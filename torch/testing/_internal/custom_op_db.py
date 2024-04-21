@@ -46,7 +46,7 @@ def numpy_cube_backward(ctx, grad_out, grad_dx):
     grad_x = numpy_mul(grad_out, dx) + 6 * numpy_mul(grad_dx, x)
     return grad_x
 
-numpy_cube.register_autograd(numpy_cube_setup_context, numpy_cube_backward)
+numpy_cube.register_autograd(numpy_cube_backward, setup_context=numpy_cube_setup_context)
 
 @torch.library.custom_op("_torch_testing::numpy_mul", mutates_args=())
 def numpy_mul(x: Tensor, y: Tensor) -> Tensor:
@@ -66,7 +66,7 @@ def numpy_mul_backward(ctx, grad_out):
     grad_y = grad_out * x if ctx.needs_input_grad[1] else None
     return grad_x, grad_y
 
-numpy_mul.register_autograd(numpy_mul_setup_context, numpy_mul_backward)
+numpy_mul.register_autograd(numpy_mul_backward, setup_context=numpy_mul_setup_context)
 
 @torch.library.custom_op("_torch_testing::numpy_sort", mutates_args=())
 def numpy_sort(x: Tensor, dim: int) -> Tuple[Tensor, Tensor, Tensor]:
@@ -95,7 +95,7 @@ def numpy_sort_backward(ctx, grad_out, grad_ind, grad_ind_inv):
     ind, ind_inv = ctx.saved_tensors
     return numpy_take(grad_out, ind_inv, ind, ctx.dim), None
 
-numpy_sort.register_autograd(numpy_sort_setup_context, numpy_sort_backward)
+numpy_sort.register_autograd(numpy_sort_backward, setup_context=numpy_sort_setup_context)
 
 
 @torch.library.custom_op("_torch_testing::numpy_take", mutates_args=())
@@ -123,7 +123,7 @@ def numpy_take_backward(ctx, grad_out):
     grad_x = numpy_take(grad_out, ind_inv, ind, ctx.dim)
     return grad_x, None, None, None
 
-numpy_take.register_autograd(numpy_take_setup_context, numpy_take_backward)
+numpy_take.register_autograd(numpy_take_backward, setup_context=numpy_take_setup_context)
 
 @torch.library.custom_op("_torch_testing::numpy_nonzero", mutates_args=())
 def numpy_nonzero(x: Tensor) -> Tensor:
@@ -165,7 +165,7 @@ def numpy_view_copy_setup_context(ctx, inputs, output) -> None:
 def numpy_view_copy_backward(ctx, grad_out):
     return torch.ops._torch_testing.numpy_view_copy(grad_out, ctx.x_shape), None
 
-numpy_view_copy.register_autograd(numpy_view_copy_setup_context, numpy_view_copy_backward)
+numpy_view_copy.register_autograd(numpy_view_copy_backward, setup_context=numpy_view_copy_setup_context)
 
 def sample_inputs_numpy_view_copy(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = functools.partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -188,7 +188,7 @@ def _(xs, dim):
     assert all(x.dtype == xs[0].dtype for x in xs)
     return torch.cat(xs, dim=dim)
 
-def numpy_cat_setup_backward(ctx, inputs, output):
+def numpy_cat_setup_context(ctx, inputs, output):
     xs, dim = inputs
     ctx.dim_sizes = [x.shape[dim] for x in xs]
     ctx.dim = dim
@@ -201,7 +201,7 @@ def numpy_cat_backward(ctx, grad_out):
     grad_xs = torch.ops._torch_testing.numpy_split_copy(grad_out, splits, dim)
     return grad_xs, None
 
-numpy_cat.register_autograd(numpy_cat_setup_backward, numpy_cat_backward)
+numpy_cat.register_autograd(numpy_cat_backward, setup_context=numpy_cat_setup_context)
 
 def sample_inputs_numpy_cat(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = functools.partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -228,7 +228,7 @@ def numpy_split_copy_backward(ctx, grad_out):
     result = torch.ops._torch_testing.numpy_cat(grad_out, dim=ctx.dim)
     return result, None, None
 
-numpy_split_copy.register_autograd(numpy_split_copy_setup_context, numpy_split_copy_backward)
+numpy_split_copy.register_autograd(numpy_split_copy_backward, setup_context=numpy_split_copy_setup_context)
 
 def sample_inputs_numpy_split_copy(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = functools.partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -252,7 +252,9 @@ def numpy_split_copy_with_int_setup_context(ctx, inputs, output):
 def numpy_split_copy_with_int_backward(ctx, grad_out, _):
     return torch.ops._torch_testing.numpy_cat(grad_out, dim=ctx.dim), None, None
 
-numpy_split_copy_with_int.register_autograd(numpy_split_copy_with_int_setup_context, numpy_split_copy_with_int_backward)
+numpy_split_copy_with_int.register_autograd(
+    numpy_split_copy_with_int_backward,
+    setup_context=numpy_split_copy_with_int_setup_context)
 
 @torch.library.custom_op("_torch_testing::numpy_nms", mutates_args=())
 def numpy_nms(boxes: Tensor, scores: Tensor, iou_threshold: Number) -> Tensor:
