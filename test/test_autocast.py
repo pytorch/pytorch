@@ -269,8 +269,8 @@ class TestAutocastGPU(TestCase):
 
 class TestTorchAutocast(TestCase):
     def test_autocast_fast_dtype(self):
-        gpu_fast_dtype = torch.get_autocast_dtype('cuda')
-        cpu_fast_dtype = torch.get_autocast_dtype('cpu')
+        gpu_fast_dtype = torch.get_autocast_gpu_dtype()
+        cpu_fast_dtype = torch.get_autocast_cpu_dtype()
         self.assertEqual(gpu_fast_dtype, torch.half)
         self.assertEqual(cpu_fast_dtype, torch.bfloat16)
 

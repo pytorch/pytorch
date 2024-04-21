@@ -109,12 +109,12 @@ def custom_fwd(fwd=None, *, cast_inputs=None):
 
     @functools.wraps(fwd)
     def decorate_fwd(*args, **kwargs):
-        args[0]._dtype = torch.get_autocast_dtype('cuda')
+        args[0]._dtype = torch.get_autocast_gpu_dtype()
         if cast_inputs is None:
-            args[0]._fwd_used_autocast = torch.is_autocast_enabled("cuda")
+            args[0]._fwd_used_autocast = torch.is_autocast_enabled()
             return fwd(*args, **kwargs)
         else:
-            autocast_context = torch.is_autocast_enabled("cuda")
+            autocast_context = torch.is_autocast_enabled()
             args[0]._fwd_used_autocast = False
             if autocast_context:
                 with autocast(enabled=False):
