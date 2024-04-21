@@ -1,0 +1,4 @@
+def forward(self,
+    x: Tensor,
+    y: Tensor) -> str:
+  return torch.add(self.a, CONSTANTS.c0)

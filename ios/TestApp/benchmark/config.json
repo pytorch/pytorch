@@ -1,0 +1,7 @@
+{
+    "input_dims": "1,3,224,224",
+    "input_type": "float",
+    "warmup": 10,
+    "iter": 10,
+    "print_output": false
+}

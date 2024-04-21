@@ -1,0 +1,463 @@
+build_features: []
+custom_classes: []
+include_all_non_op_selectives: false
+include_all_operators: false
+kernel_metadata: {}
+et_kernel_metadata:
+  custom::add_3.out:
+    - v1/6;0,1,2,3|6;0,1,2,3|6;0,1,2,3
+    - v1/3;0,1,2,3|3;0,1,2,3|3;0,1,2,3
+  aten::add.out:
+    - v1/6;0,1,2,3|6;0,1,2,3|6;0,1,2,3
+    - v1/3;0,1,2,3|3;0,1,2,3|3;0,1,2,3
+operators:
+  aten::_fake_quantize_per_tensor_affine_cachemask_tensor_qparams.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::_reshape_alias_copy.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::_softmax.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::_to_copy.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::_unique2.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::add.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::addmm.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::avg_pool2d.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::baddbmm.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::bitwise_and.Tensor_out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::bmm.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::cat.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::clamp.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::clone.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::constant_pad_nd.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::conv1d.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::convolution.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::cumsum.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::detach_copy.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::div.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::embedding.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::eq.Scalar_out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::eq.Tensor_out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::exp.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::expand_copy.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::floor_divide.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::gelu.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::grid_sampler_2d.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::gt.Scalar_out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::index.Tensor_out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::index_put.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::index_select.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::leaky_relu.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::linalg_inv_ex.inverse:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::logit.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::masked_fill.Scalar_out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::max.unary_out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::max_pool2d_with_indices.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::mean.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::minimum.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::mm.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::mul.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::native_batch_norm.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::native_layer_norm.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::ne.Scalar_out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::nonzero.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::permute_copy.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::pixel_shuffle.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::relu.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::remainder.Scalar_out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::repeat.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::round.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::rsub.Scalar_out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::select_copy.int_out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::sigmoid.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::slice_copy.Tensor_out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::softplus.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::sort.values:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::split_copy.Tensor_out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::split_with_sizes_copy.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::stack.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::sub.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::sum.IntList_out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::tanh.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::topk.values:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::transpose_copy.int_out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::unbind_copy.int_out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::unsafe_split.Tensor_out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::unsqueeze_copy.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::upsample_bilinear2d.vec_out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::upsample_nearest2d.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::upsample_nearest2d.vec_out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::view_copy.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  aten::zeros_like.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
+  custom::add_3.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true
