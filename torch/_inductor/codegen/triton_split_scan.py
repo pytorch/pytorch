@@ -73,6 +73,7 @@ class TritonSplitScanKernel(TritonKernel):
                     is_loop=False,
                     tensor_dim=tensor_dim,
                     grid_dim=grid_dim,
+                    has_zdim=False,
                 )
             )
         for tree in self.range_trees:
