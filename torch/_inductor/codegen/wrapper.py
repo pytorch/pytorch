@@ -42,6 +42,7 @@ from ..utils import (
     sympy_str,
 )
 from ..virtualized import V
+from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import CodeGen, DeferredLine, IndentedBuffer, PythonPrinter
 from .triton_utils import config_of, signature_to_meta
 
@@ -264,8 +265,10 @@ class EnterDeviceContextManagerLine(WrapperLine):
                         )
                     else:
                         code.writeline(
-                            "at::cuda::CUDAStreamGuard stream_guard("
-                            + "at::cuda::getStreamFromExternal(stream, this->device_idx_));"
+                            maybe_hipify_code_wrapper(
+                                "at::cuda::CUDAStreamGuard stream_guard("
+                                + "at::cuda::getStreamFromExternal(stream, this->device_idx_));"
+                            )
                         )
                 else:
                     assert (
@@ -276,7 +279,9 @@ class EnterDeviceContextManagerLine(WrapperLine):
                     code.writeline(
                         f"AOTICudaGuard device_guard({self.device_idx});"
                         if config.abi_compatible
-                        else f"at::cuda::CUDAGuard device_guard({self.device_idx});"
+                        else maybe_hipify_code_wrapper(
+                            f"at::cuda::CUDAGuard device_guard({self.device_idx});"
+                        )
                     )
                 else:
                     code.writeline(f"device_guard.set_index({self.device_idx});")
@@ -1340,13 +1345,13 @@ class WrapperCodeGen(CodeGen):
 
     def writelines(self, lines):
         for line in lines:
-            self.lines.append(line)
+            self.writeline(line)
 
     def enter_context(self, ctx):
         self.lines.append(LineContext(ctx))
 
     def val_to_cpp_arg_str(self, type_, val) -> str:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def val_to_arg_str(self, s):
         from torch.utils._triton import dtype_to_string, has_triton_package

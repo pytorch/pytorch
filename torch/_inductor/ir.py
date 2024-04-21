@@ -2252,7 +2252,7 @@ class View(GenericView):
                     size_old = size_old * modulus
                 V.graph.sizevars.guard_equals(size_new, size_old)
             else:
-                raise AssertionError()
+                raise AssertionError
 
         while stack_old:
             size_old = stack_old.pop()
@@ -2818,7 +2818,7 @@ class FlexibleLayout(Layout):
                 "stride_ordered_for_memory_format, unsuppored memory_format: %s",
                 memory_format,
             )
-            raise NotImplementedError()
+            raise NotImplementedError
 
     @staticmethod
     def same_ordered(sizes, stride):
@@ -3669,9 +3669,34 @@ class TemplateBuffer(Buffer):
 
 
 class TritonTemplateBuffer(TemplateBuffer):
-    def __init__(self, layout, inputs, make_kernel_render, debug_extra=None):
+    def __init__(
+        self,
+        layout,
+        inputs,
+        make_kernel_render,
+        debug_extra=None,
+        mutated_inputs: Optional[Iterable[IRNode]] = None,
+    ):
+        """
+        NOTE:[TritonTemplates with multiple outputs]
+        We want the ability for TritonTemplates to output multiple tensors. Triton
+        kernels have no notion of outputs and this is done by creating tensors that
+        are then mutated by the kernel. Currenlty our STORE_OUTPUT codegen doesn't
+        support creating multinode outputs for triton templates.
+        We work around this by creating an extra input buffer during the lowering
+        and we mark them as mutated inputs.
+        """
         super().__init__(layout, inputs, make_kernel_render)
         self.debug_extra = debug_extra
+        self.mutated_inputs = mutated_inputs
+        if mutated_inputs is not None:
+            # Ensure that the mutated inputs are only allowed for certain nodes
+            allowed_set = {"templated_attention"}
+            current_node = str(V.graph.current_node)
+            assert (
+                current_node in allowed_set
+            ), f"Mutated inputs are only allowed for {allowed_set} but got {current_node}"
+            mark_node_as_mutating(self, *mutated_inputs)
 
     def __str__(self):
         out = f"TritonTemplateBuffer(layout={self.layout}, {self.debug_extra})"
@@ -3701,16 +3726,16 @@ class ChoiceCaller:
         return do_bench(lambda: algo(*args, out=out))
 
     def call_name(self) -> str:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def to_callable(self):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def hash_key(self) -> str:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def output_node(self) -> "TensorBox":
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def info_dict(self) -> Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]:
         """Information returned here is logged to the autotune log file when that is enabled."""
@@ -3719,7 +3744,7 @@ class ChoiceCaller:
 
 class TritonTemplateCallerBase(ChoiceCaller):
     def get_make_kernel_render(self) -> Any:
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 class MultiTemplateBuffer(TritonTemplateBuffer):
@@ -3938,6 +3963,20 @@ class ConcatKernel(NopKernel):
                     # use CL stride for the output
                     output_stride = make_channels_last_strides_for(new_size)
                     break
+        any_input_is_storage_and_layout = any(is_storage_and_layout(x) for x in inputs)
+        fx_node_args = V.graph.current_node.args[0]
+        assert V.graph.current_node.target in [aten.cat, aten.cat.default]
+        assert isinstance(fx_node_args, list)
+        # If any of the inputs has meta tensor and the meta tensor is in CL format, use CL format for the output
+        if any_input_is_storage_and_layout is False and any(
+            "val" in arg.meta
+            and (
+                arg.meta["val"].is_contiguous(memory_format=torch.channels_last)
+                or arg.meta["val"].is_contiguous(memory_format=torch.channels_last_3d)
+            )
+            for arg in fx_node_args
+        ):
+            output_stride = make_channels_last_strides_for(new_size)
 
         concat_kernel = ConcatKernel(
             name=None,
@@ -3954,7 +3993,9 @@ class ConcatKernel(NopKernel):
         for i in range(len(inputs)):
             input_buffer = cls.realize_into(
                 inputs[i],
-                SliceView.create(kernel, dim, offsets_start[i], offsets_end[i]),
+                SliceView.create(
+                    kernel, dim, offsets_start[i], offsets_end[i], clamp=False
+                ),
             )
             concat_kernel.inputs.append(input_buffer)
 
@@ -4113,7 +4154,7 @@ class ExternKernel(InputsKernel):
             wrapper.writeline(origin_str)
 
     def codegen(self, wrapper):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def get_kernel_name(self):
         return self.cpp_kernel_name if V.graph.cpp_wrapper else self.python_kernel_name
@@ -4218,7 +4259,30 @@ class ExternKernel(InputsKernel):
 
         # NOTE: Don't use extract_read_writes here as it fails when
         # make_loader() inlines the computation
-        x.unwrap_view().freeze_layout()
+        x_unwrap_view = x.unwrap_view()
+        x_unwrap_view_fx_node = V.graph.get_buffer(
+            x_unwrap_view.get_name()
+        ).get_origin_node()
+        # Prefer channels last format according to how the format is set from eager.
+        if (
+            x_unwrap_view_fx_node is not None
+            and "val" in x_unwrap_view_fx_node.meta
+            and isinstance(x_unwrap_view.layout, FlexibleLayout)
+            and (
+                x_unwrap_view_fx_node.meta["val"].is_contiguous(
+                    memory_format=torch.channels_last
+                )
+                or x_unwrap_view_fx_node.meta["val"].is_contiguous(
+                    memory_format=torch.channels_last_3d
+                )
+            )
+        ):
+            x_unwrap_view.freeze_layout_with_same_order(
+                make_channels_last_strides_for(x_unwrap_view.get_size())
+            )
+        else:
+            x_unwrap_view.freeze_layout()
+
         index_args, var_ranges = dependencies.index_vars_squeeze(
             x.get_size(), prefix="r"
         )
@@ -4237,7 +4301,7 @@ class ExternKernel(InputsKernel):
                 offset,
                 index,
             )
-            raise NotImplementedError()
+            raise NotImplementedError
 
         return ReinterpretView(
             data=x.data,
@@ -4711,13 +4775,15 @@ class UserDefinedTritonKernel(ExternKernel):
         return [i.get_name() for i in self.inputs]
 
 
-def mark_node_as_mutating(cur_buffer, *mutated_ops):
+def mark_node_as_mutating(cur_buffer, *mutated_ops: IRNode):
     """
     Allows ops in mutated_ops to be marked as being mutated as well as
     indicates to the scheduler that these ops depend on cur_buffer.
     """
     for op in mutated_ops:
-        assert isinstance(op, IRNode), op
+        assert isinstance(
+            op, IRNode
+        ), f"{op} op is type {type(op)} and is not an IRNode"
         V.graph.mark_buffer_mutated(op.get_name())
         assert hasattr(op, "layout")
         MutationOutput(op.layout, op, cur_buffer)
