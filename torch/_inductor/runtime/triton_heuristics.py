@@ -21,9 +21,17 @@ from torch._dynamo.device_interface import DeviceGuard, get_interface_for_device
 from torch._dynamo.utils import dynamo_timed, get_first_attr
 
 from torch._inductor import config
-from torch._inductor.codecache import cache_dir, CudaKernelParamCache
 from torch._inductor.coordinate_descent_tuner import CoordescTuner
-from torch._inductor.utils import (
+from .hints import (
+    _NUM_THREADS_PER_WARP,
+    AutotuneHint,
+    HeuristicType,
+    ReductionHint,
+    TileHint,
+)
+
+from .runtime_utils import (
+    cache_dir,
     ceildiv,
     conditional_product,
     create_bandwidth_info_str,
@@ -33,20 +41,13 @@ from torch._inductor.utils import (
     next_power_of_2,
     triton_config_to_hashable,
 )
-from torch.utils._triton import has_triton_package
-from .hints import (
-    _NUM_THREADS_PER_WARP,
-    AutotuneHint,
-    HeuristicType,
-    ReductionHint,
-    TileHint,
-)
 
-
-log = logging.getLogger(__name__)
-
-if has_triton_package():
+try:
     import triton
+except ImportError:
+    triton = None
+
+if triton is not None:
     from triton import Config
     from triton.runtime.autotuner import OutOfResources
     from triton.runtime.jit import KernelInterface
@@ -57,10 +58,12 @@ if has_triton_package():
         ASTSource = None
 else:
     Config = object
-    triton = None
     KernelInterface = object
     OutOfResources = object
     ASTSource = None
+
+
+log = logging.getLogger(__name__)
 
 
 def autotune_hints_to_configs(
@@ -680,6 +683,8 @@ class CachingAutotuner(KernelInterface):
             # User defined triton kernels will have arbitrary kwarg names
             "meta": launcher.config.kwargs,
         }
+
+        from torch._inductor.codecache import CudaKernelParamCache
 
         if torch.version.hip is None:
             CudaKernelParamCache.set(key, params, launcher.bin.asm["cubin"])
