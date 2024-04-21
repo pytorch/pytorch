@@ -552,10 +552,10 @@ class TritonTemplate(KernelTemplate):
 
         numel = sympy_product(layout.size)
         buffers = itertools.chain(input_nodes, (fake_out,))
-        # if not TritonScheduling.can_use_32bit_indexing(numel, buffers):
-        #     raise NotImplementedError(
-        #         "64-bit indexing is not yet implemented for triton templates"
-        #     )
+        if not TritonScheduling.can_use_32bit_indexing(numel, buffers):
+            raise NotImplementedError(
+                "64-bit indexing is not yet implemented for triton templates"
+            )
 
         kernel_options = dict(
             input_nodes=input_nodes,
@@ -602,6 +602,11 @@ class TritonTemplate(KernelTemplate):
             mod = PyCodeCache.load(code, extra)
             _, call_args, _ = kernel.args.python_argdefs()
 
+        # There are 3 kinds of buffers we pass in
+        # 1. Explicit inputs
+        # 2. Captured inputs (e.g. used by a subgraph)
+        # 3. Explicit outputs
+        # We are ensuring that 1 and 3 match our expectations here.
         expected_input_args = list(unique(x.get_name() for x in input_nodes))
         expected_output_args = [fake_out.get_name()]
         expected_args = expected_input_args + expected_output_args
