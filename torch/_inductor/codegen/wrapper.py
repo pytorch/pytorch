@@ -28,7 +28,7 @@ import torch._ops
 from torch._dynamo.utils import counters, dynamo_timed
 
 from torch._inductor.codegen.multi_kernel import MultiKernelState
-from torch.fx.experimental.symbolic_shapes import SymTypes
+from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, SymTypes
 from torch.fx.node import _get_qualified_name
 from torch.utils._sympy.singleton_int import SingletonInt
 
@@ -940,10 +940,21 @@ class WrapperCodeGen(CodeGen):
 
     def codegen_dynamic_scalar(self, node):
         (data,) = (t.codegen_reference() for t in node.inputs)
-        if node.is_bool:
-            self.writeline(f"{node.sym} = 1 if {data}.item() else 0")
-        else:
+        if len(node.keypath) == 0:
             self.writeline(f"{node.sym} = {data}.item()")
+        elif len(node.keypath) == 1 and isinstance(node.keypath[0], ConvertIntKey):
+            self.writeline(f"{node.sym} = 1 if {data}.item() else 0")
+        elif len(node.keypath) == 1 and isinstance(node.keypath[0], DivideByKey):
+            self.writeline(f"{node.sym}_undivided = {data}.item()")
+            self.writeline(
+                f"assert {node.sym}_undivided % {node.keypath[0].divisor} == 0, "
+                f"f'{{{node.sym}_undivided}} not divisible by {node.keypath[0].divisor}'"
+            )
+            self.writeline(
+                f"{node.sym} = {node.sym}_undivided // {node.keypath[0].divisor}"
+            )
+        else:
+            raise AssertionError(f"unrecognized keypath {node.keypath}")
         # No one should ever use this buffer, but for uniformity
         # define the variable and assign it None
         self.writeline(f"{node.get_name()} = None")

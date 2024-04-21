@@ -8,6 +8,7 @@ a functionalized version of the graph under compilation.
 """
 
 import collections
+import contextlib
 import logging
 from functools import wraps
 from typing import Callable, DefaultDict, Dict, List
@@ -15,6 +16,7 @@ from typing import Callable, DefaultDict, Dict, List
 import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
+from torch._guards import detect_fake_mode
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._subclasses.meta_utils import safe_is_leaf
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
@@ -142,10 +144,22 @@ def run_functionalized_fw_and_collect_metadata(
             torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
         )
 
+        # AOTAutograd collect metadata will do fake tensor propagation, but it
+        # throws out all the resulting fake tensors and doesn't save anything
+        # about sizes (TODO: Actually, the subclass metadata does save size
+        # info, this is likely to be incorrect if unbacked SymInts are
+        # allowed).  The net effect is we generate a bunch of fresh unbacked
+        # symbols that we immediately throw out and don't use.  NB: we don't
+        # want to rename into these symbols, because we aren't going to have
+        # binding sites for them.
+        ignore_fresh_unbacked = contextlib.nullcontext()
+        if (fake_mode := detect_fake_mode()) and fake_mode.shape_env:
+            ignore_fresh_unbacked = fake_mode.shape_env.ignore_fresh_unbacked_symbols()
+
         # It doesn't matter if we run this under predispatch or not because it is
         # only for figuring out metadata
         mode = FunctionalTensorMode(_allow_token_discovery=True)
-        with disable_above, mode:
+        with disable_above, mode, ignore_fresh_unbacked:
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
             flat_f_args = pytree.tree_map(_to_fun, flat_args)
             flat_f_outs = f(*flat_f_args)

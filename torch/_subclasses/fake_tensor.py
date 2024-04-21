@@ -381,6 +381,11 @@ class FakeTensor(torch.Tensor):
     # TODO: Generalize this as needed, e.g., into a trie of memos
     _nonzero_memo: Optional[torch.SymInt]
     _nonzero_memo_vc: Optional[int]
+    # When we retrace, we need to invalidate all the memos so that we can
+    # accurately identify the first time unbacked SymInts are allocated.
+    # This is only relevant for inputs; for intermediates, they will get fresh
+    # fake tensors so you won't have a memo anyway
+    _nonzero_memo_epoch: Optional[int]
 
     # Indicates to our torch_dispatch dispatching infra that
     # this is an "infra" mode with lower dispatching precedence.
@@ -392,7 +397,10 @@ class FakeTensor(torch.Tensor):
             return None
         # Version counter based tracking isn't 100% sound but it's close
         # enough
-        if self._nonzero_memo_vc != self._version:
+        if (
+            self._nonzero_memo_vc != self._version
+            or self._nonzero_memo_epoch != self.fake_mode.epoch
+        ):
             self._nonzero_memo = None
             return None
         return self._nonzero_memo
@@ -757,6 +765,9 @@ class FakeTensorMode(TorchDispatchMode):
     cache_hits: int = 0
     cache_misses: int = 0
     cache_bypasses = defaultdict(int)
+    # Every time you retrace using the same fake tensor mode, you should
+    # advance the epoch so we don't reuse unbacked memos
+    epoch: int = 0
 
     def __init__(
         self,
