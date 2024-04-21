@@ -75,7 +75,7 @@ class AdamW(Optimizer):
             # Suppor AMP with FP16/BF16 model params which would need
             # higher prec copy of params to do update math in higher prec to
             # alleviate the loss of information.
-            fused_supported_devices = _get_fused_kernels_supported_devices()
+            fused_supported_devices = _get_fused_kernels_supported_devices() + ["cpu"]
             if not all(
                 p.device.type in fused_supported_devices and torch.is_floating_point(p)
                 for pg in self.param_groups
