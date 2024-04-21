@@ -16,6 +16,7 @@ except ImportError:
     raise unittest.SkipTest("requires triton")  # noqa: TRY200
 
 from torch._inductor import config
+from torch._inductor.runtime.hints import TRITON_MAX_BLOCK
 from torch._inductor.runtime.triton_heuristics import triton_config
 from torch._inductor.test_case import run_tests, TestCase
 
@@ -30,7 +31,7 @@ class TestTritonHeuristics(TestCase):
             key = f"{label}BLOCK"
             if key not in cfg.kwargs:
                 continue
-            self.assertTrue(cfg.kwargs[key] <= config.triton.max_block[label])
+            self.assertTrue(cfg.kwargs[key] <= TRITON_MAX_BLOCK[label])
 
     def _test_artificial_zgrid(self):
         def forward(primals_1, primals_2, primals_5):
