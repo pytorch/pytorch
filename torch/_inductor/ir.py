@@ -61,6 +61,7 @@ from .dependencies import (
 )
 from .ops_handler import OpCounterCSE
 from .runtime.hints import ReductionHint
+from .runtime.runtime_utils import do_bench
 from .utils import (
     argsort,
     cache_on_self,
@@ -68,7 +69,6 @@ from .utils import (
     convert_shape_to_inductor,
     convert_shape_to_symint,
     developer_warning,
-    do_bench,
     get_kernel_metadata,
     is_dynamic,
     is_gpu,
