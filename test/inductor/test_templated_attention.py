@@ -260,7 +260,7 @@ class TestTemplatedSDPA(InductorTestCase):
     def test_backwards_fails(self):
         make_tensor = functools.partial(
             torch.randn,
-            (H, H, S, D),
+            (B, H, S, D),
             dtype=torch.float32,
             device="cuda",
             requires_grad=True,
