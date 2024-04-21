@@ -34,7 +34,7 @@ import torch.utils._pytree as pytree
 from torch._dynamo.utils import preserve_rng_state
 
 from torch._inductor.metrics import is_metric_table_enabled, log_kernel_metadata
-from torch._inductor.runtime.triton_heuristics import AutotuneHint
+from torch._inductor.runtime.hints import AutotuneHint
 from torch._prims_common import is_integer_dtype
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.value_ranges import ValueRanges
@@ -44,8 +44,9 @@ from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
 from ..codecache import code_hash, get_path, PyCodeCache
 from ..dependencies import Dep, MemoryDep, StarDep, WeakDep
-from ..ir import IRNode, ReductionHint, TritonTemplateBuffer
+from ..ir import IRNode, TritonTemplateBuffer
 from ..optimize_indexing import indexing_dtype_strength_reduction
+from ..runtime.hints import ReductionHint
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
 from ..utils import (
     cache_on_self,
@@ -120,15 +121,9 @@ def gen_common_triton_imports():
 
     imports.splice(
         """
-        from torch._inductor.runtime import (
-            triton_helpers,
-            triton_heuristics,
-            libdevice,
-            tl_math,
-            AutotuneHint,
-        )
-        from torch._inductor.ir import ReductionHint, TileHint
-        from torch._inductor.utils import instance_descriptor
+        from torch._inductor.runtime import triton_helpers, triton_heuristics
+        from torch._inductor.runtime.triton_helpers import libdevice, math as tl_math
+        from torch._inductor.runtime.hints import AutotuneHint, ReductionHint, TileHint, instance_descriptor
         """
     )
     return imports.getvalue()
