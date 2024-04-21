@@ -195,6 +195,7 @@ class AutogradCompilerInstance:
             (self.fx_tracer.create_arg(self.to_proxy(outputs)),),
             {},
         )
+        self.reorder_accumulate_grad_nodes()
         graph = GraphModule(
             self.fx_tracer.root, self.fx_tracer.graph, "CompiledAutograd"
         )
@@ -206,6 +207,19 @@ class AutogradCompilerInstance:
             payload_fn=lambda: graph.print_readable(print_output=False),
         )
         return self.compiler_fn(graph)
+
+    def reorder_accumulate_grad_nodes(self):
+        """
+        Usage of AOTAutograd causes all the accumulate_grad_ nodes to get pushed to the end of
+        the graph.  This differs from eager mode, which schedules them as soon as possible. This
+        pass attempts to reorder the graph to mimic eager behavior.
+        """
+        for node in self.fx_tracer.graph.find_nodes(
+            op="call_function", target=torch.ops.inductor.accumulate_grad_.default
+        ):
+            arg = max(node.args)  # last arg
+            if arg is not node.prev and arg.op != "placeholder":
+                arg.append(node)
 
     def to_proxy(self, t):
         if t is None:

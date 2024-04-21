@@ -6,7 +6,10 @@
 #include <c10/cuda/CUDAFunctions.h>
 
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <thread>
+#include <vector>
 
 namespace at::cuda {
 
@@ -86,26 +89,33 @@ CUDAGraph::CUDAGraph()
 #endif
 }
 
+void CUDAGraph::register_generator_state(
+    c10::intrusive_ptr<at::CUDAGeneratorState> state) {
+  captured_generator_states_[std::move(state)] = 0;
+}
+
+void CUDAGraph::register_generator_state(const at::Generator& generator) {
+  c10::intrusive_ptr<CUDAGeneratorImpl> cuda_gen =
+      dynamic_intrusive_pointer_cast<CUDAGeneratorImpl>(
+          generator.getIntrusivePtr());
+  cuda_gen->register_graph(this);
+}
+
 void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capture_mode) {
 #if !defined(USE_ROCM) || ROCM_VERSION >= 50300
   TORCH_CHECK(!has_graph_exec_,
               "This CUDAGraph instance already owns a captured graph. "
               "To capture a new graph, create a new instance.");
 
-  // For now, a CUDAGraph instance only accommodates the default generator on the device that's
-  // current when capture begins. If any op in the captured region uses a non-default generator,
-  // or a generator on another device, the offending generator will throw an error.
-  // These restrictions simplify CUDAGraph, but could be relaxed in the future:
-  // in principle, the underlying Cuda calls do permit cross-device ops to be captured.
+  // default generator is always registered
   auto* gen = get_generator_or_default<CUDAGeneratorImpl>(
       c10::nullopt, cuda::detail::getDefaultCUDAGenerator());
+  gen->register_graph(this);
 
-  auto options = TensorOptions().device(at::kCUDA).dtype(at::kLong);
-  seed_extragraph_ = at::empty({1}, options);
-  offset_extragraph_ = at::empty({1}, options);
-
-  seed_extragraph_.fill_(int64_t(gen->current_seed()));
-  gen->capture_prologue(seed_extragraph_.data_ptr<int64_t>(), offset_extragraph_.mutable_data_ptr<int64_t>());
+  for (auto& [generator_state, wholegraph_increments] :
+       captured_generator_states_) {
+    generator_state->capture_prologue();
+  }
 
   auto stream = at::cuda::getCurrentCUDAStream();
 
@@ -115,7 +125,6 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
               "default stream.)");
 
   capture_stream_ = stream;
-  capture_gen_ = gen;
   capture_dev_ = c10::cuda::current_device();
 
   id_ = capture_sequence_id();
@@ -215,13 +224,10 @@ void CUDAGraph::capture_end() {
 
   has_graph_exec_ = true;
 
-  auto* gen = get_generator_or_default<CUDAGeneratorImpl>(
-      c10::nullopt, cuda::detail::getDefaultCUDAGenerator());
-  TORCH_CHECK(gen == capture_gen_,
-              "Default CUDA RNG generator on current device at capture end "
-              "is different from default generator on current device "
-              "when capture began");
-  wholegraph_increment_ = gen->capture_epilogue();
+  for (auto& [generator_state, wholegraph_increments] :
+       captured_generator_states_) {
+    wholegraph_increments = generator_state->capture_epilogue();
+  }
 
   size_t numCUDAGraphNodes = 0;
   AT_CUDA_CHECK(cudaGraphGetNodes(graph_, NULL, &numCUDAGraphNodes));
@@ -251,17 +257,10 @@ void CUDAGraph::replay() {
 
   c10::OptionalDeviceGuard device_guard{capture_stream_.device()};
 
-  // Just like any RNG consumer kernel!
-  auto* gen = get_generator_or_default<CUDAGeneratorImpl>(
-      c10::nullopt, cuda::detail::getDefaultCUDAGenerator());
-  PhiloxCudaState rng_engine_inputs;
-  {
-    std::lock_guard<std::mutex> lock(gen->mutex_);
-    rng_engine_inputs = gen->philox_cuda_state(wholegraph_increment_);
+  for (auto& [generator_state, wholegraph_increments] :
+       captured_generator_states_) {
+    generator_state->replay_prologue(wholegraph_increments);
   }
-  seed_extragraph_.fill_(int64_t(gen->current_seed()));
-  offset_extragraph_.fill_(int64_t(rng_engine_inputs.offset_.val));
-
   // graph_exec_ may be replayed in any stream.
   AT_CUDA_CHECK(cudaGraphLaunch(graph_exec_, at::cuda::getCurrentCUDAStream()));
 
@@ -355,6 +354,10 @@ TORCH_CHECK(has_graph_exec_,
 }
 
 CUDAGraph::~CUDAGraph() {
+  for (auto& [generator_state, wholegraph_increments] :
+       captured_generator_states_) {
+    generator_state->unregister_graph(this);
+  }
   reset();
 }
 

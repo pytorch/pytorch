@@ -23,6 +23,8 @@ bool THPGenerator_init(PyObject* module);
 
 TORCH_PYTHON_API PyObject* THPGenerator_Wrap(at::Generator gen);
 
+TORCH_PYTHON_API at::Generator THPGenerator_Unwrap(PyObject* state);
+
 // Creates a new Python object for a Generator. The Generator must not already
 // have a PyObject* associated with it.
 PyObject* THPGenerator_NewWithVar(PyTypeObject* type, at::Generator gen);

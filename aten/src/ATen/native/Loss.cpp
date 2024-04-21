@@ -269,8 +269,8 @@ Tensor& binary_cross_entropy_out_cpu(const Tensor& input, const Tensor& target, 
 
     auto iter = TensorIteratorConfig()
       .add_output(loss_squeezed)
-      .add_owned_input(at::squeeze(input))
-      .add_owned_input(at::squeeze(target))
+      .add_owned_const_input(at::squeeze(input))
+      .add_owned_const_input(at::squeeze(target))
       .build();
 
     AT_DISPATCH_FLOATING_TYPES(loss.scalar_type(), "binary_cross_entropy", [&] {
@@ -323,9 +323,9 @@ Tensor& binary_cross_entropy_backward_out_cpu(const Tensor& grad, const Tensor& 
 
     auto iter = TensorIteratorConfig()
       .add_output(grad_input_squeezed)
-      .add_owned_input(at::squeeze(grad))
-      .add_owned_input(at::squeeze(input))
-      .add_owned_input(at::squeeze(target))
+      .add_owned_const_input(at::squeeze(grad))
+      .add_owned_const_input(at::squeeze(input))
+      .add_owned_const_input(at::squeeze(target))
       .build();
 
     AT_DISPATCH_FLOATING_TYPES(grad_input.scalar_type(), "binary_cross_entropy_backward", [&] {
@@ -435,9 +435,9 @@ Tensor& smooth_l1_loss_backward_out(const Tensor& grad_output, const Tensor& inp
   auto norm = reduction == Reduction::Mean ? 1. / input.numel() : 1.;
   auto iter = at::TensorIteratorConfig()
     .add_output(grad_input)
-    .add_input(input)
-    .add_input(target)
-    .add_input(grad_output)
+    .add_const_input(input)
+    .add_const_input(target)
+    .add_const_input(grad_output)
     .promote_inputs_to_common_dtype(true)
     .cast_common_dtype_to_outputs(true)
     .enforce_safe_casting_to_output(true)
@@ -480,9 +480,9 @@ Tensor& huber_loss_backward_out(const Tensor& grad_output, const Tensor& input, 
   auto norm = (reduction == Reduction::Mean) ? (1. / input.numel()) : 1.;
   auto iter = at::TensorIteratorConfig()
     .add_output(grad_input)
-    .add_input(input)
-    .add_input(target)
-    .add_input(grad_output)
+    .add_const_input(input)
+    .add_const_input(target)
+    .add_const_input(grad_output)
     .build();
   huber_backward_stub(iter.device_type(), iter, norm, delta);
   return grad_input;
@@ -498,9 +498,9 @@ Tensor& mse_loss_backward_out(const Tensor& grad_output,
   auto norm = reduction == Reduction::Mean ? 2. / input.numel() : 2.;
   auto iter = at::TensorIteratorConfig()
     .add_output(grad_input)
-    .add_input(input)
-    .add_input(target)
-    .add_input(grad_output)
+    .add_const_input(input)
+    .add_const_input(target)
+    .add_const_input(grad_output)
     .build();
   mse_backward_stub(iter.device_type(), iter, norm);
   return grad_input;

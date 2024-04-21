@@ -68,6 +68,24 @@ class _ReplicateState(_State):
             return
 
         self.has_initialized = True
+
+        device_mesh = kwargs.get("device_mesh", None)
+        if device_mesh is not None:
+            from torch.distributed.device_mesh import _mesh_resources
+
+            if _mesh_resources.get_parent_mesh(device_mesh) is not None:
+                # TODO: This is a temporary work around to enable DDP + TP.
+                # We should do the logic in DDP so that the 2D implementation is
+                # sound and the state_dict works out of the box.
+                #
+                # This won't conflict with what is done in DDP class as the module
+                # replicate is going to pass is NOT the original module.
+                from torch.distributed.tensor.parallel.ddp import (
+                    _pre_dp_module_transform,
+                )
+
+                _pre_dp_module_transform(module)
+
         self.module = module
         ignored_params = {p for m in ignored_modules for p in m.parameters()}
         self._collect_params(module, ignored_modules, ignored_params)

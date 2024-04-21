@@ -36,12 +36,12 @@ class TestPairWiseLossOps(serial.SerializedTestCase):
         new_output = workspace.FetchBlob('new_output')
         sign = 1 if label[0] > label[1] else -1
         if label[0] == label[1]:
-            self.assertEqual(np.asscalar(output), 0)
+            self.assertEqual(output.item(), 0)
             return
 
         self.assertAlmostEqual(
-            np.asscalar(output),
-            np.asscalar(np.log(1 + np.exp(sign * (X[1] - X[0])))),
+            output.item(),
+            np.log(1 + np.exp(sign * (X[1] - X[0]))).item(),
             delta=1e-4
         )
         # check swapping row order doesn't alter overall loss
@@ -71,14 +71,14 @@ class TestPairWiseLossOps(serial.SerializedTestCase):
         dx = workspace.FetchBlob('dX')
         sign = 1 if label[0] > label[1] else -1
         if label[0] == label[1]:
-            self.assertEqual(np.asscalar(dx[0]), 0)
+            self.assertEqual(dx[0].item(), 0)
             return
         self.assertAlmostEqual(
-            np.asscalar(dx[0]),
-            np.asscalar(-dY[0] * sign / (1 + np.exp(sign * (X[0] - X[1])))),
-            delta=1e-2 * abs(np.asscalar(dx[0])))
+            dx[0].item(),
+            (-dY[0] * sign / (1 + np.exp(sign * (X[0] - X[1])))).item(),
+            delta=1e-2 * abs(dx[0].item()))
 
-        self.assertEqual(np.asscalar(dx[0]), np.asscalar(-dx[1]))
+        self.assertEqual(dx[0].item(), (-dx[1]).item())
         delta = 1e-3
         up_x = np.array([[X[0] + delta], [X[1]]], dtype=np.float32)
         down_x = np.array([[X[0] - delta], [X[1]]], dtype=np.float32)
@@ -94,10 +94,9 @@ class TestPairWiseLossOps(serial.SerializedTestCase):
         down_output_pred = workspace.FetchBlob('down_output')
         up_output_pred = workspace.FetchBlob('up_output')
         np.testing.assert_allclose(
-            np.asscalar(dx[0]),
-            np.asscalar(
-                0.5 * dY[0] *
-                (up_output_pred[0] - down_output_pred[0]) / delta),
+            dx[0].item(),
+            (0.5 * dY[0] *
+                (up_output_pred[0] - down_output_pred[0]) / delta).item(),
             rtol=1e-2, atol=1e-2)
 
     @serial.given(n=st.integers(0, 10), k=st.integers(1, 5), **hu.gcs_cpu_only)

@@ -22,6 +22,7 @@
 #include <ATen/ops/_sparse_csc_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_bsr_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_bsc_tensor_unsafe_native.h>
+#include <ATen/ops/_sparse_compressed_tensor_with_dims_native.h>
 #include <ATen/ops/_sparse_coo_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_coo_tensor_unsafe.h>
 #include <ATen/ops/_validate_sparse_compressed_tensor_args_native.h>
@@ -349,6 +350,79 @@ static SparseCsrTensor new_compressed_tensor(const TensorOptions& options) {
   }
 
   return detail::make_tensor<SparseCsrTensorImpl>(DispatchKeySet(dispatch_key), options.device(), layout, options.dtype());
+}
+
+Tensor sparse_compressed_tensor_with_dims(
+     int64_t nnz,
+     int64_t dense_dim,
+     c10::IntArrayRef size,
+     c10::IntArrayRef blocksize,
+     ScalarType index_dtype,
+     c10::optional<ScalarType> dtype,
+     c10::optional<Layout> layout,
+     c10::optional<Device> device,
+     c10::optional<bool> pin_memory) {
+  // sparse_compressed_tensor_with_dims is a generalization of empty
+  // that enables the specification of nnz, dense_dim, blocksize, and
+  // index_dtype for sparse compressed tensors.
+  //
+  // sparse_compressed_tensor_with_dims indices and values tensors are
+  // created as empty tensors, so the returned sparse compressed
+  // tensor will not satisfy the sparse compressed tensor
+  // invariants. The caller is responsible for initializing the
+  // indices tensors properly.
+  TORCH_CHECK(layout, "sparse_compressed_tensor_with_dims: expected sparse compressed tensor layout but got none");
+
+  Layout layout_ = layout.value();
+  AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(layout_, "sparse_compressed_tensor_with_dims", [&]{});
+
+  constexpr int64_t sparse_dim = 2;
+  int64_t batch_dim = size.size() - dense_dim - sparse_dim;
+  TORCH_CHECK(batch_dim >= 0, "sparse_compressed_tensor_with_dims: dimensionality must be at least dense_dim(=",
+              dense_dim, ") + sparse_dim(=", sparse_dim, "), but got ", size.size());
+
+  TORCH_CHECK(nnz >= 0, "sparse_compressed_tensor_with_dims: nnz must be non-negative, got ", nnz);
+
+  auto plain_indices_size = DimVector(size.slice(0, batch_dim));
+  auto compressed_indices_size = DimVector(size.slice(0, batch_dim));
+  auto values_size = DimVector(size.slice(0, batch_dim));
+
+  plain_indices_size.push_back(nnz);
+  values_size.push_back(nnz);
+
+  if (layout_ == kSparseBsr || layout_ == kSparseBsc) {
+    TORCH_CHECK(blocksize.size() == (size_t)sparse_dim, "sparse_compressed_tensor_with_dims: blocksize needs to be a tuple of size ",
+                sparse_dim, ", but got ", blocksize.size());
+    auto d0 = (layout_ == kSparseBsr ? 0 : 1);
+    auto d1 = (layout_ == kSparseBsr ? 1 : 0);
+    TORCH_CHECK(blocksize[0] > 0 && blocksize[1] > 0, "sparse_compressed_tensor_with_dims: blocksize needs to be positive, but got ", blocksize);
+    auto compressed_size = size[compressedDimension(layout_, size, dense_dim)];
+    auto plain_size = size[plainDimension(layout_, size, dense_dim)];
+    TORCH_CHECK(compressed_size % blocksize[d0] == 0, "sparse_compressed_tensor_with_dims: dimension ",
+                compressedDimension(layout_, size, dense_dim), " must be multiple of blocksize[", d0, "](=", blocksize[d0], ") but got ", compressed_size);
+    TORCH_CHECK(plain_size % blocksize[d1] == 0, "sparse_compressed_tensor_with_dims: dimension ", plainDimension(layout_, size, dense_dim),
+                " must be multiple of blocksize[", d1, "](=", blocksize[d1], ") but got ", plain_size);
+    compressed_indices_size.push_back(compressed_size / blocksize[d0] + 1);
+    values_size.append(DimVector(blocksize));
+  } else {
+    TORCH_CHECK(blocksize.size() == 0, "sparse_compressed_tensor_with_dims: blocksize cannot be specified for non-block layout ", layout_);
+    compressed_indices_size.push_back(size[compressedDimension(layout_, size, dense_dim)] + 1);
+  }
+
+  values_size.append(DimVector(size.slice(batch_dim + sparse_dim, dense_dim)));
+  TORCH_CHECK(
+      index_dtype == ScalarType::Int || index_dtype == ScalarType::Long,
+      "indices dtype must be Int or Long, but got ", index_dtype);
+
+  TensorOptions options_ = TensorOptions().layout(Layout::Strided).device(device).pinned_memory(pin_memory);
+  auto compressed_indices = at::empty(compressed_indices_size, options_.dtype(index_dtype));
+  auto plain_indices = at::empty(plain_indices_size, options_.dtype(index_dtype));
+  auto values = at::empty(values_size, options_.dtype(dtype));
+
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout_).device(device).pinned_memory(pin_memory);
+  SparseCsrTensor self = new_compressed_tensor(options);
+  get_sparse_csr_impl(self)->set_member_tensors(compressed_indices, plain_indices, values, size);
+  return self;
 }
 
 Tensor _sparse_compressed_tensor_unsafe_symint(
@@ -800,8 +874,8 @@ Tensor empty_like_sparse_csr(
     self.layout(), " but you requested ", options.layout(), ")");
   if (options.layout() == kSparseCsr) {
     auto result = at::native::_sparse_csr_tensor_unsafe(
-        self.crow_indices().clone(),
-        self.col_indices().clone(),
+        self.crow_indices().to(options.device(), self.crow_indices().dtype(), false, true),
+        self.col_indices().to(options.device(), self.col_indices().dtype(), false, true),
         at::empty(self.values().sizes(), options.layout(kStrided)),
         self.sizes(),
         optTypeMetaToScalarType(options.dtype()),
@@ -810,8 +884,8 @@ Tensor empty_like_sparse_csr(
     return result;
   } else if (options.layout() == kSparseCsc) {
     auto result = at::native::_sparse_csc_tensor_unsafe(
-        self.ccol_indices().clone(),
-        self.row_indices().clone(),
+        self.ccol_indices().to(options.device(), self.ccol_indices().dtype(), false, true),
+        self.row_indices().to(options.device(), self.row_indices().dtype(), false, true),
         at::empty(self.values().sizes(), options.layout(kStrided)),
         self.sizes(),
         optTypeMetaToScalarType(options.dtype()),
@@ -820,8 +894,8 @@ Tensor empty_like_sparse_csr(
     return result;
   } else if (options.layout() == kSparseBsr) {
     auto result = at::native::_sparse_bsr_tensor_unsafe(
-        self.crow_indices().clone(),
-        self.col_indices().clone(),
+        self.crow_indices().to(options.device(), self.crow_indices().dtype(), false, true),
+        self.col_indices().to(options.device(), self.col_indices().dtype(), false, true),
         at::empty(self.values().sizes(), options.layout(kStrided)),
         self.sizes(),
         optTypeMetaToScalarType(options.dtype()),
@@ -831,8 +905,8 @@ Tensor empty_like_sparse_csr(
     return result;
   } else if (options.layout() == kSparseBsc) {
     auto result = at::native::_sparse_bsc_tensor_unsafe(
-        self.ccol_indices().clone(),
-        self.row_indices().clone(),
+        self.ccol_indices().to(options.device(), self.ccol_indices().dtype(), false, true),
+        self.row_indices().to(options.device(), self.row_indices().dtype(), false, true),
         at::empty(self.values().sizes(), options.layout(kStrided)),
         self.sizes(),
         optTypeMetaToScalarType(options.dtype()),

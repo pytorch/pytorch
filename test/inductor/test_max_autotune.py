@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+import json
 import os
 import unittest
 
@@ -7,9 +8,7 @@ from typing import Callable, List, Optional
 import torch
 from torch import multiprocessing as mp
 from torch._dynamo import reset
-from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import reset_rng_state
-from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.autotune_process import (
     BenchmarkRequest,
@@ -17,19 +16,18 @@ from torch._inductor.autotune_process import (
     TuningProcessPool,
 )
 from torch._inductor.graph import GraphLowering
-from torch._inductor.ir import Buffer, FixedLayout
+from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
 from torch._inductor.select_algorithm import (
     AlgorithmSelectorCache,
-    ChoiceCaller,
     TritonTemplateCaller,
 )
+from torch._inductor.test_case import run_tests, TestCase
 
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import SM75OrLater, SM90OrLater
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -255,18 +253,20 @@ class TestMaxAutotune(TestCase):
             def get(self, filenames):
                 nonlocal cache
                 nonlocal num_get
-                ret = {file: cache[file] for file in filenames if file in cache}
+                ret = {
+                    file: json.loads(cache[file]) for file in filenames if file in cache
+                }
                 num_get += len(ret)
                 return ret
 
             def put(self, filename, data):
                 nonlocal cache
                 nonlocal num_put
-                cache[filename] = data
+                cache[filename] = json.dumps(data)
                 num_put += 1
 
         cache_module = (
-            "triton.runtime.fb_memcache.FbMemcacheRemoteCacheBackend"
+            "triton.runtime.fb_memcache.FbMemcacheRemoteAutotuneCacheBackend"
             if config.is_fbcode()
             else "triton.runtime.cache.RedisRemoteCacheBackend"
         )
@@ -280,17 +280,17 @@ class TestMaxAutotune(TestCase):
             os.environ.pop("TRITON_CACHE_MANAGER", None)
             with config.patch({"max_autotune": True}):
                 for _ in range(4):
-                    torch.compile(mm, dynamic=dynamic)(a, b)
+                    with fresh_inductor_cache():
+                        torch.compile(mm, dynamic=dynamic)(a, b)
                     reset()
-                    torch._inductor.codecache.PyCodeCache.clear()
                 self.assertEqual(num_get, 3)
                 self.assertEqual(num_put, 1)
             num_get = 0
             num_put = 0
             for _ in range(4):
-                torch.compile(f, dynamic=dynamic)(x, y)
+                with fresh_inductor_cache():
+                    torch.compile(f, dynamic=dynamic)(x, y)
                 reset()
-                torch._inductor.codecache.PyCodeCache.clear()
             self.assertEqual(num_get, 3)
             self.assertEqual(num_put, 1)
 
@@ -361,261 +361,6 @@ class TestMaxAutotune(TestCase):
         finally:
             V.set_debug_handler(old_debug_handler)
 
-    @unittest.skipIf(not SM75OrLater, "need sm_75")
-    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
-    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_max_autotune_precompile(self):
-        """
-        Make sure autotuning mm in sub processes work without crashes.
-        """
-
-        if torch.version.hip:
-            return
-
-        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
-
-        def mm(a, b):
-            return a @ b
-
-        a = torch.randn(100, 10).cuda().half()
-        b = torch.randn(10, 100).cuda().half()
-
-        with config.patch(
-            {
-                "max_autotune": True,
-                "autotune_in_subproc": True,
-                "max_autotune_gemm_backends": "CUTLASS,Triton,ATen",
-                "compile_threads": 4,
-                "cuda.cutlass_dir": _CUTLASS_DIR,
-                "cuda.cutlass_max_profiling_configs": 2,
-            }
-        ):
-            Y_compiled = torch.compile(mm, dynamic=False)(a, b)
-            Y = mm(a, b)
-            torch.testing.assert_close(Y_compiled, Y)
-
-    # TODO: Enable dynamic test cases when dynamic support is added.
-    @unittest.skipIf(not SM75OrLater, "need sm_75")
-    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
-    @parametrize("dynamic", (False,))
-    @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen,Triton,CUTLASS"))
-    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_max_autotune_cutlass_backend_regular_mm(
-        self, dynamic: bool, max_autotune_gemm_backends: str
-    ):
-        """
-        Make sure autotuning mm in sub processes work without crashes.
-        """
-
-        if max_autotune_gemm_backends == "CUTLASS" and torch.version.hip:
-            return
-
-        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
-
-        def mm(a, b):
-            return a @ b
-
-        a = torch.randn(100, 10).cuda().half()
-        b = torch.randn(10, 100).cuda().half()
-
-        with config.patch(
-            {
-                "max_autotune": True,
-                "autotune_in_subproc": False,
-                "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "cuda.cutlass_dir": _CUTLASS_DIR,
-                "cuda.cutlass_max_profiling_configs": 2,
-            }
-        ):
-            Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
-            Y = mm(a, b)
-            torch.testing.assert_close(Y_compiled, Y)
-
-    def _test_max_autotune_cutlass_backend_epilogue_fusion(
-        self,
-        dynamic: bool = False,
-        max_autotune_gemm_backends: str = "CUTLASS",
-        mixed_precision=False,
-        fp16=True,
-        expected_fuse_count=1,
-        mm: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = None,
-    ):
-        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
-            mixed_precision
-        )
-
-        # Note: The ops that are available
-        # also depend on the alignment of the shapes
-        # so if these shapes don't all align to at least 8 elements
-        # it can happen that no Cutlass 3.x op is available
-        # that allows fusions
-        a = torch.randn(256, 32).cuda()
-        b = torch.randn(32, 256).cuda()
-        if fp16:
-            a = a.half()
-            b = b.half()
-
-        with config.patch(
-            {
-                "max_autotune": True,
-                "autotune_in_subproc": False,
-                "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "cuda.cutlass_dir": _CUTLASS_DIR,
-                "cuda.cutlass_max_profiling_configs": 4,
-                "cuda.cutlass_only_evt_capable_ops": True,
-                "cuda.version": "12.2",  # required to enable the Kernels we need
-            }
-        ):
-            counters["inductor"]["cuda_epilogue_fusion_counter"] = 0
-            Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
-            Y = mm(a, b)
-            actual_count = counters["inductor"]["cuda_epilogue_fusion_counter"]
-            assert (
-                actual_count == expected_fuse_count
-            ), f"Expected fuse count of {expected_fuse_count} but got {actual_count}"
-            torch.testing.assert_close(Y_compiled, Y, atol=1e-2, rtol=1e-2)
-
-    @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(torch.version.hip, "HIP not supported")
-    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
-    def test_max_autotune_cutlass_backend_simple_fusion_fp16(self):
-        def mm(a, b):
-            return (a @ b) * 3.0
-
-        #  The pointwise ops seem to be pre-fused into a single Pointwise
-        self._test_max_autotune_cutlass_backend_epilogue_fusion(
-            mixed_precision=False, fp16=True, expected_fuse_count=1, mm=mm
-        )
-
-    @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(torch.version.hip, "HIP not supported")
-    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
-    def test_max_autotune_cutlass_backend_simple_fusion_fp16_fp32acc(self):
-        def mm(a, b):
-            return (a @ b) * 3.0
-
-        self._test_max_autotune_cutlass_backend_epilogue_fusion(
-            mixed_precision=True, fp16=True, expected_fuse_count=1, mm=mm
-        )
-
-    @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(torch.version.hip, "HIP not supported")
-    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
-    def test_max_autotune_cutlass_backend_chained_fusion_fp16(self):
-        def mm(a, b):
-            return (a @ b) * 3.3 - 1.234
-
-        #  The pointwise ops seem to be pre-fused into a single Pointwise
-        self._test_max_autotune_cutlass_backend_epilogue_fusion(
-            mixed_precision=False, fp16=True, expected_fuse_count=1, mm=mm
-        )
-
-    @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(torch.version.hip, "HIP not supported")
-    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
-    def test_max_autotune_cutlass_backend_chained_fusion_fp16_fp32acc(self):
-        def mm(a, b):
-            return (a @ b) * 3.3 - 1.234
-
-        self._test_max_autotune_cutlass_backend_epilogue_fusion(
-            mixed_precision=True, fp16=True, expected_fuse_count=1, mm=mm
-        )
-
-    @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(torch.version.hip, "HIP not supported")
-    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
-    def test_max_autotune_cutlass_backend_relu_fusion_fp16(self):
-        def mm(a, b):
-            return torch.nn.functional.relu((a @ b) * 3.3 - 1.234)
-
-        self._test_max_autotune_cutlass_backend_epilogue_fusion(
-            mixed_precision=False, fp16=True, expected_fuse_count=1, mm=mm
-        )
-
-    @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(torch.version.hip, "HIP not supported")
-    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
-    def test_max_autotune_cutlass_backend_relu_fusion_fp16_fp32acc(self):
-        def mm(a, b):
-            return torch.nn.functional.relu((a @ b) * 3.3 - 1.234)
-
-        #  The pointwise ops seem to be pre-fused into a single Pointwise
-        self._test_max_autotune_cutlass_backend_epilogue_fusion(
-            mixed_precision=True, fp16=True, expected_fuse_count=1, mm=mm
-        )
-
-    @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(torch.version.hip, "HIP not supported")
-    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
-    def test_max_autotune_cutlass_backend_relu6_fusion_fp16_fp32acc(self):
-        def mm(a, b):
-            return torch.clamp(torch.nn.functional.relu(a @ b), max=6.0)
-
-        #  The pointwise ops seem to be pre-fused into a single Pointwise
-        self._test_max_autotune_cutlass_backend_epilogue_fusion(
-            mixed_precision=True, fp16=True, expected_fuse_count=1, mm=mm
-        )
-
-    @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(torch.version.hip, "HIP not supported")
-    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
-    def test_max_autotune_cutlass_backend_no_fusion_dtype_mismatch(self):
-        def mm(a, b):
-            # this should not be fused, since the output dtype is different from the matmul dtype
-            return (a @ b).to(torch.float32) * 0.00001
-
-        self._test_max_autotune_cutlass_backend_epilogue_fusion(
-            mixed_precision=True, fp16=True, expected_fuse_count=0, mm=mm
-        )
-
-    @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(torch.version.hip, "HIP not supported")
-    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
-    def test_max_autotune_cutlass_backend_shape_dependent_normalization_fusion(self):
-        def mm(a, b):
-            return (a @ b) / b.size(1)
-
-        self._test_max_autotune_cutlass_backend_epilogue_fusion(
-            mixed_precision=True, fp16=True, expected_fuse_count=1, mm=mm
-        )
-
-    # TODO: Enable dynamic test cases when dynamic support is added.
-    @unittest.skipIf(not SM75OrLater, "need sm_75")
-    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
-    @parametrize("dynamic", (False,))
-    @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen,Triton,CUTLASS"))
-    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_max_autotune_cutlass_backend_mm_bias(
-        self, dynamic: bool = False, max_autotune_gemm_backends: str = "CUTLASS"
-    ):
-        """
-        Make sure autotuning mm in sub processes work without crashes.
-        """
-
-        if max_autotune_gemm_backends == "CUTLASS" and torch.version.hip:
-            return
-
-        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
-
-        def mm(a, b, bias):
-            return torch.nn.functional.linear(a, b, bias)
-
-        a = torch.randn(2048, 4096).cuda().half()
-        bias = torch.randn(2048).cuda().half()
-
-        with config.patch(
-            {
-                "max_autotune": True,
-                "autotune_in_subproc": False,
-                "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "cuda.cutlass_dir": _CUTLASS_DIR,
-                "cuda.cutlass_max_profiling_configs": 2,
-            }
-        ):
-            Y = mm(a, a, bias)
-            Y_compiled = torch.compile(mm, dynamic=dynamic)(a, a, bias)
-            torch.testing.assert_close(Y_compiled, Y, atol=1e-1, rtol=1e-1)
-
     @parametrize("dynamic", (False, True))
     def test_max_autotune_addmm(self, dynamic=False):
         """
@@ -649,60 +394,6 @@ class TestMaxAutotune(TestCase):
         b = torch.randn(10, 100).cuda()
         with config.patch({"max_autotune": True}):
             torch.compile(addmm, dynamic=dynamic)(x, a, b)
-
-    # TODO: Enable dynamic test cases when dynamic support is added.
-    @unittest.skipIf(not SM75OrLater, "need sm_75")
-    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
-    @parametrize("dynamic", (False,))
-    @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen,Triton,CUTLASS"))
-    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_max_autotune_cutlass_backend_addmm(
-        self, dynamic, max_autotune_gemm_backends
-    ):
-        """
-        Make sure autotuning addmm in sub processes work without crashes.
-        """
-
-        if max_autotune_gemm_backends == "CUTLASS" and torch.version.hip:
-            return
-
-        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
-
-        def addmm(x, a, b, alpha, beta):
-            return torch.addmm(x, a, b, alpha=alpha, beta=beta)
-
-        def compare_results(
-            m: int, k: int, n: int, alpha: float, beta: float, x_shape: List[int]
-        ) -> None:
-            x = torch.randn(x_shape).cuda().half()
-            a = torch.randn(m, k).cuda().half()
-            b = torch.randn(k, n).cuda().half()
-            y_expected = addmm(x, a, b, alpha, beta)
-
-            compiled_fn = torch.compile(addmm, dynamic=dynamic)
-            y = compiled_fn(x, a, b, alpha, beta)
-            torch.testing.assert_close(y, y_expected)
-
-        with config.patch(
-            {
-                "max_autotune": True,
-                "autotune_in_subproc": False,
-                "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "cuda.cutlass_dir": _CUTLASS_DIR,
-                "cuda.cutlass_max_profiling_configs": 2,
-            }
-        ):
-            # No broadcast
-            compare_results(4096, 25728, 2048, 2.0, 0.4, [4096, 2048])
-            # Broadcast first dim.
-            compare_results(4096, 25728, 2048, 2.0, 0.4, [2048])
-            # Broadcast last dim.
-            if not SM90OrLater and max_autotune_gemm_backends == "CUTLASS":
-                with self.assertRaisesRegex(RuntimeError, "No choices to select"):
-                    # CUTLASS2 doesn't support Bias last-dim broadcast.
-                    compare_results(4096, 25728, 2048, 2.0, 0.4, [4096, 1])
-            else:
-                compare_results(4096, 25728, 2048, 2.0, 0.4, [4096, 1])
 
     @skipIfRocm
     def test_autotune_conv1x1(self):
@@ -832,6 +523,51 @@ class TestMaxAutotune(TestCase):
         if N <= 8:
             print(f"ref\n{ref}\nact\n{act}")
         torch.testing.assert_close(ref, act, atol=1e-1, rtol=1e-1)
+
+    @config.patch(
+        max_autotune_gemm=True,
+    )
+    @unittest.skipIf(
+        torch.cuda.device_count() < 2, "Need at least 2 devices for this test"
+    )
+    def test_autotune_device_guard(self):
+        x = torch.randn(1024, 1024, device="cuda:1")
+        y = torch.randn(1024, 1024, device="cuda:1")
+
+        def f(x, y):
+            return x @ y
+
+        with fresh_inductor_cache():
+            act = torch.compile(f)(x, y)
+        ref = f(x, y)
+        self.assertTrue(torch.allclose(act, ref, atol=4 * 1e-3, rtol=4 * 1e-3))
+
+    @config.patch(max_autotune=True)
+    def test_empty_conv_input(self, kernel_size=3):
+        x = torch.randn(0, 256, 14, 14, device="cuda")
+        weight = torch.randn(256, 256, kernel_size, kernel_size, device="cuda")
+
+        def f(x, weight):
+            return torch.convolution(
+                x,
+                weight,
+                bias=None,
+                stride=[1, 1],
+                padding=[0, 0],
+                dilation=[1, 1],
+                transposed=False,
+                output_padding=[0, 0],
+                groups=1,
+            )
+
+        opt_f = torch.compile(f)
+        ref = f(x, weight)
+        act = opt_f(x, weight)
+        self.assertTrue(torch.allclose(ref, act, atol=4 * 1e-3, rtol=4 * 1e-3))
+
+    @config.patch(max_autotune=True)
+    def test_empty_conv_input_with_1x1_kernel(self):
+        self.test_empty_conv_input(kernel_size=1)
 
 
 class TestBenchmarkRequest(BenchmarkRequest):

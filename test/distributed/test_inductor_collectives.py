@@ -941,6 +941,45 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled(*inputs)
 
     @run_with_both_funcol_impls
+    @parametrize(
+        "source", [
+            "GroupMember.WORLD",
+            "group.WORLD",
+            "_get_default_group",
+        ]
+    )
+    def test_dynamo_get_world_group(self, source):
+
+        def func(tensor):
+            if source == "GroupMember.WORLD":
+                group = torch.distributed.GroupMember.WORLD
+            elif source == "group.WORLD":
+                group = torch.distributed.group.WORLD
+            else:
+                assert source == "_get_default_group"
+                group = torch.distributed.distributed_c10d._get_default_group()
+
+            torch.distributed.all_reduce(
+                tensor,
+                group=group,
+            )
+
+        def verify(gm, _):
+            ar_nodes = []
+            for node in gm.graph.nodes:
+                if node.target in [
+                        torch.ops.c10d_functional.all_reduce,
+                        torch.ops._c10d_functional.all_reduce]:
+                    ar_nodes.append(node)
+            self.assertEqual(len(ar_nodes), 1)
+            return gm
+
+        compiled = torch.compile(func, backend=verify, fullgraph=True)
+        input = torch.ones(2, device=self.device)
+        compiled(input)
+
+
+    @run_with_both_funcol_impls
     def test_dynamo_support_collective_op_with_async_op_False(self):
 
         def func(inp, out, *, pg):

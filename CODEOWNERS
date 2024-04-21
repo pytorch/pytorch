@@ -67,6 +67,7 @@ nn/qat/ @jerryzh168
 /test/run_test.py @pytorch/pytorch-dev-infra
 /torch/testing/_internal/common_device_type.py @mruberry
 /torch/testing/_internal/common_utils.py @pytorch/pytorch-dev-infra
+/torch/testing/_internal/hop_db.py @tugsbayasgalan @zou3519 @ydwu4
 
 # Parametrizations
 /torch/nn/utils/parametriz*.py @lezcano

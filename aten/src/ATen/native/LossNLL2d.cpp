@@ -289,7 +289,7 @@ static void nll_loss2d_backward_out_frame(
     int64_t ignore_index,
     const Tensor& total_weight) {
   auto weight_contiguous = optional_contiguous(weight);
-  const scalar_t* weight_data = optional_data<scalar_t>(weight_contiguous);
+  const scalar_t* weight_data = optional_data<const scalar_t>(weight_contiguous);
 
   if (reduction == at::Reduction::None) {
     check_gradout_shape_nll_loss2d(grad_output, target);
@@ -299,8 +299,8 @@ static void nll_loss2d_backward_out_frame(
     const int64_t W = input.size(3);
 
     auto grad_input_acc = grad_input.accessor<scalar_t, 4>();
-    auto grad_output_acc = grad_output.accessor<scalar_t, 3>();
-    auto target_acc = target.accessor<int64_t, 3>();
+    auto grad_output_acc = grad_output.accessor<const scalar_t, 3>();
+    auto target_acc = target.accessor<const int64_t, 3>();
 
     at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
       for (const auto b : c10::irange(start, end)) {
@@ -323,17 +323,17 @@ static void nll_loss2d_backward_out_frame(
     return;
   }
 
-  const scalar_t total_weight_value = *total_weight.data_ptr<scalar_t>();
+  const scalar_t total_weight_value = *total_weight.const_data_ptr<scalar_t>();
 
   TORCH_CHECK(
       grad_output.dim() <= 1 && grad_output.numel() == 1,
       "Expected a single element grad_output tensor, but got: ",
       grad_output.sizes());
 
-  const scalar_t grad_output_value = *grad_output.data_ptr<scalar_t>();
+  const scalar_t grad_output_value = *grad_output.const_data_ptr<scalar_t>();
 
   const auto target_contiguous = target.contiguous();
-  const int64_t* target_data = target_contiguous.data_ptr<int64_t>();
+  const int64_t* target_data = target_contiguous.const_data_ptr<int64_t>();
 
   scalar_t* grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
 

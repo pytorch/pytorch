@@ -414,7 +414,11 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
     TORCH_CHECK_VALUE(
         PyArray_DescrConverter(py_typestr, &descr), "cannot parse `typestr`");
     dtype = numpy_dtype_to_aten(descr->type_num);
+#if NPY_ABI_VERSION >= 0x02000000
+    dtype_size_in_bytes = PyDataType_ELSIZE(descr);
+#else
     dtype_size_in_bytes = descr->elsize;
+#endif
     TORCH_INTERNAL_ASSERT(dtype_size_in_bytes > 0);
   }
 
@@ -469,6 +473,20 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
     }
   }
 
+  const auto target_device = [&]() -> c10::optional<Device> {
+    // note(crcrpar): zero-size arrays come with nullptr.
+    // ref:
+    // https://numba.readthedocs.io/en/stable/cuda/cuda_array_interface.html#cuda-array-interface-version-3
+    if (data_ptr != nullptr) {
+      return {};
+    } else {
+      const auto current_device = at::detail::getCUDAHooks().current_device();
+      return Device(
+          kCUDA,
+          static_cast<DeviceIndex>(current_device > -1 ? current_device : 0));
+    }
+  }();
+
   Py_INCREF(obj);
   return at::from_blob(
       data_ptr,
@@ -478,7 +496,8 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
         pybind11::gil_scoped_acquire gil;
         Py_DECREF(obj);
       },
-      at::device(kCUDA).dtype(dtype));
+      at::device(kCUDA).dtype(dtype),
+      target_device);
 }
 
 // Mutated only once (during module init); behaves as an immutable variable

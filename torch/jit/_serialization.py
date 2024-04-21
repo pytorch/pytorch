@@ -7,9 +7,11 @@ This module contains functionality for serializing TorchScript modules, notably:
 This is not intended to be imported directly; please use the exposed
 functionalities in `torch.jit`.
 """
+
 import os
 
 import torch
+from torch._utils_internal import log_torchscript_usage
 from torch.jit._recursive import wrap_cpp_module
 from torch.serialization import validate_cuda_device
 
@@ -73,6 +75,7 @@ def save(m, f, _extra_files=None):
         extra_files = {'foo.txt': b'bar'}
         torch.jit.save(m, 'scriptmodule.pt', _extra_files=extra_files)
     """
+    log_torchscript_usage("save")
     if _extra_files is None:
         _extra_files = {}
     if isinstance(f, (str, os.PathLike)):
@@ -143,6 +146,7 @@ def load(f, map_location=None, _extra_files=None, _restore_shapes=False):
         import os
         os.remove("scriptmodule.pt")
     """
+    log_torchscript_usage("load")
     if isinstance(f, (str, os.PathLike)):
         if not os.path.exists(f):  # type: ignore[type-var]
             raise ValueError(f"The provided filename {f} does not exist")  # type: ignore[str-bytes-safe]

@@ -7,7 +7,7 @@ import sys
 import time
 from collections import defaultdict
 from contextlib import contextmanager
-from typing import Any, Callable, DefaultDict, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, DefaultDict, Dict, List, Optional, Set, Tuple, Union
 
 import sympy
 
@@ -16,11 +16,17 @@ import torch._logging
 import torch.fx
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import defake, dynamo_timed
+from torch._higher_order_ops.effects import _EffectType
 from torch._logging import LazyString, trace_structured
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
-from torch.fx.experimental.symbolic_shapes import has_free_symbols, ShapeEnv, SymTypes
+from torch.fx.experimental.symbolic_shapes import (
+    free_unbacked_symbols,
+    has_free_symbols,
+    ShapeEnv,
+    SymTypes,
+)
 from torch.utils._mode_utils import no_dispatch
 
 from . import config, ir
@@ -61,7 +67,12 @@ from .lowering import (
     unsupported_output_tensor,
 )
 from .sizevars import SizeVarAllocator
-from .utils import convert_shape_to_inductor, gather_origins, get_sympy_Expr_dtype
+from .utils import (
+    convert_shape_to_inductor,
+    gather_origins,
+    get_cloned_parameter_buffer_name,
+    get_sympy_Expr_dtype,
+)
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -187,13 +198,22 @@ class GraphLowering(torch.fx.Interpreter):
         if get_scheduling_for_device("cpu") is None:
             from .codegen.cpp import CppScheduling
 
-            register_backend_for_device("cpu", CppScheduling, WrapperCodeGen)
+            register_backend_for_device(
+                "cpu", CppScheduling, WrapperCodeGen, CppWrapperCpu
+            )
 
         if get_scheduling_for_device("cuda") is None:
             from .codegen.cuda_combined_scheduling import CUDACombinedScheduling
 
             # CUDACombinedScheduling combines Triton and CUDA C++ scheduling for CUDA devices via delegation
-            register_backend_for_device("cuda", CUDACombinedScheduling, WrapperCodeGen)
+            register_backend_for_device(
+                "cuda", CUDACombinedScheduling, WrapperCodeGen, CppWrapperCuda
+            )
+
+        if get_scheduling_for_device("xpu") is None:
+            from .codegen.triton import TritonScheduling
+
+            register_backend_for_device("xpu", TritonScheduling, WrapperCodeGen)
 
     def __init__(
         self,
@@ -313,6 +333,8 @@ class GraphLowering(torch.fx.Interpreter):
             const_module.allocated_constant_name if const_module is not None else {}
         )
         self.init_backend_registration()
+
+        self.effectful_ops: Dict[_EffectType, ir.Buffer] = {}
 
     @staticmethod
     def decide_layout_opt(gm, *, is_inference) -> bool:
@@ -616,7 +638,10 @@ class GraphLowering(torch.fx.Interpreter):
         self.buffers.append(buffer)
         self.name_to_buffer[name] = buffer
         # Skip empty CPU tensor so that CUDA graphs can succeed, see https://github.com/pytorch/pytorch/pull/114144
-        if not isinstance(buffer, ir.ComputedBuffer) or not buffer.is_zero_elements():
+        if (
+            not (isinstance(buffer, ir.ComputedBuffer) and buffer.is_zero_elements())
+            and buffer.get_device() is not None
+        ):
             self.add_device_info(buffer.get_device())
         return name
 
@@ -660,6 +685,22 @@ class GraphLowering(torch.fx.Interpreter):
         for user in self.name_to_users[name]:
             user.realize()
 
+    def get_original_value_of_constant(self, name: str):
+        """
+        In AOTI, module buffers may have been mutated during the tracing and compilation.
+        Thus we need to read from previously stored original buffers, to make sure the
+        generated model.so uses correct initial values.
+        """
+        assert name in self.allocated_constant_name and name in self.constants, (
+            "Can not find the original value for " + name
+        )
+        orig_name = get_cloned_parameter_buffer_name(self.allocated_constant_name[name])
+        return (
+            self.module.meta[orig_name]
+            if orig_name in self.module.meta
+            else self.constants[name]
+        )
+
     def add_tensor_constant(self, data, name=None):
         def allocate(name):
             if not config.aot_inductor.use_runtime_constant_folding:
@@ -670,7 +711,8 @@ class GraphLowering(torch.fx.Interpreter):
                         and data.stride() == value.stride()
                         and data.dtype == value.dtype
                         and data.device == value.device
-                        and torch.eq(data, value).all()
+                        and data.untyped_storage().data_ptr()
+                        == value.untyped_storage().data_ptr()
                     ):
                         return constant_name
 
@@ -860,6 +902,9 @@ class GraphLowering(torch.fx.Interpreter):
 
     def output(self, target, args, kwargs):
         result = super().output(target, args, kwargs)
+        if not isinstance(result, (tuple, list)):
+            # nested subgraphs can have singleton outputs
+            result = (result,)
         assert isinstance(result, (tuple, list)), type(result)
         assert all(
             isinstance(
@@ -872,11 +917,31 @@ class GraphLowering(torch.fx.Interpreter):
                     sympy.Expr,
                     sympy.logic.boolalg.Boolean,
                     int,
+                    ir.EffectfulKernel,
                 ),
             )
             for x in result
         ), result
-        self.graph_outputs = [ir.ExternKernel.realize_input(x) for x in result]
+
+        fx_node_args = V.graph.current_node.args[0]  # type: ignore[arg-type]
+        if not isinstance(fx_node_args, (tuple, list)):
+            # nested subgraphs can have singleton outputs
+            fx_node_args = (fx_node_args,)
+        result = [ir.ExternKernel.realize_input(x) for x in result]
+        result_correct_strides = []
+
+        assert len(fx_node_args) == len(result)
+        for r, fx_node in zip(result, fx_node_args):
+            if not isinstance(r, (ir.TensorBox, ir.BaseView)):
+                result_correct_strides.append(r)
+            else:
+                # AOT Autograd tries to detect stride divergence of inductor from output metadata.
+                # Here, we try to avoid spurious divergence by matching insignificant strides such as
+                result_correct_strides.append(
+                    self.match_insignificant_strides(r, fx_node.meta["val"].stride())
+                )
+
+        self.graph_outputs = result_correct_strides
         value: ir.IRNode
         for name, value in self.graph_inputs.items():
             assert isinstance(
@@ -892,7 +957,9 @@ class GraphLowering(torch.fx.Interpreter):
             value = value.data
             if not isinstance(value, InputBuffer) or value.get_name() != name:
                 # one of our inputs was mutated, need to turn that into a copy
-                ir.MutationLayout.realize_into(value, self.graph_inputs_original[name])
+                ir.MutationLayoutSHOULDREMOVE.realize_into(
+                    value, self.graph_inputs_original[name]
+                )
                 # replace output with mutated input
                 try:
                     ind = self.graph_outputs.index(value_storage_box)
@@ -919,6 +986,54 @@ class GraphLowering(torch.fx.Interpreter):
             yield
         finally:
             self.current_node = old
+
+    def match_insignificant_strides(
+        self,
+        tensor,
+        meta_strides_inp: Tuple[Union[int, torch.SymInt], ...],
+    ) -> ir.TensorBox:
+        # should have already been realized
+        assert torch._inductor.ir.is_storage_and_layout(tensor)
+
+        meta_strides = [
+            s.node.expr if isinstance(s, torch.SymInt) else s for s in meta_strides_inp
+        ]
+
+        if all(
+            self.sizevars.statically_known_equals(s1, s2)
+            for s1, s2 in zip(meta_strides, tensor.get_stride())
+        ):
+            return tensor
+
+        def significant_strides_equal(shape, meta_strides, tensor_strides):
+            for dim, s1, s2 in zip(shape, meta_strides, tensor_strides):
+                if self.sizevars.statically_known_leq(dim, 1):  # type: ignore[arg-type]
+                    continue
+
+                if not self.sizevars.statically_known_equals(s1, s2):
+                    return False
+
+            return True
+
+        if not significant_strides_equal(
+            tensor.get_size(), meta_strides, tensor.get_stride()
+        ):
+            return tensor
+
+        storage, old_layout = torch._inductor.ir.as_storage_and_layout(tensor)
+        new_stride = list(old_layout.stride)
+        for i, s in enumerate(tensor.get_size()):
+            if self.sizevars.statically_known_leq(s, 1):  # type: ignore[arg-type]
+                new_stride[i] = meta_strides[i]
+
+        new_layout = torch._inductor.ir.FixedLayout(
+            old_layout.device,
+            old_layout.dtype,
+            old_layout.size,
+            new_stride,
+            old_layout.offset,
+        )
+        return ir.TensorBox(torch._inductor.ir.ReinterpretView(storage, new_layout))
 
     def run_node(self, n: torch.fx.Node):
         def debug(msg):
@@ -967,6 +1082,8 @@ class GraphLowering(torch.fx.Interpreter):
                 torch.ops.aten.as_strided.default,
                 torch.ops.aten.as_strided_.default,
                 torch.ops.aten.as_strided_scatter.default,
+                torch.ops.aten.resize.default,
+                torch.ops.aten.resize_as.default,
             ]
             is_output = any(user.op == "output" for user in n.users)
             is_input_for_as_strided = any(
@@ -985,9 +1102,10 @@ class GraphLowering(torch.fx.Interpreter):
             ):
                 strides = n.meta["val"].stride()
                 dense = torch._prims_common.is_non_overlapping_and_dense(n.meta["val"])
+                unbacked_symbols_in_strides = len(free_unbacked_symbols(strides)) > 0
                 # requiring a stride order for a non-dense output wouldn't
                 # recreate the same strides, and would fail with view, defer for now.
-                if dense and len(strides):
+                if not unbacked_symbols_in_strides and dense and len(strides):
                     stride_order = ir.get_stride_order(strides)
                     if (
                         len(result.get_size()) == 4
@@ -1117,8 +1235,6 @@ class GraphLowering(torch.fx.Interpreter):
         self.cuda = "cuda" in self.device_types
         if self.cpp_wrapper:
             self.validate_can_generate_cpp_wrapper()
-            self.wrapper_code = CppWrapperCuda() if self.cuda else CppWrapperCpu()
-            return
 
         device_types = self.device_types.copy()
         device_types.discard("cpu")
@@ -1130,9 +1246,19 @@ class GraphLowering(torch.fx.Interpreter):
         device_type = "cpu" if only_cpu else device_types.pop()
 
         self.device_ops = get_device_op_overrides(device_type)
-        wrapper_code_gen_cls = get_wrapper_codegen_for_device(device_type)
+        wrapper_code_gen_cls = get_wrapper_codegen_for_device(
+            device_type, self.cpp_wrapper
+        )
         assert wrapper_code_gen_cls is not None, f"Device {device_type} not supported"
         self.wrapper_code = wrapper_code_gen_cls()
+
+        if self.const_module:
+            # If we have const module, we could reuse the kernels
+            # This could avoid duplication and save time on doing recompilation (if Triton.)
+            self.wrapper_code._names_iter = self.const_module.wrapper_code._names_iter
+            self.wrapper_code.src_to_kernel = (
+                self.const_module.wrapper_code.src_to_kernel
+            )
 
     def codegen_with_cpp_wrapper(self):
         """
@@ -1173,6 +1299,25 @@ class GraphLowering(torch.fx.Interpreter):
             else:
                 real_inputs = [materialize(x) for x in V.real_inputs]
 
+            if self.mutated_inputs:
+                from .compile_fx import clone_preserve_strides
+
+                mutated_input_idxs = [
+                    idx
+                    for idx, name in enumerate(self.graph_inputs)
+                    if name in self.mutated_inputs
+                    and isinstance(real_inputs[idx], torch.Tensor)
+                ]
+                for idx in mutated_input_idxs:
+                    # clone mutated Tensor inputs to avoid mutating them in
+                    # the first pass of the CPP wrapper-based compilation, as
+                    # this will lead to a side effect on the example inputs:
+                    # e.g. if torch.compile(f)(x) if called on input-mutating
+                    # f, the inputs x will be mutated twice in the process:
+                    # once here, and again when running the compiled model;
+                    # this will also lead to a numerically incorrect output
+                    real_inputs[idx] = clone_preserve_strides(real_inputs[idx])
+
             with torch.utils._python_dispatch._disable_current_modes():
                 assert self.example_inputs is not None
                 compiled(real_inputs)
@@ -1183,6 +1328,8 @@ class GraphLowering(torch.fx.Interpreter):
             self.cpp_wrapper = True
             self.removed_buffers.clear()
             self.inplaced_to_remove.clear()
+            V.graph.sizevars.precomputed_replacements.clear()
+            V.graph.sizevars.inv_precomputed_replacements.clear()
             return self.codegen()
         else:
             # cpu
@@ -1196,8 +1343,11 @@ class GraphLowering(torch.fx.Interpreter):
         self.scheduler = Scheduler(self.buffers)
         V.debug.draw_orig_fx_graph(self.orig_gm, self.scheduler.nodes)
 
+        self.wrapper_code.push_codegened_graph(self)
         self.scheduler.codegen()
-        return self.wrapper_code.generate(self.is_inference)
+        result = self.wrapper_code.generate(self.is_inference)
+        self.wrapper_code.pop_codegened_graph()
+        return result
 
     def codegen_subgraph(self, parent_graph):
         """

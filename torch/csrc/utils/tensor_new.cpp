@@ -154,6 +154,8 @@ ScalarType infer_scalar_type(PyObject* obj) {
         return ScalarType::ComplexFloat;
       case ScalarType::Double:
         return ScalarType::ComplexDouble;
+      case ScalarType::Half:
+        return ScalarType::ComplexHalf;
       default:
         TORCH_CHECK(false, "invalid default scalar type for complex");
     }

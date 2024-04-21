@@ -283,7 +283,6 @@ def error_check_native_functions(funcs: Sequence[NativeFunction]) -> None:
             and str(f.func.name.name) != "set_"
         ):
             base_name = f.func.name.name
-            overload_name = f.func.name.overload_name
             assert base_name.inplace, (
                 f"{f.func.name} is marked with tag: inplace_view, but it doesn't follow the naming "
                 "convention for inplace ops - the codegen expects the base name to have a trailing underscore. "
@@ -858,7 +857,7 @@ def compute_meta_function_declaration(g: NativeFunctionsGroup) -> Optional[str]:
                 # element that is set by this method is false on the
                 # class corresponding to the object that `this` points to.
                 # This ensures that each element can be set only once.
-                assert_msg = f'"{precomputed_elements[i].name} already set"'
+                assert_msg = f'"{elem.name} already set"'
                 assert_stmt = f"static_assert({precomputed_template_parameters[i]} == false, {assert_msg});"
 
                 # Generate the new object construction block. All state

@@ -30,41 +30,53 @@ static void clamp_mps_graph(CachedGraph* cachedGraph,
                             const Tensor& min_tensor,
                             const Tensor& max_tensor) {
   auto input_dtype = input_tensor.scalar_type();
-  auto min_dtype = input_dtype;
-  auto max_dtype = input_dtype;
-  if (cachedGraph->minTensor) {
-    min_dtype = min_tensor.scalar_type();
-  }
-  if (cachedGraph->maxTensor) {
-    max_dtype = max_tensor.scalar_type();
-  }
+  auto min_dtype = cachedGraph->minTensor ? min_tensor.scalar_type() : input_dtype;
+  auto max_dtype = cachedGraph->maxTensor ? max_tensor.scalar_type() : input_dtype;
 
   MPSGraph* mpsGraph = cachedGraph->graph();
 
   cachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_tensor);
 
-  MPSGraphTensor* minTensor = cachedGraph->minTensor;
-  MPSGraphTensor* maxTensor = cachedGraph->maxTensor;
+  auto minTensor = cachedGraph->minTensor;
+  auto maxTensor = cachedGraph->maxTensor;
+
   if (input_dtype != min_dtype) {
     minTensor = castMPSTensor(mpsGraph, cachedGraph->minTensor, input_dtype);
   }
   if (input_dtype != max_dtype) {
     maxTensor = castMPSTensor(mpsGraph, cachedGraph->maxTensor, input_dtype);
   }
-  if (cachedGraph->minTensor && cachedGraph->maxTensor) {
-    cachedGraph->outputTensor = [mpsGraph clampWithTensor:cachedGraph->inputTensor
-                                           minValueTensor:minTensor
-                                           maxValueTensor:maxTensor
-                                                     name:nil];
-  } else if (cachedGraph->maxTensor) {
-    cachedGraph->outputTensor = [mpsGraph minimumWithPrimaryTensor:cachedGraph->inputTensor
-                                                   secondaryTensor:maxTensor
-                                                              name:nil];
-  } else if (cachedGraph->minTensor) {
-    cachedGraph->outputTensor = [mpsGraph maximumWithPrimaryTensor:cachedGraph->inputTensor
-                                                   secondaryTensor:minTensor
-                                                              name:nil];
+  if (c10::isIntegralType(input_dtype, /*includeBool=*/true)) {
+    if (minTensor && maxTensor) {
+      cachedGraph->outputTensor = [mpsGraph clampWithTensor:cachedGraph->inputTensor
+                                             minValueTensor:minTensor
+                                             maxValueTensor:maxTensor
+                                                       name:nil];
+    } else if (maxTensor) {
+      cachedGraph->outputTensor = [mpsGraph minimumWithPrimaryTensor:cachedGraph->inputTensor
+                                                     secondaryTensor:maxTensor
+                                                                name:nil];
+    } else if (minTensor) {
+      cachedGraph->outputTensor = [mpsGraph maximumWithPrimaryTensor:cachedGraph->inputTensor
+                                                     secondaryTensor:minTensor
+                                                                name:nil];
+    }
+    return;
   }
+  // clampWithTensor doesn't propagate NaN through so simulate it as composition of
+  // maximumWithNaNPropagationWithPrimaryTensor and minimumWithNaNPropagationWithPrimaryTensor
+  auto outputTensor = cachedGraph->inputTensor;
+  if (minTensor) {
+    outputTensor = [mpsGraph maximumWithNaNPropagationWithPrimaryTensor:outputTensor
+                                                        secondaryTensor:minTensor
+                                                                   name:nil];
+  }
+  if (maxTensor) {
+    outputTensor = [mpsGraph minimumWithNaNPropagationWithPrimaryTensor:outputTensor
+                                                        secondaryTensor:maxTensor
+                                                                   name:nil];
+  }
+  cachedGraph->outputTensor = outputTensor;
 }
 
 static void check_min_max_dims(const OptionalTensorRef clamp_opt, const Tensor& input_t, string op_name) {
