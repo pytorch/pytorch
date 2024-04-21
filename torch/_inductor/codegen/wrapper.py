@@ -1259,7 +1259,7 @@ class WrapperCodeGen(CodeGen):
         self.wrapper_call.writeline("start_graph()")
 
     def generate_end_graph(self):
-        self.wrapper_call.writeline("end_graph()")
+        self.wrapper_call.writeline(f"end_graph({config.profile_bandwidth_output!r})")
 
     def generate_reset_kernel_saved_flags(self):
         self.wrapper_call.splice(

@@ -382,11 +382,8 @@ class CudaReproTests(TestCase):
         """
         from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
         from torch._inductor.runtime import instance_descriptor
-        from torch._inductor.runtime.triton_heuristics import (
-            CachingAutotuner,
-            grid,
-            HeuristicType,
-        )
+        from torch._inductor.runtime.hints import HeuristicType
+        from torch._inductor.runtime.triton_heuristics import CachingAutotuner, grid
 
         def autotune(configs, meta):
             def decorator(fn):
