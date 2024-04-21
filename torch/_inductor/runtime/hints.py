@@ -3,6 +3,15 @@ from dataclasses import fields
 from enum import auto, Enum
 
 
+# NOTE: if these fail asserts submit a PR to increase them
+TRITON_MAX_BLOCK = {
+    "X": 2048,
+    "Y": 1024,
+    "Z": 1024,
+    "R": 4096 * 16,  # * 16 is multi-kernel only
+}
+
+
 class ReductionHint(Enum):
     INNER = 0
     OUTER = 1
