@@ -146,8 +146,11 @@ DEFAULT_TEST_UTILS = [
     "test_schema",
     "test_autograd_registration",
     "test_faketensor",
-    "test_aot_dispatch_static",
     "test_aot_dispatch_dynamic",
+]
+
+DEPRECATED_DEFAULT_TEST_UTILS = DEFAULT_TEST_UTILS + [
+    "test_aot_dispatch_static",
 ]
 
 
@@ -621,7 +624,7 @@ def opcheck(
     args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
     *,
-    test_utils: Union[str, List[str]] = "ALL",
+    test_utils: Union[str, List[str]] = DEFAULT_TEST_UTILS,
     raise_exception: bool = True,
 ) -> Dict[str, str]:
     """Given an operator and some sample arguments, tests if the operator is
