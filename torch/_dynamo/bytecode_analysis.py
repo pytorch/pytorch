@@ -244,8 +244,8 @@ def stacksize_analysis(instructions) -> Union[int, float]:
             stack_size = stack_sizes[inst]
             print(stack_size.low, stack_size.high, inst)
 
-    low = min([x.low for x in stack_sizes.values()])
-    high = max([x.high for x in stack_sizes.values()])
+    low = min(x.low for x in stack_sizes.values())
+    high = max(x.high for x in stack_sizes.values())
 
     assert fixed_point.value, "failed to reach fixed point"
     assert low >= 0

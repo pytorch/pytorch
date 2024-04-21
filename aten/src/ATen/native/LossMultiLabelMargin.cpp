@@ -168,9 +168,9 @@ static void multilabel_margin_loss_backward_out_frame(
   TORCH_CHECK(
       is_target_contiguous.max().item<scalar_t>() <= 1, is_target_arg, " is out of range");
 
-  scalar_t* input_data = input_contiguous.data_ptr<scalar_t>();
-  int64_t* target_data = target_contiguous.data_ptr<int64_t>();
-  scalar_t* is_target_data = is_target_contiguous.data_ptr<scalar_t>();
+  const scalar_t* input_data = input_contiguous.const_data_ptr<scalar_t>();
+  const int64_t* target_data = target_contiguous.const_data_ptr<int64_t>();
+  const scalar_t* is_target_data = is_target_contiguous.const_data_ptr<scalar_t>();
   scalar_t g = static_cast<scalar_t>(
       // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       reduction == Reduction::Mean ? 1. / (nframe * dim) : 1. / dim);
@@ -204,13 +204,13 @@ static void multilabel_margin_loss_backward_out_frame(
   if (reduction != Reduction::None || grad_output.dim() == 0) {
     assert(
         reduction != Reduction::None || grad_output.dim() > 0 || nframe == 1);
-    const auto d = *grad_output.data_ptr<scalar_t>();
+    const auto d = *grad_output.const_data_ptr<scalar_t>();
     for (int64_t t = 0; t < nframe * dim; t++) {
       grad_input_data[t] *= d;
     }
   } else {
     check_dim_size(grad_output, 1, 0, nframe);
-    auto grad_output_acc = grad_output.accessor<scalar_t, 1>();
+    auto grad_output_acc = grad_output.accessor<const scalar_t, 1>();
     for (const auto t : c10::irange(nframe)) {
       for (const auto d : c10::irange(dim)) {
         grad_input_data[t * dim + d] *= grad_output_acc[t];

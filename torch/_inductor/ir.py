@@ -123,7 +123,9 @@ def validate_ir(node_or_nodes):
     def _check_tensorbox(nodes):
         # Could expand this to check deeper properties
         # (e.g. TensorBox points to View or StorageBox)
-        if isinstance(nodes, (list, tuple)):
+        if nodes is None:
+            pass
+        elif isinstance(nodes, (list, tuple)):
             for node in nodes:
                 _check_tensorbox(node)
         elif isinstance(nodes, dict):
@@ -139,6 +141,7 @@ def validate_ir(node_or_nodes):
                     TensorBox,
                     sympy.logic.boolalg.Boolean,
                     Expr,
+                    EffectfulKernel,
                 ),
             ), f"Found {type(nodes)}, which is not a supported top level IR node. See [Note: Inductor IR]"
 
@@ -2515,7 +2518,7 @@ class Layout(IRNode):
 
     def is_channels_last_contiguous(self):
         ndim = len(self.size)
-        if ndim not in [4, 5]:
+        if ndim not in [4, 5] or self.size[1] == 1:
             return False
         for left, right, size in zip(
             self.stride, make_channels_last_strides_for(self.size), self.size  # type: ignore[arg-type]
@@ -3066,7 +3069,7 @@ class Buffer(IRNode):
             symbols_to_define.remove(s)
         assert (
             not symbols_to_define
-        ), f"unbacked symint {s} not written out, check comment above"
+        ), f"unbacked symint {symbols_to_define} not written out, check comment above"
 
     def realize(self):
         pass
@@ -3505,7 +3508,13 @@ class TemplateBuffer(Buffer):
 
 
 class TritonTemplateBuffer(TemplateBuffer):
-    pass
+    def __init__(self, layout, inputs, make_kernel_render, debug_extra=None):
+        super().__init__(layout, inputs, make_kernel_render)
+        self.debug_extra = debug_extra
+
+    def __str__(self):
+        out = f"TritonTemplateBuffer(layout={self.layout}, {self.debug_extra})"
+        return out
 
 
 PrimitiveInfoType = Union[int, float, bool, str, List[Union[int, str, float, bool]]]
@@ -4083,9 +4092,25 @@ class ExternKernel(InputsKernel):
             while isinstance(x.get_layout(), NonOwningLayout):
                 x = x.get_layout().view
             if isinstance(x.get_layout(), FlexibleLayout):
+                # If the the FlexibleLayout already has the size and stride in the required order,
+                # freeze it to a FixedLayout by using its current size and stride.
+                # The behavior of using its current size and stride or the given order can be different
+                # if the size and stride has ambiguilty, for example for a 4D input where the iC = 1:
+                # size=[s0, 1, 28, 28], stride=[784, 784, 28, 1]. If the required order is [3, 0, 2, 1] (channels last),
+                # the current size and stride already satisfies this order.
+                # However by freezing it to the required order, the layout will be changed to:
+                # size=[s0, 1, 28, 28], stride=[784, 1, 28, 1]), which is not actually necessary.
+
                 # fix flexiblelayout to be FixedLayout with stride_order
                 as_storage_and_layout(
-                    x, freeze=True, want_contiguous=False, stride_order=order
+                    x,
+                    freeze=True,
+                    want_contiguous=False,
+                    stride_order=get_stride_order(
+                        V.graph.sizevars.size_hints(x.get_layout().stride)
+                    )
+                    if is_stride_order_storage_and_layout(x, order)
+                    else order,
                 )
                 return x
             elif isinstance(
@@ -5377,16 +5402,26 @@ class FallbackKernel(ExternKernelAlloc):
                 unflatten_args,
             ) = cls.process_kernel(kernel, *args, **kwargs)
 
-        device = cls.find_device(tensor_args, example_output)
-        assert device, "Not sure where to find device info"
+        if example_output is None:
+            packed = cls(
+                NoneLayout(None),
+                kernel,
+                tensor_args,
+                non_tensor_args,
+                unflatten_args,
+            )
 
-        packed = cls(
-            MultiOutputLayout(device),
-            kernel,
-            tensor_args,
-            non_tensor_args,
-            unflatten_args,
-        )
+        else:
+            device = cls.find_device(tensor_args, example_output)
+            assert device, "Not sure where to find device info"
+
+            packed = cls(
+                MultiOutputLayout(device),
+                kernel,
+                tensor_args,
+                non_tensor_args,
+                unflatten_args,
+            )
 
         def generate_output(output, indices):
             if isinstance(output, (list, tuple)):
@@ -6784,9 +6819,9 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
                 double inv_output_scale,
                 int64_t output_zero_point,
                 c10::optional<c10::ScalarType> output_dtype,
-                std::string post_op_name,
+                c10::string_view post_op_name,
                 torch::List<c10::optional<at::Scalar>> post_op_args,
-                std::string post_op_algorithm)"""
+                c10::string_view post_op_algorithm)"""
 
     def codegen(self, wrapper):
         # Parser the inputs and constant
@@ -7336,11 +7371,61 @@ class WhileLoop(ExternKernel):
             for i, output in enumerate(body_outputs)
         ]
 
+        for inp, out in zip(carried_inputs, outputs):
+            if inp.get_name() in V.graph.graph_inputs:
+                # if a carried input of the while_loop is a graph input,
+                # it can be returned as is when the number of iterations
+                # is zero. due to this, we can't (generally) reuse the
+                # output buffers corresponding to the graph inputs, as
+                # the inputs may end up being mutated.
+                V.graph.never_reuse_buffers.add(out.get_name())
+
         while_loop.outputs = outputs
         return outputs
 
     def codegen(self, wrapper):
         wrapper.codegen_while_loop(self)
+
+
+class EffectfulKernel(FallbackKernel):
+    def __init__(
+        self,
+        layout,
+        kernel,
+        tensor_args,
+        nontensor_args,
+        unflatten_args,
+        kwargs=None,
+    ):
+        super().__init__(
+            NoneLayout(layout.device),
+            kernel,
+            tensor_args,
+            nontensor_args,
+            unflatten_args,
+            kwargs=None,
+        )
+
+        from torch._higher_order_ops.effects import get_effect_key
+
+        effect_type = get_effect_key(kernel, (*nontensor_args, *tensor_args), kwargs)
+        assert effect_type is not None
+        self.effect_type = effect_type
+        self.prev_effect_buffer = V.graph.effectful_ops.get(effect_type, None)
+        V.graph.effectful_ops[effect_type] = self
+
+    def get_read_writes(self):
+        read_writes = super().get_read_writes()
+
+        if self.prev_effect_buffer is not None:
+            read_writes.reads.add(
+                dependencies.StarDep(self.prev_effect_buffer.get_name())
+            )
+
+        return read_writes
+
+    def has_side_effects(self):
+        return True
 
 
 class InterpreterShim(torch.fx.Interpreter):
