@@ -218,7 +218,7 @@ def _verify_options(
             fqn_param_mapping[fqn] = param
             all_fqns.add(fqn)
 
-    submodule_prefixes = set()
+    submodule_prefixes: Set[str] = set()
     if submodules:
         submodules = set(submodules)
         for name, module in model.named_modules():
