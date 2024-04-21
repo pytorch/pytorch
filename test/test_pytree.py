@@ -778,6 +778,8 @@ class TestGenericPytree(TestCase):
             n_fields = 2
             n_sequence_fields = 2
             n_unnamed_fields = 0
+
+            __slots__ = ()
             __match_args__ = ("x", "y")
 
             def __new__(cls, sequence):
