@@ -1361,6 +1361,14 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         self._check_recompiles(fn, (nt,), (nt2,), False)
         self._check_recompiles(fn, (nt,), (nt3,), True)
 
+    def test_inline_nested_tensor_from_jagged(self):
+        nt, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
+
+        def fn(x):
+            return torch.nested.nested_tensor_from_jagged(x.values() * 2, x.offsets())
+
+        torch.compile(fn, fullgraph=True, backend="aot_eager")(nt)
+
     def _get_views(self):
         # Test all cases with both an NT base and a dense base
         # Subclass -> Subclass
