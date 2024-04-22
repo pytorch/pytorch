@@ -3,7 +3,7 @@ set -xe
 
 
 # Intel® software for general purpose GPU capabilities.
-# Refer to https://dgpu-docs.intel.com/releases/stable_647_21_20230714.html
+# Refer to https://dgpu-docs.intel.com/releases/LTS_803.29_20240131.html
 
 # Intel® oneAPI Base Toolkit (version 2024.0.0) has been updated to include functional and security updates.
 # Refer to https://www.intel.com/content/www/us/en/developer/tools/oneapi/base-toolkit-download.html
@@ -21,7 +21,7 @@ function install_ubuntu() {
         | gpg --dearmor | tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
 
     # Add the signed entry to APT sources and configure the APT client to use the Intel repository
-    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/intel-graphics.gpg] https://repositories.intel.com/gpu/ubuntu jammy/production/2328 unified" \
+    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/intel-graphics.gpg] https://repositories.intel.com/gpu/ubuntu jammy/lts/2350 unified" \
         | tee /etc/apt/sources.list.d/intel-gpu-jammy.list
     echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" \
         | tee /etc/apt/sources.list.d/oneAPI.list

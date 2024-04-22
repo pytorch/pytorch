@@ -151,7 +151,7 @@ def fuse_convtranspose_bn(is_qat, convt, bn):
         "ConvTranspose and BN both must be in the same mode (train or eval)."
 
     if is_qat:
-        raise Exception("Fusing ConvTranspose+BatchNorm not yet supported in QAT.")
+        raise Exception("Fusing ConvTranspose+BatchNorm not yet supported in QAT.")  # noqa: TRY002
     else:
         return nn.utils.fusion.fuse_conv_bn_eval(convt, bn, transpose=True)
 
