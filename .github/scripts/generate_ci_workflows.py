@@ -378,7 +378,9 @@ def main() -> None:
     for template, workflows in template_and_workflows:
         # added Iterable check to appease the mypy gods
         if not isinstance(workflows, Iterable):
-            raise Exception(f"How is workflows not iterable? {workflows}")
+            raise Exception(  # noqa: TRY002
+                f"How is workflows not iterable? {workflows}"
+            )  # noqa: TRY002
         for workflow in workflows:
             workflow.generate_workflow_file(workflow_template=template)
 
