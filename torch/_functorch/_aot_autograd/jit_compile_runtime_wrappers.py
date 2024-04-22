@@ -925,12 +925,12 @@ Got grad_output types: {str(grad_output_types)}"""
                 ), "BackwardState requires CompiledAutograd"
                 ctx.maybe_clear_saved_tensors()
                 if CompiledFunction.compiled_bw is None:
+                    context = (
+                        torch._C._DisableAutocast if disable_amp else nullcontext
+                    )
                     with tracing(saved_context), compile_context(
                         saved_compile_context
                     ), context(), track_graph_compiling(aot_config, "backward"):
-                        context = (
-                            torch._C._DisableAutocast if disable_amp else nullcontext
-                        )
                         fail_type: Optional[str] = None
                         fail_reason: Optional[str] = None
                         start_time = time.time()
