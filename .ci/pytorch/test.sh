@@ -43,7 +43,7 @@ BUILD_BIN_DIR="$BUILD_DIR"/bin
 SHARD_NUMBER="${SHARD_NUMBER:=1}"
 NUM_TEST_SHARDS="${NUM_TEST_SHARDS:=1}"
 
-sudo chown -R jenkins ../workspace
+#sudo chown -R jenkins ../workspace
 
 export VALGRIND=ON
 # export TORCH_INDUCTOR_INSTALL_GXX=ON
