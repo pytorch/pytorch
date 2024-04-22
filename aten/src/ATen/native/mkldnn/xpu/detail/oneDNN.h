@@ -89,4 +89,22 @@ TORCH_API sycl::event deconvolution_backward_weights(
     int64_t groups,
     const std::vector<sycl::event>& deps = {});
 
+dnnl::memory::dims conv_dst_size(
+    int64_t ndim,
+    IntArrayRef src_tz,
+    IntArrayRef wgh_tz,
+    IntArrayRef padding_front_top_left,
+    IntArrayRef padding_back_bottom_right,
+    IntArrayRef stride,
+    IntArrayRef dilation);
+
+dnnl::memory::dims deconv_dst_size(
+    IntArrayRef src_size,
+    IntArrayRef wgh_size,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    IntArrayRef dst_padding,
+    int64_t groups);
+
 } // namespace at::native::onednn
