@@ -290,7 +290,8 @@ if (jit::tracer::isTracing()) {
   ${add_trace_inputs}
   tracer_state->insertNode(node);
   ${inplace_guard}
-  jit::tracer::setTracingState(nullptr);
+  if(${disable_trace})
+    jit::tracer::setTracingState(nullptr);
 }
 """
 )
@@ -319,6 +320,7 @@ def format_prerecord_trace(f: NativeFunction) -> str:
     )
 
     return PRE_RECORD_TRACE.substitute(
+        disable_trace=int(cpp.name(f.func) not in ["linear", "matmul"]),
         set_op_name=format_trace_op_name(f),
         add_trace_inputs=format_trace_inputs(f) + additional_inputs,
         inplace_guard=INPLACE_GUARD.substitute(
@@ -335,7 +337,8 @@ def format_prerecord_trace(f: NativeFunction) -> str:
 POST_RECORD_TRACE = CodeTemplate(
     """\
 if (tracer_state) {
-  jit::tracer::setTracingState(std::move(tracer_state));
+  if(${disable_trace})
+    jit::tracer::setTracingState(std::move(tracer_state));
   ${add_trace_outputs}
 }
 """
@@ -358,7 +361,10 @@ def format_postrecord_trace(f: NativeFunction) -> str:
             outputs = [
                 f"jit::tracer::addOutput(node, {n});" for n in output_names_outplace
             ]
-            return POST_RECORD_TRACE.substitute(add_trace_outputs=outputs)
+            return POST_RECORD_TRACE.substitute(
+            disable_trace=int(cpp.name(f.func) not in ["linear", "matmul"]),
+                add_trace_outputs=outputs,
+            )
 
         selection = SELECT.substitute(
             cond="force_outplace",
@@ -369,11 +375,17 @@ def format_postrecord_trace(f: NativeFunction) -> str:
                 f"jit::tracer::addOutput(node, {n});" for n in output_names_inplace
             ),
         )
-        return POST_RECORD_TRACE.substitute(add_trace_outputs=selection)
+        return POST_RECORD_TRACE.substitute(
+            disable_trace=int(cpp.name(f.func) not in ["linear", "matmul"]),
+            add_trace_outputs=selection,
+        )
     else:
         output_names = cpp.return_names(f)
         outputs = [f"jit::tracer::addOutput(node, {n});" for n in output_names]
-        return POST_RECORD_TRACE.substitute(add_trace_outputs=outputs)
+        return POST_RECORD_TRACE.substitute(
+            disable_trace=int(cpp.name(f.func) not in ["linear", "matmul"]),
+            add_trace_outputs=outputs
+        )
 
 
 def declare_returned_variables(f: NativeFunction) -> str:
