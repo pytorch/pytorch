@@ -1089,6 +1089,7 @@ if not torch.backends.mps.is_available():
     NNTestCase = NoTest  # noqa: F811
 
 product_version = float('.'.join(platform.mac_ver()[0].split('.')[:2]) or -1)
+total_memory = int(subprocess.check_output(["sysctl", "-n", "hw.memsize"]))
 
 # Determine whether to enable MPS memory leak check (uses same code as CUDA).
 TEST_MPS_MEM_LEAK_CHECK = os.getenv('PYTORCH_TEST_MPS_MEM_LEAK_CHECK', '0') == '1'
@@ -6952,6 +6953,7 @@ class TestMPS(TestCaseMPS):
             # Test bfloat16 mm
             compare_mm(1024, 1, 32769, torch.bfloat16)
 
+    @unittest.skipIf(total_memory < 12_000_000_000, "Needs at least 12Gb RAM to run the test")
     def test_copy_large(self):
         """ Test that copy of 4Gb+ tensors works """
         x = torch.ones((2**30 + 11,), dtype=torch.float32)
