@@ -599,25 +599,25 @@ class TritonTemplate(KernelTemplate):
                 + "-"
             )
             mod = PyCodeCache.load(code, extra)
-            _, call_args, _ = kernel.args.python_argdefs()
 
-        # There are 3 kinds of buffers we pass in
-        # 1. Explicit inputs
-        # 2. Captured inputs (e.g. used by a subgraph)
-        # 3. Explicit outputs
-        # We are ensuring that 1 and 3 match our expectations here.
-        expected_input_args = list(unique(x.get_name() for x in input_nodes))
-        expected_output_args = [fake_out.get_name()]
-        expected_args = expected_input_args + expected_output_args
-        call_args_expected = list(call_args[: len(expected_input_args)]) + list(
-            call_args[-len(expected_output_args) :]
+        input_call_args = tuple(kernel.args.input_buffers.keys())
+        output_call_args = tuple(kernel.args.output_buffers.keys())
+
+        # We expect the input_buffer order to be [*input_nodes, *captured_buffers]
+        expected_input_args = tuple(unique(x.get_name() for x in input_nodes))
+        expected_output_args = (fake_out.get_name(),)
+        assert input_call_args[: len(expected_input_args)] == expected_input_args, (
+            input_call_args,
+            expected_input_args,
         )
-        assert call_args_expected == expected_args, (
-            call_args,
-            expected_args,
+        assert output_call_args == expected_output_args, (
+            output_call_args,
+            expected_output_args,
         )
+
+        full_input_nodes = tuple([V.graph.get_buffer(k) for k in input_call_args])
         extra_args = V.graph.sizevars.size_hints(
-            map(sympy.expand, call_args[len(expected_args) :]),
+            map(sympy.expand, tuple(kernel.args.sizevars.keys())),
             fallback=config.unbacked_symint_fallback,
         )
 
@@ -655,13 +655,13 @@ class TritonTemplate(KernelTemplate):
             num_stages=num_stages,
             num_warps=num_warps,
             matrix_instr_nonkdim=kwargs.get("matrix_instr_nonkdim", 0),
-            input_tensor_meta=TensorMeta.from_irnodes(input_nodes),
+            input_tensor_meta=TensorMeta.from_irnodes(full_input_nodes),
             output_tensor_meta=TensorMeta.from_irnodes(layout),
         )
 
         return TritonTemplateCaller(
             kernel_hash_name,
-            input_nodes,
+            full_input_nodes,
             layout,
             make_kernel_render,
             extra.strip("-").replace("-", ", "),

@@ -285,10 +285,13 @@ def templated_attention(*args, **kwargs):
                     (128, 128, 8, 2),
                     (64, 128, 4, 3),
                 ]
+            # Note, we don't need to pass in the captured buffers explicitly
+            # because they're implicitly added by the score_mod function
+            # We do need to explicitly pass it in for autotuning though.
             for BLOCK_M, BLOCK_N, num_warps, num_stages in configs:
                 sdpa_template.maybe_append_choice(
                     choices=choices,
-                    input_nodes=(query, key, value, logsumexp),
+                    input_nodes=[query, key, value, logsumexp],
                     layout=layout,
                     subgraphs=subgraph_buffer,
                     mutated_inputs=[
@@ -304,9 +307,10 @@ def templated_attention(*args, **kwargs):
                     ROWS_GUARANTEED_SAFE=False,
                     OUTPUT_LOGSUMEXP=True,
                 )
+            inputs_for_autotuning = [query, key, value, logsumexp] + list(other_buffers)
             return (
                 autotune_select_algorithm(
-                    "sdpa", choices, [query, key, value, logsumexp], layout
+                    "sdpa", choices, inputs_for_autotuning, layout
                 ),
                 logsumexp,
             )

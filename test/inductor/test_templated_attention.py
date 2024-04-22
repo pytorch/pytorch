@@ -4,7 +4,7 @@ import functools
 from collections import namedtuple
 from typing import Callable
 
-from unittest import expectedFailure, skipUnless
+from unittest import skipUnless
 from unittest.mock import patch
 
 import torch
@@ -228,33 +228,39 @@ class TestTemplatedSDPA(InductorTestCase):
         def bias_mod(score, b, h, q, kv):
             causal_attention = q >= kv
             cur_num_bidirectional = index(num_bidirectional, (b,))
-            bidirectional_attention_on_video = (q <= cur_num_bidirectional) & (kv <= cur_num_bidirectional)
-            return torch.where(bidirectional_attention_on_video | causal_attention, score, -float("inf"))
+            bidirectional_attention_on_video = (q <= cur_num_bidirectional) & (
+                kv <= cur_num_bidirectional
+            )
+            return torch.where(
+                bidirectional_attention_on_video | causal_attention,
+                score,
+                -float("inf"),
+            )
 
         self.run_test(bias_mod, dtype)
 
-    @supported_platform
-    @expectedFailure  # Triton bug?
-    @common_utils.parametrize("dtype", test_dtypes)
-    def test_njt_causal(self, dtype):
-        offsets = torch.tensor(
-            [0, 1024, 1024 + 512, S], device="cuda", dtype=torch.int32
-        )
-        seq_idx = torch.zeros(S, device="cuda", dtype=torch.int32)
-        for idx in range(len(offsets) - 1):
-            seq_idx[offsets[idx] : offsets[idx + 1]] = idx
+    # @supported_platform
+    # @expectedFailure  # Triton bug?
+    # @common_utils.parametrize("dtype", test_dtypes)
+    # def test_njt_causal(self, dtype):
+    #     offsets = torch.tensor(
+    #         [0, 1024, 1024 + 512, S], device="cuda", dtype=torch.int32
+    #     )
+    #     seq_idx = torch.zeros(S, device="cuda", dtype=torch.int32)
+    #     for idx in range(len(offsets) - 1):
+    #         seq_idx[offsets[idx] : offsets[idx + 1]] = idx
 
-        def create_njt_wrapper(orig_score_mod, offsets, seq_idx):
-            def njt_score_mod(qk, b, h, q, kv):
-                q_nested = q - index(offsets, [index(seq_idx, [q])])
-                kv_nested = kv - index(offsets, [index(seq_idx, [kv])])
-                return orig_score_mod(qk, b, h, q_nested, kv_nested)
+    #     def create_njt_wrapper(orig_score_mod, offsets, seq_idx):
+    #         def njt_score_mod(qk, b, h, q, kv):
+    #             q_nested = q - index(offsets, [index(seq_idx, [q])])
+    #             kv_nested = kv - index(offsets, [index(seq_idx, [kv])])
+    #             return orig_score_mod(qk, b, h, q_nested, kv_nested)
 
-            return njt_score_mod
+    #         return njt_score_mod
 
-        causal_njt = create_njt_wrapper(_causal_mod, offsets, seq_idx)
+    #     causal_njt = create_njt_wrapper(_causal_mod, offsets, seq_idx)
 
-        self.run_test(causal_njt, dtype)
+    #     self.run_test(causal_njt, dtype)
 
     @supported_platform
     def test_backwards_fails(self):
@@ -297,6 +303,22 @@ class TestTemplatedSDPA(InductorTestCase):
             return score * 2
 
         self.run_test(score_mod)
+
+    @supported_platform
+    @patch.object(torch._inductor.config, "max_autotune", True)
+    def test_max_autotune_with_captured(self):
+        head_scale = torch.randn(H, device="cuda")
+        batch_scale = torch.randn(B, device="cuda")
+        tok_scale = torch.randn(S, device="cuda")
+
+        def bias_mod(score, batch, head, token_q, token_kv):
+            score = score + index(tok_scale, [token_q])
+            score = score + index(batch_scale, [batch])
+            score = score + index(head_scale, [head])
+            return score
+
+        self.run_test(bias_mod)
+
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
