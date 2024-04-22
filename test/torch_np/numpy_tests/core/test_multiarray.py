@@ -1181,7 +1181,7 @@ class TestCreation(TestCase):
         # Special case where a bad __getitem__ makes us fall back on __iter__:
         class C:
             def __getitem__(self, x):
-                raise Exception
+                raise Exception  # noqa: TRY002
 
             def __iter__(self):
                 return iter(())
