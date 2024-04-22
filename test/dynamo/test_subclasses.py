@@ -1371,7 +1371,11 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
 
         values = nt.values().requires_grad_(True)
         out = torch.compile(fn, fullgraph=True, backend="aot_eager")(values, nt.offsets())
-        torch.autograd.grad(out, inputs=(values,), grad_outputs=(torch.ones_like(out),))
+        ref_out = fn(values, nt.offsets())
+        grad, = torch.autograd.grad(out, inputs=(values,), grad_outputs=(torch.ones_like(out),))
+        ref_grad, = torch.autograd.grad(ref_out, inputs=(values,), grad_outputs=(torch.ones_like(ref_out),))
+        self.assertEqual(out, ref_out)
+        self.assertEqual(grad, ref_grad)
 
         # Binary op
         def fn(values, offsets, offsets2):
@@ -1380,7 +1384,11 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
             return nt1 * nt2
 
         out = torch.compile(fn, fullgraph=True, backend="aot_eager")(values, nt.offsets(), nt.offsets())
-        torch.autograd.grad(out, inputs=(values,), grad_outputs=(torch.ones_like(out),))
+        ref_out = fn(values, nt.offsets(), nt.offsets())
+        grad, = torch.autograd.grad(out, inputs=(values,), grad_outputs=(torch.ones_like(out),))
+        ref_grad, = torch.autograd.grad(ref_out, inputs=(values,), grad_outputs=(torch.ones_like(ref_out),))
+        self.assertEqual(out, ref_out)
+        self.assertEqual(grad, ref_grad)
 
         # Not only do we recompile, we also error out on the recompile with
         # an error message mentioning data-dependent-ness.
@@ -1521,7 +1529,6 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
     # view. To construct this intermediate properly, we need the associated nested int
     # to be symbolic. This view is expected to fail compilation until symbolic nested ints
     # are cached onto fake offsets to solve this problem.
-    @unittest.expectedFailure
     def test_subclass_dense_subclass_dense_view(self):
         x = self._get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)[0].clone()
         offsets2 = x.offsets().clone().detach()
