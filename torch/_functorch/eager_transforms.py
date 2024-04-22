@@ -1669,9 +1669,6 @@ def linearize(func: Callable, *primals) -> Tuple[Any, Callable]:
     def jvp_fn(*tangents):
         flat_tangents, tangent_argspec = tree_flatten(tangents)
         _linearize_treespec_compare(primals, tangents)
-        # if tangent_argspec != primals_argspec:
-        #     raise RuntimeError(f"Expected the tangents {tangent_argspec} to have "
-        #                        f"the same argspec as the primals {primals_argspec}")
 
         forward_ad_checks(flat_tangents)
 

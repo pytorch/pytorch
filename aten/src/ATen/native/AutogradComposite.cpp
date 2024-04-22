@@ -65,25 +65,22 @@ Tensor _new_zeros_with_same_feature_meta(
   //     this case.
   constexpr int64_t kSmallBufferSizeHint = 8;
 
-  auto out_sizes_vec = c10::SmallVector<c10::SymInt, kSmallBufferSizeHint>(other.dim() + self_num_batch_dims);
-  std::copy(self_sizes.begin(), self_sizes.begin() + self_num_batch_dims, out_sizes_vec.begin());
-  std::copy(other_sizes.begin(), other_sizes.end(), out_sizes_vec.begin() + self_num_batch_dims);
+  auto out_sizes = c10::SmallVector<c10::SymInt, kSmallBufferSizeHint>(other.dim() + self_num_batch_dims);
+  std::copy(self_sizes.begin(), self_sizes.begin() + self_num_batch_dims, out_sizes.begin());
+  std::copy(other_sizes.begin(), other_sizes.end(), out_sizes.begin() + self_num_batch_dims);
 
   // We use the strides of other, and tack on the strides computed with
   // the batch dims of self, so that the slices are arranged contiguously
-  auto out_strides_vec = c10::SmallVector<c10::SymInt, kSmallBufferSizeHint>(other.dim() + self_num_batch_dims);
+  auto out_strides = c10::SmallVector<c10::SymInt, kSmallBufferSizeHint>(other.dim() + self_num_batch_dims);
   auto prod = other_storage_numel;
 
   for (int64_t i = self_num_batch_dims - 1; i >= 0; --i) {
-    out_strides_vec[i] = prod;
+    out_strides[i] = prod;
     prod *= self_sizes[i];
   }
-  std::copy(other_strides.begin(), other_strides.end(), out_strides_vec.begin() + self_num_batch_dims);
+  std::copy(other_strides.begin(), other_strides.end(), out_strides.begin() + self_num_batch_dims);
 
   auto storage_numel = prod;
-
-  c10::SymIntArrayRef out_sizes = out_sizes_vec;
-  c10::SymIntArrayRef out_strides = out_strides_vec;
 
   // Inherit the TensorOptions of the primal
   auto new_tensor = at::zeros_symint({storage_numel}, other.options());

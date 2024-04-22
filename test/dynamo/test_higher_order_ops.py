@@ -2639,6 +2639,25 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
             munge_exc(record.getMessage()),
         )
 
+    @make_logging_test(recompiles=True)
+    def test_linearize_recompiles(self, records):
+        @torch.compile(backend="eager")
+        def fn(x):
+            out, jvp_fn = torch.func.linearize(torch.sin, x)
+            return out, jvp_fn(x)
+
+        x = torch.randn(2, 3)
+        fn(x)
+        self.assertEqual(len(records), 0)
+
+        z = torch.randn(2, 3)
+        fn(z)
+        self.assertEqual(len(records), 0)
+
+        y = torch.randn(3, 4)
+        fn(y)
+        self.assertGreater(len(records), 0)
+
 
 class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
     def tearDown(self):
