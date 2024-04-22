@@ -775,10 +775,11 @@ class DispatchCacheInfo:
 
 
 class FakeTensorMode(TorchDispatchMode):
-    cache: Dict[_DispatchCacheKey, _DispatchCacheEntry | _BypassDispatchCache] = {}
+    cache: Dict[_DispatchCacheKey, Union[_DispatchCacheEntry, _BypassDispatchCache]] = {}
     cache_hits: int = 0
     cache_misses: int = 0
     cache_bypasses: Dict[str, int] = defaultdict(int)
+    in_kernel_invocation: bool = False
 
     def __init__(
         self,
@@ -1537,7 +1538,7 @@ class FakeTensorMode(TorchDispatchMode):
         If not, try to convert them to fake tensors.
         Returns the original args, kwargs, and a flattened list of (args, kwargs) that are fake tensors.
         """
-        flat_arg_fake_tensors = []
+        flat_arg_fake_tensors: List[Any] = []
 
         def validate(x):
             if not isinstance(x, torch.Tensor):
