@@ -211,7 +211,9 @@ class FSDP:
             recurse (bool): Whether to set for all submodules or just the
                 passed-in module.
         """
-        for module in cast(nn.Module, self).modules():
+        self_module = cast(nn.Module, self)
+        modules = list(self_module.modules()) if recurse else [self_module]
+        for module in modules:
             if isinstance(module, FSDP):
                 state = module._get_fsdp_state()
                 if fsdp_param_group := state._fsdp_param_group:
@@ -227,7 +229,9 @@ class FSDP:
         # TODO: post_reduce_output += fsdp_param.sharded_param.grad
         # after reduce-scatter and before all-reduce
         raise NotImplementedError("requires_all_reduce is not yet supported in HSDP")
-        for module in cast(nn.Module, self).modules():
+        self_module = cast(nn.Module, self)
+        modules = list(self_module.modules()) if recurse else [self_module]
+        for module in modules:
             if isinstance(module, FSDP):
                 state = module._get_fsdp_state()
                 if fsdp_param_group := state._fsdp_param_group:
