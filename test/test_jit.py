@@ -8106,7 +8106,6 @@ dedent """
 
             self.assertEqual(cu.test_call_python(*inputs), outputs)
 
-    @unittest.skip
     def test_type_call_in_script(self):
         @torch.jit.script
         def fn(x):
