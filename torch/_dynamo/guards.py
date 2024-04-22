@@ -397,11 +397,11 @@ def getattr_on_nn_module(
 
     if attr_name in mod_dict:
         accessor_info = NNModuleAttrAccessorInfo(True, attr_name, None)
-    elif attr_name in mod_dict["_parameters"]:
+    elif "_parameters" in mod_dict and attr_name in mod_dict["_parameters"]:
         accessor_info = NNModuleAttrAccessorInfo(True, "_parameters", attr_name)
-    elif attr_name in mod_dict["_buffers"]:
+    elif "_buffers" in mod_dict and attr_name in mod_dict["_buffers"]:
         accessor_info = NNModuleAttrAccessorInfo(True, "_buffers", attr_name)
-    elif attr_name in mod_dict["_modules"]:
+    elif "_modules" in mod_dict and attr_name in mod_dict["_modules"]:
         accessor_info = NNModuleAttrAccessorInfo(True, "_modules", attr_name)
     else:
         accessor_info = NNModuleAttrAccessorInfo(False, None, None)
@@ -451,8 +451,17 @@ def getattr_on_nn_module(
             # l1_value must be a dict
             assert isinstance(l1_mgr, DictGuardManager)
 
-            # Install a value manager. We can skip the key manager guard.
             index = get_key_index(l1_value, l2_key)
+
+            # Install the key manager and add equals match guard
+            key_source = f"list({l1_source}.keys())[{index!r}]"
+            l1_mgr.get_key_manager(
+                index=index, source=key_source, example_value=l2_key
+            ).add_equals_match_guard(
+                l2_key, [f"{key_source} == {l2_key!r}"]
+            )
+
+            # Install the value manager
             l2_mgr = l1_mgr.get_value_manager(
                 index=index, source=l2_source, example_value=l2_value
             )
