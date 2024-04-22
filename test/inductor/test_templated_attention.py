@@ -14,6 +14,7 @@ from torch._higher_order_ops.templated_attention import (
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch.nn.attention._templated_attention import _compose, _templated_attention
+from torch.nn.attention._score_mod import *  # noqa: F403
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16
@@ -48,9 +49,14 @@ test_dtypes_fast = [torch.float16]
 if common_utils.TEST_WITH_ROCM:
     test_dtypes = [torch.float32]
 
-
-def _identity_mod(score, b, h, m, n):
-    return score
+test_score_modes = [
+    identity,
+    causal,
+    rel_bias,
+    rel_causal,
+    alibi_bias,
+    alibi_causal,
+]
 
 
 def _causal_mod(score, b, h, token_q, token_kv):
@@ -90,58 +96,8 @@ class TestTemplatedSDPA(InductorTestCase):
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
-    def test_identity(self, dtype: torch.dtype):
-        def score_mod(score, b, h, m, n):
-            return score
-
-        self.run_test(score_mod, dtype)
-
-    @supported_platform
-    @common_utils.parametrize("dtype", test_dtypes)
-    def test_causal_mask(self, dtype: torch.dtype):
-        def score_mod(score, b, h, token_q, token_kv):
-            return torch.where(token_q >= token_kv, score, float("-inf"))
-
-        self.run_test(score_mod, dtype)
-
-    @supported_platform
-    @common_utils.parametrize("dtype", test_dtypes)
-    def test_rel_bias(self, dtype: torch.dtype):
-        def score_mod(score, b, h, m, n):
-            return score + (m - n)
-
-        self.run_test(score_mod, dtype)
-
-    @supported_platform
-    @common_utils.parametrize("dtype", test_dtypes)
-    def test_alibi_bias(self, dtype: torch.dtype):
-        def score_mod(score, b, h, m, n):
-            return score + (m - n) * h
-
-        self.run_test(score_mod, dtype)
-
-    @supported_platform
-    @common_utils.parametrize("dtype", test_dtypes)
-    def test_rel_causal(self, dtype: torch.dtype):
-        def score_mod(score, b, h, m, n):
-            return torch.where(m <= n, score + (m - n), float("-inf"))
-
-        self.run_test(score_mod, dtype)
-
-    @supported_platform
-    @common_utils.parametrize("dtype", test_dtypes)
-    def test_skip_odd_keys(self, dtype: torch.dtype):
-        def score_mod(score, b, h, q, kv):
-            return torch.where(kv % 2 == 0, score, float("-inf"))
-
-        self.run_test(score_mod, dtype)
-
-    @supported_platform
-    @common_utils.parametrize("dtype", test_dtypes)
-    def test_alibi_causal(self, dtype: torch.dtype):
-        def score_mod(score, b, h, m, n):
-            return torch.where(m <= n, score + (m - n) * h, float("-inf"))
-
+    @common_utils.parametrize("score_mod", test_score_modes)
+    def test_builtin_score_mods(self, dtype: torch.dtype, score_mod: Callable):
         self.run_test(score_mod, dtype)
 
     @supported_platform
@@ -302,7 +258,7 @@ class TestTemplatedSDPA(InductorTestCase):
             requires_grad=True,
         )
         q, k, v = make_tensor(), make_tensor(), make_tensor()
-        out = _templated_attention(q, k, v, _identity_mod)
+        out = _templated_attention(q, k, v, identity)
         with self.assertRaisesRegex(
             RuntimeError, "Autograd not implemented for templated_attention"
         ):
@@ -316,7 +272,7 @@ class TestTemplatedSDPA(InductorTestCase):
         with self.assertRaisesRegex(
             ValueError, "Expected query, key, and value to have the same dtype"
         ):
-            _templated_attention(query, key, value, _identity_mod)
+            _templated_attention(query, key, value, identity)
 
     @supported_platform
     def test_different_sequence_length_fails(self):
@@ -324,7 +280,7 @@ class TestTemplatedSDPA(InductorTestCase):
         key = torch.randn((1, 1, 1024, 64), dtype=torch.float32, device="cuda")
         value = torch.randn((1, 1, 1024, 64), dtype=torch.float32, device="cuda")
         with self.assertRaisesRegex(ValueError, "NYI: The target sequence length"):
-            _templated_attention(query, key, value, _identity_mod)
+            _templated_attention(query, key, value, identity)
 
     @supported_platform
     @patch.object(torch._inductor.config, "max_autotune", True)
