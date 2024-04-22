@@ -319,7 +319,6 @@ class TestTemplatedSDPA(InductorTestCase):
 
         self.run_test(bias_mod)
 
-
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
     @common_utils.parametrize("score_mod", [_identity_mod, _causal_mod])
