@@ -181,10 +181,8 @@ void AOTIPythonKernelHolder::cache_miss(
   }
 
   std::vector<at::Tensor> inputs;
-  auto unpack_status =
-      unpack_tensors(op.schema().arguments(), *stack, device, inputs);
   TORCH_INTERNAL_ASSERT(
-      unpack_status,
+      unpack_tensors(op.schema().arguments(), *stack, device, inputs),
       "Failed to unpack tensors for the stack to run the AOTI kernel.");
   auto outputs = kernel->run(inputs);
   if (outputs.size() > 0) {
