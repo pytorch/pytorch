@@ -2662,13 +2662,22 @@ Please use `add.register_fake` to add an fake impl.""",
             y.sum().backward()
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    def test_register_autograd_kwargonly(self):
+    def test_kwargonly(self):
         @torch.library.custom_op("_torch_testing::g", mutates_args=())
         def g(*, x: Tensor) -> Tensor:
             return x.sin()
 
         with self.assertRaisesRegex(NotImplementedError, "with kwarg-only args"):
             g.register_autograd(lambda x: x)
+
+        @torch.library.custom_op("_torch_testing::h", mutates_args=())
+        def h(*, x: Tensor, y: int) -> Tensor:
+            return x.sin() * y
+
+        x = torch.randn(3, requires_grad=True)
+        y = 314
+        z = h(x=x, y=y)
+        self.assertEqual(z, x.sin() * y)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_replacement(self):

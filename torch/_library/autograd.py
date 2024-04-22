@@ -38,15 +38,32 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
     name: str = f"GeneratedBackwardFor_{op._namespace}_{op._opname}_{op._overloadname}"
 
     saved_keyset = None
+    saved_kwargs_spec = None
 
     def forward(ctx, *args):
         with _C._AutoDispatchBelowAutograd():
-            nonlocal saved_keyset
+            nonlocal saved_keyset, saved_kwargs_spec
+
             keyset = saved_keyset
             assert keyset is not None, "Should have been set by autograd_impl"
             saved_keyset = None
-            result = op.redispatch(keyset & _C._after_autograd_keyset, *args)
+
+            kwargs_spec = saved_kwargs_spec
+            saved_kwargs_spec = None
+
+            if kwargs_spec is not None:
+                num_kwargs = kwargs_spec.num_leaves
+                flat_kwargs = list(args[-num_kwargs:])
+                args = args[:-num_kwargs]
+                kwargs = unflatten(flat_kwargs, kwargs_spec)
+            else:
+                kwargs = {}
+
+            result = op.redispatch(keyset & _C._after_autograd_keyset, *args, **kwargs)
             if info._setup_context_fn:
+                assert (
+                    not kwargs
+                ), "register_autograd errors if kwargonly-args are present"
                 info._setup_context_fn(ctx, args, result)
             return result
 
@@ -76,14 +93,18 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
     ):
         Generated = supports_tensorlist(Generated)
 
-    def autograd_impl(keyset, *args):
+    def autograd_impl(keyset, *args, **kwargs):
         # We set a nonlocal to ferry keyset from here to the forward.
         # This supports recursive calls (we implement the forward carefully so
         # that it'll read saved_keyset before making a recursive call to the op).
-        nonlocal saved_keyset
+        nonlocal saved_keyset, saved_kwargs_spec
         assert saved_keyset is None
         saved_keyset = keyset
-        result = Generated.apply(*args)  # type: ignore[attr-defined]
+        if kwargs:
+            flat_kwargs, saved_kwargs_spec = flatten(kwargs)
+            result = Generated.apply(*args, *flat_kwargs)  # type: ignore[attr-defined]
+        else:
+            result = Generated.apply(*args)  # type: ignore[attr-defined]
         return result
 
     return autograd_impl
