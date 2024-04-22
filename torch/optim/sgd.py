@@ -1,8 +1,8 @@
 from typing import List, Optional
-from torch.utils._foreach_utils import _get_fused_kernels_supported_devices
 
 import torch
 from torch import Tensor
+from torch.utils._foreach_utils import _get_fused_kernels_supported_devices
 from .optimizer import (
     _default_to_fused_or_foreach,
     _differentiable_doc,
@@ -56,14 +56,16 @@ class SGD(Optimizer):
         if fused:
             self._step_supports_amp_scaling = True
 
-            fused_supported_devices = _get_fused_kernels_supported_devices() + ['cpu']
+            fused_supported_devices = _get_fused_kernels_supported_devices()
             if not all(
-                p.device.type in fused_supported_devices and
-                torch.is_floating_point(p)
-                for pg in self.param_groups for p in pg['params']
+                p.device.type in fused_supported_devices and torch.is_floating_point(p)
+                for pg in self.param_groups
+                for p in pg["params"]
             ):
-                raise RuntimeError("`fused=True` requires all the params to be floating point Tensors of "
-                                   f"supported devices: {fused_supported_devices}.")
+                raise RuntimeError(
+                    "`fused=True` requires all the params to be floating point Tensors of "
+                    f"supported devices: {fused_supported_devices}."
+                )
             if differentiable:
                 raise RuntimeError("`fused` does not support `differentiable`")
             if foreach:
