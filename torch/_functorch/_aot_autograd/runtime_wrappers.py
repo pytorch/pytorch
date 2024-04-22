@@ -99,8 +99,9 @@ def create_runtime_wrapper(
             assert num_tokens == 0
         elif num_tokens > 0:
             # Pass in effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
-            # NOTE: this keeps an extra reference to the old args until the end of this function
+            old_args = args
             args = [[None] * num_tokens, *args]
+            old_args.clear()
 
         # stash a ref to each input tensor we plan to use after the compiled function
         orig_inputs = {i: args[i] for i in epilogue_args_idx}
@@ -166,6 +167,7 @@ def create_runtime_wrapper(
                 original_inpt = orig_inputs[inpt_idx]
                 updated_inpt = updated_inputs[i]
                 if meta.mutates_storage_metadata:
+                    # See Note [set_() Input Mutations in AOTAutograd]
                     # mutates_storage_metadata means our input saw a x.set_(y) call.
                     # What if x **also** saw a data and/or a metadata mutation?
                     # (1) If the [meta]data mutation occurred after the set_(),
@@ -258,7 +260,7 @@ def create_runtime_wrapper(
                 if info.output_type == OutputType.alias_of_input:
                     aliased_base_tensor = orig_inputs[info.base_idx + num_tokens]  # type: ignore[index]
                     regenerated_out = gen_alias_from_base(
-                        aliased_base_tensor, o_, o_grad
+                        aliased_base_tensor, o_, o_grad, info.functional_tensor
                     )
                     fw_outs_including_aliases.append(regenerated_out)
                     continue
@@ -283,7 +285,9 @@ def create_runtime_wrapper(
                 # TODO: handle the custom autograd function case here.
                 # We need a way to check whether a tensor came from a custom autograd fn from python,
                 # AND a way to replay that custom view fn.
-                regenerated_out = gen_alias_from_base(aliased_base_tensor, o_, o_grad)
+                regenerated_out = gen_alias_from_base(
+                    aliased_base_tensor, o_, o_grad, info.functional_tensor
+                )
                 fw_outs_including_aliases.append(regenerated_out)
             ret_outs = fw_outs_including_aliases
         else:
@@ -331,8 +335,9 @@ def aot_dispatch_subclass_wrapper(
     subclass_metas: List[Union[int, SubclassCreationMeta]],
     num_fw_outs_saved_for_bw: Optional[int],
 ) -> Callable:
-    def inner_fn(args):
+    def inner_fn(args: List[Any]):
         unwrapped_args = unwrap_tensor_subclasses(args, is_joint_structure=False)
+        args.clear()
         # expectation: runtime_fn is a boxed fn
         unwrapped_outs = runtime_fn(unwrapped_args)
         wrapped_outs = wrap_tensor_subclasses(

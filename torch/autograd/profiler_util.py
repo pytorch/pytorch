@@ -164,7 +164,7 @@ class EventList(list):
 
     @property
     def self_cpu_time_total(self):
-        return sum([event.self_cpu_time_total for event in self])
+        return sum(event.self_cpu_time_total for event in self)
 
     def table(
         self,
@@ -526,7 +526,7 @@ class FunctionEvent(FormattedTimesMixin):
         if self.is_async or self.device_type != DeviceType.CPU:
             return 0
         return self.cpu_memory_usage - sum(
-            [child.cpu_memory_usage for child in self.cpu_children]
+            child.cpu_memory_usage for child in self.cpu_children
         )
 
     @property
@@ -534,7 +534,7 @@ class FunctionEvent(FormattedTimesMixin):
         if self.is_async or self.device_type != DeviceType.CPU:
             return 0
         return self.cuda_memory_usage - sum(
-            [child.cuda_memory_usage for child in self.cpu_children]
+            child.cuda_memory_usage for child in self.cpu_children
         )
 
     @property
@@ -542,7 +542,7 @@ class FunctionEvent(FormattedTimesMixin):
         if self.is_async or self.device_type != DeviceType.CPU:
             return 0
         return self.privateuse1_memory_usage - sum(
-            [child.privateuse1_memory_usage for child in self.cpu_children]
+            child.privateuse1_memory_usage for child in self.cpu_children
         )
 
     @property
@@ -550,7 +550,7 @@ class FunctionEvent(FormattedTimesMixin):
         if self.is_async or self.device_type != DeviceType.CPU:
             return 0
         return self.cpu_time_total - sum(
-            [child.cpu_time_total for child in self.cpu_children]
+            child.cpu_time_total for child in self.cpu_children
         )
 
     @property
@@ -576,7 +576,7 @@ class FunctionEvent(FormattedTimesMixin):
             return 0
         if self.device_type == DeviceType.CPU:
             return self.cuda_time_total - sum(
-                [child.cuda_time_total for child in self.cpu_children]
+                child.cuda_time_total for child in self.cpu_children
             )
         else:
             assert self.device_type == DeviceType.CUDA
@@ -595,7 +595,7 @@ class FunctionEvent(FormattedTimesMixin):
             return 0
         if self.device_type == DeviceType.CPU:
             return self.privateuse1_time_total - sum(
-                [child.privateuse1_time_total for child in self.cpu_children]
+                child.privateuse1_time_total for child in self.cpu_children
             )
         else:
             assert self.device_type == DeviceType.CUDA
@@ -633,30 +633,12 @@ class FunctionEvent(FormattedTimesMixin):
             else self.privateuse1_memory_usage
         )
         return (
-            "<FunctionEvent id={} name={} device_type={} node_id={} cpu_time={} start_us={} end_us={} "
-            "cpu_children={} {}_time={} name={} thread={} input_shapes={} "
-            "cpu_memory_usage={} {}_memory_usage={} is_async={} is_remote={} seq_nr={} is_legacy={}>".format(
-                self.id,
-                self.name,
-                self.device_type,
-                self.node_id,
-                self.cpu_time_str,
-                self.time_range.start,
-                self.time_range.end,
-                str([child.id for child in self.cpu_children]),
-                device_name,
-                device_time,
-                self.name,
-                self.thread,
-                str(self.input_shapes),
-                self.cpu_memory_usage,
-                device_name,
-                device_memory_usage,
-                self.is_async,
-                self.is_remote,
-                self.sequence_nr,
-                self.is_legacy,
-            )
+            f"<FunctionEvent id={self.id} name={self.name} device_type={self.device_type} node_id={self.node_id} "
+            f"cpu_time={self.cpu_time_str} start_us={self.time_range.start} end_us={self.time_range.end} "
+            f"cpu_children={str([child.id for child in self.cpu_children])} {device_name}_time={device_time} "
+            f"name={self.name} thread={self.thread} input_shapes={str(self.input_shapes)} "
+            f"cpu_memory_usage={self.cpu_memory_usage} {device_name}_memory_usage={device_memory_usage} "
+            f"is_async={self.is_async} is_remote={self.is_remote} seq_nr={self.sequence_nr} is_legacy={self.is_legacy}>"
         )
 
 
@@ -749,21 +731,9 @@ class FunctionEventAvg(FormattedTimesMixin):
             else self.privateuse1_memory_usage
         )
         return (
-            "<FunctionEventAvg key={} self_cpu_time={} cpu_time={} "
-            " self_{}_time={} {}_time={} input_shapes={} "
-            "cpu_memory_usage={} {}_memory_usage={}>".format(
-                self.key,
-                self.self_cpu_time_total_str,
-                self.cpu_time_str,
-                device_name,
-                self_device_time,
-                device_name,
-                device_time,
-                str(self.input_shapes),
-                self.cpu_memory_usage,
-                device_name,
-                device_memory,
-            )
+            f"<FunctionEventAvg key={self.key} self_cpu_time={self.self_cpu_time_total_str} cpu_time={self.cpu_time_str} "
+            f" self_{device_name}_time={self_device_time} {device_name}_time={device_time} input_shapes={str(self.input_shapes)} "
+            f"cpu_memory_usage={self.cpu_memory_usage} {device_name}_memory_usage={device_memory}>"
         )
 
 
@@ -886,11 +856,11 @@ def _build_table(
             with_flops=with_flops,
         )
 
-    name_column_width = max([len(evt.key) for evt in events]) + 4
+    name_column_width = max(len(evt.key) for evt in events) + 4
     if max_name_column_width is not None:
         name_column_width = min(name_column_width, max_name_column_width)
 
-    shapes_column_width = max([len(str(evt.input_shapes)) for evt in events]) + 4
+    shapes_column_width = max(len(str(evt.input_shapes)) for evt in events) + 4
     if max_shapes_column_width is not None:
         shapes_column_width = min(shapes_column_width, max_shapes_column_width)
 
@@ -905,7 +875,7 @@ def _build_table(
     has_stack = len(stacks) > 0
     if has_stack:
         src_column_width = (
-            max([max([len(entry) for entry in stack]) for stack in stacks]) + 4
+            max(max(len(entry) for entry in stack) for stack in stacks) + 4
         )
         if max_src_column_width is not None:
             src_column_width = min(src_column_width, max_src_column_width)
@@ -1030,7 +1000,7 @@ def _build_table(
         result.append(s)
         result.append("\n")  # Yes, newline after the end as well
 
-    sum_self_cpu_time_total = sum([event.self_cpu_time_total for event in events])
+    sum_self_cpu_time_total = sum(event.self_cpu_time_total for event in events)
     sum_self_cuda_time_total = 0
     sum_self_privateuse1_time_total = 0
     for evt in events:

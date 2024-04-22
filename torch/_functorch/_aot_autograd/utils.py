@@ -11,6 +11,7 @@ from typing import Any, Callable, List, Optional, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
+from torch._library.fake_class_registry import FakeScriptObject
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import py_sym_types
 
@@ -23,6 +24,7 @@ KNOWN_TYPES = [
     bool,
     type(None),
     *py_sym_types,
+    FakeScriptObject,
 ]
 
 original_zip = zip
@@ -282,3 +284,13 @@ def unlift_tokens(fw_module, fw_metadata):
     fw_metadata.num_forward_returns -= num_tokens
     fw_metadata.num_forward -= num_tokens
     fw_metadata.tokens = {}
+
+
+def root_module_when_exporting_non_strict(flat_fn):
+    # When exporting in non-strict mode, we wrap the root module in a specific pattern.
+    # See `_aot_export_non_strict` in torch.export._trace.py.
+    # We look for that wrapping pattern here.
+    if hasattr(flat_fn, "_orig_mod") and hasattr(flat_fn._orig_mod, "_export_root"):
+        return flat_fn._orig_mod._export_root
+    else:
+        return None
