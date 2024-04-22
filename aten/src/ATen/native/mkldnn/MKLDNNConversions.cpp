@@ -239,6 +239,21 @@ Tensor mkldnn_reorder_conv3d_weight(
   return new_with_itensor_mkldnn(std::move(result), optTypeMetaToScalarType(self.options().dtype_opt()), self.options().device_opt());
 }
 
+static Tensor mkldnn_reorder_conv_weight(
+    const Tensor& self,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    c10::OptionalArrayRef<int64_t> input_size) {
+  TORCH_CHECK((self.dim() == 4 || self.dim() == 5), "mkldnn_reorder_conv_weight only supports conv2d and conv3d");
+  if (self.dim() == 4) {
+    return at::native::mkldnn_reorder_conv2d_weight(self, padding, stride, dilation, groups, input_size);
+  } else {
+    return at::native::mkldnn_reorder_conv3d_weight(self, padding, stride, dilation, groups, input_size);
+  }
+}
+
 static Tensor mkldnn_reorder_linear_weight(
     const Tensor& self,
     c10::optional<int64_t> batch_size_opt) {
@@ -501,11 +516,8 @@ TORCH_LIBRARY_IMPL(mkldnn, CPU, m) {
       TORCH_SELECTIVE_NAME("mkldnn::_reorder_linear_weight"),
       TORCH_FN(mkldnn_reorder_linear_weight));
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_reorder_convolution2d_weight"),
-      TORCH_FN(mkldnn_reorder_conv2d_weight));
-  m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_reorder_convolution3d_weight"),
-      TORCH_FN(mkldnn_reorder_conv3d_weight));
+      TORCH_SELECTIVE_NAME("mkldnn::_reorder_convolution_weight"),
+      TORCH_FN(mkldnn_reorder_conv_weight));
   m.impl(
       TORCH_SELECTIVE_NAME("mkldnn::_reorder_mkldnn_rnn_layer_weight"),
       TORCH_FN(mkldnn_reorder_mkldnn_rnn_layer_weight));

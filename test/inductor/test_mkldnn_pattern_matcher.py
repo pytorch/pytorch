@@ -227,6 +227,7 @@ class TestPatternMatcherBase(TestCase):
 class TestPatternMatcher(TestPatternMatcherBase):
     def _test_conv_unary_cpu_base(self, dim=4):
         assert dim == 4 or dim == 5
+
         class M(torch.nn.Module):
             def __init__(
                 self,
@@ -403,6 +404,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     def _test_conv_binary_base(self, dim=4):
         assert dim == 4 or dim == 5
+
         class M(torch.nn.Module):
             def __init__(
                 self,

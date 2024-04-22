@@ -1016,10 +1016,7 @@ if torch._C._has_mkldnn:
             input_size = conv_node.args[0].meta.get("val").shape
             with graph.inserting_before(conv_node):
                 constant_args = [args[4], args[3], args[5], args[-1]]
-                if len(input_size) == 4:
-                    packed_weight_op = mkldnn._reorder_convolution2d_weight
-                else:
-                    packed_weight_op = mkldnn._reorder_convolution3d_weight
+                packed_weight_op = mkldnn._reorder_convolution_weight
                 packed_conv_op = mkldnn._convolution_pointwise.default
                 if is_transposed:
                     constant_args.insert(1, args[-2])  # output_padding
