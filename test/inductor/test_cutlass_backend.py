@@ -49,8 +49,16 @@ class TestCutlassBackend(TestCase):
         # interacts badly with persistent subprocesses during
         # autotuning. So we need to disable automatic cache refresh
         # before calling setUp() on the parent class.
-        os.environ["INDUCTOR_TEST_DISABLE_FRESH_CACHE"] = "1"
-        super().setUp()
+        old_disable_fresh_cache_envvar = os.environ.get(
+            "INDUCTOR_TEST_DISABLE_FRESH_CACHE", ""
+        )
+        try:
+            os.environ["INDUCTOR_TEST_DISABLE_FRESH_CACHE"] = "1"
+            super().setUp()
+        finally:
+            os.environ[
+                "INDUCTOR_TEST_DISABLE_FRESH_CACHE"
+            ] = old_disable_fresh_cache_envvar
         torch.random.manual_seed(1234)
 
     @unittest.skipIf(not SM75OrLater, "need sm_75")
