@@ -144,6 +144,26 @@ Jiterator (beta)
     jiterator._create_jit_fn
     jiterator._create_multi_output_jit_fn
 
+TunableOp
+---------
+
+Some operations could be implemented using more than one library or more than
+one technique. For example, a GEMM could be implemented for CUDA or ROCm using
+either the cublas/cublasLt libraries or hipblas/hipblasLt libraries,
+respectively. How does one know which implementation is the fastest and should
+be chosen? That's what TunableOp provides. Certain operators have been
+implemented using multiple strategies as Tunable Operators. At runtime, all
+strategies are profiled and the fastest is selected for all subsequent
+operations.
+
+See the :doc:`documentation <cuda.tunable>` for information on how to use it.
+
+.. toctree::
+    :hidden:
+
+    cuda.tunable
+
+
 Stream Sanitizer (prototype)
 ----------------------------
 
@@ -169,4 +189,3 @@ See the :doc:`documentation <cuda._sanitizer>` for information on how to use it.
 .. py:module:: torch.cuda.random
 .. py:module:: torch.cuda.sparse
 .. py:module:: torch.cuda.streams
-.. py:module:: torch.cuda.tunable
