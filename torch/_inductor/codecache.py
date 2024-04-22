@@ -61,6 +61,7 @@ from torch._inductor.runtime.compile_tasks import (
     _reload_python_module_in_subproc,
     _set_triton_ptxas_path,
     _worker_compile_triton,
+    call_standalone_triton_compile,
 )
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import clear_on_fresh_inductor_cache, is_linux
@@ -2112,7 +2113,8 @@ class CppCodeCache:
                 if lib is None:
                     if future is not None:
                         future.result()
-                    worker_fn()
+                    result = worker_fn()
+                    assert result is None
                     lib = cls._load_library(output_path, key)
                     assert lib is not None
                 return lib
@@ -2738,7 +2740,8 @@ class TritonFuture(CodeCacheFuture):
     def result(self) -> ModuleType:
         if self.future is not None:
             # If the worker failed this will throw an exception.
-            self.future.result()
+            result = self.future.result()
+            assert result is None
             self.future = None
             self.kernel.precompile()
         return self.kernel
@@ -2777,8 +2780,10 @@ def _async_compile_initializer(orig_ppid) -> None:
 
 _watchdog_thread: Optional[Thread] = None
 
+AnyPool = Union[ProcessPoolExecutor, ThreadPoolExecutor]
+
 # Used to keep track of all process pools invoked so far.
-_pool_set: Set[ProcessPoolExecutor] = set()
+_pool_set: Set[AnyPool] = set()
 
 
 def shutdown_compile_workers() -> None:
@@ -2812,28 +2817,28 @@ class AsyncCompile:
 
     @staticmethod
     @functools.lru_cache(1)
-    def process_pool() -> ProcessPoolExecutor:
-        # ensure properties have been calculated before processes
-        # are forked
-        caching_device_properties()
+    def process_pool() -> AnyPool:
         assert config.compile_threads > 1
-        orig_ppid = os.getpid()
+        pool: AnyPool
+        if config.worker_start_method == "thread":
+            pool = ThreadPoolExecutor(config.compile_threads)
+        else:
+            # ensure properties have been calculated before processes
+            # are forked
+            caching_device_properties()
+            ctx = multiprocessing.get_context(config.worker_start_method)
+            pool = ProcessPoolExecutor(
+                config.compile_threads,
+                mp_context=ctx,
+                initializer=partial(_async_compile_initializer, os.getpid()),
+            )
+            # when this pool is created in a subprocess object, the normal exit handler
+            # doesn't run, and we need to register our own handler.
+            # exitpriority has to be high, because another one of the finalizers will
+            # kill the worker thread that sends the shutdown message to the workers...
+            multiprocessing.util.Finalize(None, pool.shutdown, exitpriority=sys.maxsize)
 
-        ctx = multiprocessing.get_context(config.worker_start_method)
-        pool = ProcessPoolExecutor(
-            config.compile_threads,
-            mp_context=ctx,
-            initializer=partial(_async_compile_initializer, orig_ppid),
-        )
-
-        global _pool_set
         _pool_set.add(pool)
-
-        # when this pool is created in a subprocess object, the normal exit handler
-        # doesn't run, and we need to register our own handler.
-        # exitpriority has to be high, because another one of the finalizers will
-        # kill the worker thread that sends the shutdown message to the workers...
-        multiprocessing.util.Finalize(None, pool.shutdown, exitpriority=sys.maxsize)
         return pool
 
     @classmethod
@@ -2842,6 +2847,9 @@ class AsyncCompile:
             return
         _compile_start()
         pool = cls.process_pool()
+        assert isinstance(
+            pool, ProcessPoolExecutor
+        ), "warm_pool not yet implemented for ThreadPool"
 
         # We have to fork processes for compiler workers, but the more memory and other resources that are loaded, the
         # slower the os.fork time is, quite drastically. It also holds the GIL so we can't put it on another thread.
@@ -2878,13 +2886,19 @@ class AsyncCompile:
 
         kernel = TritonCodeCache.load(kernel_name, source_code)
         if config.compile_threads > 1:
-            return TritonFuture(
-                kernel,
-                self.process_pool().submit(
-                    _worker_compile_triton,
-                    kernel._reload_in_subproc,
-                ),
-            )
+            if config.worker_start_method == "thread":
+                return TritonFuture(
+                    kernel,
+                    self.process_pool().submit(call_standalone_triton_compile, kernel),
+                )
+            else:
+                return TritonFuture(
+                    kernel,
+                    self.process_pool().submit(
+                        _worker_compile_triton,
+                        kernel._reload_in_subproc,
+                    ),
+                )
         else:
             kernel.precompile()
             return kernel
@@ -2945,6 +2959,8 @@ class AsyncCompile:
 if (
     os.environ.get("TORCH_TNT_IN_USE", "0") == "1"
     or os.environ.get("TORCH_WARM_POOL", "1") != "1"
+    # TODO(jansel): do we need a version of warm_pool for threads?
+    or config.worker_start_method == "thread"
 ):
     pass
 elif sys.version_info >= (3, 12):
