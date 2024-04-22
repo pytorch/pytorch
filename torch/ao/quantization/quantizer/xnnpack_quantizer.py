@@ -305,9 +305,9 @@ class XNNPACKQuantizer(Quantizer):
 
     @classmethod
     def get_supported_quantization_configs(cls) -> List[QuantizationConfig]:
-        op_configs: Set[QuantizationConfig] = set({})
-        for spec, _ in cls.supported_config_and_operators:
-            op_configs.add(spec)
+        op_configs: Set[QuantizationConfig] = {
+            spec for spec, _ in cls.supported_config_and_operators
+        }
         return list(op_configs)
 
     @classmethod
