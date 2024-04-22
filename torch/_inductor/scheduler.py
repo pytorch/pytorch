@@ -1769,7 +1769,11 @@ class Scheduler:
         If config.benchmark_fusion is False, always return True.
         Otherwise, return True if fusion can brings speedup.
         """
-        if not config.benchmark_fusion:
+
+        is_multi_template = node1.is_template() and isinstance(
+            node1.get_template_node(), ir.MultiTemplateBuffer
+        )
+        if not config.benchmark_fusion and not is_multi_template:
             return True
 
         if (
@@ -1835,12 +1839,18 @@ class Scheduler:
             min_ms_fused = float("inf")
             ms_fused_choice = None
 
+            triton_choices = 0
+
             for choice, unfused_time in choice_timings.items():
                 if not isinstance(choice, torch._inductor.ir.TritonTemplateCallerBase):
                     continue
 
                 if unfused_time >= ms1 + ms2:
                     continue
+
+                triton_choices += 1
+                if triton_choices > config.max_epilogue_benchmarked_choices:
+                    break
 
                 # TODO - parallel compile triton templates
                 # TODO - should prune/skip choices that are not within certain % of best choice
