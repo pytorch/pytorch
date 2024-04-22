@@ -172,16 +172,31 @@ class TuningProcess:
         self.request_queue.put(obj)
 
     def get(
-        self, result_timeout=1.0, graceful_timeout=3.0, terminate_timeout=1.0
+        self, result_timeout=120.0, graceful_timeout=3.0, terminate_timeout=1.0
     ) -> Any:
         """
-        Get a response from the child process.
+        Get a response from the child process. Raises queue.Empty on timeout
+        or if the process dies.
+
+        This method is (so far) only used by TuningProcessPool, where torch._inductor.config entries are being used
+        to populate the timeouts:
+
+        Arguments:
+
+            @param result_timeout: Timeout in seconds, defaults to 120.0 or to
+                                   config.max_autotune_subproc_result_timeout_seconds when called by TuningProcessPool
+            @param graceful_timeout: Timeout in seconds to allow graceful shutdown (SIGTERM is sent after this time).
+                                    Defaults to 3.0 or to config.max_autotune_subproc_graceful_timeout_seconds
+            @param terminate_timeout: Timeout in seconds after SIGTERM, until we send SIGKILL if the process
+                                      remains alive. Defaults to 1.0 or to
+                                      config.max_autotune_subproc_terminate_timeout_seconds.
+        Returns:
+            A response from the child process (Any type)
         """
         assert self.process is not None
         assert self.response_queue is not None
         while True:
             try:
-                start = time.time()
                 remaining_timeout = result_timeout
                 res = None
                 while remaining_timeout is not None and remaining_timeout >= 1.0:
@@ -194,11 +209,9 @@ class TuningProcess:
                             raise  # is being caught a few lines below
                 if res is None:
                     res = self.response_queue.get(timeout=remaining_timeout)
-                end = time.time()
                 return res
             except queue.Empty:
                 status = self.process.exitcode
-                end = time.time()
                 if status is None:
                     self.kill(
                         graceful_timeout=graceful_timeout,
