@@ -251,15 +251,14 @@ class CKTemplate(CUDATemplate):
     """
 
     _TORCH_DTYPE_TO_CK = {
-        torch.float32: "float",
-        torch.float64: "double",
-        torch.float16: "ck::half_t",
-        torch.bfloat16: "ck::bhalf_t",
-        torch.int32: "int",
-        torch.int8: "int8_t",
-        torch.uint8: "uint8_t",
-        # TBD: f8
-        torch.bool: "bool",
+        torch.float32: "F32",
+        torch.float64: "F64",
+        torch.float16: "F16",
+        torch.bfloat16: "BF16",
+        torch.int32: "I32",
+        torch.int8: "I8",
+        torch.float8_e4m3fnuz: "F8",
+        torch.float8_e5m2fnuz: "BF8",
     }
 
 
@@ -303,11 +302,11 @@ class CKTemplate(CUDATemplate):
 
                 // see "composable_kernel/include/ck/utility/data_type.hpp"
                 using F8  = ck::f8_t;
+                using BF8 = ck::bf8_t;
                 using F16 = ck::half_t;
                 using F32 = float;
                 // using F64 = double;
                 // using BF16 = ck::bhalf_t;
-                // using BF8 = ck::bf8_t;
                 // using I32 = int32_t;
                 // using I8 = int8_t;
                 // using I4 = ck::int4_t;

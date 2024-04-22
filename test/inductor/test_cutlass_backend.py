@@ -130,11 +130,40 @@ class TestCutlassBackend(TestCase):
             Y = mm(a, b)
             torch.testing.assert_close(Y_compiled, Y)
 
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CK path setup")
+    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_max_autotune_precompile_ck(self):
+        """
+        Make sure autotuning mm in sub processes work without crashes.
+        """
+
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+
+        def mm(a, b):
+            return a @ b
+
+        a = torch.randn(2240, 256).cuda().half()
+        b = torch.randn(256, 2048).cuda().half()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": True,
+                "max_autotune_gemm_backends": "CK",
+                # "max_autotune_gemm_backends": "CK,Triton,ATen",
+                "compile_threads": -1,
+            }
+        ):
+            Y_compiled = torch.compile(mm, dynamic=False)(a, b)
+            Y = mm(a, b)
+            torch.testing.assert_close(Y_compiled, Y)
+
     # TODO: Enable dynamic test cases when dynamic support is added.
-    # @unittest.skipIf(not SM75OrLater, "need sm_75")
+    @unittest.skipIf(not SM75OrLater, "need sm_75")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     @parametrize("dynamic", (False, True))
-    @parametrize("max_autotune_gemm_backends", ("CUTLASS", "CK", "ATen,Triton,CUTLASS"))
+    @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen,Triton,CUTLASS"))
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_regular_mm(
         self, dynamic: bool, max_autotune_gemm_backends: str
@@ -146,17 +175,13 @@ class TestCutlassBackend(TestCase):
         if max_autotune_gemm_backends == "CUTLASS" and torch.version.hip:
             return
 
-        if dynamic and max_autotune_gemm_backends == "CK":
-            # TBD support this
-            return
-
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
 
         def mm(a, b):
             return a @ b
 
-        a = torch.randn(2240, 256).cuda().half()
-        b = torch.randn(256, 2048).cuda().half()
+        a = torch.randn(100, 10).cuda().half()
+        b = torch.randn(10, 100).cuda().half()
 
         with config.patch(
             {
