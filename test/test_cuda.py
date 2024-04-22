@@ -4150,8 +4150,8 @@ class TestBlockStateAbsorption(TestCase):
         self.assertEqual(rc, "False", "Triton was imported when importing torch!")
 
 class TestCudaOptims(TestCase):
-    # This test case uses initiate_device_type_tests to apply the new
-    # OptimizerInfo structure.
+    # These tests will be instantiate with instantiate_device_type_tests 
+    # to apply the new OptimizerInfo structure.
 
     @onlyCUDA
     @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
