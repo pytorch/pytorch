@@ -393,40 +393,84 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
   C10_ALWAYS_INLINE Vectorized(T s)
       : _vec0{vec_splats((ElementType)s)}, _vec1{vec_splats((ElementType)s)} {}
 
-  static Vectorized<value_type> C10_ALWAYS_INLINE
-  loadu(const void* ptr, int count = size()) {
-    if (count == size()) {
+  template <typename U, typename DUMMY = void>
+  struct LoaduHelper {
+    static Vectorized<T> C10_ALWAYS_INLINE
+    loadu(const U* ptr, int count = size()) {
+      __at_align__ ElementType tmp_values[size()] = {};
+      std::memcpy(tmp_values, ptr, std::min(count, size()) * sizeof(ElementType));
+
       return {
-          vec_xl(offset0, reinterpret_cast<const ElementType*>(ptr)),
-          vec_xl(offset16, reinterpret_cast<const ElementType*>(ptr))};
+          vec_xl(offset0, &(tmp_values[0])),
+          vec_xl(offset16, &(tmp_values[0]))};
     }
+  };
 
-    __at_align__ ElementType tmp_values[size()] = {};
-    std::memcpy(tmp_values, ptr, std::min(count, size()) * sizeof(ElementType));
+  template <typename DUMMY>
+  struct LoaduHelper<ElementType, DUMMY> {
+    static Vectorized<T> C10_ALWAYS_INLINE
+    loadu(const ElementType* ptr, int count = size()) {
+      if (count == size()) {
+        return {
+            vec_xl(offset0, ptr),
+            vec_xl(offset16, ptr)};
+      }
 
-    return {
-        vec_xl(offset0, reinterpret_cast<const ElementType*>(tmp_values)),
-        vec_xl(offset16, reinterpret_cast<const ElementType*>(tmp_values))};
+      __at_align__ ElementType tmp_values[size()] = {};
+      std::memcpy(tmp_values, ptr, std::min(count, size()) * sizeof(ElementType));
+
+      return {
+          vec_xl(offset0, &(tmp_values[0])),
+          vec_xl(offset16, &(tmp_values[0]))};
+    }
+  };
+
+  template <typename U>
+  static Vectorized<T> C10_ALWAYS_INLINE
+  loadu(const U* ptr, int count = size()) {
+    return LoaduHelper<U>::loadu(ptr, count);
   }
 
-  static Vectorized<value_type> C10_ALWAYS_INLINE
-  loadu_one_fourth(const void* ptr) {
+  template <typename U>
+  static Vectorized<T> C10_ALWAYS_INLINE
+  loadu_one_fourth(const U* ptr) {
     // load only first 8 bytes
     // only intended to be used with uint8_t
     return loadu(ptr, 8 / sizeof(ElementType));
   }
 
-  void C10_ALWAYS_INLINE store(void* ptr, int count = size()) const {
-    if (count == size()) {
-      vec_xst(_vec0, offset0, reinterpret_cast<ElementType*>(ptr));
-      vec_xst(_vec1, offset16, reinterpret_cast<ElementType*>(ptr));
-    } else if (count > 0) {
-      __at_align__ ElementType tmp_values[size()];
-      vec_xst(_vec0, offset0, reinterpret_cast<ElementType*>(tmp_values));
-      vec_xst(_vec1, offset16, reinterpret_cast<ElementType*>(tmp_values));
-      std::memcpy(
-          ptr, tmp_values, std::min(count, size()) * sizeof(ElementType));
+  template <typename U, typename DUMMY = void>
+  struct StoreHelper {
+    static void C10_ALWAYS_INLINE store(const Vectorized<T> &vec, U* ptr, int count = size()) {
+      if (count > 0) {
+        __at_align__ ElementType tmp_values[size()];
+        vec_xst(vec._vec0, offset0, &(tmp_values[0]));
+        vec_xst(vec._vec1, offset16, &(tmp_values[0]));
+        std::memcpy(
+            ptr, tmp_values, std::min(count, size()) * sizeof(ElementType));
+      }
     }
+  };
+
+  template <typename DUMMY>
+  struct StoreHelper<ElementType, DUMMY> {
+    static void C10_ALWAYS_INLINE store(const Vectorized<T> &vec, ElementType* ptr, int count = size()) {
+      if (count == size()) {
+        vec_xst(vec._vec0, offset0, ptr);
+        vec_xst(vec._vec1, offset16, ptr);
+      } else if (count > 0) {
+        __at_align__ ElementType tmp_values[size()];
+        vec_xst(vec._vec0, offset0, &(tmp_values[0]));
+        vec_xst(vec._vec1, offset16, &(tmp_values[0]));
+        std::memcpy(
+            ptr, tmp_values, std::min(count, size()) * sizeof(ElementType));
+      }
+    }
+  };
+
+  template <typename U>
+  void C10_ALWAYS_INLINE store(U* ptr, int count = size()) const {
+    return StoreHelper<U>::store(*this, ptr, count);
   }
 
   C10_ALWAYS_INLINE const vtype& vec0() const {
@@ -1710,12 +1754,14 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_quant<T>()>> {
     return _vec;
   }
 
+  template <typename U>
   static Vectorized<T> C10_ALWAYS_INLINE
-  loadu(const void* ptr, int count = size()) {
+  loadu(const U* ptr, int count = size()) {
     return Vectorized<T>{vinner_type::loadu(ptr, count)};
   }
 
-  void C10_ALWAYS_INLINE store(void* ptr, int count = size()) const {
+  template <typename U>
+  void C10_ALWAYS_INLINE store(U* ptr, int count = size()) const {
     _vec.store(ptr, count);
   }
 
@@ -2174,12 +2220,14 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_complex<T>()>> {
     return _vec.data();
   }
 
+  template <typename U>
   static Vectorized<T> C10_ALWAYS_INLINE
-  loadu(const void* ptr, int count = size()) {
+  loadu(const U* ptr, int count = size()) {
     return Vectorized<T>{vinner_type::loadu(ptr, 2 * count)};
   }
 
-  void C10_ALWAYS_INLINE store(void* ptr, int count = size()) const {
+  template <typename U>
+  void C10_ALWAYS_INLINE store(U* ptr, int count = size()) const {
     return _vec.store(ptr, 2 * count);
   }
 
