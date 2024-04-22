@@ -1,0 +1,90 @@
+name: Setup ROCm host
+
+description: Set up ROCm host for CI
+
+runs:
+  using: composite
+  steps:
+    - name: Set DOCKER_HOST
+      shell: bash
+      run: echo "DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> "${GITHUB_ENV}"
+
+    - name: Remove leftover Docker config file
+      shell: bash
+      continue-on-error: true
+      run: |
+        set -ex
+
+        cat ~/.docker/config.json || true
+        # https://stackoverflow.com/questions/64455468/error-when-logging-into-ecr-with-docker-login-error-saving-credentials-not
+        rm -f ~/.docker/config.json
+
+    - name: Stop all running docker containers
+      if: always()
+      shell: bash
+      run: |
+        # ignore expansion of "docker ps -q" since it could be empty
+        # shellcheck disable=SC2046
+        docker stop $(docker ps -q) || true
+        # Prune all stopped containers.
+        docker container prune -f
+
+    - name: Runner health check system info
+      if: always()
+      shell: bash
+      run: |
+        cat /etc/os-release || true
+        cat /etc/apt/sources.list.d/rocm.list || true
+        cat /opt/rocm/.info/version || true
+        whoami
+
+    - name: Runner health check rocm-smi
+      if: always()
+      shell: bash
+      run: |
+        rocm-smi
+
+    - name: Runner health check rocminfo
+      if: always()
+      shell: bash
+      run: |
+        rocminfo
+
+    - name: Runner health check GPU count
+      if: always()
+      shell: bash
+      run: |
+        ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
+        msg="Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
+        if [[ $ngpu -eq 0 ]]; then
+            echo "Error: Failed to detect any GPUs on the runner"
+            echo "$msg"
+            exit 1
+        fi
+        if [[ $ngpu -eq 1 ]]; then
+            echo "Error: only 1 GPU detected, at least 2 GPUs are needed for distributed jobs"
+            echo "$msg"
+            exit 1
+        fi
+
+    - name: Runner diskspace health check
+      uses: ./.github/actions/diskspace-cleanup
+      if: always()
+
+    - name: Runner health check disconnect on failure
+      if: ${{ failure() }}
+      shell: bash
+      run: |
+        killall runsvc.sh
+
+    - name: Preserve github env variables for use in docker
+      shell: bash
+      run: |
+        env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+        env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+
+    - name: ROCm set GPU_FLAG
+      shell: bash
+      run: |
+        # All GPUs are visible to the runner; visibility, if needed, will be set by run_test.py.
+        echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
