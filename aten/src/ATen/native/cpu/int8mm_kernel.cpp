@@ -345,9 +345,11 @@ void int8pack_mm_kernel(
     const Tensor& B,
     const Tensor& scales) {
   if (C.dtype() == kHalf) {
-     int8pack_mm_kernel_<Half>(C, A, B, scales);
+    int8pack_mm_kernel_<Half>(C, A, B, scales);
+  } else if (C.dtype() == kBFloat16) {
+    int8pack_mm_kernel_<BFloat16>(C, A, B, scales);
   } else {
-     int8pack_mm_kernel_<BFloat16>(C, A, B, scales);
+    int8pack_mm_kernel_<float>(C, A, B, scales);
   }
 }
 
