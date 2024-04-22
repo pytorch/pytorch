@@ -309,6 +309,9 @@ case "$image" in
     # snadampal: skipping sccache due to the following issue
     # https://github.com/pytorch/pytorch/issues/121559
     SKIP_SCCACHE_INSTALL=yes
+    # snadampal: skipping llvm src build install because the current version
+    # from pytorch/llvm:9.0.1 is x86 specific
+    SKIP_LLVM_SRC_BUILD_INSTALL=yes
     ;;
   *)
     # Catch-all for builds that are not hardcoded.
@@ -403,6 +406,7 @@ DOCKER_BUILDKIT=1 docker build \
        --build-arg "BASEKIT_VERSION=${BASEKIT_VERSION}" \
        --build-arg "ACL=${ACL:-}" \
        --build-arg "SKIP_SCCACHE_INSTALL=${SKIP_SCCACHE_INSTALL:-}" \
+       --build-arg "SKIP_LLVM_SRC_BUILD_INSTALL=${SKIP_LLVM_SRC_BUILD_INSTALL:-}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        -t "$tmp_tag" \
        "$@" \
