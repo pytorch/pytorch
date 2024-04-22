@@ -125,10 +125,15 @@ def foo_functional(x):
 
 
 NON_STRICT_SUFFIX = "_non_strict"
+RETRACEABILITY_SUFFIX = "_retraceability"
 
 
 def is_non_strict_test(test_name):
     return test_name.endswith(NON_STRICT_SUFFIX)
+
+
+def is_retracebility_test(test_name):
+    return test_name.endswith(RETRACEABILITY_SUFFIX)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
@@ -424,7 +429,7 @@ class TestExport(TestCase):
                 foo, bad_example_inp, dynamic_shapes=dynamic_shapes, strict=False
             )
 
-    def test_state(self):
+    def test_state_tensors(self):
         class M(torch.nn.Module):  # simple with register buffer
             def __init__(self):
                 super().__init__()
@@ -465,7 +470,7 @@ class TestExport(TestCase):
 
         with self.assertRaisesRegex(
             ValueError,
-            "The attribute self.buf was assigned during export",
+            "The tensor attribute self.buf was assigned during export",
         ):
             torch.export.export(M(), (torch.randn(2, 3),), strict=False)
 
@@ -523,9 +528,28 @@ class TestExport(TestCase):
 
         with self.assertRaisesRegex(
             ValueError,
-            "The attributes self.tensors\\[0\\], self.tensors\\[1\\] were assigned during export",
+            "The tensor attributes self.tensors\\[0\\], self.tensors\\[1\\] were assigned during export",
         ):
             torch.export.export(M(), (torch.randn(2, 3),), strict=False)
+
+    def test_state_primitives(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = 1
+                self.y = {"k": 2}
+                self.z = (3,)
+
+            def forward(self, x):
+                self.x = self.x + 4
+                self.y["k"] = self.y["k"] + 5
+                self.z = (self.z[0] + 6,)
+                return x + self.x + self.y["k"] + self.z[0]
+
+        ep = torch.export.export(M(), (torch.randn(2, 3),), strict=False)
+        self.assertTrue(
+            torch.allclose(ep.module()(torch.zeros(2, 3)), torch.ones(2, 3) * 21)
+        )
 
     # Predispatch has different expected results
     @testing.expectedFailureSerDerPreDispatch
@@ -671,7 +695,6 @@ class TestExport(TestCase):
 
         self.assertEqual(ep.module()(torch.randn(4), torch.randn(5)).size()[0], 4)
 
-    @testing.expectedFailurePreDispatchRunDecomp  # T183703359
     def test_derived_dim_nested(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
@@ -737,7 +760,6 @@ class TestExport(TestCase):
 
         self.assertEqual(ep.module()(torch.randn(5), torch.randn(9)).size()[0], 4)
 
-    @testing.expectedFailurePreDispatchRunDecomp  # T183703359
     def test_derived_dim_integer(self):
         class Foo(torch.nn.Module):
             def forward(self, w):
@@ -984,7 +1006,6 @@ class TestExport(TestCase):
             6,
         )
 
-    @testing.expectedFailurePreDispatchRunDecomp  # T183704046
     def test_static_dim_constraints(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -1035,7 +1056,6 @@ class TestExport(TestCase):
         ):
             _ = export(foo, inputs, dynamic_shapes=((dx, 9), (dy, 4), (3, 3)))
 
-    @testing.expectedFailurePreDispatchRunDecomp  # T183703911
     def test_dim_1_2(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -1053,7 +1073,6 @@ class TestExport(TestCase):
         self.assertEqual(vr.lower, 1)
         self.assertEqual(vr.upper, 2)
 
-    @testing.expectedFailurePreDispatchRunDecomp  # T183703359
     def test_derived_dim_1_2(self):
         class Bar(torch.nn.Module):
             def forward(self, x, y):
@@ -1243,10 +1262,6 @@ class TestExport(TestCase):
         }
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
-    # TODO(pianpwk): resolve in immediate follow-up PR
-    # add name to ConstantArgument schema for SerDer
-    @testing.expectedFailureSerDer
-    @testing.expectedFailureSerDerPreDispatch
     def test_export_func_with_default_kwargs(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, a, b=1):
@@ -2238,7 +2253,6 @@ def forward(self, arg_0):
             )
         )
 
-    @testing.expectedFailureNonStrict  # non-strict does not add deferred runtime assertions
     @testing.expectedFailureSerDerPreDispatch  # .item call becomes aten.item in predispatch IR
     @testing.expectedFailurePreDispatchRunDecomp  # assert name is still referring to item
     def test_automatic_constrain_size(self):
@@ -2249,10 +2263,13 @@ def forward(self, arg_0):
 
         ep = export(M(), (torch.tensor(1), torch.ones(4, 5)))
 
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"_local_scalar_dense is outside of inline constraint \[0, 9223372036854775806\]",
-        ):
+        if is_non_strict_test(self._testMethodName):
+            error_msg = r"Runtime assertion failed for _local_scalar_dense >= 0"
+        elif is_retracebility_test(self._testMethodName):
+            error_msg = r"Runtime assertion failed for _local_scalar_dense_default >= 0"
+        else:
+            error_msg = "_local_scalar_dense is outside of inline constraint \[0, 9223372036854775806\]."
+        with self.assertRaisesRegex(RuntimeError, error_msg):
             _ = ep.module()(torch.tensor(-1), torch.randn(4, 5))
 
         self.assertTrue(
@@ -2606,6 +2623,17 @@ def forward(self, arg_0):
         self.assertTrue(
             torch.allclose(ep.module()(torch.ones(6, 4)), Foo()(torch.ones(6, 4)))
         )
+
+    def test_aten_lift_fresh_copy(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aten.lift_fresh_copy(x)
+
+        ep = export(M(), (torch.ones(6, 4),))
+        found = False
+
+        op = "torch.ops.aten.clone.default"
+        FileCheck().check_count(op, 1, exactly=True).run(ep.graph_module.code)
 
     def test_cond_buffers(self):
         class M(torch.nn.Module):
@@ -4366,6 +4394,21 @@ def forward(self, x):
             node.name for node in ep.graph.nodes if node.op == "get_attr"
         ]
         self.assertEqual(expected_getattr_names, real_getattr_names)
+
+    # original input names aren't retraceable:
+    # compilation will succeed, but names won't match forward() signature.
+    @testing.expectedFailureRetraceability
+    def test_constant_input_naming(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y, div="floor"):
+                return torch.div(x, y, rounding_mode=div)
+
+        f = Foo()
+        inputs = (torch.randn(4), torch.randn(4), "floor")
+        ep = export(f, inputs)
+        div_spec = ep.graph_signature.input_specs[2]
+        self.assertEqual(div_spec.arg.name, "div")
+        self.assertEqual(div_spec.arg.value, "floor")
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")

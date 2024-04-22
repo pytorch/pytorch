@@ -736,11 +736,8 @@ class DistributedDataParallel(Module, Joinable):
                     ValueError,
                     "DistributedDataParallel device_ids and output_device arguments "
                     "only work with single-device/multiple-device GPU modules or CPU modules, "
-                    "but got device_ids {}, output_device {}, and module parameters {}.".format(
-                        device_ids,
-                        output_device,
-                        {p.device for p in self._module_parameters},
-                    ),
+                    f"but got device_ids {device_ids}, output_device {output_device}, "
+                    f"and module parameters {({p.device for p in self._module_parameters})}.",
                 )
 
             self.device_ids = None
@@ -956,7 +953,7 @@ class DistributedDataParallel(Module, Joinable):
         # 1. Create gradient buffer
         device = torch.device("cpu") if device_ids is None else device_ids[0]
         self._delay_grad_buffer = torch.zeros(
-            sum([p.numel() for p in self._delay_all_reduce_params]),
+            sum(p.numel() for p in self._delay_all_reduce_params),
             device=device,
         )
 

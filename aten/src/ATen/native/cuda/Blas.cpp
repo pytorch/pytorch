@@ -176,6 +176,12 @@ cuda::blas::GEMMAndBiasActivationEpilogue activation_to_gemm_and_blas_arg(Activa
 static bool getDisableAddmmCudaLt() {
     static const char* env_value = std::getenv("DISABLE_ADDMM_CUDA_LT");
 #ifdef USE_ROCM
+    // if we enable tunable op, it'll take priority over just hipblaslt (heuristics)
+    // note the current tunable op is not the hipblaslt path (gemm_and_bias)
+    auto tuning_ctx = at::cuda::tunable::getTuningContext();
+    if (tuning_ctx->IsTunableOpEnabled()) {
+      return true;
+    }
     // allow both CUDA and HIP env var names for ROCm builds
     // also, current default for ROCm builds is disable by default
     if (env_value == nullptr) {
