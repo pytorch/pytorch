@@ -5,7 +5,7 @@ import unittest
 from typing import List
 
 import torch
-import torch.distributed._functional_collectives as funcol
+import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable import replicate
 from torch.distributed._composable.fsdp import fully_shard
@@ -600,7 +600,7 @@ class TestFullyShardMetaDeviceInit(FSDPTestMultiThread):
             ):
                 full_param = full_param.detach().cuda()
                 mesh = sharded_meta_param.device_mesh
-                full_param = funcol.broadcast(full_param, src=0, group=mesh)
+                dist.broadcast(full_param, src=0, group=mesh.get_group(0))
                 sharded_tensor = distribute_tensor(
                     full_param, mesh, sharded_meta_param.placements
                 )
@@ -613,7 +613,7 @@ class TestFullyShardMetaDeviceInit(FSDPTestMultiThread):
                     dtype=sharded_meta_param.dtype,
                 )
                 mesh = sharded_meta_param.device_mesh
-                full_tensor = funcol.broadcast(full_tensor, src=0, group=mesh)
+                dist.broadcast(full_tensor, src=0, group=mesh.get_group(0))
                 sharded_tensor = distribute_tensor(
                     full_tensor, mesh, sharded_meta_param.placements
                 )
