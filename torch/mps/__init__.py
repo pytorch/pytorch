@@ -4,6 +4,8 @@ Metal is Apple's API for programming metal GPU (graphics processor unit). Using 
 performance can be achieved, by running work on the metal GPU(s).
 See https://developer.apple.com/documentation/metalperformanceshaders for more details.
 """
+from typing import Union
+
 import torch
 from .. import Tensor
 
@@ -20,7 +22,7 @@ def _get_default_mps_generator() -> torch._C.Generator:
 
 
 def device_count() -> int:
-    r"""Return the number of available MPS devices."""
+    r"""Returns the number of available MPS devices."""
     return int(torch._C._has_mps and torch._C._mps_is_available())
 
 
@@ -29,12 +31,14 @@ def synchronize() -> None:
     return torch._C._mps_deviceSynchronize()
 
 
-def get_rng_state() -> Tensor:
+def get_rng_state(device: Union[int, str, torch.device] = "mps") -> Tensor:
     r"""Returns the random number generator state as a ByteTensor."""
     return _get_default_mps_generator().get_state()
 
 
-def set_rng_state(new_state: Tensor) -> None:
+def set_rng_state(
+    new_state: Tensor, device: Union[int, str, torch.device] = "mps"
+) -> None:
     r"""Sets the random number generator state.
 
     Args:
