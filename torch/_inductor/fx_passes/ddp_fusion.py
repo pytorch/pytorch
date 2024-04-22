@@ -330,7 +330,7 @@ def _scatter_fused_allreduce_waits(
                 aten.split,
                 (
                     fused_wait_node,
-                    [math.prod(cb.shape) for cb in orig_comm_blocks],
+                    [math.prod(cast(List[int], cb.shape)) for cb in orig_comm_blocks],
                 ),
             )
         with graph.inserting_after(split_node):
