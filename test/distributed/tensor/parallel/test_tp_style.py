@@ -249,7 +249,7 @@ class TensorParallelStyleTest(DTensorTestBase):
     def test_prepare_module_kwargs_input(self):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
 
-        class TestModule(torch.nn.Module):
+        class TestKwargModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.linear = torch.nn.Linear(8, 8)
@@ -257,8 +257,7 @@ class TensorParallelStyleTest(DTensorTestBase):
             def forward(self, x, *, y, z=2):
                 return self.linear(x) + y + z
 
-        test_mod = TestModule().to(self.device_type)
-        # Raise assertion error if module inputs and input_layouts do not have same length.
+        test_mod = TestKwargModule().to(self.device_type)
         prepare_inps_simple = PrepareModuleInput(
             input_kwarg_layouts={"y": Shard(0)},
             desired_input_kwarg_layouts={"y": Replicate()},
@@ -271,12 +270,39 @@ class TensorParallelStyleTest(DTensorTestBase):
         comm_mode = CommDebugMode()
         with comm_mode:
             output = test_mod(
-                torch.randn(4, 8, device=self.device_type),
+                torch.randn(1 * self.world_size, 8, device=self.device_type),
                 y=torch.ones(1, 8, device=self.device_type),
             )
 
         self.assertEqual(comm_mode.get_total_counts(), 1)
-        self.assertEqual(output.shape, (4, 8))
+        self.assertEqual(output.shape, (1 * self.world_size, 8))
+
+        class TestKwargOnlyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(8, 8)
+
+            def forward(self, *, x, y=2, z=None):
+                return self.linear(x) + y + z
+
+        test_kwonly_mod = TestKwargOnlyModule().to(self.device_type)
+        prepare_inps_simple = PrepareModuleInput(
+            input_kwarg_layouts={"x": Shard(0), "z": Shard(0)},
+            desired_input_kwarg_layouts={"x": Replicate(), "z": Replicate()},
+        )
+        parallelize_module(
+            test_kwonly_mod.linear, mesh, ColwiseParallel(use_local_output=False)
+        )
+        parallelize_module(test_kwonly_mod, mesh, prepare_inps_simple)
+
+        with comm_mode:
+            output = test_kwonly_mod(
+                x=torch.randn(1, 8, device=self.device_type),
+                z=torch.ones(1, 8, device=self.device_type),
+            )
+
+        self.assertEqual(comm_mode.get_total_counts(), 2)
+        self.assertEqual(output.shape, (1 * self.world_size, 8))
 
     @with_comms
     def test_prepare_module_output(self):
