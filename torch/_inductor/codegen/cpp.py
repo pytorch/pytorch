@@ -3623,8 +3623,7 @@ class CppScheduling(BaseScheduling):
                             if var_ranges is None:
                                 var_ranges = v
                             assert var_ranges == v, (var_ranges, v, node.snodes)
-                            for expr in exprs:
-                                indexing_exprs.add(expr)
+                            indexing_exprs.update(exprs)
                         return var_ranges, list(indexing_exprs)
                     else:
                         assert isinstance(node, SchedulerNode)
