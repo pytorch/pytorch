@@ -685,7 +685,7 @@ def fresh_inductor_cache(cache_entries=None):
                             }
                         )
         shutil.rmtree(inductor_cache_dir)
-    except:
+    except Exception:
         log.warning("on error, temporary cache dir kept at %s", inductor_cache_dir)
         raise
 
