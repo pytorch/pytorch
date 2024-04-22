@@ -933,8 +933,18 @@ def use_cutlass_template(layout, m, n, k):
     return res
 
 
-def use_ck_template(layout):
-    return torch.version.hip is not None and _use_autotune_backend("CK") and _use_template_for_cuda(layout, [torch.float16])
+def use_ck_template(layout, m, n, k):
+    from .virtualized import V
+
+    if not torch.version.hip:
+        return False
+    if not _use_autotune_backend("CK"):
+        return False
+    gemm_size = V.graph.sizevars.size_hint(m * n * k, fallback=-1)
+    if gemm_size <= 0:
+        # TBD: investigate if backend needs to be disabled for small gemms similar to CUTLASS
+        return False
+    return _use_template_for_cuda(layout, [torch.float16])
 
 
 def use_aten_gemm_kernels():

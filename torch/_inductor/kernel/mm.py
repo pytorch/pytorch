@@ -151,14 +151,11 @@ def tuned_mm(mat1, mat2, *, layout=None):
     if static_shape and is_nonzero and use_cutlass_template(layout, m, n, k):
         CUTLASSGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])
 
-<<<<<<< HEAD
-    if m * n != 0 and use_ck_template(layout):
+    if static_shape and is_nonzero and use_ck_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(
             choices, layout, [mat1, mat2]
         )
 
-    from torch._inductor.ir import FixedLayout, FlexibleLayout
-=======
     if len(choices) == 0 and not use_aten_gemm_kernels():
         log.warning("No choices for GEMM, using ATen backend as fallback")
         choices.append(aten_mm.bind((mat1, mat2), aten_layout))
@@ -167,7 +164,6 @@ def tuned_mm(mat1, mat2, *, layout=None):
     except NoValidChoicesError:
         log.warning("All choices for GEMM were invalid, using ATen backend as fallback")
         return aten_mm.bind((mat1, mat2), aten_layout).output_node()
->>>>>>> main
 
 
 def _is_static_problem(inputs_tensors, layout):
