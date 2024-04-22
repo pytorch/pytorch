@@ -67,6 +67,7 @@ def mps_ops_grad_modifier(ops):
         'digamma': [torch.float32],
         'special.polygammaspecial_polygamma_n_0': [torch.float16],
         'polygammapolygamma_n_0': [torch.float16],
+        'nn.functional.binary_cross_entropy': [torch.float16],
 
         # Unimplemented ops
         '__getitem__': [torch.float16],
@@ -985,9 +986,6 @@ def mps_ops_modifier(ops):
         # Unsupported
         # input types 'tensor<1x3x9x9xf16>' and 'tensor<1xf32>' are not broadcast compatible
         'nn.functional.avg_pool2d': [torch.float16],
-        # input types 'tensor<f32>' and 'tensor<1xf16>' are not broadcast compatible
-        # Refer to the issue please: https://github.com/pytorch/pytorch/issues/124252
-        'nn.functional.binary_cross_entropy': [torch.float16]
     }
 
     def addDecorator(op, d) -> None:
@@ -1160,19 +1158,17 @@ class MpsMemoryLeakCheck:
         if caching_allocator_discrepancy and not driver_discrepancy:
             # Just raises a warning if the leak is not validated by the driver API
             msg = ("MPS caching allocator reports a memory leak not "
-                   "verified by the driver API in {}! "
-                   "Caching allocator allocated memory was {} and is now reported as {}. "
-                   "MPS driver allocated memory was {} and is now {}.").format(
-                self.name, self.caching_allocator_before,
-                caching_allocator_mem_allocated, self.driver_before, driver_mem_allocated)
+                   f"verified by the driver API in {self.name}! "
+                   f"Caching allocator allocated memory was {self.caching_allocator_before} "
+                   f"and is now reported as {caching_allocator_mem_allocated}. "
+                   f"MPS driver allocated memory was {self.driver_before} and is now {driver_mem_allocated}.")
             warnings.warn(msg)
         elif caching_allocator_discrepancy and driver_discrepancy:
             # A caching allocator discrepancy validated by the driver API is a failure
-            msg = ("MPS driver API confirmed a leak in {}! "
-                   "Caching allocator allocated memory was {} and is now reported as {}. "
-                   "MPS driver allocated memory was {} and is now {}.").format(
-                self.name, self.caching_allocator_before, caching_allocator_mem_allocated,
-                self.driver_before, driver_mem_allocated)
+            msg = (f"MPS driver API confirmed a leak in {self.name}! "
+                   f"Caching allocator allocated memory was {self.caching_allocator_before} "
+                   f"and is now reported as {caching_allocator_mem_allocated}. "
+                   f"MPS driver allocated memory was {self.driver_before} and is now {driver_mem_allocated}.")
 
             raise RuntimeError(msg)
 
@@ -1472,9 +1468,19 @@ class MPSLeakyReluTest(TestCaseMPS):
                                                          0.9]]),
                 negative_slope=0.1))
 
-    def _testLeakyRelu(self, np_features, negative_slope, device):
-        cpu_x = torch.from_numpy(np_features).requires_grad_()
-        mps_x = torch.from_numpy(np_features).to('mps').requires_grad_()
+    def _testLeakyRelu(self, shape, dtype, negative_slope, contiguous):
+        cpu_x = torch.randn(shape, device='cpu', dtype=dtype)
+        mps_x = cpu_x.detach().clone().to('mps')
+
+        if not contiguous and not (0 in shape or len(shape) < 2):
+            # Tranposing will make the tensor non-contiguous
+            cpu_x = cpu_x.transpose(0, 1)
+            mps_x = mps_x.transpose(0, 1)
+            assert not mps_x.is_contiguous()
+
+        cpu_x.requires_grad_()
+        mps_x.requires_grad_()
+
         relu_op = torch.nn.LeakyReLU(negative_slope)
 
         cpu_leaky_relu = relu_op(cpu_x)
@@ -1482,19 +1488,24 @@ class MPSLeakyReluTest(TestCaseMPS):
         torch.testing.assert_close(cpu_leaky_relu, mps_leaky_relu.to('cpu'))
 
         # test backward pass
+
         cpu_grad = torch.ones_like(cpu_leaky_relu)
         mps_grad = cpu_grad.to('mps')
-        cpu_leaky_relu.backward(gradient=cpu_grad)
+
         mps_leaky_relu.backward(gradient=mps_grad)
-        torch.testing.assert_close(cpu_x.grad, mps_x.grad.to('cpu'))
+        cpu_leaky_relu.backward(gradient=cpu_grad)
+
+        assert cpu_x.grad is not None  # Check that the grad is well-populated
+        self.assertEqual(cpu_x.grad, mps_x.grad)
 
     def testNumbersCPU(self):
-        for t in [np.float32]:
-            self._testLeakyRelu(
-                np.array([[-9, 7, -5, 3, -1], [1, -3, 5, -7, 9]]).astype(t),
-                negative_slope=0.2,
-                device="cpu")
-
+        for t in [torch.float, torch.half]:
+            for shape in [[], (0,), (0, 3), (4,), (4, 3), (5, 4, 3)]:
+                for contiguous in [True, False]:
+                    self._testLeakyRelu(shape,
+                                        dtype=t,
+                                        negative_slope=0.2,
+                                        contiguous=contiguous)
 
 class TestAvgPool(TestCaseMPS):
     def _sum_pool2d(self, x, kernel_size):
@@ -6633,9 +6644,18 @@ class TestMPS(TestCaseMPS):
                 helper((2, 16, 16), (4, 4), return_indices, dtype)
 
     def test_gelu_simple(self):
-        def helper(shape, dtype=torch.float):
-            cpu_x = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=True)
-            x = cpu_x.detach().clone().to('mps').requires_grad_()
+        def helper(shape, dtype=torch.float, contiguous=True):
+            cpu_x = torch.randn(shape, device='cpu', dtype=dtype)
+            x = cpu_x.detach().clone().to('mps')
+
+            if not contiguous and (0 not in shape and len(shape) >= 2):
+                # Tranposing will make the tensor non-contiguous
+                cpu_x = cpu_x.transpose(0, 1)
+                x = x.transpose(0, 1)
+                assert not x.is_contiguous()
+
+            cpu_x.requires_grad_()
+            x.requires_grad_()
 
             gelu_result = torch.nn.GELU()(x)
             # GELU is not supported on CPU, so cast it to float
@@ -6650,15 +6670,54 @@ class TestMPS(TestCaseMPS):
             atol = 1e-5 if dtype == torch.float else 1e-2
             rtol = 1e-3 if dtype == torch.float else 1e-2
             self.assertEqual(gelu_result, gelu_result_cpu.to(dtype), atol=atol, rtol=rtol)
+
+            assert x.grad is not None  # Check that the grad is well-populated
             self.assertEqual(x.grad, cpu_x.grad, atol=atol, rtol=rtol)
 
         # Test empty shape too
         for dtype in [torch.float, torch.half]:
-            for shape in [(0, 3), [], (2, 3), (2, 8, 4, 5)]:
-                helper(shape, dtype)
+            for shape in [[], (0,), (0, 3), (4,), (4, 3), (5, 4, 3)]:
+                for contiguous in [True, False]:
+                    helper(shape, dtype, contiguous)
         # Test that gelu would raise an assert for integral types
         for dtype in [torch.int8, torch.int16, torch.int32, torch.int64]:
             self.assertRaises(RuntimeError, lambda: torch.nn.GELU()(torch.randint(100, (2,), dtype=dtype, device="mps")))
+
+    def test_mish_simple(self):
+        def helper(shape, dtype=torch.float, contiguous=True):
+            cpu_x = torch.randn(shape, device='cpu', dtype=dtype)
+            x = cpu_x.detach().clone().to('mps')
+
+            if not contiguous and (0 not in shape and len(shape) >= 2):
+                # Tranposing will make the tensor non-contiguous
+                cpu_x = cpu_x.transpose(0, 1)
+                x = x.transpose(0, 1)
+                assert not x.is_contiguous()
+
+            cpu_x.requires_grad_()
+            x.requires_grad_()
+
+            mish_result = torch.nn.Mish()(x)
+            mish_result_cpu = torch.nn.Mish()(cpu_x)
+
+            cpu_grad = torch.ones_like(mish_result_cpu)
+            grad = cpu_grad.to('mps')
+
+            mish_result.backward(gradient=grad)
+            mish_result_cpu.backward(gradient=cpu_grad)
+
+            atol = 1e-5 if dtype == torch.float else 1e-2
+            rtol = 1e-3 if dtype == torch.float else 1e-2
+            self.assertEqual(mish_result, mish_result_cpu.to(dtype), atol=atol, rtol=rtol)
+
+            assert x.grad is not None  # Check that the grad is well-populated
+            self.assertEqual(x.grad, cpu_x.grad, atol=atol, rtol=rtol)
+
+        # Test empty shape too
+        for dtype in [torch.float, torch.half]:
+            for shape in [[], (0,), (0, 3), (4,), (4, 3), (5, 4, 3)]:
+                for contiguous in [True, False]:
+                    helper(shape, dtype, contiguous)
 
     def test_gelu(self):
         def _test_gelu(n, m, dtype, contiguous, atol=None, rtol=None):
@@ -11414,6 +11473,9 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.batch_norm',
         'nn.functional.instance_norm',
         'round', 'xlogy', 'addcmul',
+        'nn.functional.cross_entropy',
+        'nn.functional.binary_cross_entropy',
+        'nn.functional.nll_loss',
         'nn.functional.max_pool2d',
         'nn.functional.gelu',
         'nn.functional.glu',

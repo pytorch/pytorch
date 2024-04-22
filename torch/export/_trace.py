@@ -36,6 +36,7 @@ from torch._guards import detect_fake_mode
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch._utils_internal import log_export_usage
 from torch.export.exported_program import OutputKind
+from torch.fx._utils import first_call_function_nn_module_stack
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     free_unbacked_symbols,
@@ -43,6 +44,7 @@ from torch.fx.experimental.symbolic_shapes import (
     ShapeEnv,
 )
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
+from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.utils._pytree import TreeSpec
 from torch.utils._sympy.value_ranges import ValueRangeError
 
@@ -1061,6 +1063,12 @@ def _export(
             ),
             example_inputs=(args, kwargs),
             constants=ep_non_strict.constants,
+        )
+        insert_deferred_runtime_asserts(
+            exported_program.graph_module,
+            fake_mode.shape_env,
+            f"non strict exported program: {first_call_function_nn_module_stack(exported_program.graph)}",
+            export=True,
         )
         return exported_program
 
