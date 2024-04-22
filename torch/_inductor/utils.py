@@ -138,7 +138,7 @@ def do_bench_using_profiling(fn: Callable[[], Any], warmup=25, rep=100) -> float
     log.debug("profiling time breakdown")
     log.debug(actual_events.table(row_limit=-1))
 
-    res = sum(event.cuda_time_total for event in actual_events) / 1000.0 / n_repeat
+    res = sum(event.device_time_total for event in actual_events) / 1000.0 / n_repeat
     log.debug("profiling results: %s ms", res)
     return res
 
@@ -1560,6 +1560,36 @@ def use_scatter_fallback(
         or (reduction_type == reduce_ty and self_dtype in {torch.bool, torch.int64})
         or torch.are_deterministic_algorithms_enabled()
     )
+
+
+def dump_node_schedule(node_schedule):
+    """
+    An API that can be used in pdb to dump a node_schedule.
+    Right mainly dump the read/write dependencies but can add more as needed.
+    """
+    from torch._inductor.codegen.triton import DisableReduction, EnableReduction
+    from torch._inductor.scheduler import SchedulerNode
+
+    print(f"Node schedule with {len(node_schedule)} nodes")
+    for idx, node in enumerate(node_schedule):
+        print(f" {idx:3}:")
+        if node is EnableReduction:
+            print("enable reduction")
+        elif node is DisableReduction:
+            print("disable reduction")
+        elif isinstance(node, SchedulerNode):
+            is_red = node.is_reduction()
+            print(f"{'red' if is_red else 'pw'} scheduler node")
+            if is_red:
+                print(f"original reduction hint {node.node.data.reduction_hint}")  # type: ignore[attr-defined]
+            print("ReadDep:")
+            for dep in node.read_writes.reads:
+                print(dep)
+            print("WriteDep:")
+            for dep in node.read_writes.writes:
+                print(dep)
+        else:
+            raise RuntimeError(f"Unrecognized node type: {type(node)}")
 
 
 def tensor_is_aligned(tensor: torch.Tensor):
