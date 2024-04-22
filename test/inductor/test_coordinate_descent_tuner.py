@@ -5,7 +5,6 @@ import unittest
 from unittest import mock
 
 import torch
-from torch._inductor.runtime.hints import TRITON_MAX_BLOCK
 
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import IS_LINUX
@@ -105,7 +104,7 @@ class TestCoordinateDescentTuner(TestCase):
 
         tuner = CoordescTuner(size_hints=size_hints)
 
-        max_block = TRITON_MAX_BLOCK
+        max_block = config.triton.max_block
         self.assertFalse(tuner.value_too_large("XBLOCK", max_block["X"]))
         self.assertTrue(tuner.value_too_large("XBLOCK", max_block["X"] * 2))
         self.assertFalse(tuner.value_too_large("RBLOCK", max_block["R"]))
