@@ -99,6 +99,7 @@ from torch._guards import TracingContext
 from torch._subclasses.meta_utils import is_sparse_compressed
 from torch._utils_internal import log_compilation_event
 
+from torch.fx._utils import _format_graph_code, lazy_format_graph_code
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._triton import has_triton, has_triton_package
 
@@ -2030,26 +2031,6 @@ def tensor_always_has_static_shape(
     if not is_tensor:
         return True, TensorStaticReason.NOT_TENSOR
     return False, None
-
-
-def lazy_format_graph_code(name, gm, maybe_id=None):
-    def format_name():
-        if maybe_id is not None:
-            return f"{name} {maybe_id}"
-        else:
-            return name
-
-    return LazyString(
-        lambda: _format_graph_code(
-            f"===== {format_name()} =====\n",
-            gm.forward.__code__.co_filename,
-            gm.print_readable(print_output=False),
-        )
-    )
-
-
-def _format_graph_code(name, filename, graph_str):
-    return f"TRACED GRAPH\n {name} {filename} {graph_str}\n"
 
 
 def lazy_format_graph_tabular(fn_name, gm):
