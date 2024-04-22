@@ -1643,9 +1643,12 @@ class AutogradFunctionApplyVariable(VariableTracker):
         # Remove bwd output for non-Tensor args.
         output_proxy = bwd_proxy_of_fwd_freevars
         if isinstance(output_proxy, (tuple, list)):
-            new_bwd_graph_outputs = tuple(
-                [x for x, mask in zip(output_proxy, args_tensor_mask) if mask]
-            )
+            new_bwd_graph_outputs = ()
+            for x, mask in zip(output_proxy, args_tensor_mask):
+                if mask:
+                    new_bwd_graph_outputs = new_bwd_graph_outputs + (x,)
+                else:
+                    assert x is None, f"Grad of non-Tensor arg {x} is not None."
         else:
             new_bwd_graph_outputs = output_proxy
 
