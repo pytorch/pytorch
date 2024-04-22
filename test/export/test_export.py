@@ -125,10 +125,15 @@ def foo_functional(x):
 
 
 NON_STRICT_SUFFIX = "_non_strict"
+RETRACEABILITY_SUFFIX = "_retraceability"
 
 
 def is_non_strict_test(test_name):
     return test_name.endswith(NON_STRICT_SUFFIX)
+
+
+def is_retracebility_test(test_name):
+    return test_name.endswith(RETRACEABILITY_SUFFIX)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
@@ -1051,7 +1056,6 @@ class TestExport(TestCase):
         ):
             _ = export(foo, inputs, dynamic_shapes=((dx, 9), (dy, 4), (3, 3)))
 
-    @testing.expectedFailurePreDispatchRunDecomp  # T183703911
     def test_dim_1_2(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -1069,7 +1073,6 @@ class TestExport(TestCase):
         self.assertEqual(vr.lower, 1)
         self.assertEqual(vr.upper, 2)
 
-    @testing.expectedFailurePreDispatchRunDecomp  # T183703911
     def test_derived_dim_1_2(self):
         class Bar(torch.nn.Module):
             def forward(self, x, y):
@@ -2250,7 +2253,6 @@ def forward(self, arg_0):
             )
         )
 
-    @testing.expectedFailureNonStrict  # non-strict does not add deferred runtime assertions
     @testing.expectedFailureSerDerPreDispatch  # .item call becomes aten.item in predispatch IR
     @testing.expectedFailurePreDispatchRunDecomp  # assert name is still referring to item
     def test_automatic_constrain_size(self):
@@ -2261,10 +2263,13 @@ def forward(self, arg_0):
 
         ep = export(M(), (torch.tensor(1), torch.ones(4, 5)))
 
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"_local_scalar_dense is outside of inline constraint \[0, 9223372036854775806\]",
-        ):
+        if is_non_strict_test(self._testMethodName):
+            error_msg = r"Runtime assertion failed for _local_scalar_dense >= 0"
+        elif is_retracebility_test(self._testMethodName):
+            error_msg = r"Runtime assertion failed for _local_scalar_dense_default >= 0"
+        else:
+            error_msg = "_local_scalar_dense is outside of inline constraint \[0, 9223372036854775806\]."
+        with self.assertRaisesRegex(RuntimeError, error_msg):
             _ = ep.module()(torch.tensor(-1), torch.randn(4, 5))
 
         self.assertTrue(
@@ -2618,6 +2623,17 @@ def forward(self, arg_0):
         self.assertTrue(
             torch.allclose(ep.module()(torch.ones(6, 4)), Foo()(torch.ones(6, 4)))
         )
+
+    def test_aten_lift_fresh_copy(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aten.lift_fresh_copy(x)
+
+        ep = export(M(), (torch.ones(6, 4),))
+        found = False
+
+        op = "torch.ops.aten.clone.default"
+        FileCheck().check_count(op, 1, exactly=True).run(ep.graph_module.code)
 
     def test_cond_buffers(self):
         class M(torch.nn.Module):

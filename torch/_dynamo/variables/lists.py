@@ -272,7 +272,7 @@ class ListVariable(CommonListMethodsVariable):
         return list
 
     def __repr__(self):
-        return f"{self.__class__.__name__}(length={len(self.items)}"
+        return f"{self.__class__.__name__}(length={len(self.items)})"
 
     def reconstruct(self, codegen):
         codegen.foreach(self.items)
@@ -586,8 +586,7 @@ class NamedTupleVariable(TupleVariable):
         return self.items[fields.index(name)]
 
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
-        fields = namedtuple_fields(self.tuple_cls)
-        return variables.ConstantVariable.create(name in fields)
+        return variables.ConstantVariable.create(hasattr(self.tuple_cls, name))
 
 
 class SliceVariable(BaseListVariable):
