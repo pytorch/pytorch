@@ -866,7 +866,7 @@ def _get_updated_range_constraints(
     # runtime_var_to_range will make a difference compated to var_to_range.
     # e.g. [2, oo) -> [0, oo)
     for k, v in shape_env.var_to_range.items():
-        if k not in shape_env.replacements:
+        if k not in shape_env.replacements and k not in range_constraints:
             range_constraints[k] = v
     return range_constraints
 
