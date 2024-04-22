@@ -1242,7 +1242,7 @@ class InstructionTranslatorBase(
             if (
                 isinstance(val, BuiltinVariable) and val.fn is StopIteration
             ) or isinstance(val, variables.StopIterationVariable):
-                raise exc.UserStopIteration()
+                raise exc.UserStopIteration
             unimplemented(f"raise {exc}")
         else:
             unimplemented("raise ... from ...")
@@ -2231,7 +2231,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             return self.f_locals[source.local_name]
         if isinstance(source, GlobalSource):
             return self.f_globals[source.global_name]
-        raise KeyError()
+        raise KeyError
 
     def run(self):
         super().run()
@@ -2270,11 +2270,24 @@ class InstructionTranslator(InstructionTranslatorBase):
             return [create_instruction("RETURN_CONST", argval=inst.argval)]
 
         reads = livevars_analysis(self.instructions, inst)
-        argnames = tuple(
+        all_argnames = tuple(
             k
             for k in self.symbolic_locals.keys()
             if k in reads and k not in self.cell_and_freevars()
         )
+        # NOTE: do not use isinstance, since it realizes lazy VT's
+        argnames = tuple(
+            k
+            for k in all_argnames
+            if not type.__instancecheck__(NullVariable, self.symbolic_locals[k])
+        )
+        argnames_null = tuple(
+            k
+            for k in all_argnames
+            if type.__instancecheck__(NullVariable, self.symbolic_locals[k])
+        )
+        if sys.version_info < (3, 12):
+            assert len(argnames_null) == 0, "variables should not be NULL in < 3.12"
 
         cg = PyCodegen(self)
 
@@ -2312,6 +2325,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             tuple(b.target.offset for b in self.block_stack),
             stack_len,
             argnames,
+            argnames_null,
             tuple(b.resume_fn() for b in self.block_stack),
             tuple(null_idxes),
         )
@@ -2374,7 +2388,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             else create_instruction("RETURN_CONST", argval=inst.argval)
         )
         self.output.add_output_instructions([return_inst])
-        raise ReturnValueOp()
+        raise ReturnValueOp
 
     def RETURN_VALUE(self, inst):
         self._return(inst)
@@ -2623,7 +2637,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     self.output.root_tx.mutated_closure_cell_contents.add(
                         maybe_cell.source.name()
                     )
-                    raise exc.UnspecializeRestartAnalysis()
+                    raise exc.UnspecializeRestartAnalysis
                 unimplemented("write to __closure__ while inlining")
 
     def LOAD_DEREF(self, inst):
@@ -2662,12 +2676,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def RETURN_VALUE(self, inst):
         self.symbolic_result = self.pop()  # type: ignore[assignment]
         self.instruction_pointer = None
-        raise ReturnValueOp()
+        raise ReturnValueOp
 
     def RETURN_CONST(self, inst):
         self.symbolic_result = self._load_const(inst)
         self.instruction_pointer = None
-        raise ReturnValueOp()
+        raise ReturnValueOp
 
 
 class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
