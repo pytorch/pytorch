@@ -199,6 +199,10 @@ class autocast:
             assert dtype is not None
             return
         self.device = device_type
+        if not torch._C._is_autocast_available(self.device):
+            raise RuntimeError(
+                f"User specified an unsupported autocast device_type '{self.device}'"
+            )
         self.custom_backend_name = torch._C._get_privateuse1_backend_name()
         self.fast_dtype = torch.get_autocast_dtype(self.device)
         if self.device == self.custom_backend_name:
