@@ -66,6 +66,14 @@ struct TORCH_API XPUHooksInterface {
   virtual void deviceSynchronize(DeviceIndex /*device_index*/) const {
     TORCH_CHECK(false, "Cannot synchronize XPU device without ATen_xpu library.");
   }
+
+  virtual Allocator* getPinnedMemoryAllocator() const  {
+    TORCH_CHECK(false, "Cannot get XPU pinned memory allocator without ATen_xpu library.");
+  }
+
+  virtual bool isPinnedPtr(const void* /*data*/) const {
+    return false;
+  }
 };
 
 struct TORCH_API XPUHooksArgs {};

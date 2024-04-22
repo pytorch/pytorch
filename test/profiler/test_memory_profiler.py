@@ -103,7 +103,6 @@ class TestIdentifyGradients(TestCase):
         grad_tensor: torch.Tensor,
         parameter: Optional[torch.Tensor] = None,
     ) -> None:
-
         # This is not an exhaustive check, but for the purpose of unit testing
         # it is sufficient.
         def key_matches_tensor(key, tensor) -> bool:
@@ -219,7 +218,6 @@ class TestIdentifyGradients(TestCase):
         check(cold_start=False)
 
     def _test_extract_gradients_from_optimizer(self, set_to_none: bool) -> None:
-
         x = torch.ones((1,))
         w0 = torch.ones((1,), requires_grad=True)
         w1 = torch.ones((1,), requires_grad=True)
@@ -844,14 +842,19 @@ class TestMemoryProfilerE2E(TestCase):
             if key.storage.allocation_id == max(ids | {-1})
         }
 
-    def _run_and_check_parameters_and_gradients(self, inner_fn, model, grads_none: bool = False):
-
+    def _run_and_check_parameters_and_gradients(
+        self, inner_fn, model, grads_none: bool = False
+    ):
         with profile() as prof:
             inner_fn()
 
         memory_profile = prof._memory_profile()
 
-        def assert_category(t: torch.Tensor, category: _memory_profiler.Category, should_be_none: bool = False):
+        def assert_category(
+            t: torch.Tensor,
+            category: _memory_profiler.Category,
+            should_be_none: bool = False,
+        ):
             if should_be_none:
                 assert t is None, "tensor should be None but is not."
                 return
@@ -940,7 +943,9 @@ class TestMemoryProfilerE2E(TestCase):
         # If we profile the first step then gradients will not have been
         # created when we call `model.forward`, so if we don't call `.backward`
         # then gradients are never created.
-        self._run_and_check_parameters_and_gradients(inner_fn=fwd_only, model=model, grads_none=True)
+        self._run_and_check_parameters_and_gradients(
+            inner_fn=fwd_only, model=model, grads_none=True
+        )
 
         # On the first step we must rely on `AccumulateGrad`, since gradients
         # did not exist when `model.forward` was called.
@@ -1461,7 +1466,6 @@ class TestMemoryProfilerE2E(TestCase):
                 return f"{size / 1024:3.1f} kB"
             return f"{size // 1024} kB"
 
-
         # We generate sequential IDs for Tensors; however platforms vary
         # slightly in the exact computation executed. If this results in
         # tensor creation the IDs will be shifted and the unit test will fail.
@@ -1477,7 +1481,6 @@ class TestMemoryProfilerE2E(TestCase):
             f"{action.name.lower():<25}  {format_action(action, key, version):<25}  "
             f"{id_for_testing(key):>3}(v{version}) {format_size(size):>15}"
             for _, action, (key, version), size in prof._memory_profile().timeline
-
             # We generally don't care about tiny allocations during memory
             # profiling and they add a lot of noise to the unit test.
             if size > 1024
@@ -1547,7 +1550,8 @@ class TestMemoryProfilerE2E(TestCase):
             destroy                    ???                         29(v1)         1024 kB
             destroy                    GRADIENT                    16(v0)          128 kB
             destroy                    GRADIENT                    17(v0)            2 kB
-            destroy                    GRADIENT                    13(v0)         1024 kB""")
+            destroy                    GRADIENT                    13(v0)         1024 kB""",
+        )
 
     def test_memory_timeline_no_id(self) -> None:
         # On CPU the default behavior is to simply forward to malloc. That
@@ -1594,7 +1598,9 @@ class TestMemoryProfilerE2E(TestCase):
         if not torch.cuda.is_available():
             expected = expected[2:]
             for event in expected:
-                self.assertTrue(event in actual, f"event: {event} was not found in actual.")
+                self.assertTrue(
+                    event in actual, f"event: {event} was not found in actual."
+                )
         else:
             self.assertEqual(
                 actual,
