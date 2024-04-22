@@ -20,12 +20,6 @@ inputs:
     description: |
       If this is set, our linter will use this to make sure that every other
       job with the same `sync-tag` is identical.
-  timeout-minutes:
-    required: false
-    type: number
-    default: 240
-    description: |
-      Set the maximum (in minutes) how long the workflow should take to finish
   use-gha:
     required: false
     type: string
@@ -150,14 +144,6 @@ runs:
         github-token: ${{ inputs.GITHUB_TOKEN }}
         test-matrix: ${{ inputs.test-matrix }}
         job-name: ${{ steps.get-job-id.outputs.job-name }}
-
-#    - name: Set Test step time
-#      id: test-timeout
-#      shell: bash
-#      env:
-#        JOB_TIMEOUT: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}
-#      run: |
-#        echo "timeout=$((JOB_TIMEOUT-30))" >> "${GITHUB_OUTPUT}"
 
     - name: Test
       id: test

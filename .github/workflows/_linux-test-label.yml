@@ -77,7 +77,6 @@ jobs:
           test-matrix: ${{ inputs.test-matrix }}
           docker-image: ${{ inputs.docker-image }}
           sync-tag: ${{ inputs.sync-tag }}
-          timeout-minutes: ${{ inputs.timeout-minutes }}
           use-gha: ${{ inputs.use-gha }}
           dashboard-tag: ${{ inputs.dashboard-tag }}
           s3-bucket: ${{ inputs.s3-bucket }}
