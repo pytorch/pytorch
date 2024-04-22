@@ -1,4 +1,5 @@
 import collections
+import typing
 from dataclasses import fields
 from enum import auto, Enum
 
@@ -89,3 +90,32 @@ class AutotuneHint(Enum):
     # which isn't valid python.
     # Enum.__str__ will just return "AutotuneHint.ELEMENTS_PER_WARP_32".
     __repr__ = Enum.__str__
+
+
+class DeviceProperties(typing.NamedTuple):
+    """Copy device properties into a data structure not requiring torch to be imported"""
+
+    type: str  # type: ignore[assignment]
+    index: int  # type: ignore[assignment]
+    cc: int
+    major: int
+    regs_per_multiprocessor: int
+    max_threads_per_multi_processor: int
+    multi_processor_count: int
+
+    @classmethod
+    def create(cls, device):
+        import torch
+        from torch._dynamo.device_interface import get_interface_for_device
+
+        device_interface = get_interface_for_device(device)
+        props = device_interface.get_device_properties(device)
+        return cls(
+            type=device.type if torch.version.hip is None else "hip",
+            index=device.index,
+            cc=device_interface.get_compute_capability(device),
+            major=props.major,
+            regs_per_multiprocessor=props.regs_per_multiprocessor,
+            max_threads_per_multi_processor=props.max_threads_per_multi_processor,
+            multi_processor_count=props.multi_processor_count,
+        )
