@@ -1,5 +1,5 @@
 # Owner(s): ["module: dynamo"]
-
+# flake8: noqa: B950
 import copy
 import math
 
