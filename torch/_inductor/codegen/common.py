@@ -1348,9 +1348,11 @@ class Kernel(CodeGen):
             self.current_node = prior
 
     @contextlib.contextmanager
-    def swap_buffers(self, lb, cb=None, sb=None):
+    def swap_buffers(self, lb, cb=None, sb=None, cse_cache=None):
         if cb is None:
             cb = lb
+        if cse_cache is None:
+            cse_cache = {}
         loads = self.loads
         compute = self.compute
         stores = self.stores
@@ -1359,8 +1361,7 @@ class Kernel(CodeGen):
         self.compute = cb
         self.stores = sb
         self.cse = cse.clone()
-        self.cse.cache = cse.cache
-        pass
+        self.cse.cache = cse_cache
         try:
             yield
         finally:
