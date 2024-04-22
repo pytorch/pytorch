@@ -1125,6 +1125,19 @@ class DeviceCachingAllocator {
             device_free);
       }
 
+      int64_t allocated_in_private_pools = 0;
+      get_size_block = [](const BlockPool& pool) {
+        int64_t res = 0;
+        for (const auto& block : pool.blocks) {
+          res += block->size;
+        }
+        return res;
+      };
+      for (const auto& p : graph_pools) {
+        allocated_in_private_pools += get_size_block(p.second->large_blocks);
+        allocated_in_private_pools += get_size_block(p.second->small_blocks);
+      }
+
       // "total capacity": total global memory on GPU
       // "allowed": memory is allowed to use, which set by fraction.
       // "already allocated": memory allocated by the program using the
@@ -1157,9 +1170,12 @@ class DeviceCachingAllocator {
           " is free. ",
           proc_info,
           "Of the allocated memory ",
-          format_size(allocated_bytes),
-          " is allocated by PyTorch, and ",
-          format_size(reserved_bytes - allocated_bytes),
+          format_size(allocated_bytes + allocated_in_private_pools),
+          " is allocated by PyTorch, with ",
+          format_size(allocated_in_private_pools),
+          " allocated in private pools, and ",
+          format_size(
+              reserv ed_bytes - allocated_bytes - allocated_in_private_pools),
           " is reserved by PyTorch but unallocated.",
           " If reserved but unallocated memory is large try setting",
           " PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid"
