@@ -564,6 +564,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._get_autograd_fallback_mode",
         "torch._C._get_backcompat_broadcast_warn",
         "torch._C._get_backcompat_keepdim_warn",
+        "torch._C._get_blas_preferred_backend",
         "torch._C._get_caught_jit_exception_class_name",
         "torch._C._get_caught_jit_exception_original_msg",
         "torch._C._get_constant_bool_symnode",
@@ -1092,6 +1093,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._set_autograd_fallback_mode",
         "torch._C._set_backcompat_broadcast_warn",
         "torch._C._set_backcompat_keepdim_warn",
+        "torch._C._set_blas_preferred_backend",
         "torch._C._set_cached_tensors_enabled",
         "torch._C._set_check_sparse_tensor_invariants",
         "torch._C._set_conj",
@@ -2385,6 +2387,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.backends.cuda.mem_efficient_sdp_enabled",
         "torch.backends.cuda.cudnn_sdp_enabled",
         "torch.backends.cuda.enable_cudnn_sdp",
+        "torch.backends.cuda.preferred_blas_library",
         "torch.backends.cuda.preferred_linalg_library",
         "torch.backends.cuda.sdp_kernel",
         "torch.backends.cudnn._init",
@@ -3064,7 +3067,7 @@ def is_callable_disallowed(obj) -> bool:
 
 def is_forbidden(obj) -> bool:
     _maybe_init_lazy_module(obj)
-    return getattr(obj, "_dynamo_forbidden", False)
+    return inspect.getattr_static(obj, "_dynamo_forbidden", False)
 
 
 def is_builtin_callable(obj) -> bool:
@@ -3233,17 +3236,19 @@ if torch.distributed.is_available():
 
 @functools.lru_cache(None)
 def get_legacy_mod_inlinelist():
-    inlinelist = set()
-    for m in LEGACY_MOD_INLINELIST:
-        inlinelist.add(_module_dir(torch) + m[len("torch.") :].replace(".", "/"))
+    inlinelist = {
+        _module_dir(torch) + m[len("torch.") :].replace(".", "/")
+        for m in LEGACY_MOD_INLINELIST
+    }
     return inlinelist
 
 
 @functools.lru_cache(None)
 def get_mod_inlinelist():
-    inlinelist = set()
-    for m in MOD_INLINELIST:
-        inlinelist.add(_module_dir(torch) + m[len("torch.") :].replace(".", "/"))
+    inlinelist = {
+        _module_dir(torch) + m[len("torch.") :].replace(".", "/")
+        for m in MOD_INLINELIST
+    }
     return inlinelist
 
 
