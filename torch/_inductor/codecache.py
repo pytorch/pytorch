@@ -34,13 +34,14 @@ from ctypes import c_void_p, cdll, CDLL
 from functools import partial
 from pathlib import Path
 from threading import Thread
-from time import sleep, time
+from time import sleep, time, time_ns
 from types import ModuleType
 from typing import (
     Any,
     Callable,
     cast,
     Dict,
+    Generator,
     List,
     Optional,
     Set,
@@ -716,15 +717,13 @@ class FxGraphCache:
     def _lookup_graph(
         key: str,
         example_inputs: List[torch.Tensor],
+        local,
+        remote_cache,
     ) -> Optional[CompiledFxGraph]:
         """
         Lookup a compiled graph in the cache by key. On a hit, return the
         deserialized CompiledFxGraph object. On a miss, return None.
         """
-        subdir = FxGraphCache._get_tmp_dir_for_key(key)
-        if not os.path.exists(subdir):
-            return None
-
         shape_env = FxGraphCache._get_shape_env()
         assert shape_env is not None
 
@@ -732,14 +731,22 @@ class FxGraphCache:
         assert all(has_hint(s) for s in symints)
         hints = [hint_int(s) for s in symints]
 
+        def iterate_over_candidates() -> Generator[CompiledFxGraph]:
+            if local:
+                subdir = FxGraphCache._get_tmp_dir_for_key(key)
+                if os.path.exists(subdir):
+                    for path in sorted(os.listdir(subdir)):
+                        with open(os.path.join(subdir, path), "rb") as f:
+                            yield pickle.load(f)
+            if remote_cache:
+                if (data := remote_cache.get(key)) is not None:
+                    yield pickle.loads(data)
+
         # Iterate over any entries in the subdir for this key and evaluate
         # their guards to determine whether there's a hit.
         graph = None
 
-        for path in sorted(os.listdir(subdir)):
-            with open(os.path.join(subdir, path), "rb") as f:
-                candidate: CompiledFxGraph = pickle.load(f)
-
+        for candidate in iterate_over_candidates():
             if not candidate.guards_expr:
                 # No guards to evaluate, so this is a hit.
                 graph = candidate
@@ -771,6 +778,9 @@ class FxGraphCache:
         artifact_path = get_path(graph.cache_key, "py")[2]
         if not os.path.exists(artifact_path):
             counters["inductor"]["fxgraph_lookup_write_file"] += 1
+            pathlib.Path(os.path.dirname(artifact_path)).mkdir(
+                parents=True, exist_ok=True
+            )
             write_atomic(artifact_path, graph.source_code)
         try:
             graph.current_callable = PyCodeCache.load_by_key_path(
@@ -804,7 +814,12 @@ class FxGraphCache:
 
     @staticmethod
     def _save_graph(
-        key: str, compiled_graph: CompiledFxGraph, example_inputs: List[torch.Tensor]
+        key: str,
+        compiled_graph: CompiledFxGraph,
+        example_inputs: List[torch.Tensor],
+        time_taken_ns,
+        local,
+        remote_cache,
     ):
         """
         Store a serialized CompiledFxGraph on disk.
@@ -833,15 +848,27 @@ class FxGraphCache:
             counters["inductor"]["fxgraph_cache_pickle_error"] += 1
             return
 
-        subdir = FxGraphCache._get_tmp_dir_for_key(key)
-        if not os.path.exists(subdir):
-            os.makedirs(subdir, exist_ok=True)
+        if local:
+            subdir = FxGraphCache._get_tmp_dir_for_key(key)
+            if not os.path.exists(subdir):
+                os.makedirs(subdir, exist_ok=True)
 
-        # Use a hash of the serialized CompiledFxGraph to get a unique file
-        # name. The specific name doesn't matter since a lookup involves
-        # iterating over all entries in the parent subdir.
-        path = os.path.join(subdir, sha256_hash(content))
-        write_atomic(path, content)
+            # Use a hash of the serialized CompiledFxGraph to get a unique file
+            # name. The specific name doesn't matter since a lookup involves
+            # iterating over all entries in the parent subdir.
+            path = os.path.join(subdir, sha256_hash(content))
+            write_atomic(path, content)
+
+        if remote_cache:
+            cache_data = (
+                {
+                    "data": content,
+                    "time_taken_ms": time_taken_ns // 1000000,  # Convert from NS to MS
+                }
+                if config.is_fbcode()
+                else content
+            )
+            remote_cache.put(key, cache_data)
 
     @staticmethod
     def _check_can_cache(gm: torch.fx.GraphModule):
@@ -871,23 +898,55 @@ class FxGraphCache:
         gm: torch.fx.GraphModule,
         example_inputs: List[torch.Tensor],
         fx_kwargs: Dict[str, Any],
+        local: bool,
+        remote: bool,
     ):
         """
         Load a compiled graph from the cache. If a cached entry does not exist,
         compile the graph and save it to the cache.
         """
 
+        assert local or remote, "at least one of them needs to be enabled"
         compiled_graph = None
         try:
             FxGraphCache._check_can_cache(gm)
             key = compiled_fx_graph_hash(gm, example_inputs, fx_kwargs)
 
-            compiled_graph = FxGraphCache._lookup_graph(key, example_inputs)
+            remote_cache = None
+            if remote:
+                cache_id = "fx-graph-v1-testing2"
+                try:
+                    import triton
+
+                    if config.is_fbcode():
+                        remote_cache = triton.runtime.fb_memcache.FbMemcacheRemoteFxGraphCacheBackend(
+                            cache_id
+                        )
+                    else:
+                        remote_cache = triton.runtime.cache.RedisRemoteCacheBackend(
+                            cache_id
+                        )
+                except Exception:
+                    remote_cache = None
+                    log.warning("Unable to create a remote cache", exc_info=True)
+
+            compiled_graph = FxGraphCache._lookup_graph(
+                key, example_inputs, local, remote_cache
+            )
             if compiled_graph is None:
                 log.debug("fx graph cache miss for key %s", key)
                 counters["inductor"]["fxgraph_cache_miss"] += 1
+                start_time = time_ns()
                 compiled_graph = compile_fx_fn(gm, example_inputs, **fx_kwargs)
-                FxGraphCache._save_graph(key, compiled_graph, example_inputs)
+                time_taken_ns = time_ns() - start_time
+                FxGraphCache._save_graph(
+                    key,
+                    compiled_graph,
+                    example_inputs,
+                    time_taken_ns,
+                    local,
+                    remote_cache,
+                )
             else:
                 log.debug("fx graph cache hit for key %s", key)
                 counters["inductor"]["fxgraph_cache_hit"] += 1

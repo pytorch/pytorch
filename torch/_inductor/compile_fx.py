@@ -381,6 +381,21 @@ def fake_tensor_prop(
     return fake_mode
 
 
+def should_use_remote_fx_graph_cache():
+    if config.fx_graph_remote_cache:
+        return True
+    if not config.is_fbcode():
+        return False
+    if torch.version.hip is not None:
+        return False
+
+    from triton.runtime.fb_memcache import MEMCACHE_VERSION
+
+    return MEMCACHE_VERSION >= torch._utils_internal.justknobs_getval_int(
+        "pytorch/remote_cache:pytorch/remote_cache:fx_graph_memcache_version"
+    )
+
+
 # pass config dict back to user
 def get_patched_config_dict(config_patches=None) -> Dict[str, Any]:
     with config.patch(config_patches):
@@ -469,11 +484,19 @@ def compile_fx_inner(
 
     start = time.time()
 
-    if config.fx_graph_cache and not aot_mode:
+    compiled_graph = None
+    fx_graph_remote_cache = should_use_remote_fx_graph_cache()
+    if (config.fx_graph_cache or fx_graph_remote_cache) and not aot_mode:
         compiled_graph = FxGraphCache.load(
-            fx_codegen_and_compile, gm, example_inputs, graph_kwargs
+            fx_codegen_and_compile,
+            gm,
+            example_inputs,
+            graph_kwargs,
+            local=config.fx_graph_cache,
+            remote=fx_graph_remote_cache,
         )
-    else:
+
+    if compiled_graph is None:
         compiled_graph = fx_codegen_and_compile(
             gm, example_inputs, **graph_kwargs  # type: ignore[arg-type]
         )

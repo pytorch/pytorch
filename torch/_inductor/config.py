@@ -24,6 +24,9 @@ verbose_progress = False
 # use fx aot graph codegen cache
 fx_graph_cache = os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE") == "1"
 
+# use fx aot graph codegen cache
+fx_graph_remote_cache = os.environ.get("TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE") == "1"
+
 # enable autotune local cache
 autotune_local_cache = True
 
