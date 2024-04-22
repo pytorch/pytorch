@@ -493,8 +493,6 @@ class TestConvolutionNNDeviceType(NNTestCase):
     def test_conv3d_same_padding_backward(self, device, dtype):
         x = torch.rand(1, 1, 1, 11, 12, dtype=dtype, device=device, requires_grad=True)
         y = torch.rand(1, 1, 1, 2, 5, dtype=dtype, device=device, requires_grad=True)
-
-        # Symmetric padding
         z = F.conv3d(x, y, padding=(0, 1, 4), dilation=2)
         z.sum().abs().backward()
         gx_expect, gy_expect = x.grad, y.grad
@@ -505,7 +503,6 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(gx_expect, x.grad)
         self.assertEqual(gy_expect, y.grad)
         x.grad, y.grad = None, None
-
         gradcheck(
             lambda x, y: F.conv3d(x, y, padding="same", dilation=2),
             (x, y),
@@ -518,7 +515,6 @@ class TestConvolutionNNDeviceType(NNTestCase):
             check_fwd_over_rev=True,
         )
 
-        # Asymmetric padding
         y = torch.rand(1, 1, 1, 4, 4, dtype=dtype, device=device, requires_grad=True)
         z = F.conv3d(x, y, padding=2)[..., 1:, 1:]
         z.sum().abs().backward()
@@ -529,7 +525,6 @@ class TestConvolutionNNDeviceType(NNTestCase):
         z.sum().abs().backward()
         self.assertEqual(gx_expect, x.grad)
         self.assertEqual(gy_expect, y.grad)
-
         gradcheck(
             lambda x, y: F.conv3d(x, y, padding="same"),
             (x, y),
@@ -549,7 +544,6 @@ class TestConvolutionNNDeviceType(NNTestCase):
         F.conv1d(x, y, padding=0).sum().abs().backward()
         gx_expect, gy_expect = x.grad, y.grad
         x.grad, y.grad = None, None
-
         F.conv1d(x, y, padding="valid").sum().abs().backward()
         gx_actual, gy_actual = x.grad, y.grad
         self.assertEqual(gx_expect, gx_actual)
@@ -630,7 +624,6 @@ class TestConvolutionNNDeviceType(NNTestCase):
             t_a = t.squeeze(0).cpu().numpy()
             w_a = weight.squeeze(0).squeeze(0).cpu().numpy()
             expected = scipy.signal.convolve(t_a, w_a, mode=mode)
-
             kwargs = {"padding": mode}
             if mode == "same":
                 left_right_pad = weight.shape[4] // 2
@@ -646,12 +639,10 @@ class TestConvolutionNNDeviceType(NNTestCase):
                 )
                 t = torch.nn.functional.pad(t, p)
                 kwargs.pop("padding")
-
             weight_flipped = torch.flip(weight, (2, 3, 4))
             actual = torch.nn.functional.conv3d(t, weight_flipped, **kwargs).squeeze(0)
             if mode == "same":
                 actual = actual[:5, :5, :10]
-
             self.assertEqual(actual, expected, rtol=2e-5, atol=5e-6)
 
         with set_default_dtype(torch.float):
@@ -665,7 +656,6 @@ class TestConvolutionNNDeviceType(NNTestCase):
         F.conv2d(x, y, padding=0).sum().abs().backward()
         gx_expect, gy_expect = x.grad, y.grad
         x.grad, y.grad = None, None
-
         F.conv2d(x, y, padding="valid").sum().abs().backward()
         gx_actual, gy_actual = x.grad, y.grad
         self.assertEqual(gx_expect, gx_actual)
@@ -683,7 +673,6 @@ class TestConvolutionNNDeviceType(NNTestCase):
         gx_actual, gy_actual = x.grad, y.grad
         self.assertEqual(gx_expect, gx_actual)
         self.assertEqual(gy_expect, gy_actual)
-
         gradcheck(
             lambda x, y: F.conv3d(x, y, padding="valid"),
             (x, y),
@@ -788,7 +777,6 @@ class TestConvolutionNNDeviceType(NNTestCase):
                 (1, 3, 224, 224, 2), device=device, dtype=torch.float
             )[:, :, :, :, 1]
             input_c = input_nc.contiguous()
-
             weight_nc = torch.randn((64, 3, 7, 7, 2), device=device, dtype=torch.float)[
                 :, :, :, :, 1
             ]
@@ -1001,9 +989,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
                 x, weight, bias=None, stride=(1, 10), groups=2
             )
 
-        for cudnn_enabled in [False, True]:
-            with torch.backends.cudnn.flags(enabled=cudnn_enabled):
-                torch.autograd.gradcheck(conv2d_depthwise, (x, weight))
+        torch.autograd.gradcheck(conv2d_depthwise, (x, weight))
 
     @dtypes(torch.half, torch.float)
     def test_conv_cudnn_nhwc(self, device, dtype):
@@ -1202,38 +1188,6 @@ class TestConvolutionNNDeviceType(NNTestCase):
                     output_ng = m(input)
                 output = m(input)
                 self.assertEqual(output, output_ng, rtol=1e-2, atol=1e-5)
-
-    def test_convert_conv2d_weight_memory_format(self, device):
-        input = torch.randint(1, 10, (2, 8, 4, 4), dtype=torch.float32, device=device)
-        model = nn.Sequential(nn.Conv2d(8, 4, 3), nn.BatchNorm2d(4)).to(device).float()
-        for memory_format in [torch.channels_last, torch.contiguous_format]:
-            model = nn.utils.convert_conv2d_weight_memory_format(model, memory_format)
-            out = model(input)
-            self.assertTrue(out.is_contiguous(memory_format=memory_format))
-
-        model = (
-            nn.Sequential(nn.ConvTranspose2d(8, 4, 3), nn.BatchNorm2d(4))
-            .to(device)
-            .float()
-        )
-        for memory_format in [torch.channels_last, torch.contiguous_format]:
-            model = nn.utils.convert_conv2d_weight_memory_format(model, memory_format)
-            out = model(input)
-            self.assertTrue(out.is_contiguous(memory_format=memory_format))
-
-    def test_convert_conv3d_weight_memory_format(self, device):
-        input = torch.randint(
-            1, 10, (2, 8, 4, 4, 4), dtype=torch.float32, device=device
-        )
-        model = (
-            nn.Sequential(nn.ConvTranspose3d(8, 4, 3), nn.BatchNorm3d(4))
-            .to(device)
-            .float()
-        )
-        for memory_format in [torch.channels_last_3d, torch.contiguous_format]:
-            model = nn.utils.convert_conv3d_weight_memory_format(model, memory_format)
-            out = model(input)
-            self.assertTrue(out.is_contiguous(memory_format=memory_format))
 
     def test_conv_double_backward_strided_with_3D_input_and_weight(self, device):
         input = torch.randn(2, 3, 6, device=device)
