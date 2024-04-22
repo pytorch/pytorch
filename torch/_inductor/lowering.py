@@ -2963,7 +2963,7 @@ def scatter(x, dim: int, index, src, **kwargs):
 
 
 def scatter_fallback(
-    fn,
+    op_overload: torch._ops.OpOverload,
     self,
     dim: int,
     index,
@@ -2974,7 +2974,7 @@ def scatter_fallback(
 ):
     src_is_tensor = isinstance(src, TensorBox)
     if use_scatter_fallback(
-        fn,
+        op_overload,
         reduce,
         self.get_dtype(),
         src.get_dtype() if src_is_tensor else type(src),
@@ -2982,8 +2982,7 @@ def scatter_fallback(
         src_is_tensor,
     ):
         ir.ScatterFallback(
-            V.graph.current_node.target,
-            fn,
+            op_overload,
             self,
             dim,
             index,
@@ -3000,18 +2999,18 @@ def scatter_fallback(
 def scatter_(self, dim: int, index, src, *, reduce: Optional[str] = None):
     assert reduce in {None, "add", "multiply"}
 
-    fallback_result = scatter_fallback(
-        "aten.scatter_", self, dim, index, src, reduce=reduce
-    )
-
-    if fallback_result:
-        return fallback_result
+    if reduce is None:
+        op_overload = getattr(aten.scatter_, V.graph.current_node.target._overloadname)  # type: ignore[union-attr]
+        fallback_result = scatter_fallback(
+            op_overload, self, dim, index, src, reduce=reduce
+        )
+        if fallback_result is not None:
+            return fallback_result
 
     if reduce == "add":
         reduce = "sum"
     elif reduce == "multiply":
         reduce = "prod"
-
     return scatter_reduce_(self, dim, index, src, reduce)
 
 
@@ -3034,8 +3033,12 @@ def scatter_reduce(x, dim: int, index, src, reduction_type, **kwargs):
 def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = True):
     assert reduce in {None, "sum", "prod", "mean", "amax", "amin"}
 
+    assert (
+        len(aten.scatter_reduce_.overloads()) == 1
+        and "two" in aten.scatter_reduce_.overloads()
+    ), "aten.scatter_reduce_.two is not the unique overload of aten.scatter_reduce_"
     fallback_result = scatter_fallback(
-        "aten.scatter_reduce_",
+        aten.scatter_reduce_.two,
         self,
         dim,
         index,
