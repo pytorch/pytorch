@@ -35,6 +35,7 @@ from .codegen.common import get_scheduling_for_device, Kernel
 from .comm_analysis import estimate_nccl_collective_runtime
 from .dependencies import Dep, MemoryDep, StarDep, WeakDep
 from .ir import ComputedBuffer, MultiOutput, MultiOutputLayout
+from .runtime.runtime_utils import green_text, red_text
 from .sizevars import SimplifyIndexing
 from .utils import (
     cache_on_self,
@@ -44,11 +45,9 @@ from .utils import (
     get_device_tflops,
     get_dtype_size,
     get_gpu_dram_gbps,
-    green_text,
     is_collective,
     is_gpu,
     is_wait,
-    red_text,
     sympy_product,
 )
 from .virtualized import V
@@ -355,7 +354,11 @@ class BaseSchedulerNode:
                 input_node: Optional[
                     BaseSchedulerNode
                 ] = self.scheduler.name_to_node.get(read.name)
-                if input_node and V.graph.wrapper_code.can_reuse(input_node, self):
+                if (
+                    input_node
+                    and V.graph.wrapper_code.can_reuse(input_node, self)
+                    and not isinstance(input_node, NopKernelSchedulerNode)
+                ):
                     assert input_node.users is not None
                     remaining_uses = [
                         x
@@ -1775,7 +1778,11 @@ class Scheduler:
         If config.benchmark_fusion is False, always return True.
         Otherwise, return True if fusion can brings speedup.
         """
-        if not config.benchmark_fusion:
+
+        is_multi_template = node1.is_template() and isinstance(
+            node1.get_template_node(), ir.MultiTemplateBuffer
+        )
+        if not config.benchmark_fusion and not is_multi_template:
             return True
 
         if (
@@ -1841,12 +1848,18 @@ class Scheduler:
             min_ms_fused = float("inf")
             ms_fused_choice = None
 
+            triton_choices = 0
+
             for choice, unfused_time in choice_timings.items():
                 if not isinstance(choice, torch._inductor.ir.TritonTemplateCallerBase):
                     continue
 
                 if unfused_time >= ms1 + ms2:
                     continue
+
+                triton_choices += 1
+                if triton_choices > config.max_epilogue_benchmarked_choices:
+                    break
 
                 # TODO - parallel compile triton templates
                 # TODO - should prune/skip choices that are not within certain % of best choice
@@ -2284,9 +2297,7 @@ class Scheduler:
         Populate node.last_usage recursively (also for the nodes within a FusedSchedulerNode)
         """
 
-        future_used_buffers = set()
-        for node_name in V.graph.get_output_names():
-            future_used_buffers.add(node_name)
+        future_used_buffers = set(V.graph.get_output_names())
 
         for node in reversed(self.nodes):
             node.set_last_usage(future_used_buffers, self.mutation_real_name)
@@ -2501,18 +2512,9 @@ class Scheduler:
 
         self.flush()
 
-    def is_unaligned_buffer(self, buf_name):
-        if buf_name in V.graph.graph_inputs:
-            return not config.assume_aligned_inputs
-        if buf_name in V.graph.constants:
-            # all constants are assumed to be aligned
-            return False
+    def get_buffer_layout(self, buf_name: str) -> ir.Layout:
         node = self.name_to_node[buf_name]
-        layout = node.node.get_layout()
-        if isinstance(layout, ir.NonOwningLayout):
-            return not layout.maybe_guard_aligned()
-        else:
-            return False
+        return node.node.get_layout()
 
 
 class BaseScheduling:
@@ -2520,13 +2522,13 @@ class BaseScheduling:
         """
         Check whether node1 and node2 can be vertically fused or not.
         """
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def can_fuse_horizontal(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode):
         """
         Check whether node1 and node2 can be horizontally fused or not.
         """
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def fuse(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode):
         """
@@ -2541,7 +2543,7 @@ class BaseScheduling:
         """
         Process the iteration sizes in case a transformation needs to be applied.
         """
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def codegen_template(
         self, template_node: SchedulerNode, epilogue_nodes: List[SchedulerNode]
@@ -2552,19 +2554,19 @@ class BaseScheduling:
         This function is only available for triton now. If the third-party backend behaves as a sub-class
         of TritonScheduling, it can override it or reuse it.
         """
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def codegen_node(self, node: Union[FusedSchedulerNode, SchedulerNode]):
         """
         Generate a kernel given a list of pre-fused nodes.
         """
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def codegen_sync(self):
         """
         Generate synchronization code for the kernel. This method depends on the hardware characteristics.
         """
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def ready_to_flush(self) -> bool:
         """
@@ -2577,14 +2579,14 @@ class BaseScheduling:
         """
         Flush the generated kernel and python wrapper code to the source code file.
         """
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def benchmark_fused_nodes(self, nodes):
         """
         Benchmark fused list of nodes and return the execution time
         in milliseconds on randomly generated inputs.
         """
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def get_fusion_pair_priority(self, node1, node2) -> int:
         """

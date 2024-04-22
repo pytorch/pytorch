@@ -173,6 +173,7 @@ manual_torch_name_rule_map = {
     "torch.nn.Parameter": TorchInGraphFunctionVariable,
     "torch._nested_tensor_from_mask": SkipFunctionVariable,
     "torch._nested_from_padded": SkipFunctionVariable,
+    "torch.nested.nested_tensor_from_jagged": UserFunctionVariable,
     # symbol operators implemented in Python
     "torch.sym_not": TorchInGraphFunctionVariable,
     "torch.sym_float": TorchInGraphFunctionVariable,
@@ -3035,10 +3036,6 @@ def add_module_init_func(name: str, init_func: Callable[[], None]) -> None:
     """Register a module without eagerly importing it"""
     # If the module is already imported, eagerly run init
     assert "." not in name, f"Expected a root module name, but got {name}"
-    if name in sys.modules:
-        init_func()
-
-    # Module is not yet imported, delay processing until needed
     assert name not in _lazy_module_init
     _lazy_module_init[name].append(init_func)
 
@@ -3067,7 +3064,7 @@ def is_callable_disallowed(obj) -> bool:
 
 def is_forbidden(obj) -> bool:
     _maybe_init_lazy_module(obj)
-    return getattr(obj, "_dynamo_forbidden", False)
+    return inspect.getattr_static(obj, "_dynamo_forbidden", False)
 
 
 def is_builtin_callable(obj) -> bool:
@@ -3236,17 +3233,19 @@ if torch.distributed.is_available():
 
 @functools.lru_cache(None)
 def get_legacy_mod_inlinelist():
-    inlinelist = set()
-    for m in LEGACY_MOD_INLINELIST:
-        inlinelist.add(_module_dir(torch) + m[len("torch.") :].replace(".", "/"))
+    inlinelist = {
+        _module_dir(torch) + m[len("torch.") :].replace(".", "/")
+        for m in LEGACY_MOD_INLINELIST
+    }
     return inlinelist
 
 
 @functools.lru_cache(None)
 def get_mod_inlinelist():
-    inlinelist = set()
-    for m in MOD_INLINELIST:
-        inlinelist.add(_module_dir(torch) + m[len("torch.") :].replace(".", "/"))
+    inlinelist = {
+        _module_dir(torch) + m[len("torch.") :].replace(".", "/")
+        for m in MOD_INLINELIST
+    }
     return inlinelist
 
 
