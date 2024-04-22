@@ -2585,7 +2585,7 @@ def _hipcc_device_compiler_options() -> List[str]:
         "-fPIC",
     ]
     if config.rocm.is_debug:
-        opts += ["-DDEBUG_LOG=1", "-g", "--save-temps='obj'"]
+        opts += ["-DDEBUG_LOG=1", "-g", "--save-temps='obj'", "-Rpass-analysis=kernel-resource-usage"]
     return opts
 
 
