@@ -3648,6 +3648,43 @@ class CPUReproTests(TestCase):
         x = torch.randn(1, 4, 2, 2)
         self.common(fn, (x,))
 
+    def test_vec_indirect_load_cse_cache(self):
+        # https://github.com/pytorch/pytorch/issues/123502.
+        from math import inf
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, arg0_1):
+                full_default = torch.ops.aten.full.default([209985], 1)
+                select = torch.ops.aten.select.int(arg0_1, 0, 0)
+                select_1 = torch.ops.aten.select.int(arg0_1, 0, 1)
+                view = torch.ops.aten.reshape.default(select_1, [-1])
+                expand = torch.ops.aten.expand.default(view, [209985])
+                full_default_1 = torch.ops.aten.full.default([10000], 0)
+                scatter_add = torch.ops.aten.scatter_add.default(
+                    full_default_1, 0, expand, full_default
+                )
+                pow_1 = torch.ops.aten.pow.Tensor_Scalar(scatter_add, -0.5)
+                eq = torch.ops.aten.eq.Scalar(pow_1, inf)
+                full_default_2 = torch.ops.aten.full.default([], 0.0)
+                where = torch.ops.aten.where.self(eq, full_default_2, pow_1)
+                index = torch.ops.aten.index.Tensor(where, [select])
+                index_1 = torch.ops.aten.index.Tensor(where, [select_1])
+                mul_1 = torch.ops.aten.mul.Tensor(index, index_1)
+                return (mul_1,)
+
+        fn = Model()
+        x = torch.zeros(2, 209985).to(torch.int64)
+        _fn_opt = torch.compile()(fn)
+        _, code = run_and_get_cpp_code(_fn_opt, x)
+        FileCheck().check_count(
+            "return at::vec::VectorizedN<int64_t,2>::loadu(tmpbuf.data(), 16);",
+            2,
+            exactly=True,
+        ).run(code)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
