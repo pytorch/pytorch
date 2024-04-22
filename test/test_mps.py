@@ -6954,6 +6954,7 @@ class TestMPS(TestCaseMPS):
             compare_mm(1024, 1, 32769, torch.bfloat16)
 
     @unittest.skipIf(total_memory < 12_000_000_000, "Needs at least 12Gb RAM to run the test")
+    @unittest.skipIf(product_version < 14.0, "Can't allocate 4Gb tensor on MacOS 13")
     def test_copy_large(self):
         """ Test that copy of 4Gb+ tensors works """
         x = torch.ones((2**30 + 11,), dtype=torch.float32)
