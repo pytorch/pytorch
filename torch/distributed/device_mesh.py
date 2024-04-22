@@ -523,7 +523,7 @@ else:
 
         Args:
             device_type (str): The device type of the mesh. Currently supports: "cpu", "cuda/cuda-like".
-                "cuda:0" will be converted to 'cuda'.
+                Passing in a device type with a GPU index, such as "cuda:0", is not allowed.
             mesh_shape (Tuple[int]): A tuple defining the dimensions of the multi-dimensional array
                 describing the layout of devices.
             mesh_dim_names (Tuple[str], optional): A tuple of mesh dimension names to assign to each dimension
@@ -554,9 +554,13 @@ else:
                     f"Found len(mesh_dim_names): {len(mesh_dim_names)} and len(mesh_shape):{len(mesh_shape)}.",
                 )
 
-        # e.g., strip the ':0' from 'cuda:0'
-        if device_type:
-            device_type = device_type.split(":")[0]
+        # assume valid device types are all letters
+        if device_type and not device_type.isalpha():
+            raise RuntimeError(
+                f"Device type with GPU index is not supported but got {device_type}. ",
+                "If you maintained a 'torch.device' object, it's recommended to pass in 'device.type'.",
+            )
+
         mesh = torch.arange(math.prod(mesh_shape), dtype=torch.int).view(mesh_shape)
         device_mesh = DeviceMesh(
             device_type=device_type,
