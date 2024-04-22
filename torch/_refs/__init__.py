@@ -1146,9 +1146,7 @@ def copysign(
     if isinstance(b, Number) and isinstance(a, Tensor):
         b = scalar_tensor(b, dtype=a.dtype, device=a.device)
     elif isinstance(a, Tensor) and isinstance(b, Tensor) and a.device != b.device:
-        msg = "Expected divisor (b) to be on the same device ({}) as dividend (a), but it is found on {}!".format(
-            a.device, b.device
-        )
+        msg = f"Expected divisor (b) to be on the same device ({a.device}) as dividend (a), but it is found on {b.device}!"
         raise RuntimeError(msg)
     return where(signbit(b), neg(abs(a)), abs(a))
 
@@ -1288,9 +1286,7 @@ def floor_divide(
         a = scalar_tensor(a, dtype=b.dtype, device=b.device)
     elif isinstance(a, Tensor) and isinstance(b, Tensor) and a.device != b.device:
         if a.device == torch.device("cpu"):
-            msg = "Expected divisor (b) to be on the same device ({}) as dividend (a), but it is found on {}!".format(
-                a.device, b.device
-            )
+            msg = f"Expected divisor (b) to be on the same device ({a.device}) as dividend (a), but it is found on {b.device}!"
             raise RuntimeError(msg)
         else:
             b = prims.device_put(b, device=a.device)
@@ -1936,9 +1932,7 @@ def clone(
 
 def copy_to(a: Tensor, b: Tensor, *, allow_cross_device=True):
     if not allow_cross_device and a.device != b.device:
-        msg = "Attempting to copy from device {} to device {}, but cross-device copies are not allowed!".format(
-            b.device, a.device
-        )
+        msg = f"Attempting to copy from device {b.device} to device {a.device}, but cross-device copies are not allowed!"
         raise RuntimeError(msg)
 
     return prims.copy_to(a, b)
@@ -3708,9 +3702,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
                 if allow_copy:
                     return prims.reshape(a, shape)
 
-                msg = "Cannot view a tensor with shape {} and strides {} as a tensor with shape {}!".format(
-                    a.shape, a.stride(), shape
-                )
+                msg = f"Cannot view a tensor with shape {a.shape} and strides {a.stride()} as a tensor with shape {shape}!"
                 raise ValueError(msg)
 
             a_ = flatten(a_, idx, end)
@@ -4070,8 +4062,9 @@ def tensor_split(
     # If indices_or_sections is a tensor, it must be a CPU Long tensor
     if isinstance(indices_or_sections, TensorLike):
         if not indices_or_sections.device.type == "cpu":
-            msg = "tensor_split: if indices_or_sections is a tensor it must be on the CPU, but received one on {}".format(
-                indices_or_sections.device
+            msg = (
+                f"tensor_split: if indices_or_sections is a tensor it must be on the CPU, "
+                f"but received one on {indices_or_sections.device}"
             )
             raise ValueError(msg)
         if indices_or_sections.dtype != torch.long:
