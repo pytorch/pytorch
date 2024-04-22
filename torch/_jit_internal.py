@@ -981,7 +981,7 @@ def _get_overloaded_methods(method, mod_class):
     mod_class_fileno = get_source_lines_and_file(mod_class)[1]
     mod_end_fileno = mod_class_fileno + len(get_source_lines_and_file(mod_class)[0])
     if not (method_line_no >= mod_class_fileno and method_line_no <= mod_end_fileno):
-        raise Exception(
+        raise Exception(  # noqa: TRY002
             "Overloads are not useable when a module is redeclared within the same file: "
             + str(method)
         )
