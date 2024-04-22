@@ -991,6 +991,7 @@ def trace(
     else:
         raise RuntimeError("Export doesn't work on ScriptFunction/ScriptMethod")
 
+    warnings.warn("TORCH.EXPORT SUCCEEDED")
     return traced_func
 
 _trace_module_map: Optional[Dict[Any, Any]] = None
