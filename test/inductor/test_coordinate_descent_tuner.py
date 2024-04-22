@@ -18,7 +18,7 @@ except ImportError:
     raise unittest.SkipTest("requires triton")  # noqa: TRY200
 
 from torch._inductor import config
-from torch._inductor.runtime.coordinate_descent_tuner import CoordescTuner
+from torch._inductor.coordinate_descent_tuner import CoordescTuner
 
 config.benchmark_kernel = True
 config.coordinate_descent_tuning = True
