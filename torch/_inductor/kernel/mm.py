@@ -209,6 +209,12 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
                 layout=layout,
                 **mm_options(config, m, n, k, layout),
             )
+    if len(choices) == 0:
+        log.warning(
+            "No choices for integer GEMM avaialbe using configured backends, using ATen backend as fallback"
+        )
+        choices = [aten__int_mm.bind((mat1, mat2), layout)]
+
     try:
         return autotune_select_algorithm("int_mm", choices, [mat1, mat2], layout)
     except NoValidChoicesError:
