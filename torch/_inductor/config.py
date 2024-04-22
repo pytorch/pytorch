@@ -99,6 +99,10 @@ pattern_matcher = True
 post_grad_custom_pre_pass: Optional[Callable[[torch.fx.graph.Graph], None]] = None
 post_grad_custom_post_pass: Optional[Callable[[torch.fx.graph.Graph], None]] = None
 
+# Registers a custom joint graph pass.
+joint_custom_pre_pass: Optional[Callable[[torch.fx.Graph], None]] = None
+joint_custom_post_pass: Optional[Callable[[torch.fx.Graph], None]] = None
+
 # Registers a custom pregrad pass. Note that the pre-grad IR is 1.
 # non-functional, 2. non-normalized, and 3. prone to change. Ideally we should
 # use post-grad passes.
@@ -299,8 +303,14 @@ benchmark_fusion = os.environ.get("TORCHINDUCTOR_BENCHMARK_FUSION") == "1"
 enabled_metric_tables = os.environ.get("TORCHINDUCTOR_ENABLED_METRIC_TABLES", "")
 
 benchmark_multi_templates = (
-    os.environ.get("TORCHINDUCTOR_BENCHMARK_MULTI_TEMPLATES", "0") == "1"
+    os.environ.get(
+        "TORCHINDUCTOR_BENCHMARK_MULTI_TEMPLATES", "0" if is_fbcode() else "1"
+    )
+    == "1"
 )
+
+# Take how many of the top triton kernels to benchmark epilogue
+max_epilogue_benchmarked_choices = 3
 
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
@@ -418,6 +428,17 @@ kernel_name_max_ops = 10
 
 # Pad input tensors of matmul/bmm/addmm to leverage Tensor Cores in NVIDIA GPUs
 shape_padding = os.environ.get("TORCHINDUCTOR_SHAPE_PADDING", "1") == "1"
+
+# Control if we will do padding for pointwise/reductions
+comprehensive_padding = (
+    os.environ.get("TORCHINDUCTOR_COMPREHENSIVE_PADDING", "0" if is_fbcode() else "1")
+    == "1"
+)
+pad_channels_last = False
+
+# Whether to treat output of the backward graph as user visible.
+# For user visible outputs, inductor will make sure the stride matches with eager.
+bw_outputs_user_visible = True
 
 # Fx-based linear/matmul/bmm + permute/transpose vertical fusion
 permute_fusion = os.environ.get("TORCHINDUCTOR_PERMUTE_FUSION", "0") == "1"
@@ -558,7 +579,7 @@ class cpp:
 # config specific to codegen/triton.py
 class triton:
     # Use cudagraphs on output code
-    cudagraphs = False
+    cudagraphs = os.environ.get("TORCHINDUCTOR_CUDAGRAPHS") == "1"
 
     # Use cudagraph trees for memory pooling if `cudagraphs` is True
     cudagraph_trees = True
@@ -635,18 +656,6 @@ class triton:
 
     # hint to Triton when arguments are divisible by 16
     divisible_by_16 = True
-
-    # theses are not enforced, but they are used by asserts in triton_heuristics.py
-    # NOTE: mobilevit_s in timm_models required X to be set to the higher value 2048
-
-    # Max RBLOCK will be large for multi-kernel since we do more aggressive
-    # persistent reduction.
-    max_block = {
-        "X": 2048,
-        "Y": 1024,
-        "Z": 1024,
-        "R": 4096 * (16 if multi_kernel else 1),
-    }
 
     # Minimum RBLOCK to be used for a TritonSplitScanKernel
     # NOTE: This also indirectly controls the size of workspace buffer required

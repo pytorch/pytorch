@@ -21,7 +21,7 @@ This file contains TorchDynamo backends intended for debugging uses.
 
 @register_backend
 def eager(gm, fake_tensor_inputs):
-    return gm
+    return gm.forward
 
 
 @register_backend
@@ -129,7 +129,7 @@ class TestingOnlyCompileError(Exception):
 def relu_compile_error_TESTING_ONLY(gm: torch.fx.GraphModule, example_inputs):
     for node in gm.graph.nodes:
         if node.target == torch.relu:
-            raise ReluCompileError()
+            raise ReluCompileError
     return gm
 
 
@@ -165,7 +165,7 @@ def non_leaf_compile_error_TESTING_ONLY(gm: torch.fx.GraphModule, example_inputs
         return gm
     for t in example_inputs:
         if not t.is_leaf:
-            raise TestingOnlyCompileError()
+            raise TestingOnlyCompileError
     return gm
 
 
