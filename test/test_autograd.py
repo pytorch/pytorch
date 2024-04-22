@@ -6730,11 +6730,14 @@ for shape in [(1,), ()]:
         ]
 
         # Passing explicitly should not warn
-        with warnings.catch_warnings():
+        with warnings.catch_warnings(record=True):
             warnings.simplefilter("error")
-            self.assertNotWarn(
-                lambda: checkpoint_sequential(modules_list, 3, a, use_reentrant=False)
-            )
+            with set_warn_always_context(True):
+                self.assertNotWarn(
+                    lambda: checkpoint_sequential(
+                        modules_list, 3, a, use_reentrant=False
+                    )
+                )
         self.assertNotWarn(
             lambda: checkpoint_sequential(modules_list, 3, a, use_reentrant=False)
         )
