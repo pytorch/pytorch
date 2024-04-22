@@ -534,9 +534,9 @@ class FSDPParam:
             )
 
     def reset_sharded_param(self):
-        # For out-of-place operations like `nn.Module._apply` or
-        # `load_state_dict(assign=True)`, we may need to reset the sharded
-        # parameter by padding its local tensor and saving the reference.
+        # For ops like `nn.Module._apply` or `load_state_dict(assign=True)`
+        # that change the sharded parameter tensor, we may need to re-pad the
+        # sharded local tensor and re-save the reference.
         module_info = self._module_info
         new_param = getattr(module_info.module, module_info.param_name)
         if new_param is not self.sharded_param:
