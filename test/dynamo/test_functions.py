@@ -1285,6 +1285,22 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return mytuple.add(), mytuple.static_method(), mytuple.class_method()
 
     @make_test
+    def test_namedtuple_hasattr(a, b):
+        mytuple = FunctionTests.MyNamedTuple(a, b)
+
+        def isinstance_namedtuple(obj) -> bool:
+            return (
+                isinstance(obj, tuple)
+                and hasattr(obj, "_asdict")
+                and hasattr(obj, "_fields")
+            )
+
+        if isinstance_namedtuple(mytuple):
+            return a + b
+        else:
+            return a - b
+
+    @make_test
     def test_is_quantized(a, b):
         if not a.is_quantized:
             return a + b

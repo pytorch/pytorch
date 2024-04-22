@@ -1140,13 +1140,6 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "Fails assertion of params close to params_c at all, see #123147"
-                ),
-                "TestOptimRenewed",
-                "test_rosenbrock_sparse",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
                     "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
                 ),
                 "TestOptimRenewed",
@@ -1304,27 +1297,6 @@ optim_db: List[OptimizerInfo] = [
                 unittest.skip("Uses too much memory, even for H100, surprisingly."),
                 "TestOptimRenewed",
                 "test_foreach_large_tensor",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "capturable path no longer called after hitting cache limit, see #121178"
-                ),
-                "TestOptimRenewed",
-                "test_save_load_equality_with_weights_only",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "capturable path no longer called after hitting cache limit, see #121178"
-                ),
-                "TestOptimRenewed",
-                "test_load_nontensor_step",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "capturable path no longer called after hitting cache limit, see #121178"
-                ),
-                "TestOptimRenewed",
-                "test_param_groups_lr",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1672,13 +1644,6 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "fails, https://github.com/pytorch/pytorch/issues/117165"
-                ),
-                "TestOptimRenewed",
-                "test_deepcopy_copies_all_public_attrs",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
                     "This test uses mocks, which dynamo does not support"
                 ),
                 "TestOptimRenewed",
@@ -1799,13 +1764,6 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Fails assertion of params close to params_c at all, see #123147"
-                ),
-                "TestOptimRenewed",
-                "test_rosenbrock_sparse",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(

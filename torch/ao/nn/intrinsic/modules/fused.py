@@ -39,8 +39,7 @@ class LinearReLU(_FusedModule):
     During quantization this will be replaced with the corresponding fused module."""
     def __init__(self, linear, relu):
         assert type_before_parametrizations(linear) == Linear and type_before_parametrizations(relu) == ReLU, \
-            'Incorrect types for input modules{}{}'.format(
-                type_before_parametrizations(linear), type_before_parametrizations(relu))
+            f'Incorrect types for input modules{type_before_parametrizations(linear)}{type_before_parametrizations(relu)}'
         super().__init__(linear, relu)
 
 class ConvBn1d(_FusedModule):
@@ -64,8 +63,7 @@ class ConvBnReLU1d(_FusedModule):
     During quantization this will be replaced with the corresponding fused module."""
     def __init__(self, conv, bn, relu):
         assert type_before_parametrizations(conv) == Conv1d and type_before_parametrizations(bn) == BatchNorm1d and \
-            type_before_parametrizations(relu) == ReLU, 'Incorrect types for input modules{}{}{}' \
-            .format(type_before_parametrizations(conv), type_before_parametrizations(bn), type_before_parametrizations(relu))
+            type_before_parametrizations(relu) == ReLU, f'Incorrect types for input modules{type_before_parametrizations(conv)}{type_before_parametrizations(bn)}{type_before_parametrizations(relu)}'  # noqa: B950
         super().__init__(conv, bn, relu)
 
 class ConvBnReLU2d(_FusedModule):
@@ -73,8 +71,7 @@ class ConvBnReLU2d(_FusedModule):
     During quantization this will be replaced with the corresponding fused module."""
     def __init__(self, conv, bn, relu):
         assert type_before_parametrizations(conv) == Conv2d and type_before_parametrizations(bn) == BatchNorm2d and \
-            type_before_parametrizations(relu) == ReLU, 'Incorrect types for input modules{}{}{}' \
-            .format(type_before_parametrizations(conv), type_before_parametrizations(bn), type_before_parametrizations(relu))
+            type_before_parametrizations(relu) == ReLU, f'Incorrect types for input modules{type_before_parametrizations(conv)}{type_before_parametrizations(bn)}{type_before_parametrizations(relu)}'  # noqa: B950
         super().__init__(conv, bn, relu)
 
 class ConvBn3d(_FusedModule):
@@ -90,8 +87,7 @@ class ConvBnReLU3d(_FusedModule):
     During quantization this will be replaced with the corresponding fused module."""
     def __init__(self, conv, bn, relu):
         assert type_before_parametrizations(conv) == Conv3d and type_before_parametrizations(bn) == BatchNorm3d and \
-            type_before_parametrizations(relu) == ReLU, 'Incorrect types for input modules{}{}{}' \
-            .format(type_before_parametrizations(conv), type_before_parametrizations(bn), type_before_parametrizations(relu))
+            type_before_parametrizations(relu) == ReLU, f'Incorrect types for input modules{type_before_parametrizations(conv)}{type_before_parametrizations(bn)}{type_before_parametrizations(relu)}'  # noqa: B950
         super().__init__(conv, bn, relu)
 
 
@@ -100,8 +96,7 @@ class BNReLU2d(_FusedModule):
     During quantization this will be replaced with the corresponding fused module."""
     def __init__(self, batch_norm, relu):
         assert type_before_parametrizations(batch_norm) == BatchNorm2d and type_before_parametrizations(relu) == ReLU, \
-            'Incorrect types for input modules{}{}'.format(
-                type_before_parametrizations(batch_norm), type_before_parametrizations(relu))
+            f'Incorrect types for input modules{type_before_parametrizations(batch_norm)}{type_before_parametrizations(relu)}'
         super().__init__(batch_norm, relu)
 
 class BNReLU3d(_FusedModule):
@@ -109,8 +104,7 @@ class BNReLU3d(_FusedModule):
     During quantization this will be replaced with the corresponding fused module."""
     def __init__(self, batch_norm, relu):
         assert type_before_parametrizations(batch_norm) == BatchNorm3d and type_before_parametrizations(relu) == ReLU, \
-            'Incorrect types for input modules{}{}'.format(
-                type_before_parametrizations(batch_norm), type_before_parametrizations(relu))
+            f'Incorrect types for input modules{type_before_parametrizations(batch_norm)}{type_before_parametrizations(relu)}'
         super().__init__(batch_norm, relu)
 
 
