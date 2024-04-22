@@ -194,7 +194,7 @@ def set_device_states(devices, states) -> None:
 
 
 def _get_autocast_kwargs(device="cuda"):
-    assert device != 'cpu'
+    assert device != "cpu"
     device_autocast_kwargs = {
         "enabled": torch.is_autocast_enabled(device),
         "dtype": torch.get_autocast_dtype(device),
