@@ -304,8 +304,12 @@ void nll_loss_forward_out_cpu_template(
     const Tensor& weight,
     int64_t reduction,
     int64_t ignore_index) {
-  AT_DISPATCH_FLOATING_TYPES_AND(
-      ScalarType::BFloat16, input.scalar_type(), "nll_loss_out_frame", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::BFloat16,
+      ScalarType::Half,
+      input.scalar_type(),
+      "nll_loss_out_frame",
+      [&] {
         if (target.scalar_type() == kByte) {
           nll_loss_out_frame<scalar_t, uint8_t>(
               output,
@@ -346,15 +350,15 @@ static void nll_loss_backward_out_frame(
   if (target.dim() == 0) {
     target_ = target.unsqueeze(0);
   }
-  auto target_acc = target_.accessor<target_t, 1>();
+  auto target_acc = target_.accessor<const target_t, 1>();
 
   auto weight_contiguous = optional_contiguous(weight);
-  const scalar_t* weight_data = optional_data<scalar_t>(weight_contiguous);
+  const scalar_t* weight_data = optional_data<const scalar_t>(weight_contiguous);
 
   if (reduction == Reduction::None && n_dims == 2) {
     const auto batch_size = input.size(0);
     auto grad_input_acc = grad_input.accessor<scalar_t, 2>();
-    auto grad_output_acc = grad_output.accessor<scalar_t, 1>();
+    auto grad_output_acc = grad_output.accessor<const scalar_t, 1>();
     at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
       for (const auto i : c10::irange(start, end)) {
         auto cur_target = target_acc[i];
@@ -369,9 +373,9 @@ static void nll_loss_backward_out_frame(
     return;
   }
 
-  const scalar_t total_weight_value = *total_weight.data_ptr<scalar_t>();
+  const scalar_t total_weight_value = *total_weight.const_data_ptr<scalar_t>();
 
-  const scalar_t grad_output_value = *grad_output.data_ptr<scalar_t>();
+  const scalar_t grad_output_value = *grad_output.const_data_ptr<scalar_t>();
 
   if (input.dim() == 1) {
     auto grad_input_acc = grad_input.accessor<scalar_t, 1>();
@@ -415,8 +419,9 @@ void nll_loss_backward_out_cpu_template(
     const Tensor& total_weight) {
   grad_input.zero_();
 
-  AT_DISPATCH_FLOATING_TYPES_AND(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::BFloat16,
+      ScalarType::Half,
       input.scalar_type(),
       "nll_loss_backward_out_frame",
       [&] {
