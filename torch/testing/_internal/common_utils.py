@@ -3731,8 +3731,6 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
             warnings.simplefilter("always")  # allow any warning to be raised
             with set_warn_always_context(True):
                 callable()
-            for w in ws:
-                msg += str(w.message)
             self.assertTrue(len(ws) == 0, msg)
 
     @contextmanager
