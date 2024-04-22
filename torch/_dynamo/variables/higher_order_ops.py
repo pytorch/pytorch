@@ -88,14 +88,10 @@ def _make_inlined(tx, f):
     return inline_call
 
 
-def _call_function_and_unflatten_output(tx, fn, args, kwargs, ret_vt, ret_treespec):
+def _call_function_and_unflatten_output(
+    tx, fn, args, kwargs, flat_example_value, ret_treespec
+):
     from .builder import wrap_fx_proxy
-
-    flat_example_value = pytree.tree_map_only(
-        torch.fx.Proxy,
-        lambda a: a.node.meta["example_value"],
-        ret_vt.as_proxy(),
-    )
 
     # Store the invocation as a call
     flat_variable = wrap_fx_proxy(
@@ -731,8 +727,19 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             true_shared + unique_true + unique_false,
         )
 
+        flat_example_value = pytree.tree_map_only(
+            torch.fx.Proxy,
+            lambda a: a.node.meta["example_value"],
+            true_r.as_proxy(),
+        )
+
         return _call_function_and_unflatten_output(
-            tx, torch.ops.higher_order.cond, p_args, {}, true_r, true_treespec
+            tx,
+            torch.ops.higher_order.cond,
+            p_args,
+            {},
+            flat_example_value,
+            true_treespec,
         )
 
 
@@ -885,8 +892,19 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             ),
         )
 
+        flat_example_value = pytree.tree_map_only(
+            torch.fx.Proxy,
+            lambda a: a.node.meta["example_value"],
+            body_r.as_proxy(),
+        )
+
         return _call_function_and_unflatten_output(
-            tx, torch.ops.higher_order.while_loop, p_args, {}, body_r, body_treespec
+            tx,
+            torch.ops.higher_order.while_loop,
+            p_args,
+            {},
+            flat_example_value,
+            body_treespec,
         )
 
 
@@ -950,6 +968,23 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             should_flatten_outputs=True,
         )
 
+        subgraph_example_value = [
+            proxy.node.meta["example_value"] for proxy in body_r.as_proxy()
+        ]
+
+        with tx.output.fake_mode:
+            # We need to expand the example output from map() so that it has
+            # the same first dimension as the mapped input.
+            # We also do a clone with contiguous_format. This is to be consistent with
+            # eager semantic of map, which stacks the outputs. The result is contiguous
+            # as a result of the stack operation.
+            map_example_out = [
+                t.expand(sample_shape[0], *t.size()).clone(
+                    memory_format=torch.contiguous_format
+                )
+                for t in subgraph_example_value
+            ]
+
         body_nn_modules = dict(tx.output.nn_modules)
 
         body_name = add_subgraph(
@@ -965,8 +1000,9 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             [args[1].as_proxy()],
             [arg.as_proxy() for arg in args[2:]] + list(body_lifted_freevars.keys()),
         )
+
         return _call_function_and_unflatten_output(
-            tx, torch.ops.higher_order.map_impl, p_args, {}, body_r, body_spec
+            tx, torch.ops.higher_order.map_impl, p_args, {}, map_example_out, body_spec
         )
 
 
@@ -1094,8 +1130,14 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         if len(p_kwargs) > 0:
             unimplemented("kwargs should have been flattened into lifted args")
 
+        flat_example_value = pytree.tree_map_only(
+            torch.fx.Proxy,
+            lambda a: a.node.meta["example_value"],
+            body_r.as_proxy(),
+        )
+
         return _call_function_and_unflatten_output(
-            tx, self.value, tuple(p_args), p_kwargs, body_r, treespec
+            tx, self.value, tuple(p_args), p_kwargs, flat_example_value, treespec
         )
 
 
@@ -1138,8 +1180,6 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from .builder import wrap_fx_proxy
-
         callable = args[0]
 
         unpacked_sequence = args[1].unpack_var_sequence(tx)
@@ -1187,20 +1227,13 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
             ret_val.as_proxy(),
         )
 
-        # Store the invocation as a call
-        flat_variable = wrap_fx_proxy(
-            tx=tx,
-            proxy=tx.output.create_proxy(
-                "call_function",
-                torch.ops.higher_order.strict_mode,
-                args=tuple(p_args),
-                kwargs={},
-            ),
-            example_value=flat_example_value,
-        )
-
         return _call_function_and_unflatten_output(
-            tx, torch.ops.higher_order.strict_mode, p_args, {}, ret_val, ret_treespec
+            tx,
+            torch.ops.higher_order.strict_mode,
+            p_args,
+            {},
+            flat_example_value,
+            ret_treespec,
         )
 
 
@@ -1333,7 +1366,12 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         def create_scalar():
             return query.call_method(
-                tx, "new_empty", (SourcelessBuilder.create(tx, []),), {}
+                tx,
+                "new_empty",
+                (SourcelessBuilder.create(tx, []),),
+                {
+                    "dtype": SourcelessBuilder.create(tx, torch.int32),
+                },
             )
 
         bhmn = [create_scalar() for _ in range(4)]
@@ -1367,13 +1405,8 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         lifted_args = tuple(arg for arg in body_lifted_freevars.keys())
 
         proxy_args = (body_node,) + lifted_args
-        example_value = pytree.tree_map_only(
-            torch.fx.Proxy,
-            lambda a: a.node.meta["example_value"],
-            body_output.as_proxy(),
-        )
 
-        return proxy_args, {}, example_value
+        return proxy_args, {}
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -1384,13 +1417,22 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             args, kwargs
         )
 
-        p_args, p_kwargs, example_value = self.create_wrapped_node(tx, query, score_mod)
+        p_args, p_kwargs = self.create_wrapped_node(tx, query, score_mod)
         proxied_args = [query, key, value, *other_buffers]
 
         # Store the invocation as a call
         # Norm_kwargs contains the score_function and we dont want to proxy this because
         # Proxying user defined functions is not supported.
         inp_args, _ = proxy_args_kwargs(proxied_args, {})
+
+        # Why is this here? Unlike other HOPs, the subgrpah's output for this hop is unrelated
+        # to what the overall HOP returns, we create the correct output proxy by calling the
+        # hop (self.value) with the example values.
+        with torch._guards.TracingContext.try_get().fake_mode:
+            example_args = pytree.tree_map_only(
+                torch.fx.Proxy, lambda a: a.node.meta["example_value"], inp_args
+            )
+            example_value = self.value(*example_args, score_mod)
         return wrap_fx_proxy(
             tx=tx,
             proxy=tx.output.create_proxy(

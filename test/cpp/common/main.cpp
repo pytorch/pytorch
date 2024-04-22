@@ -18,6 +18,7 @@ std::string add_negative_flag(const std::string& flag) {
 
 int main(int argc, char* argv[]) {
   ::testing::InitGoogleTest(&argc, argv);
+
   if (!torch::cuda::is_available()) {
     std::cout << "CUDA not available. Disabling CUDA and MultiCUDA tests"
               << std::endl;
