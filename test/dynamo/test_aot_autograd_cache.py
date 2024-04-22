@@ -60,7 +60,9 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             return x.sin().cos()
 
         def fn2(x):
-            return x.sin().cos()
+            y = x.sin()
+            z = y.cos()
+            return z
 
         # Make the id different, but otherwise identical
         config = self.default_config()
