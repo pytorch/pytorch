@@ -8,7 +8,7 @@
 namespace torch {
 namespace torch::unwind {
 
-std::vector<Frame> symbolize(const std::vector<void*>& frames) {
+std::vector<Frame> symbolize(const std::vector<void*>& frames, Mode mode) {
   static std::mutex symbolize_mutex;
   static llvm::symbolize::LLVMSymbolizer symbolizer;
   static ska::flat_hash_map<void*, Frame> frame_map_;
