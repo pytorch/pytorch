@@ -19,6 +19,7 @@ import time
 import typing
 import unittest
 import weakref
+from pathlib import Path
 from typing import Tuple
 from unittest.mock import patch
 
@@ -41,6 +42,9 @@ from torch._inductor.fx_passes import pad_mm
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
     add_scheduler_init_hook,
+    aoti_compile_with_persistent_cache,
+    aoti_eager_cache_dir,
+    load_aoti_eager_cache,
     run_and_get_code,
     run_and_get_triton_code,
 )
@@ -646,6 +650,12 @@ def check_model_gpu(
 check_model_cuda = check_model_gpu
 
 
+def clear_aoti_eager_cache(ns: str, device_type: str):
+    device_cache = aoti_eager_cache_dir() / ns / device_type
+    if device_cache.exists():
+        shutil.rmtree(device_cache)
+
+
 def _run_and_assert_no_indirect_indexing(
     test_case, func, *args, has_wrapping=None, **kwargs
 ):
@@ -760,6 +770,61 @@ class CommonTemplate:
         )
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
+    def test_eager_aoti_cache_hit(self):
+        ns = "aten"
+        op_name = "abs"
+        op_overload_name = "default"
+        dispatch_key = "CPU"
+        device = "cpu"
+        if self.device.lower() == "cuda":
+            dispatch_key = "CUDA"
+            device = "cuda"
+
+        input_tensor = torch.randn(128, dtype=torch.float, device=device)
+
+        # Produce kernel for the first time
+        clear_aoti_eager_cache(ns, device)
+
+        kernel_lib_path = aoti_compile_with_persistent_cache(
+            ns,
+            op_name,
+            op_overload_name,
+            device,
+            False,
+            getattr(torch.ops.aten, op_name),
+            (input_tensor,),
+            {},
+        )
+        self.assertTrue(Path(kernel_lib_path).exists())
+
+        from unittest import mock
+
+        # Patch the aoti_compile_with_persistent_cache as None to ensure no new kernel is generated
+        with mock.patch(
+            "torch._inductor.utils.aoti_compile_with_persistent_cache", None
+        ):
+            qualified_op_name = f"{ns}::{op_name}"
+            _, overload_names = torch._C._jit_get_operation(qualified_op_name)
+
+            with _scoped_library("aten", "IMPL") as torch_compile_op_lib_impl:
+                # Get ref result from eager
+                ref_value = getattr(torch.ops.aten, op_name)(input_tensor)
+
+                for overload_name in overload_names:
+                    try:
+                        schema = torch._C._get_schema(qualified_op_name, overload_name)
+                        torch_compile_op_lib_impl._impl_with_aoti_compile(  # noqa: F821
+                            schema.name, schema.overload_name, dispatch_key
+                        )
+                    except Exception as e:
+                        continue
+
+                # Invoke the pre-compiled kernel and get result.
+                res_value = getattr(torch.ops.aten, op_name)(input_tensor)
+
+                self.assertEqual(ref_value, res_value)
+
+    @skipCUDAIf(not SM80OrLater, "Requires sm80")
     def test_aoti_compile_with_persistent_cache(self):
         def fn(a):
             return torch.abs(a)
@@ -774,17 +839,7 @@ class CommonTemplate:
 
         input_tensor = torch.randn(128, dtype=torch.float, device=device)
 
-        from torch._inductor.utils import (
-            aoti_compile_with_persistent_cache,
-            aoti_eager_cache_dir,
-            load_aoti_eager_cache,
-        )
-
-        def clear_aoti_eager_cache():
-            if aoti_eager_cache_dir().exists():
-                shutil.rmtree(aoti_eager_cache_dir())
-
-        clear_aoti_eager_cache()
+        clear_aoti_eager_cache(ns, device)
         kernel_lib_path = aoti_compile_with_persistent_cache(
             ns,
             op_name,
@@ -821,7 +876,6 @@ class CommonTemplate:
             kernel_libs_abs_path.append(kernel_path.as_posix())
 
         self.assertTrue(kernel_lib_path in kernel_libs_abs_path)
-        clear_aoti_eager_cache()
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     def test_torch_compile_override_registration(self):
@@ -886,6 +940,20 @@ class CommonTemplate:
 
             for ref, res in zip(ref_array, res_array):
                 self.assertEqual(ref, res)
+
+        a = torch.randn(128, device=device)
+        min_tensor = torch.randn(128, device=device)
+        max_tensor = min_tensor + 0.5
+
+        ref_with_min = torch.ops.aten.clamp(a, min_tensor)
+        ref_with_min_max = torch.ops.aten.clamp(a, min_tensor, max_tensor)
+
+        with _scoped_library("aten", "IMPL") as torch_compile_op_lib_impl:
+            register_ops(["clamp"], dispatch_key, torch_compile_op_lib_impl)
+            res_with_min = torch.ops.aten.clamp(a, min_tensor)
+            res_with_min_max = torch.ops.aten.clamp(a, min_tensor, max_tensor)
+            self.assertEqual(ref_with_min, res_with_min)
+            self.assertEqual(ref_with_min_max, res_with_min_max)
 
     def test_add_const_int(self):
         def fn(a):
