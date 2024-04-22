@@ -558,6 +558,16 @@ void initDispatchBindings(PyObject* module) {
       });
 
   m.def(
+      // Returns whether or not the kernel for this dispatach key is a
+      // fallthrough kernel
+      "_dispatch_kernel_for_dispatch_key_is_fallthrough",
+      [](const char* name, c10::DispatchKey dispatch) -> bool {
+        auto op =
+            c10::Dispatcher::singleton().findOp(torch::jit::parseName(name));
+        return op->isKernelFallthroughKernel(dispatch);
+      });
+
+  m.def(
       "_dispatch_has_kernel_for_any_dispatch_key",
       [](const char* name, c10::DispatchKeySet ks) -> bool {
         auto op =

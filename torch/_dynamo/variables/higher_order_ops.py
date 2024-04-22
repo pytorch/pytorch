@@ -1366,7 +1366,12 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         def create_scalar():
             return query.call_method(
-                tx, "new_empty", (SourcelessBuilder.create(tx, []),), {}
+                tx,
+                "new_empty",
+                (SourcelessBuilder.create(tx, []),),
+                {
+                    "dtype": SourcelessBuilder.create(tx, torch.int32),
+                },
             )
 
         bhmn = [create_scalar() for _ in range(4)]
@@ -1400,13 +1405,8 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         lifted_args = tuple(arg for arg in body_lifted_freevars.keys())
 
         proxy_args = (body_node,) + lifted_args
-        example_value = pytree.tree_map_only(
-            torch.fx.Proxy,
-            lambda a: a.node.meta["example_value"],
-            body_output.as_proxy(),
-        )
 
-        return proxy_args, {}, example_value
+        return proxy_args, {}
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -1417,13 +1417,22 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             args, kwargs
         )
 
-        p_args, p_kwargs, example_value = self.create_wrapped_node(tx, query, score_mod)
+        p_args, p_kwargs = self.create_wrapped_node(tx, query, score_mod)
         proxied_args = [query, key, value, *other_buffers]
 
         # Store the invocation as a call
         # Norm_kwargs contains the score_function and we dont want to proxy this because
         # Proxying user defined functions is not supported.
         inp_args, _ = proxy_args_kwargs(proxied_args, {})
+
+        # Why is this here? Unlike other HOPs, the subgrpah's output for this hop is unrelated
+        # to what the overall HOP returns, we create the correct output proxy by calling the
+        # hop (self.value) with the example values.
+        with torch._guards.TracingContext.try_get().fake_mode:
+            example_args = pytree.tree_map_only(
+                torch.fx.Proxy, lambda a: a.node.meta["example_value"], inp_args
+            )
+            example_value = self.value(*example_args, score_mod)
         return wrap_fx_proxy(
             tx=tx,
             proxy=tx.output.create_proxy(
