@@ -665,7 +665,8 @@ def fresh_inductor_cache(cache_entries=None):
     for obj in _registered_caches:
         obj.cache_clear()
 
-    with tempfile.TemporaryDirectory() as inductor_cache_dir:
+    inductor_cache_dir = tempfile.mkdtemp()
+    try:
         with mock.patch.dict(
             os.environ, {"TORCHINDUCTOR_CACHE_DIR": inductor_cache_dir}
         ):
@@ -683,6 +684,10 @@ def fresh_inductor_cache(cache_entries=None):
                                 if ".lock" not in f
                             }
                         )
+        shutil.rmtree(inductor_cache_dir)
+    except:
+        log.warning("on error, temporary cache dir kept at %s", inductor_cache_dir)
+        raise
 
 
 def argsort(seq) -> List[int]:
