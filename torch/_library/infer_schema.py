@@ -23,9 +23,16 @@ def infer_schema(prototype_function: typing.Callable, mutates_args=()) -> str:
 
     params = []
     seen_args = set()
+    saw_kwarg_only_arg = False
     for idx, (name, param) in enumerate(sig.parameters.items()):
         if not supported_param(param):
             error_fn("We do not support positional-only args, varargs, or varkwargs.")
+
+        if param.kind == inspect.Parameter.KEYWORD_ONLY:
+            # The first time we see a kwarg-only arg, add "*" to the schema.
+            if not saw_kwarg_only_arg:
+                params.append("*")
+                saw_kwarg_only_arg = True
 
         if param.annotation is inspect.Parameter.empty:
             error_fn(f"Parameter {name} must have a type annotation.")

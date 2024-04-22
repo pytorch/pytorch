@@ -598,6 +598,18 @@ class TestCustomOp(CustomOpTestCaseBase):
 
         self.assertExpectedInline(infer_schema(a), """(Tensor x) -> Tensor""")
 
+        def kwonly1(x: Tensor, *, y: int, z: float) -> Tensor:
+            return torch.empty([])
+
+        self.assertExpectedInline(
+            infer_schema(kwonly1), """(Tensor x, *, SymInt y, float z) -> Tensor"""
+        )
+
+        def kwonly2(*, y: Tensor) -> Tensor:
+            return torch.empty([])
+
+        self.assertExpectedInline(infer_schema(kwonly2), """(*, Tensor y) -> Tensor""")
+
         def b(
             x: Tensor,
             y: int,
