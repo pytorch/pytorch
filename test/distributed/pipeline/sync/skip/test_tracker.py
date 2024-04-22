@@ -6,18 +6,25 @@
 #
 # This source code is licensed under the BSD license found in the
 # LICENSE file in the root directory of this source tree.
-from queue import Queue
 import threading
+from queue import Queue
 
 import pytest
 import torch
 from torch import nn
 
-from torch.distributed.pipeline.sync.checkpoint import enable_checkpointing, enable_recomputing
+from torch.distributed.pipeline.sync.checkpoint import (
+    enable_checkpointing,
+    enable_recomputing,
+)
 from torch.distributed.pipeline.sync.microbatch import Batch
 from torch.distributed.pipeline.sync.skip import pop, skippable, stash
 from torch.distributed.pipeline.sync.skip.layout import SkipLayout
-from torch.distributed.pipeline.sync.skip.tracker import SkipTracker, SkipTrackerThroughPotals, current_skip_tracker
+from torch.distributed.pipeline.sync.skip.tracker import (
+    current_skip_tracker,
+    SkipTracker,
+    SkipTrackerThroughPotals,
+)
 from torch.testing._internal.common_utils import run_tests
 
 
@@ -76,7 +83,10 @@ def test_reuse_portal():
 
 
 def test_no_copy_no_portal():
-    skip_layout = SkipLayout(num_partitions=2, skip_routes={(None, "copy"): (0, 1), (None, "not_copy"): (0, 0)})
+    skip_layout = SkipLayout(
+        num_partitions=2,
+        skip_routes={(None, "copy"): (0, 1), (None, "not_copy"): (0, 0)},
+    )
     skip_tracker = SkipTrackerThroughPotals(skip_layout)
 
     batch = Batch(torch.tensor([1.0]))

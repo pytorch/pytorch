@@ -71,13 +71,11 @@ protobuf via:
         https://github.com/google/protobuf/releases/
 """
 
-VERSION_MISMATCH = """
-Your python protobuf is of version {py_ver} but your native protoc version is of
-version {native_ver}. This will cause the installation to produce incompatible
+VERSION_MISMATCH = f"""
+Your python protobuf is of version {python_version} but your native protoc version is of
+version {native_version}. This will cause the installation to produce incompatible
 protobuf files. This is bad in general - consider installing the same version.
-""".format(
-    py_ver=python_version, native_ver=native_version
-)
+"""
 
 # Now, give actual recommendations
 if not python_protobuf_installed:

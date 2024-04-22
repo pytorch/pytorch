@@ -88,16 +88,16 @@ device_codegens: Dict[str, DeviceCodegen] = {}
 
 class DeviceOpOverrides:
     def import_get_raw_stream_as(self, name):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def set_device(self, device_idx):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def synchronize(self):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def device_guard(self, device_idx):
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 device_op_overrides_dict: Dict[str, DeviceOpOverrides] = {}
@@ -1368,7 +1368,7 @@ class Kernel(CodeGen):
             self.cse = cse
 
     def load(self, name: str, index: sympy.Expr) -> CSEVariable:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def indirect_load(self, name: str, index: sympy.Expr):
         """A load the depends on an index we have read"""
@@ -1381,12 +1381,12 @@ class Kernel(CodeGen):
             self.loads = prior
 
     def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def store(
         self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
     ) -> None:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def reduction(
         self,
@@ -1395,7 +1395,7 @@ class Kernel(CodeGen):
         reduction_type: ReductionType,
         value: Union[CSEVariable, Tuple[CSEVariable, ...]],
     ) -> Union[CSEVariable, Tuple[CSEVariable, ...]]:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def scan(
         self,
@@ -1405,7 +1405,7 @@ class Kernel(CodeGen):
         ],
         values: Tuple[CSEVariable, ...],
     ) -> Tuple[CSEVariable, ...]:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def bucketize(
         self,
@@ -1418,11 +1418,11 @@ class Kernel(CodeGen):
         """
         See [Note: Inductor bucketize op]
         """
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @property
     def assert_function(self) -> str:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def indirect_assert(self, var, lower, upper, mask=None):
         if lower and upper:
@@ -1444,7 +1444,7 @@ class Kernel(CodeGen):
         return f'{self.assert_function}({cond}, "index out of bounds: {cond_print}")'
 
     def index_to_str(self, index: sympy.Expr) -> str:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def __enter__(self):
         # TODO: hoist this to top level
@@ -1737,4 +1737,4 @@ class KernelTemplate:
         Generates a ChoiceCaller instance from the given arguments.
         """
 
-        raise NotImplementedError()
+        raise NotImplementedError
