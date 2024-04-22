@@ -419,6 +419,8 @@ def getattr_on_nn_module(
 
         # Set source strings for debug info
         mod_dict_source = f"{base_source_name}.__dict__"
+        l1_source = l2_source = None
+        l1_value = l2_value = None
         if l2_key:
             l1_source = f"{mod_dict_source}[{l1_key!r}]"
             l1_value = mod_dict[l1_key]
