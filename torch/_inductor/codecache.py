@@ -2752,7 +2752,6 @@ class CUDACodeCache:
                         [input_path], output_path, dst_file_ext, extra_args
                     )
                     start_time = time()
-                    log.debug("CUDA Compilation: %s", cmd)
                     cmd_parts = cmd.split(" ")
                     try:
                         output = subprocess.check_output(
