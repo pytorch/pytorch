@@ -28,7 +28,8 @@ from torch.utils.checkpoint import checkpoint_sequential
 from torch.testing._internal.common_utils import TestCase, freeze_rng_state, run_tests, \
     NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_WINDOWS, \
     slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, TEST_CUDA, TEST_CUDA_GRAPH, TEST_WITH_ROCM, TEST_NUMPY, \
-    get_cycles_per_ms, parametrize, instantiate_parametrized_tests, subtest, IS_JETSON, gcIfJetson, NoTest, IS_LINUX, IS_ARM64
+    get_cycles_per_ms, parametrize, instantiate_parametrized_tests, subtest, IS_JETSON, gcIfJetson, NoTest, IS_LINUX, IS_ARM64, \
+    serialTest
 from torch.testing._internal.common_cuda import TEST_CUDNN, TEST_MULTIGPU, \
     _create_scaling_case, _get_torch_cuda_version
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
@@ -172,6 +173,7 @@ class TestCuda(TestCase):
         self.assertTrue((tensor == 1).all())
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC or IS_JETSON, "Segmentation fault (core dumped)")
+    @serialTest()
     def test_out_of_memory_retry(self):
         torch.cuda.empty_cache()
         total_memory = torch.cuda.get_device_properties(0).total_memory
@@ -255,6 +257,7 @@ class TestCuda(TestCase):
         c.copy_(b, non_blocking=True)
         self.assertEqual(a, c, exact_dtype=False)
 
+    @serialTest()
     def test_to_non_blocking(self):
         stream = torch.cuda.current_stream()
 
@@ -781,6 +784,7 @@ except RuntimeError as e:
 
     @slowTest
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
+    @serialTest()
     def test_huge_index(self):
         src = torch.empty(15000000, 45, device='cuda', dtype=torch.long).random_(0, 2**22)
         idx = torch.randperm(src.shape[0], device='cuda')
@@ -850,6 +854,7 @@ except RuntimeError as e:
                 z = x + y
 
     @unittest.skipIf(not TEST_MEDIUM_TENSOR, "not enough memory")
+    @serialTest()
     def test_cuda_kernel_loop_overflow(self):
         # Issue #24309: In extreme cases, the loop variable could overflow and continue
         # the kernel loop with a negative index, causing a RuntimeError (invalid write):
@@ -861,6 +866,7 @@ except RuntimeError as e:
 
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
     @gcIfJetson
+    @serialTest()
     def test_cuda_kernel_loop_overflow_large(self):
         # Make sure input.numel() > INT_MAX is handled:
         x = torch.randn(1, 1, 1, 2**31, dtype=torch.float16, device="cuda")
@@ -1735,6 +1741,7 @@ torch.cuda.synchronize()
 
     @slowTest
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
+    @serialTest()
     def test_max_large_axis(self):
         x = torch.zeros(2**32, device='cuda', dtype=torch.int8)
         x[-1] = 1
@@ -2020,6 +2027,7 @@ exit(2)
                 torch.zeros(2 ** 40, device="cuda")
 
     @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
+    @serialTest()
     def test_repeat_graph_capture_cublas_workspace_memory(self):
         (x, y, z) = 1024, 512, 64
         a = torch.rand((x, y), device='cuda')
@@ -2606,6 +2614,7 @@ exit(2)
     # DropoutState's long-lived internal buffer. Calling code perceives this (correct) behavior
     # as a memory leak unless we skip the leak check.
     @skipCUDAMemoryLeakCheckIf(True)
+    @serialTest()
     def test_graph_cudnn_dropout(self):
         # Tests the interaction of cuda graph capture with DropoutState's syncs in ATen/native/cudnn/RNN.cpp.
         # In particular, if user runs a sequence of captured and noncaptured cudnn rnns, DropoutState should
@@ -2698,6 +2707,7 @@ exit(2)
             {True: "_allow_unused_input", False: "_not_allow_unused_input"}[z],
         ),
     )
+    @serialTest()
     def test_graph_make_graphed_callables(
         self, with_amp, cache_enabled, allow_unused_input
     ):

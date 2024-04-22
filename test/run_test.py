@@ -214,8 +214,6 @@ CI_SERIAL_LIST = [
     "test_fake_tensor",
     "test_cpp_api_parity",
     "test_reductions",
-    "test_cuda",
-    "test_cuda_expandable_segments",
     "test_fx_backends",
     "test_linalg",
     "test_cpp_extensions_jit",
