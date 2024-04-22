@@ -75,7 +75,7 @@ jobs:
         with:
           build-environment: ${{ inputs.build-environment }}
           test-matrix: ${{ inputs.test-matrix }}
-          docker-image: ${{ inputs.docker-image-name }}
+          docker-image: ${{ inputs.docker-image }}
           sync-tag: ${{ inputs.sync-tag }}
           timeout-minutes: ${{ inputs.timeout-minutes }}
           use-gha: ${{ inputs.use-gha }}
