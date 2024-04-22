@@ -1126,7 +1126,7 @@ class DeviceCachingAllocator {
       }
 
       int64_t allocated_in_private_pools = 0;
-      get_size_block = [](const BlockPool& pool) {
+      auto get_size_block = [](const BlockPool& pool) {
         int64_t res = 0;
         for (const auto& block : pool.blocks) {
           res += block->size;
@@ -1175,7 +1175,7 @@ class DeviceCachingAllocator {
           format_size(allocated_in_private_pools),
           " allocated in private pools, and ",
           format_size(
-              reserv ed_bytes - allocated_bytes - allocated_in_private_pools),
+              reserved_bytes - allocated_bytes - allocated_in_private_pools),
           " is reserved by PyTorch but unallocated.",
           " If reserved but unallocated memory is large try setting",
           " PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid"
