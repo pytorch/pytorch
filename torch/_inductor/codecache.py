@@ -213,12 +213,10 @@ class CacheBase:
 
     def update_local_cache(self, local_cache: Dict[str, Any]) -> None:
         local_cache_path = self.get_local_cache_path()
-        if not os.path.exists(local_cache_path.parent):
-            os.makedirs(local_cache_path.parent, exist_ok=True)
-
         write_atomic(
             str(local_cache_path),
             json.dumps({"system": self.system, "cache": local_cache}, indent=4),
+            make_dirs=True,
         )
 
 
@@ -391,20 +389,20 @@ def write(
     # spaces.
     key: str = get_hash(content.strip(), extra, hash_type)
     basename, subdir, path = get_path(key, extension, specified_dir)
-    if not os.path.exists(subdir):
-        os.makedirs(subdir, exist_ok=True)
     if not os.path.exists(path):
-        write_atomic(path, content)
+        write_atomic(path, content, make_dirs=True)
     return basename, path
 
 
-def write_atomic(path: str, content: Union[str, bytes]) -> None:
+def write_atomic(path: str, content: Union[str, bytes], make_dirs: bool = False) -> None:
     # Write into temporary file first to avoid conflicts between threads
     # Avoid using a named temporary file, as those have restricted permissions
     assert isinstance(
         content, (str, bytes)
     ), "Only strings and byte arrays can be saved in the cache"
     path = pathlib.Path(path)
+    if make_dirs:
+        path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.parent / f".{os.getpid()}.{threading.get_ident()}.tmp"
     write_mode = "w" if isinstance(content, str) else "wb"
     with tmp_path.open(write_mode) as f:
@@ -771,7 +769,7 @@ class FxGraphCache:
         artifact_path = get_path(graph.cache_key, "py")[2]
         if not os.path.exists(artifact_path):
             counters["inductor"]["fxgraph_lookup_write_file"] += 1
-            write_atomic(artifact_path, graph.source_code)
+            write_atomic(artifact_path, graph.source_code, make_dirs=True)
         try:
             graph.current_callable = PyCodeCache.load_by_key_path(
                 graph.cache_key,
@@ -834,14 +832,12 @@ class FxGraphCache:
             return
 
         subdir = FxGraphCache._get_tmp_dir_for_key(key)
-        if not os.path.exists(subdir):
-            os.makedirs(subdir, exist_ok=True)
 
         # Use a hash of the serialized CompiledFxGraph to get a unique file
         # name. The specific name doesn't matter since a lookup involves
         # iterating over all entries in the parent subdir.
         path = os.path.join(subdir, sha256_hash(content))
-        write_atomic(path, content)
+        write_atomic(path, content, make_dirs=True)
 
     @staticmethod
     def _check_can_cache(gm: torch.fx.GraphModule):
