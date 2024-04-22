@@ -131,6 +131,7 @@ select = [
     "RUF015", # access first ele in constant time
     "RUF016", # type error non-integer index
     "RUF017",
+    "TRY002", # ban vanilla raise (todo fix NOQAs)
     "TRY200", # TODO: migrate from deprecated alias
     "TRY302",
     "UP",

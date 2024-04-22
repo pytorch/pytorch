@@ -294,8 +294,7 @@ def _replace_pattern(
         # Copy the replacement graph over
         user_nodes: Set[Node] = set()
         for n in match.returning_nodes:
-            for user in n.users:
-                user_nodes.add(user)
+            user_nodes.update(n.users)
         assert user_nodes, "The returning_nodes should have at least one user node"
 
         if len(user_nodes) == 1:
