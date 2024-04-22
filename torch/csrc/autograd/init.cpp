@@ -571,6 +571,24 @@ static PyObject* is_any_autocast_enabled(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* is_autocast_available(
+    PyObject* _unused,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser(
+      {"_is_autocast_available(c10::string_view device_type)"});
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto device_type = at::Device(r.string(0)).type();
+  if (at::autocast::is_autocast_available(device_type)) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* set_autocast_cpu_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK_TYPE(
@@ -1228,6 +1246,10 @@ static PyMethodDef methods[] = { // NOLINT
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {"_is_any_autocast_enabled", is_any_autocast_enabled, METH_NOARGS, nullptr},
+    {"_is_autocast_available",
+     castPyCFunctionWithKeywords(is_autocast_available),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
     {"clear_autocast_cache", clear_autocast_cache, METH_NOARGS, nullptr},
     {"set_autocast_cpu_enabled", set_autocast_cpu_enabled, METH_O, nullptr},
     {"is_autocast_cpu_enabled", is_autocast_cpu_enabled, METH_NOARGS, nullptr},
