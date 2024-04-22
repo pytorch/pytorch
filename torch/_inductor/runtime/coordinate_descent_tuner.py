@@ -3,14 +3,14 @@ import itertools
 import logging
 from typing import Callable, Optional
 
-from .hints import TRITON_MAX_BLOCK
-
 from .runtime_utils import red_text, triton_config_to_hashable
 
 try:
     import triton
 except ImportError:
     triton = None
+
+from torch._inductor import config as inductor_config
 
 log = logging.getLogger(__name__)
 
@@ -44,35 +44,32 @@ class CoordescTuner:
           i.e., there are multiple local optima..
     """
 
-    def __init__(
-        self, is_mm=False, name="unknown", size_hints=None, inductor_meta=None
-    ):
+    def __init__(self, is_mm=False, name="unknown", size_hints=None):
         self.is_mm = is_mm  # we will tune num_stages for mm
         self.cached_benchmark_results = {}
         self.name = name
         self.size_hints = size_hints
-        self.inductor_meta = inductor_meta or {}
 
     def get_xmax(self):
-        xmax = TRITON_MAX_BLOCK["X"]
+        xmax = inductor_config.triton.max_block["X"]
         if self.size_hints and len(self.size_hints) > 0:
             xmax = min(xmax, self.size_hints[0])
         return xmax
 
     def get_ymax(self):
-        ymax = TRITON_MAX_BLOCK["Y"]
+        ymax = inductor_config.triton.max_block["Y"]
         if self.size_hints and len(self.size_hints) > 1:
             ymax = min(ymax, self.size_hints[1])
         return ymax
 
     def get_zmax(self):
-        zmax = TRITON_MAX_BLOCK["Z"]
+        zmax = inductor_config.triton.max_block["Z"]
         if self.size_hints and len(self.size_hints) > 2:
             zmax = min(zmax, self.size_hints[2])
         return zmax
 
     def get_rmax(self):
-        rmax = TRITON_MAX_BLOCK["R"]
+        rmax = inductor_config.triton.max_block["R"]
         if self.size_hints and len(self.size_hints) > 0:
             rmax = min(rmax, self.size_hints[-1])  # the last one is for reduction
         return rmax
@@ -197,7 +194,7 @@ class CoordescTuner:
             candidate_values = self.get_neighbour_values(
                 field,
                 old_value,
-                radius=self.inductor_meta.get("coordinate_descent_search_radius", 1),
+                radius=inductor_config.coordinate_descent_search_radius,
                 include_self=True,
             )
             candidate_values_list.append(candidate_values)
@@ -289,9 +286,7 @@ class CoordescTuner:
                         improved = True
                         best_config, best_timing = candidate_config, candidate_timing
 
-            if not improved and self.inductor_meta.get(
-                "coordinate_descent_check_all_directions"
-            ):
+            if not improved and inductor_config.coordinate_descent_check_all_directions:
                 old_best_timing = best_timing
                 improved, best_config, best_timing = self.check_all_tuning_directions(
                     func, best_config, best_timing
