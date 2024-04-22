@@ -71,6 +71,13 @@ http_archive(
     ],
 )
 
+http_archive(
+    name = "com_github_opentelemetry-cpp",
+    urls = [
+        "https://github.com/open-telemetry/opentelemetry-cpp/archive/refs/tags/v1.14.2.tar.gz",
+    ],
+)
+
 new_local_repository(
     name = "gloo",
     build_file = "//third_party:gloo.BUILD",
@@ -153,6 +160,12 @@ new_local_repository(
     name = "kineto",
     build_file = "//third_party:kineto.BUILD",
     path = "third_party/kineto",
+)
+
+new_local_repository(
+    name = "opentelemetry-cpp",
+    build_file = "//third_party::opentelemetry-cpp.BUILD",
+    path = "third_party/opentelemetry-cpp",
 )
 
 new_patched_local_repository(

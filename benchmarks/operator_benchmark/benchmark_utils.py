@@ -345,8 +345,9 @@ def get_operator_range(chars_range):
             ops_start_chars_set.add(item.lower())
             continue
         start, end = item.split("-")
-        for c in range(ord(start), ord(end) + 1):
-            ops_start_chars_set.add(chr(c).lower())
+        ops_start_chars_set.update(
+            chr(c).lower() for c in range(ord(start), ord(end) + 1)
+        )
     return ops_start_chars_set
 
 
