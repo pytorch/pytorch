@@ -1,0 +1,64 @@
+ir_version: 8
+producer_name: "pytorch"
+producer_version: "CURRENT_VERSION"
+graph {
+  node {
+    output: "onnx::Reshape_1"
+    name: "Constant_1"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 2
+        data_type: 7
+        raw_data: "\001\000\000\000\000\000\000\000\001\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "onnx::Reshape_0"
+    input: "onnx::Reshape_1"
+    output: "2"
+    name: "Reshape_2"
+    op_type: "Reshape"
+    attribute {
+      name: "allowzero"
+      i: 0
+      type: INT
+    }
+  }
+  name: "main_graph"
+  input {
+    name: "onnx::Reshape_0"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 1
+          }
+        }
+      }
+    }
+  }
+  output {
+    name: "2"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 1
+          }
+          dim {
+            dim_value: 1
+          }
+        }
+      }
+    }
+  }
+}
+opset_import {
+  version: 17
+}
