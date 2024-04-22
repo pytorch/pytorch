@@ -49,6 +49,7 @@ from .vmap import doesnt_support_saved_tensors_hooks, get_chunk_sizes
 
 def lazy_dynamo_disallow(func):
     import torch._dynamo
+
     return torch._dynamo.disallow_in_graph(func)
 
 
@@ -1789,7 +1790,9 @@ def linearize(func: Callable, *primals) -> Tuple[Any, Callable]:
         return tangents
 
     jvp_graph = lazy_dynamo_disallow(make_fx)(trace_fn)(flat_tangents)
-    const_folded_jvp_graph = lazy_dynamo_disallow(const_fold.split_const_subgraphs)(jvp_graph)
+    const_folded_jvp_graph = lazy_dynamo_disallow(const_fold.split_const_subgraphs)(
+        jvp_graph
+    )
 
     # Hold only the meta-data regarding the primals.
     flat_primals_shape = tuple(p.shape for p in flat_primals)
@@ -1835,4 +1838,5 @@ def linearize(func: Callable, *primals) -> Tuple[Any, Callable]:
         # const folded graph can return flat output,
         # so transform output.
         return tree_unflatten(flat_output, output_spec)
+
     return output, jvp_fn

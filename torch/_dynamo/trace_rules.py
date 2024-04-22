@@ -263,7 +263,7 @@ manual_torch_name_rule_map = {
     "torch.autograd.forward_ad.make_dual": UserFunctionVariable,
     "torch.autograd.forward_ad.unpack_dual": UserFunctionVariable,
     # functorch/linearize
-    "torch._functorch.eager_transforms.linearize": UserFunctionVariable,
+    "torch._functorch.eager_transforms.linearize": FunctorchHigherOrderVariable,
     # functorch/jacfwd
     "torch._functorch.eager_transforms.jacfwd": FunctorchHigherOrderVariable,
     "torch._functorch.eager_transforms._construct_standard_basis_for": UserFunctionVariable,

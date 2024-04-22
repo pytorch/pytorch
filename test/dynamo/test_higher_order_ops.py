@@ -5152,6 +5152,30 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    def test_linearize_disable_capture(self):
+        counters.clear()
+        with config.patch(capture_func_transforms=False):
+            # We have verified above that this
+            # function compiles
+            def wrapper_fn(x):
+                out, _ = torch.func.linearize(torch.sin, x)
+                return out
+
+            x = torch.randn(2, 3)
+            actual = wrapper_fn(x)
+            expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(
+                x
+            )
+            self.assertEqual(len(counters["graph_break"]), 1)
+            self.assertEqual(
+                {
+                    "torch.func.linearize capture is disabled, it can be "
+                    "turned on by setting `torch._dynamo.config.capture_func_transforms=True`": 2,
+                },
+                dict(counters["graph_break"]),
+            )
+            self.assertEqual(actual, expected)
+
     @config.patch(capture_func_transforms=True)
     @config.patch(error_on_recompile=True)
     def test_vmap_recompile(self):
