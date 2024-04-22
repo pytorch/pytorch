@@ -304,9 +304,7 @@ def requires_nccl_version(version, msg):
     else:
         return skip_but_pass_in_sandcastle_if(
             torch.cuda.nccl.version() < version,
-            "Requires NCCL version greater than or equal to: {}, found: {}, reason: {}".format(
-                version, torch.cuda.nccl.version(), msg
-            ),
+            f"Requires NCCL version greater than or equal to: {version}, found: {torch.cuda.nccl.version()}, reason: {msg}",
         )
 
 
@@ -798,9 +796,8 @@ class MultiProcessTestCase(TestCase):
                 # Get error from pipe.
                 error_message = self.pid_to_pipe[process.pid].recv()
                 error += (
-                    "Process {} exited with error code {} and exception:\n{}\n".format(
-                        i, MultiProcessTestCase.TEST_ERROR_EXIT_CODE, error_message
-                    )
+                    f"Process {i} exited with error code {MultiProcessTestCase.TEST_ERROR_EXIT_CODE} "
+                    f"and exception:\n{error_message}\n"
                 )
 
             raise RuntimeError(error)
@@ -814,9 +811,7 @@ class MultiProcessTestCase(TestCase):
             self.assertEqual(
                 p.exitcode,
                 first_process.exitcode,
-                msg="Expect process {} exit code to match Process 0 exit code of {}, but got {}".format(
-                    i, first_process.exitcode, p.exitcode
-                ),
+                msg=f"Expect process {i} exit code to match Process 0 exit code of {first_process.exitcode}, but got {p.exitcode}",
             )
         for skip in TEST_SKIPS.values():
             if first_process.exitcode == skip.exit_code:
