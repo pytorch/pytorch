@@ -130,7 +130,7 @@ class TestCutlassBackend(TestCase):
     # TODO: Enable dynamic test cases when dynamic support is added.
     @unittest.skipIf(not SM75OrLater, "need sm_75")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
-    @parametrize("dynamic", (False,))
+    @parametrize("dynamic", (False, True))
     @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen,Triton,CUTLASS"))
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_regular_mm(
@@ -398,12 +398,7 @@ class TestCutlassBackend(TestCase):
             # Broadcast first dim.
             compare_results(4096, 25728, 2048, 2.0, 0.4, [2048])
             # Broadcast last dim.
-            if not SM90OrLater and max_autotune_gemm_backends == "CUTLASS":
-                with self.assertRaisesRegex(RuntimeError, "No choices to select"):
-                    # CUTLASS2 doesn't support Bias last-dim broadcast.
-                    compare_results(4096, 25728, 2048, 2.0, 0.4, [4096, 1])
-            else:
-                compare_results(4096, 25728, 2048, 2.0, 0.4, [4096, 1])
+            compare_results(4096, 25728, 2048, 2.0, 0.4, [4096, 1])
 
     # TODO: Enable dynamic test cases when dynamic support is added.
     @unittest.skipIf(not SM80OrLater, "need sm_80")

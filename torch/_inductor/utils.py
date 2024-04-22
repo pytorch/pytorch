@@ -5,7 +5,6 @@ import contextlib
 import dataclasses
 import enum
 import functools
-import getpass
 import inspect
 import io
 import itertools
@@ -14,14 +13,12 @@ import math
 import operator
 import os
 import platform
-import re
 import shutil
 import sys
 import tempfile
 import textwrap
 import time
 import unittest
-from dataclasses import fields
 from datetime import datetime
 from io import StringIO
 from typing import (
@@ -52,6 +49,7 @@ from torch.autograd.profiler_util import EventList
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.utils._sympy.functions import CeilDiv, CleanDiv, FloorDiv, ModularIndexing
 from . import config
+from .runtime.runtime_utils import ceildiv as runtime_ceildiv
 
 log = logging.getLogger(__name__)
 
@@ -141,37 +139,6 @@ def do_bench_using_profiling(fn: Callable[[], Any], warmup=25, rep=100) -> float
     return res
 
 
-def do_bench(*args, **kwargs):
-    @functools.lru_cache(None)
-    def load_triton():
-        try:
-            # NB: Lazily load triton, as importing triton is slow
-            # see https://github.com/openai/triton/issues/1599
-            from triton.testing import do_bench as triton_do_bench
-        except ImportError as exc:
-            raise NotImplementedError("requires Triton") from exc
-
-        # triton PR https://github.com/openai/triton/pull/1513 change the
-        # quantile fields name from 'percentiles' to 'quantiles'
-        # and change the default value from (0.5, 0.2, 0.8) to None.
-        # This may break inductor since a caller expects a tuple may get a item.
-        #
-        # Add a wrapper to maintain the same behavior for inductor.
-        # Maybe we should have own implementation of this function?
-        return triton_do_bench, (
-            "quantiles"
-            if inspect.signature(triton_do_bench).parameters.get("quantiles")
-            is not None
-            else "percentiles"
-        )
-
-    triton_do_bench, quantile_field_name = load_triton()
-
-    if quantile_field_name not in kwargs:
-        kwargs[quantile_field_name] = (0.5, 0.2, 0.8)
-    return triton_do_bench(*args, **kwargs)[0]
-
-
 @functools.lru_cache(None)
 def has_torchvision_roi_align() -> bool:
     try:
@@ -182,10 +149,6 @@ def has_torchvision_roi_align() -> bool:
         )
     except ImportError:
         return False
-
-
-def conditional_product(*args):
-    return functools.reduce(operator.mul, [x for x in args if x])
 
 
 def decode_device(device: Union[Optional[torch.device], str]) -> torch.device:
@@ -223,20 +186,7 @@ def ceildiv(
     assert isinstance(numer, int) and isinstance(
         denom, int
     ), f"{numer}: {type(numer)}, {denom}: {type(denom)}"
-    return -(numer // -denom)
-
-
-def next_power_of_2(n: int) -> int:
-    """Return the smallest power of 2 greater than or equal to n"""
-    n -= 1
-    n |= n >> 1
-    n |= n >> 2
-    n |= n >> 4
-    n |= n >> 8
-    n |= n >> 16
-    n |= n >> 32
-    n += 1
-    return n
+    return runtime_ceildiv(numer, denom)
 
 
 def _type_of(key):
@@ -689,51 +639,6 @@ def output_node(gm: torch.fx.GraphModule):
     return last_node
 
 
-# Attempt to import AttrsDescriptor from Triton
-try:
-    from triton.compiler.compiler import AttrsDescriptor
-
-    attrs_descriptor_available = True
-    # Determine if 'ids_of_folded_args' is a valid field for AttrsDescriptor
-    attr_desc_fields = {f.name for f in fields(AttrsDescriptor)}
-    ids_of_folded_args_available = "ids_of_folded_args" in attr_desc_fields
-    divisible_by_8_available = "divisible_by_8" in attr_desc_fields
-except ImportError:
-    attrs_descriptor_available = False
-
-# Define `instance_descriptor` function with clear conditional handling
-if attrs_descriptor_available:
-
-    def instance_descriptor(
-        divisible_by_16=None,
-        equal_to_1=None,
-        ids_of_folded_args=None,
-        divisible_by_8=None,
-    ):
-        # Prepare the arguments for AttrsDescriptor
-        kwargs = {
-            "divisible_by_16": divisible_by_16,
-            "equal_to_1": equal_to_1,
-        }
-
-        # Conditionally add 'ids_of_folded_args' if it's available in AttrsDescriptor
-        if ids_of_folded_args_available:
-            kwargs["ids_of_folded_args"] = ids_of_folded_args
-        if divisible_by_8_available:
-            kwargs["divisible_by_8"] = divisible_by_8
-
-        # Instantiate AttrsDescriptor with the prepared arguments
-        return AttrsDescriptor(**kwargs)
-
-else:
-    # Define a namedtuple as a fallback when AttrsDescriptor is not available
-    instance_descriptor = collections.namedtuple(  # type: ignore[no-redef]
-        "instance_descriptor",
-        ["divisible_by_16", "equal_to_1", "ids_of_folded_args", "divisible_by_8"],
-        defaults=[tuple(), tuple(), tuple(), tuple()],
-    )
-
-
 _registered_caches: List[Any] = []
 
 
@@ -747,20 +652,6 @@ def clear_on_fresh_inductor_cache(obj: Any):
 
     _registered_caches.append(obj)
     return obj
-
-
-@clear_on_fresh_inductor_cache
-@functools.lru_cache(None)
-def cache_dir() -> str:
-    cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
-    if cache_dir is None:
-        sanitized_username = re.sub(r'[\\/:*?"<>|]', "_", getpass.getuser())
-        cache_dir = os.path.join(
-            tempfile.gettempdir(),
-            "torchinductor_" + sanitized_username,
-        )
-    os.makedirs(cache_dir, exist_ok=True)
-    return cache_dir
 
 
 @contextlib.contextmanager
@@ -1187,28 +1078,6 @@ def developer_warning(msg):
         log.info(msg)
 
 
-def get_num_bytes(*args: torch.Tensor, num_in_out_args: int = 0) -> int:
-    """
-    Return the total number of bytes the arguments of tensor type takes.
-
-    For in/out args, tensor sizes are counted twice: once for reading and
-    once for writing.
-
-    The first num_in_out_args arguments are in out tensors.
-    """
-    return sum(
-        arg.numel() * arg.element_size() * (1 + int(i < num_in_out_args))
-        for i, arg in enumerate(args)
-        if isinstance(arg, torch.Tensor)
-    )
-
-
-def create_bandwidth_info_str(ms, num_gb, gb_per_s, prefix="", suffix="", color=True):
-    info_str = f"{prefix}{ms:.3f}ms    \t{num_gb:.3f} GB \t {gb_per_s:7.2f}GB/s{suffix}"
-    slow = ms > 0.012 and gb_per_s < 650
-    return red_text(info_str) if color and slow else info_str
-
-
 def get_benchmark_name():
     """
     An experimental API used only when config.benchmark_kernel is true.
@@ -1275,52 +1144,11 @@ def maybe_profile(should_profile, *args, **kwargs):
         yield
 
 
-def triton_config_to_hashable(cfg):
-    """
-    Convert triton config to a tuple that can uniquely identify it. We can use
-    the return value as a dictionary key.
-    """
-    items = sorted(cfg.kwargs.items())
-    items.append(("num_warps", cfg.num_warps))
-    items.append(("num_stages", cfg.num_stages))
-    return tuple(items)
-
-
 def parallel_num_threads():
     threads = config.cpp.threads
     if threads < 1:
         threads = torch.get_num_threads()
     return threads
-
-
-HAS_COLORAMA = True
-try:
-    import colorama
-except ImportError:
-    HAS_COLORAMA = False
-
-
-def _color_text(msg, color):
-    if not HAS_COLORAMA:
-        return msg
-
-    return getattr(colorama.Fore, color.upper()) + msg + colorama.Fore.RESET
-
-
-def green_text(msg):
-    return _color_text(msg, "green")
-
-
-def yellow_text(msg):
-    return _color_text(msg, "yellow")
-
-
-def red_text(msg):
-    return _color_text(msg, "red")
-
-
-def blue_text(msg):
-    return _color_text(msg, "blue")
 
 
 @functools.lru_cache(None)
@@ -1364,10 +1192,6 @@ def is_welford_reduction(reduction_type):
 
 def reduction_num_outputs(reduction_type):
     return 3 if is_welford_reduction(reduction_type) else 1
-
-
-def get_max_y_grid():
-    return 65535
 
 
 def is_linux() -> bool:

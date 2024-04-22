@@ -59,7 +59,8 @@ from torch._dynamo.device_interface import (
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
-from torch._inductor.utils import cache_dir, clear_on_fresh_inductor_cache, is_linux
+from torch._inductor.runtime.runtime_utils import cache_dir
+from torch._inductor.utils import clear_on_fresh_inductor_cache, is_linux
 from torch._subclasses.fake_tensor import (
     extract_tensor_metadata,
     FakeTensor,
