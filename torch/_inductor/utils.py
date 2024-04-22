@@ -1360,9 +1360,16 @@ def needs_fallback_due_to_atomic_add_limitations(dtype):
 
 
 def use_scatter_fallback(
-    fn, reduction_type, self_dtype, src_dtype, src_device_type, src_is_tensor
+    op_overload: torch._ops.OpOverload,
+    reduction_type,
+    self_dtype,
+    src_dtype,
+    src_device_type,
+    src_is_tensor,
 ):
-    reduce_ty = "add" if fn == "aten.scatter_" else "sum"
+    reduce_ty = (
+        "add" if op_overload.overloadpacket == torch.ops.aten.scatter_ else "sum"
+    )
 
     return (
         reduction_type not in {None, reduce_ty}
@@ -1372,7 +1379,7 @@ def use_scatter_fallback(
             and needs_fallback_due_to_atomic_add_limitations(src_dtype)
         )
         or (
-            fn == "aten.scatter_reduce_"
+            op_overload.overloadpacket == torch.ops.aten.scatter_reduce_
             and reduction_type == "sum"
             and src_is_tensor
             and src_device_type == "cpu"
