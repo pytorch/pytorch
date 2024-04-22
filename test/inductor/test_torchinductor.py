@@ -1039,6 +1039,22 @@ class CommonTemplate:
         self.assertEqual(expect, actual)
         self.assertEqual(actual, repeat(x, 3))
 
+    def test_index_propagation_abs(self):
+        def reflection_pad_left(x, n):
+            # e.g. x=[1, 2, 3], n=2 => returns [3, 2, 1, 2, 3]
+            i = torch.arange(x.shape[0] + n, device=x.device)
+            return x[(i - n).abs()]
+
+        x = torch.randn(8, device=self.device)
+        opt_fn = torch._dynamo.optimize("inductor")(reflection_pad_left)
+
+        # this should be collapsed to direct indexing
+        actual = _run_and_assert_no_indirect_indexing(
+            self, opt_fn, x, 3, has_wrapping=False
+        )
+        expect = reflection_pad_left(x, 3)
+        self.assertEqual(expect, actual)
+
     @skipIfRocm
     @config.patch(debug_index_asserts=False)
     def test_neg_index(self):
