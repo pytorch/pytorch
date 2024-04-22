@@ -868,7 +868,6 @@ at::Tensor _weight_int4pack_mm_cuda(
     int64_t qGroupSize,
     const at::Tensor& qScaleAndZeros) {
   c10::cuda::CUDAGuard g(A.device());
-  auto stream = at::cuda::getCurrentCUDAStream();
 
   TORCH_CHECK(
       A.device() == B.device() && A.device() == qScaleAndZeros.device());
@@ -926,6 +925,7 @@ at::Tensor _weight_int4pack_mm_cuda(
       {m, n}, at::TensorOptions().dtype(at::kBFloat16).device(A.device()));
 
 #if (defined(CUDA_VERSION) && CUDA_VERSION >= 12000) && (!defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800))
+  auto stream = at::cuda::getCurrentCUDAStream();
 #define RUN_GEMM(WARPS, K_TILES_PER_WARP, Q_GROUP_SIZE, REDUCE_TYPE) \
   do {                                                               \
     using ACLayout = ALayout_RM<REDUCE_TYPE>;                        \
@@ -1041,7 +1041,6 @@ at::Tensor _convert_weight_to_int4pack_cuda(
     const at::Tensor& in,
     int64_t innerKTiles) {
   c10::cuda::CUDAGuard g(in.device());
-  auto stream = at::cuda::getCurrentCUDAStream();
 
   TORCH_CHECK(in.dim() == 2);
   TORCH_CHECK(in.dtype() == at::kInt);
@@ -1072,6 +1071,7 @@ at::Tensor _convert_weight_to_int4pack_cuda(
       at::TensorOptions().dtype(at::kInt).device(in.device()));
 
 #if (defined(CUDA_VERSION) && CUDA_VERSION >= 12000) && (!defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800))
+  auto stream = at::cuda::getCurrentCUDAStream();
   dim3 grid(kSuperTiles, nTiles);
 
   if (innerKTiles == 2) {

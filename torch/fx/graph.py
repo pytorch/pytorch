@@ -4,8 +4,9 @@ import torch.utils._pytree as pytree
 from . import _pytree as fx_pytree
 from ._compatibility import compatibility
 
+import os
 import contextlib
-from typing import TYPE_CHECKING, Callable, Any, List, Dict, NamedTuple, Optional, Tuple, Set, FrozenSet, Type
+from typing import TYPE_CHECKING, Callable, Any, List, Dict, NamedTuple, Optional, Tuple, Set, FrozenSet, Type, Iterable
 from dataclasses import dataclass
 from contextlib import contextmanager
 import copy
@@ -219,6 +220,8 @@ dtype_abbrs = {
     torch.int64: 'i64',
     torch.bool: 'b8',
     torch.uint8: 'u8',
+    torch.uint32: 'u32',
+    torch.uint64: 'u64',
 }
 
 @compatibility(is_backward_compatible=True)
@@ -267,12 +270,20 @@ class _node_list:
         return self.graph._len
 
     def __iter__(self):
-        root, direction = self.graph._root, self.direction
-        cur = getattr(root, direction)
-        while cur is not root:
-            if not cur._erased:
-                yield cur
-            cur = getattr(cur, direction)
+        root = self.graph._root
+        if self.direction == "_next":
+            cur = root._next
+            while cur is not root:
+                if not cur._erased:
+                    yield cur
+                cur = cur._next
+        else:
+            assert self.direction == "_prev"
+            cur = root._prev
+            while cur is not root:
+                if not cur._erased:
+                    yield cur
+                cur = cur._prev
 
     def __reversed__(self):
         return _node_list(self.graph, '_next' if self.direction == '_prev' else '_prev')
@@ -368,7 +379,8 @@ class CodeGen:
         return []
 
     def _gen_python_code(
-        self, nodes, root_module: str, namespace: _Namespace, *, verbose: bool = False,
+        self, nodes, root_module: str, namespace: _Namespace, *,
+        verbose: bool = False, include_stride: bool = False, include_device: bool = False
     ) -> PythonCode:
         free_vars: List[str] = []
         body: List[str] = []
@@ -377,6 +389,8 @@ class CodeGen:
 
         # Wrap string in list to pass by reference
         maybe_return_annotation : List[str] = ['']
+        include_stride = include_stride or (os.environ.get("FX_GRAPH_SHOW_STRIDE", "0") == "1")
+        include_device = include_device or (os.environ.get("FX_GRAPH_SHOW_DEVICE", "0") == "1")
 
         def add_global(name_hint: str, obj: Any):
             """Add an obj to be tracked as a global.
@@ -520,7 +534,7 @@ class CodeGen:
                     prev_stacktrace = ""
                     body.append('\n# No stacktrace found for following nodes\n')
 
-        def stringify_shape(shape : torch.Size) -> str:
+        def stringify_shape(shape : Iterable) -> str:
             return f"[{', '.join(str(x) for x in shape)}]"
 
         def emit_node(node : Node):
@@ -533,10 +547,13 @@ class CodeGen:
                 from torch.fx.passes.shape_prop import TensorMetadata
 
                 meta_val = node.meta.get('val', node.meta.get('tensor_meta', None))
-
                 # use string as annotation, to make it valid python code
                 if isinstance(meta_val, FakeTensor):
-                    maybe_type_annotation = f': "{dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}"'
+                    stride_annotation = f"{stringify_shape(meta_val.stride())}" if include_stride else ""
+                    device_annotation = f"{meta_val.device}" if include_device else ""
+                    maybe_type_annotation = \
+                        f': "{dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}' \
+                        f'{stride_annotation}{device_annotation}"'
                 elif isinstance(meta_val, py_sym_types):
                     maybe_type_annotation = f': "Sym({meta_val})"'
                 elif isinstance(meta_val, TensorMetadata):
@@ -743,6 +760,36 @@ class _PyTreeCodeGen(CodeGen):
         else:
             return super().generate_output(output_args)
 
+class _FindNodesLookupTable:
+    """
+    Side table for the graph for the purpose of doing fast queries
+    """
+    def __init__(self):
+        self.table: Dict[Tuple[str, Optional[Target]], Dict[Node, None]] = defaultdict(dict)
+
+    def _key(self, node) -> Tuple[str, Optional[Target]]:
+        return (node.op, node.target if node.op == "call_function" else None)
+
+    def __contains__(self, node) -> bool:
+        return node in self.table[self._key(node)]
+
+    def insert(self, node: Node) -> None:
+        self.table[self._key(node)][node] = None
+
+    def remove(self, node: Node) -> None:
+        self.table[self._key(node)].pop(node)
+
+    def find_nodes(self, *, op: str, target: Optional['Target'] = None):
+        if op == "call_function":
+            assert target is not None
+            return dict(self.table[(op, target)]).keys()
+
+        if target is None:
+            return dict(self.table[(op, None)]).keys()
+
+        # op is call_method, get_attr, call_module
+        return [node for node in self.table[(op, None)].keys() if node.target == target]
+
 @compatibility(is_backward_compatible=True)
 class Graph:
     """
@@ -804,6 +851,7 @@ class Graph:
         self._tracer_extras = tracer_extras
         self._codegen = CodeGen()
         self._co_fields : Dict[str, Any] = {}
+        self._find_nodes_lookup_table = _FindNodesLookupTable()
 
     @property
     def owning_module(self):
@@ -827,6 +875,30 @@ class Graph:
             this list to switch iteration order.
         """
         return _node_list(self)
+
+    @compatibility(is_backward_compatible=False)
+    def find_nodes(self, *, op: str, target: Optional['Target'] = None, sort: bool = True):
+        """
+        Allows for fast query of nodes
+
+        Args:
+
+            op (str): the name of the operation
+
+            target (Optional[Target]): the target of the node. For call_function,
+                the target is required. For other ops, the target is optional.
+
+            sort (bool): whether to return nodes in the order they appear on
+                         on the graph.
+
+        Returns:
+
+            Iteratable of nodes with the requested op and target.
+        """
+        node_list = self._find_nodes_lookup_table.find_nodes(op=op, target=target)
+        if sort:
+            return sorted(node_list)
+        return node_list
 
     @compatibility(is_backward_compatible=True)
     def graph_copy(self, g : 'Graph', val_map : Dict[Node, Node], return_output_node=False) -> 'Optional[Argument]':
@@ -917,6 +989,7 @@ class Graph:
         self._graph_namespace.associate_name_with_obj(name, n)
 
         self._insert(n)
+        self._find_nodes_lookup_table.insert(n)
         self._len += 1
         return n
 
@@ -945,10 +1018,13 @@ class Graph:
         if len(to_erase.users) > 0:
             raise RuntimeError(f'Tried to erase Node {to_erase} but it still had {len(to_erase.users)} '
                                f'users in the graph: {to_erase.users}!')
+        if to_erase.graph != self:
+            raise RuntimeError(f"Attempting to remove {to_erase} from wrong graph!")
         if to_erase._erased:
             warnings.warn(f"erase_node({to_erase}) on an already erased node")
             return
 
+        self._find_nodes_lookup_table.remove(to_erase)
         to_erase._remove_from_list()
         to_erase._erased = True  # iterators may retain handles to erased nodes
         self._len -= 1
@@ -1277,7 +1353,10 @@ class Graph:
         return op
 
     @compatibility(is_backward_compatible=True)
-    def python_code(self, root_module: str, *, verbose: bool = False) -> PythonCode:
+    def python_code(
+        self, root_module: str, *,
+        verbose: bool = False, include_stride: bool = False, include_device: bool = False
+    ) -> PythonCode:
         """
         Turn this ``Graph`` into valid Python code.
 
@@ -1336,10 +1415,19 @@ class Graph:
                     node._repr_fn = orig_repr_fns[node]
 
         with override_node_repr(self):
-            return self._python_code(root_module, namespace, verbose=verbose)
+            return self._python_code(
+                root_module, namespace,
+                verbose=verbose, include_stride=include_stride, include_device=include_device
+            )
 
-    def _python_code(self, root_module: str, namespace: _Namespace, *, verbose: bool = False) -> PythonCode:
-        return self._codegen._gen_python_code(self.nodes, root_module, namespace, verbose=verbose)
+    def _python_code(
+        self, root_module: str, namespace: _Namespace, *,
+        verbose: bool = False, include_stride: bool = False, include_device: bool = False
+    ) -> PythonCode:
+        return self._codegen._gen_python_code(
+            self.nodes, root_module, namespace,
+            verbose=verbose, include_stride=include_stride, include_device=include_device
+        )
 
 
     def __str__(self) -> str:
@@ -1409,6 +1497,8 @@ class Graph:
                 raise RuntimeError(f'Node {node} had unknown opcode {node.op}!')
             if node.graph is not self:
                 raise RuntimeError(f'Node \'{node}\' does not belong to this Graph!')
+            if node not in self._find_nodes_lookup_table:
+                raise RuntimeError(f"Node \'{node}\' is not added to the side table")
             map_arg(node.args, lambda arg: check_arg(arg, node))
             map_arg(node.kwargs, lambda arg: check_arg(arg, node))
             seen_values.add(node)

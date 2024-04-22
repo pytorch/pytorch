@@ -44,7 +44,7 @@ namespace {
 // so if l is l_0 l_1 ... l_(tl-1) then this looks up idx in
 // l' = BLANK l_0 BLANK l_1 BLANK ... BLANK l_(tl-1) BLANK
 // - note that no bound-checking is done
-// - it is important to only call it witth idx == 0 if the target length is 0
+// - it is important to only call it with idx == 0 if the target length is 0
 // - __restrict__ impact to be measured, see
 //   https://devblogs.nvidia.com/cuda-pro-tip-optimize-pointer-aliasing/
 template <typename target_t>
@@ -96,6 +96,14 @@ ctc_loss_log_alpha_gpu_kernel(scalar_t* __restrict__ log_alpha_data,
 
   if (b >= batch_size)
     return;
+
+  if (input_length == 0) {
+    if (threadIdx.x == 0) {
+      scalar_t log_likelihood = target_length == 0 ? 0 : neginf;
+      neg_log_likelihood_data[b] = -log_likelihood;
+    }
+    return;
+  }
 
   // first row (t=0), the three equations for alpha_1 above eq (6)
   for (int64_t block_s = 0; block_s < 2*max_target_length+1; block_s += blockDim.x) {
@@ -237,6 +245,9 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
   if (targets.dim() == 1) { // concatenated targets
     int64_t pos = 0;
     for (int64_t i = 0; i < batch_size; i++) {
+      TORCH_CHECK(target_lengths[i] >= 0,
+                  "Expected target_lengths to have value at least ", 0, ", but got value ", target_lengths[i],
+                  " (while checking arguments for ", c, ")");
       tg_batch_offsets_data[i] = pos;
       pos += target_lengths[i];
       if (max_target_length < target_lengths[i])
@@ -249,6 +260,9 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
     // dim is 2
     int64_t tg_batch_stride = targets.stride(0);
     for (int64_t i = 0; i < batch_size; i++) {
+      TORCH_CHECK(target_lengths[i] >= 0,
+                  "Expected target_lengths to have value at least ", 0, ", but got value ", target_lengths[i],
+                  " (while checking arguments for ", c, ")");
       tg_batch_offsets_data[i] = i * tg_batch_stride;
       if (max_target_length < target_lengths[i])
         max_target_length = target_lengths[i];
@@ -261,6 +275,9 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
   }
   int64_t max_input_length = log_probs.size(0);
   for (int64_t b = 0; b < batch_size; b++) {
+    TORCH_CHECK(input_lengths[b] >= 0,
+             "Expected input_lengths to have value at least ", 0, ", but got value ", input_lengths[b],
+             " (while checking arguments for ", c, ")");
     TORCH_CHECK(input_lengths[b] <= max_input_length,
              "Expected input_lengths to have value at most ", max_input_length, ", but got value ", input_lengths[b],
              " (while checking arguments for ", c, ")");
@@ -273,8 +290,8 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
   Tensor log_alpha = at::empty({batch_size, log_probs.size(0), 2*max_target_length+1}, log_probs.options());
   Tensor neg_log_likelihood = at::empty({batch_size}, log_probs.options());
 
-  // Very likely, we could be more clever here, e.g. learning (or genralizing and reusing) from SoftMax.cu...
-  constexpr int max_threads = std::is_same<scalar_t, float>::value ? 1024 : 896; // we need 72 or so 32 bit registers for double
+  // Very likely, we could be more clever here, e.g. learning (or generalizing and reusing) from SoftMax.cu...
+  constexpr int max_threads = std::is_same<scalar_t, float>::value ? 1024 : 768; // we need 72 or so 32 bit registers for double
   int threads_target = max_threads;
   while (threads_target / 2 >= 2*max_target_length+1) {
     threads_target /= 2;
@@ -322,7 +339,10 @@ ctc_loss_backward_log_beta_gpu_kernel(scalar_t* __restrict__ log_beta_data,
   if (b >= batch_size)
     return;
 
-  // "first" row, the beta initiaization before eq (10) (t=target_length - differes per batch)
+  if (input_length == 0)
+    return;
+
+  // "first" row, the beta initialization before eq (10) (t=target_length - differes per batch)
   for (int64_t block_s = 2*max_target_length - (2*max_target_length % blockDim.x); block_s >= 0; block_s -= blockDim.x) {
     int64_t s = threadIdx.x + block_s;
     scalar_t lb;

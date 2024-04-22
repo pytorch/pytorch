@@ -9,6 +9,12 @@ class FakeWork : public Work {
   bool wait(std::chrono::milliseconds timeout) override {
     return true;
   }
+
+  c10::intrusive_ptr<c10::ivalue::Future> getFuture() override {
+    auto fut = c10::make_intrusive<c10::ivalue::Future>(c10::NoneType::get());
+    fut->markCompleted();
+    return fut;
+  }
 };
 
 class FakeProcessGroup : public Backend {

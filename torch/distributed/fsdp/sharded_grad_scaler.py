@@ -7,7 +7,7 @@ import torch.distributed as dist
 from torch.amp.grad_scaler import _MultiDeviceReplicator, GradScaler, OptState
 from torch.distributed.distributed_c10d import ProcessGroup
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def _refresh_per_optimizer_state() -> Dict[str, Any]:
@@ -15,7 +15,7 @@ def _refresh_per_optimizer_state() -> Dict[str, Any]:
 
 
 def _is_supported_device(tensor: torch.Tensor) -> bool:
-    return tensor.is_cuda or tensor.device.type in ("xla", "cpu")
+    return tensor.is_cuda or tensor.device.type in ("xla", "cpu", "hpu")
 
 
 class _GeneralMultiDeviceReplicator(_MultiDeviceReplicator):
@@ -173,7 +173,7 @@ class ShardedGradScaler(GradScaler):
 
         for grad in grads:
             if grad.device.type != "cpu":
-                log.error(
+                logger.error(
                     "tensor device is %s but was expected to be ``cpu``",
                     grad.device,
                 )

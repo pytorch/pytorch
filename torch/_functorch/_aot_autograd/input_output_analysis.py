@@ -15,10 +15,10 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
-from torch._logging import getArtifactLogger
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
-from .functional_utils import _get_mutation_type
+from .. import config
+from .collect_metadata_analysis import coerce_tangent
 from .schemas import (
     BackwardSignature,
     GraphSignature,
@@ -30,8 +30,6 @@ from .schemas import (
 from .utils import strict_zip
 
 zip = strict_zip
-
-aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
 
 
 def remove_dupe_metadata(
@@ -48,6 +46,7 @@ def remove_dupe_metadata(
     other_traced_tangents = m.traced_tangents[num_data_mutations:]
     inp_traced_tangents = m.traced_tangents[:num_data_mutations]
     filtered_inp_traced_tangents = [
+        # See Note [Tangents must be contiguous]
         x
         for i, x in enumerate(inp_traced_tangents)
         if keep_arg_mask[m.mutated_inp_runtime_indices[i]]
@@ -65,6 +64,7 @@ def remove_dupe_metadata(
                 dynamic_dims=o.dynamic_dims,
                 base_idx=None if o.base_idx is None else add_dupe_map[o.base_idx],
                 requires_grad=o.requires_grad,
+                functional_tensor=o.functional_tensor,
             )
             for o in m.output_info
         ],
@@ -151,14 +151,6 @@ def create_synthetic_base_metadata(
             m.input_info[x].mutations_under_no_grad_or_inference_mode
             for x in outer_indices
         )
-        mutation_type = _get_mutation_type(
-            m.keep_input_mutations,
-            mutates_data,
-            mutates_metadata,
-            mutations_hidden_from_autograd,
-            mutations_under_no_grad_or_inference_mode,
-            requires_grad,
-        )
 
         inpt_info = InputAliasInfo(
             # If len(outer_indices) > 1, then this input is a synthetic base.
@@ -176,7 +168,7 @@ def create_synthetic_base_metadata(
             mutations_under_no_grad_or_inference_mode=mutations_under_no_grad_or_inference_mode,
             is_leaf=any_leaf,
             requires_grad=requires_grad,
-            mutation_type=mutation_type,
+            keep_input_mutations=m.keep_input_mutations,
         )
         input_infos.append(inpt_info)
 
@@ -231,11 +223,13 @@ def create_synthetic_base_metadata(
                 # Map the input idx pre-synthetic-bases to the new idx post-synthetic-bases
                 base_idx=new_base_idx,  # type: ignore[arg-type]
                 requires_grad=o.requires_grad,
+                functional_tensor=o.functional_tensor,
             )
         )
 
     inner_mutated_tangents = [
-        x
+        # See Note [Tangents must be contiguous]
+        coerce_tangent(x)
         for inner_idx, x in enumerate(inner_args)
         if input_infos[inner_idx].mutates_data and input_infos[inner_idx].requires_grad
     ]
@@ -263,6 +257,13 @@ def create_synthetic_base_metadata(
     )
 
 
+def _get_last_mem_address(x):
+    out = x.storage_offset()
+    for size, stride in zip(x.size(), x.stride()):
+        out += (size - 1) * stride
+    return out
+
+
 # Assumption: x and y are known to share a storage, and we are trying to determine
 # if their memory is actually completely disjoint, based on sizes/strides/storage_offset
 def _tensors_definitely_do_not_overlap(x, y):
@@ -282,6 +283,11 @@ def _tensors_definitely_do_not_overlap(x, y):
         else:
             # definitely no overlap
             return True
+
+    # Short-circuit: if last memory address of x is < start of y, then not overlapping.
+    x_last = _get_last_mem_address(x)
+    if x_last < y.storage_offset():
+        return True
 
     if x.dim() == 2 and y.dim() == 2 and x.stride(1) == 1 and y.stride(1) == 1:
         # This cases is needed for the shampoo optimizer.
@@ -332,11 +338,60 @@ def _tensors_definitely_do_not_overlap(x, y):
 
 
 def compute_overlapping_inputs(fwd_inputs, aliased_input_indices):
+    max_aliased_inps_w_dyn_shapes = (
+        config._max_aliased_inputs_with_dynamic_shapes_enabled
+    )
+    definitely_error_on_dyn_shapes = False
+    # If the JK is false / not set, we will fall back to obeying the config above
+    # If it is true, we will always error when there are aliased + mutated inps with dynamic shapes
+    if torch._inductor.config.is_fbcode():
+        definitely_error_on_dyn_shapes = torch._utils_internal.justknobs_check(
+            "pytorch/dynamo:disable_aliased_inputs_with_mutation_and_dyn_shapes"
+        )
+
     actual_aliased_indices = set()
-    for j in range(len(aliased_input_indices)):
-        for i in range(j):
-            i_ = aliased_input_indices[i]
+    num_aliases = len(aliased_input_indices)
+    # > 2 check because num_aliases==1 means no aliasing
+    if num_aliases >= 2 and (
+        definitely_error_on_dyn_shapes or num_aliases > max_aliased_inps_w_dyn_shapes
+    ):
+        dynamic_shape_indices = set()
+        for j in range(num_aliases):
             j_ = aliased_input_indices[j]
+            curr_inp = fwd_inputs[j_]
+            if any(
+                isinstance(x, torch.SymInt)
+                for x in itertools.chain(
+                    curr_inp.shape, curr_inp.stride(), [curr_inp.storage_offset()]
+                )
+            ):
+                dynamic_shape_indices.add(j_)
+        assert (
+            len(dynamic_shape_indices) == 0
+        ), f"""\
+Encountered a graph where:
+- {num_aliases} graph inputs all share the same storage (input indices: {str(aliased_input_indices)})
+- at least one of these aliased inputs was mutated
+- at least one of these inputs is being compiled with dynamic shapes (indices: {str(dynamic_shape_indices)})
+
+Current limit: {str(max_aliased_inps_w_dyn_shapes)}
+Killswitch enabled: {str(definitely_error_on_dyn_shapes)}
+
+The most common way to run into this situation is when your model parameters are allocated as one giant buffer
+and are all mutated by the optimizer, and some of your parameters end up getting compiled with dynamic shapes.
+
+You can avoid this problem by marking your parameters so they explicitly do not participate in dynamic shapes,
+by marking each dim of your parameter static:
+
+torch._dynamo.mark_static(param, 0) # (1, 2, ... for every dimension on the parameter).
+
+If you are running into this issue in a situation where your parameters are static but some other inputs
+are aliased and mutated, and they should be dynamic, please file an issue.
+"""
+    for j in range(num_aliases):
+        for i in range(j):
+            j_ = aliased_input_indices[j]
+            i_ = aliased_input_indices[i]
             if not _tensors_definitely_do_not_overlap(fwd_inputs[i_], fwd_inputs[j_]):
                 actual_aliased_indices.add(i_)
                 actual_aliased_indices.add(j_)
@@ -344,7 +399,7 @@ def compute_overlapping_inputs(fwd_inputs, aliased_input_indices):
 
 
 def _graph_input_names(gm):
-    return [node.name for node in gm.graph.nodes if node.op == "placeholder"]
+    return [node.name for node in gm.graph.find_nodes(op="placeholder")]
 
 
 def _graph_output_names(gm):
@@ -374,9 +429,10 @@ def create_graph_signature(
     graph_output_names = _graph_output_names(fx_g)
 
     num_params_buffers = len(param_names) + len(buffer_names)
+    num_tokens = len(fw_metadata.tokens)
     # We have enough restrictions on the graph (no de-duping, synthetic bases, etc),
     # Such that # graph inps = # user inps + # params + # buffers
-    num_user_args = len(graph_input_names) - num_params_buffers
+    num_user_args = len(graph_input_names) - num_params_buffers - num_tokens
 
     if trace_joint:
         assert num_user_fw_outs is not None
@@ -411,7 +467,9 @@ def create_graph_signature(
     else:
         backward_signature = None
         num_user_fw_outs = (
-            len(graph_output_names) - fw_metadata.num_mutated_inp_runtime_indices
+            len(graph_output_names)
+            - fw_metadata.num_mutated_inp_runtime_indices
+            - num_tokens
         )
 
     return GraphSignature.from_tracing_metadata(

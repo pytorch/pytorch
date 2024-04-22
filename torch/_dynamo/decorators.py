@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import torch
@@ -93,7 +94,7 @@ def allow_in_graph(fn):
     if isinstance(fn, (list, tuple)):
         return [allow_in_graph(x) for x in fn]
     assert callable(fn), "allow_in_graph expects a callable"
-    if trace_rules.lookup(fn) != variables.TorchInGraphFunctionVariable:
+    if trace_rules.lookup_callable(fn) != variables.TorchInGraphFunctionVariable:
         trace_rules._disallowed_callable_ids.remove(id(fn))
         trace_rules._allowed_callable_ids.add(id(fn))
     return fn
@@ -106,8 +107,9 @@ def _disallow_in_graph_helper(throw_if_not_allowed):
         assert callable(fn), "disallow_in_graph expects a callable"
         if (
             throw_if_not_allowed
+            and trace_rules.lookup_callable(fn)
+            != variables.TorchInGraphFunctionVariable
             and trace_rules.lookup(fn) != variables.TorchInGraphFunctionVariable
-            and fn not in trace_rules._allowed_callable_ids
         ):
             raise IncorrectUsage(
                 "disallow_in_graph is expected to be used on an already allowed callable (like torch.* ops). "
@@ -167,20 +169,33 @@ def forbid_in_graph(fn):
 # Helper function to flatten a tensor subclass and apply a function to
 # all inner tensors that match the outer dim. Used to reduce duplication
 # across the various marking APIs.
-def _apply_func_to_inner_tensors_of_same_dim(func, t, *args):
+def _apply_func_to_inner_tensors_of_same_dim(func, t, *args, **kwargs):
     assert is_traceable_wrapper_subclass(t)
 
     attrs, ctx = t.__tensor_flatten__()
     for attr in attrs:
         inner = getattr(t, attr)
         if inner.dim() == t.dim():
-            func(inner, *args)
+            func(inner, *args, **kwargs)
+
+
+@dataclass(frozen=True)
+class _DimRange:
+    """
+    This represents an dimension of a tensor and the corresponding
+    min and max values it can take.  Don't create this
+    class directly; instead, use :func:`mark_dynamic`.
+    """
+
+    dim: int
+    min: int
+    max: int
 
 
 @forbid_in_graph
-def mark_dynamic(t, index):
+def mark_dynamic(t, index, *, min=None, max=None):
     """
-    Mark a tensor as having a dynamic dim.
+    Mark a tensor as having a dynamic dim and set corresponding min and max range for the dim.
 
     [Note - on the state of mark_dynamic]
 
@@ -205,18 +220,22 @@ def mark_dynamic(t, index):
     if is_traceable_wrapper_subclass(t):
         # default behavior: mirror mark_dynamic() on all inner tensors with same dim as t
         # TODO: Make this configurable via a supported public API
-        _apply_func_to_inner_tensors_of_same_dim(mark_dynamic, t, index)
+        _apply_func_to_inner_tensors_of_same_dim(
+            mark_dynamic, t, index, min=min, max=max
+        )
 
     if isinstance(index, int):
         if not hasattr(t, "_dynamo_dynamic_indices"):
             t._dynamo_dynamic_indices = set()
+            t._dynamo_dynamic_range = set()
         # TODO(voz): Should we bounds check?
         t._dynamo_dynamic_indices.add(index)
+        t._dynamo_dynamic_range.add(_DimRange(index, min, max))
         return
 
     assert isinstance(index, (list, tuple))
     for i in index:
-        mark_dynamic(t, i)
+        mark_dynamic(t, i, min=min, max=max)
 
 
 @forbid_in_graph

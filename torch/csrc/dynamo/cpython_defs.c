@@ -26,7 +26,7 @@
 
 #define Py_BUILD_CORE
 #include <internal/pycore_pystate.h>
-#define NEED_OPCODE_TABLES // To get _PyOpcode_Deopt
+#define NEED_OPCODE_TABLES // To get _PyOpcode_Deopt, _PyOpcode_Caches
 #include <internal/pycore_opcode.h>
 #undef NEED_OPCODE_TABLES
 #undef Py_BUILD_CORE
@@ -34,9 +34,8 @@
 
 // As a simple way to reduce the impact of ABI changes on the CPython side, this check forces
 // us to manually re-check that the function didn't change on the next major version
-#if PY_VERSION_HEX >= 0x030C0000 // 3.12
-// Spoiler alert: They don't! This will be done in a follow up.
-// #error "Please ensure that the functions below still match the CPython implementation for 3.12"
+#if PY_VERSION_HEX >= 0x030D0000 // 3.13
+#error "Please ensure that the functions below still match the CPython implementation for 3.13"
 #endif
 
 // https://github.com/python/cpython/blob/a7715ccfba5b86ab09f86ec56ac3755c93b46b48/Objects/frameobject.c#L1079
@@ -65,9 +64,197 @@ THP_PyFrame_OpAlreadyRan(_PyInterpreterFrame *frame, int opcode, int oparg)
     return 0;
 }
 
-// https://github.com/python/cpython/blob/a7715ccfba5b86ab09f86ec56ac3755c93b46b48/Objects/frameobject.c#L1182
+#if IS_PYTHON_3_12_PLUS
+
+// https://github.com/python/cpython/blob/0325a8a8cdba6c091bcbbb3c995f3bf1d1217012/Objects/frameobject.c#L1136
+// Initialize frame free variables if needed
+// free_vars_copied argument added in order to let caller know that the COPY_FREE_VARS
+// codepath occurred.
+static void
+frame_init_get_vars(_PyInterpreterFrame *frame, int *free_vars_copied)
+{
+    // COPY_FREE_VARS has no quickened forms, so no need to use _PyOpcode_Deopt
+    // here:
+    PyCodeObject *co = frame->f_code;
+    int lasti = _PyInterpreterFrame_LASTI(frame);
+    if (!(lasti < 0 && _PyCode_CODE(co)->op.code == COPY_FREE_VARS
+          && PyFunction_Check(frame->f_funcobj)))
+    {
+        /* Free vars are initialized */
+        return;
+    }
+
+    /* Free vars have not been initialized -- Do that */
+    PyObject *closure = ((PyFunctionObject *)frame->f_funcobj)->func_closure;
+    int offset = PyCode_GetFirstFree(co);
+    for (int i = 0; i < co->co_nfreevars; ++i) {
+        PyObject *o = PyTuple_GET_ITEM(closure, i);
+        frame->localsplus[offset + i] = Py_NewRef(o);
+    }
+    // COPY_FREE_VARS doesn't have inline CACHEs, either:
+    frame->prev_instr = _PyCode_CODE(frame->f_code);
+
+    *free_vars_copied = 1;
+}
+
+// https://github.com/python/cpython/blob/0325a8a8cdba6c091bcbbb3c995f3bf1d1217012/Objects/frameobject.c#L1162
+static int
+frame_get_var(_PyInterpreterFrame *frame, PyCodeObject *co, int i,
+              PyObject **pvalue)
+{
+    _PyLocals_Kind kind = _PyLocals_GetKind(co->co_localspluskinds, i);
+
+    /* If the namespace is unoptimized, then one of the
+       following cases applies:
+       1. It does not contain free variables, because it
+          uses import * or is a top-level namespace.
+       2. It is a class namespace.
+       We don't want to accidentally copy free variables
+       into the locals dict used by the class.
+    */
+    if (kind & CO_FAST_FREE && !(co->co_flags & CO_OPTIMIZED)) {
+        return 0;
+    }
+
+    PyObject *value = frame->localsplus[i];
+    if (frame->stacktop) {
+        if (kind & CO_FAST_FREE) {
+            // The cell was set by COPY_FREE_VARS.
+            CHECK(value != NULL && PyCell_Check(value));
+            value = PyCell_GET(value);
+        }
+        else if (kind & CO_FAST_CELL) {
+            // Note that no *_DEREF ops can happen before MAKE_CELL
+            // executes.  So there's no need to duplicate the work
+            // that MAKE_CELL would otherwise do later, if it hasn't
+            // run yet.
+            if (value != NULL) {
+                if (PyCell_Check(value) &&
+                        THP_PyFrame_OpAlreadyRan(frame, MAKE_CELL, i)) {
+                    // (likely) MAKE_CELL must have executed already.
+                    value = PyCell_GET(value);
+                }
+                // (likely) Otherwise it it is an arg (kind & CO_FAST_LOCAL),
+                // with the initial value set when the frame was created...
+                // (unlikely) ...or it was set to some initial value by
+                // an earlier call to PyFrame_LocalsToFast().
+            }
+        }
+    }
+    else {
+        CHECK(value == NULL);
+    }
+    *pvalue = value;
+    return 1;
+}
+
+// https://github.com/python/cpython/blob/0325a8a8cdba6c091bcbbb3c995f3bf1d1217012/Objects/frameobject.c#L1213
+static PyObject *
+THP_PyFrame_GetLocals(_PyInterpreterFrame *frame, int include_hidden, int *free_vars_copied)
+{
+    /* Merge fast locals into f->f_locals */
+    PyObject *locals = frame->f_locals;
+    if (locals == NULL) {
+        locals = frame->f_locals = PyDict_New();
+        if (locals == NULL) {
+            return NULL;
+        }
+    }
+    PyObject *hidden = NULL;
+
+    /* If include_hidden, "hidden" fast locals (from inlined comprehensions in
+       module/class scopes) will be included in the returned dict, but not in
+       frame->f_locals; the returned dict will be a modified copy. Non-hidden
+       locals will still be updated in frame->f_locals. */
+    if (include_hidden) {
+        hidden = PyDict_New();
+        if (hidden == NULL) {
+            return NULL;
+        }
+    }
+
+    frame_init_get_vars(frame, free_vars_copied);
+
+    PyCodeObject *co = frame->f_code;
+    for (int i = 0; i < co->co_nlocalsplus; i++) {
+        PyObject *value;  // borrowed reference
+        if (!frame_get_var(frame, co, i, &value)) {
+            continue;
+        }
+
+        PyObject *name = PyTuple_GET_ITEM(co->co_localsplusnames, i);
+        _PyLocals_Kind kind = _PyLocals_GetKind(co->co_localspluskinds, i);
+        if (kind & CO_FAST_HIDDEN) {
+            if (include_hidden && value != NULL) {
+                if (PyObject_SetItem(hidden, name, value) != 0) {
+                    goto error;
+                }
+            }
+            continue;
+        }
+        if (value == NULL) {
+            if (PyObject_DelItem(locals, name) != 0) {
+                if (PyErr_ExceptionMatches(PyExc_KeyError)) {
+                    PyErr_Clear();
+                }
+                else {
+                    goto error;
+                }
+            }
+        }
+        else {
+            if (PyObject_SetItem(locals, name, value) != 0) {
+                goto error;
+            }
+        }
+    }
+
+    if (include_hidden && PyDict_Size(hidden)) {
+        PyObject *innerlocals = PyDict_New();
+        if (innerlocals == NULL) {
+            goto error;
+        }
+        if (PyDict_Merge(innerlocals, locals, 1) != 0) {
+            Py_DECREF(innerlocals);
+            goto error;
+        }
+        if (PyDict_Merge(innerlocals, hidden, 1) != 0) {
+            Py_DECREF(innerlocals);
+            goto error;
+        }
+        locals = innerlocals;
+    }
+    else {
+        Py_INCREF(locals);
+    }
+    Py_CLEAR(hidden);
+
+    return locals;
+
+  error:
+    Py_XDECREF(hidden);
+    return NULL;
+}
+
+// https://github.com/python/cpython/blob/0325a8a8cdba6c091bcbbb3c995f3bf1d1217012/Objects/frameobject.c#L1301
 int
-THP_PyFrame_FastToLocalsWithError(_PyInterpreterFrame *frame) {
+THP_PyFrame_FastToLocalsWithError(_PyInterpreterFrame *frame, int *free_vars_copied)
+{
+    PyObject *locals = THP_PyFrame_GetLocals(frame, 0, free_vars_copied);
+    if (locals == NULL) {
+        return -1;
+    }
+    Py_DECREF(locals);
+    return 0;
+}
+
+#else
+
+// https://github.com/python/cpython/blob/a7715ccfba5b86ab09f86ec56ac3755c93b46b48/Objects/frameobject.c#L1182
+// free_vars_copied argument added in order to let caller know that the COPY_FREE_VARS
+// codepath occurred.
+int
+THP_PyFrame_FastToLocalsWithError(_PyInterpreterFrame *frame, int *free_vars_copied) {
     /* Merge fast locals into f->f_locals */
     PyObject *locals = NULL;
     PyObject **fast = NULL;
@@ -86,13 +273,8 @@ THP_PyFrame_FastToLocalsWithError(_PyInterpreterFrame *frame) {
     if (lasti < 0 && _Py_OPCODE(_PyCode_CODE(co)[0]) == COPY_FREE_VARS) {
         /* Free vars have not been initialized -- Do that */
         PyCodeObject *co = frame->f_code;
-        #if IS_PYTHON_3_12_PLUS
-        PyObject *closure = ((PyFunctionObject *)frame->f_funcobj)->func_closure;
-        int offset = co->co_nlocals + co->co_ncellvars;
-        #else
         PyObject *closure = frame->f_func->func_closure;
         int offset = co->co_nlocals + co->co_nplaincellvars;
-        #endif
         for (int i = 0; i < co->co_nfreevars; ++i) {
             PyObject *o = PyTuple_GET_ITEM(closure, i);
             Py_INCREF(o);
@@ -100,6 +282,8 @@ THP_PyFrame_FastToLocalsWithError(_PyInterpreterFrame *frame) {
         }
         // COPY_FREE_VARS doesn't have inline CACHEs, either:
         frame->prev_instr = _PyCode_CODE(frame->f_code);
+
+        *free_vars_copied = 1;
     }
     for (int i = 0; i < co->co_nlocalsplus; i++) {
         _PyLocals_Kind kind = _PyLocals_GetKind(co->co_localspluskinds, i);
@@ -164,6 +348,8 @@ THP_PyFrame_FastToLocalsWithError(_PyInterpreterFrame *frame) {
     return 0;
 }
 
+#endif
+
 // e.g. COPY_FIELD(op, o, globals) becomes
 // PY_XINCREF((o)->func_globals);
 // (op)->func_globals = (o)->func_globals;
@@ -201,6 +387,9 @@ _PyFunction_CopyWithNewCode(PyFunctionObject *o, PyCodeObject* code)
   op->func_weakreflist = NULL;
   COPY_FIELD(op, o, module);
   COPY_FIELD(op, o, annotations);
+  #if IS_PYTHON_3_12_PLUS
+  COPY_FIELD(op, o, typeparams);
+  #endif
   op->vectorcall = o->vectorcall;
   op->func_version = o->func_version;
   PyObject_GC_Track(op);
@@ -209,7 +398,7 @@ _PyFunction_CopyWithNewCode(PyFunctionObject *o, PyCodeObject* code)
 
 // From https://github.com/python/cpython/blob/e715da6db1d1d70cd779dc48e1ba8110c51cc1bf/Objects/frameobject.c#L1020
 PyFrameObject*
-THP_PyFrame_New_NoTrack(PyCodeObject *code)
+THP_PyFrame_New_NoTrack(const PyCodeObject *code)
 {
     // DYNAMO: commented out
     // CALL_STAT_INC(frame_objects_created);
@@ -351,6 +540,7 @@ THP_PyFrame_Clear(_PyInterpreterFrame *frame)
     }
     Py_XDECREF(frame->frame_obj);
     Py_XDECREF(frame->f_locals);
+    // DYNAMO: additional field for 3.12
     #if IS_PYTHON_3_12_PLUS
     Py_DECREF(frame->f_funcobj);
     #else
@@ -358,5 +548,132 @@ THP_PyFrame_Clear(_PyInterpreterFrame *frame)
     #endif
     Py_DECREF(frame->f_code);
 }
+
+// https://github.com/python/cpython/blob/fad48ea1816be3125ea51edcdfe2f999d6ade796/Objects/obmalloc.c#L635
+void *
+THP_PyObject_VirtualAlloc(size_t size)
+{
+    PyObjectArenaAllocator arena;
+    PyObject_GetArenaAllocator(&arena);
+    return arena.alloc(arena.ctx, size);
+}
+
+// https://github.com/python/cpython/blob/fad48ea1816be3125ea51edcdfe2f999d6ade796/Objects/obmalloc.c#L641
+void
+THP_PyObject_VirtualFree(void *obj, size_t size)
+{
+    PyObjectArenaAllocator arena;
+    PyObject_GetArenaAllocator(&arena);
+    return arena.free(arena.ctx, obj, size);
+}
+
+// https://github.com/python/cpython/blob/051b8a2589ff28f0194c3701b21f729444691752/Python/pystate.c#L728
+static _PyStackChunk*
+allocate_chunk(int size_in_bytes, _PyStackChunk* previous)
+{
+    CHECK(size_in_bytes % sizeof(PyObject **) == 0);
+    _PyStackChunk *res = THP_PyObject_VirtualAlloc(size_in_bytes);
+    if (res == NULL) {
+        return NULL;
+    }
+    res->previous = previous;
+    res->size = size_in_bytes;
+    res->top = 0;
+    return res;
+}
+
+#define DATA_STACK_CHUNK_SIZE (16*1024)
+#define MINIMUM_OVERHEAD 1000
+
+// https://github.com/python/cpython/blob/051b8a2589ff28f0194c3701b21f729444691752/Python/pystate.c#L2182
+static PyObject **
+push_chunk(PyThreadState *tstate, int size)
+{
+    int allocate_size = DATA_STACK_CHUNK_SIZE;
+    while (allocate_size < (int)sizeof(PyObject*)*(size + MINIMUM_OVERHEAD)) {
+        allocate_size *= 2;
+    }
+    _PyStackChunk *new = allocate_chunk(allocate_size, tstate->datastack_chunk);
+    if (new == NULL) {
+        return NULL;
+    }
+    if (tstate->datastack_chunk) {
+        tstate->datastack_chunk->top = tstate->datastack_top -
+                                       &tstate->datastack_chunk->data[0];
+    }
+    tstate->datastack_chunk = new;
+    tstate->datastack_limit = (PyObject **)(((char *)new) + allocate_size);
+    // When new is the "root" chunk (i.e. new->previous == NULL), we can keep
+    // _PyThreadState_PopFrame from freeing it later by "skipping" over the
+    // first element:
+    PyObject **res = &new->data[new->previous == NULL];
+    tstate->datastack_top = res + size;
+    return res;
+}
+
+// https://github.com/python/cpython/blob/051b8a2589ff28f0194c3701b21f729444691752/Include/internal/pycore_frame.h#L199
+static inline bool
+THP_PyThreadState_HasStackSpace(PyThreadState *tstate, size_t size)
+{
+    CHECK(
+        (tstate->datastack_top == NULL && tstate->datastack_limit == NULL)
+        ||
+        (tstate->datastack_top != NULL && tstate->datastack_limit != NULL)
+    );
+    return tstate->datastack_top != NULL &&
+        size < (size_t)(tstate->datastack_limit - tstate->datastack_top);
+}
+
+// https://github.com/python/cpython/blob/051b8a2589ff28f0194c3701b21f729444691752/Python/pystate.c#L2207
+_PyInterpreterFrame *
+THP_PyThreadState_BumpFramePointerSlow(PyThreadState *tstate, size_t size)
+{
+    if (THP_PyThreadState_HasStackSpace(tstate, size)) {
+        _PyInterpreterFrame *res = (_PyInterpreterFrame *)tstate->datastack_top;
+        tstate->datastack_top += size;
+        return res;
+    }
+    if (size > INT_MAX/2) {
+        PyErr_NoMemory();
+        return NULL;
+    }
+    return (_PyInterpreterFrame *)push_chunk(tstate, (int)size);
+}
+
+// https://github.com/python/cpython/blob/051b8a2589ff28f0194c3701b21f729444691752/Python/pystate.c#L2222
+void
+THP_PyThreadState_PopFrame(PyThreadState *tstate, _PyInterpreterFrame * frame)
+{
+    CHECK(tstate->datastack_chunk);
+    PyObject **base = (PyObject **)frame;
+    if (base == &tstate->datastack_chunk->data[0]) {
+        _PyStackChunk *chunk = tstate->datastack_chunk;
+        _PyStackChunk *previous = chunk->previous;
+        // push_chunk ensures that the root chunk is never popped:
+        CHECK(previous);
+        tstate->datastack_top = &previous->data[previous->top];
+        tstate->datastack_chunk = previous;
+        THP_PyObject_VirtualFree(chunk, chunk->size);
+        tstate->datastack_limit = (PyObject **)(((char *)previous) + previous->size);
+    }
+    else {
+        CHECK(tstate->datastack_top);
+        CHECK(tstate->datastack_top >= base);
+        tstate->datastack_top = base;
+    }
+}
+
+
+#endif
+
+#if IS_PYTHON_3_11_PLUS
+
+const uint8_t* THP_PyOpcode_Caches = _PyOpcode_Caches;
+const int THP_PyOpcode_Caches_size = sizeof(_PyOpcode_Caches) / sizeof(uint8_t);
+
+#else
+
+const uint8_t* THP_PyOpcode_Caches = NULL;
+const int THP_PyOpcode_Caches_size = 0;
 
 #endif

@@ -85,6 +85,7 @@ Features described in this documentation are classified by release status:
    torch.func <func>
    futures
    fx
+   fx.experimental
    torch.hub <hub>
    torch.jit <jit>
    torch.linalg <linalg>
@@ -106,6 +107,7 @@ Features described in this documentation are classified by release status:
    torch.random <random>
    masked
    torch.nested <nested>
+   size
    sparse
    storage
    torch.testing <testing>
@@ -121,12 +123,13 @@ Features described in this documentation are classified by release status:
    torch.utils.mobile_optimizer <mobile_optimizer>
    torch.utils.model_zoo <model_zoo>
    torch.utils.tensorboard <tensorboard>
-   torch.fx.experimental.symbolic_shapes <symbolic_shapes>
    type_info
    named_tensor
    name_inference
    torch.__config__ <config_mod>
+   torch.__future__ <future_mod>
    logging
+   torch_environment_variables
 
 .. toctree::
    :maxdepth: 1

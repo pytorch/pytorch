@@ -93,8 +93,7 @@ UpdateMomentsVec(
   fVec m2_fvec0(0), m2_fvec1(0);
   for (const auto j : c10::irange(m0)) {
     const Vec x_bvec = Vec::loadu(X_ptr + j * Vec::size());
-    fVec x_fvec0, x_fvec1;
-    std::tie(x_fvec0, x_fvec1) = convert_to_float<T>(x_bvec);
+    auto [x_fvec0, x_fvec1] = convert_to_float<T>(x_bvec);
     const fVec delta_fvec0 = x_fvec0 - m1_fvec0;
     const fVec delta_fvec1 = x_fvec1 - m1_fvec1;
     m1_fvec0 += delta_fvec0 * c_vecs[j];

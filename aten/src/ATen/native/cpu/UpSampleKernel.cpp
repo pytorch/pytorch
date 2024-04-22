@@ -473,7 +473,7 @@ void cpu_upsample_nearest_channels_last(
   auto input = input_.contiguous(channels_last_memory_format);
   auto output = output_.contiguous(channels_last_memory_format);
 
-  auto input_data = input.data_ptr<scalar_t>();
+  auto input_data = input.const_data_ptr<scalar_t>();
   auto output_data = output.data_ptr<scalar_t>();
 
   int64_t num_batches =  input_sizes[0];
@@ -489,7 +489,7 @@ void cpu_upsample_nearest_channels_last(
   TORCH_CHECK(channels > 0, "expected input and output channels greater than 0 but got ", channels);
 
   using Vec = vec::Vectorized<scalar_t>;
-  auto copy = [](scalar_t* out, scalar_t* in, int64_t size) {
+  auto copy = [](scalar_t* out, const scalar_t* in, int64_t size) {
     int64_t d = 0;
     for (; d < size - (size % Vec::size()); d += Vec::size()) {
       Vec out_vec = Vec::loadu(in + d);
@@ -510,7 +510,7 @@ void cpu_upsample_nearest_channels_last(
       int64_t ih = nearest_idx_fn(oh, input_height, output_height, scales[0]);
       int64_t iw = nearest_idx_fn(ow, input_width, output_width, scales[1]);
       scalar_t* output_ptr = output_data + i * channels;
-      scalar_t* input_ptr = input_data + n * input_height * input_width * channels +
+      const scalar_t* input_ptr = input_data + n * input_height * input_width * channels +
           ih * input_width * channels + iw * channels;
       copy(output_ptr, input_ptr, channels);
       data_index_step(n, num_batches, oh, output_height, ow, output_width);
@@ -529,7 +529,7 @@ void cpu_upsample_nearest_channels_last(
       int64_t ih = nearest_idx_fn(oh, input_height, output_height, scales[1]);
       int64_t iw = nearest_idx_fn(ow, input_width, output_width, scales[2]);
       scalar_t* output_ptr = output_data + i * channels;
-      scalar_t* input_ptr = input_data + n * input_depth * input_height * input_width * channels +
+      const scalar_t* input_ptr = input_data + n * input_depth * input_height * input_width * channels +
           id * input_height * input_width * channels +
           ih * input_width * channels + iw * channels;
       copy(output_ptr, input_ptr, channels);
@@ -579,7 +579,7 @@ void cpu_upsample_linear_channels_last(
   auto input = input_.contiguous(channels_last_memory_format);
   auto output = output_.contiguous(channels_last_memory_format);
 
-  auto input_data = input.data_ptr<scalar_t>();
+  auto input_data = input.const_data_ptr<scalar_t>();
   auto output_data = output.data_ptr<scalar_t>();
 
   int64_t num_batches =  input_sizes[0];
@@ -620,10 +620,10 @@ void cpu_upsample_linear_channels_last(
 
           scalar_t* out = output_data + n * output_slice_size +
               oh * output_width * channels + ow * channels;
-          scalar_t* i00 = input_indexr(n, ih0, iw0);
-          scalar_t* i01 = input_indexr(n, ih0, iw1);
-          scalar_t* i10 = input_indexr(n, ih1, iw0);
-          scalar_t* i11 = input_indexr(n, ih1, iw1);
+          const scalar_t* i00 = input_indexr(n, ih0, iw0);
+          const scalar_t* i01 = input_indexr(n, ih0, iw1);
+          const scalar_t* i10 = input_indexr(n, ih1, iw0);
+          const scalar_t* i11 = input_indexr(n, ih1, iw1);
           opmath_t w00 = h0lambda * w0lambda;
           opmath_t w01 = h0lambda * w1lambda;
           opmath_t w10 = h1lambda * w0lambda;
@@ -674,14 +674,14 @@ void cpu_upsample_linear_channels_last(
             scalar_t* out = output_data + n * output_slice_size +
                 od * output_height * output_width * channels +
                 oh * output_width * channels + ow * channels;
-            scalar_t* i000 = input_indexr(n, id0, ih0, iw0);
-            scalar_t* i001 = input_indexr(n, id0, ih0, iw1);
-            scalar_t* i010 = input_indexr(n, id0, ih1, iw0);
-            scalar_t* i011 = input_indexr(n, id0, ih1, iw1);
-            scalar_t* i100 = input_indexr(n, id1, ih0, iw0);
-            scalar_t* i101 = input_indexr(n, id1, ih0, iw1);
-            scalar_t* i110 = input_indexr(n, id1, ih1, iw0);
-            scalar_t* i111 = input_indexr(n, id1, ih1, iw1);
+            const scalar_t* i000 = input_indexr(n, id0, ih0, iw0);
+            const scalar_t* i001 = input_indexr(n, id0, ih0, iw1);
+            const scalar_t* i010 = input_indexr(n, id0, ih1, iw0);
+            const scalar_t* i011 = input_indexr(n, id0, ih1, iw1);
+            const scalar_t* i100 = input_indexr(n, id1, ih0, iw0);
+            const scalar_t* i101 = input_indexr(n, id1, ih0, iw1);
+            const scalar_t* i110 = input_indexr(n, id1, ih1, iw0);
+            const scalar_t* i111 = input_indexr(n, id1, ih1, iw1);
             opmath_t w000 = d0lambda * h0lambda * w0lambda;
             opmath_t w001 = d0lambda * h0lambda * w1lambda;
             opmath_t w010 = d0lambda * h1lambda * w0lambda;
@@ -846,7 +846,7 @@ struct HelperInterpBase {
     return wt_max;
   }
 
-  // Note [ Support for antialias=False as a subcase of antilias=True ]
+  // Note [ Support for antialias=False as a subcase of antialias=True ]
   // This function was originally written with the hard assumption that
   // antialias=True and it was later extended to support antialias=False.
   // The only difference between aa and no-aa is in how the
@@ -952,7 +952,7 @@ struct HelperInterpBase {
   uint8 in basic_loop_aa_horizontal<uint8_t> (and vertical)
 
   In essence the idea is to avoid a multiplication between a float (the
-  weight) and an int (the pixel value) and instead run a multpilication between
+  weight) and an int (the pixel value) and instead run a multiplication between
   2 ints:
 
   ```py
@@ -1242,10 +1242,8 @@ struct HelperInterpLinear : public HelperInterpBase {
             input_size, output_size, align_corners, opt_scale);
 
         auto interp_size = HelperInterpLinear::interp_size;
-        int unused;
-        scalar_t unused_2;
 
-        std::tie(indices_weights, unused, unused_2) = HelperInterpLinear::_compute_index_ranges_weights<scalar_t>(
+        indices_weights = std::get<0>(HelperInterpLinear::_compute_index_ranges_weights<scalar_t>(
             input_size,
             output_size,
             stride,
@@ -1255,7 +1253,7 @@ struct HelperInterpLinear : public HelperInterpBase {
             interp_size,
             &HelperInterpLinear::aa_filter<scalar_t>,
             /*antialias=*/antialias,
-            /*align_corners=*/align_corners);
+            /*align_corners=*/align_corners));
       }
     );
     return indices_weights;
@@ -1378,10 +1376,8 @@ struct HelperInterpCubic : public HelperInterpBase {
             input_size, output_size, align_corners, opt_scale);
 
         auto interp_size = HelperInterpCubic::interp_size;
-        int unused;
-        scalar_t unused_2;
 
-        std::tie(indices_weights, unused, unused_2) = HelperInterpCubic::_compute_index_ranges_weights<scalar_t>(
+        indices_weights = std::get<0>(HelperInterpCubic::_compute_index_ranges_weights<scalar_t>(
             input_size,
             output_size,
             stride,
@@ -1391,7 +1387,7 @@ struct HelperInterpCubic : public HelperInterpBase {
             interp_size,
             &HelperInterpCubic::aa_filter<scalar_t>,
             /*antialias=*/antialias,
-            /*align_corners=*/align_corners);
+            /*align_corners=*/align_corners));
       }
     );
     return indices_weights;
@@ -1478,11 +1474,11 @@ void upsample_generic_Nd_kernel_impl(
   config.check_all_same_dtype(false)
     .declare_static_dtype_and_device(input.scalar_type(), input.device())
     .add_output(output)
-    .add_input(restrided_input);
+    .add_const_input(restrided_input);
 
   for (auto & idx_weight: indices_weights) {
     for (auto& tensor : idx_weight) {
-      config.add_input(tensor);
+      config.add_const_input(tensor);
     }
   }
 
@@ -1594,10 +1590,10 @@ void _separable_upsample_generic_Nd_kernel_impl_single_dim(
   config.check_all_same_dtype(false)
       .declare_static_dtype_and_device(input.scalar_type(), input.device())
       .add_output(output)
-      .add_input(restrided_input);
+      .add_const_input(restrided_input);
 
   for (auto& tensor : indices_weights) {
-    config.add_input(tensor);
+    config.add_const_input(tensor);
   }
 
   auto iter = config.build();
@@ -1961,7 +1957,7 @@ void cpu_upsample_genNd_backward_aa(
   auto grad_output = grad_output_.contiguous();
   auto grad_input = grad_input_.contiguous();
 
-  auto grad_output_data = grad_output.data_ptr<scalar_t>();
+  auto grad_output_data = grad_output.const_data_ptr<scalar_t>();
   auto grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
   auto input_sizes = grad_input.sizes().vec();
   auto output_sizes = grad_output.sizes().vec();

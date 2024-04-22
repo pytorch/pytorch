@@ -546,7 +546,7 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
     .declare_static_shape(sizes, /*squash_dims=*/dim)
     .add_output(vals)
     .add_output(inds)
-    .add_input(in)
+    .add_const_input(in)
     .build();
 
   AT_DISPATCH_ALL_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, in.scalar_type(), "median_out", [&] {

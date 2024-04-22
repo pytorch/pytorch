@@ -113,6 +113,7 @@ __all__ = [
     "fmax",
     "fmin",
     "fmod",
+    "frexp",
     "gcd",
     "ge",
     "gt",
@@ -211,6 +212,11 @@ __all__ = [
     "fft_r2c",
     "fft_c2c",
     "fft_c2r",
+    #
+    # prims for making/sinking tokens
+    #
+    "_make_token",
+    "_sink_tokens",
 ]
 
 
@@ -1659,8 +1665,9 @@ def _split_dim_meta(a: TensorLikeType, dim: int, outer_length: int) -> TensorLik
     inner_length = a.shape[dim] // outer_length
 
     if (a.shape[dim] % outer_length) != 0:
-        msg = "Attempting to split dimension of length {}, but outer length of {} divides it with a remainder!".format(
-            a.shape[dim], outer_length
+        msg = (
+            f"Attempting to split dimension of length {a.shape[dim]}, "
+            f"but outer length of {outer_length} divides it with a remainder!"
         )
         raise ValueError(msg)
 
@@ -1738,9 +1745,7 @@ squeeze = _make_prim(
 
 def _transpose_meta(a: TensorLikeType, permutation: DimsSequenceType) -> TensorLikeType:
     if a.ndim != len(permutation):
-        msg = "Attempting to permute a tensor of rank {}, but received a permutation of length {}!".format(
-            a.ndim, len(permutation)
-        )
+        msg = f"Attempting to permute a tensor of rank {a.ndim}, but received a permutation of length {len(permutation)}!"
         raise ValueError(msg)
 
     if not utils.is_valid_permutation(a.ndim, permutation):
@@ -1900,11 +1905,15 @@ collapse = _make_prim(
 
 
 # TODO: review stride logic
+# NB: unlike torch.cat, this is more strict about empty tensors and dim is
+# never negative
 def _cat_meta(tensors: Sequence[TensorLikeType], dim: int) -> TensorLikeType:
     # Verifies same shape (except in the concat dimension)
+    assert dim >= 0
     shape = tensors[0].shape
     concat_length = 0
     for tensor_idx, tensor in enumerate(tensors):
+        assert len(shape) == len(tensor.shape)
         for idx, (common_length, length) in enumerate(zip(shape, tensor.shape)):
             if idx == dim:
                 concat_length = concat_length + length
@@ -3004,6 +3013,50 @@ fft_c2r = _make_prim(
     return_type=RETURN_TYPE.NEW,
     doc=_fft_c2r_doc,
 )
+
+
+def _frexp_meta(self: TensorLikeType) -> Tuple[TensorLikeType, TensorLikeType]:
+    torch._check(
+        self.dtype.is_floating_point,
+        lambda: "torch.frexp() only supports floating-point dtypes",
+    )
+    return torch.empty_like(self), torch.empty_like(self, dtype=torch.int32)
+
+
+frexp = _make_prim(
+    schema="frexp(Tensor self) -> (Tensor mantissa, Tensor exponent)",
+    meta=_frexp_meta,
+    return_type=(RETURN_TYPE.NEW, RETURN_TYPE.NEW),
+    impl_aten=torch.frexp,
+    doc="",
+)
+
+
+def _make_token_aten() -> TensorLikeType:
+    return torch.empty(0)
+
+
+_make_token = _make_prim(
+    schema="_make_token() -> Tensor",
+    meta=_make_token_aten,
+    return_type=RETURN_TYPE.NEW,
+    impl_aten=_make_token_aten,
+    doc="Creates a token used for keeping track of side effects.",
+)
+
+
+def _sink_tokens_aten(tokens) -> None:
+    pass
+
+
+_sink_tokens = _make_prim(
+    schema="_sink_tokens(Tensor[] tokens) -> ()",
+    meta=_sink_tokens_aten,
+    return_type=RETURN_TYPE.NONE,
+    impl_aten=_sink_tokens_aten,
+    doc="Sink all of the tokens which were previously used for keeping track of side effects.",
+)
+
 
 register_rng_prims()
 register_debug_prims()

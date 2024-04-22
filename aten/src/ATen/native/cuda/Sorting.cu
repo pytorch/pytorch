@@ -22,7 +22,7 @@ namespace {
 // Finds the rank k element, and its index, of the values along dimension dim
 template <typename scalar_t, typename index_t, int Dim>
 __global__ void gatherKthValue(
-    cuda::detail::TensorInfo<scalar_t, index_t> input,
+    cuda::detail::TensorInfo<const scalar_t, index_t> input,
     index_t inputSliceSize,
     index_t k,
     index_t numInputSlices,
@@ -40,13 +40,13 @@ __global__ void gatherKthValue(
 
   // Find the start offset for our slice
   index_t sliceStartIndex =
-      cuda::detail::IndexToOffset<scalar_t, index_t, Dim>::get(slice, input);
+      cuda::detail::IndexToOffset<const scalar_t, index_t, Dim>::get(slice, input);
   index_t kthValueSliceStartIndex =
       cuda::detail::IndexToOffset<scalar_t, index_t, Dim>::get(slice, kthValue);
   index_t indicesSliceStartIndex =
       cuda::detail::IndexToOffset<int64_t, index_t, Dim>::get(slice, indices);
 
-  scalar_t* inputSliceStart = &input.data[sliceStartIndex];
+  const scalar_t* inputSliceStart = &input.data[sliceStartIndex];
   scalar_t* kthValueSliceStart = &kthValue.data[kthValueSliceStartIndex];
   int64_t* indicesSliceStart = &indices.data[indicesSliceStartIndex];
 
@@ -92,7 +92,7 @@ template <typename scalar_t, typename index_t, int Dim>
 __global__ void gatherMedian(
     cuda::detail::TensorInfo<scalar_t, index_t> values,
     cuda::detail::TensorInfo<int64_t, index_t> indices,
-    cuda::detail::TensorInfo<scalar_t, index_t> input,
+    cuda::detail::TensorInfo<const scalar_t, index_t> input,
     index_t inputSliceSize,
     index_t numInputSlices,
     index_t inputWithinSliceStride,
@@ -112,11 +112,11 @@ __global__ void gatherMedian(
   index_t indicesSliceStartIndex =
       cuda::detail::IndexToOffset<int64_t, index_t, Dim>::get(slice, indices);
   index_t inputSliceStartIndex =
-      cuda::detail::IndexToOffset<scalar_t, index_t, Dim>::get(slice, input);
+      cuda::detail::IndexToOffset<const scalar_t, index_t, Dim>::get(slice, input);
 
   scalar_t* valuesSliceStart = &values.data[valuesSliceStartIndex];
   int64_t* indicesSliceStart = &indices.data[indicesSliceStartIndex];
-  scalar_t* inputSliceStart = &input.data[inputSliceStartIndex];
+  const scalar_t* inputSliceStart = &input.data[inputSliceStartIndex];
 
   index_t nan_count = 0;
   for (index_t i = threadIdx.x; i < inputSliceSize; i += blockDim.x) {
@@ -178,7 +178,7 @@ struct KthValueLauncher {
       int collapse_values_dim,
       cuda::detail::TensorInfo<int64_t, index_t> indices_info,
       int collapse_indices_dim,
-      cuda::detail::TensorInfo<scalar_t, index_t> self_info,
+      cuda::detail::TensorInfo<const scalar_t, index_t> self_info,
       int collapse_self_dim,
       int64_t num_slices,
       int64_t slice_size) {
@@ -216,7 +216,7 @@ struct MedianLauncher {
       int collapse_values_dim,
       cuda::detail::TensorInfo<int64_t, index_t> indices_info,
       int collapse_indices_dim,
-      cuda::detail::TensorInfo<scalar_t, index_t> self_info,
+      cuda::detail::TensorInfo<const scalar_t, index_t> self_info,
       int collapse_self_dim,
       int64_t num_slices,
       int64_t slice_size) {

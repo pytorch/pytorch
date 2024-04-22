@@ -135,11 +135,11 @@ void apply_ldl_solve_cusolver(
   auto b_stride = B.dim() > 2 ? B.stride(-3) : 0;
   auto pivots_stride = pivots.dim() > 1 ? pivots.stride(-2) : 0;
 
-  auto a_data = A.data_ptr<scalar_t>();
+  auto a_data = A.const_data_ptr<scalar_t>();
   auto b_data = B.data_ptr<scalar_t>();
 
   auto pivots_ = pivots.to(kLong);
-  auto pivots_data = pivots_.data_ptr<int64_t>();
+  auto pivots_data = pivots_.const_data_ptr<int64_t>();
 
   // needed to run ldl_solve tests in parallel
   // see https://github.com/pytorch/pytorch/issues/82894 for examples of failures
@@ -175,9 +175,9 @@ void apply_ldl_solve_cusolver(
 
   Tensor info = at::zeros({}, A.options().dtype(at::kInt));
   for (const auto i : c10::irange(batch_size)) {
-    auto* a_working_ptr = &a_data[i * a_stride];
+    const auto* a_working_ptr = &a_data[i * a_stride];
     auto* b_working_ptr = &b_data[i * b_stride];
-    auto* pivots_working_ptr = &pivots_data[i * pivots_stride];
+    const auto* pivots_working_ptr = &pivots_data[i * pivots_stride];
     TORCH_CUSOLVER_CHECK(cusolverDnXsytrs(
         handle,
         uplo,
@@ -1078,8 +1078,8 @@ static void apply_ormqr(const Tensor& input, const Tensor& tau, const Tensor& ot
   auto side = left ? CUBLAS_SIDE_LEFT : CUBLAS_SIDE_RIGHT;
   auto trans = transpose ? (input.is_complex() ? CUBLAS_OP_C : CUBLAS_OP_T) : CUBLAS_OP_N;
 
-  auto input_data = input.data_ptr<scalar_t>();
-  auto tau_data = tau.data_ptr<scalar_t>();
+  auto input_data = input.const_data_ptr<scalar_t>();
+  auto tau_data = tau.const_data_ptr<scalar_t>();
   auto other_data = other.data_ptr<scalar_t>();
 
   auto input_matrix_stride = matrixStride(input);
@@ -1101,9 +1101,9 @@ static void apply_ormqr(const Tensor& input, const Tensor& tau, const Tensor& ot
   auto info_data = info.data_ptr<int>();
 
   for (auto i = decltype(batch_size){0}; i < batch_size; i++) {
-    scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
+    const scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
     scalar_t* other_working_ptr = &other_data[i * other_matrix_stride];
-    scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
+    const scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
     auto handle = at::cuda::getCurrentCUDASolverDnHandle();
 
     // allocate workspace storage
@@ -1149,7 +1149,7 @@ void ormqr_cusolver(const Tensor& input, const Tensor& tau, const Tensor& other,
 template <typename scalar_t>
 inline static void apply_orgqr(Tensor& self, const Tensor& tau) {
   auto self_data = self.data_ptr<scalar_t>();
-  auto tau_data = tau.data_ptr<scalar_t>();
+  auto tau_data = tau.const_data_ptr<scalar_t>();
   auto self_matrix_stride = matrixStride(self);
   auto batchsize = cuda_int_cast(batchCount(self), "batch size");
   auto m = cuda_int_cast(self.size(-2), "m");
@@ -1180,7 +1180,7 @@ inline static void apply_orgqr(Tensor& self, const Tensor& tau) {
 
   for (auto i = decltype(batchsize){0}; i < batchsize; i++) {
     scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
-    scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
+    const scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
     auto handle = at::cuda::getCurrentCUDASolverDnHandle();
 
     // allocate workspace storage
@@ -1434,8 +1434,12 @@ static void linalg_eigh_cusolver_syevj_batched(const Tensor& eigenvalues, const 
 }
 
 void linalg_eigh_cusolver(const Tensor& eigenvalues, const Tensor& eigenvectors, const Tensor& infos, bool upper, bool compute_eigenvectors) {
+  // for ROCm's hipSolver, syevj is fastest.
+#ifdef USE_ROCM
+  linalg_eigh_cusolver_syevj(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
+#else
   if (use_cusolver_syevj_batched_ && batchCount(eigenvectors) > 1 && eigenvectors.size(-1) <= 32) {
-    // Use syevjBatched for batched matrix opertion when matrix size <= 32
+    // Use syevjBatched for batched matrix operation when matrix size <= 32
     // See https://github.com/pytorch/pytorch/pull/53040#issuecomment-788264724
     linalg_eigh_cusolver_syevj_batched(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
   } else if (eigenvectors.scalar_type() == at::kFloat && eigenvectors.size(-1) >= 32 && eigenvectors.size(-1) <= 512) {
@@ -1445,6 +1449,7 @@ void linalg_eigh_cusolver(const Tensor& eigenvalues, const Tensor& eigenvectors,
   } else {
     linalg_eigh_cusolver_syevd(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
   }
+#endif
 }
 
 // The 'apply_' word is used for templated by dtype functions that call an API routine

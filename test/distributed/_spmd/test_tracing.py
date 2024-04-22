@@ -256,7 +256,7 @@ def ddm_backward(grad: torch.Tensor) -> torch.Tensor:
     return grad
 
 
-dummy_lib = torch.library.Library("dummy", "DEF")
+dummy_lib = torch.library.Library("dummy", "DEF")  # noqa: TOR901
 dummy_lib.define("ddm(Tensor x) -> Tensor")
 dummy_lib.impl("ddm", ddm, "CompositeExplicitAutograd")
 dummy_lib.define("ddm_backward(Tensor x) -> Tensor")

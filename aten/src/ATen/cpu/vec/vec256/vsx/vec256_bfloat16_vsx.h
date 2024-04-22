@@ -51,6 +51,23 @@ inline void load_fp32_from_bf16(
   load_fp32_from_bf16(data, out2);
 }
 
+inline void load_fp32_from_fp16(const c10::Half* data, Vectorized<float>& out) {
+  __at_align__ float values[Vectorized<float>::size()];
+  for (const auto k : c10::irange(Vectorized<float>::size())) {
+    values[k] = data[k];
+  }
+  out = Vectorized<float>::loadu(values);
+}
+
+inline void load_fp32_from_fp16(
+    const c10::Half* data,
+    Vectorized<float>& out1,
+    Vectorized<float>& out2) {
+  load_fp32_from_fp16(data, out1);
+  data += Vectorized<float>::size();
+  load_fp32_from_fp16(data, out2);
+}
+
 } // namespace
 } // namespace vec
 } // namespace at

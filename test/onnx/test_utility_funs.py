@@ -256,6 +256,7 @@ class TestUtilityFuns(_BaseTestCase):
             self.assertNotEqual(node.kind(), "onnx::Cast")
         self.assertEqual(len(list(graph.nodes())), 2)
 
+    @skipIfUnsupportedMaxOpsetVersion(17)
     def test_constant_fold_reduceL2(self):
         class ReduceModule(torch.nn.Module):
             def forward(self, x):
@@ -273,6 +274,7 @@ class TestUtilityFuns(_BaseTestCase):
         for node in graph.nodes():
             self.assertNotEqual(node.kind(), "onnx::ReduceL2")
 
+    @skipIfUnsupportedMaxOpsetVersion(17)
     def test_constant_fold_reduceL1(self):
         class NormModule(torch.nn.Module):
             def forward(self, x):

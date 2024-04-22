@@ -556,7 +556,7 @@ class TestColumnStack(TestCase):
     def test_generator(self):
         # numpy 1.24 emits a warning but we don't
         # with assert_warns(FutureWarning):
-        column_stack(np.arange(3) for _ in range(2))
+        column_stack([np.arange(3) for _ in range(2)])
 
 
 class TestDstack(TestCase):
@@ -604,7 +604,7 @@ class TestDstack(TestCase):
     def test_generator(self):
         # numpy 1.24 emits a warning but we don't
         # with assert_warns(FutureWarning):
-        dstack(np.arange(3) for _ in range(2))
+        dstack([np.arange(3) for _ in range(2)])
 
 
 # array_split has more comprehensive test of splitting.

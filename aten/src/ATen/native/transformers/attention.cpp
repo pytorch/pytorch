@@ -37,6 +37,7 @@
 #include <ATen/ops/_scaled_dot_product_flash_attention.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention_backward_native.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention_native.h>
+#include <ATen/ops/_scaled_dot_product_cudnn_attention.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention_for_cpu.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention_for_cpu_native.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention_for_cpu_backward.h>
@@ -596,6 +597,17 @@ at::Tensor post_process_flash_output(
   return out;
 }
 
+int64_t handle_private_use(const Tensor& query_, const Tensor& key, const Tensor& value,
+    const c10::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, c10::optional<double> scale){
+  int64_t choice_int = static_cast<int64_t>(sdp::SDPBackend::math);
+  try {
+    choice_int = _fused_sdp_choice_stub(query_.device().type(),
+        query_, key, value, attn_mask_, dropout_p, is_causal, scale);
+  } catch(const ::c10::Error& e){
+  }
+  return choice_int;
+}
+
 } // namespace
 
 // Computes scaled dot product attention on query, key and value tensors, using
@@ -606,8 +618,10 @@ at::Tensor post_process_flash_output(
 //     query (Tensor): Query tensor; shape (N, ..., L, E)
 //     key (Tensor): Key tensor; shape (N, ..., S, E)
 //     value (Tensor): Value tensor; shape (N, ..., S, E)
-//     attn_mask (optional Tensor): Attention mask; shape (N, ..., L, S) or (L, S). Currently, only a boolean mask
-//         is supported, where a value of True indicates that the element *should* take part in attention.
+//     attn_mask (optional Tensor): Attention mask; shape must be broadcastable to the shape of attention weights,
+//         which is (N,..., L, S). Two types of masks are supported.
+//         A boolean mask where a value of True indicates that the element *should* take part in attention.
+//         A float mask of the same type as query, key, value that is added to the attention score.
 //     dropout_p (float): Dropout probability; if greater than 0.0, dropout is applied
 //     need_attn_weights (bool): If true, the second return value will contain the attention weights used;
 //         otherwise, the second return value is unspecified
@@ -616,9 +630,8 @@ at::Tensor post_process_flash_output(
 //         to get specialized support for causal masks (and other types of masking e.g. local attention / block
 //         sparse masks) via tensor subclassing, allowing for a leaner API.
 //
-// Returns a tuple containing:
+// Returns a tensor:
 //     output (Tensor): Attention output; shape (N, ..., L, E)
-//     attn_weights (Tensor): Attention weighting; shape (N, ..., L, S)
 //
 // Shape legend:
 //     N: Batch size
@@ -638,13 +651,27 @@ Tensor scaled_dot_product_attention(
   int64_t choice_int = static_cast<int64_t>(sdp::SDPBackend::math);
   if (query_.device().type() == DeviceType::CUDA
       || query_.device().type() == DeviceType::CPU
-      || query_.device().type() == DeviceType::HIP){
-    choice_int = _fused_sdp_choice_stub(query_.device().type(),
-      query_, key, value, attn_mask_, dropout_p, is_causal, scale);
+      || query_.device().type() == DeviceType::HIP
+      || query_.device().type() == DeviceType::PrivateUse1){
+    if (query_.device().type() == DeviceType::PrivateUse1){
+      choice_int = handle_private_use(
+          query_, key, value, attn_mask_, dropout_p, is_causal, scale);
+    } else {
+      choice_int = _fused_sdp_choice_stub(query_.device().type(),
+          query_, key, value, attn_mask_, dropout_p, is_causal, scale);
+    }
   }
   sdp::SDPBackend backend = static_cast<sdp::SDPBackend>(choice_int);
   c10::optional<Tensor> attn_mask = convert_boolean_attn_mask(attn_mask_, query_.dtype());
   switch (backend) {
+    case sdp::SDPBackend::cudnn_attention: {
+      bool compute_logsumexp =
+          (query_.requires_grad() || key.requires_grad() ||
+           value.requires_grad());
+      auto out_lse_softmax = at::_scaled_dot_product_cudnn_attention(
+          query_, key, value, dropout_p, is_causal, compute_logsumexp, scale);
+      return std::get<0>(out_lse_softmax);
+    }
     case sdp::SDPBackend::flash_attention: {
       if(query_.device().type() == DeviceType::CUDA){
         c10::SymInt og_size = query_.sym_size(-1);
@@ -760,8 +787,8 @@ _scaled_dot_product_flash_attention_cpu(
   int64_t num_head = query.size(1);
   int64_t headSize = query.size(3);
 
-  TORCH_CHECK(c10::isFloatingType(dtype) && dtype != ScalarType::Half,
-    "scaled_dot_product_attention_flash_attention: Expected data type in FP32, FP64, BF16, but got ", dtype, " instead.");
+  TORCH_CHECK(c10::isFloatingType(dtype),
+    "scaled_dot_product_attention_flash_attention: Expected data type in FP32, FP64, BF16, FP16, but got ", dtype, " instead.");
   TORCH_CHECK(query.dim() == 4 && key.dim() == 4 && value.dim() == 4,
     "scaled_dot_product_attention_flash_attention: Accept only 4 dims inputs shape of {B, H, T, K}");
   TORCH_CHECK(dropout_p == 0.0,

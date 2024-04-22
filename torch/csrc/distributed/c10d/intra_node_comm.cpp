@@ -6,7 +6,7 @@
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 
 #include <iostream>
-#include <random>
+#include <utility>
 
 #include <fcntl.h>
 #include <pthread.h>
@@ -22,8 +22,7 @@
 
 #include <cuda_runtime.h>
 
-namespace c10d {
-namespace intra_node_comm {
+namespace c10d::intra_node_comm {
 
 static std::vector<std::string> ENABLE_INTRA_NODE_COMM = {
     "ENABLE_INTRA_NODE_COMM"};
@@ -44,29 +43,9 @@ void* initP2pState();
 
 void* initTopoInfo(Topology topology, NvlMesh nvlMesh, size_t rank);
 
-AllReduceAlgo selectAllReduceAlgo(
-    const at::Tensor& input,
-    Topology topology,
-    size_t worldSize);
-
-at::Tensor allReduce(
-    const at::Tensor& input,
-    std::array<void*, kMaxDevices> p2pStates,
-    std::array<void*, kMaxDevices> buffers,
-    void* p2pStatesDev,
-    void* buffersDev,
-    void* topoInfo,
-    size_t rank,
-    size_t worldSize,
-    AllReduceAlgo algo,
-    at::cuda::CUDAStream& stream);
-
 ////////////////////////////////////////////////////////////////////////////////
 // Topology Detection
 ////////////////////////////////////////////////////////////////////////////////
-
-// TODO: find a better way to determine this
-static constexpr size_t kMaxNvLinks = 20;
 
 static std::ostream& operator<<(std::ostream& os, const NvlMesh& nvlMesh) {
   std::ostringstream oss;
@@ -74,7 +53,7 @@ static std::ostream& operator<<(std::ostream& os, const NvlMesh& nvlMesh) {
     for (size_t j = 0; j < kMaxDevices; ++j) {
       oss << nvlMesh[i][j] << " ";
     }
-    oss << std::endl;
+    oss << '\n';
   }
   os << oss.str();
   return os;
@@ -94,7 +73,7 @@ static bool isSame(NvlMesh lhs, NvlMesh rhs) {
 /**
  * Query the nvlink connection among devices.
  */
-static NvlMesh getNvlMesh(std::vector<std::string> rankToBusId) {
+static NvlMesh getNvlMesh(const std::vector<std::string>& rankToBusId) {
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   using namespace c10::cuda;
 
@@ -105,16 +84,19 @@ static NvlMesh getNvlMesh(std::vector<std::string> rankToBusId) {
   }
 
   const auto worldSize = rankToBusId.size();
-  std::vector<nvmlDevice_t> devices(worldSize, 0);
+  std::vector<nvmlDevice_t> devices(worldSize, nullptr);
   std::unordered_map<std::string, size_t> busIdToRank;
   std::vector<size_t> switchLinkCount(worldSize, 0);
 
   for (size_t r = 0; r < worldSize; ++r) {
-    busIdToRank.emplace(std::make_pair(rankToBusId[r], r));
+    busIdToRank.emplace(rankToBusId[r], r);
     TORCH_CHECK(
         driverApi->nvmlDeviceGetHandleByPciBusId_v2_(
             rankToBusId[r].c_str(), &devices[r]) == NVML_SUCCESS);
   }
+
+  // TODO: find a better way to determine this
+  constexpr size_t kMaxNvLinks = 20;
 
   // For each device, loop over devices connected to it via NVLink
   for (size_t idx = 0; idx < worldSize; ++idx) {
@@ -222,24 +204,21 @@ static Topology detectTopology(const NvlMesh nvlMesh, size_t worldSize) {
 ////////////////////////////////////////////////////////////////////////////////
 
 IntraNodeComm::IntraNodeComm(
-    Topology topology,
-    std::array<void*, kMaxDevices> p2pStates,
-    std::array<void*, kMaxDevices> buffers,
-    void* p2pStatesDev,
-    void* buffersDev,
-    void* topoInfo,
+    c10::intrusive_ptr<c10d::Store> store,
     size_t rank,
-    size_t worldSize)
-    : topology_(topology),
-      p2pStates_(p2pStates),
-      buffers_(buffers),
-      p2pStatesDev_(p2pStatesDev),
-      buffersDev_(buffersDev),
-      topoInfo_(topoInfo),
+    size_t worldSize,
+    c10::optional<size_t> bufferSize)
+    : store_(std::move(store)),
       rank_(rank),
-      worldSize_(worldSize) {}
+      worldSize_(worldSize),
+      bufferSize_(bufferSize.has_value() ? *bufferSize : kDefaultBufferSize) {
+  rendezvous();
+}
 
 IntraNodeComm::~IntraNodeComm() {
+  if (!isInitialized_) {
+    return;
+  }
   // Intentionally releasing resources without synchronizing devices. The
   // teardown logic is safe for propoerly sync'd user program. We don't want
   // improperly sync'd user program to hang here.
@@ -259,17 +238,21 @@ IntraNodeComm::~IntraNodeComm() {
   AT_CUDA_CHECK(cudaFree(buffersDev_));
 }
 
+bool IntraNodeComm::isEnabled() {
+  return getCvarBool(ENABLE_INTRA_NODE_COMM, false);
+}
+
 /**
  * Use c10d::Store to perform allgather on a trivially copyable type.
  */
 template <typename T>
 std::vector<T> storeAllGather(
-    c10::intrusive_ptr<c10d::Store> store,
+    const c10::intrusive_ptr<c10d::Store>& store,
     const std::string& prefix,
     size_t rank,
     size_t worldSize,
     T val) {
-  static_assert(std::is_trivially_copyable<T>::value);
+  static_assert(std::is_trivially_copyable_v<T>);
 
   std::vector<std::string> peerKeys;
   for (size_t r = 0; r < worldSize; ++r) {
@@ -294,26 +277,24 @@ std::vector<T> storeAllGather(
     store->wait({peerKeys[r]});
     auto payload = store->get(peerKeys[r]);
     TORCH_CHECK(payload.size() == sizeof(T));
-    T peerVal;
+    T peerVal{};
     std::memcpy(&peerVal, payload.data(), sizeof(T));
     peerVals.push_back(peerVal);
   }
   return peerVals;
 }
 
-c10::intrusive_ptr<IntraNodeComm> IntraNodeComm::rendezvous(
-    c10::intrusive_ptr<c10d::Store> store,
-    const std::string& prefix,
-    size_t rank,
-    size_t worldSize) {
+bool IntraNodeComm::rendezvous() {
+  if (isInitialized_) {
+    return true;
+  }
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
-  if (!isIntraNodeCommSupported() ||
-      !getCvarBool(ENABLE_INTRA_NODE_COMM, false) || worldSize < 2 ||
-      worldSize > kMaxDevices) {
-    return nullptr;
+  if (!isIntraNodeCommSupported() || !isEnabled() || worldSize_ < 2 ||
+      worldSize_ > kMaxDevices) {
+    return false;
   }
 
-  int deviceIdx = at::cuda::current_device();
+  auto deviceIdx = at::cuda::current_device();
   c10::cuda::CUDAGuard guard(deviceIdx);
 
   // First hand shake: exchange hostname and device bus ID
@@ -334,8 +315,8 @@ c10::intrusive_ptr<IntraNodeComm> IntraNodeComm::rendezvous(
       prop.pciBusID,
       prop.pciDeviceID);
 
-  auto peerDevInfos = storeAllGather(
-      store, prefix + "-IntraNodeCommHandShake-0", rank, worldSize, devInfo);
+  auto peerDevInfos =
+      storeAllGather(store_, "handshake-0", rank_, worldSize_, devInfo);
 
   std::vector<std::string> rankToBusId;
   for (const auto& info : peerDevInfos) {
@@ -343,7 +324,7 @@ c10::intrusive_ptr<IntraNodeComm> IntraNodeComm::rendezvous(
       LOG(WARNING) << "Aborting IntraNodeComm::rendezvous because some "
                       "participants are not on the same host ("
                    << info.hostname << ", " << devInfo.hostname << ")";
-      return nullptr;
+      return false;
     }
     rankToBusId.emplace_back(info.busId);
   }
@@ -352,7 +333,7 @@ c10::intrusive_ptr<IntraNodeComm> IntraNodeComm::rendezvous(
   {
     std::unordered_set uniqueBusIds(rankToBusId.begin(), rankToBusId.end());
     TORCH_CHECK(
-        uniqueBusIds.size() == worldSize,
+        uniqueBusIds.size() == worldSize_,
         "IntraNodeComm::rendezvous: detected overlapping devices across ranks. "
         "Please properly set device via torch.cuda.set_device() before "
         "initiating rendezvous.");
@@ -362,14 +343,14 @@ c10::intrusive_ptr<IntraNodeComm> IntraNodeComm::rendezvous(
   auto nvlMesh = getNvlMesh(rankToBusId);
 
   // Detect topology
-  Topology topology = detectTopology(nvlMesh, worldSize);
+  Topology topology = detectTopology(nvlMesh, worldSize_);
 
   // Initialize p2p state
   auto p2pState = initP2pState();
 
   // Allocate buffer
   void* buffer = nullptr;
-  AT_CUDA_CHECK(cudaMalloc(&buffer, kMaxIntraNodeSize * 2));
+  AT_CUDA_CHECK(cudaMalloc(&buffer, bufferSize_));
 
   // Second handshake: exchange topology and CUDA IPC handles
   struct IpcInfo {
@@ -389,8 +370,8 @@ c10::intrusive_ptr<IntraNodeComm> IntraNodeComm::rendezvous(
       .p2pStateHandle = p2pStateHandle,
       .bufferHandle = bufferHandle};
 
-  auto peerIpcInfos = storeAllGather(
-      store, prefix + "-IntraNodeCommHandShake-2", rank, worldSize, ipcInfo);
+  auto peerIpcInfos =
+      storeAllGather(store_, "handshake-1", rank_, worldSize_, ipcInfo);
 
   for (const auto& info : peerIpcInfos) {
     if (!isSame(info.nvlMesh, peerIpcInfos.front().nvlMesh) ||
@@ -400,13 +381,13 @@ c10::intrusive_ptr<IntraNodeComm> IntraNodeComm::rendezvous(
                    << int(info.topology) << " and " << int(topology) << ")";
       AT_CUDA_CHECK(cudaFree(p2pState));
       AT_CUDA_CHECK(cudaFree(buffer));
-      return nullptr;
+      return false;
     }
   }
 
   std::array<void*, kMaxDevices> p2pStates = {}, buffers = {};
   for (size_t r = 0; r < peerIpcInfos.size(); ++r) {
-    if (r == rank) {
+    if (r == rank_) {
       p2pStates[r] = p2pState;
       buffers[r] = buffer;
     } else {
@@ -433,53 +414,18 @@ c10::intrusive_ptr<IntraNodeComm> IntraNodeComm::rendezvous(
   AT_CUDA_CHECK(cudaMemcpy(
       buffersDev, buffers.data(), sizeof(buffers), cudaMemcpyHostToDevice));
 
-  void* topoInfo = initTopoInfo(topology, nvlMesh, rank);
-  return c10::make_intrusive<IntraNodeComm>(
-      topology,
-      p2pStates,
-      buffers,
-      p2pStatesDev,
-      buffersDev,
-      topoInfo,
-      rank,
-      worldSize);
-#else
-  return nullptr;
+  void* topoInfo = initTopoInfo(topology, nvlMesh, rank_);
+
+  isInitialized_ = true;
+  topology_ = topology;
+  std::copy(p2pStates.begin(), p2pStates.end(), p2pStates_.begin());
+  std::copy(buffers.begin(), buffers.end(), buffers_.begin());
+  p2pStatesDev_ = p2pStatesDev;
+  buffersDev_ = buffersDev;
+  topoInfo_ = topoInfo;
+  return true;
 #endif
+  return false;
 }
 
-AllReduceAlgo IntraNodeComm::selectAllReduceAlgo(const at::Tensor& input) {
-  return c10d::intra_node_comm::selectAllReduceAlgo(
-      input, topology_, worldSize_);
-}
-
-static int64_t usageCounter = 0;
-
-at::Tensor IntraNodeComm::allReduce(
-    const at::Tensor& input,
-    AllReduceAlgo algo) {
-  // Report usage for testing purposes.
-  // We don't care about overflowing.
-  ++usageCounter;
-  auto stream = at::cuda::getCurrentCUDAStream();
-  c10::cuda::CUDACachingAllocator::recordStream(
-      input.storage().data_ptr(), stream);
-  return c10d::intra_node_comm::allReduce(
-      input,
-      p2pStates_,
-      buffers_,
-      p2pStatesDev_,
-      buffersDev_,
-      topoInfo_,
-      rank_,
-      worldSize_,
-      algo,
-      stream);
-}
-
-int64_t getIntraNodeCommUsageCounter() {
-  return usageCounter;
-}
-
-} // namespace intra_node_comm
-} // namespace c10d
+} // namespace c10d::intra_node_comm

@@ -254,10 +254,7 @@ static std::tuple<double, Tensor, double, int64_t> _strong_wolfe(
   auto d_norm = val(d.abs().max());
   g = g.clone(at::MemoryFormat::Contiguous);
   // evaluate objective and gradient using initial step
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  double f_new;
-  Tensor g_new;
-  std::tie(f_new, g_new) = obj_func(x, t, d);
+  auto [f_new, g_new] = obj_func(x, t, d);
   int64_t ls_func_evals = 1;
   auto gtd_new = g_new.dot(d);
 
@@ -330,9 +327,7 @@ static std::tuple<double, Tensor, double, int64_t> _strong_wolfe(
   // exact point satisfying the criteria
   bool insuf_progress = false;
   // find high and low points in bracket
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t low_pos, high_pos;
-  std::tie(low_pos, high_pos) = bracket_f[0] <= bracket_f[1]
+  auto [low_pos, high_pos] = bracket_f[0] <= bracket_f[1]
       ? std::make_tuple(0, 1)
       : std::make_tuple(1, 0);
   while (!done && (ls_iter < max_ls)) {

@@ -144,6 +144,9 @@ def get_glsl_paths():
         ],
     )
 
+def spv_shader_library():
+    pass
+
 # @lint-ignore BUCKRESTRICTEDSYNTAX
 IS_OSS = read_config("pt", "is_oss", "0") == "1"  # True for OSS BUCK build, and False for internal BUCK build
 
@@ -700,6 +703,43 @@ def gen_aten_libtorch_files(name, extra_params = [], compatible_with = [], apple
         apple_sdks = apple_sdks,
     )
 
+def vulkan_spv_shader_library(name, spv_filegroup):
+    genrule_cmd = [
+        "$(exe //xplat/caffe2/tools:gen_aten_vulkan_spv_bin)",
+        "--glsl-paths $(location {})".format(spv_filegroup),
+        "--output-path $OUT --env FLOAT_IMAGE_FORMAT={}".format(get_glsl_image_format()),
+        "--glslc-path=$(exe //xplat/caffe2/fb/vulkan/dotslash:glslc)",
+        "--tmp-dir-path=$TMP",
+    ]
+
+    genrule_name = "gen_{}_cpp".format(name)
+    fb_xplat_genrule(
+        name = "gen_{}_cpp".format(name),
+        outs = {
+            "{}.cpp".format(name): ["spv.cpp"],
+        },
+        cmd = " ".join(genrule_cmd),
+        default_outs = ["."],
+        labels = ["uses_dotslash"],
+    )
+
+    fb_xplat_cxx_library(
+        name = name,
+        srcs = [
+            ":{}[{}.cpp]".format(genrule_name, name),
+        ],
+        # Static initialization is used to register shaders to the global shader registry,
+        # therefore link_whole must be True to make sure unused symbols are not discarded.
+        # @lint-ignore BUCKLINT: Avoid `link_whole=True`
+        link_whole = True,
+        # Define a soname that can be used for dynamic loading in Java, Python, etc.
+        soname = "lib{}.$(ext)".format(name),
+        visibility = ["PUBLIC"],
+        exported_deps = [
+            "//xplat/caffe2:torch_vulkan_api",
+        ],
+    )
+
 def copy_metal(name, apple_sdks = None):
     cmd = []
     cmd_exe = []
@@ -960,6 +1000,7 @@ def define_buck_targets(
             "Functions.h": ":gen_aten_libtorch[autograd/generated/Functions.h]",
             "VariableType.h": ":gen_aten_libtorch[autograd/generated/VariableType.h]",
             "variable_factories.h": ":gen_aten_libtorch[autograd/generated/variable_factories.h]",
+            "ViewFuncs.h": ":gen_aten_libtorch[autograd/generated/ViewFuncs.h]",
             # Don't build python bindings on mobile.
             #"python_functions.h",
         },
@@ -1466,6 +1507,7 @@ def define_buck_targets(
             "torch/csrc/jit/mobile/train/random.cpp",
             "torch/csrc/jit/mobile/train/sequential.cpp",
             ":gen_aten_libtorch[autograd/generated/Functions.cpp]",
+            ":gen_aten_libtorch[autograd/generated/ViewFuncs.cpp]",
         ],
         compiler_flags = get_pt_compiler_flags(),
         exported_preprocessor_flags = get_pt_preprocessor_flags() + ["-DUSE_MOBILE_CLASSTYPE"],
@@ -1678,6 +1720,7 @@ def define_buck_targets(
         compiler_flags = get_pt_compiler_flags() + ["-Wno-error"],
         exported_preprocessor_flags = get_pt_preprocessor_flags() + [
             "-DUSE_KINETO",
+            "-DTMP_LIBKINETO_NANOSECOND",
             # Need this otherwise USE_KINETO is undefed
             # for mobile
             "-DEDGE_PROFILER_USE_KINETO",
@@ -1704,6 +1747,7 @@ def define_buck_targets(
         compiler_flags = get_pt_compiler_flags() + ["-Wno-error"],
         exported_preprocessor_flags = get_pt_preprocessor_flags() + [
             "-DUSE_KINETO",
+            "-DTMP_LIBKINETO_NANOSECOND",
             "-DEDGE_PROFILER_USE_KINETO",
         ],
         # @lint-ignore BUCKLINT link_whole
@@ -1790,6 +1834,7 @@ def define_buck_targets(
         compiler_flags = get_pt_compiler_flags() + ["-Wno-error"],
         exported_preprocessor_flags = get_pt_preprocessor_flags() + [
             "-DUSE_KINETO",
+            "-DTMP_LIBKINETO_NANOSECOND",
             # Need this otherwise USE_KINETO is undefed
             # for mobile
             "-DEDGE_PROFILER_USE_KINETO",
