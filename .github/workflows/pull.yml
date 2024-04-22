@@ -113,7 +113,7 @@ jobs:
 
   linux-jammy-py3_10-clang15-asan-test:
     name: linux-jammy-py3.10-clang15-asan
-    uses: ./.github/workflows/_linux-test.yml
+    uses: ./.github/workflows/_linux-test-label.yml
     needs:
       - linux-jammy-py3_10-clang15-asan-build
       - target-determination
