@@ -19,6 +19,11 @@ def _get_default_mps_generator() -> torch._C.Generator:
     return _default_mps_generator
 
 
+def device_count() -> int:
+    r"""Return the number of available MPS devices."""
+    return int(torch._C._has_mps and torch._C._mps_is_available())
+
+
 def synchronize() -> None:
     r"""Waits for all kernels in all streams on a MPS device to complete."""
     return torch._C._mps_deviceSynchronize()
@@ -116,6 +121,7 @@ from . import profiler
 from .event import Event
 
 __all__ = [
+    "device_count",
     "get_rng_state",
     "manual_seed",
     "seed",
