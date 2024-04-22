@@ -887,9 +887,9 @@ class OrtBackend:
                 )
             else:
                 try:
-                    prim_outputs = FakeTensorProp(
-                        graph_module, check_consistency=False
-                    ).propagate(*args, **kwargs)
+                    prim_outputs = FakeTensorProp(graph_module).propagate(
+                        *args, **kwargs
+                    )
                 except Exception:
                     logger.warning("FakeTensorProb failed for %s", graph_module)
                     # When FakeTensorProp fails, it is not possible to preallocate output buffers
