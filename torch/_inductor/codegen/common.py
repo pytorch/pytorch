@@ -1359,6 +1359,8 @@ class Kernel(CodeGen):
         self.compute = cb
         self.stores = sb
         self.cse = cse.clone()
+        self.cse.cache = cse.cache
+        pass
         try:
             yield
         finally:
