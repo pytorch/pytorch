@@ -239,6 +239,8 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
             SparseSemiStructuredTensorCompileTest._test_mlp_contiguous_relu_compile("cutlass", dense_input_shape)
 
 
+    @unittest.skipIf(IS_WINDOWS, "torch.compile not supported on windows")
+    @unittest.skipIf("cusparselt" not in SEMI_STRUCTURED_SUPPORTED_BACKENDS, "cusparselt not supported on this machine")
     def test_sp24_compile(self) -> None:
         x = torch.randn([1024, 512], device="cuda", dtype=torch.float16, requires_grad=True)
         e = torch.eye(x.shape[0], x.shape[0], device="cuda", dtype=torch.float16)
@@ -260,6 +262,8 @@ class TestSparseSemiStructured(TestCase):
     def setUp(self):
         if not _IS_SM8X:
             self.skipTest('Only runs on SM80')
+        if IS_WINDOWS:
+            self.skipTest("torch.compile not supported on windows")
 
     @inference_dtypes
     @parametrize_backends
@@ -560,6 +564,8 @@ class TestSparseSemiStructuredTraining(TestCase):
     def setUp(self):
         if not _IS_SM8X:
             self.skipTest('Only runs on SM80')
+        if IS_WINDOWS:
+            self.skipTest('CUTLASS not supported on windows')
 
 
     @training_dtypes
@@ -850,7 +856,7 @@ class TestSparseSemiStructuredCUTLASS(TestCase):
         if "cutlass" not in SEMI_STRUCTURED_SUPPORTED_BACKENDS:
             self.skipTest('CUTLASS not enabled')
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
+    @unittest.skipIf(TEST_WITH_ROCM or IS_WINDOWS, "ROCm and Windows doesn't support CUTLASS")
     @inference_dtypes
     def test_linear_cutlass(self, device, dtype):
 
