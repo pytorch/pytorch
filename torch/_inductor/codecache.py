@@ -394,7 +394,9 @@ def write(
     return basename, path
 
 
-def write_atomic(path: str, content: Union[str, bytes], make_dirs: bool = False) -> None:
+def write_atomic(
+    path: str, content: Union[str, bytes], make_dirs: bool = False
+) -> None:
     # Write into temporary file first to avoid conflicts between threads
     # Avoid using a named temporary file, as those have restricted permissions
     assert isinstance(
