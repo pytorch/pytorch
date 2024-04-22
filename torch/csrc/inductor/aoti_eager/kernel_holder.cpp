@@ -59,23 +59,14 @@ c10::ScalarType parse_dtype(const std::string& dtype_str) {
   }
 }
 
-enum class IValueType : uint8_t {
-  Tensor,
-  TensorList,
-  OptionalTensorList,
-  Scalar,
-  Invalid,
-};
-
-static bool HandleTensor(
+inline void unpack_tensor_ivalue(
     const c10::IValue& ivalue,
     const c10::Device& device,
     std::vector<at::Tensor>& inputs) {
   inputs.push_back(ivalue.toTensor());
-  return true;
 }
 
-static bool HandleTensorList(
+inline void unpack_tensor_list_ivalue(
     const c10::IValue& ivalue,
     const c10::Device& device,
     std::vector<at::Tensor>& inputs) {
@@ -84,93 +75,104 @@ static bool HandleTensorList(
       inputs.push_back(item.toTensor());
     }
   }
-  return true;
 }
 
-static bool HandleOptionalTensorList(
+inline void unpack_optional_tensor_list_ivalue(
     const c10::IValue& ivalue,
     const c10::Device& device,
     std::vector<at::Tensor>& inputs) {
-  return HandleTensorList(ivalue, device, inputs);
+  unpack_tensor_list_ivalue(ivalue, device, inputs);
 }
 
-static bool HandleScalar(
+inline void unpack_scalar_ivalue(
     const c10::IValue& ivalue,
     const c10::Device& device,
     std::vector<at::Tensor>& inputs) {
-  c10::DeviceIndex device_index = device.index();
-  if (device.is_cpu()) {
-    device_index = -1;
-  }
-
-  auto new_device = c10::Device(device.type(), device_index);
-  auto ivalue_scalar = ivalue.toScalar();
-  if (ivalue_scalar.isFloatingPoint()) {
-    ivalue_scalar = ivalue_scalar.toDouble();
-  } else if (ivalue_scalar.isIntegral(false)) {
-    ivalue_scalar = ivalue_scalar.toLong();
-  } else if (ivalue_scalar.isBoolean()) {
-    ivalue_scalar = ivalue_scalar.toBool();
-  }
-
-  inputs.push_back(at::native::scalar_tensor(
-      ivalue_scalar,
-      ivalue_scalar.type(),
-      c10::nullopt,
-      new_device,
-      c10::nullopt));
-  return true;
+  inputs.push_back(at::scalar_tensor(
+      ivalue.toScalar(),
+      c10::TensorOptions().device(device).dtype(ivalue.toScalar().type())));
 }
 
-typedef bool (*HandlerFunc)(
-    const c10::IValue& ivalue,
-    const c10::Device& device,
-    std::vector<at::Tensor>& inputs);
-std::unordered_map<IValueType, HandlerFunc> handlers_ = {
-    {IValueType::Tensor, &HandleTensor},
-    {IValueType::TensorList, &HandleTensorList},
-    {IValueType::OptionalTensorList, &HandleOptionalTensorList},
-    {IValueType::Scalar, &HandleScalar}};
-
-bool HandleIValue(
+bool unpack_ivalue(
+    const c10::Argument& argument,
     const c10::IValue& ivalue,
     const c10::Device& device,
     std::vector<at::Tensor>& inputs) {
-  IValueType ivalue_type = IValueType::Invalid;
   if (ivalue.isTensor()) {
-    ivalue_type = IValueType::Tensor;
+    unpack_tensor_ivalue(ivalue, device, inputs);
   } else if (ivalue.isTensorList()) {
-    ivalue_type = IValueType::TensorList;
+    unpack_tensor_list_ivalue(ivalue, device, inputs);
   } else if (ivalue.isOptionalTensorList()) {
-    ivalue_type = IValueType::OptionalTensorList;
+    unpack_optional_tensor_list_ivalue(ivalue, device, inputs);
   } else if (ivalue.isScalar()) {
-    ivalue_type = IValueType::Scalar;
+    // ivalue is scalar
+    unpack_scalar_ivalue(ivalue, device, inputs);
+  } else if (
+      *argument.real_type() == *c10::getTypePtr<c10::optional<at::Tensor>>()) {
+    // ivalue is c10::optional<at::Tensor>
+    auto ivalue_opt_tensor = ivalue.toOptional<at::Tensor>();
+    if (ivalue_opt_tensor.has_value()) {
+      unpack_tensor_ivalue(ivalue, device, inputs);
+    }
+  } else {
+    // Unsupport IValue type.
+    return false;
   }
 
-  auto it = handlers_.find(ivalue_type);
-  if (it != handlers_.end()) {
-    return it->second(ivalue, device, inputs);
-  }
-
-  // Handle unsupported types or add a default handler
-  return false;
+  return true;
 }
 
-bool unpackTensors(
+bool unpack_tensors(
+    const std::vector<c10::Argument>& arguments,
     const torch::jit::Stack& stack,
     const c10::Device& device,
     std::vector<at::Tensor>& inputs,
-    bool with_scalar = true) {
-  for (const auto& ivalue : stack) {
-    if (ivalue.isScalar() && !with_scalar) {
+    bool with_scalar = false) {
+  for (size_t idx = 0; idx < stack.size(); idx++) {
+    if (!with_scalar && stack[idx].isScalar()) {
       continue;
     }
 
-    if (!HandleIValue(ivalue, device, inputs)) {
+    if (!unpack_ivalue(arguments[idx], stack[idx], device, inputs)) {
       return false;
     }
   }
+
   return true;
+}
+
+std::vector<size_t> get_tensor_paramter_index(
+    const std::vector<c10::Argument>& arguments,
+    const torch::jit::Stack& stack) {
+  std::vector<size_t> tensor_parameter_index;
+  for (size_t idx = 0; idx < stack.size(); idx++) {
+    if (stack[idx].isScalar() || stack[idx].isTensor()) {
+      // scalar and tensor
+      tensor_parameter_index.push_back(idx);
+    } else if (stack[idx].isTensorList()) {
+      // tensor list
+      std::fill_n(
+        std::back_inserter(tensor_parameter_index),
+        stack[idx].toListRef().size(),
+        idx);
+    } else if (stack[idx].isOptionalTensorList()) {
+      // optional tensor list: std::vector<std::optional<at::Tensor>>
+      for (const auto& item : stack[idx].toListRef()) {
+        if (item.toOptional<at::Tensor>().has_value()) {
+          tensor_parameter_index.push_back(idx);
+        }
+      }
+    } else if (
+        *arguments[idx].real_type() ==
+        *c10::getTypePtr<c10::optional<at::Tensor>>()) {
+      // optional tensor
+      if (stack[idx].toOptional<at::Tensor>().has_value()) {
+        tensor_parameter_index.push_back(idx);
+      }
+    }
+  }
+
+  return tensor_parameter_index;
 }
 
 } // namespace
@@ -180,14 +182,12 @@ AOTIPythonKernelHolder::AOTIPythonKernelHolder(
     c10::DispatchKey dispatch_key,
     c10::string_view ns,
     c10::string_view op_name,
-    c10::string_view op_overload_name,
-    bool is_symbolic)
+    c10::string_view op_overload_name)
     : python_kernel_holder_(func, dispatch_key),
       dispatch_key_(dispatch_key),
       ns_(std::string(ns)),
       op_name_(std::string(op_name)),
       op_overload_name_(std::string(op_overload_name)),
-      is_symbolic_(is_symbolic),
       has_fall_back_(func.ptr() != Py_None),
       device_(c10::Device(c10::dispatchKeyToDeviceType(dispatch_key_), 0)),
       pyinterpreter_(getPyInterpreter()) {
@@ -196,8 +196,6 @@ AOTIPythonKernelHolder::AOTIPythonKernelHolder(
     // Remove the namespace from the op_name as ns is already set
     op_name_ = op_name_.substr(pos + strlen("::"));
   }
-
-  (void)is_symbolic_; // Suppress unused variable warning
 
   // Initialize the AOTI kernel cache
   init_aoti_kernel_cache();
@@ -234,13 +232,17 @@ bool AOTIPythonKernelHolder::cache_lookup(
   }
 
   std::vector<at::Tensor> inputs;
-  auto res = unpackTensors(*stack, device_, inputs);
+  auto res = unpack_tensors(
+      op.schema().arguments(), *stack, device_, inputs, true /*with scalar*/);
   if (!res || inputs.empty()) {
     return false;
   }
 
-  TORCH_INTERNAL_ASSERT(op.schema().arguments().size() == inputs.size());
-  auto inputs_meta_info = get_inputs_meta_info(inputs, op.schema().arguments());
+  auto tensor_parameter_index =
+      get_tensor_paramter_index(op.schema().arguments(), *stack);
+  TORCH_INTERNAL_ASSERT(tensor_parameter_index.size() == inputs.size());
+  auto inputs_meta_info = get_inputs_meta_info(
+      inputs, op.schema().arguments(), tensor_parameter_index);
   auto aoti_kernel_state = aoti_kernel_cache_.find(inputs_meta_info);
   if (aoti_kernel_state == aoti_kernel_cache_.end()) {
     return false;
@@ -271,7 +273,7 @@ void AOTIPythonKernelHolder::cache_hit(
     const c10::DispatchKeySet& keyset,
     torch::jit::Stack* stack) {
   std::vector<at::Tensor> inputs;
-  unpackTensors(*stack, device_, inputs, false /*not with_scalar*/);
+  unpack_tensors(op.schema().arguments(), *stack, device_, inputs);
   torch::jit::drop(*stack, op.schema().arguments().size());
 
   auto outputs = kernel_state.kernel_runner_->run(inputs);
@@ -282,11 +284,12 @@ void AOTIPythonKernelHolder::cache_hit(
 
 AOTIKernelMetaInfo AOTIPythonKernelHolder::get_inputs_meta_info(
     const std::vector<at::Tensor>& inputs,
-    const std::vector<c10::Argument>& inputs_argument) {
+    const std::vector<c10::Argument>& inputs_argument,
+    const std::vector<size_t>& inputs_argument_index) {
   AOTIKernelMetaInfo inputs_meta_info;
   for (size_t idx = 0; idx < inputs.size(); ++idx) {
     auto input = inputs[idx];
-    auto input_info = inputs_argument[idx];
+    auto input_info = inputs_argument[inputs_argument_index[idx]];
 
     auto device = input.device();
     if (device.is_cpu()) {
@@ -320,7 +323,7 @@ AOTIKernelMetaInfo AOTIPythonKernelHolder::get_inputs_meta_info(
     }
 
     inputs_meta_info.emplace_back(
-        is_symbolic_,
+        false,
         tensor_type,
         c10::IValue(scalar_value),
         device,
@@ -497,15 +500,18 @@ void AOTIPythonKernelHolder::cache_miss(
   }
 
   std::vector<at::Tensor> inputs;
-  if (unpackTensors(*stack, device, inputs, false)) {
-    auto outputs = kernel->run(inputs);
-    if (outputs.size() > 0) {
-      torch::jit::drop(*stack, op.schema().arguments().size());
-      // TODO: Get the output type of this operation and then convert to the
-      // output type.
-      for (auto& output : outputs) {
-        torch::jit::push(*stack, std::move(output));
-      }
+  auto unpack_status =
+      unpack_tensors(op.schema().arguments(), *stack, device, inputs);
+  TORCH_INTERNAL_ASSERT(
+      unpack_status,
+      "Failed to unpack tensors for the stack to run the AOTI kernel.");
+  auto outputs = kernel->run(inputs);
+  if (outputs.size() > 0) {
+    torch::jit::drop(*stack, op.schema().arguments().size());
+    // TODO: Get the output type of this operation and then convert to the
+    // output type.
+    for (auto& output : outputs) {
+      torch::jit::push(*stack, std::move(output));
     }
   }
 }
@@ -569,7 +575,7 @@ std::string AOTIPythonKernelHolder::produce_aoti_kernel_lib(
       py::str(func_name).ptr(),
       py::str(overload_name).ptr(),
       py::str(c10::DeviceTypeName(device_.type())).ptr(),
-      py::bool_(is_symbolic_).ptr(),
+      py::bool_(false).ptr(),
       op_py_func.ptr(),
       args_kwargs.first.ptr(),
       args_kwargs.second.ptr(),

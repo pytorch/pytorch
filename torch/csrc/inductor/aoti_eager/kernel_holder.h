@@ -39,8 +39,6 @@ class AOTIPythonKernelHolder : public c10::OperatorKernel {
   std::string op_name_;
   // Name of the overloaded operation the kernel performs.
   std::string op_overload_name_;
-  // Produce kernel w/ dynamic shapes.
-  bool is_symbolic_;
   // Has a fallback function or not.
   bool has_fall_back_;
   // The device on which the kernel is to be executed.
@@ -59,8 +57,7 @@ class AOTIPythonKernelHolder : public c10::OperatorKernel {
       c10::DispatchKey dispatch_key,
       c10::string_view ns,
       c10::string_view op_name,
-      c10::string_view op_overload_name,
-      bool is_symbolic = false);
+      c10::string_view op_overload_name);
 
   void operator()(
       const c10::OperatorHandle& op,
@@ -98,7 +95,8 @@ class AOTIPythonKernelHolder : public c10::OperatorKernel {
   // meta infomation will be used for cache lookup as the key.
   AOTIKernelMetaInfo get_inputs_meta_info(
       const std::vector<at::Tensor>& inputs,
-      const std::vector<c10::Argument>& inputs_argument);
+      const std::vector<c10::Argument>& inputs_argument,
+      const std::vector<size_t>& inputs_argument_index);
   // Load the AOTIModelContainerRunner object from the given file path.
   std::shared_ptr<AOTIModelContainerRunner> load_aoti_model_runner(
       const std::string&);
