@@ -2755,9 +2755,10 @@ class CUDACodeCache:
                     log.debug("CUDA Compilation: %s", cmd)
                     cmd_parts = cmd.split(" ")
                     try:
-                        subprocess.check_output(
+                        output = subprocess.check_output(
                             cmd_parts, stderr=subprocess.STDOUT, env=os.environ
                         )
+                        log.debug(f"CUDA compilation output: {output}")
                     except subprocess.CalledProcessError as error:
                         raise exc.CUDACompileError(cmd_parts, error.output) from error
                     end_time = time()
