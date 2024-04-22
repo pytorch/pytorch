@@ -2354,10 +2354,33 @@ def _local_scalar_dense(data):
     # solely responsible for generating this .item().  The buffer is
     # not used for anything (notice we discard it); at codegen time,
     # the "buffer" just gets assigned None.
-    sym = V.graph.current_node.meta["val"].node.expr
-    buffer = ir.DynamicScalar(sym, data)
+    unbacked_bindings = V.graph.current_node.meta["unbacked_bindings"]
+    assert len(unbacked_bindings) == 1, unbacked_bindings
+    # NB: Have to be very careful here.  V.graph.current_node.meta["val"]
+    # seemingly also contains a symbol which you want to do binding for,
+    # but it actually isn't.  In particular, if we have later performed
+    # a deferred runtime assert saying that u0 == s0, you will actually
+    # see s0 from expr!  This is bad because we need to actually generate
+    # the assert that says u0 == s0, so we need to know where to get u0
+    # from (this call).  In particular, we must use unbacked_bindings, which
+    # is guaranteed to have the original, unreplaced symbol in question.
+    #
+    # NB2: Another thing we have to be very careful about are symbol bindings
+    # that require nontrivial refinement, e.g., when you have a binding site
+    # x: Sym(u0 * 4) = y.item().  Here, the code generation must do a division
+    # in order to appropriately bind u0.  This is communicated via the keypath
+    # in unbacked_bindings, and we need to hold onto it in order to generate
+    # code appropriately for this case.
+    binding_sym, keypath = next(iter(unbacked_bindings.items()))
+    buffer = ir.DynamicScalar(binding_sym, keypath, data)
     buffer.name = V.graph.register_buffer(buffer)
-    return sym
+    # NB: the replaced expr is OK to use directly downstream, we want
+    # simplifications in this case!
+    val = V.graph.current_node.meta["val"]
+    if isinstance(val, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+        return val.node.expr
+    else:
+        return sympy.sympify(val)
 
 
 @register_lowering(aten._assert_scalar)

@@ -10,6 +10,7 @@ from sympy import Expr
 
 import torch
 import torch._ops
+from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey
 from .. import config, ir
 
 from ..codecache import CudaKernelParamCache
@@ -1206,6 +1207,7 @@ class CppWrapperCpu(WrapperCodeGen):
         output_name_base = fallback_kernel.get_name()
         for idx, output in enumerate(fallback_kernel.outputs):
             if isinstance(output, ir.MultiOutput):
+                # TODO: handle integer output (e.g., as in attention)
                 name = f"{output.get_name()}"
                 output_handle_name = f"{name}_handle"
                 if output.indices:
@@ -1373,18 +1375,28 @@ class CppWrapperCpu(WrapperCodeGen):
         if config.abi_compatible:
             dtype = node.inputs[0].get_dtype()
             dtype_str = str(dtype).split(".")[-1]
-            self.writeline(f"{DTYPE_TO_CPP[dtype]} {node.sym};")
-            self.writeline(f"aoti_torch_item_{dtype_str}({data}, &{node.sym});")
-            # record in unbacked_symbol_decls so we won't generate a declaration of the symbol again
-            self.unbacked_symbol_decls.add(str(node.sym))
+            self.writeline(f"{DTYPE_TO_CPP[dtype]} {node.sym}_raw;")
+            self.writeline(f"aoti_torch_item_{dtype_str}({data}, &{node.sym}_raw);")
         else:
-            if node.is_bool:
-                self.writeline(f"bool {node.sym} = {data}.item() ? 1 : 0;")
-            else:
-                convert_type = DTYPE_TO_ATEN[node.inputs[0].get_dtype()].replace(
-                    "at::k", "to"
-                )
-                self.writeline(f"auto {node.sym} = {data}.item().{convert_type}();")
+            convert_type = DTYPE_TO_ATEN[node.inputs[0].get_dtype()].replace(
+                "at::k", "to"
+            )
+            self.writeline(f"auto {node.sym}_raw = {data}.item().{convert_type}();")
+
+        if len(node.keypath) == 0:
+            self.writeline(f"auto {node.sym} = {node.sym}_raw;")
+        elif len(node.keypath == 1) and isinstance(node.keypath[0], ConvertIntKey):
+            self.writeline(f"int64_t {node.sym} = {node.sym}_raw ? 1 : 0;")
+        elif len(node.keypath == 1) and isinstance(node.keypath[0], DivideByKey):
+            # TODO: assert divisibility here
+            self.writeline(
+                f"int64_t {node.sym} = {node.sym}_raw / {node.keypath[0].divisor};"
+            )
+        else:
+            raise AssertionError(f"unrecognized keypath {node.keypath}")
+
+        # record in unbacked_symbol_decls so we won't generate a declaration of the symbol again
+        self.unbacked_symbol_decls.add(str(node.sym))
 
     def can_stack_allocate_buffer(self, buffer):
         return (
