@@ -8,6 +8,7 @@ import re
 import textwrap
 import traceback
 from contextlib import nullcontext
+from enum import Enum
 from functools import partial
 from typing import (
     Any,
@@ -60,7 +61,6 @@ from .dependencies import (
     var_builder,
 )
 from .ops_handler import OpCounterCSE
-from .runtime.hints import ReductionHint
 from .utils import (
     argsort,
     cache_on_self,
@@ -531,6 +531,18 @@ class Scatter(Pointwise):
             loader(vars),
             mode=self.scatter_mode,
         )
+
+
+class ReductionHint(Enum):
+    INNER = 0
+    OUTER = 1
+    OUTER_TINY = 2
+    DEFAULT = 3
+
+
+class TileHint(Enum):
+    SQUARE = 0
+    DEFAULT = 1
 
 
 REDUCTION_COMBINE_FN = {
