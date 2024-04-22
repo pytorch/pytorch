@@ -317,7 +317,7 @@ void cpu_padding_backward(
   auto grad_output = grad_output_.contiguous();
   auto grad_input = grad_input_.contiguous();
 
-  auto grad_output_data = grad_output.data_ptr<scalar_t>();
+  auto grad_output_data = grad_output.const_data_ptr<scalar_t>();
   auto grad_input_data = grad_input.data_ptr<scalar_t>();
 
   // fold nbatch and channels into single dimension for channels first.
@@ -351,7 +351,7 @@ void cpu_padding_backward(
     // parallel on N,C, sequential on H,W
     at::parallel_for(0, channels, 1, [&](int64_t begin, int64_t end) {
       for (const auto c : c10::irange(begin, end)) {
-        scalar_t* grad_output_ptr = grad_output_data + c * output_height * output_width;
+        const scalar_t* grad_output_ptr = grad_output_data + c * output_height * output_width;
         scalar_t* grad_input_ptr = grad_input_data + c * input_height * input_width;
 
         for (const auto oh : c10::irange(output_height)) {
@@ -367,7 +367,7 @@ void cpu_padding_backward(
     // parallel on N,C, sequential on D,H,W
     at::parallel_for(0, channels, 1, [&](int64_t begin, int64_t end) {
       for (const auto c : c10::irange(begin, end)) {
-        scalar_t* grad_output_ptr = grad_output_data + c * output_depth *output_height * output_width;
+        const scalar_t* grad_output_ptr = grad_output_data + c * output_depth *output_height * output_width;
         scalar_t* grad_input_ptr = grad_input_data + c * input_depth * input_height * input_width;
 
         for (const auto od : c10::irange(output_depth)) {
@@ -406,7 +406,7 @@ void cpu_padding_backward_channels_last(
   auto grad_output = grad_output_.contiguous(memory_format);
 
   auto grad_input_data = grad_input.data_ptr<scalar_t>();
-  auto grad_output_data = grad_output.data_ptr<scalar_t>();
+  auto grad_output_data = grad_output.const_data_ptr<scalar_t>();
 
   int64_t nbatch = p.nbatch;
   int64_t channels = p.channels;
@@ -435,7 +435,7 @@ void cpu_padding_backward_channels_last(
             int64_t iw = PaddingType::index(ow, input_width, pad_w, offset_w);
             scalar_t* grad_input_ptr = grad_input_data +
                 (n * input_height * input_width + ih * input_width + iw) * channels;
-            scalar_t* grad_output_ptr = grad_output_data +
+            const scalar_t* grad_output_ptr = grad_output_data +
                 (n * output_height * output_width + oh * output_width + ow) * channels;
             add_stub(grad_input_ptr, grad_output_ptr, channels);
           }
@@ -455,7 +455,7 @@ void cpu_padding_backward_channels_last(
               scalar_t* grad_input_ptr = grad_input_data +
                   (n * input_depth * input_height * input_width + id * input_height * input_width +
                    ih * input_width + iw) * channels;
-              scalar_t* grad_output_ptr = grad_output_data +
+              const scalar_t* grad_output_ptr = grad_output_data +
                   (n * output_depth * output_height * output_width + od * output_height * output_width +
                    oh * output_width + ow) * channels;
               add_stub(grad_input_ptr, grad_output_ptr, channels);

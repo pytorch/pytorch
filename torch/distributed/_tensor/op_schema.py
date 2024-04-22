@@ -136,7 +136,7 @@ class OpStrategy(StrategyType):
         """
         Returns the max number of shards across all placement strategies
         """
-        return max([strategy.output_spec.num_shards for strategy in self.strategies])
+        return max(strategy.output_spec.num_shards for strategy in self.strategies)
 
     @property
     def output_mesh_shape(self):
@@ -419,7 +419,7 @@ class OutputSharding:
     """
 
     output_spec: OutputSpecType
-    schema_suggestions: Optional[List[OpSchema]] = None
+    redistribute_schema: Optional[OpSchema] = None
     failed_reason: Optional[str] = None
     needs_redistribute: bool = False
 
