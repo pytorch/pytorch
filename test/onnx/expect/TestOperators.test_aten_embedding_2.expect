@@ -1,0 +1,160 @@
+ir_version: 7
+producer_name: "pytorch"
+producer_version: "CURRENT_VERSION"
+graph {
+  node {
+    input: "emb.weight"
+    input: "input_1"
+    output: "onnx::Add_3"
+    name: "ATen_1"
+    op_type: "ATen"
+    attribute {
+      name: "custom_attributes_json"
+      s: "{\"padding_idx\":-1,\"scale_grad_by_freq\":false,\"sparse\":false}"
+      type: STRING
+    }
+    attribute {
+      name: "operator"
+      s: "embedding"
+      type: STRING
+    }
+    attribute {
+      name: "overload_name"
+      s: ""
+      type: STRING
+    }
+    domain: "org.pytorch.aten"
+  }
+  node {
+    input: "onnx::Add_3"
+    input: "input_2"
+    output: "onnx::Shape_4"
+    name: "Add_2"
+    op_type: "Add"
+  }
+  node {
+    input: "onnx::Shape_4"
+    output: "onnx::Gather_5"
+    name: "Shape_3"
+    op_type: "Shape"
+  }
+  node {
+    output: "onnx::Gather_6"
+    name: "Constant_4"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        data_type: 7
+        raw_data: "\000\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "onnx::Gather_5"
+    input: "onnx::Gather_6"
+    output: "onnx::Unsqueeze_7"
+    name: "Gather_5"
+    op_type: "Gather"
+    attribute {
+      name: "axis"
+      i: 0
+      type: INT
+    }
+  }
+  node {
+    input: "onnx::Unsqueeze_7"
+    output: "onnx::Concat_8"
+    name: "Unsqueeze_6"
+    op_type: "Unsqueeze"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+  }
+  node {
+    input: "onnx::Concat_8"
+    output: "onnx::ConstantOfShape_9"
+    name: "Concat_7"
+    op_type: "Concat"
+    attribute {
+      name: "axis"
+      i: 0
+      type: INT
+    }
+  }
+  node {
+    input: "onnx::ConstantOfShape_9"
+    output: "10"
+    name: "ConstantOfShape_8"
+    op_type: "ConstantOfShape"
+    attribute {
+      name: "value"
+      t {
+        dims: 1
+        data_type: 1
+        raw_data: "\000\000\200?"
+      }
+      type: TENSOR
+    }
+  }
+  name: "main_graph"
+  initializer {
+    dims: 4
+    dims: 8
+    data_type: 1
+    name: "emb.weight"
+    raw_data: "\264\314\344\275\017A\376\276\313\374&>J\266a\277s\306\\=\212\032+?\211[t\275\344[\357\276Dk\\\276OKb?\234\'B\277A\334\274\2767N\257\276\320s\263\277\371+\244>:\314\202\277K\200L??\001\275\275\236u4\2774\032\315\277\214\004\224>Z\320\372>\267B\305\276\346G6\277N\265.\276\343\316\272\277t\364a>\201)|>p\223\251\277Qm2?\346\275)\277\354\235\233?"
+  }
+  input {
+    name: "input_1"
+    type {
+      tensor_type {
+        elem_type: 7
+        shape {
+          dim {
+            dim_param: "input_1_dim_0"
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "input_2"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_param: "input_2_dim_0"
+          }
+          dim {
+            dim_param: "input_2_dim_1"
+          }
+        }
+      }
+    }
+  }
+  output {
+    name: "10"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_param: "ConstantOfShape10_dim_0"
+          }
+        }
+      }
+    }
+  }
+}
+opset_import {
+  version: 12
+}
+opset_import {
+  domain: "org.pytorch.aten"
+  version: 1
+}
