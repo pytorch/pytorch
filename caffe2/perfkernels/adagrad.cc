@@ -63,6 +63,7 @@ void adagrad_fp16_update_prefetch__base(
 
 // version without prefetching
 decltype(adagrad_update__base) adagrad_update__avx2_fma;
+decltype(adagrad_update__base) adagrad_update__avx512;
 void adagrad_update(
     int N,
     const float* w,
@@ -74,6 +75,7 @@ void adagrad_update(
     float decay,
     float lr,
     float weight_decay) {
+  AVX512_DO(adagrad_update, N, w, g, h, nw, nh, epsilon, decay, lr, weight_decay);
   AVX2_FMA_DO(
       adagrad_update, N, w, g, h, nw, nh, epsilon, decay, lr, weight_decay);
   BASE_DO(adagrad_update, N, w, g, h, nw, nh, epsilon, decay, lr, weight_decay);

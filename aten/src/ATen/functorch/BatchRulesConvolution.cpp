@@ -8,7 +8,7 @@
 #include <ATen/functorch/PlumbingHelper.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 // convolution_batch_rule translated from jax with modifications:
 // https://github.com/google/jax/blob/master/jax/_src/lax/lax.py#L3143
@@ -29,7 +29,7 @@ convolution_batch_rule(const Tensor& lhs, optional<int64_t> lhs_bdim, const Tens
 
   // If we have a batched bias or weight, we need to perform the computation separately.
   optional<Tensor> unbatched_bias;
-  bool separate_bias;
+  bool separate_bias = false;
   if ((rhs_bdim && bias && bias->defined()) || bias_bdim) {
     TORCH_INTERNAL_ASSERT(bias.has_value());
     TORCH_INTERNAL_ASSERT(bias->defined());
@@ -245,7 +245,7 @@ convolution_backward_input_batch_rule(
     const Tensor& input, optional<int64_t> input_bdim,
     const Tensor& weight, optional<int64_t> weight_bdim,
     c10::SymIntArrayRef stride, c10::SymIntArrayRef padding, c10::SymIntArrayRef dilation, bool transposed,
-    c10::SymIntArrayRef output_padding, c10::SymInt groups) {
+    c10::SymIntArrayRef output_padding, const c10::SymInt& groups) {
   const std::array<bool, 3> mask = {true, false, false};
   if (grad_output_bdim && weight_bdim) {
     // regular: BNO, BOI -> N(BO), (BO)I -> N(BI)
@@ -326,7 +326,7 @@ convolution_backward_weight_batch_rule(
     const Tensor& input, optional<int64_t> input_bdim,
     const Tensor& weight, optional<int64_t> weight_bdim,
     c10::SymIntArrayRef stride, c10::SymIntArrayRef padding, c10::SymIntArrayRef dilation, bool transposed,
-    c10::SymIntArrayRef output_padding, c10::SymInt groups) {
+    c10::SymIntArrayRef output_padding, const c10::SymInt& groups) {
   const std::array<bool, 3> mask = {false, true, false};
   if (grad_output_bdim && input_bdim) {
     // BNO, BNI -> N(BO), N(BI) -> (BO)I (regular) (BI)O (transposed)
@@ -449,15 +449,9 @@ static std::tuple<Tensor,Tensor,Tensor> convolution_backward_plumbing(
         dilation, transposed, output_padding, groups, output_mask);
   }
 
-  Tensor grad_output;
-  optional<int64_t> grad_output_bdim;
-  std::tie(grad_output, grad_output_bdim) = unwrapTensorAtLevel(grad_output_, cur_level);
-  Tensor input;
-  optional<int64_t> input_bdim;
-  std::tie(input, input_bdim) = unwrapTensorAtLevel(input_, cur_level);
-  Tensor weight;
-  optional<int64_t> weight_bdim;
-  std::tie(weight, weight_bdim) = unwrapTensorAtLevel(weight_, cur_level);
+  auto [grad_output, grad_output_bdim] = unwrapTensorAtLevel(grad_output_, cur_level);
+  auto [input, input_bdim] = unwrapTensorAtLevel(input_, cur_level);
+  auto [weight, weight_bdim] = unwrapTensorAtLevel(weight_, cur_level);
 
   const auto grad_bias = compute_grad_bias(grad_output_, output_mask);
   output_mask[2] = false;
@@ -542,4 +536,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("convolution_backward", convolution_backward_plumbing);
 }
 
-}} // namespace at;:functorch
+} // namespace at;:functorch

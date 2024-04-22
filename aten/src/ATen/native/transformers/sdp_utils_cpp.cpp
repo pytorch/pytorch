@@ -34,7 +34,7 @@ bool check_head_dim_size_cpp(sdp_params const& params, bool debug) {
 
 bool use_flash_attention_cpp(sdp_params const& params, bool debug) {
   constexpr auto cpp_supported_flash_dtypes =
-      array_of<at::ScalarType>(at::kFloat, at::kDouble, at::kBFloat16);
+      array_of<at::ScalarType>(at::kFloat, at::kDouble, at::kBFloat16, at::kHalf);
 
   // Define gate functions that determine if a flash kernel can be run
   constexpr auto constraints = array_of<bool (*)(sdp_params const&, bool)>(

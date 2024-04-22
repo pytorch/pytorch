@@ -7,6 +7,8 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <iosfwd>
+#include <ostream>
 
 #if defined(__CUDACC__) && !defined(USE_ROCM)
 #include <cuda_bf16.h>
@@ -111,6 +113,13 @@ struct alignas(2) BFloat16 {
   explicit inline C10_HOST_DEVICE operator sycl::ext::oneapi::bfloat16() const;
 #endif
 };
+
+C10_API inline std::ostream& operator<<(
+    std::ostream& out,
+    const BFloat16& value) {
+  out << (float)value;
+  return out;
+}
 
 } // namespace c10
 

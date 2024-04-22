@@ -4,6 +4,7 @@
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/utils/ParamUtils.h>
 #include <ATen/native/vulkan/api/Utils.h>
+#include <ATen/native/vulkan/impl/Packing.h>
 #include <ATen/native/vulkan/ops/Common.h>
 #include <ATen/native/vulkan/ops/Convolution.h>
 #include <ATen/native/vulkan/ops/Copy.h>
@@ -293,7 +294,8 @@ static api::ShaderInfo get_shader(
 
   if (quantized) {
     if (transposed) {
-      TORCH_CHECK(false, "Quantized TConv not supported!");
+      shader = VK_KERNEL(quantized_conv_transpose2d);
+      return shader;
     }
 
     switch (method) {
@@ -318,7 +320,7 @@ static api::ShaderInfo get_shader(
 
   switch (method) {
     case Conv2dSlidingWindow:
-      shader = VK_LOOKUP_KERNEL(conv2d);
+      shader = VK_KERNEL(conv2d);
       break;
     case Conv2dDepthwise:
       shader = VK_KERNEL(conv2d_dw);
@@ -334,7 +336,7 @@ static api::ShaderInfo get_shader(
       }
       break;
     case Conv2dPointwise:
-      shader = VK_LOOKUP_KERNEL(conv2d_pw);
+      shader = VK_KERNEL(conv2d_pw_output_tile_2x2);
       break;
   }
   return shader;
@@ -834,12 +836,32 @@ Tensor quantized_convolution(
 
 namespace conv1d {
 
-// This is a full implementation. For algorithm details, refer to the shader
-// kernel code.
-//
-// There are multiple perf improvement opportunities: e.g. width-packing
-// weight tensor.
+vTensor pack_weights_using_width_packing(const Tensor& weight_arg) {
+  Tensor weight = weight_arg;
 
+  if (weight.is_cpu()) {
+    weight = weight.vulkan();
+  }
+
+  TORCH_CHECK(weight.is_vulkan(), "Weight must be on Vulkan device!");
+
+  vTensor v_weight = convert(weight);
+  if (v_weight.gpu_memory_layout() ==
+      api::GPUMemoryLayout::TENSOR_CHANNELS_PACKED) {
+    v_weight = packing::convert_image_channels_packed_to_width_packed(v_weight);
+  }
+
+  TORCH_CHECK(
+      v_weight.gpu_memory_layout() == api::GPUMemoryLayout::TENSOR_WIDTH_PACKED,
+      "After packing, the v_weight must be in TENSOR_WIDTH_PACKED format");
+
+  return v_weight;
+}
+
+/*
+ * This is a full implementation. For algorithm details, refer to the shader
+ * kernel code.
+ */
 Tensor run_conv1d_context_impl(
     const Tensor& input_arg,
     const Tensor& weight_arg,
@@ -1104,13 +1126,36 @@ c10::intrusive_ptr<Conv2dPackedContext> create_qconv2d_context(
       output_max));
 }
 
+c10::intrusive_ptr<Conv2dPackedContext> create_qtconv2d_context(
+    Tensor&& weight,
+    c10::optional<Tensor>&& bias,
+    std::vector<int64_t>&& stride,
+    std::vector<int64_t>&& padding,
+    std::vector<int64_t>&& output_padding,
+    std::vector<int64_t>&& dilation,
+    const int64_t groups,
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max) {
+  return c10::make_intrusive<Conv2dPackedContext>(Conv2dPackedContext(
+      weight,
+      bias,
+      stride,
+      padding,
+      dilation,
+      /* transposed = */ true,
+      /* quantized = */ true,
+      output_padding,
+      groups,
+      output_min,
+      output_max));
+}
+
 Tensor run_conv2d_context_impl(
     const Tensor& input_arg,
     const c10::intrusive_ptr<Conv2dPackedContext>& conv_context,
     double scale,
     int64_t zero_point) {
   api::Context* const context = api::context();
-
   // Validate input tensor is a Vulkan tensor, then convert to vTensor
   TORCH_CHECK(input_arg.is_vulkan(), "Input tensor must be Vulkan!");
   const vTensor& v_input = convert(input_arg);
@@ -1357,7 +1402,8 @@ Conv1dPackedContext::Conv1dPackedContext(
     const int64_t groups)
     : unpacked_{c10::AnyType::get()} {
   packed_.reserve(Packed::NumArgs);
-  packed_.emplace_back(weight.vulkan());
+  packed_.emplace_back(
+      convert(conv1d::pack_weights_using_width_packing(weight.vulkan())));
   packed_.emplace_back(bias->vulkan());
   packed_.emplace_back(stride_arg);
   packed_.emplace_back(padding_arg);

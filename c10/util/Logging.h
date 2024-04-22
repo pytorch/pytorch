@@ -196,40 +196,6 @@ std::string enforceFailMsgImpl(const T1& x, const T2& y, const Args&... args) {
   return c10::str(x, " vs ", y, ". ", args...);
 }
 
-// GCC7 is getting an internal compiler error on the new
-// implementation, so keep the old one (which evaluates the error
-// message eagerly and therefore is undesirable for general use
-// compared to the new one) around for it.
-#if defined(__GNUG__) && __GNUC__ <= 7 && !defined(__clang__)
-template <typename Pred, typename T1, typename T2, typename... Args>
-void enforceThatImpl(
-    Pred p,
-    const T1& lhs,
-    const T2& rhs,
-    const char* file,
-    int line,
-    const char* expr,
-    const void* caller,
-    const Args&... args) {
-  if (C10_UNLIKELY(!(p(lhs, rhs)))) {
-    ::c10::ThrowEnforceNotMet(
-        file,
-        line,
-        expr,
-        ::c10::enforce_detail::enforceFailMsgImpl(lhs, rhs, args...),
-        caller);
-  }
-}
-
-#define CAFFE_ENFORCE_THAT_IMPL(op, lhs, rhs, expr, ...) \
-  ::c10::enforce_detail::enforceThatImpl(                \
-      op, lhs, rhs, __FILE__, __LINE__, expr, nullptr, ##__VA_ARGS__)
-
-#define CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER(op, lhs, rhs, expr, ...) \
-  ::c10::enforce_detail::enforceThatImpl(                            \
-      op, (lhs), (rhs), __FILE__, __LINE__, expr, this, ##__VA_ARGS__)
-
-#else
 template <typename Pred, typename T1, typename T2, typename GetFailMsgFunc>
 void enforceThatImpl(
     Pred p,
@@ -272,7 +238,6 @@ void enforceThatImpl(
         return ::c10::enforce_detail::enforceFailMsgImpl(            \
             arg1, arg2, ##__VA_ARGS__);                              \
       })
-#endif
 
 } // namespace enforce_detail
 

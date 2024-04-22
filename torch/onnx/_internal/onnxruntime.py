@@ -5,6 +5,7 @@ import os
 
 from typing import (
     Any,
+    Callable,
     Dict,
     Final,
     List,
@@ -181,7 +182,7 @@ class OrtOperatorSupport(OperatorSupport):
             return False
         # This is the and the only place to decide if aten op is supported.
         if node.op == "call_function" and node.target in self._onnx_support_dict:
-            logger.warning(
+            logger.info(
                 "support_dict supports node.target: %s (type: %s)",
                 node.target,
                 type(node.target),
@@ -191,7 +192,7 @@ class OrtOperatorSupport(OperatorSupport):
         # can convert it to ONNX equivalence. Let's use base mechanism to do this.
         # See extra_support_dict  for supported ops.
         if super().is_node_supported(submodules, node):
-            logger.warning(
+            logger.info(
                 "extra_support_dict supports node.target: %s (type: %s)",
                 node.target,
                 type(node.target),
@@ -301,10 +302,6 @@ def _get_onnx_devices(
         ...,
     ]
 ) -> Tuple["ORTC.OrtDevice", ...]:
-    devices = tuple(value.device for value in values if isinstance(value, torch.Tensor))
-    if len(devices) == 0:
-        devices = (torch.device("cpu"),)
-
     def _device_id_or_zero(device_id: int) -> int:
         return device_id or 0
 
@@ -312,13 +309,12 @@ def _get_onnx_devices(
         value: Union[
             torch.Tensor, torch.SymInt, int, torch.SymFloat, float, torch.SymBool, bool
         ],
-        device: torch.device,
     ) -> int:
         if isinstance(value, torch.Tensor):
             return ORTC.OrtDevice(
-                _get_ort_device_type(device.type),
+                _get_ort_device_type(value.device.type),
                 ORTC.OrtDevice.default_memory(),
-                _device_id_or_zero(device.index),
+                _device_id_or_zero(value.device.index),
             )
         elif isinstance(
             value, (torch.SymInt, int, torch.SymFloat, float, torch.SymBool, bool)
@@ -329,10 +325,11 @@ def _get_onnx_devices(
         else:
             raise ValueError("Unsupported value type: " + str(type(value)))
 
-    ort_devices = tuple(
-        _map_tensor_or_sym_to_device(value, devices[0]) for value in values
-    )
-    return ort_devices
+    if len(values) > 0:
+        ort_devices = tuple(_map_tensor_or_sym_to_device(value) for value in values)
+        return ort_devices
+    else:
+        return (_map_tensor_or_sym_to_device(1),)
 
 
 def _get_ortvalues_from_torch_tensors(
@@ -704,6 +701,12 @@ class OrtBackendOptions:
     ort_session_options: Optional["onnxruntime.SessionOptions"] = None
     """Options for the ``onnxruntime.InferenceSession`` used by the ``OrtBackend``."""
 
+    pre_ort_model_transforms: Optional[  # type: ignore[name-defined]
+        Sequence[Callable[["onnx.ModelProto"], None]]
+    ] = None
+    """A list of graph transforms to be applied to the ONNX model before it
+    is fed to ONNXRuntime's InferenceSession."""
+
 
 @compatibility(is_backward_compatible=False)
 class OrtBackend:
@@ -884,9 +887,9 @@ class OrtBackend:
                 )
             else:
                 try:
-                    prim_outputs = FakeTensorProp(graph_module).propagate(
-                        *args, **kwargs
-                    )
+                    prim_outputs = FakeTensorProp(
+                        graph_module, check_consistency=False
+                    ).propagate(*args, **kwargs)
                 except Exception:
                     logger.warning("FakeTensorProb failed for %s", graph_module)
                     # When FakeTensorProp fails, it is not possible to preallocate output buffers
@@ -918,6 +921,27 @@ class OrtBackend:
             onnx_model = exported.to_model_proto(
                 opset_version=self._resolved_onnx_exporter_options.onnx_registry.opset_version,
             )
+
+            try:
+                from onnxscript import optimizer  # type: ignore[import]
+                from onnxscript.rewriter import (  # type: ignore[import]
+                    onnxruntime as ort_rewriter,  # type: ignore[import]
+                )
+
+                onnx_model = optimizer.optimize(onnx_model)
+                onnx_model = ort_rewriter.rewrite(onnx_model)
+            except ImportError:
+                logger.warning(
+                    "ONNXScript optimizer is not available. Skipping optimization. "
+                    "Please `pip install onnxscript -U` to enable post-export optimization."
+                )
+
+            # Modify ONNX model using pre-registered graph transforms.
+            # They are in-place modifications for avoiding unnecessary
+            # copy of ONNX initializers.
+            if self._options.pre_ort_model_transforms:
+                for transform in self._options.pre_ort_model_transforms:
+                    transform(onnx_model)
 
             onnx_model_bytes = onnx_model.SerializeToString()
             if os.environ.get("ONNXRT_DUMP_PATH", None):
@@ -1118,6 +1142,7 @@ class OrtBackend:
                 or a.default_execution_providers != b.default_execution_providers
                 or a.preallocate_output != b.preallocate_output
                 or a.use_aot_autograd != b.use_aot_autograd
+                or a.pre_ort_model_transforms != b.pre_ort_model_transforms
             ):
                 return False
 

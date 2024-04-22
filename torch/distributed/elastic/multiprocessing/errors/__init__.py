@@ -67,7 +67,7 @@ from .handlers import get_error_handler  # noqa: F401
 
 __all__ = ["ProcessFailure", "ChildFailedError", "record", "ErrorHandler", "get_error_handler"]
 
-log = get_logger(__name__)
+logger = get_logger(__name__)
 
 
 JSON = Dict
@@ -111,14 +111,14 @@ class ProcessFailure:
             try:
                 with open(self.error_file) as fp:
                     self.error_file_data = json.load(fp)
-                    log.debug(
+                    logger.debug(
                         "User process failed with error data: %s", json.dumps(self.error_file_data, indent=2)
                     )
                     self.message, self.timestamp = self._get_error_data(
                         self.error_file_data
                     )
             except Exception:
-                log.exception("Failed to parse reply file: %s", self.error_file)
+                logger.exception("Failed to parse reply file: %s", self.error_file)
                 raise
         else:
             self._set_no_reply_file()
@@ -345,12 +345,19 @@ def record(
             error_handler.initialize()
             try:
                 return f(*args, **kwargs)
+            except SystemExit as se:
+                # For run_path based entrypoints, SystemExit with code = 0 will never exit.
+                # Handling it here by returning a value:
+                if se.code == 0:
+                    return None
+                else:
+                    raise
             except ChildFailedError as e:
                 rank, failure = e.get_first_failure()
                 if failure.error_file != _NOT_AVAILABLE:
                     error_handler.dump_error_file(failure.error_file, failure.exitcode)
                 else:
-                    log.info(
+                    logger.info(
                         (
                             "local_rank %s FAILED with no error file."
                             " Decorate your entrypoint fn with @record for traceback info."

@@ -278,9 +278,14 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             self.assertTrue(same(out, correct))
 
     def test_nccl_heuristics(self):
-        assert list(baseLat.shape) == [len(NCCL_ALGO), len(NCCL_PROTO)]
-        assert list(hwLat.shape) == [len(NCCL_HW), len(NCCL_ALGO), len(NCCL_PROTO)]
-        assert llMaxBws.shape[0] == len(NVIDIA_GPU_TYPE)
+        assert len(baseLat) == len(NCCL_ALGO)
+        assert all(len(x) == len(NCCL_PROTO) for x in baseLat)
+
+        assert len(hwLat) == len(NCCL_HW)
+        assert all(len(x) == len(NCCL_ALGO) for x in hwLat)
+        assert all(len(y) == len(NCCL_PROTO) for x in hwLat for y in x)
+
+        assert len(llMaxBws) == len(NVIDIA_GPU_TYPE)
 
 
 if __name__ == "__main__":

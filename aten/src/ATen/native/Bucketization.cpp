@@ -16,7 +16,7 @@
 
 /* Implement a numpy like searchsorted and a TF like bucketize function running on cpu
  *
- * - torch.searchsorted(sorted_sequence, values, right=False, side='left', out_int32=False, sorter=None)
+ * - torch.searchsorted(sorted_sequence, values, right=False, side=None, out_int32=False, sorter=None)
  *   sorted_sequence - N*D or 1D (apply to all values) tensor containing sorted sequences in last dimension
  *   values          - N*D tensor or a Scalar (when sorted_sequence is 1D) containing the search values
  *   right           - corresponding to lower bound if False and upper bound if True
@@ -92,9 +92,9 @@ void searchsorted_cpu_contiguous(Tensor& result, const Tensor& input, const Tens
   int64_t idim_in = is_scalar_input ? 1 : input.sizes().back();
   int64_t idim_bd = boundaries.sizes().back();
 
-  const input_t *data_in = input.data_ptr<input_t>();
-  const input_t *data_bd = boundaries.data_ptr<input_t>();
-  const int64_t *data_st = sorter.defined() ? sorter.data_ptr<int64_t>() : nullptr;
+  const input_t *data_in = input.const_data_ptr<input_t>();
+  const input_t *data_bd = boundaries.const_data_ptr<input_t>();
+  const int64_t *data_st = sorter.defined() ? sorter.const_data_ptr<int64_t>() : nullptr;
   output_t *data_out = result.data_ptr<output_t>();
 
   bool is_1d_boundaries = boundaries.dim() == 1;
@@ -162,7 +162,7 @@ Tensor& searchsorted_out_cpu(
     return result;
   }
 
-  // for non-contiguous result tensors, we write the output to a contiguous copy so we can later copy back, maintaing the original result tensor
+  // for non-contiguous result tensors, we write the output to a contiguous copy so we can later copy back, maintaining the original result tensor
   Tensor out = result;
   if (!result.is_contiguous()) {
     out = result.contiguous();

@@ -18,7 +18,6 @@ __all__ = [
     "FunctionMeta",
     "Function",
     "once_differentiable",
-    "traceable",
     "InplaceFunction",
     "NestedIOFunction",
 ]
@@ -33,8 +32,8 @@ class FunctionCtx:
     def save_for_backward(self, *tensors: torch.Tensor):
         r"""Save given tensors for a future call to :func:`~Function.backward`.
 
-        ``save_for_backward`` should be called at most once, only from inside the
-        :func:`forward` method, and only with tensors.
+        ``save_for_backward`` should be called at most once, in either the
+        :func:`setup_context` or :func:`forward` methods, and only with tensors.
 
         All tensors intended to be used in the backward pass should be saved
         with ``save_for_backward`` (as opposed to directly on ``ctx``) to prevent
@@ -92,8 +91,9 @@ class FunctionCtx:
     def save_for_forward(self, *tensors: torch.Tensor):
         r"""Save given tensors for a future call to :func:`~Function.jvp`.
 
-        ``save_for_forward`` should be only called once, from inside the :func:`forward`
-        method, and only be called with tensors.
+        ``save_for_forward`` should be called at most once, in either the
+        :func:`setup_context` or :func:`forward` methods, and all arguments
+        should be tensors.
 
         In :func:`jvp`, saved objects can be accessed through the :attr:`saved_tensors`
         attribute.
@@ -145,8 +145,8 @@ class FunctionCtx:
     def mark_dirty(self, *args: torch.Tensor):
         r"""Mark given tensors as modified in an in-place operation.
 
-        **This should be called at most once, only from inside the**
-        :func:`forward` **method, and all arguments should be inputs.**
+        This should be called at most once, in either the :func:`setup_context`
+        or :func:`forward` methods, and all arguments should be inputs.
 
         Every tensor that's been modified in-place in a call to :func:`forward`
         should be given to this function, to ensure correctness of our checks.
@@ -189,8 +189,8 @@ class FunctionCtx:
     def mark_non_differentiable(self, *args: torch.Tensor):
         r"""Mark outputs as non-differentiable.
 
-        **This should be called at most once, only from inside the**
-        :func:`forward` **method, and all arguments should be tensor outputs.**
+        This should be called at most once, in either the :func:`setup_context`
+        or :func:`forward` methods, and all arguments should be tensor outputs.
 
         This will mark outputs as not requiring gradients, increasing the
         efficiency of backward computation. You still need to accept a gradient
@@ -221,7 +221,8 @@ class FunctionCtx:
     def set_materialize_grads(self, value: bool):
         r"""Set whether to materialize grad tensors. Default is ``True``.
 
-        **This should be called only from inside the** :func:`forward` **method**
+        This should be called only from either the :func:`setup_context` or
+        :func:`forward` methods.
 
         If ``True``, undefined grad tensors will be expanded to tensors full of zeros
         prior to calling the :func:`backward` and :func:`jvp` methods.
@@ -337,7 +338,7 @@ class _SingleLevelFunction(
     _C._FunctionBase, FunctionCtx, _HookMixin, metaclass=FunctionMeta
 ):
     @staticmethod
-    def forward(ctx: Any, *args: Any, **kwargs: Any) -> Any:
+    def forward(*args: Any, **kwargs: Any) -> Any:
         r"""Define the forward of the custom autograd Function.
 
         This function is to be overridden by all subclasses.
@@ -497,6 +498,7 @@ class Function(_SingleLevelFunction):
             "Instantiating an autograd function will raise an "
             "error in a future version of PyTorch.",
             DeprecationWarning,
+            stacklevel=2,
         )
 
     def __call__(self, *args, **kwargs):
@@ -505,9 +507,6 @@ class Function(_SingleLevelFunction):
             "Please use new-style autograd function with static forward method. "
             "(Example: https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function)"
         )
-
-    # for the tracer
-    is_traceable = False
 
     """
     Bool that specifies if PyTorch should attempt to autogenerate
@@ -576,7 +575,7 @@ class Function(_SingleLevelFunction):
                 "In order to use an autograd.Function with functorch transforms "
                 "(vmap, grad, jvp, jacrev, ...), it must override the setup_context "
                 "staticmethod. For more details, please see "
-                "https://pytorch.org/docs/master/notes/extending.func.html"
+                "https://pytorch.org/docs/main/notes/extending.func.html"
             )
 
         return custom_function_call(cls, *args, **kwargs)
@@ -631,21 +630,6 @@ def once_differentiable(fn):
         return err_fn(*[fake_requires_grad(v) for v in outputs])
 
     return wrapper
-
-
-def traceable(fn_cls):
-    r"""Mark Function as traceable for the JIT.
-
-    Traceable functions have additional restrictions - they can't pass any
-    data-dependent values to backward (e.g. Prod passes the output, which makes
-    it non-traceable), and their backward should be implemented entirely in terms
-    of operations on autograd Tensors in all cases.
-
-    DON'T USE THIS DECORATOR. IT IS FOR INTERNAL USE ONLY AND SHOULD BE HANDLED WITH
-    CARE (or can give incorrect results otherwise).
-    """
-    fn_cls.is_traceable = True
-    return fn_cls
 
 
 class InplaceFunction(Function):

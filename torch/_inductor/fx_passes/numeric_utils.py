@@ -8,7 +8,6 @@ import numpy
 
 import torch
 import torch.optim as optim
-from torch._utils_internal import print_graph
 
 from .. import config
 
@@ -43,8 +42,8 @@ def clean_memory() -> None:
 def compare_dict_tensors(dict_base, dict_control, precision):
     if len(set(dict_base.keys())) != len(set(dict_control.keys())):
         logger.warning("Mismatch keys found before and after pre/post grad fx passes.")
-        print_graph(dict_base.keys(), "keys before pre/post grad fx passes.")
-        print_graph(dict_control.keys(), "keys after pre/post grad fx passes.")
+        logger.debug("keys before pre/post grad fx passes %s", dict_base.keys())
+        logger.debug("keys after pre/post grad fx passes %s", dict_control.keys())
         return False
     is_allclose = True
     for key in dict_base.keys():
@@ -66,8 +65,8 @@ def compare_dict_tensors(dict_base, dict_control, precision):
             logger.warning(
                 "Mismatch parameter values found before and after pre/post grad fx passes."
             )
-            print_graph(dict_base[key], "value before pre/post grad fx passes.")
-            print_graph(dict_control[key], "value after pre/post grad fx passes.")
+            logger.debug("value before pre/post grad fx passes %s", dict_base[key])
+            logger.debug("value after pre/post grad fx passes %s", dict_control[key])
             is_allclose = False
     return is_allclose
 
@@ -92,9 +91,11 @@ def compare_tuple_tensors(tuple_base, tuple_control, precision):
             atol=precision,
             equal_nan=True,
         ):
-            print_graph(tuple_base[i], "forward output before pre/post grad fx passes.")
-            print_graph(
-                tuple_control[i], "forward output after pre/post grad fx passes."
+            logger.debug(
+                "forward output before pre/post grad fx passes %s", tuple_base[i]
+            )
+            logger.debug(
+                "forward output after pre/post grad fx passes %s", tuple_control[i]
             )
             is_allclose = False
     return is_allclose

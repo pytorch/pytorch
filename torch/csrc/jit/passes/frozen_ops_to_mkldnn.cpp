@@ -300,8 +300,7 @@ void MKLDNNLayerNormOp(Stack& stack, bool inplace) {
   auto shape = pop(stack).toDimVector();
   auto input = pop(stack).toTensor();
 
-  at::Tensor dst, mean, rstd;
-  std::tie(dst, mean, rstd) =
+  auto [dst, mean, rstd] =
       at::native::mkldnn_layer_norm_last_index_weight_bias_f32(
           input, shape, weight, bias, eps, inplace);
   push(stack, dst);

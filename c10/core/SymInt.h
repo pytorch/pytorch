@@ -413,4 +413,11 @@ inline SymBool sym_ge(const SymInt& a, const SymInt& b) {
   return a.sym_ge(b);
 }
 
+inline bool definitely_true(
+    const c10::SymBool& b,
+    const char* file,
+    int64_t line) {
+  return b.has_hint() && b.guard_bool(file, line);
+}
+
 } // namespace c10

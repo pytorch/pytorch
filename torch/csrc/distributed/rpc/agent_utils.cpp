@@ -176,8 +176,7 @@ int syncCallCount(
     ::c10d::PrefixStore store,
     const int worldSize,
     int activeCalls) {
-  std::string processCountKey, activeCallCountKey, readyKey;
-  std::tie(processCountKey, activeCallCountKey, readyKey) = getNextKeyIds();
+  auto [processCountKey, activeCallCountKey, readyKey] = getNextKeyIds();
 
   // Add to keys which will record the number of processes and active calls
   store.add(activeCallCountKey, activeCalls);

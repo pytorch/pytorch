@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from torch._inductor.select_algorithm import TritonTemplateCaller
 
 from . import config
-from .utils import do_bench
+from .runtime.runtime_utils import do_bench
 from .virtualized import V
 
 CUDA_VISIBLE_DEVICES = "CUDA_VISIBLE_DEVICES"
@@ -393,6 +393,9 @@ class BenchmarkRequest:
     """
     Only handle triton template benchmark for now. The extern kernel benchmark
     can be done inside the same process since they usually don't cause crash.
+
+    Important: Instances of this class and subclasses have to be serializable
+    across process boundaries. Do not put CUDA Tensors in here!
     """
 
     def __init__(
@@ -419,7 +422,7 @@ class BenchmarkRequest:
     def make_run_fn(
         self, *input_tensors: torch.Tensor, output_tensor: torch.Tensor
     ) -> Callable[[], None]:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def cleanup_run_fn(self) -> None:
         pass
@@ -449,8 +452,22 @@ class BenchmarkRequest:
             load_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
             start_ts = time.time()
 
-        out = do_bench(fn)
-        torch.cuda.synchronize()  # shake out any CUDA errors
+        device_idx_set = {
+            tensor.device.index
+            for tensor in [*input_tensors, output_tensor]
+            if isinstance(tensor, torch.Tensor)
+            and tensor.is_cuda
+            and tensor.device.index is not None
+        }
+        assert len(device_idx_set) <= 1, f"Can not mix devices {device_idx_set}"
+        if len(device_idx_set) == 1:
+            device_idx = next(iter(device_idx_set))
+        else:
+            device_idx = torch.cuda.current_device()
+
+        with torch.cuda.device(device_idx):
+            out = do_bench(fn)
+            torch.cuda.synchronize()  # shake out any CUDA errors
 
         if debug:
             bench_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
@@ -478,11 +495,13 @@ class TestBenchmarkRequest(BenchmarkRequest):
         self, *input_tensors: torch.Tensor, output_tensor: Optional[torch.Tensor] = None
     ) -> float:
         if self.value is None:
-            raise Exception("Failed to run")
+            raise Exception("Failed to run")  # noqa: TRY002
         return self.value
 
 
 class TritonBenchmarkRequest(BenchmarkRequest):
+    # Important: Instances of this class have to be serializable
+    # across process boundaries. Do not put CUDA Tensors in here!
     def __init__(
         self,
         kernel_name: str,
@@ -494,6 +513,7 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         grid: List[int],
         num_stages: int,
         num_warps: int,
+        matrix_instr_nonkdim: int = 0,  # only used for hip to choose the shape of mfma instruction.
     ):
         super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
         self.module_path = module_path
@@ -501,6 +521,7 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         self.grid = grid
         self.num_stages = num_stages
         self.num_warps = num_warps
+        self.matrix_instr_nonkdim = matrix_instr_nonkdim
 
     def make_run_fn(
         self, *input_tensors: torch.Tensor, output_tensor: torch.Tensor
@@ -523,22 +544,41 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         if "warmup" in inspect.signature(run_method).parameters:
             warmup_arg["warmup"] = False
 
-        return functools.partial(
-            run_method,
-            *input_tensors,
-            output_tensor,
-            *self.extra_args,
-            grid=self.grid,
-            **warmup_arg,
-            num_stages=self.num_stages,
-            num_warps=self.num_warps,
-        )
+        from torch._C import _cuda_getCurrentRawStream as get_raw_stream
+
+        if torch.version.hip and self.matrix_instr_nonkdim != 0:
+            return functools.partial(
+                run_method,
+                *input_tensors,
+                output_tensor,
+                *self.extra_args,
+                grid=self.grid,
+                **warmup_arg,
+                stream=get_raw_stream(self.output_tensor_meta.device.index),
+            )
+        else:
+            return functools.partial(
+                run_method,
+                *input_tensors,
+                output_tensor,
+                *self.extra_args,
+                grid=self.grid,
+                **warmup_arg,
+                stream=get_raw_stream(self.output_tensor_meta.device.index),
+            )
+
+    def precompile(self):
+        mod = PyCodeCache.load_by_key_path(self.module_cache_key, self.module_path)
+        getattr(mod, self.kernel_name).precompile()
 
     def __str__(self) -> str:
         return f"{self.kernel_name=}, {self.module_path=}, {self.module_cache_key=}"
 
 
 class CUDABenchmarkRequest(BenchmarkRequest):
+    # Important: Instances of this class have to be serializable
+    # across process boundaries. Do not put CUDA Tensors in here!
+
     def __init__(
         self,
         kernel_name: str,
@@ -555,6 +595,13 @@ class CUDABenchmarkRequest(BenchmarkRequest):
         self.hash_key: str = ""
         self.source_file: str = ""
         self.hash_key, self.source_file = CUDACodeCache.write(self.source_code, "so")
+
+    def precompile(self):
+        # Prepopulate CUDACodeCache
+        # may happen in separate Threadpool
+        log.debug("Precompiling %s", self)
+        CUDACodeCache.load(self.source_code, "so")
+        log.debug("Done precompiling %s", self)
 
     def make_run_fn(
         self, *input_tensors: torch.Tensor, output_tensor: torch.Tensor

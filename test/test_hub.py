@@ -43,7 +43,7 @@ class TestHub(TestCase):
 
     def _assert_in_trusted_list(self, line):
         with open(self.trusted_list_path) as f:
-            assert line in (l.strip() for l in f.readlines())
+            assert line in (l.strip() for l in f)
 
     @retry(Exception, tries=3)
     def test_load_from_github(self):

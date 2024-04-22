@@ -21,6 +21,11 @@ inline void _store(at::BFloat16* dst, at::vec::Vectorized<float> src) {
   res.store(dst, at::vec::Vectorized<float>::size());
 }
 
+inline void _store(at::Half* dst, at::vec::Vectorized<float> src) {
+  auto res = at::vec::convert_float_half(src, src);
+  res.store(dst, at::vec::Vectorized<float>::size());
+}
+
 inline namespace CPU_CAPABILITY {
 
 template <typename T>
@@ -56,8 +61,7 @@ struct Vec2 {
   Vec2(Vectorized<float> v0, Vectorized<float> v1) : val0(v0), val1(v1) {}
   Vec2(float v) : val0(v), val1(v) {}
   static Vec2 loadu(const BFloat16* ptr) {
-    Vectorized<float> v0, v1;
-    std::tie(v0, v1) = convert_bfloat16_float(Vectorized<BFloat16>::loadu(ptr));
+    auto [v0, v1] = convert_bfloat16_float(Vectorized<BFloat16>::loadu(ptr));
     return {v0, v1};
   }
   static Vec2 loadu(const float* ptr) {

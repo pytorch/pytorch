@@ -119,6 +119,12 @@ class DescriptorPool final {
   std::unordered_map<VkDescriptorSetLayout, DescriptorSetPile> piles_;
 
  public:
+  operator bool() const {
+    return (pool_ != VK_NULL_HANDLE);
+  }
+
+  void init(const DescriptorPoolConfig& config);
+
   DescriptorSet get_descriptor_set(
       VkDescriptorSetLayout handle,
       const ShaderLayout::Signature& signature);

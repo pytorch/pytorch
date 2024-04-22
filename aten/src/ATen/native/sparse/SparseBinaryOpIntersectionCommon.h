@@ -86,7 +86,7 @@ TensorIterator make_value_selection_intersection_iter(
         lhs_values.sizes(),
         // remove nnz dim for smooth broadcasting
         rhs_values.sizes().slice(1));
-    // update nnz dim to be the lenght of an index
+    // update nnz dim to be the length of an index
     sizes[0] = lhs_select_idx.numel();
     return sizes;
   }();

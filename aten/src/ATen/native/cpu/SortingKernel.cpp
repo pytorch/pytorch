@@ -5,6 +5,7 @@
 #include <ATen/native/Sorting.h>
 #include <ATen/core/TensorBase.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/Parallel.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/TensorIterator.h>
@@ -42,9 +43,8 @@ void _dim_apply(
   auto indices_dim_stride = indices.stride(dim);
   auto dim_size = values.size(dim);
 
-  AT_DISPATCH_ALL_TYPES_AND3(
-    ScalarType::Bool, ScalarType::Half, ScalarType::BFloat16, iter.dtype(),
-    "sorting_kernel_method_name", [&] {
+  AT_DISPATCH_V2(
+    iter.dtype(), "sorting_kernel_method_name", AT_WRAP([&] {
       auto loop = [&](char** data, const int64_t* strides, int64_t n) {
         auto* values_data_bytes = data[0];
         auto* indices_data_bytes = data[1];
@@ -69,7 +69,7 @@ void _dim_apply(
 
       int64_t grain_size = internal::GRAIN_SIZE / std::max(int64_t{1}, dim_size);
       iter.for_each(loop, /*grain_size=*/grain_size);
-    }
+    }), kBool, kHalf, kBFloat16, AT_EXPAND(AT_ALL_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES)
   );
 }
 
@@ -216,7 +216,7 @@ static void topk_kernel(
     .declare_static_shape(sizes, /*squash_dims=*/dim)
     .add_output(values)
     .add_output(indices)
-    .add_input(self)
+    .add_const_input(self)
     .build();
 
   auto mode_values_stride = values.strides()[dim];

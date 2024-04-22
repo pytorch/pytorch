@@ -19,6 +19,7 @@ import torch
 import torch._jit_internal as _jit_internal
 from torch._classes import classes
 from torch._jit_internal import _qualified_name
+from torch._utils_internal import log_torchscript_usage
 from torch.jit._builtins import _register_builtin
 from torch.jit._fuser import _graph_for, _script_method_graph_for
 
@@ -475,7 +476,7 @@ if _enabled:
         # RecursiveScriptClass.
         def forward_magic_method(self, method_name, *args, **kwargs):
             if not self._c._has_method(method_name):
-                raise TypeError()
+                raise TypeError
 
             self_method = self.__getattr__(method_name)
             return self_method(*args, **kwargs)
@@ -864,7 +865,7 @@ if _enabled:
             if getattr(self_method, "__func__", None) == getattr(
                 RecursiveScriptModule, method_name
             ):
-                raise NotImplementedError()
+                raise NotImplementedError
             return self_method(*args, **kwargs)
 
         def __iter__(self):
@@ -1287,6 +1288,8 @@ def script(
     if not _enabled:
         return obj
 
+    log_torchscript_usage("script")
+
     if optimize is not None:
         warnings.warn(
             "`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead"
@@ -1649,7 +1652,7 @@ class _ScriptProfile:
         for source_stats in self.profile._dump_stats():
             source_ref = source_stats.source()
             source_lines = source_ref.text().splitlines()
-            dedent = min([len(line) - len(line.lstrip(" ")) for line in source_lines])
+            dedent = min(len(line) - len(line.lstrip(" ")) for line in source_lines)
             source_lines = [line[dedent:] for line in source_lines]
 
             start_line = source_ref.starting_lineno()

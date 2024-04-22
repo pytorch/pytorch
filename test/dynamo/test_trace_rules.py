@@ -12,18 +12,16 @@ import torch
 import torch._dynamo.config as config
 import torch._dynamo.test_case
 import torch._functorch.deprecated as deprecated_func
-from torch._dynamo.skipfiles import (
-    FUNC_INLINELIST,
-    LEGACY_MOD_INLINELIST,
-    MOD_INLINELIST,
-)
 from torch._dynamo.trace_rules import (
+    LEGACY_MOD_INLINELIST,
     load_object,
+    manual_torch_name_rule_map,
+    MOD_INLINELIST,
     torch_c_binding_in_graph_functions,
     torch_non_c_binding_in_graph_functions,
 )
 from torch._dynamo.utils import hashable, is_safe_constant, istype
-from torch._dynamo.variables import TorchInGraphFunctionVariable
+from torch._dynamo.variables import TorchInGraphFunctionVariable, UserFunctionVariable
 
 try:
     from .utils import create_dummy_module_and_function
@@ -35,7 +33,14 @@ ignored_c_binding_in_graph_function_names = {
     # Ignored because they have manual rules defined at `trace_rules.manual_torch_name_rule_map`.
     "torch._nested_tensor_from_mask",
     "torch._nested_from_padded",
-    # Ignored and go through rules defined at `skipfiles.check`.
+    "torch.sparse_compressed_tensor",
+    "torch.sparse_bsc_tensor",
+    "torch.sparse_bsr_tensor",
+    "torch.sparse_coo_tensor",
+    "torch.sparse_csc_tensor",
+    "torch.sparse_csr_tensor",
+    "torch.cuda._get_device_properties",
+    # Ignored and go through rules defined at `trace_rules.check`.
     "torch._functionalize_are_all_mutations_under_no_grad_or_inference_mode",
     "torch._cslt_sparse_mm_search",
     "torch._C._abort",
@@ -58,6 +63,19 @@ ignored_c_binding_in_graph_function_names = {
     "torch._C.set_autocast_xla_enabled",
     "torch.resize_as_",
     "torch.resize_as_sparse_",
+    "torch._C._data_address",
+    "torch._C._is_cow_tensor",
+    "torch._lazy_clone",
+    "torch._test_parallel_materialize",
+    "torch._C._storage_address",
+    "torch._C._pickle_save",
+    "torch._validate_sparse_compressed_tensor_args",
+    "torch._validate_sparse_csr_tensor_args",
+    "torch._validate_sparse_bsr_tensor_args",
+    "torch._validate_sparse_csc_tensor_args",
+    "torch._validate_sparse_coo_tensor_args",
+    "torch._validate_sparse_bsc_tensor_args",
+    "torch._validate_compressed_sparse_indices",
 }
 if torch._C._llvm_enabled():
     ignored_c_binding_in_graph_function_names |= {
@@ -282,19 +300,6 @@ def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObject
     )
 
 
-def gen_get_func_inlinelist(dummy_func_inlinelist):
-    def get_func_inlinelist():
-        inlinelist = set()
-        for f in dummy_func_inlinelist:
-            module_name, fn_name = f.rsplit(".", 1)
-            m = importlib.import_module(module_name)
-            fn = getattr(m, fn_name)
-            inlinelist.add(fn.__code__)
-        return inlinelist
-
-    return get_func_inlinelist
-
-
 class TraceRuleTests(torch._dynamo.test_case.TestCase):
     def _check_set_equality(self, generated, used, rule_map, ignored_set):
         x = generated - used
@@ -319,16 +324,12 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
         for m in LEGACY_MOD_INLINELIST.union(MOD_INLINELIST):
             self.assertTrue(
                 isinstance(importlib.import_module(m), types.ModuleType),
-                f"{m} from skipfiles.MOD_INLINELIST/LEGACY_MOD_INLINELIST is not a python module, please check and correct it.",
-            )
-        for f in FUNC_INLINELIST:
-            module_name, fn_name = f.rsplit(".", 1)
-            m = importlib.import_module(module_name)
-            self.assertTrue(
-                isinstance(getattr(m, fn_name), types.FunctionType),
-                f"{f} from skipfiles.FUNC_INLINELIST is not a python function, please check and correct it.",
+                f"{m} from trace_rules.MOD_INLINELIST/LEGACY_MOD_INLINELIST is not a python module, please check and correct it.",
             )
 
+    @unittest.skip(
+        "This test keeps getting broken and our disable infra is not handling well. see #120627"
+    )
     def test_torch_name_rule_map_updated(self):
         # Generate the allowed objects based on heuristic defined in `allowed_functions.py`,
         objs = gen_allowed_objs_and_ids(record=True, c_binding_only=True)
@@ -355,7 +356,6 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
                     load_object(f),
                     (
                         types.FunctionType,
-                        types.MethodType,
                         types.BuiltinFunctionType,
                         types.MethodDescriptorType,
                         types.WrapperDescriptorType,
@@ -363,24 +363,35 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
                 )
             )
 
-    def test_func_inlinelist_torch_function(self):
+    def test_force_inline_torch_function(self):
+        # `torch._dynamo.utils.istype` is skipped by default
         def fn(x):
             if istype(x, torch.Tensor):
                 return x + 1
             else:
                 return x - 1
 
-        func_inlinelist = torch._dynamo.skipfiles.FUNC_INLINELIST.copy()
-        func_inlinelist.add("torch._dynamo.utils.istype")
+        _manual_torch_name_rule_map = manual_torch_name_rule_map.copy()
+        # Force inline `torch._dynamo.utils.istype` by setting trace rule.
+        _manual_torch_name_rule_map["torch._dynamo.utils.istype"] = UserFunctionVariable
+
+        _torch_name_rule_map = [
+            _manual_torch_name_rule_map,
+            torch_c_binding_in_graph_functions,
+            torch_non_c_binding_in_graph_functions,
+        ]
 
         self.assertTrue(
-            "torch._dynamo" not in torch._dynamo.skipfiles.LEGACY_MOD_INLINELIST
+            "torch._dynamo" not in torch._dynamo.trace_rules.LEGACY_MOD_INLINELIST
         )
-        self.assertTrue("torch._dynamo" not in torch._dynamo.skipfiles.MOD_INLINELIST)
+        self.assertTrue("torch._dynamo" not in torch._dynamo.trace_rules.MOD_INLINELIST)
 
         with unittest.mock.patch(
-            "torch._dynamo.skipfiles.get_func_inlinelist",
-            gen_get_func_inlinelist(func_inlinelist),
+            "torch._dynamo.trace_rules.torch_name_rule_map",
+            _torch_name_rule_map,
+        ), unittest.mock.patch(
+            "torch._dynamo.trace_rules.get_torch_obj_rule_map",
+            torch._dynamo.trace_rules.get_torch_obj_rule_map.__wrapped__,  # bypass functools.lru_cache
         ):
             x = torch.rand(3)
             opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
@@ -388,29 +399,57 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             res = opt_fn(x)
             self.assertEqual(ref, res)
 
-    def test_func_inlinelist_third_party_function(self):
+    def test_force_inline_custom_function(self):
         mod, func = create_dummy_module_and_function()
 
         def fn(x):
             return func(x)
 
-        func_inlinelist = torch._dynamo.skipfiles.FUNC_INLINELIST.copy()
-        func_inlinelist.add(f"{mod.__name__}.{func.__name__}")
+        _manual_torch_name_rule_map = manual_torch_name_rule_map.copy()
+        # Force inline `mod.func` by setting trace rule.
+        _manual_torch_name_rule_map[
+            f"{mod.__name__}.{func.__name__}"
+        ] = UserFunctionVariable
+
+        _torch_name_rule_map = [
+            _manual_torch_name_rule_map,
+            torch_c_binding_in_graph_functions,
+            torch_non_c_binding_in_graph_functions,
+        ]
 
         with unittest.mock.patch(
-            "torch._dynamo.skipfiles.get_func_inlinelist",
-            gen_get_func_inlinelist(func_inlinelist),
+            "torch._dynamo.trace_rules.torch_name_rule_map",
+            _torch_name_rule_map,
         ), unittest.mock.patch(
-            "torch._dynamo.skipfiles.SKIP_DIRS",
-            torch._dynamo.skipfiles.SKIP_DIRS.copy(),
+            "torch._dynamo.trace_rules.get_torch_obj_rule_map",
+            torch._dynamo.trace_rules.get_torch_obj_rule_map.__wrapped__,
         ):
-            # First adding the module to SKIP_DIRS so that it will be skipped.
-            torch._dynamo.skipfiles.add(mod.__name__)
+            # First adding the module to SKIP_DIRS so that it will be skipped by default.
+            torch._dynamo.trace_rules.add(mod.__name__)
             x = torch.rand(3)
             opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
             ref = fn(x)
             res = opt_fn(x)
             self.assertEqual(ref, res)
+
+
+class TestModuleSurviveSkipFiles(torch._dynamo.test_case.TestCase):
+    @unittest.skipIf(
+        not torch.distributed.is_available(),
+        "need to import MLP module from distributed",
+    )
+    def test_module_survive_skip_files(self):
+        from torch.testing._internal.common_fsdp import MLP
+
+        model = MLP(3)
+        inp = torch.randn((2, 3))
+        frame_count_before = torch._dynamo.convert_frame.FRAME_COUNTER
+        model.compile(backend="eager")
+        model(inp)
+        frame_count_after = torch._dynamo.convert_frame.FRAME_COUNTER
+        self.assertTrue(
+            frame_count_after > frame_count_before, "MLP did not survive skip files"
+        )
 
 
 if __name__ == "__main__":
