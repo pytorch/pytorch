@@ -8,7 +8,6 @@ import logging
 import torch
 from torch._inductor.codecache import _ident, FxGraphCachePickler
 
-from torch._subclasses.fake_tensor import extract_tensor_metadata
 from .schemas import AOTConfig  # noqa: F401
 
 log = logging.getLogger(__name__)

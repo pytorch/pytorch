@@ -505,10 +505,10 @@ class FxGraphCachePickler(pickle.Pickler):
         return sha256_hash(serialized_data)
 
     @classmethod
-    def debug_str(cls, obj: Any) -> str:
+    def debug_str(cls, inp: Any) -> str:
         """
         Get a printable string describing in more detail all the attributes
-        comprising this object. Useful for debugging when one graph hashes
+        comprising an object. Useful for debugging when one graph hashes
         to a different value than another.
         """
 
@@ -521,7 +521,7 @@ class FxGraphCachePickler(pickle.Pickler):
                 return str(obj)
 
         lines = []
-        for attr, obj in vars(obj).items():
+        for attr, obj in vars(inp).items():
             if isinstance(obj, list):
                 for ii in range(len(obj)):
                     h = cls.get_hash(obj[ii])
@@ -534,7 +534,6 @@ class FxGraphCachePickler(pickle.Pickler):
                 h = cls.get_hash(obj)
                 lines.append(f"[{h}] {attr}: {get_str(obj)}")
         return "\n".join(lines)
-
 
 
 @functools.lru_cache(None)
@@ -640,6 +639,7 @@ class FxGraphHashDetails:
         """
         return FxGraphCachePickler.debug_str(self)
 
+
 def compiled_fx_graph_hash(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
@@ -652,7 +652,11 @@ def compiled_fx_graph_hash(
     # The prefix distinguishes among the other kinds of objects we
     # cache in this module.
     key = "f" + FxGraphCachePickler.get_hash(details)
-    log.debug("FX graph cache hash details for key %s:\n%s", key, FxGraphCachePickler.debug_str(details))
+    log.debug(
+        "FX graph cache hash details for key %s:\n%s",
+        key,
+        FxGraphCachePickler.debug_str(details),
+    )
     return key
 
 
