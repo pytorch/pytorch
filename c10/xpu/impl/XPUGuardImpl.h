@@ -67,7 +67,18 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
 
   // Event-related functions
   void destroyEvent(void* event, const DeviceIndex device_index)
-      const noexcept override {}
+      const noexcept override {
+    if (!event)
+      return;
+
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      (*interp)->trace_gpu_event_deletion(
+          c10::kXPU, reinterpret_cast<uintptr_t>(event));
+    }
+
+    delete reinterpret_cast<sycl::event*>(event);
+  }
 
   void record(
       void** event,
@@ -84,7 +95,12 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
 
     auto* xpu_event = reinterpret_cast<sycl::event*>(*event);
     const XPUStream xpu_stream{stream};
-    *xpu_event = xpu_stream.queue().ext_oneapi_submit_barrier();
+
+    // Delete the event previously recorded.
+    if (xpu_event)
+      delete xpu_event;
+    xpu_event = new sycl::event(xpu_stream.queue().ext_oneapi_submit_barrier());
+
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
       (*interp)->trace_gpu_event_record(
