@@ -14,7 +14,7 @@
 #include <ATen/detail/IPUHooksInterface.h>
 #include <ATen/detail/MPSHooksInterface.h>
 #include <ATen/detail/MTIAHooksInterface.h>
-#include <ATen/detail/ORTHooksInterface.h>
+#include <ATen/detail/MAIAHooksInterface.h>
 #include <ATen/detail/PrivateUse1HooksInterface.h>
 #include <ATen/detail/XPUHooksInterface.h>
 #include <c10/core/QEngine.h>
@@ -142,8 +142,8 @@ class TORCH_API Context {
   static bool hasLazy() {
     return c10::impl::hasDeviceGuardImpl(c10::DeviceType::Lazy);
   }
-  static bool hasORT() {
-    return c10::impl::hasDeviceGuardImpl(c10::DeviceType::ORT);
+  static bool hasMAIA() {
+    return c10::impl::hasDeviceGuardImpl(c10::DeviceType::MAIA);
   }
   // defined in header so that getNonVariableType has ability to inline
   // call_once check. getNonVariableType is called fairly frequently
@@ -455,8 +455,8 @@ static inline bool hasMPS() {
   return globalContext().hasMPS();
 }
 
-static inline bool hasORT() {
-  return globalContext().hasORT();
+static inline bool hasMAIA() {
+  return globalContext().hasMAIA();
 }
 
 static inline bool hasXPU() {
