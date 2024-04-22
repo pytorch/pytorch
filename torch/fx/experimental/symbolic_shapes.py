@@ -4123,16 +4123,6 @@ class ShapeEnv:
     def _update_var_to_range(self, symbol, vr):
         lower, upper = vr.lower, vr.upper
 
-        # If we have a size-like unbacked SymInt, refuse to refine the range to be
-        # less than two.  This is because when we intersect this range
-        # with [2, inf] for size oblivious tests, the range would be
-        # unsatisfiable.  In other words, once you have a size-like
-        # unbacked SymInt, we can never learn that it is exactly zero or one,
-        # because we would now give inconsistent results for all size
-        # oblivous tests!
-        if upper < 2 and symbol in self.size_like:
-            upper = 2
-
         # Updates the range and the guards corresponding to each bound of the symbol.
         if symbol not in self.var_to_range:
             self.var_to_range[symbol] = ValueRanges(lower, upper)
