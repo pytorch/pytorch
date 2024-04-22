@@ -63,6 +63,11 @@ struct TORCH_API ${op} : public ${superclass} {
   variable_list apply_with_saved(const variable_list& inputs, SwapSavedVariables& saved) override;
   ${saved_variables}
   ${saved_list_sizes}
+
+  virtual std::vector<SavedVariable*> stored_outputs() override {
+    return ${saved_output_variables_str};
+  }
+
 };
 """
 )
@@ -547,6 +552,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
     compiled_args: List[str] = []
     apply_with_saved_before: List[str] = []
     apply_with_saved_after: List[str] = []
+    saved_output_variables: List[str] = []
 
     for arg in info.args_with_derivatives:
         if arg.type in TENSOR_LIST_LIKE_CTYPES:
@@ -569,6 +575,8 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             or type == MutRefCType(OptionalCType(BaseCType(tensorT)))
             or (type == BaseCType(scalarT) and is_output)
         ):
+            if is_output:
+                saved_output_variables.append(f"&{name}_")
             saved_variables.append(f"SavedVariable {name}_;")
             release_variables.append(f"{name}_.reset_data();")
             ptr = "shared_from_this()" if is_output else ""
@@ -795,6 +803,8 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
     for var in sorted(info.all_saved_outputs, key=lambda sa: str(sa.nctype.name)):
         save_var(var, is_output=True)
 
+    saved_output_variables_str = "{" + ",".join(saved_output_variables) + "}"
+
     # lock the mutex when we release variables and in Node::apply to protect thread safety
     # see Note [Thread Safety on Autograd Node]
     if len(release_variables) > 0:
@@ -897,6 +907,7 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
         op=info.op,
         compute_index_ranges=compute_index_ranges,
         saved_variables=saved_variables,
+        saved_output_variables_str=saved_output_variables_str,
         release_variables=release_variables,
         saved_list_sizes=saved_list_sizes,
         asserts=asserts,

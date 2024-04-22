@@ -18,6 +18,8 @@
 $ops_headers
 #endif
 
+#include <iostream>
+
 using namespace at;
 
 namespace torch {

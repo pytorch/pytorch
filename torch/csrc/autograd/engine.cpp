@@ -917,6 +917,7 @@ static variable_list call_function(
     InputBuffer& inputBuffer) {
   CheckpointValidGuard cpvguard(graph_task);
   auto& fn = *func;
+  //std::cerr << "call_function " << fn.name() << std::endl;
   auto inputs =
       call_tensor_pre_hooks(fn, InputBuffer::variables(std::move(inputBuffer)));
   inputs = call_pre_hooks(fn, std::move(inputs));

@@ -9,6 +9,7 @@
 
 #include <ATen/SparseCsrTensorUtils.h>
 
+#include <iostream>
 
 // ${generated_comment}
 

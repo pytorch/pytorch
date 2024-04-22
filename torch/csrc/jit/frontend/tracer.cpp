@@ -170,8 +170,8 @@ Value* TracingState::getValue(const IValue& var) {
       std::ostringstream oss;
       oss << "Cannot insert a Tensor that requires grad as a constant. "
           << "Consider making it a parameter or input, or detaching the gradient\n"
-          << "Tensor:\n"
-          << ten;
+          << "Tensor:\n";
+          //<< ten;
       throw std::runtime_error(oss.str());
     }
 

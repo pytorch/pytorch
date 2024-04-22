@@ -131,6 +131,10 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     thread_id_ = at::RecordFunction::currentThreadId();
   }
 
+  virtual std::vector<SavedVariable*> stored_outputs() {
+    return std::vector<SavedVariable*>();
+  }
+  
   explicit Node(edge_list&& next_edges = edge_list())
       : Node(
             /*sequence_nr=*/at::sequence_number::get_and_increment(),

@@ -2161,4 +2161,4 @@ def emit_body(
         body.append("reset_grad_accumulator(self);")
     if not returns_void:
         body.append(f"return {get_return_value(f)};")
-    return body
+    return ['//std::cerr << __PRETTY_FUNCTION__ << "," << __FILE__ << "," << __LINE__ << std::endl;\n'] + body

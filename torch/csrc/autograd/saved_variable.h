@@ -39,6 +39,8 @@ class TORCH_API SavedVariable {
     }
   }
 
+  const Variable *orig_variable;
+
   /// Reconstructs the saved variable. Pass `saved_for` as the gradient
   /// function if constructing the `SavedVariable` with it would have caused a
   /// circular reference.
