@@ -162,7 +162,7 @@ class TritonTemplateKernel(TritonKernel):
 
         inductor_meta = {
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
-            **TritonKernel.inductor_meta_common(),
+            "backend_hash": torch.utils._triton.triton_hash_with_backend(),
         }
         if config.profile_bandwidth or config.benchmark_kernel:
             num_gb = self.estimate_kernel_num_bytes() / 1e9
