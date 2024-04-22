@@ -36,7 +36,7 @@ __global__ void vol2col_kernel(
     const int height_col,
     const int width_col,
     T* data_col) {
-  CUDA_KERNEL_LOOP(index, n) {
+  CUDA_KERNEL_LOOP_TYPE(index, n, int64_t) {
     auto w_out = index % width_col;
     index /= width_col;
     auto h_out = index % height_col;
