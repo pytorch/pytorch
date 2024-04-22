@@ -3,14 +3,15 @@ import itertools
 import logging
 from typing import Callable, Optional
 
-from torch._inductor.runtime.runtime_utils import red_text, triton_config_to_hashable
+from torch.utils._triton import has_triton
+from .runtime.runtime_utils import red_text, triton_config_to_hashable
 
-try:
+if has_triton():
     import triton
-except ImportError:
+else:
     triton = None
 
-from torch._inductor import config as inductor_config
+from . import config as inductor_config
 
 log = logging.getLogger(__name__)
 
