@@ -913,7 +913,7 @@ class CKGemmTemplate(CKTemplate):
             return None
         if op.c_layout != torch_layout_to_ck_layout(Y_meta):
             return None
-        # try to avoid launching the gemm instance with invalid problem size
+        # try to avoid launching the instance with invalid problem size
 
         M = X_meta.size[-2]
         K = X_meta.size[-1]
