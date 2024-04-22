@@ -355,9 +355,17 @@ def get_key_index_source(source, index):
 
 @dataclasses.dataclass(frozen=True)
 class NNModuleAttrAccessorInfo:
+    # Represents where is the attr name is present in the nn module attribute
+    # access
+
+    # Tells that the attribute can be accessed via __dict__
     present_in_generic_dict: bool = False
-    first_level_key: Optional[str] = None
-    second_level_key: Optional[str] = None
+
+    # Either the actual name or _parameters/_buffers/_modules
+    l1_key: Optional[str] = None
+
+    # Actual paramter/buffer/submodule name
+    l2_key: Optional[str] = None
 
 
 def getattr_on_nn_module(
@@ -368,6 +376,22 @@ def getattr_on_nn_module(
     base_source_name,
     source_name,
 ):
+    """
+    This tries to avoid calling the expensive nn module custom getattr method by
+    checking if the attribute is accessible via __dict__. For attributes that
+    are not accessible via __dict__ (like descriptors), we fallback to
+    PyObject_GetAttr.
+
+    There are two cases that we optimize for
+    1) attributes present directly in __dict__, e.g training.
+    2) parameters/buffers/modules - they can be accessed via _parameters,
+       _buffers, _modules keys in __dict__. For example, mod.linear can be
+       accessed as mod.__dict__["_parameters"]["linear"]
+
+    The most common and expensive case for nn module guards is of type
+    mod.submod1.submod2.submod3.training. We avoid the python getattr of nn
+    modules by going through the __dict__.
+    """
     attr_name = source.member
     mod_dict = base_example_value.__dict__
 
@@ -382,37 +406,54 @@ def getattr_on_nn_module(
     else:
         accessor_info = NNModuleAttrAccessorInfo(False, None, None)
 
-    def getitem_mgr(dict_mgr, key, dict_source, dict_value):
-        # TODO(anijain2305) - Benchmark another way where instead of traversing
-        # PyDict_Next, we use PyDict_GetItem. If the keys are sparsely guarded,
-        # PyDict_GetItem could be faster than iterating over the entire dict.
-        index = get_key_index(dict_value, key)
-        source_name = f"{dict_source}[{key!r}]"
-        return dict_mgr.get_value_manager(
-            index=index, source=source_name, example_value=dict_value[key]
-        )
-
     if not accessor_info.present_in_generic_dict:
+        # The attribute can be accessed by __getattribute__ call, so rely on
+        # PyObject_GetAttr
         return base_guard_manager.getattr_manager(
             attr=source.member, source=source_name, example_value=example_value
         )
     else:
-        # This will install a DictGuardManager
-        generic_dict_source = f"{base_source_name}.__dict__"
+        assert accessor_info.l1_key
+        l1_key = accessor_info.l1_key
+        l2_key = accessor_info.l2_key
+
+        # Set source strings for debug info
+        mod_dict_source = f"{base_source_name}.__dict__"
+        if l2_key:
+            l1_source = f"{mod_dict_source}[{l1_key!r}]"
+            l1_value = mod_dict[l1_key]
+            l2_source = source_name
+            l2_value = example_value
+        else:
+            l1_source = source_name
+            l1_value = example_value
+
+        # Guard manager for mod.__dict__
+        # NB - The example_value is deliberately set to None to avoid building a
+        # DictGuardManager. DictGuardManager iterates over all the key, value
+        # pairs. But for mod __dict__, this could be wasterful beccause Dynamo
+        # guards on very few keys. In this case, the alternative of just using
+        # PyDict_GetItem on the dictionary is faster than DictGuardManager. We
+        # made this decision by experimentation on a few HF models.
         mod_generic_dict_manager = base_guard_manager.get_generic_dict_manager(
-            source=generic_dict_source, example_value=mod_dict
+            source=mod_dict_source, example_value=None
         )
 
-        assert accessor_info.first_level_key
-        l1_key = accessor_info.first_level_key
-        l1_mgr = getitem_mgr(
-            mod_generic_dict_manager, l1_key, generic_dict_source, mod_dict
+        l1_mgr = mod_generic_dict_manager.dict_getitem_manager(
+            key=l1_key,
+            source=l1_source,
+            example_value=l1_value,
         )
 
-        if accessor_info.second_level_key:
-            l1_source = f"{generic_dict_source}[{l1_key!r}]"
-            l2_key = accessor_info.second_level_key
-            l2_mgr = getitem_mgr(l1_mgr, l2_key, l1_source, mod_dict[l1_key])
+        if l2_key:
+            # l1_value must be a dict
+            assert isinstance(l1_mgr, DictGuardManager)
+
+            # Install a value manager. We can skip the key manager guard.
+            index = get_key_index(l1_value, l2_key)
+            l2_mgr = l1_mgr.get_value_manager(
+                index=index, source=l2_source, example_value=l2_value
+            )
             return l2_mgr
         return l1_mgr
 
