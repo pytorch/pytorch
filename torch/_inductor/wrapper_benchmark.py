@@ -4,7 +4,7 @@ from collections import defaultdict
 
 import torch
 from torch.autograd import DeviceType
-from .runtime.runtime_utils import create_bandwidth_info_str, do_bench, get_num_bytes
+from .utils import create_bandwidth_info_str, do_bench, get_num_bytes
 
 _kernel_category_choices = [
     "foreach",
