@@ -137,7 +137,7 @@ jobs:
 
   linux-focal-py3_8-clang10-onnx-test:
     name: linux-focal-py3.8-clang10-onnx
-    uses: ./.github/workflows/_linux-test-label.yml
+    uses: ./.github/workflows/_linux-test.yml
     needs:
       - linux-focal-py3_8-clang10-onnx-build
       - target-determination
@@ -222,7 +222,7 @@ jobs:
 
   linux-focal-py3_12-clang10-test:
     name: linux-focal-py3.12-clang10
-    uses: ./.github/workflows/_linux-test-label.yml
+    uses: ./.github/workflows/_linux-test.yml
     needs: linux-focal-py3_12-clang10-build
     with:
       build-environment: linux-focal-py3.12-clang10
