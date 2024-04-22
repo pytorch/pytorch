@@ -215,7 +215,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "complex": {f16},
     "resize_": {b8, f16, f32, f64, i32, i64},
     "resize_as_": {b8, f16, f32, f64, i32, i64},
-    "histc": {f16, i32, i64},
+    "histc": {f16},
     "multinomial": {f16, f32, f64},
     "nn.functional.avg_pool1d": {i64},
     "nn.functional.avg_pool2d": {i64},
@@ -238,7 +238,6 @@ inductor_expected_failures_single_sample["cpu"] = {
 inductor_expected_failures_single_sample["cuda"] = {
     "_upsample_bilinear2d_aa": {f16, f32, f64},
     "cholesky": {f32, f64},
-    "histc": {i32, i64},
     "multinomial": {f16, f32, f64},
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
