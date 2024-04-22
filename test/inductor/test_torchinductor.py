@@ -9020,6 +9020,54 @@ class CommonTemplate:
                 res2 = fn_c(inp2)
                 self.assertEqual(ref2, res2)
 
+    @requires_gpu()
+    @config.patch(assume_aligned_inputs=False)
+    def test_config_option_dont_assume_alignment_recompiles(self):
+        # Inputs:
+        #  1. (32, 32) shape
+        #  2. (64, 64) shape -> causes a recompile
+        #  3. (64, 64) shape with different storage offset -> should NOT cause a recompile
+        failed_guards = []
+
+        def fail(guard):
+            nonlocal failed_guards
+            failed_guards.append(guard)
+
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            return x.sin() + x.cos()
+
+        base = torch.randn(64 * 64 + 64, dtype=torch.float32, device=GPU_TYPE)
+
+        inp1 = torch.as_strided(base, (32, 32), (32, 1), 4)
+        inp2 = torch.as_strided(base, (64, 64), (64, 1), 4)
+        inp3 = torch.as_strided(base, (64, 64), (64, 1), 5)
+
+        torch._dynamo.reset()
+
+        fn_c = torch._dynamo.optimize("inductor", guard_fail_fn=fail)(fn)
+
+        ref1 = fn(inp1)
+        res1 = fn_c(inp1)
+        self.assertEqual(ref1, res1)
+        self.assertEqual(0, len(failed_guards))
+
+        ref2 = fn(inp2)
+        res2 = fn_c(inp2)
+        self.assertEqual(ref2, res2)
+        # dynamic shapes
+        self.assertEqual(1, len(failed_guards))
+        first_guard_failure = failed_guards[0]
+
+        failed_guards = []
+        ref3 = fn(inp3)
+        res3 = fn_c(inp3)
+        self.assertEqual(ref3, res3)
+        # still have the dynamics shapes failure, but offset change shouldn't be guarded on
+        # see Note: [Input Alignment handling in Inductor]
+        print(failed_guards)
+        self.assertEqual(1, len(failed_guards))
+        self.assertEqual(first_guard_failure.reason, failed_guards[0].reason)
+
     @config.patch(implicit_fallbacks=True)
     def test_custom_op_1(self):
         import torch.library
