@@ -269,6 +269,18 @@ def _verify_param_shape_across_processes(
     return dist._verify_params_across_processes(process_group, tensors, logger)
 
 
+def _broadcast_module_states(module_states: List[torch.Tensor], process_group: dist.ProcessGroup, src: int):
+    """
+    An alternative to _sync_params_and_buffers which avoids spiking GPU memory (allocated/reserved).
+    Uses NCCL coalescing managers to mitigate perf overhead by combining collectives.
+    TODO: deprecate _sync_params_and_buffers for FSDP use cases once this is thoroughly validated.
+    """
+    from torch.distributed.distributed_c10d import _coalescing_manager
+    with _coalescing_manager(device=process_group):
+        for state in module_states:
+            dist.broadcast(state, src=src)
+
+
 def _sync_module_states(
     module: nn.Module,
     process_group: dist.ProcessGroup,

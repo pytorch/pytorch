@@ -55,7 +55,7 @@ from torch.distributed.fsdp.api import (
 )
 from torch.distributed.fsdp.wrap import _Policy
 from torch.distributed.tensor.parallel.fsdp import DTensorExtensions
-from torch.distributed.utils import _sync_params_and_buffers
+from torch.distributed.utils import  _broadcast_module_states
 
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.hooks import RemovableHandle
@@ -1086,12 +1086,7 @@ def _sync_module_params_and_buffers(
             module_states.append(detached_param)
 
     _check_module_states_for_sync_module_states(module_states)
-    _sync_params_and_buffers(
-        process_group,
-        module_states,
-        PARAM_BROADCAST_BUCKET_SIZE,
-        src=0,
-    )
+    _broadcast_module_states(module_states=module_states, process_group=process_group, src=0)
 
 
 
