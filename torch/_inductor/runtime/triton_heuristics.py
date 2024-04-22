@@ -222,12 +222,14 @@ class CachingAutotuner(KernelInterface):
                 self.inductor_meta.get("dynamic_scale_rblock", True)
                 and self.heuristic_type == HeuristicType.REDUCTION
                 and self.size_hints is not None
-                # Disable for AMDGPU as Triton is not ready to return n_regs for a compiled_binary.
-                and not self.inductor_meta.get("is_hip")
-                # Disable for Intel GPU as Triton is not ready to return n_regs for a compiled_binary.
-                and device_prop.type != "xpu"
+                # Disable for AMDGPU/Intel as Triton is not ready to return n_regs for a compiled_binary.
+                and device_prop.type == "cuda"
+                and device_prop.major
                 and device_prop.major >= 8
             ):
+                assert device_prop.regs_per_multiprocessor
+                assert device_prop.max_threads_per_multi_processor
+                assert device_prop.multi_processor_count
                 for triton_config, compiled_binary in zip(
                     self.configs, compiled_binaries
                 ):
@@ -302,7 +304,7 @@ class CachingAutotuner(KernelInterface):
         """Ahead of time compile a given autotuner config."""
         compile_meta = copy.deepcopy(self.triton_meta)
         for k, v in cfg.kwargs.items():
-            if torch.version.hip is not None:
+            if self.device_props.type != "hip":
                 if k == "matrix_instr_nonkdim":
                     compile_meta["matrix_instr_nonkdim"] = v
                     continue
@@ -336,7 +338,7 @@ class CachingAutotuner(KernelInterface):
                 "num_stages": compile_meta["num_stages"],
                 "debug": compile_meta["debug"],
             }
-            if torch.version.hip is not None:
+            if self.device_props.type != "hip":
                 if "waves_per_eu" in compile_meta:
                     options["waves_per_eu"] = compile_meta["waves_per_eu"]
                 if "matrix_instr_nonkdim" in compile_meta:
@@ -692,7 +694,7 @@ class CachingAutotuner(KernelInterface):
 
         from torch._inductor.codecache import CudaKernelParamCache
 
-        if torch.version.hip is None:
+        if self.device_props.type != "hip":
             CudaKernelParamCache.set(key, params, launcher.bin.asm["cubin"])
         else:
             # There is some divergence between CUDA and ROCm here.
