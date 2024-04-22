@@ -34,6 +34,7 @@ from torch.utils._sympy.singleton_int import SingletonInt
 
 from .. import codecache, config, ir
 from ..ir import ReinterpretView
+from ..runtime import triton_heuristics
 from ..utils import (
     cache_on_self,
     get_benchmark_name,
@@ -521,10 +522,11 @@ class WrapperCodeGen(CodeGen):
             """
             import triton
             import triton.language as tl
-            from torch._inductor.triton_heuristics import grid, split_scan_grid, start_graph, end_graph
+            from {} import grid, split_scan_grid, start_graph, end_graph
             {}
             """.format(
-                V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
+                triton_heuristics.__name__,
+                V.graph.device_ops.import_get_raw_stream_as("get_raw_stream"),
             )
         )
 
@@ -1127,13 +1129,13 @@ class WrapperCodeGen(CodeGen):
         compile_wrapper = IndentedBuffer()
         compile_wrapper.writeline(f"async_compile.triton({original_name!r}, '''")
 
-        from .triton import gen_common_triton_imports
+        from .triton import gen_common_triton_imports, TritonKernel
 
         compile_wrapper.splice(gen_common_triton_imports())
 
         inductor_meta = {
             "kernel_name": name,
-            "backend_hash": torch.utils._triton.triton_hash_with_backend(),
+            **TritonKernel.inductor_meta_common(),
         }
 
         configs = [
@@ -1262,13 +1264,13 @@ class WrapperCodeGen(CodeGen):
         self.wrapper_call.writeline("start_graph()")
 
     def generate_end_graph(self):
-        self.wrapper_call.writeline("end_graph()")
+        self.wrapper_call.writeline(f"end_graph({config.profile_bandwidth_output!r})")
 
     def generate_reset_kernel_saved_flags(self):
         self.wrapper_call.splice(
-            """
+            f"""
             for kernel in globals().values():
-                if isinstance(kernel, torch._inductor.triton_heuristics.CachingAutotuner):
+                if isinstance(kernel, {triton_heuristics.__name__}.CachingAutotuner):
                     kernel.cuda_kernel_saved = False
             """
         )
@@ -1285,9 +1287,9 @@ class WrapperCodeGen(CodeGen):
         subsequent AOTInductor code generation and compilation.
         """
         self.wrapper_call.splice(
-            """
+            f"""
             for kernel in globals().values():
-                if isinstance(kernel, torch._inductor.triton_heuristics.CachingAutotuner):
+                if isinstance(kernel, {triton_heuristics.__name__}.CachingAutotuner):
                     if not kernel.cuda_kernel_saved:
                         if len(kernel.launchers) == 0:
                             kernel.precompile()
