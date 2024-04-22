@@ -161,6 +161,13 @@ class FSDPParam:
         self._init_extensions()
         self.all_gather_outputs: List[torch.Tensor] = []
         self._param_fqn: Optional[str] = None  # prefixed from root module
+        # TODO: Remove this padding logic once DTensor pads the local tensor:
+        # https://github.com/pytorch/pytorch/issues/113045
+        self._post_load_hook_handle = (
+            module_info.module.register_load_state_dict_post_hook(
+                lambda *args, **kwargs: self.reset_sharded_param()
+            )
+        )
 
     @torch.no_grad()
     def _init_sharded_param(self, param: nn.Parameter, device: torch.device):
@@ -525,6 +532,31 @@ class FSDPParam:
             _raise_assert_with_print(
                 f"Expects to be in one of {states}, not {self.sharded_state}"
             )
+
+    def reset_sharded_param(self):
+        # For out-of-place operations like `nn.Module._apply` or
+        # `load_state_dict(assign=True)`, we may need to reset the sharded
+        # parameter by padding its local tensor and saving the reference.
+        module_info = self._module_info
+        new_param = getattr(module_info.module, module_info.param_name)
+        if new_param is not self.sharded_param:
+            if torch.__future__.get_swap_module_params_on_conversion():
+                raise AssertionError(
+                    f"Expects swap_tensors to preserve object but got {new_param} "
+                    f"instead of {self.sharded_param}"
+                )
+            self.sharded_param = new_param
+        local_tensor = new_param._local_tensor
+        padded_sharded_size = self.padded_sharded_param_size
+        if local_tensor.size() != padded_sharded_size:
+            padded_local_tensor = local_tensor.new_zeros(padded_sharded_size)
+            padded_local_tensor[: local_tensor.size(0)].copy_(local_tensor)
+            local_tensor = padded_local_tensor
+        if self.pin_memory and not local_tensor.is_pinned():
+            local_tensor = local_tensor.cpu().pin_memory()
+        self._sharded_param_data = local_tensor.view(-1)
+        assert isinstance(self.sharded_param, DTensor)  # mypy
+        self.sharded_param._local_tensor = local_tensor[: self.sharded_size[0]]
 
 
 def alloc_storage(tensor: torch.Tensor) -> None:

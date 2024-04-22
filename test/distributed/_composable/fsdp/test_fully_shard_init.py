@@ -5,31 +5,37 @@ import unittest
 from typing import List
 
 import torch
+import torch.distributed._functional_collectives as funcol
 import torch.nn as nn
 from torch.distributed._composable import replicate
 from torch.distributed._composable.fsdp import fully_shard
-import torch.distributed._functional_collectives as funcol
 from torch.distributed._composable.fsdp._fsdp_init import (
     _get_managed_modules,
     _get_managed_states,
 )
 from torch.distributed._composable.fsdp._fsdp_param import ParamModuleInfo
 from torch.distributed._composable.fsdp._fsdp_param_group import _get_param_module_infos
-from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard, distribute_tensor
+from torch.distributed._tensor import (
+    DeviceMesh,
+    distribute_tensor,
+    DTensor,
+    Replicate,
+    Shard,
+)
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
     RowwiseParallel,
 )
+from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_fsdp import FSDPTestMultiThread, MLP
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
     TransformerBlock,
 )
-from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_fsdp import FSDPTestMultiThread, MLP
-from torch.testing._internal.common_utils import run_tests
 
 
 class TestFullyShardDeviceTensor(FSDPTestMultiThread):
@@ -562,7 +568,7 @@ class TestFullyShardMetaDeviceInit(FSDPTestMultiThread):
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_rank0_broadcast_meta_device_init(self):
-        model_args = ModelArgs()
+        model_args = ModelArgs(dropout_p=0.0)
         # Assume we have a CPU full state dict on rank 0
         if self.rank == 0:
             torch.manual_seed(42)
@@ -602,7 +608,9 @@ class TestFullyShardMetaDeviceInit(FSDPTestMultiThread):
         else:
             for param_name, sharded_meta_param in meta_sharded_sd.items():
                 full_tensor = torch.empty(
-                    sharded_meta_param.size(), device="cuda", dtype=sharded_meta_param.dtype
+                    sharded_meta_param.size(),
+                    device="cuda",
+                    dtype=sharded_meta_param.dtype,
                 )
                 mesh = sharded_meta_param.device_mesh
                 full_tensor = funcol.broadcast(full_tensor, src=0, group=mesh)
@@ -632,6 +640,16 @@ class TestFullyShardMetaDeviceInit(FSDPTestMultiThread):
         ):
             self.assertEqual(param_name, ref_param_name)
             self.assertEqual(param, ref_param)
+
+        # Check one forward/backward for parity
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device="cuda")
+        loss = model(inp).sum()
+        loss.backward()
+        ref_loss = ref_model(inp).sum()
+        ref_loss.backward()
+        self.assertEqual(loss, ref_loss)
+        for param, ref_param in zip(model.parameters(), ref_model.parameters()):
+            self.assertEqual(param.grad, ref_param.grad)
 
 
 if __name__ == "__main__":
