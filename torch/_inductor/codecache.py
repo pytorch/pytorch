@@ -59,7 +59,8 @@ from torch._dynamo.device_interface import (
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
-from torch._inductor.utils import cache_dir, is_linux
+from torch._inductor.runtime.runtime_utils import cache_dir
+from torch._inductor.utils import clear_on_fresh_inductor_cache, is_linux
 from torch._subclasses.fake_tensor import (
     extract_tensor_metadata,
     FakeTensor,
@@ -158,7 +159,7 @@ class CacheBase:
         try:
             import triton
 
-            triton_version = triton.__version__
+            triton_version = triton.__version__  # type: ignore[attr-defined]
         except ModuleNotFoundError:
             triton_version = None
 
@@ -185,6 +186,7 @@ class CacheBase:
         return system
 
     @staticmethod
+    @clear_on_fresh_inductor_cache
     @functools.lru_cache(None)
     def get_local_cache_path() -> Path:
         return Path(os.path.join(cache_dir(), "cache", CacheBase.get_system()["hash"]))
@@ -204,22 +206,21 @@ class CacheBase:
 
         self.system = CacheBase.get_system()
 
-        self.local_cache_path = CacheBase.get_local_cache_path()
-        self.global_cache_path = CacheBase.get_global_cache_path()
-
     def get_local_cache(self) -> Dict[str, Any]:
-        if not self.local_cache_path.is_file():
+        local_cache_path = self.get_local_cache_path()
+        if not local_cache_path.is_file():
             return {}
-        with open(self.local_cache_path) as local_cache_fp:
+        with open(local_cache_path) as local_cache_fp:
             local_cache = json.load(local_cache_fp)
         return local_cache["cache"]
 
     def update_local_cache(self, local_cache: Dict[str, Any]) -> None:
-        if not os.path.exists(self.local_cache_path.parent):
-            os.makedirs(self.local_cache_path.parent, exist_ok=True)
+        local_cache_path = self.get_local_cache_path()
+        if not os.path.exists(local_cache_path.parent):
+            os.makedirs(local_cache_path.parent, exist_ok=True)
 
         write_atomic(
-            str(self.local_cache_path),
+            str(local_cache_path),
             json.dumps({"system": self.system, "cache": local_cache}, indent=4),
         )
 
@@ -252,9 +253,10 @@ class LocalCache(CacheBase):
 class PersistentCache(CacheBase):
     @functools.lru_cache(None)
     def get_global_cache(self):
-        if self.global_cache_path is None or not self.global_cache_path.is_file():
+        global_cache_path = self.get_global_cache_path()
+        if global_cache_path is None or not global_cache_path.is_file():
             return {}
-        with open(self.global_cache_path) as global_cache_fp:
+        with open(global_cache_path) as global_cache_fp:
             global_cache = json.load(global_cache_fp)
         return global_cache["cache"]
 
@@ -263,7 +265,7 @@ class PersistentCache(CacheBase):
         choices: List[ChoiceCaller],
         op: str,
         inputs: str,
-        benchmark: Callable[[Any], Dict[ChoiceCaller, float]],
+        benchmark: Optional[Callable[[Any], Dict[ChoiceCaller, float]]],
     ) -> Dict[ChoiceCaller, float]:
         """
         Check to see if we have benchmarked the given choice callers. For each
@@ -271,7 +273,7 @@ class PersistentCache(CacheBase):
 
             1. Check global_cache[op][inputs][choice][precision], return benchmark if cached.
             2. Check local_cache[op][inputs][choice][precision], return benchmark if cached.
-            3.
+            3. If benchmark is not None:
                 a. `max_autotune_gemm=True`: benchmark the choice, update
                     local_cache[op][inputs][choice], and return the benchmark.
                 b. `max_autotune_gemm=False`: don't benchmark the choice, return nothing.
@@ -302,11 +304,15 @@ class PersistentCache(CacheBase):
             return hit
 
         if config.max_autotune or config.max_autotune_gemm:
-            local_cache = self.get_local_cache()
+            local_cache = self.get_local_cache() if config.autotune_local_cache else {}
             # check local cache first since it is data specific to the current machine
-            if not check_cache(local_cache) and not (
-                use_global_cache()
-                and check_cache(self.get_global_cache(), callback=log_stats)
+            if (
+                not check_cache(local_cache)
+                and not (
+                    use_global_cache()
+                    and check_cache(self.get_global_cache(), callback=log_stats)
+                )
+                and benchmark is not None
             ):
                 try:
                     # re-benchmark everything to try to get consistent numbers from the same machine
@@ -447,7 +453,7 @@ def _reduce_tensor(t):
         # TODO: These tensors don't currently pickle, so we can't cache a
         # compiled graph containing them. Just fail now. If mkldnn tensors
         # get pickling support, we can remove this.
-        raise BypassFxGraphCache()
+        raise BypassFxGraphCache
 
     # Very large tensors could be expensive to copy to cpu and hash. Let's
     # at least report if we find slowness.
@@ -599,7 +605,7 @@ class FxGraphHashDetails:
             # Some configs options are callables, e.g., post_grad_custom_pre_pass,
             # and may not pickle.
             log.debug("Can't pickle inductor config: %s", e)
-            raise BypassFxGraphCache() from e
+            raise BypassFxGraphCache from e
 
     def debug_str(self) -> str:
         """
@@ -765,17 +771,21 @@ class FxGraphCache:
 
         # See _save_graph(); we don't store the callable in the cache entry so
         # recreate it here from the PyCodeCache disk cache.
+        artifact_path = get_path(graph.cache_key, "py")[2]
+        if not os.path.exists(artifact_path):
+            counters["inductor"]["fxgraph_lookup_write_file"] += 1
+            write_atomic(artifact_path, graph.source_code)
         try:
             graph.current_callable = PyCodeCache.load_by_key_path(
                 graph.cache_key,
-                graph.artifact_path,
+                artifact_path,
                 graph.cache_linemap,
                 graph.constants,
             ).call
         except OSError:
             # Not expected, but in case the PyCodeCache entry is removed from
             # underneath us, treat it as a cache miss and recompile.
-            log.error("Failed to load cached artifact: %s", graph.artifact_path)
+            log.error("Failed to load cached artifact: %s", artifact_path)
             return None
 
         # Now re-evaluate with the symints to add any guards to the current env.
@@ -837,20 +847,26 @@ class FxGraphCache:
         write_atomic(path, content)
 
     @staticmethod
-    def _check_can_cache():
+    def _check_can_cache(gm: torch.fx.GraphModule):
         """
         Check some conditions that would preclude caching and raise BypassFxGraphCache
         to bypass in case caching is not possible.
         """
+        # Freezing can embed constants that wouldn't be static across runs.
         if config.freezing or config.aot_inductor.use_runtime_constant_folding:
-            # Freezing can embed constants that wouldn't be static across runs.
-            raise BypassFxGraphCache()
+            raise BypassFxGraphCache
 
+        # The treatment of guards in the caching implementation requires that
+        # we have a shape env.
         if FxGraphCache._get_shape_env() is None:
-            # The treatment of guards in the caching implementation requires that
-            # we have a shape env.
             log.debug("fx graph cache no shape env")
-            raise BypassFxGraphCache()
+            raise BypassFxGraphCache
+
+        # HigherOrderOperators should be handled on a case-by-case basis.
+        # Currently, we just skip caching if we have any.
+        for node in gm.graph.nodes:
+            if isinstance(node.target, torch._ops.HigherOrderOperator):
+                raise BypassFxGraphCache
 
     @staticmethod
     def load(
@@ -863,29 +879,25 @@ class FxGraphCache:
         Load a compiled graph from the cache. If a cached entry does not exist,
         compile the graph and save it to the cache.
         """
-        from filelock import FileLock
 
         compiled_graph = None
         try:
-            FxGraphCache._check_can_cache()
+            FxGraphCache._check_can_cache(gm)
             key = compiled_fx_graph_hash(gm, example_inputs, fx_kwargs)
 
-            lock_path = os.path.join(get_lock_dir(), key + ".lock")
-            with FileLock(lock_path, timeout=LOCK_TIMEOUT):
-                compiled_graph = FxGraphCache._lookup_graph(key, example_inputs)
-                if compiled_graph is None:
-                    log.debug("fx graph cache miss for key %s", key)
-                    counters["inductor"]["fxgraph_cache_miss"] += 1
-                    compiled_graph = compile_fx_fn(gm, example_inputs, **fx_kwargs)
-                    FxGraphCache._save_graph(key, compiled_graph, example_inputs)
-                else:
-                    log.debug("fx graph cache hit for key %s", key)
-                    counters["inductor"]["fxgraph_cache_hit"] += 1
+            compiled_graph = FxGraphCache._lookup_graph(key, example_inputs)
+            if compiled_graph is None:
+                log.debug("fx graph cache miss for key %s", key)
+                counters["inductor"]["fxgraph_cache_miss"] += 1
+                compiled_graph = compile_fx_fn(gm, example_inputs, **fx_kwargs)
+                FxGraphCache._save_graph(key, compiled_graph, example_inputs)
+            else:
+                log.debug("fx graph cache hit for key %s", key)
+                counters["inductor"]["fxgraph_cache_hit"] += 1
         except BypassFxGraphCache:
             counters["inductor"]["fxgraph_cache_bypass"] += 1
-
-        if not compiled_graph:
-            compiled_graph = compile_fx_fn(gm, example_inputs, **fx_kwargs)
+            if not compiled_graph:
+                compiled_graph = compile_fx_fn(gm, example_inputs, **fx_kwargs)
 
         return compiled_graph
 
@@ -909,7 +921,7 @@ class CompiledFxGraph:
 
     current_callable: Optional[Callable[..., Any]]
     cache_key: str
-    artifact_path: str
+    source_code: str = dataclasses.field(repr=False)  # Do not display source_code
     cache_linemap: Optional[List[Tuple[int, str]]]
     device_types: Set[str]
     device_idxs: Set[int]
@@ -938,7 +950,9 @@ class CompiledFxGraph:
     ):
         self.current_callable = current_callable
         self.cache_key = graph.cache_key
-        self.artifact_path = graph.cache_path
+        if graph.cache_path:
+            with open(graph.cache_path) as f:
+                self.source_code = f.read()
         self.cache_linemap = graph.cache_linemap
         self.device_types = graph.device_types
         self.device_idxs = graph.device_idxs
@@ -957,7 +971,7 @@ class CompiledFxGraph:
 
 def cpp_compiler() -> str:
     if config.is_fbcode():
-        return build_paths.cc()
+        return build_paths.cc() if torch.version.hip is None else build_paths.clang()
     if isinstance(config.cpp.cxx, (list, tuple)):
         search = tuple(config.cpp.cxx)
     else:
@@ -989,7 +1003,7 @@ def cpp_compiler_search(search: str) -> str:
             return cxx
         except (subprocess.SubprocessError, FileNotFoundError, ImportError):
             continue
-    raise exc.InvalidCxxCompiler()
+    raise exc.InvalidCxxCompiler
 
 
 def install_gcc_via_conda() -> str:
@@ -1182,7 +1196,7 @@ class VecNEON(VecISA):
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
 
     def __str__(self) -> str:
-        return "neon"  # Unused
+        return "asimd"  # detects the presence of advanced SIMD on armv8-a kernels
 
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__
 
@@ -1242,7 +1256,7 @@ class InvalidVecISA(VecISA):
 
 
 invalid_vec_isa = InvalidVecISA()
-supported_vec_isa_list = [VecAVX512(), VecAVX2()]
+supported_vec_isa_list = [VecAVX512(), VecAVX2(), VecNEON()]
 
 
 # Cache the cpuinfo to avoid I/O overhead. Meanwhile, the cpuinfo content
@@ -1409,18 +1423,23 @@ def homebrew_libomp() -> Tuple[bool, str]:
         return False, ""
 
 
+def _set_gpu_runtime_env() -> None:
+    if (
+        config.is_fbcode()
+        and torch.version.hip is None
+        and "CUDA_HOME" not in os.environ
+        and "CUDA_PATH" not in os.environ
+    ):
+        os.environ["CUDA_HOME"] = os.path.dirname(build_paths.cuda())
+
+
 def get_include_and_linking_paths(
     include_pytorch: bool = False,
     vec_isa: VecISA = invalid_vec_isa,
     cuda: bool = False,
     aot_mode: bool = False,
 ) -> Tuple[List[str], str, str, str, str]:
-    if (
-        config.is_fbcode()
-        and "CUDA_HOME" not in os.environ
-        and "CUDA_PATH" not in os.environ
-    ):
-        os.environ["CUDA_HOME"] = os.path.dirname(build_paths.cuda())
+    _set_gpu_runtime_env()
     from torch.utils import cpp_extension
 
     macros = vec_isa.build_macro() if vec_isa != invalid_vec_isa else ""
@@ -1452,7 +1471,7 @@ def get_include_and_linking_paths(
             libs += ["omp"]
             if aot_mode:
                 ipaths += [os.path.dirname(cpp_prefix_path())]
-                if cuda:
+                if cuda and torch.version.hip is None:
                     # This is a special treatment for Meta internal cuda-12 where all libs
                     # are in lib/cuda-12 and lib/cuda-12/stubs
                     for i, path in enumerate(lpaths):
@@ -1483,7 +1502,10 @@ def get_include_and_linking_paths(
 
         if cuda:
             if torch.version.hip is not None:
-                libs += ["c10_hip", "torch_hip"]
+                if config.is_fbcode():
+                    libs += ["amdhip64"]
+                else:
+                    libs += ["c10_hip", "torch_hip"]
                 macros += " -D __HIP_PLATFORM_AMD__"
             else:
                 if config.is_fbcode():
@@ -1549,16 +1571,27 @@ def get_include_and_linking_paths(
 
     # third party libs
     if config.is_fbcode():
-        ipaths.append(build_paths.sleef())
+        # Note that the order of include paths do matter, as a result
+        # we need to have several branches interleaved here
+        if torch.version.hip is None:
+            ipaths.append(build_paths.sleef())
         ipaths.append(build_paths.openmp())
         ipaths.append(build_paths.python())
-        ipaths.append(build_paths.cc_include())
-        ipaths.append(build_paths.libgcc())
-        ipaths.append(build_paths.libgcc_arch())
+        if torch.version.hip is not None:
+            ipaths.append(build_paths.clang_include())
+            ipaths.append(build_paths.gcc_include())
+            ipaths.append(build_paths.gcc_install_tools_include())
+        else:
+            ipaths.append(build_paths.cc_include())
+            ipaths.append(build_paths.libgcc())
+            ipaths.append(build_paths.libgcc_arch())
         ipaths.append(build_paths.libgcc_backward())
         ipaths.append(build_paths.glibc())
         ipaths.append(build_paths.linux_kernel())
-        ipaths.append(build_paths.cuda())
+        if torch.version.hip is not None:
+            ipaths.append(build_paths.rocm())
+        else:
+            ipaths.append(build_paths.cuda())
         # We also need to bundle includes with absolute paths into a remote directory
         # (later on, we copy the include paths from cpp_extensions into our remote dir)
         ipaths.append("include")
@@ -1566,7 +1599,8 @@ def get_include_and_linking_paths(
     static_link_libs = []
     if aot_mode and cuda and config.is_fbcode():
         # For Meta internal cuda-12, it is recommended to static link cudart
-        static_link_libs = ["-Wl,-Bstatic", "-lcudart_static", "-Wl,-Bdynamic"]
+        if torch.version.hip is None:
+            static_link_libs = ["-Wl,-Bstatic", "-lcudart_static", "-Wl,-Bdynamic"]
 
     lpaths_str = " ".join(["-L" + p for p in lpaths])
     libs_str = " ".join(static_link_libs + ["-l" + p for p in libs])
@@ -1656,9 +1690,10 @@ def split_aot_inductor_output_path(path: str) -> Tuple[str, str]:
         return path, ""
 
 
+@clear_on_fresh_inductor_cache
 class CudaKernelParamCache:
     cache: Dict[str, Dict[str, str]] = dict()
-    clear = staticmethod(cache.clear)
+    cache_clear = staticmethod(cache.clear)
 
     @classmethod
     def set(cls, key: str, params: Dict[str, str], cubin: str) -> None:
@@ -1846,10 +1881,8 @@ class AotCodeCompiler:
                 if name not in graph.folded_constants
             )
             # TODO: Fix mmap weights with cuda
-            use_mmap_weights = (
-                not cuda and not config.is_fbcode() and consts_size > 2_000_000_000
-            )
-            if config.aot_inductor.force_mmap_weights and not cuda:
+            use_mmap_weights = not config.is_fbcode() and consts_size > 2_000_000_000
+            if config.aot_inductor.force_mmap_weights:
                 use_mmap_weights = True
             compile_cmd = cpp_compile_command(
                 input=input_path,
@@ -1942,6 +1975,7 @@ class AotCodeCompiler:
 # - valid_vec_isa_list()
 # - VecISA.__bool__() <-- takes out a lock
 # - compile_file() <-- imports cpp_prefix_path from cpp, which causes us to try to take out the same lock.
+@clear_on_fresh_inductor_cache
 @functools.lru_cache
 def cpp_prefix_path() -> str:
     path = Path(__file__).parent / "codegen/cpp_prefix.h"
@@ -2054,9 +2088,10 @@ def custom_op_wrapper(op: str, *args):
         return torch._C._aoti.unsafe_alloc_void_ptr_from_tensor(result)
 
 
+@clear_on_fresh_inductor_cache
 class CppCodeCache:
     cache: Dict[str, Callable[[], Union[CDLL, ModuleType]]] = {}
-    clear = staticmethod(cache.clear)
+    cache_clear = staticmethod(cache.clear)
     cpp_compile_command_flags: Dict[str, Any] = {}
 
     @staticmethod
@@ -2146,9 +2181,10 @@ def _worker_compile_cpp(lock_path, input_path, output_path, cmd):
 
 
 # Customized Python binding for cpp kernels
+@clear_on_fresh_inductor_cache
 class CppPythonBindingsCodeCache(CppCodeCache):
     cache: Dict[str, Callable[[], Union[CDLL, ModuleType]]] = {}
-    clear = staticmethod(cache.clear)
+    cache_clear = staticmethod(cache.clear)
     cpp_compile_command_flags = {
         # kernels have no dependency on libtorch
         "include_pytorch": False,
@@ -2290,9 +2326,10 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         return cls.load_pybinding_async(*args, **kwargs)()
 
 
+@clear_on_fresh_inductor_cache
 class CppWrapperCodeCache(CppPythonBindingsCodeCache):
     cache: Dict[str, Callable[[], Union[CDLL, ModuleType]]] = {}
-    clear = staticmethod(cache.clear)
+    cache_clear = staticmethod(cache.clear)
     cpp_compile_command_flags = {
         "include_pytorch": not config.abi_compatible,
         "shared": True,
@@ -2356,10 +2393,11 @@ def _reload_python_module_in_subproc(key, path):
     return PyCodeCache.load_by_key_path(key, path)
 
 
+@clear_on_fresh_inductor_cache
 class PyCodeCache:
     cache: Dict[str, ModuleType] = dict()
     linemaps: Dict[str, List[Tuple[Any, ...]]] = dict()
-    clear = staticmethod(cache.clear)
+    cache_clear = staticmethod(cache.clear)
 
     @classmethod
     def write(cls, source_code: str, extra: str = "") -> Tuple[str, str]:
@@ -2605,6 +2643,7 @@ class DLLWrapper:
         lib_path: str,
     ):
         self.lib_path = lib_path
+        self.is_open = False
         self.DLL = cdll.LoadLibrary(lib_path)
         self.is_open = True
 
@@ -2658,6 +2697,7 @@ class DLLWrapper:
         self.close()
 
 
+@clear_on_fresh_inductor_cache
 class CUDACodeCache:
     @dataclasses.dataclass
     class CacheEntry:
@@ -2665,7 +2705,7 @@ class CUDACodeCache:
         output_path: str
 
     cache: Dict[str, CacheEntry] = dict()
-    clear = staticmethod(cache.clear)
+    cache_clear = staticmethod(cache.clear)
     _SOURCE_CODE_SUFFIX = "cu"
 
     @classmethod
@@ -2777,7 +2817,7 @@ def _worker_compile_triton(
 
 class CodeCacheFuture:
     def result(self):
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 class TritonFuture(CodeCacheFuture):
