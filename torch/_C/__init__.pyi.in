@@ -391,6 +391,16 @@ ResolutionCallback = Callable[[str], Callable[..., Any]]
 
 # Defined in torch/csrc/jit/python/script_init.cpp
 #        and torch/csrc/jit/python/init.cpp
+def _maybe_call_torch_function_for_op_packet(
+    op_overload_packet: Any,
+    args: Any,
+    kwargs: Any,
+) -> Any: ...
+def _check_schema_allow_fake_script_object(
+    schema: FunctionSchema,
+    args: Any,
+    kwargs: Any,
+) -> _bool: ...
 def _create_function_from_graph(qualname: str, graph: Graph) -> ScriptFunction: ...
 def _debug_set_autodiff_subgraph_inlining(disabled: _bool) -> None: ...
 def _ivalue_tags_match(lhs: ScriptModule, rhs: ScriptModule) -> _bool: ...
@@ -1430,6 +1440,9 @@ class _DispatchModule:
     def define(self, schema: str, alias: str = "") -> _DispatchModule: ...
     def fallback_fallthrough(self, dispatch: str = "") -> _DispatchModule: ...
 
+_after_ADInplaceOrView_keyset: DispatchKeySet
+_after_autograd_keyset: DispatchKeySet
+
 def _dispatch_library(
     kind: str,
     name: str,
@@ -1452,6 +1465,10 @@ def _dispatch_has_kernel_for_dispatch_key(
 def _dispatch_has_kernel_for_any_dispatch_key(
     name: str,
     dispatch_key_set: DispatchKeySet,
+) -> _bool: ...
+def _dispatch_kernel_for_dispatch_key_is_fallthrough(
+    name: str,
+    dispatch: _dispatchkey,
 ) -> _bool: ...
 def _dispatch_has_computed_kernel_for_dispatch_key(
     name: str,

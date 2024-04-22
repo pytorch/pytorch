@@ -819,8 +819,9 @@ class TestCommon(TestCase):
                 self.assertEqual(expected, out)
 
                 if compare_strides_and_data_ptrs:
-                    stride_msg = "Strides are not the same! Original strides were {} and strides are now {}".format(
-                        original_strides, final_strides
+                    stride_msg = (
+                        f"Strides are not the same! Original strides were {original_strides} "
+                        f"and strides are now {final_strides}"
                     )
                     self.assertEqual(original_strides, final_strides, msg=stride_msg)
                     self.assertEqual(original_ptrs, final_ptrs)
@@ -944,8 +945,9 @@ class TestCommon(TestCase):
                 self.assertEqual(expected, out)
 
                 if compare_strides_and_data_ptrs:
-                    stride_msg = "Strides are not the same! Original strides were {} and strides are now {}".format(
-                        original_strides, final_strides
+                    stride_msg = (
+                        "Strides are not the same! "
+                        f"Original strides were {original_strides} and strides are now {final_strides}"
                     )
                     self.assertEqual(original_strides, final_strides, msg=stride_msg)
                     self.assertEqual(original_ptrs, final_ptrs)
@@ -1516,16 +1518,12 @@ class TestCommon(TestCase):
             if len(partially_supported_forward) > 0:
                 msg = (
                     msg
-                    + "The following dtypes only worked on some samples during forward: {}.\n".format(
-                        partially_supported_forward
-                    )
+                    + f"The following dtypes only worked on some samples during forward: {partially_supported_forward}.\n"
                 )
             if len(partially_supported_backward) > 0:
                 msg = (
                     msg
-                    + "The following dtypes only worked on some samples during backward: {}.\n".format(
-                        partially_supported_backward
-                    )
+                    + f"The following dtypes only worked on some samples during backward: {partially_supported_backward}.\n"
                 )
             print(msg)
 
@@ -1550,30 +1548,26 @@ class TestCommon(TestCase):
         if len(supported_but_unclaimed_forward) > 0:
             msg = (
                 msg
-                + "The following dtypes worked in forward but are not listed by the OpInfo: {}.\n".format(
-                    supported_but_unclaimed_forward
-                )
+                + "The following dtypes worked in forward but are not listed by the OpInfo: "
+                + f"{supported_but_unclaimed_forward}.\n"
             )
         if len(supported_but_unclaimed_backward) > 0:
             msg = (
                 msg
-                + "The following dtypes worked in backward but are not listed by the OpInfo: {}.\n".format(
-                    supported_but_unclaimed_backward
-                )
+                + "The following dtypes worked in backward but are not listed by the OpInfo: "
+                + f"{supported_but_unclaimed_backward}.\n"
             )
         if len(claimed_but_unsupported_forward) > 0:
             msg = (
                 msg
-                + "The following dtypes did not work in forward but are listed by the OpInfo: {}.\n".format(
-                    claimed_but_unsupported_forward
-                )
+                + "The following dtypes did not work in forward but are listed by the OpInfo: "
+                + f"{claimed_but_unsupported_forward}.\n"
             )
         if len(claimed_but_unsupported_backward) > 0:
             msg = (
                 msg
-                + "The following dtypes did not work in backward but are listed by the OpInfo: {}.\n".format(
-                    claimed_but_unsupported_backward
-                )
+                + "The following dtypes did not work in backward "
+                + f"but are listed by the OpInfo: {claimed_but_unsupported_backward}.\n"
             )
 
         all_claimed_but_unsupported = set.union(
@@ -2374,6 +2368,15 @@ dynamic_output_op_tests = (
     "linalg.lstsq.grad_oriented",
 )
 
+# Ops that have dynamic output shapes that we can handle when
+# allow_dynamic_shape_ops is True in fake tensor shape environment.
+supported_dynamic_output_op_tests = (
+    "nonzero",
+    "unique",
+    "repeat_interleave",
+    "masked_select",
+)
+
 # some inputs invoke dynamic output shape operators, some do not
 sometimes_dynamic_output_op_test = (
     "__getitem__",
@@ -2442,12 +2445,28 @@ class TestFakeTensor(TestCase):
 
         samples = op.sample_inputs(device, dtype, requires_grad=False)
         for sample in samples:
-            try:
-                mode = FakeTensorMode()
+            mode = FakeTensorMode()
 
+            from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+            allow_dynamic_output_shape_shape_env = ShapeEnv(
+                allow_dynamic_output_shape_ops=True
+            )
+
+            allow_dynamic_output_shape_mode = FakeTensorMode(
+                shape_env=allow_dynamic_output_shape_shape_env
+            )
+
+            try:
+                with context():
+                    res = op(sample.input, *sample.args, **sample.kwargs)
+            except Exception:
+                continue
+
+            def run_with_fake_mode_and_verify(fake_mode, match_results=True):
                 def map_to_fake(e):
                     if isinstance(e, torch.Tensor):
-                        return mode.from_tensor(e)
+                        return fake_mode.from_tensor(e)
                     else:
                         return e
 
@@ -2457,55 +2476,64 @@ class TestFakeTensor(TestCase):
 
                 try:
                     with context():
-                        res = op(sample.input, *sample.args, **sample.kwargs)
-                except Exception as e:
-                    continue
+                        with fake_mode:
+                            res_fake = op(input, *args, **kwargs)
 
-                with context():
-                    with mode:
-                        res_fake = op(input, *args, **kwargs)
+                    if not match_results:
+                        return
 
-                for fake_out, real_out in zip(
-                    pytree.tree_leaves(res_fake), pytree.tree_leaves(res)
-                ):
-                    if not isinstance(fake_out, torch.Tensor):
-                        self.assertTrue(not isinstance(real_out, torch.Tensor))
-                        self.assertEqual(fake_out, real_out)
-                        continue
+                    for fake_out, real_out in zip(
+                        pytree.tree_leaves(res_fake), pytree.tree_leaves(res)
+                    ):
+                        if not isinstance(fake_out, torch.Tensor):
+                            self.assertTrue(not isinstance(real_out, torch.Tensor))
+                            self.assertEqual(fake_out, real_out)
+                            continue
 
-                    self.assertTrue(isinstance(fake_out, FakeTensor))
-                    # if you see a shape exception here, you may need to add
-                    # a `dynamic_output_shape` tag to an operator
+                        self.assertTrue(isinstance(fake_out, FakeTensor))
+                        # if you see a shape exception here, you may need to add
+                        # a `dynamic_output_shape` tag to an operator
 
-                    # prims/decomps must correctly model strides,
-                    # see https://github.com/pytorch/pytorch/issues/78050#issuecomment-1253950325
-                    prims.utils.compare_tensor_meta(fake_out, real_out, True)
+                        # prims/decomps must correctly model strides,
+                        # see https://github.com/pytorch/pytorch/issues/78050#issuecomment-1253950325
+                        prims.utils.compare_tensor_meta(fake_out, real_out, True)
 
-                    if name not in aliasing_failures:
-                        fake_aliasing = outputs_alias_inputs(
-                            (input, args, kwargs), res_fake
-                        )
-                        real_aliasing = outputs_alias_inputs(
-                            (sample.input, sample, args, sample.kwargs), res
-                        )
-                        self.assertEqual(fake_aliasing, real_aliasing)
+                        if name not in aliasing_failures:
+                            fake_aliasing = outputs_alias_inputs(
+                                (input, args, kwargs), res_fake
+                            )
+                            real_aliasing = outputs_alias_inputs(
+                                (sample.input, sample, args, sample.kwargs), res
+                            )
+                            self.assertEqual(fake_aliasing, real_aliasing)
 
-                self.assertTrue(
-                    name not in dynamic_output_op_tests
-                    and name not in data_dependent_op_tests
+                    self.assertTrue(
+                        name not in dynamic_output_op_tests
+                        and name not in data_dependent_op_tests
+                    )
+
+                except torch._subclasses.fake_tensor.UnsupportedFakeTensorException:
+                    pass
+                except torch._subclasses.fake_tensor.UnsupportedOperatorException:
+                    pass
+                except torch._subclasses.fake_tensor.DynamicOutputShapeException:
+                    self.assertTrue(
+                        name in dynamic_output_op_tests
+                        or name in sometimes_dynamic_output_op_test
+                    )
+                    self.assertTrue(
+                        mode.shape_env is None
+                        or not mode.shape_env.allow_dynamic_output_shape_ops
+                        or name not in supported_dynamic_output_op_tests
+                    )
+                except torch._subclasses.fake_tensor.DataDependentOutputException:
+                    self.assertTrue(name in data_dependent_op_tests)
+
+            run_with_fake_mode_and_verify(mode)
+            if name in supported_dynamic_output_op_tests:
+                run_with_fake_mode_and_verify(
+                    allow_dynamic_output_shape_mode, match_results=False
                 )
-
-            except torch._subclasses.fake_tensor.UnsupportedFakeTensorException:
-                pass
-            except torch._subclasses.fake_tensor.UnsupportedOperatorException:
-                pass
-            except torch._subclasses.fake_tensor.DynamicOutputShapeException:
-                self.assertTrue(
-                    name in dynamic_output_op_tests
-                    or name in sometimes_dynamic_output_op_test
-                )
-            except torch._subclasses.fake_tensor.DataDependentOutputException:
-                self.assertTrue(name in data_dependent_op_tests)
 
     @ops(op_db, dtypes=OpDTypes.any_one)
     def test_pointwise_ops(self, device, dtype, op):
