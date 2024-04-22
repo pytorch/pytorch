@@ -1,4 +1,5 @@
 import inspect
+import weakref
 from typing import (
     Any,
     Callable,
@@ -14,7 +15,7 @@ from typing import (
 
 from torch.utils._exposed_in import exposed_in
 
-from .. import _C, _library, autograd, library, Tensor
+from .. import _C, _library, _ops, autograd, library, Tensor
 
 
 device_types_t = Optional[Union[str, Sequence[str]]]
@@ -27,7 +28,6 @@ def custom_op(
     *,
     mutates_args: Iterable[str],
     device_types: device_types_t = None,
-    qualname: Optional[str] = None,
 ) -> Callable:
     """Wraps a function into custom operator.
 
@@ -130,6 +130,7 @@ class CustomOpDef:
 
         self._lib = get_library_allowing_overwrite(self._namespace, self._name)
         self._register_to_dispatcher()
+        OPDEFS[self._qualname] = self
 
     @property
     def _qualname(self) -> str:
@@ -308,30 +309,33 @@ class CustomOpDef:
         return fn
 
     def register_autograd(
-        self, setup_context_fn: Callable, backward_fn: Callable, /
+        self, setup_context_fn: Optional[Callable], backward_fn: Callable, /
     ) -> None:
         r"""Register a backward formula for this custom op.
 
         In order for an operator to work with autograd, you need to register
-        a backward formula. There are two pieces to this:
-        1. You must tell us what we need to save from the forward pass for
-           the backward pass. This is the "setup_context" function.
-        2. You must tell us how to compute gradients during the backward pass.
-           This is the "backward" function.
-
-        ``setup_context_fn(ctx, inputs, output)`` runs during the forward pass.
-        Please save quantities needed for backward onto the ``ctx`` object via
-        either :func:`ctx.save_for_backward` or assigning them as attributes of
-        ``ctx``.
+        a backward formula:
+        1. You must tell us how to compute gradients during the backward pass
+        by providing us a "backward" function.
+        2. If you need any values from the forward to compute gradients, you can
+        use `setup_context` to save values for backward.
 
         ``backward_fn`` runs during the backward pass. It accepts ``(ctx, *grads)``:
         - ``grads`` is one or more gradients. The number of gradients matches
-          the number of outputs of the operator.
+        the number of outputs of the operator.
+        The ``ctx`` object is `the same ctx object <context_method_mixins>`_ used by
+        :class:`torch.autograd.Function`. The semantics of ``backward_fn`` are the
+        same as :meth:`torch.autograd.Function.backward`.
+
+        ``setup_context_fn(ctx, inputs, output)`` runs during the forward pass.
+        Please save quantities needed for backward onto the ``ctx`` object via
+        either :meth:`torch.autograd.function.FunctionCtx.save_for_backward`
+        or assigning them as attributes of ``ctx``.
 
         Both ``setup_context_fn`` and ``backward_fn`` must be traceable. That is,
-        they may not directly access Tensor.data_ptr and they must not depend on
-        or mutate global state. If you need a non-traceable backward, you can make
-        it a separate custom_op that you call inside ``backward_fn``.
+        they may not directly access :meth:`torch.Tensor.data_ptr` and they must
+        not depend on or mutate global state. If you need a non-traceable backward,
+        you can make it a separate custom_op that you call inside ``backward_fn``.
 
         Examples:
             >>> import torch
@@ -390,13 +394,13 @@ class CustomOpDef:
 
         lib._register_fake(self._name, fake_impl)
 
-        autograd_impl = _library.autograd.make_autograd_impl(self)
-        lib.impl(self._name, autograd_impl, "Autograd")
+        autograd_impl = _library.autograd.make_autograd_impl(self._opoverload, self)
+        lib.impl(self._name, autograd_impl, "Autograd", with_keyset=True)
 
         schema = self._opoverload._schema
         if schema.is_mutable:
 
-            def adinplaceorview_impl(*args, **kwargs):
+            def adinplaceorview_impl(keyset, *args, **kwargs):
                 for arg, val in _library.utils.zip_schema(schema, args, kwargs):
                     if not arg.alias_info:
                         continue
@@ -409,9 +413,16 @@ class CustomOpDef:
                             if isinstance(v, Tensor):
                                 autograd.graph.increment_version(v)
                 with _C._AutoDispatchBelowADInplaceOrView():
-                    return self._opoverload(*args, **kwargs)
+                    return self._opoverload.redispatch(
+                        keyset & _C._after_ADInplaceOrView_keyset, *args, **kwargs
+                    )
 
-            lib.impl(self._name, adinplaceorview_impl, "ADInplaceOrView")
+            lib.impl(
+                self._name,
+                adinplaceorview_impl,
+                "ADInplaceOrView",
+                with_keyset=True,
+            )
 
     def __call__(self, *args, **kwargs):
         return self._opoverload(*args, **kwargs)
@@ -441,6 +452,7 @@ class CustomOpDef:
 
 
 OPDEF_TO_LIB: Dict[str, "library.Library"] = {}
+OPDEFS: weakref.WeakValueDictionary = weakref.WeakValueDictionary()
 
 
 def get_library_allowing_overwrite(namespace: str, name: str) -> "library.Library":
@@ -468,3 +480,16 @@ def iter_tensors(
         yield from check(arg)
     for kwarg in kwargs.values():
         yield from check(kwarg)
+
+
+def _maybe_get_opdef(
+    op: Union[CustomOpDef, _ops.OpOverload, str]
+) -> Optional[CustomOpDef]:
+    if isinstance(op, CustomOpDef):
+        return op
+    if isinstance(op, _ops.OpOverload):
+        op = op._name
+    assert isinstance(op, str)
+    if op in OPDEFS:
+        return OPDEFS[op]
+    return None
