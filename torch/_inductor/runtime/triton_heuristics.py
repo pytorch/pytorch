@@ -314,11 +314,6 @@ class CachingAutotuner(KernelInterface):
             "assert_indirect_indexing", True
         ) and not self.inductor_meta.get("is_hip", False)
 
-        # Setting device_type="hip" required on ROCm to pass down to triton
-        compile_meta["device_type"] = (
-            self.device_type if torch.version.hip is None else "hip"
-        )
-
         if warm_cache_only_with_cc:
             cc = warm_cache_only_with_cc
         else:
@@ -328,6 +323,11 @@ class CachingAutotuner(KernelInterface):
             device_id = compile_meta["device"]
             device = torch.device(device_type, device_id)
             cc = self.device_interface.get_compute_capability(device)
+
+        # Setting device_type="hip" required on ROCm to pass down to triton
+        compile_meta["device_type"] = (
+            self.device_type if torch.version.hip is None else "hip"
+        )
 
         compile_meta["cc"] = cc
 
@@ -341,7 +341,18 @@ class CachingAutotuner(KernelInterface):
                 ),
             )
 
-            target = (compile_meta["device_type"], cc)
+            cc_str = str(cc)
+            if "gfx10" in cc_str or "gfx11" in cc_str:
+                rocm_warp_size = 32
+            else:
+                rocm_warp_size = 64
+
+            target = (
+                (compile_meta["device_type"], cc)
+                if not torch.version.hip
+                else [compile_meta["device_type"], cc, rocm_warp_size]
+            )
+
             options = {
                 "num_warps": compile_meta["num_warps"],
                 "num_stages": compile_meta["num_stages"],
@@ -696,19 +707,13 @@ class CachingAutotuner(KernelInterface):
         }
 
         from torch._inductor.codecache import CudaKernelParamCache
-
-        if torch.version.hip is None:
-            CudaKernelParamCache.set(key, params, launcher.bin.asm["cubin"])
-        else:
-            # There is some divergence between CUDA and ROCm here.
-            # On ROCm's triton we only have the the path to the binary, not the binary itself.
-            # For ROCm we will copy the binary to the new location instead of writing to file
-            import pathlib
-
-            launcher.bin.asm["hsaco"] = pathlib.Path(
-                launcher.bin.asm["hsaco_path"]
-            ).read_bytes()
-            CudaKernelParamCache.set(key, params, launcher.bin.asm["hsaco"])
+        
+        binary = (
+            launcher.bin.asm["cubin"]
+            if torch.version.hip is None
+            else launcher.bin.asm["hsaco"]
+        )
+        CudaKernelParamCache.set(key, params, binary)
 
         self.cuda_kernel_saved = True
 
