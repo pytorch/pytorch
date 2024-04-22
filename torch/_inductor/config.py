@@ -250,7 +250,7 @@ autotune_in_subproc = os.environ.get("TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC") == "1"
 # The following three timeouts are applicable if autotune_in_subproc is True:
 
 # Max time that a a valid benchmark result may take during autotuning
-max_autotune_subproc_result_timeout_seconds = 30.0
+max_autotune_subproc_result_timeout_seconds = 60.0
 # Additional time we allow subprocesses to terminate gracefully after the timeout until we send a SIGTERM
 max_autotune_subproc_graceful_timeout_seconds = 1.0
 # Additional time that we grant after a SIGTERM until we do a hard SIGKILL of subprocesses
