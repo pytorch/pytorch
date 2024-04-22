@@ -280,20 +280,21 @@ class TestMaxAutotune(TestCase):
             os.environ.pop("TRITON_CACHE_MANAGER", None)
             with config.patch({"max_autotune": True}):
                 for _ in range(4):
-                    torch.compile(mm, dynamic=dynamic)(a, b)
+                    with fresh_inductor_cache():
+                        torch.compile(mm, dynamic=dynamic)(a, b)
                     reset()
-                    torch._inductor.codecache.PyCodeCache.clear()
                 self.assertEqual(num_get, 3)
                 self.assertEqual(num_put, 1)
             num_get = 0
             num_put = 0
             for _ in range(4):
-                torch.compile(f, dynamic=dynamic)(x, y)
+                with fresh_inductor_cache():
+                    torch.compile(f, dynamic=dynamic)(x, y)
                 reset()
-                torch._inductor.codecache.PyCodeCache.clear()
             self.assertEqual(num_get, 3)
             self.assertEqual(num_put, 1)
 
+    @skipIfRocm
     def test_precompilation_threads(self):
         import threading
         from typing import Any, Dict
@@ -328,7 +329,8 @@ class TestMaxAutotune(TestCase):
             inputs: str,
             benchmark: Callable[[Any], Dict[ChoiceCaller, float]],
         ) -> Dict[ChoiceCaller, float]:
-            return benchmark(choices)
+            if benchmark is not None:
+                return benchmark(choices)
 
         asc = AlgorithmSelectorCache()
 
@@ -425,6 +427,41 @@ class TestMaxAutotune(TestCase):
 
             FileCheck().check_not("extern_kernels.convolution").run(code[0])
             self.assertEqual(conv1x1(input_tensor), out, atol=1e-2, rtol=0)
+
+    @skipIfRocm
+    def test_filled_cache_precompile(self):
+        def fn(a, b, c):
+            a = (a @ b) @ c
+            a, b, c = (t.to(torch.float16) for t in [a, b, c])
+            return (a @ b) @ c
+
+        fn_c = torch.compile(mode="max-autotune-no-cudagraphs")(fn)
+        inputs = [torch.rand([256, 256], device="cuda") for _ in range(3)]
+        from torch._dynamo.utils import counters
+
+        self.assertEqual(fn(*inputs), fn_c(*inputs), atol=1e-2, rtol=1e-2)
+
+        torch._dynamo.reset()
+        counters.clear()
+
+        fn_c = torch.compile(mode="max-autotune-no-cudagraphs")(fn)
+        self.assertEqual(counters["inductor"]["select_algorithm_precompile"], 0)
+
+    @config.patch(autotune_local_cache=False, autotune_remote_cache=False)
+    def test_precompilations(self):
+        def fn(a, b, c):
+            a = (a @ b) @ c
+            a, b, c = (t.to(torch.float16) for t in [a, b, c])
+            return (a @ b) @ c
+
+        fn_c = torch.compile(mode="max-autotune-no-cudagraphs")(fn)
+        inputs = [torch.rand([256, 256], device="cuda") for _ in range(3)]
+
+        self.assertEqual(fn(*inputs), fn_c(*inputs), atol=1e-2, rtol=1e-2)
+
+        from torch._dynamo.utils import counters
+
+        self.assertEqual(counters["inductor"]["select_algorithm_precompile"], 2)
 
     def test_cat_addmm(self):
         def fn(a: torch.Tensor, b: torch.Tensor, c: torch.Tensor):
