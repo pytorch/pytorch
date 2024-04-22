@@ -768,17 +768,21 @@ class FxGraphCache:
 
         # See _save_graph(); we don't store the callable in the cache entry so
         # recreate it here from the PyCodeCache disk cache.
+        artifact_path = get_path(graph.cache_key, "py")[2]
+        if not os.path.exists(artifact_path):
+            counters["inductor"]["fxgraph_lookup_write_file"] += 1
+            write_atomic(artifact_path, graph.source_code)
         try:
             graph.current_callable = PyCodeCache.load_by_key_path(
                 graph.cache_key,
-                graph.artifact_path,
+                artifact_path,
                 graph.cache_linemap,
                 graph.constants,
             ).call
         except OSError:
             # Not expected, but in case the PyCodeCache entry is removed from
             # underneath us, treat it as a cache miss and recompile.
-            log.error("Failed to load cached artifact: %s", graph.artifact_path)
+            log.error("Failed to load cached artifact: %s", artifact_path)
             return None
 
         # Now re-evaluate with the symints to add any guards to the current env.
@@ -914,7 +918,7 @@ class CompiledFxGraph:
 
     current_callable: Optional[Callable[..., Any]]
     cache_key: str
-    artifact_path: str
+    source_code: str = dataclasses.field(repr=False)  # Do not display source_code
     cache_linemap: Optional[List[Tuple[int, str]]]
     device_types: Set[str]
     device_idxs: Set[int]
@@ -943,7 +947,9 @@ class CompiledFxGraph:
     ):
         self.current_callable = current_callable
         self.cache_key = graph.cache_key
-        self.artifact_path = graph.cache_path
+        if graph.cache_path:
+            with open(graph.cache_path) as f:
+                self.source_code = f.read()
         self.cache_linemap = graph.cache_linemap
         self.device_types = graph.device_types
         self.device_idxs = graph.device_idxs
