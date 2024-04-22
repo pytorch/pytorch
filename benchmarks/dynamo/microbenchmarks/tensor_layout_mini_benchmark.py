@@ -1,6 +1,6 @@
 import torch
 from torch._inductor import ir
-from torch._inductor.utils import do_bench
+from torch._inductor.runtime.runtime_utils import do_bench
 
 
 def to_channels_last(x):
