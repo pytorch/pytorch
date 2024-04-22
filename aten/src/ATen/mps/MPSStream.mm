@@ -180,14 +180,14 @@ void MPSStream::copy(id<MTLBuffer> srcBuffer,
       size_t bytes_copied = 0;
       size_t bytes_remains = length;
       while (bytes_remains > 0) {
-          NSUInteger bytes_to_copy = std::min(max_copy_size, bytes_remains);
-          [blitEncoder copyFromBuffer:srcBuffer
-                         sourceOffset:(NSUInteger)srcOffset + bytes_copied
-                             toBuffer:dstBuffer
-                    destinationOffset:(NSUInteger)dstOffset + bytes_copied
-                                 size:bytes_to_copy];
-          bytes_copied += bytes_to_copy;
-          bytes_remains -= bytes_to_copy;
+        NSUInteger bytes_to_copy = std::min(max_copy_size, bytes_remains);
+        [blitEncoder copyFromBuffer:srcBuffer
+                       sourceOffset:(NSUInteger)srcOffset + bytes_copied
+                           toBuffer:dstBuffer
+                  destinationOffset:(NSUInteger)dstOffset + bytes_copied
+                               size:bytes_to_copy];
+        bytes_copied += bytes_to_copy;
+        bytes_remains -= bytes_to_copy;
       }
       [blitEncoder endEncoding];
 
