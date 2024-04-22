@@ -41,6 +41,18 @@ static_weight_shapes = True
 # Applies CSE to the graph before partitioning
 cse = True
 
+# When AOTAutograd regenerates aliased graph outputs,
+# attempte to use functionalization's view-replay logic
+# before falling back to the autograd engine's view replay or as_strided.
+# This can have some perf implications
+# (although for many models this will not matter).
+# (1) If you have many view ops chained together, replaying all of them
+#     at runtime can have more overhead compared to a single as_strided call
+# (2) If you are doing training, AsStridedBackward is quite slow,
+#     and the individual view op backward formulas will likely be faster.
+# (3) Some backends like XLA do not support as_strided
+view_replay_for_aliased_outputs = False
+
 # Restricts the amount of computation AOTAutograd can do.
 # NB: We have essentially disabled this heuristic now. However, this is kept
 # here for now in case it's useful. Setting it low can artificially reduce the
