@@ -222,7 +222,7 @@ jobs:
 
   linux-focal-py3_12-clang10-test:
     name: linux-focal-py3.12-clang10
-    uses: ./.github/workflows/_linux-test.yml
+    uses: ./.github/workflows/_linux-test-label.yml
     needs: linux-focal-py3_12-clang10-build
     with:
       build-environment: linux-focal-py3.12-clang10
