@@ -37,6 +37,7 @@ from ..utils import (
     get_fused_kernel_name,
     is_welford_reduction,
     parallel_num_threads,
+    Placeholder,
     sympy_index_symbol,
     sympy_product,
     sympy_subs,
@@ -559,6 +560,11 @@ class CppPrinter(ExprPrinter):
     def _print_floor(self, expr):
         assert len(expr.args) == 1
         r = f"std::floor({self._print(expr.args[0])})"
+        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
+
+    def _print_Trunc(self, expr):
+        assert len(expr.args) == 1
+        r = f"std::trunc({self._print(expr.args[0])})"
         return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
 
     def _print_Pow(self, expr):
@@ -1829,8 +1835,8 @@ class CppKernel(Kernel):
                 if cse_var == var:
                     if is_to_lowp_dtype(expr):
                         m = re.search(r"tmp\d+", expr)
-                        assert m
-                        fp32_cse_var_name = m.group()
+                        if m is not None:
+                            fp32_cse_var_name = m.group()
             if fp32_cse_var_name:
                 for cse_var in cache.values():
                     if cse_var.name == fp32_cse_var_name:
@@ -2653,7 +2659,7 @@ class CppVecKernel(CppKernel):
                 mean, m2, weight = reduction_project(reduction_type, next_value)
             return f"welford_combine({var}, {{{mean}, {m2}, {weight}}})"
         else:
-            raise NotImplementedError()
+            raise NotImplementedError
 
     def indirect_assert(self, var, lower, upper, mask=None):
         assert not mask, "do not support mask in indirect_indexing assertion"
@@ -3574,7 +3580,7 @@ class CppScheduling(BaseScheduling):
 
     def __init__(self, scheduler):
         self.scheduler = scheduler
-        self.get_kernel_group()
+        self.reset_kernel_group()
         self._ready_to_flush = False
 
     def _set_flush_status(self, status: bool):
@@ -3583,7 +3589,7 @@ class CppScheduling(BaseScheduling):
     def group_fn(self, sizes):
         return tuple(tuple(map(V.graph.sizevars.simplify, s)) for s in sizes)
 
-    def get_kernel_group(self):
+    def reset_kernel_group(self):
         from .cpp_wrapper_cpu import CppWrapperCpu
 
         self.kernel_group: Union[CppWrapperKernelGroup, KernelGroup]
@@ -3617,8 +3623,7 @@ class CppScheduling(BaseScheduling):
                             if var_ranges is None:
                                 var_ranges = v
                             assert var_ranges == v, (var_ranges, v, node.snodes)
-                            for expr in exprs:
-                                indexing_exprs.add(expr)
+                            indexing_exprs.update(exprs)
                         return var_ranges, list(indexing_exprs)
                     else:
                         assert isinstance(node, SchedulerNode)
@@ -3873,9 +3878,39 @@ class CppScheduling(BaseScheduling):
     def codegen_sync(self):
         pass
 
+    def define_kernel(self, src_code, nodes):
+        wrapper = V.graph.wrapper_code
+        fused_name = (
+            get_fused_kernel_name(nodes, config.cpp.descriptive_names)
+            if config.cpp.descriptive_names
+            else ""
+        )
+        kernel_name = "_".join(["cpp", fused_name, wrapper.next_kernel_suffix()])
+        kernel_decl_name = kernel_name if V.graph.cpp_wrapper else "kernel"
+        src_code = src_code.replace(str(Placeholder.KERNEL_NAME), kernel_decl_name)
+        src_code = src_code.replace(str(Placeholder.DESCRIPTIVE_NAME), kernel_name)
+        # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
+        # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
+        src_code = src_code.replace("#pragma CMT", "//")
+
+        compile_wrapper = IndentedBuffer()
+        _, _, arg_types = self.kernel_group.args.cpp_argdefs()
+        if not V.graph.cpp_wrapper:
+            compile_wrapper.writeline(f"async_compile.cpp_pybinding({arg_types!r}, '''")
+        compile_wrapper.splice(src_code, strip=True)
+        if not V.graph.cpp_wrapper:
+            compile_wrapper.writeline("''')")
+        wrapper.define_kernel(kernel_name, compile_wrapper.getvalue(), cuda=False)
+        return kernel_name
+
     def flush(self):
-        self.kernel_group.codegen_define_and_call(V.graph.wrapper_code)
-        self.get_kernel_group()
+        src_code = self.kernel_group.codegen_group()
+        if src_code:
+            kernel_name = self.define_kernel(
+                src_code, self.kernel_group.scheduled_nodes
+            )
+            self.kernel_group.call_kernel(V.graph.wrapper_code, kernel_name)
+        self.reset_kernel_group()
         self._set_flush_status(False)
 
 
@@ -3903,30 +3938,28 @@ class KernelGroup:
         args_num = len(arg_defs)
         return args_num
 
-    def codegen_define_and_call(self, wrapper):
+    def codegen_group(self, name=None) -> str:
         self.stack.close()
         if not self.scheduled_nodes:
-            return
-
-        fused_name = (
-            get_fused_kernel_name(self.scheduled_nodes, config.cpp.descriptive_names)
-            if config.cpp.descriptive_names
-            else ""
-        )
-        kernel_name = "_".join(["cpp", fused_name, wrapper.next_kernel_suffix()])
-        arg_defs, call_args, arg_types = self.args.cpp_argdefs()
-        arg_defs = ",\n".ljust(25).join(arg_defs)
+            return ""
         code = BracesBuffer()
+        # 1. Include header files
         # TODO: support kernel profile on other platforms
         enable_kernel_profile = (
             config.cpp.enable_kernel_profile and sys.platform == "linux"
         )
         if enable_kernel_profile:
             code.writelines(["#include <ATen/record_function.h>"])
-        kernel_decl_name = kernel_name if V.graph.cpp_wrapper else "kernel"
         code.writeline(codecache.cpp_prefix())
 
+        # 2. Function definition
+        kernel_decl_name = str(Placeholder.KERNEL_NAME) if name is None else name
+        kernel_name = str(Placeholder.DESCRIPTIVE_NAME) if name is None else name
+        arg_defs, _, _ = self.args.cpp_argdefs()
+        arg_defs = ",\n".ljust(25).join(arg_defs)
         code.writeline(f'extern "C" void {kernel_decl_name}({arg_defs})')
+
+        # 3. Function body
         with code.indent():
             if enable_kernel_profile:
                 graph_id = V.graph.graph_id
@@ -3939,20 +3972,10 @@ class KernelGroup:
             for old, new in self.args.aliases():
                 code.writeline(f"auto {old} = {new};")
             code.splice(self.loops_code)
+        return code.getvalue()
 
-        codecache_def = IndentedBuffer()
-        if not V.graph.cpp_wrapper:
-            codecache_def.writeline(f"async_compile.cpp_pybinding({arg_types!r}, '''")
-        codecache_def.splice(code)
-        if not V.graph.cpp_wrapper:
-            codecache_def.writeline("''')")
-
-        codecache_str = codecache_def.getvalue()
-        # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
-        # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
-        codecache_str = codecache_str.replace("#pragma CMT", "//")
-        wrapper.define_kernel(kernel_name, codecache_str, cuda=False)
-        # generate the code to call this
+    def call_kernel(self, wrapper, kernel_name):
+        _, call_args, arg_types = self.args.cpp_argdefs()
         wrapper.generate_kernel_call(
             kernel_name, call_args, cuda=False, arg_types=arg_types
         )

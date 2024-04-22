@@ -408,8 +408,8 @@ def _dp_init_subclass(sub_cls, *args, **kwargs):
                                 ", but found {}".format(sub_cls.__name__, _type_repr(hints['return'])))
             data_type = return_hint.__args__[0]
             if not issubtype(data_type, sub_cls.type.param):
-                raise TypeError("Expected return type of '__iter__' as a subtype of {}, but found {}"
-                                " for {}".format(sub_cls.type, _type_repr(data_type), sub_cls.__name__))
+                raise TypeError(f"Expected return type of '__iter__' as a subtype of {sub_cls.type},"
+                                f" but found {_type_repr(data_type)} for {sub_cls.__name__}")
 
 
 def reinforce_type(self, expected_type):

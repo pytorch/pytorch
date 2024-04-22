@@ -75,7 +75,6 @@ if config.abi_compatible:
         "test_conv2d_binary_inplace_fusion_failed_cpu",
         "test_conv2d_binary_inplace_fusion_pass_cpu",
         "test_cumsum_cpu",
-        "test_dtype_sympy_expr_cpu",
         "test_dynamic_qlinear_cpu",
         "test_dynamic_qlinear_qat_cpu",
         "test_lstm_packed_change_input_sizes_cpu",
@@ -89,7 +88,6 @@ if config.abi_compatible:
         "test_qlinear_cpu",
         "test_qlinear_dequant_promotion_cpu",
         "test_qlinear_relu_cpu",
-        "test_randn_with_dtype_and_device_cpu",
         "test_scatter5_cpu",
         "test_scatter6_cpu",
         "test_tensor2_cpu",
@@ -135,16 +133,21 @@ def make_test_case(
         tests.setUpClass()
         tests.setUp()
         try:
-            _, code = test_torchinductor.run_and_get_cpp_code(
-                func, *func_inputs if func_inputs else []
-            )
-            self.assertEqual("CppWrapperCodeCache" in code, True)
-            self.assertTrue(
-                all(
-                    code.count(string) == code_string_count[string]
-                    for string in code_string_count
+            with torch._C._PreserveDispatchKeyGuard():
+                torch._C._dispatch_tls_set_dispatch_key_included(
+                    torch._C.DispatchKey.Dense, True
                 )
-            )
+
+                _, code = test_torchinductor.run_and_get_cpp_code(
+                    func, *func_inputs if func_inputs else []
+                )
+                self.assertEqual("CppWrapperCodeCache" in code, True)
+                self.assertTrue(
+                    all(
+                        code.count(string) == code_string_count[string]
+                        for string in code_string_count
+                    )
+                )
         finally:
             tests.tearDown()
             tests.tearDownClass()
@@ -237,7 +240,10 @@ if RUN_CPU:
         ),
         BaseTest("test_mm_views"),
         BaseTest("test_multihead_attention", "cpu", test_cpu_repro.CPUReproTests()),
-        BaseTest("test_multi_threading"),
+        BaseTest(
+            "test_multi_threading",
+            code_string_count={"py::gil_scoped_release release;": 1},
+        ),
         BaseTest("test_profiler_mark_wrapper_call"),
         BaseTest(
             "test_qconv2d",

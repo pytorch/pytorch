@@ -1292,6 +1292,59 @@ def forward(self, getitem, const):
     return (sin,)""",
             )
 
+    def test_map_example_value_metadata_consistent_with_eager(self):
+        from torch._higher_order_ops.map import map_dense
+
+        backend = EagerAndRecordGraphs()
+
+        def inner(x):
+            return x.sin(), x.cos().T, x.sin().view(-1)
+
+        rand_44 = torch.randn(4, 4)
+        inps = [
+            torch.randn(3),
+            torch.randn(3, 4),
+            torch.randn(3, 4, 5, requires_grad=True),
+            torch.randn(3, 4, 5, requires_grad=True).permute((2, 0, 1)),
+            torch.randn(3, 4, 5, requires_grad=True).detach(),
+            torch.randn(3, 4, 5, requires_grad=True).narrow(1, 1, 2),
+            rand_44.T,
+            rand_44[::2],
+            rand_44[::2, ::2],
+            rand_44[1::3, 1::3],
+            rand_44[1::3, 1::2].T,
+            rand_44.unsqueeze(1),
+            rand_44.squeeze(0),
+            rand_44.reshape(2, 8),
+        ]
+        for x in inps:
+            compiled_ret = torch.compile(
+                control_flow.map, backend=backend, fullgraph=True
+            )(inner, x)
+            eager_sin, eager_transpose, eager_view = map_dense(inner, (x,), tuple())
+
+            map_node = next(
+                node
+                for node in backend.graphs[0].graph.nodes
+                if node.op == "call_function" and "map" in node.name
+            )
+
+            fake_sin, fake_transpose, fake_view = map_node.meta["example_value"]
+
+            def _check_size_stride_contiguous(x, y):
+                self.assertEqual(y.size(), x.size())
+                self.assertEqual(y.stride(), x.stride())
+                self.assertEqual(y.requires_grad, x.requires_grad)
+                self.assertEqual(x.is_contiguous(), True)
+                self.assertEqual(y.is_contiguous(), True)
+
+            _check_size_stride_contiguous(eager_sin, fake_sin)
+            _check_size_stride_contiguous(eager_transpose, fake_transpose)
+            _check_size_stride_contiguous(eager_view, fake_view)
+
+            torch._dynamo.reset()
+            backend.graphs.clear()
+
     def test_cond_subgraph_name_is_valid(self):
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
@@ -1322,8 +1375,7 @@ def forward(self, getitem, const):
 
         cond_gm = backend.graphs[0]
         name_set = set()
-        for name, _ in cond_gm.named_modules():
-            name_set.add(name)
+        name_set.update(name for name, _ in cond_gm.named_modules())
         self.assertEqual(
             name_set,
             {
@@ -1682,8 +1734,7 @@ def forward(self):
         self.assertEqual(result, x + y + x)
         wrap_gm = backend.graphs[0]
         names = set()
-        for mod_name, _ in wrap_gm.named_modules():
-            names.add(mod_name)
+        names.update(mod_name for mod_name, _ in wrap_gm.named_modules())
         self.assertEqual(
             names,
             {
