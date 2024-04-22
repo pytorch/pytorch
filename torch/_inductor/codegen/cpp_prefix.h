@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <limits>
 #include <omp.h>
+#include <memory>
 
 #include <ATen/NumericUtils.h>
 #include <ATen/core/PhiloxRNGEngine.h>

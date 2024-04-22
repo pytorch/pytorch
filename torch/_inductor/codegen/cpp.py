@@ -2037,6 +2037,20 @@ class CppKernel(Kernel):
 
             def gen_kernel(kernel):
                 if isinstance(kernel, OuterLoopFusedKernel):
+                    if getattr(kernel, "_has_thread_local_buf", False):
+                        _thread_local_buf_size = getattr(
+                            kernel, "_thread_local_buf_size", 0
+                        )
+                        dtype = "float"
+                        allocate = (
+                            f"std::make_unique<{dtype} []>({_thread_local_buf_size})"
+                        )
+                        code.splice(
+                            f"thread_local std::unique_ptr<{dtype} []> thread_local_buffer = {allocate};"
+                        )
+                        code.splice(
+                            f"{dtype}* thread_local_buffer_ptr = thread_local_buffer.get();"
+                        )
                     for loop in kernel.inner:
                         if loop.inner:
                             gen_loops(loop.inner, loop.is_reduction)
@@ -2420,6 +2434,27 @@ class CppVecKernel(CppKernel):
             return super().load(name, index)
         elif stride == 1:
             # load contiguously
+            if getattr(
+                V.graph.scheduler.name_to_node.get(name, None),
+                "_use_thread_local_buf",
+                False,
+            ):
+                # Modify the index to use thread id
+                index_id = getattr(
+                    V.graph.scheduler.name_to_node.get(name, None),
+                    "_index_with_tl_tid",
+                    None,
+                )
+                assert isinstance(index_id, dict)
+                sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)  # type: ignore[attr-defined]
+                replacements = {}
+                for x in sorted_symbols:
+                    if x.name != f"x{index_id['keep_idx_id']}":  # type: ignore[attr-defined]
+                        # Remove the idx other than `keep_idx_id`
+                        replacements[x] = "0"
+                index = sympy_subs(index, replacements)  # type: ignore[arg-type]
+                var = "thread_local_buffer_ptr"
+
             line = self._get_vec_load_line(var, index, dtype, self._load_mask)
             csevar = self.cse.generate(self.loads, line)  # type: ignore[assignment]
         else:
@@ -2435,6 +2470,7 @@ class CppVecKernel(CppKernel):
         var: str,
         index: sympy.Expr,
         dtype: torch.dtype,
+        name: str = "",
     ):
         """
         Get a store line buffer that stores `value` into `var` at `index` of `dtype`. It handles
@@ -2454,6 +2490,27 @@ class CppVecKernel(CppKernel):
         code = IndentedBuffer()
         if stride == 1:
             if dtype == torch.float:
+                if getattr(
+                    V.graph.scheduler.name_to_node.get(name, None),
+                    "_use_thread_local_buf",
+                    False,
+                ):
+                    # Modify the index to use thread id
+                    index_id = getattr(
+                        V.graph.scheduler.name_to_node.get(name, None),
+                        "_index_with_tl_tid",
+                        None,
+                    )
+                    sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)  # type: ignore[attr-defined]
+                    replacements = {}
+                    for x in sorted_symbols:
+                        assert isinstance(index_id, dict)
+                        if x.name != f"x{index_id['keep_idx_id']}":  # type: ignore[attr-defined]
+                            # Remove the idx other than `keep_idx_id`
+                            replacements[x] = "0"
+                    index = sympy_subs(index, replacements)  # type: ignore[arg-type]
+                    var = "thread_local_buffer_ptr"
+                    var_expr = f"{var} + {cexpr_index(index)}"
                 code.writeline(f"{value}.store({var_expr});")
             else:
                 code.writeline(f"{value}.store({var_expr}, {self.tiling_factor});")
@@ -2474,7 +2531,7 @@ class CppVecKernel(CppKernel):
         var = self.args.output(name)
         self.cache_fp32_cse_var_before_lowp_store(value)
         index = self.rename_indexing(index)
-        code = self._get_store_line(value, var, index, V.graph.get_dtype(name))
+        code = self._get_store_line(value, var, index, V.graph.get_dtype(name), name)
         self.stores.splice(code.map(lambda x: DeferredLine(name, x)))
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
@@ -3828,9 +3885,6 @@ class CppScheduling(BaseScheduling):
         kernel_group = self.kernel_group
 
         if isinstance(node, OuterLoopFusedSchedulerNode):
-            cpp_kernel_proxy_list: List[CppKernelProxy] = []
-            nodes_list: List[List[SchedulerNode]] = []
-
             # Backup the original kernel_group.args for fallback path.
             # <TODO> Leslie: Actually we may not have to do this backup.
             # Since KernelArgs will look up dict and avoid to adding duplicated Kernel Args
@@ -3839,14 +3893,61 @@ class CppScheduling(BaseScheduling):
 
             def try_outer_loop_fusion(node: OuterLoopFusedSchedulerNode):
                 assert isinstance(node, OuterLoopFusedSchedulerNode)
+                cpp_kernel_proxy_list: List[CppKernelProxy] = []
+                nodes_list: List[List[SchedulerNode]] = []
+
+                def _can_use_thread_local_buffer(node):
+                    outer_loop_fusion_depth = node.outer_loop_fusion_depth
+                    for _node in node.get_outer_nodes():
+                        _nodes: List[SchedulerNode] = _node.get_nodes()
+                        _, (group, reduction_group) = max(
+                            _nodes, key=lambda x: int(x.is_reduction())
+                        ).group
+
+                        call_ranges = tuple(group) + tuple(reduction_group)
+
+                        if len(call_ranges) != outer_loop_fusion_depth + 1:
+                            # Assume there is only 1 left loop level
+                            # which potentially can do the thread_local id sustitute
+                            return False
+                    return True
+
+                if _can_use_thread_local_buffer(node):
+                    flatten_node = node.get_nodes()
+                    # Annotate the node to change index
+                    for _node in node.get_outer_nodes():
+                        _nodes: List[SchedulerNode] = _node.get_nodes()
+                        _, (group, reduction_group) = max(
+                            _nodes, key=lambda x: int(x.is_reduction())
+                        ).group
+                        call_ranges = tuple(group) + tuple(reduction_group)
+                        keep_idx_id = len(call_ranges) - 1
+                        for _snode in _nodes:
+                            if not _snode.is_reduction():
+                                users = _snode.users
+                                if any(user.node not in flatten_node for user in users):
+                                    # Skip if any node' user is outside of current OuterLoopFusedSchedulerNode
+                                    continue
+                                # Only Support torch.float32 for now
+                                _snode._use_thread_local_buf = (  # type: ignore[attr-defined]
+                                    _snode.node.layout.get_dtype() == torch.float32
+                                )
+                                # Record current node's index which will be used in codegen
+                                _snode._index_with_tl_tid = {  # type: ignore[attr-defined]
+                                    "keep_idx_id": keep_idx_id,
+                                }
+                                _snode._thread_local_buf_size = call_ranges[keep_idx_id]  # type: ignore[attr-defined]
+                                _snode._thread_local_buf_dtype = (  # type: ignore[attr-defined]
+                                    _snode.node.layout.get_dtype()
+                                )
+
                 for _node in node.get_outer_nodes():
                     assert isinstance(_node, (FusedSchedulerNode, SchedulerNode))
-                    _nodes: List[SchedulerNode] = _node.get_nodes()  # type: ignore[assignment]
                     cpp_kernel_proxy = CppKernelProxy(kernel_group)
-                    cpp_kernel_proxy.codegen_nodes(_nodes)
+                    cpp_kernel_proxy.codegen_nodes(_node.get_nodes())  # type: ignore[arg-type]
 
                     cpp_kernel_proxy_list.append(cpp_kernel_proxy)
-                    nodes_list.append(_nodes)
+                    nodes_list.append(_node.get_nodes())  # type: ignore[arg-type]
 
                 # Note that, in the future, when every kernel can be vectorized,
                 # the function select_tiling will be much easier, and we'll be able to lift
@@ -3861,6 +3962,35 @@ class CppScheduling(BaseScheduling):
                 outer_fusion_cpp_kernel_proxy = node.merge_outer_fusion_kernels(
                     cpp_kernel_proxy_list,
                 )
+                if any(
+                    getattr(node, "_use_thread_local_buf", False)
+                    for node in node.get_nodes()
+                ):
+                    kernels = outer_fusion_cpp_kernel_proxy.loop_nest.get_kernels()
+                    assert len(kernels) == 1
+                    assert isinstance(kernels[0], OuterLoopFusedKernel)
+                    outer_loop_fusion_kernel = kernels[0]
+                    outer_loop_fusion_kernel._has_thread_local_buf = True  # type: ignore[attr-defined]
+                    _thread_local_buf_size_list = [
+                        node._thread_local_buf_size  # type: ignore[attr-defined]
+                        for node in node.get_nodes()
+                        if getattr(node, "_thread_local_buf_size", False)
+                    ]
+                    assert len(_thread_local_buf_size_list) == 1
+                    outer_loop_fusion_kernel._thread_local_buf_size = (  # type: ignore[attr-defined]
+                        _thread_local_buf_size_list[0]
+                    )
+
+                    _thread_local_buf_dtype_list = [
+                        node._thread_local_buf_dtype  # type: ignore[attr-defined]
+                        for node in node.get_nodes()
+                        if getattr(node, "_thread_local_buf_dtype", False)
+                    ]
+                    assert len(_thread_local_buf_dtype_list) == 1
+                    outer_loop_fusion_kernel._thread_local_buf_dtype = (  # type: ignore[attr-defined]
+                        _thread_local_buf_dtype_list[0]
+                    )
+
                 kernel_group.finalize_kernel(
                     outer_fusion_cpp_kernel_proxy,
                     [_node for _nodes in nodes_list for _node in _nodes],
@@ -3871,6 +4001,14 @@ class CppScheduling(BaseScheduling):
                 # Outer Loop Fusion failed and fallback to norm codegen
                 self.kernel_group.args = original_kernel_group_args
                 kernel_group = self.kernel_group
+
+                # Clear the annotation for the thread_local buffer
+                for _snode in node.get_nodes():
+                    if getattr(_snode, "_use_thread_local_buf", None) is not None:
+                        delattr(_snode, "_use_thread_local_buf")
+                        delattr(_snode, "_index_with_tl_tid")
+                        delattr(_snode, "_thread_local_buf_size")
+                        delattr(_snode, "_thread_local_buf_dtype")
 
                 for _node in node.get_outer_nodes():
                     assert isinstance(_node, (FusedSchedulerNode, SchedulerNode))
@@ -4309,3 +4447,13 @@ class LoopNestWithSplit:
         if depth == 0:
             self.root = split_loops
         return split_loops
+
+    def get_kernels(self) -> List[CppKernel]:
+        """Get all kernel objects under this loop nest"""
+        if self.kernel:
+            return [self.kernel]
+        kernels: List[CppKernel] = []
+        assert self.root is not None
+        for loop in self.root:
+            kernels += loop.get_kernels()
+        return kernels
