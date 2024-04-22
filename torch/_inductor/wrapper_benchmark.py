@@ -277,13 +277,29 @@ def compiled_module_main(benchmark_name, benchmark_compiled_module_fn):
         action="store_true",
         help="Whether to profile the compiled module",
     )
+    parser.add_argument(
+        "--model",
+        "-m",
+        type=str,
+        default="noname",
+    )
+    parser.add_argument(
+        "-n",
+        type=int,
+        default=2,
+    )
     args = parser.parse_args()
 
     if args.benchmark_kernels:
         benchmark_all_kernels(benchmark_name, args.benchmark_all_configs)
     else:
-        times = 10
-        repeat = 10
+        if args.n:
+            times = args.n
+            repeat = args.n
+        else:
+            times = 10
+            repeat = 10
+        
         wall_time_ms = benchmark_compiled_module_fn(times=times, repeat=repeat) * 1000
 
         if not args.profile:
@@ -292,7 +308,12 @@ def compiled_module_main(benchmark_name, benchmark_compiled_module_fn):
         with torch.profiler.profile(record_shapes=True) as p:
             benchmark_compiled_module_fn(times=times, repeat=repeat)
 
-        path = f"{tempfile.gettempdir()}/compiled_module_profile.json"
+        # path = f"{tempfile.gettempdir()}/compiled_module_profile.json"
+        from datetime import datetime
+        current_time = datetime.now().strftime("%Y%m%d%H%M")
+        # read env profile_path
+        profile_path = os.environ.get('profile_path', "/scratch/yhao/logs/profile")
+        path = f"{profile_path}/{args.model}_profile_{current_time}.json"
         p.export_chrome_trace(path)
         print(f"Profiling result for a compiled module of benchmark {benchmark_name}:")
         print(f"Chrome trace for the profile is written to {path}")
