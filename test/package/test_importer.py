@@ -98,7 +98,7 @@ class TestImporter(PackageTestCase):
                 self._whichmodule_return = whichmodule_return
 
             def import_module(self, module_name):
-                raise NotImplementedError()
+                raise NotImplementedError
 
             def whichmodule(self, obj, name):
                 return self._whichmodule_return

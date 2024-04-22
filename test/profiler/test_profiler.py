@@ -60,6 +60,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
     run_tests,
+    serialTest,
     skipIfTorchDynamo,
     TemporaryDirectoryName,
     TemporaryFileName,
@@ -633,6 +634,7 @@ class TestExecutionTrace(TestCase):
                 found_root_node = True
         assert found_root_node
 
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/124500")
     def test_execution_trace_nested_tensor(self):
         fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
         fp.close()
@@ -771,6 +773,7 @@ class TestProfiler(TestCase):
         }.items(),
         name_fn=lambda name, thread_spec: name,
     )
+    @serialTest()
     @parametrize("work_in_main_thread", [True, False])
     def test_source_multithreaded(self, name, thread_spec, work_in_main_thread):
         """Test various threading configurations.
@@ -1077,7 +1080,7 @@ class TestProfiler(TestCase):
             stats = run_profiler(create_cuda_tensor)
             check_metrics(
                 stats,
-                "cuda_memory_usage",
+                "device_memory_usage",
                 allocs=[
                     "test_user_scope_alloc",
                     "aten::to",
@@ -1129,7 +1132,7 @@ class TestProfiler(TestCase):
             deallocs=["[memory]"],
         )
         if torch.cuda.is_available():
-            check_metrics(stats, "cuda_memory_usage", deallocs=["[memory]"])
+            check_metrics(stats, "device_memory_usage", deallocs=["[memory]"])
 
     @unittest.skipIf(
         IS_JETSON, "Jetson has a guard against OOM since host and gpu memory are shared"
@@ -1970,7 +1973,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                 try:
                     with cm:
                         x.add(y)
-                        raise ValueError()
+                        raise ValueError
                         x.relu()
                 except ValueError:
                     pass
