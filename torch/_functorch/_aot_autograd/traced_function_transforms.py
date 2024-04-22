@@ -502,7 +502,7 @@ def create_functionalized_fn(
                         # (although if the tensor was created in inference mode, it has no VC)
                         maybe_preserve_vc = nullcontext()
                         if not inpt_old.is_inference():
-                            maybe_preserve_vc = (
+                            maybe_preserve_vc = (  # type: ignore[assignment]
                                 torch.autograd._unsafe_preserve_version_counter(
                                     inpt_old
                                 )
