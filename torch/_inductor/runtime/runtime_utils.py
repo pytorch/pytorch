@@ -140,24 +140,3 @@ def red_text(msg):
 
 def blue_text(msg):
     return _color_text(msg, "blue")
-
-
-def get_first_attr(obj, *attrs):
-    """
-    Return the first available attribute or throw an exception if none is present.
-    """
-    for attr in attrs:
-        if hasattr(obj, attr):
-            return getattr(obj, attr)
-
-    raise AssertionError(f"{obj} does not has any of the attributes: {attrs}")
-
-
-try:
-    dynamo_timed = torch._dynamo.utils.dynamo_timed
-except AttributeError:  # Compile workers only have a mock version of torch
-
-    def dynamo_timed(original_function=None, phase_name=None):
-        if original_function:
-            return original_function
-        return dynamo_timed
