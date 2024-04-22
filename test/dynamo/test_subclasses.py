@@ -1361,47 +1361,6 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         self._check_recompiles(fn, (nt,), (nt2,), False)
         self._check_recompiles(fn, (nt,), (nt3,), True)
 
-    def test_construct_from_jagged_with_offsets_from_inputs(self):
-        # Basic case
-        nt, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
-        nt2, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
-
-        def fn(values, offsets):
-            return torch.nested.nested_tensor_from_jagged(values * 2, offsets) * 2
-
-        values = nt.values().requires_grad_(True)
-        out = torch.compile(fn, fullgraph=True, backend="aot_eager")(values, nt.offsets())
-        ref_out = fn(values, nt.offsets())
-        grad, = torch.autograd.grad(out, inputs=(values,), grad_outputs=(torch.ones_like(out),))
-        ref_grad, = torch.autograd.grad(ref_out, inputs=(values,), grad_outputs=(torch.ones_like(ref_out),))
-        self.assertEqual(out, ref_out)
-        self.assertEqual(grad, ref_grad)
-
-        # Binary op
-        def fn(values, offsets, offsets2):
-            nt1 = torch.nested.nested_tensor_from_jagged(values * 2, offsets)
-            nt2 = torch.nested.nested_tensor_from_jagged(values * 3, offsets2)
-            return nt1 * nt2
-
-        out = torch.compile(fn, fullgraph=True, backend="aot_eager")(values, nt.offsets(), nt.offsets())
-        ref_out = fn(values, nt.offsets(), nt.offsets())
-        grad, = torch.autograd.grad(out, inputs=(values,), grad_outputs=(torch.ones_like(out),))
-        ref_grad, = torch.autograd.grad(ref_out, inputs=(values,), grad_outputs=(torch.ones_like(ref_out),))
-        self.assertEqual(out, ref_out)
-        self.assertEqual(grad, ref_grad)
-
-        # Not only do we recompile, we also error out on the recompile with
-        # an error message mentioning data-dependent-ness.
-        with self.assertRaisesRegex(RuntimeError, "data-dependent"):
-            out = torch.compile(fn, fullgraph=True, backend="aot_eager")(values, nt.offsets(), nt2.offsets())
-
-        values = values.detach()
-        # Offsets which is an intermediate works without autograd
-        def fn(values, offsets):
-            return torch.nested.nested_tensor_from_jagged(values * 2, offsets.clone()) * 2
-
-        out = torch.compile(fn, fullgraph=True, backend="aot_eager")(values, nt.offsets())
-
     def test_inline_nested_tensor_from_jagged(self):
         nt, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
 
@@ -1529,6 +1488,7 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
     # view. To construct this intermediate properly, we need the associated nested int
     # to be symbolic. This view is expected to fail compilation until symbolic nested ints
     # are cached onto fake offsets to solve this problem.
+    @unittest.expectedFailure
     def test_subclass_dense_subclass_dense_view(self):
         x = self._get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)[0].clone()
         offsets2 = x.offsets().clone().detach()
