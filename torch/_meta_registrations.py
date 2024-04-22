@@ -6088,10 +6088,11 @@ def meta_bucketize(self, boundaries, *, out_int32=False, right=False):
 @out_wrapper()
 def meta_histc(input, bins=100, min=0, max=0):
     fn_name = "histc()"
-    torch._check(
-        input.is_floating_point(),
-        lambda: f"{fn_name}: input tensor must have a float dtype, not {input.dtype}",
-    )
+    if device_hint(input) == "cpu":
+        torch._check(
+            input.is_floating_point(),
+            lambda: f"\"histogram_cpu\" not implemented for '{input.dtype}'",
+        )
     torch._check(
         isinstance(bins, IntLike),
         lambda: f"{fn_name}: argument 'bins' must be int, not {type(bins)}",

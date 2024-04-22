@@ -740,7 +740,6 @@ meta_function_device_expected_failures['cuda'] = {
     torch.functional.unique: {f16},  # aten::_unique2, aten::unique_dim
     torch.functional.unique_consecutive: {f16},  # aten::unique_consecutive
     torch.geqrf: {f32, f64},  # aten::geqrf
-    torch.histc: {i16, i32, i64, i8},  # aten::histc, aten::histc.out
     torch.kthvalue: {f16},  # aten::kthvalue.values
 }
 
@@ -888,8 +887,6 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten._use_cudnn_ctc_loss.Tensor: {f32, f64},  # aten::_use_cudnn_ctc_loss.Tensor
     aten.cudnn_grid_sampler.default: {f16, f32, f64},  # aten::cudnn_grid_sampler
     aten.geqrf.default: {f32, f64},  # aten::geqrf
-    aten.histc.default: {i16, i32, i64, i8},  # aten::histc
-    aten.histc.out: {i16, i32, i64, i8},  # aten::histc.out
     aten.kthvalue.default: {f16},  # aten::kthvalue.values
     aten.linalg_eigvalsh.out: {f32, f64},  # aten::linalg_eigvalsh.out
     aten.log_sigmoid_forward.default: {bf16, f16, f64, f32},
