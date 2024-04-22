@@ -1,4 +1,3 @@
-#include <ATen/DeviceAccelerator.h>
 #include <c10/util/Optional.h>
 #include <fmt/core.h>
 #include <sys/types.h>
@@ -16,12 +15,10 @@
 #include <ATen/Parallel.h>
 #include <ATen/Utils.h>
 #include <ATen/core/Vitals.h>
-#include <ATen/detail/AcceleratorHooksInterface.h>
 #include <ATen/dlpack.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/ForeachUtils.h>
 #include <ATen/native/Normalization.h>
-#include <c10/core/Device.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/util/AbortHandler.h>
 #include <c10/util/Backtrace.h>
@@ -42,7 +39,6 @@
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/DynamicTypes.h>
-#include <torch/csrc/Event.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/MemoryFormat.h>
@@ -74,7 +70,6 @@
 #include <torch/csrc/lazy/python/init.h>
 #include <torch/csrc/monitor/python_init.h>
 #include <torch/csrc/mps/Module.h>
-#include <torch/csrc/mtia/Module.h>
 #include <torch/csrc/multiprocessing/init.h>
 #include <torch/csrc/onnx/init.h>
 #include <torch/csrc/profiler/python/init.h>
@@ -1608,7 +1603,6 @@ PyObject* initModule() {
   THPQScheme_init(module);
   THPDevice_init(module);
   THPStream_init(module);
-  THPEvent_init(module);
   ASSERT_TRUE(THPVariable_initModule(module));
   ASSERT_TRUE(THPFunction_initModule(module));
   ASSERT_TRUE(THPEngine_initModule(module));
@@ -1644,7 +1638,6 @@ PyObject* initModule() {
 #ifdef USE_XPU
   torch::xpu::initModule(module);
 #endif
-  torch::mtia::initModule(module);
   torch::cpu::initModule(module);
   torch::initVerboseBindings(module);
   ASSERT_TRUE(THPStorage_init(module));
@@ -1939,70 +1932,6 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def("_get_linalg_preferred_backend", []() {
     return at::globalContext().linalgPreferredBackend();
   });
-
-  py_module.def("_accelerator_hooks_device_count", []() {
-    auto device_type = at::getAccelerator();
-    if (device_type.has_value()) {
-      return at::globalContext()
-          .getAcceleratorHooksInterface(device_type.value())
-          .deviceCount();
-    }
-    return c10::DeviceIndex(-1);
-  });
-
-  py_module.def(
-      "_accelerator_hooks_set_current_device",
-      [](c10::DeviceIndex device_index) {
-        auto device_type = at::getAccelerator();
-        if (device_type.has_value()) {
-          at::globalContext()
-              .getAcceleratorHooksInterface(device_type.value())
-              .setCurrentDevice(device_index);
-        }
-      });
-
-  py_module.def("_accelerator_hooks_get_current_device", []() {
-    auto device_type = at::getAccelerator();
-    if (device_type.has_value()) {
-      return at::globalContext()
-          .getAcceleratorHooksInterface(device_type.value())
-          .getCurrentDevice();
-    }
-    return c10::DeviceIndex(-1);
-  });
-
-  py_module.def(
-      "_accelerator_hooks_exchange_device", [](c10::DeviceIndex device_index) {
-        auto device_type = at::getAccelerator();
-        if (device_type.has_value()) {
-          return at::globalContext()
-              .getAcceleratorHooksInterface(device_type.value())
-              .exchangeDevice(device_index);
-        }
-        return c10::DeviceIndex(-1);
-      });
-
-  py_module.def(
-      "_accelerator_hooks_maybe_exchange_device",
-      [](c10::DeviceIndex device_index) {
-        auto device_type = at::getAccelerator();
-        if (device_type.has_value()) {
-          return at::globalContext()
-              .getAcceleratorHooksInterface(device_type.value())
-              .maybeExchangeDevice(device_index);
-        }
-        return c10::DeviceIndex(-1);
-      });
-
-  py_module.def(
-      "_get_accelerator",
-      [](c10::optional<bool> check = c10::nullopt) {
-        return c10::Device(
-            at::getAccelerator(check.value_or(false))
-                .value_or(c10::DeviceType::CPU),
-            -1);
-      },
-      py::arg("check") = nullptr);
 
   py_module.def(
       "_construct_storage_from_data_pointer",

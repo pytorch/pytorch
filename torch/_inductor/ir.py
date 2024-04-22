@@ -8,7 +8,6 @@ import re
 import textwrap
 import traceback
 from contextlib import nullcontext
-from enum import Enum
 from functools import partial
 from typing import (
     Any,
@@ -61,6 +60,8 @@ from .dependencies import (
     var_builder,
 )
 from .ops_handler import OpCounterCSE
+from .runtime.hints import ReductionHint
+from .runtime.runtime_utils import do_bench
 from .utils import (
     argsort,
     cache_on_self,
@@ -68,7 +69,6 @@ from .utils import (
     convert_shape_to_inductor,
     convert_shape_to_symint,
     developer_warning,
-    do_bench,
     get_kernel_metadata,
     is_dynamic,
     is_gpu,
@@ -531,18 +531,6 @@ class Scatter(Pointwise):
             loader(vars),
             mode=self.scatter_mode,
         )
-
-
-class ReductionHint(Enum):
-    INNER = 0
-    OUTER = 1
-    OUTER_TINY = 2
-    DEFAULT = 3
-
-
-class TileHint(Enum):
-    SQUARE = 0
-    DEFAULT = 1
 
 
 REDUCTION_COMBINE_FN = {
@@ -3634,9 +3622,34 @@ class TemplateBuffer(Buffer):
 
 
 class TritonTemplateBuffer(TemplateBuffer):
-    def __init__(self, layout, inputs, make_kernel_render, debug_extra=None):
+    def __init__(
+        self,
+        layout,
+        inputs,
+        make_kernel_render,
+        debug_extra=None,
+        mutated_inputs: Optional[Iterable[IRNode]] = None,
+    ):
+        """
+        NOTE:[TritonTemplates with multiple outputs]
+        We want the ability for TritonTemplates to output multiple tensors. Triton
+        kernels have no notion of outputs and this is done by creating tensors that
+        are then mutated by the kernel. Currenlty our STORE_OUTPUT codegen doesn't
+        support creating multinode outputs for triton templates.
+        We work around this by creating an extra input buffer during the lowering
+        and we mark them as mutated inputs.
+        """
         super().__init__(layout, inputs, make_kernel_render)
         self.debug_extra = debug_extra
+        self.mutated_inputs = mutated_inputs
+        if mutated_inputs is not None:
+            # Ensure that the mutated inputs are only allowed for certain nodes
+            allowed_set = {"templated_attention"}
+            current_node = str(V.graph.current_node)
+            assert (
+                current_node in allowed_set
+            ), f"Mutated inputs are only allowed for {allowed_set} but got {current_node}"
+            mark_node_as_mutating(self, *mutated_inputs)
 
     def __str__(self):
         out = f"TritonTemplateBuffer(layout={self.layout}, {self.debug_extra})"
@@ -4625,6 +4638,9 @@ class UserDefinedTritonKernel(ExternKernel):
         return set()
 
     def get_mutation_names(self):
+        # NB: Inductor only allows a node to mutate 0 or 1 buffers.
+        # To get around that, we create MutationOutputs which marks their
+        # assigned input as mutable, thus, adhering to Inductor's constraint.
         return []
 
     def __init__(self, *, kernel_idx, grid, kernel_args):
@@ -4654,27 +4670,36 @@ class UserDefinedTritonKernel(ExternKernel):
         self.kernel_idx = kernel_idx
         self.grid = grid
 
-        kernel, _ = self.get_kernel_and_configs()
+        kernel, configs = self.get_kernel_and_configs()
         # If we are autotuning, not all arguments will be passed
         self.ordered_kwargs_for_cpp_kernel = [
             arg for arg in kernel.arg_names if arg in kernel_args
         ]
 
-        mark_node_as_mutating(
-            self, *[a for a in kernel_args.values() if isinstance(a, TensorBox)]
-        )
+        from torch._higher_order_ops.triton_kernel_wrap import identify_mutated_tensors
+
+        autotuned_kwargs = configs[0].kwargs if len(configs) > 0 else {}
+        self.mutable_args = [
+            kernel_args[key]
+            for key in identify_mutated_tensors(
+                kernel, {**kernel_args, **autotuned_kwargs}
+            )
+        ]
+        mark_node_as_mutating(self, *self.mutable_args)
 
     def get_inputs_that_alias_output(self):
-        return [i.get_name() for i in self.inputs]
+        return [i.get_name() for i in self.mutable_args]
 
 
-def mark_node_as_mutating(cur_buffer, *mutated_ops):
+def mark_node_as_mutating(cur_buffer, *mutated_ops: IRNode):
     """
     Allows ops in mutated_ops to be marked as being mutated as well as
     indicates to the scheduler that these ops depend on cur_buffer.
     """
     for op in mutated_ops:
-        assert isinstance(op, IRNode), op
+        assert isinstance(
+            op, IRNode
+        ), f"{op} op is type {type(op)} and is not an IRNode"
         V.graph.mark_buffer_mutated(op.get_name())
         assert hasattr(op, "layout")
         MutationOutput(op.layout, op, cur_buffer)
