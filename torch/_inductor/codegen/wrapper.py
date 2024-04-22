@@ -684,15 +684,22 @@ class WrapperCodeGen(CodeGen):
         )
 
     def generate_scatter_fallback(
-        self, output, inputs, kernel, python_kernel_name, src_is_tensor, reduce, kwargs
+        self,
+        output,
+        inputs,
+        cpp_kernel_name,
+        python_kernel_name,
+        src_is_tensor,
+        reduce,
+        kwargs,
     ):
-        line = f"{kernel}({','.join(map(str, inputs))}"
-        if kernel == "aten.scatter_":
+        line = f"{python_kernel_name}({','.join(map(str, inputs))}"
+        if python_kernel_name.startswith("aten.scatter_reduce"):
+            line += ", ".join([""] + kwargs)
+        else:
             if reduce:
                 line += f", reduce={repr(reduce)}"
-        else:
-            line += ", ".join([""] + kwargs)
-        line += f"){self.ending}"
+        line += ")"
         self.writeline(line)
 
     def generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
