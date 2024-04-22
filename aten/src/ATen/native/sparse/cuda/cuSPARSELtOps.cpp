@@ -68,8 +68,8 @@ at::Tensor _cslt_compress(const Tensor& sparse_input)
         case at::ScalarType::BFloat16:
             type = sparseLtDataTypes.at("CUDA_R_16BF";
             break;
-#ifndef USE_ROCM
-    case at::ScalarType::Float:
+#ifndf USE_ROCM
+        case at::ScalarType::Float:
             type = sparseLtDataTypes.at("CUDA_R_32F");
             break;
 #endif
@@ -443,5 +443,19 @@ int64_t _cslt_sparse_mm_search(
 }
 
 } // namespace at::native
+
+#ifdef USE_ROCM
+
+static bool isSupportedHipSparseLtArch(int idx) {
+    hipDeviceProp_t prop = at::cuda::getCurrentDeviceProperties(idx);
+    std::string_view arch = prop.gcnArchName;
+    constexpr std::set<std::string> supported_archs = {"gfx942"};
+    if (supported_archs.find(arch) == supported_archs.end()) {
+        TORCH_CHECK(false, "hipSPARSELt not supported on your machine.");
+    }
+    return true;
+}
+
+#endif
 
 #endif
