@@ -136,7 +136,7 @@ def _collate_helper(conversion, item):
     # TODO(VitalyFedyunin): Verify that item is any sort of batch
     if len(item.items) > 1:
         # TODO(VitalyFedyunin): Compact all batch dataframes into one
-        raise Exception("Only supports one DataFrame per batch")
+        raise Exception("Only supports one DataFrame per batch")  # noqa: TRY002
     df = item[0]
     columns_name = df_wrapper.get_columns(df)
     tuple_names: List = []
@@ -144,12 +144,12 @@ def _collate_helper(conversion, item):
 
     for name in conversion.keys():
         if name not in columns_name:
-            raise Exception("Conversion keys missmatch")
+            raise Exception("Conversion keys missmatch")  # noqa: TRY002
 
     for name in columns_name:
         if name in conversion:
             if not callable(conversion[name]):
-                raise Exception('Collate (DF)DataPipe requires callable as dict values')
+                raise Exception('Collate (DF)DataPipe requires callable as dict values')  # noqa: TRY002
             collation_fn = conversion[name]
         else:
             # TODO(VitalyFedyunin): Add default collation into df_wrapper
@@ -157,7 +157,7 @@ def _collate_helper(conversion, item):
                 import torcharrow.pytorch as tap  # type: ignore[import]
                 collation_fn = tap.rec.Default()
             except Exception as e:
-                raise Exception("unable to import default collation function from the TorchArrow") from e
+                raise Exception("unable to import default collation function from the TorchArrow") from e  # noqa: TRY002
 
         tuple_names.append(str(name))
         value = collation_fn(df[name])

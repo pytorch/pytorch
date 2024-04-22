@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/BlasBackend.h>
 #include <ATen/CPUGeneratorImpl.h>
 #include <ATen/DeviceAccelerator.h>
 #include <ATen/LinalgBackend.h>
@@ -68,8 +69,6 @@ class TORCH_API Context {
       return at::detail::getMPSHooks();
     } else if (device_type == at::kPrivateUse1) {
       return at::detail::getPrivateUse1Hooks();
-    } else if (device_type == at::kMTIA) {
-      return at::detail::getMTIAHooks();
     } else {
       AT_ERROR(
           c10::DeviceTypeName(device_type), " device type not an accelerator.");
@@ -122,6 +121,9 @@ class TORCH_API Context {
   static bool hasCuSOLVER() {
     return detail::getCUDAHooks().hasCuSOLVER();
   }
+  static bool hasCuBLASLt() {
+    return detail::getCUDAHooks().hasCuBLASLt();
+  }
   static bool hasHIP() {
     return detail::getHIPHooks().hasHIP();
   }
@@ -153,9 +155,6 @@ class TORCH_API Context {
   }
   void lazyInitXPU() {
     c10::call_once(thx_init, [&] { detail::getXPUHooks().initXPU(); });
-  }
-  void lazyInitMTIA() {
-    c10::call_once(th_mtia_init, [&] { detail::getMTIAHooks().initMTIA(); });
   }
   void lazyInitPrivateUse1() {
     c10::call_once(thp_init, [&] {
@@ -212,6 +211,9 @@ class TORCH_API Context {
 
   at::LinalgBackend linalgPreferredBackend() const;
   void setLinalgPreferredBackend(at::LinalgBackend);
+
+  at::BlasBackend blasPreferredBackend() const;
+  void setBlasPreferredBackend(at::BlasBackend);
 
   // Note [Enabling Deterministic Operations]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -347,7 +349,6 @@ class TORCH_API Context {
   c10::once_flag thc_init;
   c10::once_flag thh_init;
   c10::once_flag thx_init;
-  c10::once_flag th_mtia_init;
   c10::once_flag thp_init;
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
@@ -377,6 +378,11 @@ class TORCH_API Context {
       c10::utils::check_env("TORCH_LINALG_PREFER_CUSOLVER") == true
       ? at::LinalgBackend::Cusolver
       : at::LinalgBackend::Default;
+  at::BlasBackend blas_preferred_backend =
+      (c10::utils::check_env("TORCH_BLAS_PREFER_CUBLASLT") == true ||
+       c10::utils::check_env("TORCH_BLAS_PREFER_HIPBLASLT") == true)
+      ? at::BlasBackend::Cublaslt
+      : at::BlasBackend::Cublas;
 #ifdef C10_MOBILE
   bool release_original_weights = true;
 #else
