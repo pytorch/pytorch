@@ -250,6 +250,7 @@ def _parse_legacy_records(thread_records):
                         entry for entry in start.stack() if _filter_stack_entry(entry)
                     ],
                     scope=start.scope(),
+                    use_device="cuda" if start.has_cuda() else None,
                     cpu_memory_usage=cpu_memory_usage,
                     device_memory_usage=cuda_memory_usage,
                     is_async=is_async,
