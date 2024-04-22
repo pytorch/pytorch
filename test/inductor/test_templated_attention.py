@@ -4,7 +4,7 @@ import functools
 from collections import namedtuple
 from typing import Callable
 
-from unittest import skipUnless
+from unittest import skip, skipUnless
 from unittest.mock import patch
 
 import torch
@@ -239,28 +239,28 @@ class TestTemplatedSDPA(InductorTestCase):
 
         self.run_test(bias_mod, dtype)
 
-    # @supported_platform
-    # @expectedFailure  # Triton bug?
-    # @common_utils.parametrize("dtype", test_dtypes)
-    # def test_njt_causal(self, dtype):
-    #     offsets = torch.tensor(
-    #         [0, 1024, 1024 + 512, S], device="cuda", dtype=torch.int32
-    #     )
-    #     seq_idx = torch.zeros(S, device="cuda", dtype=torch.int32)
-    #     for idx in range(len(offsets) - 1):
-    #         seq_idx[offsets[idx] : offsets[idx + 1]] = idx
+    @supported_platform
+    @skip("Triton bug ")  # https://github.com/pytorch/pytorch/issues/124571
+    @common_utils.parametrize("dtype", test_dtypes)
+    def test_njt_causal(self, dtype):
+        offsets = torch.tensor(
+            [0, 1024, 1024 + 512, S], device="cuda", dtype=torch.int32
+        )
+        seq_idx = torch.zeros(S, device="cuda", dtype=torch.int32)
+        for idx in range(len(offsets) - 1):
+            seq_idx[offsets[idx] : offsets[idx + 1]] = idx
 
-    #     def create_njt_wrapper(orig_score_mod, offsets, seq_idx):
-    #         def njt_score_mod(qk, b, h, q, kv):
-    #             q_nested = q - index(offsets, [index(seq_idx, [q])])
-    #             kv_nested = kv - index(offsets, [index(seq_idx, [kv])])
-    #             return orig_score_mod(qk, b, h, q_nested, kv_nested)
+        def create_njt_wrapper(orig_score_mod, offsets, seq_idx):
+            def njt_score_mod(qk, b, h, q, kv):
+                q_nested = q - index(offsets, [index(seq_idx, [q])])
+                kv_nested = kv - index(offsets, [index(seq_idx, [kv])])
+                return orig_score_mod(qk, b, h, q_nested, kv_nested)
 
-    #         return njt_score_mod
+            return njt_score_mod
 
-    #     causal_njt = create_njt_wrapper(_causal_mod, offsets, seq_idx)
+        causal_njt = create_njt_wrapper(_causal_mod, offsets, seq_idx)
 
-    #     self.run_test(causal_njt, dtype)
+        self.run_test(causal_njt, dtype)
 
     @supported_platform
     def test_backwards_fails(self):
