@@ -33,12 +33,6 @@ from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.overrides import handle_torch_function, has_torch_function
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
-prim = torch.library.Library("prims", "DEF")
-prim_impl = torch.library.Library("prims", "IMPL", "CompositeExplicitAutograd")
-prim_backend_select_impl = torch.library.Library("prims", "IMPL", "BackendSelect")
-prim_autograd_impl = torch.library.Library("prims", "IMPL", "Autograd")
-prim_meta_impl = torch.library.Library("prims", "IMPL", "Meta")
-
 # Experimental module containing prototype "primitive" operations.
 
 __all__ = [
@@ -270,14 +264,13 @@ def _make_prim(
     meta: Callable,
     impl_aten: Callable,
     doc: str,
+    mutates_args: Sequence[str] = (),
     tags: Optional[Sequence[torch.Tag]] = None,
 ):
     """
     Creates a primitive operation.
 
     """
-
-    prim.define(schema, tags=torch.Tag.pt2_compliant_tag)
 
     def _prim_impl(*args, **kwargs):
         # always run the meta function because aten implementation will
@@ -302,9 +295,15 @@ def _make_prim(
             return _prim_impl(*args, **kwargs)
 
     name = schema.split("(")[0]
-    prim_impl.impl(name, _prim_impl)
-    prim_autograd_impl.impl(name, _autograd_impl)
-    prim_meta_impl.impl(name, meta)
+    schema = schema[len(name) :]
+
+    prim_def = torch.library.custom_op(
+        "prims::" + name,
+        _prim_impl,
+        mutates_args=mutates_args,
+        schema=schema,
+    )
+    prim_def.register_fake(meta)
 
     _prim_packet = getattr(torch._ops.ops.prims, name)
     _prim = _prim_packet.default
@@ -319,7 +318,7 @@ def _make_prim(
         # See https://github.com/pytorch/pytorch/issues/103532
         "prims.device_put.default"
     ]:
-        prim_backend_select_impl.impl(name, _backend_select_impl)
+        prim_def.register_kernel("backend_select", _backend_select_impl)
 
     for p in (_prim_packet, _prim):
         p.__doc__ = doc
@@ -1206,6 +1205,7 @@ _as_strided_doc = """
 
 as_strided = _make_prim(
     schema="as_strided(Tensor(a!) a, SymInt[] size, SymInt[] stride, SymInt storage_offset) -> Tensor(a!)",
+    mutates_args=("a",),
     meta=_as_strided_meta,
     impl_aten=_as_strided_aten,
     return_type=RETURN_TYPE.VIEW,
@@ -1276,7 +1276,7 @@ def _broadcast_in_dim_aten(a, shape, broadcast_dimensions):
     for broadcast_dimension in broadcast_dimensions:
         s[broadcast_dimension] = -1
 
-    v = a
+    v = a.clone()
     for idx, x in enumerate(s):
         if x != -1:
             v = v.unsqueeze(idx)
@@ -1400,7 +1400,7 @@ def _collapse_view_meta(a: TensorLikeType, start: int, end: int) -> TensorLikeTy
 
 def _collapse_view_aten(a: Tensor, start: int, end: int) -> Tensor:
     new_shape = _collapsed_shape(a.shape, start, end)
-    return a.view(new_shape)
+    return a.clone().view(new_shape)
 
 
 _collapse_view_doc = """
@@ -1688,7 +1688,7 @@ def _split_dim_aten(a: Tensor, dim: int, outer_length: int) -> Tensor:
     inner_length = a.shape[dim] // outer_length
     new_shape = a.shape[0:dim] + (outer_length, inner_length) + a.shape[dim + 1 :]
 
-    return a.view(new_shape)
+    return a.clone().view(new_shape)
 
 
 _split_dim_doc = """
@@ -1762,7 +1762,7 @@ def _transpose_meta(a: TensorLikeType, permutation: DimsSequenceType) -> TensorL
 
 
 def _transpose_aten(a: Tensor, permutation: DimsSequenceType) -> Tensor:
-    return torch.permute(a, permutation)
+    return torch.permute(a, permutation).clone()
 
 
 _transpose_doc = """
@@ -2219,7 +2219,7 @@ def _copy_to_meta(a: TensorLikeType, b: TensorLikeType):
 
 
 def _copy_to_aten(a: Tensor, b: Tensor) -> Tensor:
-    return a.copy_(b)
+    return a.copy_(b).clone()
 
 
 _copy_to_doc = """
@@ -2229,6 +2229,7 @@ _copy_to_doc = """
 # TODO: Remove safe casting and implement on reference instead
 copy_to = _make_prim(
     schema="copy_to(Tensor(a!) a, Tensor b) -> Tensor(a!)",
+    mutates_args=("a",),
     meta=_copy_to_meta,
     impl_aten=_copy_to_aten,
     return_type=RETURN_TYPE.INPLACE,
@@ -2292,6 +2293,7 @@ _resize_doc = """
 # TODO: review support arbitrary resizes
 resize = _make_prim(
     schema="resize(Tensor(a!) a, SymInt[] shape) -> Tensor(a!)",
+    mutates_args=("a",),
     meta=_resize_meta,
     impl_aten=_resize_aten,
     return_type=RETURN_TYPE.INPLACE,
@@ -2363,7 +2365,7 @@ def _make_reduction_prim(name: str, impl_aten, doc):
 def _make_var_reduction_prim(name: str, impl_aten, doc):
     """Creates a reduction prim."""
     return _make_prim(
-        schema=f"{name}(Tensor inp, int[]? dims, *, float correction, ScalarType? output_dtype=None) -> Tensor",
+        schema=f"{name}(Tensor inp, int[]? dims, float? correction=1, *, ScalarType? output_dtype=None) -> Tensor",
         meta=_var_reduction_meta,
         impl_aten=impl_aten,
         return_type=RETURN_TYPE.NEW,
@@ -2415,9 +2417,15 @@ prod = _make_reduction_prim(
     doc=_prod_doc,
 )
 
+
+# torch.var, but correction is not kwarg-only
+def torch_var(input, dim=None, correction=1, **kwargs):
+    return torch.var(input, dim=dim, correction=correction, **kwargs)
+
+
 var = _make_var_reduction_prim(
     name="var",
-    impl_aten=torch.var,
+    impl_aten=torch_var,
     doc=_var_doc,
 )
 
