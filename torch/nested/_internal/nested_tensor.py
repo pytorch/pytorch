@@ -5,6 +5,8 @@ from torch._C import DispatchKey, DispatchKeySet
 from torch._prims_common import is_expandable_to
 from torch.fx.experimental.symbolic_shapes import has_free_symbols
 from torch.utils.weak import WeakTensorKeyDictionary
+from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.functional_tensor import FunctionalTensor
 from typing import *  # noqa: F403
 
 _tensor_id_counter = 0
@@ -15,11 +17,19 @@ def get_tensor_symint(tensor, *, coeff=1):
     global _tensor_id_counter
     tensor_symint = _tensor_symint_registry.get(tensor)
     if tensor_symint is None:
-        tensor_symint = torch._C._get_nested_int(_tensor_id_counter, coeff)
-        _tensor_id_counter += 1
-        _tensor_symint_registry[tensor] = tensor_symint
-    return tensor_symint
+        if isinstance(tensor, FunctionalTensor):
+            tensor = torch._from_functional_tensor(tensor.elem)
+            return get_tensor_symint(tensor, coeff=coeff)
+        elif isinstance(tensor, FakeTensor):
+            shape_env = tensor.fake_mode.shape_env
+            tensor_symint = shape_env.create_unbacked_symint()
+            # Do we need to constrain as size?
+        else:
+            tensor_symint = torch._C._get_nested_int(_tensor_id_counter, coeff)
+            _tensor_id_counter += 1
+        _tensor_symint_registry[tensor] = tensor_symint     # cache the symint
 
+    return tensor_symint
 
 # SDPA metadata; max / min seqlens are needed for e.g. flash
 def _get_sdpa_extreme_seqlen(func, tensor):
@@ -190,7 +200,10 @@ class NestedTensor(torch.Tensor):
         # during aot autograd, FunctionalTensors are not fake but hold
         # symbolic sizes.
         ragged_source = offsets if lengths is None else lengths
-        if has_free_symbols(ragged_source) or has_free_symbols(values):
+
+        # If we are constructing a NestedTensor from within the graph, the
+        # values may not be dynamic. TODO: what would happen in this case?
+        if isinstance(values, FakeTensor) or isinstance(values, FunctionalTensor):
             # Associate offsets or lengths (possibly fake, possibly functionalized)
             # with the ragged_size.
             ragged_size = outer_size[ragged_idx]
