@@ -1238,4 +1238,4 @@ class _Ops(types.ModuleType):
 
 
 # The ops "namespace"
-ops: _Ops = _Ops()
+ops = _Ops()

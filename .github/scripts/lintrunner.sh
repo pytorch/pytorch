@@ -35,7 +35,7 @@ rm -f lint.json
 
 RC=0
 # Run lintrunner on all files
-if ! lintrunner --force-color --all-files --tee-json=lint.json ${ADDITIONAL_LINTRUNNER_ARGS}; then
+if ! lintrunner --force-color --all-files --tee-json=lint.json ${ADDITIONAL_LINTRUNNER_ARGS} 2> /dev/null; then
     echo ""
     echo -e "\e[1m\e[36mYou can reproduce these results locally by using \`lintrunner -m origin/main\`. (If you don't get the same results, run \'lintrunner init\' to update your local linter)\e[0m"
     echo -e "\e[1m\e[36mSee https://github.com/pytorch/pytorch/wiki/lintrunner for setup instructions.\e[0m"
