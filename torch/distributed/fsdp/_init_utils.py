@@ -1094,24 +1094,6 @@ def _sync_module_params_and_buffers(
     )
 
 
-def _sync_module_states(
-    params: List[nn.Parameter],
-    buffers: List[torch.Tensor],
-    process_group: dist.ProcessGroup,
-) -> None:
-    # Assumes that each call to this method passes in disjoint `params` and
-    # and `buffers` across calls, so there is no chance of re-synchronizing
-    params_and_buffers = [param.detach() for param in params] + [
-        buffer.detach() for buffer in buffers
-    ]
-    _check_module_states_for_sync_module_states(params_and_buffers)
-    _sync_params_and_buffers(
-        process_group,
-        params_and_buffers,
-        PARAM_BROADCAST_BUCKET_SIZE,
-        src=0,
-    )
-
 
 def _check_module_states_for_sync_module_states(
     module_states: List[torch.Tensor],
