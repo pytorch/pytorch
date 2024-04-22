@@ -457,9 +457,7 @@ def getattr_on_nn_module(
             key_source = f"list({l1_source}.keys())[{index!r}]"
             l1_mgr.get_key_manager(
                 index=index, source=key_source, example_value=l2_key
-            ).add_equals_match_guard(
-                l2_key, [f"{key_source} == {l2_key!r}"]
-            )
+            ).add_equals_match_guard(l2_key, [f"{key_source} == {l2_key!r}"])
 
             # Install the value manager
             l2_mgr = l1_mgr.get_value_manager(
