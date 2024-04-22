@@ -8,6 +8,7 @@ cpu_supported_platforms = [
     "ovr_config//os:macos",
     "ovr_config//os:windows-x86_64",
     "ovr_config//runtime:arm64-linux-ubuntu-neon",
+    "ovr_config//os:linux-arm64",
 ]
 
 cuda_supported_platforms = [
