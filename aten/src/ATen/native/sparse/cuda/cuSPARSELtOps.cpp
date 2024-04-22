@@ -449,7 +449,7 @@ int64_t _cslt_sparse_mm_search(
 static bool isSupportedHipSparseLtArch(int idx) {
     hipDeviceProp_t prop = at::cuda::getCurrentDeviceProperties(idx);
     std::string_view arch = prop.gcnArchName;
-    constexpr std::set<std::string> supported_archs = {"gfx942"};
+    constexpr std::set<std::string> supported_archs = {"gfx940", "gfx941", "gfx942", "gfx1200", "gfx1201"};
     if (supported_archs.find(arch) == supported_archs.end()) {
         TORCH_CHECK(false, "hipSPARSELt not supported on your machine.");
     }
