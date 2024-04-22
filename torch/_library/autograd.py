@@ -1,7 +1,7 @@
 import dataclasses
 from typing import Any, Callable, Optional, Protocol
 
-from .. import _C, _ops, autograd, Tensor
+from .. import _C, _library, _ops, autograd, Tensor
 
 from ..utils import _pytree
 from . import utils
@@ -16,6 +16,22 @@ class InfoProtocol(Protocol):
 class Info:
     _backward_fn: Optional[Callable]
     _setup_context_fn: Optional[Callable]
+
+
+def check_can_register_autograd(op: _ops.OpOverload) -> None:
+    schema = op._schema
+    if not _library.utils.is_functional_schema(schema):
+        raise RuntimeError(
+            f"register_autograd: Cannot register autograd formula for "
+            f"non-functional operator with schema {schema}. Please create "
+            f"a functional operator and register an autograd formula for that."
+        )
+
+    if any(a.kwarg_only for a in op._schema.arguments):
+        raise NotImplementedError(
+            f"register_autograd for ops with kwarg-only args (got: {op._schema}). "
+            f"As a workaround, don't use kwarg-only args."
+        )
 
 
 def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:

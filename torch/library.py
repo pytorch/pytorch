@@ -668,13 +668,7 @@ def register_autograd(op: _op_identifier, backward: Callable, /, *, setup_contex
     assert isinstance(op, str)
     qualname = op
     op = torch._library.utils.lookup_op(qualname)
-    schema = op._schema
-    if not _library.utils.is_functional_schema(schema):
-        raise RuntimeError(
-            f"Cannot register autograd formula for non-functional operator "
-            f"{op} with schema {schema}. Please create "
-            f"a functional operator and register an autograd formula for that."
-        )
+    torch._library.autograd.check_can_register_autograd(op)
 
     info = _library.autograd.Info(backward, setup_context)
     autograd_kernel = _library.autograd.make_autograd_impl(op, info)

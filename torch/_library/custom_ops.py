@@ -401,14 +401,7 @@ class CustomOpDef:
             >>> assert torch.allclose(grad_x, x.cos())
 
         """
-        schema = self._opoverload._schema
-        if not _library.utils.is_functional_schema(schema):
-            raise RuntimeError(
-                f"Cannot register autograd formula for non-functional operator "
-                f"{self} with schema {schema}. Please create "
-                f"a functional operator and register an autograd formula for that."
-            )
-
+        _library.autograd.check_can_register_autograd(self._opoverload)
         self._backward_fn = backward
         self._setup_context_fn = setup_context
 
