@@ -32,7 +32,12 @@ def synchronize() -> None:
 
 
 def get_rng_state(device: Union[int, str, torch.device] = "mps") -> Tensor:
-    r"""Returns the random number generator state as a ByteTensor."""
+    r"""Returns the random number generator state as a ByteTensor.
+
+    Args:
+        device (torch.device or int, optional): The device to return the RNG state of.
+            Default: ``'mps'`` (i.e., ``torch.device('mps')``, the current MPS device).
+    """
     return _get_default_mps_generator().get_state()
 
 
@@ -43,6 +48,8 @@ def set_rng_state(
 
     Args:
         new_state (torch.ByteTensor): The desired state
+        device (torch.device or int, optional): The device to set the RNG state.
+            Default: ``'mps'`` (i.e., ``torch.device('mps')``, the current MPS device).
     """
     new_state_copy = new_state.clone(memory_format=torch.contiguous_format)
     _get_default_mps_generator().set_state(new_state_copy)
