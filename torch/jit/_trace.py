@@ -300,6 +300,32 @@ def indent(s):
     return "\n".join(["\t" + line for line in s.splitlines()])
 
 
+@contextlib.contextmanager
+def patch_forward(obj: torch.nn.Module, new_method):
+    """Helper method to make it easier to cleanly torch.export() a method on a
+    module that is not `forward`.
+
+    TODO(suo): upstream this to torch.export.wrapper.
+    """
+    # Save the original method
+    original_method = obj.forward
+
+    # Patch the method
+    obj.forward = new_method.__get__(obj, obj.__class__)
+
+    try:
+        yield
+    finally:
+        # Restore the original method
+        obj.forward = original_method
+
+
+class WrapperModule(torch.nn.Module):
+    def __init__(self, f):
+        super().__init__()
+        self.forward = f
+
+
 class TracingCheckError(Exception):
     def __init__(self, graph_diff_error, tensor_compare_error, extra_msg=None):
         self.message = "Tracing failed sanity checks!\n"
@@ -988,8 +1014,39 @@ def trace(
         result_traced = traced_func(*export_example_inputs, **example_kwarg_inputs)
         if not torch.allclose(result_exported, result_traced):
             raise RuntimeError("Accuracy error")
+
+    elif isinstance(traced_func, torch._C.ScriptMethod) and isinstance(traced_func.owner(), torch._C.ScriptModule):
+        with patch_forward(traced_func.owner(), traced_func):
+            try:
+                from torch.export import export
+                exported = export(
+                    traced_func.owner(),
+                    export_example_inputs,
+                    example_kwarg_inputs,
+                    strict=False,
+                ).module()
+            except Exception as e:
+                raise RuntimeError(f"Failed to export {func} with error message:\n{e}")
+        result_exported = exported(*export_example_inputs, **example_kwarg_inputs)
+        result_traced = traced_func(*export_example_inputs, **example_kwarg_inputs)
+        if not torch.allclose(result_exported, result_traced):
+            raise RuntimeError("Accuracy error")
     else:
-        raise RuntimeError("Export doesn't work on ScriptFunction/ScriptMethod")
+        try:
+            from torch.export import export
+            exported = export(
+                WrapperModule(traced_func),
+                export_example_inputs,
+                example_kwarg_inputs,
+                strict=False,
+            ).module()
+        except Exception as e:
+            raise RuntimeError(f"Failed to export {func} with error message:\n{e}")
+
+        result_exported = exported(*export_example_inputs, **example_kwarg_inputs)
+        result_traced = traced_func(*export_example_inputs, **example_kwarg_inputs)
+        if not torch.allclose(result_exported, result_traced):
+            raise RuntimeError("Accuracy error")
 
     warnings.warn("TORCH.EXPORT SUCCEEDED")
     return traced_func
