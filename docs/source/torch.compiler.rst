@@ -102,8 +102,8 @@ Read More
    :caption: Deep Dive for PyTorch Developers
    :maxdepth: 1
 
-   torch.compiler_deepdive
-   torch.compiler_guards_overview
+   torch.compiler_dynamo_overview
+   torch.compiler_dynamo_deepdive
    torch.compiler_dynamic_shapes
    torch.compiler_nn_module
    torch.compiler_best_practices_for_backends

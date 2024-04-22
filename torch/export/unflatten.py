@@ -145,6 +145,8 @@ class UnflattenedModule(torch.nn.Module):
         if export_module.graph_signature.backward_signature is not None:
             raise ValueError("Unflattening on JointExportModule NYI")
 
+        fqn_list = [entry.fqn for entry in export_module.module_call_graph]
+        assert fqn_list[0] == ""
         export_graph = deepcopy(export_module.graph)
         self.graph_signature = deepcopy(export_module.graph_signature)
         self.graph = torch.fx.Graph()
@@ -224,7 +226,22 @@ class UnflattenedModule(torch.nn.Module):
             node for node in self.graph.nodes if node.op == "placeholder"
         ]
         self.check_input_constraints = True
-        assert self.module_call_graph[0].fqn == ""
+        # TODO(zhxchen17) We can register modules ahead of time instead of reorder later.
+        fqn_order = {fqn: i for i, fqn in enumerate(fqn_list)}
+        # In the case of legacy IR, we might be missing some modules from metadata.
+        for name, _ in self.named_modules(remove_duplicate=False):
+            if name not in fqn_order:
+                fqn_order[name] = len(fqn_order)
+        _reorder_submodules(self, fqn_order)
+        assert [fqn for fqn, _ in self.named_modules(remove_duplicate=False)] == list(
+            fqn_order.keys()
+        )
+
+    def _print_graph(self):
+        for fqn, mod in self.named_modules():
+            print(fqn + ":")
+            if hasattr(mod, "graph") and isinstance(mod.graph, torch.fx.Graph):
+                print(mod.graph)
 
     def forward(self, *args, **kwargs):
         signature = self.module_call_graph[0].signature
@@ -440,6 +457,23 @@ def _generate_unflatten(gm: torch.nn.Module, nodes, spec) -> torch.fx.Node:
     name = _add_spec(gm, spec)
     spec_node = gm.graph.get_attr(name)
     return gm.graph.call_function(pytree.tree_unflatten, (nodes, spec_node))
+
+
+def _get_submodule(mod: torch.nn.Module, target: str):
+    *prefix, field = target.split(".")
+
+    for item in prefix:
+        submod = getattr(mod, item, None)
+
+        if submod is None:
+            return None
+
+        if not isinstance(submod, torch.nn.Module):
+            return None
+
+        mod = submod
+
+    return getattr(mod, field, None)
 
 
 def _add_submodule(mod: torch.nn.Module, target: str, module_to_add: torch.nn.Module):
@@ -786,6 +820,28 @@ def _outline_submodules(orig_graph: torch.fx.Graph, root_module: UnflattenedModu
         },
         module=root_module,
     ).run_outer()
+
+
+def _reorder_submodules(
+    parent: torch.nn.Module, fqn_order: Dict[str, int], prefix: str = ""
+):
+    # TODO Can be optimized by adding submodules ahead of time.
+    if prefix == "":
+        for fqn in list(fqn_order.keys())[1:]:
+            if _get_submodule(parent, fqn) is None:
+                _add_submodule(parent, fqn, torch.nn.Module())
+
+    children = []
+    for name, child in list(parent._modules.items()):
+        if child is None:
+            continue
+        fqn = prefix + name
+        _reorder_submodules(child, fqn_order, prefix=fqn + ".")
+        delattr(parent, name)
+        children.append((fqn_order[fqn], name, child))
+    children.sort(key=lambda x: x[0])
+    for _, name, child in children:
+        parent.register_module(name, child)
 
 
 def _sink_params(

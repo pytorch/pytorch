@@ -283,7 +283,6 @@ def error_check_native_functions(funcs: Sequence[NativeFunction]) -> None:
             and str(f.func.name.name) != "set_"
         ):
             base_name = f.func.name.name
-            overload_name = f.func.name.overload_name
             assert base_name.inplace, (
                 f"{f.func.name} is marked with tag: inplace_view, but it doesn't follow the naming "
                 "convention for inplace ops - the codegen expects the base name to have a trailing underscore. "
@@ -858,7 +857,7 @@ def compute_meta_function_declaration(g: NativeFunctionsGroup) -> Optional[str]:
                 # element that is set by this method is false on the
                 # class corresponding to the object that `this` points to.
                 # This ensures that each element can be set only once.
-                assert_msg = f'"{precomputed_elements[i].name} already set"'
+                assert_msg = f'"{elem.name} already set"'
                 assert_stmt = f"static_assert({precomputed_template_parameters[i]} == false, {assert_msg});"
 
                 # Generate the new object construction block. All state
@@ -1152,7 +1151,7 @@ def compute_cpp_argument_yaml(
             arg["default"] = cpp_a.default
         return arg
     elif isinstance(cpp_a.argument, SelfArgument):
-        raise AssertionError()
+        raise AssertionError
     elif isinstance(cpp_a.argument, Argument):
         return compute_argument_yaml(
             cpp_a.argument,
@@ -2126,7 +2125,7 @@ def gen_headers(
     )
 
     def gen_aten_interned_strings() -> Dict[str, str]:
-        attrs = set()  # All function argument names
+        attrs: Set[str] = set()  # All function argument names
         names = set()  # All ATen function names
         for func in native_functions:
             names.add(str(func.func.name.name))
@@ -2134,8 +2133,7 @@ def gen_headers(
             # symbol without the underscore
             names.add(func.func.name.name.base)
 
-            for arg in func.func.schema_order_arguments():
-                attrs.add(arg.name)
+            attrs.update(arg.name for arg in func.func.schema_order_arguments())
 
         # These are keywords in C++, so aren't valid symbol names
         # https://en.cppreference.com/w/cpp/language/operator_alternative

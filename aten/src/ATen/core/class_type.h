@@ -390,7 +390,7 @@ struct TORCH_API ClassType : public NamedType {
       std::string doc_string = "",
       std::vector<std::string> unresolved_class_attributes = {});
 
-  std::string annotation_str_impl(C10_UNUSED TypePrinter printer = nullptr) const override {
+  std::string annotation_str_impl(C10_UNUSED const TypePrinter& printer = nullptr) const override {
     const auto& n = name().value();
     return n.qualifiedName();
   }

@@ -30,8 +30,6 @@ _type_to_assert_reason = {
 
 
 class ConstantVariable(VariableTracker):
-    _has_child_nodes = False
-
     @staticmethod
     def create(value, **kwargs) -> VariableTracker:
         source = kwargs.get("source", None)
@@ -124,7 +122,7 @@ class ConstantVariable(VariableTracker):
             )
         member = getattr(self.value, name)
         if callable(member):
-            raise NotImplementedError()
+            raise NotImplementedError
         return member
 
     def call_method(
@@ -214,5 +212,5 @@ class EnumVariable(VariableTracker):
     def const_getattr(self, tx, name):
         member = getattr(self.value, name)
         if callable(member):
-            raise NotImplementedError()
+            raise NotImplementedError
         return member

@@ -182,7 +182,7 @@ class OrtOperatorSupport(OperatorSupport):
             return False
         # This is the and the only place to decide if aten op is supported.
         if node.op == "call_function" and node.target in self._onnx_support_dict:
-            logger.warning(
+            logger.info(
                 "support_dict supports node.target: %s (type: %s)",
                 node.target,
                 type(node.target),
@@ -192,7 +192,7 @@ class OrtOperatorSupport(OperatorSupport):
         # can convert it to ONNX equivalence. Let's use base mechanism to do this.
         # See extra_support_dict  for supported ops.
         if super().is_node_supported(submodules, node):
-            logger.warning(
+            logger.info(
                 "extra_support_dict supports node.target: %s (type: %s)",
                 node.target,
                 type(node.target),
@@ -887,9 +887,9 @@ class OrtBackend:
                 )
             else:
                 try:
-                    prim_outputs = FakeTensorProp(graph_module).propagate(
-                        *args, **kwargs
-                    )
+                    prim_outputs = FakeTensorProp(
+                        graph_module, check_consistency=False
+                    ).propagate(*args, **kwargs)
                 except Exception:
                     logger.warning("FakeTensorProb failed for %s", graph_module)
                     # When FakeTensorProp fails, it is not possible to preallocate output buffers
@@ -921,6 +921,20 @@ class OrtBackend:
             onnx_model = exported.to_model_proto(
                 opset_version=self._resolved_onnx_exporter_options.onnx_registry.opset_version,
             )
+
+            try:
+                from onnxscript import optimizer  # type: ignore[import]
+                from onnxscript.rewriter import (  # type: ignore[import]
+                    onnxruntime as ort_rewriter,  # type: ignore[import]
+                )
+
+                onnx_model = optimizer.optimize(onnx_model)
+                onnx_model = ort_rewriter.rewrite(onnx_model)
+            except ImportError:
+                logger.warning(
+                    "ONNXScript optimizer is not available. Skipping optimization. "
+                    "Please `pip install onnxscript -U` to enable post-export optimization."
+                )
 
             # Modify ONNX model using pre-registered graph transforms.
             # They are in-place modifications for avoiding unnecessary

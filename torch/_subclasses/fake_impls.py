@@ -258,6 +258,62 @@ def dyn_shape(fake_mode, func, *args, **kwargs):
     raise DynamicOutputShapeException(func)
 
 
+@register_op_impl(aten._unique2.default)
+def unique2(
+    fake_mode, func, arg, sorted=True, return_inverse=False, return_counts=False
+):
+    if (
+        fake_mode.shape_env is None
+        or not fake_mode.shape_env.allow_dynamic_output_shape_ops
+    ):
+        # Without symints/symfloats, cannot handle this
+        raise DynamicOutputShapeException(func)
+
+    if arg.unique_memo is None:
+        # Avoid importing sympy at a module level
+        from torch.fx.experimental.symbolic_shapes import (
+            _constrain_range_for_size,
+            has_free_symbols,
+        )
+
+        if not has_free_symbols(arg.numel()) and arg.numel() == 0:
+            # If numel is zero, then the output size must be zero.
+            # In this case, we must not allocate an unbacked SymInt,
+            # because if we do, it will immediately get refined to
+            # zero, but this will be inconsistent with size oblivious
+            # tests (which will continue to claim that the unbacked
+            # symint cannot equal zero).  We could also unconditionally
+            # allocate an unbacked SymInt and not refine its range,
+            # but this seems more precise.
+            nnz = arg._nonzero_memo = 0
+            arg._nonzero_memo_vc = arg._version
+        else:
+            nnz = fake_mode.shape_env.create_unbacked_symint()
+
+            maxval = sys.maxsize - 1
+
+            if not has_free_symbols(arg.numel()):
+                maxval = int(arg.numel())
+
+            _constrain_range_for_size(nnz, max=maxval)
+
+        arg.unique_memo = nnz
+
+    ret = [arg.new_empty((arg.unique_memo,))]
+
+    if return_inverse:
+        ret.append(torch.empty_like(arg))
+    else:
+        ret.append(arg.new_empty(0))
+
+    if return_counts:
+        ret.append(torch.empty_like(arg))
+    else:
+        ret.append(arg.new_empty(0))
+
+    return tuple(ret)
+
+
 @register_op_impl(aten.repeat_interleave.Tensor)
 def repeat_interleave_tensor(fake_mode, func, repeats, output_size=None):
     if output_size is None:
@@ -301,39 +357,42 @@ def nonzero(fake_mode, func, arg):
         # Without symints/symfloats, cannot handle this
         raise DynamicOutputShapeException(func)
 
-    if arg.nonzero_memo is None:
-        nnz = fake_mode.shape_env.create_unbacked_symint()
-
-        # This is unsound, but it works well in practice
-        # See https://docs.google.com/document/d/1lFRYAJo5nrfxRhwIzGnfi2pbLpU6T4ytSRSuLJ5qebI/edit#
-        # TODO: Add a config knob to turn off this unsound behavior
-        #
-        # NB: If numel < 2, the bounds here might be COMPLETELY
-        # disjoint with what can actually occur.  But this is fine:
-        # remember, the hypothesis is that if your later code works
-        # with N >= 2, it will work with N = 1 and N = 0.
-        maxval = sys.maxsize - 1
-
+    if arg.nonzero_memo is not None:
+        nnz = arg.nonzero_memo
+    else:
         # Avoid importing sympy at a module level
         from torch.fx.experimental.symbolic_shapes import (
             _constrain_range_for_size,
             has_free_symbols,
         )
 
-        if not has_free_symbols(arg.numel()):
-            # Don't upgrade the range if numel is less than two, since we then
-            # have an empty range which makes things go explodey.  We also
-            # don't allow for 2 because that would specialize the unbacked
-            # SymInt to 2, which is also likely to be buggy.
-            if arg.numel() > 2:
+        if not has_free_symbols(arg.numel()) and arg.numel() == 0:
+            # If numel is zero, then the output size must be zero.
+            # In this case, we must not allocate an unbacked SymInt,
+            # because if we do, it will immediately get refined to
+            # zero, but this will be inconsistent with size oblivious
+            # tests (which will continue to claim that the unbacked
+            # symint cannot equal zero).  We could also unconditionally
+            # allocate an unbacked SymInt and not refine its range,
+            # but this seems more precise.
+            nnz = arg._nonzero_memo = 0
+            arg._nonzero_memo_vc = arg._version
+        else:
+            nnz = fake_mode.shape_env.create_unbacked_symint()
+
+            maxval = sys.maxsize - 1
+
+            if not has_free_symbols(arg.numel()):
                 maxval = int(arg.numel())
 
-        _constrain_range_for_size(nnz, max=maxval)
+            _constrain_range_for_size(nnz, max=maxval)
 
-        arg._nonzero_memo = nnz
-        arg._nonzero_memo_vc = arg._version
+            if not torch.is_inference_mode_enabled():
+                # arg._version N/A in inference mode
+                arg._nonzero_memo = nnz
+                arg._nonzero_memo_vc = arg._version
 
-    return arg.new_empty((arg.nonzero_memo, arg.dim()), dtype=torch.int64)
+    return arg.new_empty((nnz, arg.dim()), dtype=torch.int64)
 
 
 @register_op_impl(torch.ops.aten.masked_select.default)
@@ -516,6 +575,8 @@ def index_put_impl(fake_mode, func, *args, **kwargs):
 
 @register_op_impl(aten._nested_tensor_from_tensor_list.default)
 @register_op_impl(aten._nested_tensor_from_tensor_list.out)
+@register_op_impl(aten._nested_view_from_buffer.default)
+@register_op_impl(aten._nested_view_from_buffer_copy.default)
 def nested_tensors_unsupported(fake_mode, func, *args, **kwargs):
     raise UnsupportedOperatorException(
         "torch.compile does not support strided NestedTensor"
