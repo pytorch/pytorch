@@ -55,6 +55,13 @@ from torch._dynamo.device_interface import get_registered_device_interfaces
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
+from torch._inductor.runtime.compile_tasks import (
+    _module_to_triton_kernel,
+    _reload_python_module,
+    _reload_python_module_in_subproc,
+    _set_triton_ptxas_path,
+    _worker_compile_triton,
+)
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import clear_on_fresh_inductor_cache, is_linux
 from torch._subclasses.fake_tensor import (
@@ -2341,10 +2348,6 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
     )
 
 
-def _reload_python_module_in_subproc(key, path):
-    return PyCodeCache.load_by_key_path(key, path)
-
-
 @clear_on_fresh_inductor_cache
 class PyCodeCache:
     cache: Dict[str, ModuleType] = dict()
@@ -2377,31 +2380,21 @@ class PyCodeCache:
         if linemap is None:
             linemap = []
         if key not in cls.cache:
-            with open(path) as f:
-                try:
-                    code = compile(f.read(), path, "exec")
-                except Exception as e:
-                    raise RuntimeError(
-                        f"Failed to import {path}\n{type(e).__name__}: {e}"
-                    ) from None
-                mod = ModuleType(f"{__name__}.{key}")
-                mod.__file__ = path
-                mod.key = key  # type: ignore[attr-defined]
-                exec(code, mod.__dict__, mod.__dict__)
-                sys.modules[mod.__name__] = mod
-                # another thread might set this first
-                cls.cache.setdefault(key, mod)
-                # unzip into separate lines/nodes lists
-                cls.linemaps[path] = list(zip(*linemap))
+            mod = _reload_python_module(key, path)
 
-                if attrs is not None:
-                    for k, v in attrs.items():
-                        setattr(mod, k, v)
+            # another thread might set this first
+            cls.cache.setdefault(key, mod)
+            # unzip into separate lines/nodes lists
+            cls.linemaps[path] = list(zip(*linemap))
 
-                if not (linemap or attrs):
-                    mod._reload_in_subproc = functools.partial(  # type: ignore[attr-defined]
-                        _reload_python_module_in_subproc, key, path
-                    )
+            if attrs is not None:
+                for k, v in attrs.items():
+                    setattr(mod, k, v)
+
+            if not (linemap or attrs):
+                mod._reload_in_subproc = functools.partial(  # type: ignore[attr-defined]
+                    _reload_python_module_in_subproc, key, path
+                )
 
         return cls.cache[key]
 
@@ -2434,25 +2427,10 @@ class PyCodeCache:
         return parse_stack_trace(entry)
 
 
-def _reload_triton_kernel_in_subproc(reload_module, kernel_name):
-    return TritonCodeCache._mod_to_kernel(reload_module(), kernel_name)
-
-
 class TritonCodeCache:
     @classmethod
     def load(cls, kernel_name: str, source_code: str) -> ModuleType:
-        mod = PyCodeCache.load(source_code)
-        return cls._mod_to_kernel(mod, kernel_name)
-
-    @classmethod
-    def _mod_to_kernel(cls, mod, kernel_name):
-        kernel = getattr(mod, kernel_name)
-        kernel._reload_in_subproc = functools.partial(
-            _reload_triton_kernel_in_subproc,
-            mod._reload_in_subproc,
-            kernel_name,
-        )
-        return kernel
+        return _module_to_triton_kernel(PyCodeCache.load(source_code), kernel_name)
 
 
 def _cuda_compiler() -> Optional[str]:
@@ -2738,28 +2716,6 @@ def caching_device_properties():
     for _, device_interface in get_registered_device_interfaces():
         if device_interface.is_available():
             device_interface.Worker.get_device_properties()
-
-
-@functools.lru_cache(None)
-def _set_triton_ptxas_path() -> None:
-    if os.environ.get("TRITON_PTXAS_PATH") is not None:
-        return
-    ptxas_path = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "bin", "ptxas")
-    )
-    if not os.path.exists(ptxas_path):
-        return
-    if os.path.isfile(ptxas_path) and os.access(ptxas_path, os.X_OK):
-        os.environ["TRITON_PTXAS_PATH"] = ptxas_path
-    else:
-        warnings.warn(f"{ptxas_path} exists but is not an executable")
-
-
-def _worker_compile_triton(
-    load_kernel: Callable[[], Any],
-):
-    _set_triton_ptxas_path()
-    load_kernel().precompile(warm_cache_only=True)
 
 
 class CodeCacheFuture:
