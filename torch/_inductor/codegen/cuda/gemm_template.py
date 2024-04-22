@@ -890,16 +890,21 @@ class CKGemmTemplate(CKTemplate):
 
     def filter_op(self, op: CKGemmOperation) -> Optional[CKGemmOperation]:
         # TBD return None if alignment or layout or dtype is invalid
-        if op.a_element_dtype != "F16" or op.b_element_dtype != "F16" or op.c_element_dtype != "F16":
-            return None
         if op.a_layout != "Row" or op.b_layout != "Row" or op.c_layout != "Row":
             return None
 
         X_meta, W_meta = map(lambda T: T.get_layout(), self.input_nodes)
+        Y_meta = self.output_node.get_layout()
         M = X_meta.size[-2]
         K = X_meta.size[-1]
         N = W_meta.size[-1]
 
+        if op.a_element_dtype != self._TORCH_DTYPE_TO_CK[X_meta.dtype]:
+            return None
+        if op.b_element_dtype != self._TORCH_DTYPE_TO_CK[W_meta.dtype]:
+            return None
+        if op.c_element_dtype != self._TORCH_DTYPE_TO_CK[Y_meta.dtype]:
+            return None
         if M % op.m_per_block != 0:
             return None
         if N % op.n_per_block != 0:

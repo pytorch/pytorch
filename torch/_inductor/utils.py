@@ -669,6 +669,7 @@ def fresh_inductor_cache(cache_entries=None):
         with mock.patch.dict(
             os.environ, {"TORCHINDUCTOR_CACHE_DIR": inductor_cache_dir}
         ):
+            log.debug(f"Using inductor cache dir {inductor_cache_dir}")
             triton_cache_dir = os.path.join(inductor_cache_dir, "triton")
             with mock.patch.dict(os.environ, {"TRITON_CACHE_DIR": triton_cache_dir}):
                 yield
