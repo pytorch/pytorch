@@ -53,8 +53,8 @@ on:
         description: |
           HF Auth token to avoid rate limits when downloading models or datasets from hub
 
-#env:
-#  GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+env:
+  GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
 
 jobs:
   test:
@@ -75,7 +75,7 @@ jobs:
         with:
           build-environment: ${{ inputs.build-environment }}
           test-matrix: ${{ inputs.test-matrix }}
-          docker-image-name: ${{ inputs.docker-image-name }}
+          docker-image: ${{ inputs.docker-image-name }}
           sync-tag: ${{ inputs.sync-tag }}
           timeout-minutes: ${{ inputs.timeout-minutes }}
           use-gha: ${{ inputs.use-gha }}
@@ -84,4 +84,3 @@ jobs:
           aws-role-to-assume: ${{ inputs.aws-role-to-assume }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          default_branch: ${{ github.event.repository.default_branch }}
