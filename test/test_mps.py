@@ -6952,6 +6952,14 @@ class TestMPS(TestCaseMPS):
             # Test bfloat16 mm
             compare_mm(1024, 1, 32769, torch.bfloat16)
 
+    def test_copy_large(self):
+        """ Test that copy of 4Gb+ tensors works """
+        x = torch.ones((2**30 + 11,), dtype=torch.float32)
+        y = x.to(device="mps")
+        self.assertTrue(torch.all(y == torch.tensor(1.0, device="mps")))
+        del y
+        del x
+
     # Test flip
     def test_flip(self):
         def helper(shape, dims):
