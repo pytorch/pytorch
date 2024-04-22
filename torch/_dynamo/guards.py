@@ -433,7 +433,7 @@ def getattr_on_nn_module(
         # Guard manager for mod.__dict__
         # NB - The example_value is deliberately set to None to avoid building a
         # DictGuardManager. DictGuardManager iterates over all the key, value
-        # pairs. But for mod __dict__, this could be wasterful beccause Dynamo
+        # pairs. But for mod __dict__, this could be wasteful because Dynamo
         # guards on very few keys. In this case, the alternative of just using
         # PyDict_GetItem on the dictionary is faster than DictGuardManager. We
         # made this decision by experimentation on a few HF models.
@@ -441,29 +441,18 @@ def getattr_on_nn_module(
             source=mod_dict_source, example_value=None
         )
 
+        # The example_value is set to None for _parameters, _buffers and
+        # _modules because we don't need key ordering.
         l1_mgr = mod_generic_dict_manager.dict_getitem_manager(
             key=l1_key,
             source=l1_source,
-            example_value=l1_value,
+            example_value=None if l2_key else l1_value,
         )
 
         if l2_key:
-            # l1_value must be a dict
-            assert isinstance(l1_mgr, DictGuardManager)
-
-            index = get_key_index(l1_value, l2_key)
-
-            # Install the key manager and add equals match guard
-            key_source = f"list({l1_source}.keys())[{index!r}]"
-            l1_mgr.get_key_manager(
-                index=index, source=key_source, example_value=l2_key
-            ).add_equals_match_guard(l2_key, [f"{key_source} == {l2_key!r}"])
-
-            # Install the value manager
-            l2_mgr = l1_mgr.get_value_manager(
-                index=index, source=l2_source, example_value=l2_value
+            return l1_mgr.dict_getitem_manager(
+                key=l2_key, source=l2_source, example_value=l2_value
             )
-            return l2_mgr
         return l1_mgr
 
 
