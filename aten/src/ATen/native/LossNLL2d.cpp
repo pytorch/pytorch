@@ -262,8 +262,9 @@ void nll_loss2d_forward_out_cpu_template(
   check_inputs_nll_loss2d(input, target, weight);
   total_weight.resize_({});
 
-  AT_DISPATCH_FLOATING_TYPES_AND(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::BFloat16,
+      ScalarType::Half,
       input.scalar_type(),
       "nll_loss2d_forward_out_frame",
       [&] {
@@ -383,8 +384,9 @@ void nll_loss2d_backward_out_cpu_template(
       total_weight.numel(),
       " elements)");
 
-  AT_DISPATCH_FLOATING_TYPES_AND(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::BFloat16,
+      ScalarType::Half,
       input.scalar_type(),
       "nll_loss2d_backward_out_frame",
       [&] {
