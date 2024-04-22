@@ -1207,6 +1207,7 @@ class CppWrapperCpu(WrapperCodeGen):
         output_name_base = fallback_kernel.get_name()
         for idx, output in enumerate(fallback_kernel.outputs):
             if isinstance(output, ir.MultiOutput):
+                # TODO: handle integer output (e.g., as in attention)
                 name = f"{output.get_name()}"
                 output_handle_name = f"{name}_handle"
                 if output.indices:
