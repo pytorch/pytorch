@@ -355,7 +355,11 @@ class BaseSchedulerNode:
                 input_node: Optional[
                     BaseSchedulerNode
                 ] = self.scheduler.name_to_node.get(read.name)
-                if input_node and V.graph.wrapper_code.can_reuse(input_node, self):
+                if (
+                    input_node
+                    and V.graph.wrapper_code.can_reuse(input_node, self)
+                    and not isinstance(input_node, NopKernelSchedulerNode)
+                ):
                     assert input_node.users is not None
                     remaining_uses = [
                         x
@@ -2288,9 +2292,7 @@ class Scheduler:
         Populate node.last_usage recursively (also for the nodes within a FusedSchedulerNode)
         """
 
-        future_used_buffers = set()
-        for node_name in V.graph.get_output_names():
-            future_used_buffers.add(node_name)
+        future_used_buffers = set(V.graph.get_output_names())
 
         for node in reversed(self.nodes):
             node.set_last_usage(future_used_buffers, self.mutation_real_name)
