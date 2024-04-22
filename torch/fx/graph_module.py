@@ -16,7 +16,7 @@ from torch.nn.modules.module import _addindent
 from torch.package import Importer, PackageExporter, PackageImporter, sys_importer
 
 from ._compatibility import compatibility
-from .graph import _custom_builtins, _is_from_torch, _is_from_triton, _PyTreeCodeGen, Graph, PythonCode
+from .graph import _custom_builtins, _is_from_torch, _PyTreeCodeGen, Graph, PythonCode
 
 __all__ = [
     "reduce_graph_module",
@@ -107,16 +107,12 @@ def _format_import_statement(name: str, obj: Any, importer: Importer) -> str:
         return _custom_builtins[name].import_str
     if _is_from_torch(name):
         return "import torch"
-    if _is_from_triton(name):
-        return "import triton"
     module_name, attr_name = importer.get_name(obj)
     return f"from {module_name} import {attr_name} as {name}"
 
 
 def _format_import_block(globals: Dict[str, Any], importer: Importer):
-    import_strs: Set[str] = set()
-    for name, obj in globals.items():
-        import_strs.add(_format_import_statement(name, obj, importer))
+    import_strs: Set[str] = {_format_import_statement(name, obj, importer) for name, obj in globals.items()}
     # Sort the imports so we have a stable import block that allows us to
     # hash the graph module and get a consistent key for use in a cache.
     return "\n".join(sorted(import_strs))
@@ -285,7 +281,7 @@ class _WrappedCall:
         all_src_lines = linecache.getlines(frame_summary.filename)
 
         # constituent substrings of the error message
-        tb_repr = traceback.format_exc()
+        tb_repr = torch._dynamo.disable(traceback.format_exc)()
         custom_msg = (
             "Call using an FX-traced Module, "
             f"line {err_lineno} of the traced Module's "
@@ -820,11 +816,13 @@ class {module_name}(torch.nn.Module):
         return res
 
     @compatibility(is_backward_compatible=False)
-    def print_readable(self, print_output=True):
+    def print_readable(self, print_output=True, include_stride=False, include_device=False):
         """
         Return the Python code generated for current GraphModule and its children GraphModules
         """
-        verbose_python_code = self._graph.python_code(root_module="self", verbose=True)
+        verbose_python_code = self._graph.python_code(
+            root_module="self", verbose=True, include_stride=include_stride, include_device=include_device
+        )
         module_code = verbose_python_code.src
         module_code = module_code.lstrip("\n")
         module_code = f"class {self._get_name()}(torch.nn.Module):\n" + module_code

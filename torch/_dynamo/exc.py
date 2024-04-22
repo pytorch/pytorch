@@ -2,7 +2,7 @@ import os
 import textwrap
 from enum import auto, Enum
 from traceback import extract_stack, format_exc, format_list, StackSummary
-from typing import cast, NoReturn, Optional
+from typing import Any, cast, NoReturn, Optional
 
 import torch._guards
 
@@ -158,6 +158,19 @@ class UserError(Unsupported):
         self.message = msg
 
 
+class UserStopIteration(TorchDynamoException):
+    value: Optional[Any]
+
+    # Reference `StopIteration_init` in CPython
+    # https://github.com/python/cpython/blob/3.11/Objects/exceptions.c#L568-L584
+    def __init__(self, *args, **kwargs):
+        super().__init__("unhandled `raise StopIteration`")
+        if len(args) > 0:
+            self.value = args[0]
+        else:
+            self.value = None
+
+
 class UncapturedHigherOrderOpError(TorchDynamoException):
     pass
 
@@ -186,11 +199,16 @@ def unimplemented_with_warning(e: Exception, code, msg: str) -> NoReturn:
     graph_break_msg = format_error_msg_verbose(e, code)
     graph_breaks_log.debug("%s", graph_break_msg)
     log.warning(msg)
-    raise unimplemented(msg) from e
+    unimplemented(msg, from_exc=e)
 
 
-def unimplemented(msg: str) -> NoReturn:
+_NOTHING = object()
+
+
+def unimplemented(msg: str, *, from_exc: Any = _NOTHING) -> NoReturn:
     assert msg != os.environ.get("BREAK", False)
+    if from_exc is not _NOTHING:
+        raise Unsupported(msg) from from_exc
     raise Unsupported(msg)
 
 

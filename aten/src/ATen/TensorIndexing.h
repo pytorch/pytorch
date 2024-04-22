@@ -317,10 +317,10 @@ static inline void recordTensorIndex(
   (*dim_ptr)++;
 };
 
-static inline c10::List<c10::optional<Tensor>> typeConvertIndices(
+static inline c10::List<::std::optional<Tensor>> typeConvertIndices(
     const Tensor& /*self*/,
     std::vector<Tensor>&& indices) {
-  c10::List<c10::optional<Tensor>> converted_inds;
+  c10::List<::std::optional<Tensor>> converted_inds;
   converted_inds.reserve(indices.size());
   for (auto&& i : std::move(indices)) {
     converted_inds.push_back(std::move(i));

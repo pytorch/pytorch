@@ -199,6 +199,9 @@ TORCH_LIBRARY(vulkan_prepack, m) {
       "int[2] padding, int[2] dilation, int groups) "
       "-> __torch__.torch.classes.vulkan.Conv1dPackedContext"));
   m.def(TORCH_SELECTIVE_SCHEMA(
+      "vulkan_prepack::run_conv1d_context(Tensor X, "
+      "__torch__.torch.classes.vulkan.Conv1dPackedContext W_prepack) -> Tensor Y"));
+  m.def(TORCH_SELECTIVE_SCHEMA(
       "vulkan_prepack::create_qtconv2d_context(Tensor W, Tensor? B, int[2] stride, "
       "int[2] padding, int[2] output_padding, int[2] dilation, int groups, "
       "Scalar? output_min=None, Scalar? output_max=None) "

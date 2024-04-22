@@ -80,6 +80,9 @@ if(INTERN_BUILD_ATEN_OPS)
   # Add source, includes, and libs to lists
   list(APPEND Caffe2_CPU_SRCS ${ATen_CPU_SRCS})
   list(APPEND Caffe2_GPU_SRCS ${ATen_CUDA_CPP_SRCS})
+  list(APPEND Caffe2_XPU_SRCS ${ATen_XPU_SRCS})
+  list(APPEND Caffe2_XPU_INCLUDE ${ATen_XPU_INCLUDE})
+  list(APPEND Caffe2_XPU_DEPENDENCY_LIBS ${ATen_XPU_DEPENDENCY_LIBS})
   list(APPEND Caffe2_GPU_SRCS_W_SORT_BY_KEY ${ATen_CUDA_SRCS_W_SORT_BY_KEY})
   list(APPEND Caffe2_GPU_CU_SRCS ${ATen_CUDA_CU_SRCS})
   list(APPEND Caffe2_GPU_CU_SRCS_W_SORT_BY_KEY ${ATen_CUDA_CU_SRCS_W_SORT_BY_KEY})
@@ -174,6 +177,7 @@ endif()
 if(CAFFE2_ALLOWLISTED_FILES)
   caffe2_do_allowlist(Caffe2_CPU_SRCS CAFFE2_ALLOWLISTED_FILES)
   caffe2_do_allowlist(Caffe2_GPU_SRCS CAFFE2_ALLOWLISTED_FILES)
+  caffe2_do_allowlist(Caffe2_XPU_SRCS CAFFE2_ALLOWLISTED_FILES)
   caffe2_do_allowlist(Caffe2_GPU_SRCS_W_SORT_BY_KEY CAFFE2_ALLOWLISTED_FILES)
   caffe2_do_allowlist(Caffe2_GPU_CU_SRCS CAFFE2_ALLOWLISTED_FILES)
   caffe2_do_allowlist(Caffe2_GPU_CU_SRCS_W_SORT_BY_KEY CAFFE2_ALLOWLISTED_FILES)
@@ -1097,6 +1101,56 @@ if(USE_XPU)
   torch_compile_options(torch_xpu)  # see cmake/public/utils.cmake
   target_compile_options_if_supported(torch_xpu "-Wno-deprecated-copy")  # see cmake/public/utils.cmake
   target_compile_definitions(torch_xpu PRIVATE USE_XPU)
+
+  # ATen XPU implementation
+  set(TORCH_XPU_OPS_DIR ${TORCH_ROOT}/third_party/torch-xpu-ops)
+  set(TORCH_XPU_OPS_REPO_URL https://github.com/intel/torch-xpu-ops.git)
+  file(READ "${TORCH_ROOT}/third_party/xpu.txt" TORCH_XPU_OPS_COMMIT)
+  string(REGEX REPLACE "\n$" "" TORCH_XPU_OPS_COMMIT "${TORCH_XPU_OPS_COMMIT}")
+  if(NOT EXISTS "${TORCH_XPU_OPS_DIR}/.git")
+    execute_process(
+      COMMAND git clone --quiet ${TORCH_XPU_OPS_REPO_URL} ${TORCH_XPU_OPS_DIR}
+      RESULT_VARIABLE _exitcode)
+    if(NOT _exitcode EQUAL 0)
+      message(FATAL_ERROR "Fail to clone ${TORCH_XPU_OPS_REPO_URL}")
+    endif()
+  endif()
+  execute_process(
+    COMMAND git fetch --quiet
+    WORKING_DIRECTORY ${TORCH_XPU_OPS_DIR}
+    RESULT_VARIABLE _exitcode)
+  if(NOT _exitcode EQUAL 0)
+    message(FATAL_ERROR "Fail to fetch ${TORCH_XPU_OPS_REPO_URL}")
+  endif()
+  execute_process(
+    COMMAND git checkout --quiet ${TORCH_XPU_OPS_COMMIT}
+    WORKING_DIRECTORY ${TORCH_XPU_OPS_DIR}
+    RESULT_VARIABLE _exitcode)
+  if(NOT _exitcode EQUAL 0)
+    message(FATAL_ERROR "Fail to checkout ${TORCH_XPU_OPS_REPO_URL} to ${TORCH_XPU_OPS_COMMIT}")
+  endif()
+
+  set(TORCH_XPU_OPS_INCLUDE_DIRS
+      ${TORCH_SRC_DIR}/csrc/api
+      ${TORCH_SRC_DIR}/csrc/api/include
+      ${Caffe2_CPU_INCLUDE}
+      ${Caffe2_XPU_INCLUDE})
+  # Pass the target as a dependency so that ATen headers generation
+  # could be followed by torch-xpu-ops build.
+  # 1. Sources in torch-xpu-ops depend on generated ATen headers.
+  # 2. Using add_custom_command in torch-xpu-ops to define sycl device sources
+  #    compilation. add_custom_command requires an explicit dependency.
+  set(TORCH_XPU_OPS_PYTORCH_DEPS ATEN_CPU_FILES_GEN_TARGET)
+
+  add_subdirectory(${TORCH_ROOT}/third_party/torch-xpu-ops
+      ${CMAKE_BINARY_DIR}/caffe2/aten_xpu)
+  if(NOT TARGET torch_xpu_ops)
+    message(WARNING "Failed to include ATen XPU implementation target")
+  else()
+    target_link_libraries(torch_xpu PRIVATE torch_xpu_ops)
+    target_link_libraries(torch_xpu PRIVATE
+      "-Wl,--whole-archive,\"$<TARGET_FILE:torch_xpu_ops>\" -Wl,--no-whole-archive")
+  endif()
 endif()
 
 if(NOT MSVC AND USE_XNNPACK)
@@ -1282,8 +1336,11 @@ if(BUILD_TEST)
   endif()
   if(BUILD_AOT_INDUCTOR_TEST)
     add_subdirectory(
-      ${TORCH_ROOT}/test/cpp/aot_inductor
-      ${CMAKE_BINARY_DIR}/test_aot_inductor)
+      ${TORCH_ROOT}/test/cpp/aoti_abi_check
+      ${CMAKE_BINARY_DIR}/test_aoti_abi_check)
+    add_subdirectory(
+      ${TORCH_ROOT}/test/cpp/aoti_inference
+      ${CMAKE_BINARY_DIR}/test_aoti_inference)
   endif()
 endif()
 
@@ -1557,9 +1614,7 @@ if(USE_CUDA)
   caffe2_interface_library(torch_cuda torch_cuda_library)
 elseif(USE_ROCM)
   caffe2_interface_library(torch_hip torch_hip_library)
-endif()
-
-if(USE_XPU)
+elseif(USE_XPU)
   caffe2_interface_library(torch_xpu torch_xpu_library)
 endif()
 
@@ -1571,9 +1626,7 @@ if(USE_CUDA)
   install(TARGETS torch_cuda torch_cuda_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 elseif(USE_ROCM)
   install(TARGETS torch_hip torch_hip_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
-endif()
-
-if(USE_XPU)
+elseif(USE_XPU)
   install(TARGETS torch_xpu torch_xpu_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 endif()
 
@@ -1639,6 +1692,8 @@ if(USE_XPU)
       torch_xpu INTERFACE $<INSTALL_INTERFACE:include>)
   target_include_directories(
       torch_xpu PRIVATE ${Caffe2_XPU_INCLUDE})
+  target_link_libraries(
+      torch_xpu PRIVATE ${Caffe2_XPU_DEPENDENCY_LIBS})
 
   target_link_libraries(torch_xpu PUBLIC torch_cpu_library)
 endif()
@@ -1787,7 +1842,7 @@ if(BUILD_TEST)
           endif()
         else()
           add_executable(${test_name}_${CPU_CAPABILITY} "${test_src}")
-          target_link_libraries(${test_name}_${CPU_CAPABILITY} torch_library gtest_main)
+          target_link_libraries(${test_name}_${CPU_CAPABILITY} torch_library sleef gtest_main)
         endif()
         target_include_directories(${test_name}_${CPU_CAPABILITY} PRIVATE $<INSTALL_INTERFACE:include>)
         target_include_directories(${test_name}_${CPU_CAPABILITY} PRIVATE $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>)
