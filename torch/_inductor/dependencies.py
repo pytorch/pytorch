@@ -1,3 +1,4 @@
+import abc
 import collections
 import dataclasses
 import itertools
@@ -25,17 +26,43 @@ from .virtualized import OpsHandler, ReductionType, V
 
 log = logging.getLogger(__name__)
 is_indirect = re.compile(r"indirect|tmp").search
-Dep = Union["MemoryDep", "StarDep", "WeakDep"]
 
 
-class MemoryDep(typing.NamedTuple):
+class Dep(abc.ABC):
     name: str
-    index: sympy.Expr  # type: ignore[assignment]
+    index: sympy.Expr
+
+    @abc.abstractmethod
+    def rename(self, renames: Dict[str, str]) -> "Dep":
+        pass
+
+    @abc.abstractmethod
+    def get_numel(self) -> sympy.Expr:
+        pass
+
+    @abc.abstractmethod
+    def numbytes_hint(self):
+        pass
+
+    @abc.abstractmethod
+    def has_unbacked_symbols(self) -> bool:
+        pass
+
+    @abc.abstractmethod
+    def is_contiguous(self) -> bool:
+        pass
+
+
+@dataclasses.dataclass(frozen=True)
+class MemoryDep(Dep):
+    name: str
+    index: sympy.Expr
     var_names: Tuple[sympy.Symbol, ...]
     size: Tuple[sympy.Expr, ...]
+    mode: Optional[str] = None
 
     def __repr__(self):
-        return f"MemoryDep({self.name!r}, {self.index}, {self.ranges})"
+        return f"MemoryDep({self.name!r}, {self.index}, {self.ranges}, {self.mode})"
 
     @property
     def ranges(self) -> Dict[sympy.Symbol, sympy.Expr]:
@@ -56,7 +83,11 @@ class MemoryDep(typing.NamedTuple):
     def rename(self, renames: Dict[str, str]) -> "MemoryDep":
         if self.name in renames:
             return MemoryDep(
-                renames[self.name], self.index, var_names=self.var_names, size=self.size
+                renames[self.name],
+                self.index,
+                var_names=self.var_names,
+                size=self.size,
+                mode=self.mode,
             )
         return self
 
@@ -71,6 +102,35 @@ class MemoryDep(typing.NamedTuple):
     def is_contiguous(self) -> bool:
         return isinstance(self.index, sympy.Symbol) and self.index in self.var_names
 
+    def stride1_for_last_dim(self, result_for_complex_expression=True) -> bool:
+        """
+        Whether the stride for the last dimension is 1.
+        """
+        # python test/inductor/test_torchinductor_opinfo.py -k test_comprehensive_masked_scatter_cuda_float16
+        # will exercise thru this corner case.
+        if len(self.var_names) == 0:
+            return True
+
+        terms = self.index.args if isinstance(self.index, sympy.Add) else [self.index]
+
+        last_sym = self.var_names[-1]
+        for term in terms:
+            if term is last_sym:
+                return True
+
+            # Having a >1 stride for the last dimension is bad for perf
+            # return False.
+            if (
+                isinstance(term, sympy.Mul)
+                and len(term.args) == 2
+                and term.args[1] is last_sym
+                and isinstance(term.args[0], (int, sympy.Integer))
+                and term.args[0] > 1
+            ):
+                return False
+
+        return result_for_complex_expression
+
     def is_scalar(self) -> bool:
         if isinstance(self.index, sympy.Symbol):
             return self.index not in self.var_names and not self.is_indirect()
@@ -80,10 +140,11 @@ class MemoryDep(typing.NamedTuple):
         return any(is_indirect(v.name) for v in self.index.free_symbols)  # type: ignore[attr-defined]
 
 
-class StarDep(typing.NamedTuple):
-    # depends on the entire buffer
+@dataclasses.dataclass(frozen=True)
+class StarDep(Dep):
     name: str
 
+    # depends on the entire buffer
     @property
     def index(self):
         raise NotImplementedError("StarDep does not have an index")
@@ -114,54 +175,14 @@ class StarDep(typing.NamedTuple):
         return False
 
 
-# Used for tracking atomic accumulate dependencies
-# if A and B both modifies a buffer with the same atomic operation
-# they can be fused together
-class AccumulateDep(typing.NamedTuple):
-    dep: Dep
-    mode: Optional[str]
-
-    @property
-    def name(self):
-        return self.dep.name
-
-    @property
-    def index(self):
-        return self.dep.index
-
-    def get_numel(self) -> sympy.Expr:
-        return V.graph.get_numel(self.name)
-
-    def rename(self, renames: Dict[str, str]) -> "AccumulateDep":
-        if self.name in renames:
-            return AccumulateDep(self.dep.rename(renames), self.mode)
-        return self
-
-    def numbytes_hint(self):
-        return V.graph.sizevars.size_hint(self.get_numel()) * get_dtype_size(
-            V.graph.get_dtype(self.name)
-        )
-
-    def has_unbacked_symbols(self):
-        return len(free_unbacked_symbols(self.get_numel())) > 0
-
-    def is_contiguous(self) -> bool:
-        return False
-
-    def is_scalar(self) -> bool:
-        return False
-
-    def is_indirect(self) -> bool:
-        return False
-
-
 # Used for tracking mutation ordering
 # if A reads a buffer and B mutates it
 # B must be ordered after A
 #
 # It is weak because if it turns out A's read is never used, we can still
 # eliminate it
-class WeakDep(typing.NamedTuple):
+@dataclasses.dataclass(frozen=True)
+class WeakDep(Dep):
     name: str
 
     @property
@@ -186,7 +207,8 @@ class WeakDep(typing.NamedTuple):
         return False
 
 
-class IndexExprDep(typing.NamedTuple):
+@dataclasses.dataclass(frozen=True)
+class IndexExprDep:
     index: sympy.Expr  # type: ignore[assignment]
     var_names: Tuple[sympy.Symbol, ...]
     size: Tuple[sympy.Expr, ...]
@@ -195,7 +217,7 @@ class IndexExprDep(typing.NamedTuple):
 @dataclasses.dataclass
 class ReadWrites:
     reads: Set[Dep]
-    writes_grouped_by_mode: Dict[Optional[str], Set[Dep]]
+    writes: Set[Dep]
     index_exprs: Set[IndexExprDep]
     range_vars: Optional[List[sympy.Expr]] = None
     var_ranges: Optional[VarRanges] = None
@@ -206,10 +228,7 @@ class ReadWrites:
     def rename(self, renames: typing.Dict[str, str]) -> "ReadWrites":
         return ReadWrites(
             {dep.rename(renames) for dep in self.reads},
-            {
-                mode: {dep.rename(renames) for dep in deps}
-                for mode, deps in self.writes_grouped_by_mode.items()
-            },
+            {dep.rename(renames) for dep in self.writes},
             self.index_exprs,
             self.range_vars,
             self.var_ranges,
@@ -217,43 +236,27 @@ class ReadWrites:
         )
 
     def with_read(self, dep: Dep) -> "ReadWrites":
-        assert isinstance(dep, (WeakDep, StarDep, AccumulateDep))
+        assert isinstance(dep, (WeakDep, StarDep))
         return ReadWrites(
             set.union(self.reads, {dep}),
-            self.writes_grouped_by_mode,
+            self.writes,
             self.index_exprs,
             self.range_vars,
             self.var_ranges,
             op_counts=self.op_counts,
         )
 
-    @property
-    def writes(self):
-        if len(self.writes_grouped_by_mode) == 1 and (
-            mode := next(iter(self.writes_grouped_by_mode.keys()))
-        ):
-            (writes,) = self.writes_grouped_by_mode.values()
-            return {AccumulateDep(write, mode) for write in writes}
-        else:
-            return set.union(*list(self.writes_grouped_by_mode.values()))
-
     def merge(self, other: "ReadWrites"):
-        return ReadWrites.merge_list([self, other])
+        reads = set.union(self.reads, other.reads)
+        writes = set.union(self.writes, other.writes)
+        index_exprs = set.union(self.index_exprs, other.index_exprs)
+        op_counts = collections.Counter(self.op_counts)
+        op_counts.update(other.op_counts)
+        return ReadWrites(reads - writes, writes, index_exprs, op_counts=op_counts)
 
     @staticmethod
     def merge_list(read_writes: List["ReadWrites"]):
-        all_modes = set.union(
-            *[set(rw.writes_grouped_by_mode.keys()) for rw in read_writes]
-        )
-        all_writes_grouped_by_mode = {
-            mode: set.union(
-                *[set(rw.writes_grouped_by_mode.get(mode, set())) for rw in read_writes]
-            )
-            for mode in all_modes
-        }
-        all_writes = set.union(
-            *[set(writes) for writes in all_writes_grouped_by_mode.values()]
-        )
+        all_writes = set.union(*[rw.writes for rw in read_writes])
         all_reads = set.union(*[rw.reads for rw in read_writes]) - all_writes
         all_index_exprs = set.union(*[rw.index_exprs for rw in read_writes])
 
@@ -261,14 +264,12 @@ class ReadWrites:
         for rw in read_writes:
             op_counts.update(rw.op_counts)
 
-        return ReadWrites(
-            all_reads, all_writes_grouped_by_mode, all_index_exprs, op_counts=op_counts
-        )
+        return ReadWrites(all_reads, all_writes, all_index_exprs, op_counts=op_counts)
 
     def remove_reads(self, rem_reads):
         return ReadWrites(
             self.reads - rem_reads,
-            self.writes_grouped_by_mode,
+            self.writes,
             self.index_exprs,
             self.range_vars,
             self.var_ranges,
@@ -276,18 +277,14 @@ class ReadWrites:
         )
 
     def reads_and_writes(self):
-        return itertools.chain(
-            self.reads, set.union(*self.writes_grouped_by_mode.values())
-        )
+        return itertools.chain(self.reads, self.writes)
 
 
 class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
     def __init__(self, var_ranges: VarRanges, normalize: bool):
         super().__init__()
         self._reads: Set[Dep] = set()
-        self._writes_grouped_by_mode: Dict[
-            Union[str], Set[MemoryDep]
-        ] = collections.defaultdict(set)
+        self._writes: Set[MemoryDep] = set()
         self._index_exprs: Set[IndexExprDep] = set()
         self._var_ranges: VarRanges = var_ranges
         self._normalize: bool = normalize
@@ -346,11 +343,9 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
         return self.load(name, sympy.Integer(index))
 
     def store(self, name: str, index: sympy.Expr, value: str, mode=None) -> str:
-        self._writes_grouped_by_mode[mode].add(
-            MemoryDep(name, *self.canonicalize(index))
-        )
+        self._writes.add(MemoryDep(name, *self.canonicalize(index), mode=mode))
         if mode is not None:
-            self._reads.add(MemoryDep(name, *self.canonicalize(index)))
+            self._reads.add(MemoryDep(name, *self.canonicalize(index), mode=mode))
         return f"store({name}, {sympy_str(index)}, {value}, {mode})"
 
     def store_reduction(self, name: str, index, value) -> str:
@@ -446,7 +441,7 @@ def extract_read_writes(
     inner = rw.parent_handler.parent_handler
     return ReadWrites(
         set(inner._reads),
-        inner._writes_grouped_by_mode,
+        set(inner._writes),
         inner._index_exprs,
         range_vars,
         var_ranges,
@@ -545,7 +540,7 @@ class FreeUnbackedSymbolsOpsHandler:
     def frexp(self, x):
         return (None,) * 2
 
-    def scan(self, dtypes, combine_fn, values, inits):
+    def scan(self, dtypes, combine_fn, values):
         return (None,) * len(values)
 
     def reduction(

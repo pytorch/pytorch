@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 from collections import defaultdict
+from functools import lru_cache
 from pathlib import Path
 from typing import cast, Dict, List, Set, Union
 from urllib.request import Request, urlopen
@@ -20,6 +21,7 @@ def python_test_file_to_test_name(tests: Set[str]) -> Set[str]:
     return valid_tests
 
 
+@lru_cache(maxsize=None)
 def query_changed_files() -> List[str]:
     default_branch = f"origin/{os.environ.get('GIT_DEFAULT_BRANCH', 'main')}"
     merge_base = (
@@ -40,15 +42,18 @@ def query_changed_files() -> List[str]:
         capture_output=True,
         check=False,
     )
+    print(f"merge_base: {merge_base}, head: {head}")
 
     if proc.returncode != 0:
         raise RuntimeError("Unable to get changed files")
 
     lines = proc.stdout.decode().strip().split("\n")
     lines = [line.strip() for line in lines]
+    print(f"Changed files: {lines}")
     return lines
 
 
+@lru_cache(maxsize=None)
 def get_git_commit_info() -> str:
     """Gets the commit info since the last commit on the default branch."""
     default_branch = f"origin/{os.environ.get('GIT_DEFAULT_BRANCH', 'main')}"
@@ -75,6 +80,7 @@ def get_git_commit_info() -> str:
     )
 
 
+@lru_cache(maxsize=None)
 def get_issue_or_pr_body(number: int) -> str:
     """Gets the body of an issue or PR"""
     github_token = os.environ.get("GITHUB_TOKEN")

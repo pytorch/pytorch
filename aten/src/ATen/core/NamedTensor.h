@@ -44,7 +44,7 @@ struct TORCH_API NamedTensorMeta final : public c10::NamedTensorMetaInterface {
 
   // Used for an assertion in TensorImpl.h
   int64_t slow_dim() const override {
-    return names_.size();
+    return static_cast<int64_t>(names_.size());
   }
 
   void check_invariants() const {

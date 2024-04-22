@@ -38,8 +38,8 @@ from torch._ops import DispatchKey
 import itertools
 import functools
 from functools import partial
+import re
 import unittest
-import sys
 
 aten = torch.ops.aten
 
@@ -144,7 +144,8 @@ def ref_vjp_no_create(f, *primals):
 
     def wrapped(cotangents):
         return _autograd_grad(
-            _as_tuple(result), primals, _as_tuple(cotangents), create_graph=False
+            _as_tuple(result), primals, _as_tuple(cotangents), create_graph=False,
+            retain_graph=True,
         )
 
     return result, wrapped
@@ -200,6 +201,12 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
         (torch.bfloat16, torch.ops.aten.nll_loss_forward.default): 1e-1,
         (torch.float16, torch.ops.aten.nll_loss2d_forward.default): 1e-2,
         (torch.bfloat16, torch.ops.aten.nll_loss2d_forward.default): 2e-1,
+        (torch.float16, torch.ops.aten.hardswish.default): 2e-7,
+        (torch.bfloat16, torch.ops.aten.hardswish.default): 2e-7,
+        (torch.float16, torch.ops.aten.multi_margin_loss.default): 3e-2,
+        (torch.bfloat16, torch.ops.aten.multi_margin_loss.default): 3e-2,
+        (torch.float16, torch.ops.aten.multilabel_margin_loss_forward.default): 3e-2,
+        (torch.bfloat16, torch.ops.aten.multilabel_margin_loss_forward.default): 3e-2,
         # see https://github.com/pytorch/pytorch/pull/96264
         (torch.float16, torch.ops.aten.mv.default): 1e-5,
     }
@@ -488,6 +495,11 @@ if not TEST_WITH_SLOW:
         skip('unsafe_split'),  # slow: takes 49 sec on A100
     })
 
+comprehensive_failures = {
+    xfail("nn.functional.interpolate", "bilinear", dtypes=(torch.uint8,)),  # off by one error
+    xfail("nn.functional.interpolate", "bicubic", dtypes=(torch.uint8,)),   # off by one error
+    xfail("nn.functional.upsample_bilinear", "", dtypes=(torch.uint8,)),    # off by one error
+}
 
 @unMarkDynamoStrictTest
 class TestDecomp(TestCase):
@@ -524,6 +536,7 @@ class TestDecomp(TestCase):
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @skipIfCrossRef
+    @skipOps('TestDecomp', 'test_comprehensive', comprehensive_failures)
     @suppress_warnings
     @ops(op_db)
     def test_comprehensive(self, device, dtype, op):
@@ -630,6 +643,45 @@ class TestDecomp(TestCase):
         var = torch.randn(3, device=device)
         res = torch._decomp.decompositions.native_batch_norm(input, weight, bias, mean, var, False, 1, 1e-05)
         self.assertEqual(shape, res[0].shape)
+
+    def test_arange_graph(self, device):
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def func(x, start):
+            le = x.shape[-1]
+            if start is None:
+                a = torch.arange(le, dtype=torch.float32, device=x.device)
+            else:
+                a = torch.arange(start, le, dtype=torch.float32, device=x.device)
+            return a
+
+        pattern = r", device = device\(.+\), requires_grad = False"
+
+        cfunc = make_fx(func, decomposition_table=decomposition_table)
+        fx_g = cfunc(torch.rand(10, device=device), None)
+        fx_g_code = fx_g.code.strip()
+        # Remove device and requires_grad
+        fx_g_code = re.sub(pattern, "", fx_g_code)
+        self.assertExpectedInline(fx_g_code, """\
+def forward(self, x_1, start_1):
+    iota = torch.ops.prims.iota.default(10, start = 0, step = 1, dtype = torch.int64)
+    mul = torch.ops.prims.mul.default(iota, 1);  iota = None
+    add = torch.ops.prims.add.default(mul, 0);  mul = None
+    convert_element_type = torch.ops.prims.convert_element_type.default(add, torch.float32);  add = None
+    return convert_element_type""")
+
+        fx_g = cfunc(torch.rand(10, device=device), 1)
+        fx_g_code = fx_g.code.strip()
+        # Remove device and requires_grad
+        fx_g_code = re.sub(pattern, "", fx_g_code)
+        self.assertExpectedInline(fx_g_code, """\
+def forward(self, x_1, start_1):
+    iota = torch.ops.prims.iota.default(9, start = 0, step = 1, dtype = torch.int64)
+    mul = torch.ops.prims.mul.default(iota, 1);  iota = None
+    add = torch.ops.prims.add.default(mul, 1);  mul = None
+    convert_element_type = torch.ops.prims.convert_element_type.default(add, torch.float32);  add = None
+    return convert_element_type""")
+
 
     class DecompCrossRefMode(TorchDispatchMode):
         def __init__(self, test_case, saved_precision, saved_rel_tol, dtype, run_all):
@@ -771,6 +823,12 @@ class TestDecomp(TestCase):
         aten_name = op.decomp_aten_name or op.aten_name
 
         func = op.get_op()
+
+        def run_without_python_dispatcher(mode):
+            return any(isinstance(op, torch._ops.OpOverload) and
+                       op.has_kernel_for_dispatch_key(DispatchKey.CompositeImplicitAutograd)
+                       for op in mode.decomposed.union([func]))
+
         for sample_input in samples:
             if requires_grad:
                 fn, primals = normalize_op_input_output(func, sample_input)
@@ -785,6 +843,12 @@ class TestDecomp(TestCase):
                 with self.DecompCrossRefMode(self, self.precision, self.rel_tol, dtype, run_all)\
                      as mode, enable_python_dispatcher():
                     decomp_out, decomp_vjp_fn = ref_vjp_no_create(fn, *primals)
+                if run_without_python_dispatcher(mode):
+                    # without this check, incorrect decomps at the python dispatcher level can still pass because
+                    # they're checking aten decomps at the torch_dispatch level.
+                    with self.DecompCrossRefMode(self, self.precision, self.rel_tol, dtype, run_all)\
+                         as mode:
+                        decomp_out, decomp_vjp_fn = ref_vjp_no_create(fn, *primals)
                 if aten_name in decomposition_names:
                     self.check_decomposed(aten_name, mode)
 
@@ -794,15 +858,31 @@ class TestDecomp(TestCase):
                     with self.DecompCrossRefMode(self, self.precision, self.rel_tol, dtype, run_all)\
                          as mode, enable_python_dispatcher():
                         decomp_vjp_fn(cotangents)
+                    if run_without_python_dispatcher(mode):
+                        # without this check, incorrect decomps at the python dispatcher level can still pass because
+                        # they're checking aten decomps at the torch_dispatch level.
+                        with self.DecompCrossRefMode(self, self.precision, self.rel_tol, dtype, run_all)\
+                             as mode:
+                            decomp_vjp_fn(cotangents)
                     if not run_all:
                         self.check_decomposed(op.aten_backward_name, mode)
 
             elif aten_name in decomposition_names or run_all:
                 args = [sample_input.input] + list(sample_input.args)
                 kwargs = sample_input.kwargs
+                # A failure here might be because the decomposition for the op is wrong or because a
+                # decomposition used by the particular op is wrong.
                 with self.DecompCrossRefMode(self, self.precision, self.rel_tol, dtype, run_all)\
                      as mode, enable_python_dispatcher():
                     func(*args, **kwargs)
+
+                if run_without_python_dispatcher(mode):
+                    # without this check, incorrect decomps at the python dispatcher level can still pass because
+                    # they're checking aten decomps at the torch_dispatch level.
+                    with self.DecompCrossRefMode(self, self.precision, self.rel_tol, dtype, run_all)\
+                         as mode:
+                        func(*args, **kwargs)
+
                 if not run_all:
                     self.check_decomposed(aten_name, mode)
             else:
@@ -1047,7 +1127,6 @@ class HasDecompTest(TestCase):
         self.assertExpected("".join(sorted(op.name() + "\n" for op in core_aten_ops)))
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile not supported on windows")
-    @unittest.skipIf(sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+")
     def test_compile_rrelu(self):
         def f(x):
             return torch.rrelu(x)

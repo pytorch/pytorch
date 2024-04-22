@@ -14,11 +14,7 @@ from torch.distributed._tensor.placement_types import (
     Replicate,
     Shard,
 )
-from torch.testing._internal.common_distributed import run_with_both_funcol_impls
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    run_tests,
-)
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     skip_unless_torch_gpu,
@@ -26,7 +22,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 
 
-@instantiate_parametrized_tests
 class DistMatrixOpsTest(DTensorTestBase):
     @with_comms
     def test_addmm(self):
@@ -138,7 +133,6 @@ class DistMatrixOpsTest(DTensorTestBase):
         self.assertEqual(tranposed_mat2.placements, shard_spec)
 
     @with_comms
-    @run_with_both_funcol_impls
     def test_t_partial(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
 
@@ -322,7 +316,14 @@ class DistMatrixOpsTest(DTensorTestBase):
             )
             self.assertEqual(dist_out.full_tensor(), out)
 
-        # TODO: add backward test once we support the backward op
+            out.sum().backward()
+            dist_out.sum().backward()
+            self.assertTrue(dist_query.grad.placements[0].is_shard(dim=1))
+            self.assertEqual(dist_query.grad.full_tensor(), query.grad)
+            self.assertTrue(dist_key.grad.placements[0].is_shard(dim=1))
+            self.assertEqual(dist_key.grad.full_tensor(), key.grad)
+            self.assertTrue(dist_value.grad.placements[0].is_shard(dim=1))
+            self.assertEqual(dist_value.grad.full_tensor(), value.grad)
 
 
 if __name__ == "__main__":

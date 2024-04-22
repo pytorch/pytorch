@@ -251,9 +251,7 @@ std::string convertToNQLString(NNGraph& g) {
   // doesn't mutate the graph and use const reference in this function too.
   auto topoMatch = nom::algorithm::tarjans(&g);
   std::vector<NNGraph::NodeRef> nodes;
-  int sccNum = 0;
   for (auto scc : topoMatch) {
-    sccNum++;
     for (auto node : scc.getNodes()) {
       nodes.emplace_back(node);
     }
