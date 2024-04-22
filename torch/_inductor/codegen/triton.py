@@ -1017,7 +1017,6 @@ class IterationRangesRoot(IterationRanges):
         is_loop: bool,
         tensor_dim: Optional[int],
         grid_dim: Optional[int],
-        has_zdim: bool,
     ):
         if pid_cache is None:
             pid_cache = {}
@@ -1045,7 +1044,6 @@ class IterationRangesRoot(IterationRanges):
         self.tensor_dim = tensor_dim
         # Index of corresponding dimension in the triton grid
         self.grid_dim = grid_dim
-        self.has_zdim = has_zdim
 
     def __repr__(self):
         return f"IterationRangesRoot({self.name!r}, {self.numel}, ...)"
@@ -1137,7 +1135,7 @@ class IterationRangesRoot(IterationRanges):
         # z grid is only exercised when max_tiles == 3 (off by default).
         if (
             self.grid_dim == 1
-            and not self.has_zdim
+            and config.triton.max_tiles <= 2
             and not (isinstance(self.numel, int) and self.numel <= get_max_y_grid())
         ):
             key = f"{key} * (tl.program_id({self.grid_dim + 1}) + 1)"
@@ -1417,7 +1415,6 @@ class TritonKernel(Kernel):
                     is_loop=is_reduction and not self.persistent_reduction,
                     tensor_dim=tensor_dim,
                     grid_dim=grid_dim,
-                    has_zdim="z" in active_prefixes,
                 )
             )
         for tree in self.range_trees:

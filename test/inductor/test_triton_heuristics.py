@@ -78,6 +78,11 @@ class TestTritonHeuristics(TestCase):
     def test_artificial_grid_cpp_wrapper(self):
         self._test_artificial_zgrid()
 
+    @config.patch("triton.max_tiles", 3)
+    def test_artificial_grid_max_tiles(self):
+        with self.assertRaisesRegex(Exception, "Generated y grid"):
+            self._test_artificial_zgrid()
+
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU:
