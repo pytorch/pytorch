@@ -1,4 +1,5 @@
 import contextlib
+from typing import Dict
 
 import torch.fx
 from .constant import ConstantVariable
@@ -56,6 +57,11 @@ def vt_to_fake_helper(vt, tx):
     return proxy_to_fake_helper(proxy_)
 
 
+tracer_to_used_names: Dict[
+    torch._dynamo.output_graph.SubgraphTracer, Dict[str, int]
+] = {}
+
+
 def reconstruct_node_meta_data(module_vt, tx, num_nodes_need_update_metadata):
     for node in tx.output.graph.nodes.__reversed__():
         num_nodes_need_update_metadata -= 1
@@ -66,20 +72,20 @@ def reconstruct_node_meta_data(module_vt, tx, num_nodes_need_update_metadata):
             # below logic to get a unique name for source_fn_stack is mimic from
             # the _Namespace.create_name() which is used to get a unique name for
             # the fx node.
-            if tx.output.current_tracer not in tx.tracer_to_used_names.keys():
+            if tx.output.current_tracer not in tracer_to_used_names.keys():
                 # TODO(JackCaoG): use weakref here?
-                tx.tracer_to_used_names[tx.output.current_tracer] = {}
+                tracer_to_used_names[tx.output.current_tracer] = {}
 
             base_module_key = module_vt.module_key.lower()
 
             if (
                 base_module_key
-                not in tx.tracer_to_used_names[tx.output.current_tracer].keys()
+                not in tracer_to_used_names[tx.output.current_tracer].keys()
             ):
-                tx.tracer_to_used_names[tx.output.current_tracer][base_module_key] = 0
+                tracer_to_used_names[tx.output.current_tracer][base_module_key] = 0
 
-            count = tx.tracer_to_used_names[tx.output.current_tracer][base_module_key]
-            tx.tracer_to_used_names[tx.output.current_tracer][base_module_key] += 1
+            count = tracer_to_used_names[tx.output.current_tracer][base_module_key]
+            tracer_to_used_names[tx.output.current_tracer][base_module_key] += 1
             unique_module_key = (
                 base_module_key if count == 0 else f"{base_module_key}_{count}"
             )
