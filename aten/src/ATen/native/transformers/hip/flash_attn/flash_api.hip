@@ -157,43 +157,6 @@ aotriton::TensorView<Rank> mk_aotensor(const at::Tensor& q, c10::string_view ten
                                     cast_dtype(q.dtype()));
 }
 
-template<bool COPY_FROM_INPUT,  // For Input Tensor
-         bool COPY_BACK>        // For Output Tensor
-class TensorStorageSanitizer {
-public:
-  TensorStorageSanitizer(const at::Tensor& ref,
-                         at::Tensor& to_sanitize)
-    : ref_(ref), to_sanitize_(to_sanitize)
-  {
-    need_sanitize = ref_.strides() !=  to_sanitize_.strides();
-    if (!need_sanitize)
-      return;
-
-    temp_ = at::empty_like(ref_);
-    if (COPY_FROM_INPUT) {
-      temp_.copy_(to_sanitize_);
-    }
-  }
-
-  ~TensorStorageSanitizer()
-  {
-    if (need_sanitize && COPY_BACK)
-      to_sanitize_.copy_(temp_);
-  }
-
-  at::Tensor& sanitized_tensor()
-  {
-    if (need_sanitize)
-      return temp_;
-    return to_sanitize_;
-  }
-private:
-  const at::Tensor& ref_;
-  at::Tensor& to_sanitize_;
-  at::Tensor temp_;
-  bool need_sanitize = false;
-};
-
 }
 
 #define CHECK_DEVICE(x) TORCH_CHECK(x.is_cuda(), #x " must be on CUDA")
@@ -531,9 +494,6 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
   int d_head = head_size_og;
   hipError_t err; // TODO: Error handling
   {
-    TensorStorageSanitizer<true, false> dq_s(q_t, dq_t);
-    TensorStorageSanitizer<true, false> dk_s(k_t, dk_t);
-    TensorStorageSanitizer<true, false> dv_s(v_t, dv_t);
     using aotriton::v2::flash::attn_bwd;
     err = attn_bwd(mk_aotensor(q_t, "q"),
                    mk_aotensor(k_t, "k"),
@@ -541,9 +501,9 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
                    softmax_scale,
                    mk_aotensor(out_t, "out"),
                    mk_aotensor(dout_t, "dout"),
-                   mk_aotensor(dq_s.sanitized_tensor(), "dq"),
-                   mk_aotensor(dk_s.sanitized_tensor(), "dk"),
-                   mk_aotensor(dv_s.sanitized_tensor(), "dv"),
+                   mk_aotensor(dq_t, "dq"),
+                   mk_aotensor(dk_t, "dk"),
+                   mk_aotensor(dv_t, "dv"),
                    mk_aotensor<2>(softmax_lse_cont, "L"),
                    mk_aotensor<2>(delta, "delta"),
                    p_dropout,

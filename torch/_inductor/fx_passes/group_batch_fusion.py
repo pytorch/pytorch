@@ -16,7 +16,8 @@ from typing import (
 )
 
 import torch
-from torch._dynamo.utils import counters
+from torch._dynamo.utils import counters, optimus_scuba_log
+from torch._utils_internal import upload_graph
 
 from .. import config
 from ..pattern_matcher import (
@@ -193,7 +194,7 @@ class PostGradBatchLinearFusion(BatchFusion):
             return None
         m, k = input_m.meta["tensor_meta"].shape  # type: ignore[union-attr]
         n = weight_m.meta["tensor_meta"].shape[1]  # type: ignore[union-attr]
-        batch_key = ("batch_linear", m, k, n, bias_m is not None)
+        batch_key = ("batch_linear_post_grad", m, k, n, bias_m is not None)
         return batch_key
 
     def fuse(self, graph: torch.fx.GraphModule, subset: List[torch.fx.Node]):
@@ -234,6 +235,7 @@ class PostGradBatchLinearFusion(BatchFusion):
             original_mm.replace_all_uses_with(new_mm_cont)
             new_mm_cont.meta.update(original_mm.meta)
             graph.erase_node(original_mm)
+        counters["inductor"]["batch_linear_post_grad"] += 1
 
 
 @register_fusion("group_linear", pre_grad=False)
@@ -315,6 +317,7 @@ class GroupLinearFusion(GroupFusion):
             original_mm.replace_all_uses_with(new_mm)
             new_mm.meta.update(original_mm.meta)
             graph.erase_node(original_mm)
+        counters["inductor"]["group_linear"] += 1
 
 
 class BatchPointwiseOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
@@ -351,7 +354,7 @@ class BatchPointwiseOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
             input, other = node.args
             shape = list(input.meta["tensor_meta"].shape)  # type: ignore[union-attr]
             group_key = (
-                "batch_" + self.op.__name__.lower() + "_post_grad",
+                "batch_aten_" + self.op.__name__.lower().split(".")[0],
                 str(shape),
                 str(input.meta["tensor_meta"].dtype),  # type: ignore[union-attr]
                 str(other.meta["tensor_meta"].dtype),  # type: ignore[union-attr]
@@ -388,6 +391,9 @@ class BatchPointwiseOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
                 original_add.replace_all_uses_with(new_add)
                 new_add.meta.update(original_add.meta)
                 graph.erase_node(original_add)
+        counters["inductor"][
+            "batch_aten_" + self.op.__name__.lower().split(".")[0]
+        ] += 1
 
 
 @register_fusion("batch_linear_lhs")
@@ -464,6 +470,7 @@ class BatchLinearLHSFusion(BatchFusion):
             node.replace_all_uses_with(new_node)
             new_node.meta.update(node.meta)
             graph.erase_node(node)
+        counters["inductor"]["batch_linear_lhs"] += 1
 
 
 def is_node_meta_valid(node: Optional[torch.fx.Node]):
@@ -508,7 +515,7 @@ class PreGradBatchLinearFusion(BatchFusion):
             weight = get_arg_value(node, 1, "weight")
             bias = get_arg_value(node, 2, "bias")
             group_key = (
-                "batch_linear_pre_grad",
+                "batch_linear",
                 self._getitem_args(input),
                 str(input.meta["example_value"].shape),
                 str(weight.meta["example_value"].shape),
@@ -576,6 +583,7 @@ class PreGradBatchLinearFusion(BatchFusion):
                 linear.replace_all_uses_with(getitem)
                 getitem.meta.update(linear.meta)
                 graph.erase_node(linear)
+        counters["inductor"]["batch_linear"] += 1
 
 
 @register_fusion("batch_layernorm")
@@ -740,6 +748,7 @@ class BatchLayernormFusion(BatchFusion):
             node.replace_all_uses_with(new_node)
             new_node.meta.update(node.meta)
             graph.erase_node(node)
+        counters["inductor"]["batch_layernorm"] += 1
 
 
 class BatchPointwiseOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
@@ -757,7 +766,7 @@ class BatchPointwiseOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
         if CallFunctionVarArgs(self.op).match(node) and is_node_meta_valid(node):
             # for relu op, we also use the inplace to construct the key
             group_key = (
-                "batch_" + self.op.__name__.lower() + "_pre_grad",
+                "batch_" + self.op.__name__.lower().split(".")[0],
                 str(input.meta["example_value"].shape),
                 str(node.kwargs.get("inplace", False)),
             )
@@ -801,6 +810,7 @@ class BatchPointwiseOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
                 node.replace_all_uses_with(getitem)
                 getitem.meta.update(node.meta)
                 graph.erase_node(node)
+        counters["inductor"]["batch_" + self.op.__name__.lower().split(".")[0]] += 1
 
 
 @register_fusion("batch_tanh")
@@ -993,6 +1003,7 @@ def get_fusion_candidates(
 def apply_group_batch_fusion(graph: torch.fx.GraphModule, rule: GroupBatchFusionBase):
     stable_topological_sort(graph)  # type: ignore[arg-type]
     fused_set: Set[torch.fx.Node] = set()
+    log_to_scuba = False
 
     for node in reversed(graph.nodes):
         candidates = get_fusion_candidates(rule, node, fused_set)
@@ -1006,21 +1017,20 @@ def apply_group_batch_fusion(graph: torch.fx.GraphModule, rule: GroupBatchFusion
             ):
                 rule.fuse(graph, subset)
                 fused_set.update(subset)
-                if isinstance(rule, GroupFusion):
-                    counters["inductor"]["group_fusion"] += 1
-                elif isinstance(rule, BatchFusion):
-                    counters["inductor"]["batch_fusion"] += 1
-                else:
-                    counters["inductor"]["unknown_group_batch_fusion"] += 1
-
                 log.debug(
                     f"{rule.__class__.__name__}: key = {key}; subset size = {len(list(subset))}"  # noqa: G004
                 )
+                log_to_scuba = True
+    if log_to_scuba:
+        optimus_scuba_log[rule.__class__.__name__] = upload_graph(graph)
 
 
 def generate_fusion_from_config(config_options: Dict[str, Any], pre_grad=True):
     fusions: List[GroupBatchFusionBase] = []
     for name, options in config_options.items():
+        # we skip all patterns from pattern_matcher passes (e.g., split_cat)
+        if name not in PRE_GRAD_FUSIONS and name not in POST_GRAD_FUSIONS:
+            continue
         fusion_cls = PRE_GRAD_FUSIONS[name] if pre_grad else POST_GRAD_FUSIONS[name]
         _options = graph_search_options.copy()
         _options.update(options)

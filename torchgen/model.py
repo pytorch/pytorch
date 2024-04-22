@@ -93,7 +93,9 @@ class DispatchKey(Enum):
     NestedTensor = auto()
     Dense = auto()
 
+    PythonTLSSnapshot = auto()
     PreDispatch = auto()
+    PythonDispatcher = auto()
     Python = auto()
     FuncTorchDynamicLayerBackMode = auto()
     ZeroTensor = auto()
@@ -106,6 +108,8 @@ class DispatchKey(Enum):
     AutogradNestedTensor = auto()
     Tracer = auto()
     Autocast = auto()
+    AutocastCPU = auto()
+    AutocastCUDA = auto()
     Batched = auto()
     VmapMode = auto()
     FuncTorchGradWrapper = auto()
@@ -861,16 +865,16 @@ class NativeFunction:
             )
 
         has_composite_implicit_autograd_kernel = (
-            DispatchKey.CompositeImplicitAutograd in dispatch.keys()
+            DispatchKey.CompositeImplicitAutograd in dispatch
         )
         has_composite_implicit_autograd_nested_tensor_kernel = (
-            DispatchKey.CompositeImplicitAutogradNestedTensor in dispatch.keys()
+            DispatchKey.CompositeImplicitAutogradNestedTensor in dispatch
         )
         has_composite_explicit_autograd_kernel = (
-            DispatchKey.CompositeExplicitAutograd in dispatch.keys()
+            DispatchKey.CompositeExplicitAutograd in dispatch
         )
         has_composite_explicit_autograd_non_functional_kernel = (
-            DispatchKey.CompositeExplicitAutogradNonFunctional in dispatch.keys()
+            DispatchKey.CompositeExplicitAutogradNonFunctional in dispatch
         )
 
         # We aren't going to store dispatch metadata inline in NativeFunctions;
@@ -1358,6 +1362,17 @@ class FunctionSchema:
 
     # TODO: Need to handle collisions with argument names at some point
     returns: Tuple["Return", ...]
+
+    @property
+    def is_mutable(self) -> bool:
+        def is_write(arg: "Argument") -> bool:
+            if arg.annotation is None:
+                return False
+            return arg.annotation.is_write
+
+        # Corresponds to torch._C._FunctionSchema.is_mutable
+        # See aten/src/ATen/core/function_schema.h (keep these in sync)
+        return any(is_write(a) for a in self.arguments.flat_all)
 
     def schema_order_arguments(self) -> Iterator["Argument"]:
         return itertools.chain(
@@ -1983,6 +1998,10 @@ class Argument:
     # model will have to change!
     annotation: Optional[Annotation]
 
+    @property
+    def alias_info(self) -> Optional[Annotation]:
+        return self.annotation
+
     @staticmethod
     def parse(arg: str) -> "Argument":
         name: str
@@ -2041,6 +2060,10 @@ class Return:
     name: Optional[str]
     type: Type
     annotation: Optional[Annotation]
+
+    @property
+    def alias_info(self) -> Optional[Annotation]:
+        return self.annotation
 
     @staticmethod
     def parse(arg: str) -> "Return":

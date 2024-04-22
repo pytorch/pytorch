@@ -41,7 +41,6 @@ IMPLICIT_IMPORT_ALLOWLIST: Iterable[str] = [
     # FX GraphModule might depend on builtins module and users usually
     # don't extern builtins. Here we import it here by default.
     "builtins",
-    "triton",
 ]
 
 

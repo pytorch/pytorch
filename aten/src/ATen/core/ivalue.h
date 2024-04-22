@@ -13,7 +13,6 @@
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/intrusive_ptr.h>
 #include <type_traits>
-#include <typeindex>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -491,9 +490,7 @@ struct TORCH_API IValue final {
   // Custom C++ classes
   template <
       typename T,
-      std::enable_if_t<
-          std::is_base_of_v<torch::CustomClassHolder, T>,
-          int> = 0>
+      std::enable_if_t<std::is_base_of_v<torch::CustomClassHolder, T>, int> = 0>
   IValue(intrusive_ptr<T> custom_class);
   bool isCustomClass() const;
   template <typename T>
@@ -743,8 +740,7 @@ struct TORCH_API IValue final {
   // they're not selectable.
   template <class T>
   using enable_if_list_is_ivalue_constructible = std::enable_if_t<
-      std::is_constructible_v<IValue, T> &&
-          !std::is_same_v<T, c10::SymInt>,
+      std::is_constructible_v<IValue, T> && !std::is_same_v<T, c10::SymInt>,
       std::nullptr_t>;
 
   template <class T, enable_if_list_is_ivalue_constructible<T> = nullptr>
@@ -775,7 +771,6 @@ struct TORCH_API IValue final {
   IValue(const std::vector<T>& v);
   template <class T, enable_if_symint<T> = nullptr>
   IValue(std::vector<T>&& v);
-
 
   template <class T>
   using enable_if_ilist_is_ivalue_constructible = std::enable_if_t<
@@ -842,7 +837,7 @@ struct TORCH_API IValue final {
   c10::intrusive_ptr<ivalue::EnumHolder> toEnumHolder() const&;
 
   // None
-  IValue()  {}
+  IValue() = default;
   bool isNone() const {
     return Tag::None == tag;
   }
@@ -941,8 +936,7 @@ struct TORCH_API IValue final {
   }
 
   // Layout
-  IValue(Layout l)
-      : IValue(static_cast<std::underlying_type_t<Layout>>(l)) {}
+  IValue(Layout l) : IValue(static_cast<std::underlying_type_t<Layout>>(l)) {}
   at::Layout toLayout() const {
     return static_cast<at::Layout>(toInt());
   }
@@ -1174,6 +1168,7 @@ struct TORCH_API IValue final {
     }
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
   C10_ALWAYS_INLINE void moveFrom(IValue&& rhs) noexcept {
     if (rhs.isTensor()) {
       new (&payload.as_tensor) at::Tensor(std::move(rhs.payload.as_tensor));

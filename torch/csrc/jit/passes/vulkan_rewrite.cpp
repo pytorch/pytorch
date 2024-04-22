@@ -235,6 +235,26 @@ void rewriteQuantizedOps(std::shared_ptr<Graph>& graph) {
       quantized_conv2d_pattern, vk_quantized_conv2d_pattern);
   quantized_conv2d_rewriter.runOnGraph(graph);
 
+  // quantized::conv_transpose2d
+  std::string quantized_conv_transpose2d_pattern = R"(
+    graph(%a_quant, %packed_params, %r_scale, %r_zero_point) :
+      %res = quantized::conv_transpose2d(%a_quant, %packed_params, %r_scale, %r_zero_point)
+      return (%res) )";
+  std::string vk_quantized_conv_transpose2d_pattern = R"(
+    graph(%a_quant, %packed_params, %r_scale, %r_zero_point):
+      %output_min_max : None = prim::Constant()
+      %vk_packed_params : __torch__.torch.classes.vulkan.Conv2dPackedContext = vulkan_quantized_prepack::convert_qtconv2d_context(
+        %packed_params, %output_min_max, %output_min_max)
+      %res = vulkan_prepack::run_qconv2d_context(
+        %a_quant, %r_scale, %r_zero_point, %vk_packed_params)
+      return (%res) )";
+
+  torch::jit::SubgraphRewriter quantized_conv_transpose2d_rewriter;
+  quantized_conv_transpose2d_rewriter.RegisterRewritePattern(
+      quantized_conv_transpose2d_pattern,
+      vk_quantized_conv_transpose2d_pattern);
+  quantized_conv_transpose2d_rewriter.runOnGraph(graph);
+
   // quantized::conv2d_relu
   std::string quantized_conv2d_relu_pattern = R"(
     graph(%a_quant, %packed_params, %r_scale, %r_zero_point) :
@@ -443,10 +463,15 @@ void vulkanFoldPrePackingOps(script::Module& m) {
         (n->kind() ==
          Symbol::fromQualString("vulkan_prepack::create_qconv2d_context")) ||
         (n->kind() ==
+         Symbol::fromQualString("vulkan_prepack::create_qtconv2d_context")) ||
+        (n->kind() ==
          Symbol::fromQualString(
              "vulkan_quantized_prepack::convert_qconv2d_context")) ||
         (n->kind() ==
          Symbol::fromQualString("vulkan_prepack::create_conv1d_context")) ||
+        (n->kind() ==
+         Symbol::fromQualString(
+             "vulkan_quantized_prepack::convert_qtconv2d_context")) ||
         (n->kind() ==
          Symbol::fromQualString(
              "vulkan_quantized_prepack::convert_linear_context")) ||

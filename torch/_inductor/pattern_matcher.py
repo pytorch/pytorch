@@ -2,13 +2,17 @@ from __future__ import annotations
 
 import dataclasses
 import functools
+import importlib
 import inspect
 import itertools
 import logging
 import operator
 import os
 import re
+import textwrap
+import typing
 from collections import defaultdict
+from pathlib import Path
 from typing import (
     Any,
     Callable,
@@ -19,10 +23,11 @@ from typing import (
     NoReturn,
     Optional,
     Set,
+    Tuple,
     Union,
 )
 
-from typing_extensions import TypeGuard
+from typing_extensions import Self, TypeGuard
 
 import torch
 import torch._guards
@@ -54,7 +59,9 @@ NodeOrConstant = Union[Constant, torch.fx.Node]
 
 
 class Multiple:
-    pass
+    def __init__(self):
+        # Ensure we're really a singleton.
+        assert "MULTIPLE" not in globals() or self is MULTIPLE
 
 
 # Sentinel indicating multiple quantities can be matched
@@ -211,7 +218,7 @@ class PatternExpr:
     def _match(
         self, node: torch.fx.Node, ctx: MatchContext
     ) -> Union[Match, FailedMatch]:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def match(self, node: torch.fx.Node) -> Union[Match, FailedMatch]:
         try:
@@ -228,6 +235,14 @@ class PatternExpr:
     def find_anchor_nodes(self, ctx: MatchContext, searched):
         if self in ctx.pattern_to_node:
             yield ctx.pattern_to_node[self]
+
+    def pattern_eq(self, other: Any) -> bool:
+        """
+        Compare two `PatternExpr`s and return true if they are the
+        same. Note this is NOT matching a pattern - it is comparing the pattern
+        structures (for debugging).
+        """
+        return isinstance(other, self.__class__)
 
 
 class Arg(PatternExpr):
@@ -270,6 +285,10 @@ class KeywordArg(PatternExpr):
     def _match(self, node: NodeOrConstant, ctx: MatchContext):
         return Match(self, kwargs={self.name: node})  # matches anything
 
+    def pattern_eq(self, other: Any) -> bool:
+        other = typing.cast(Self, other)  # super makes sure this is true
+        return super().pattern_eq(other) and self.name == other.name
+
 
 class ExclusiveKeywordArg(PatternExpr):
     """
@@ -290,6 +309,10 @@ class ExclusiveKeywordArg(PatternExpr):
         ctx.exclusive_node_set.append(node)
         return Match(self, kwargs={self.name: node})  # matches anything
 
+    def pattern_eq(self, other: Any) -> bool:
+        other = typing.cast(Self, other)  # super makes sure this is true
+        return super().pattern_eq(other) and self.name == other.name
+
 
 class _TargetExpr(PatternExpr):
     """
@@ -298,7 +321,7 @@ class _TargetExpr(PatternExpr):
 
     op: Optional[str] = None
 
-    def __init__(self, fns, users=1):
+    def __init__(self, fns, users: Union[Multiple, int] = 1):
         if not self.op:
             raise NotImplementedError("Shouldn't directly use _BaseNodeMatch")
         super().__init__()
@@ -309,7 +332,7 @@ class _TargetExpr(PatternExpr):
 
         self.fns: List[Union[Callable[..., Any], str]] = fns
         self.fns_set: Set[Union[Callable[..., Any], str]] = set(fns)
-        self.users: Union[int, Multiple] = users
+        self.users = users
 
     def fns_repr(self) -> str:
         first_repr = self.fns[0]
@@ -326,13 +349,19 @@ class _TargetExpr(PatternExpr):
             return first_repr
 
     def __repr__(self):
-        return f"{self.__class__.__name__}({self.fns_repr()})"
+        if self.users is MULTIPLE:
+            comma_users = ", MULTIPLE"
+        elif self.users != 1:
+            comma_users = f", {self.users})"
+        else:
+            comma_users = ""
+        return f"{self.__class__.__name__}({self.fns_repr()}{comma_users})"
 
     def has_multiple_users(self) -> bool:
         return isinstance(self.users, Multiple) or self.users > 1
 
     def find_anchor_nodes(self, ctx: MatchContext, searched):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def _match_fns(self, node: torch.fx.Node):
         return (
@@ -346,6 +375,15 @@ class _TargetExpr(PatternExpr):
             self in ctx.outputs
             or self.users is MULTIPLE
             or len(node.users) == self.users
+        )
+
+    def pattern_eq(self, other: Any) -> bool:
+        other = typing.cast(Self, other)  # super makes sure this is true
+        return (
+            super().pattern_eq(other)
+            and self.op == other.op
+            and self.fns == other.fns
+            and self.users == other.users
         )
 
 
@@ -393,6 +431,10 @@ class _TargetArgsExpr(_TargetExpr):
             *map(repr, self.args),
             *[f"{k}={v}" for k, v in self.kwargs.items()],
         ]
+        if self.users is MULTIPLE:
+            args.append("_users=MULTIPLE")
+        elif self.users != 1:
+            args.append(f"_users={self.users}")
         return f"{self.__class__.__name__}({', '.join(args)})"
 
     def pretty_print(self, pp: PatternPrettyPrinter):
@@ -401,9 +443,9 @@ class _TargetArgsExpr(_TargetExpr):
             *(pp.pretty_print(x) for x in self.args),
             *[f"{k}={pp.pretty_print(v)}" for k, v in self.kwargs.items()],
         ]
-        if isinstance(self.users, Multiple):
+        if self.users is MULTIPLE:
             args.append("_users=MULTIPLE")
-        elif self.users > 1:
+        elif self.users != 1:
             args.append(f"_users={self.users}")
 
         joiner_str = ", "
@@ -481,6 +523,17 @@ class _TargetArgsExpr(_TargetExpr):
                             if self._match_fns(node):
                                 yield node
                                 searched.add(node)
+
+    def pattern_eq(self, other: Any) -> bool:
+        other = typing.cast(Self, other)  # super makes sure this is true
+        return (
+            super().pattern_eq(other)
+            and self.flat_args_kwargs[1] == other.flat_args_kwargs[1]
+            and all(
+                a.pattern_eq(b) if isinstance(a, PatternExpr) else a == b
+                for a, b in zip(self.flat_args_kwargs[0], other.flat_args_kwargs[0])
+            )
+        )
 
 
 class CallFunction(_TargetArgsExpr):
@@ -577,12 +630,21 @@ class ListOf(PatternExpr):
             return FailedMatch("list: no_match")
         return m.bundle()
 
+    def pattern_eq(self, other: Any) -> bool:
+        other = typing.cast(Self, other)  # super makes sure this is true
+        return (
+            super().pattern_eq(other)
+            and self.pattern.pattern_eq(other.pattern)
+            and self.partial == other.partial
+        )
+
 
 class MultiOutputPattern(PatternExpr):
     def __init__(self, outputs):
         super().__init__()
         assert all(isinstance(x, (PatternExpr, type(None))) for x in outputs), outputs
         self.outputs: List[Optional[PatternExpr]] = outputs
+        self.op = outputs[0].op
 
     @property
     def fns(self):
@@ -631,6 +693,17 @@ class MultiOutputPattern(PatternExpr):
         except FailedMatch as e:
             return e
 
+    def pattern_eq(self, other: Any) -> bool:
+        other = typing.cast(Self, other)  # super makes sure this is true
+        return (
+            super().pattern_eq(other)
+            and len(self.outputs) == len(other.outputs)
+            and all(
+                a.pattern_eq(b) if isinstance(a, PatternExpr) else a == b
+                for a, b in zip(self.outputs, other.outputs)
+            )
+        )
+
 
 class RepeatedExpr(PatternExpr):
     """
@@ -641,6 +714,7 @@ class RepeatedExpr(PatternExpr):
         super().__init__()
         assert hasattr(inner_pattern, "fns")
         self.inner_pattern = inner_pattern
+        self.op = inner_pattern.op  # type: ignore[attr-defined]
 
     @property
     def fns(self):
@@ -662,6 +736,12 @@ class RepeatedExpr(PatternExpr):
                 return anchor_m
             m.extend(anchor_m)
         return m
+
+    def pattern_eq(self, other: Any) -> bool:
+        other = typing.cast(Self, other)  # super makes sure this is true
+        return super().pattern_eq(other) and self.inner_pattern.pattern_eq(
+            other.inner_pattern
+        )
 
 
 class PatternPrettyPrinter:
@@ -723,7 +803,7 @@ class PatternEntry:
     extra_check: Callable[[Match], bool]
 
     def apply(self, match: Match, graph: torch.fx.Graph, node: torch.fx.Node):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def register(self, pass_dicts, target=None, prepend=False):
         if target is None:
@@ -731,10 +811,11 @@ class PatternEntry:
             for fn in self.pattern.fns:
                 self.register(pass_dicts, fn, prepend=prepend)
         elif isinstance(pass_dicts, (dict, PatternMatcherPass)):
+            assert hasattr(self.pattern, "op")
             if prepend:
-                pass_dicts[target].insert(0, self)
+                pass_dicts[(self.pattern.op, target)].insert(0, self)
             else:
-                pass_dicts[target].append(self)
+                pass_dicts[(self.pattern.op, target)].append(self)
         else:
             for x in pass_dicts:
                 self.register(x, target, prepend=prepend)
@@ -1002,56 +1083,64 @@ def register_replacement(
                         ):
                             sym_args.append(v)
 
-            if sym_args:
-                # AOT Autograd and make fx will dedupe symbolic shape size
-                # accesses of sym ints that appear as inputs
-                # We don't want the sym_size uses to interfere with pattern matching
-                # so we provide them as inputs.
-                # Later, when we actually do the replacement, the symbolic shape
-                # sizes will get re-traced and added to the graph.
+            # If we were given a pre-traced pattern then use that instead of
+            # retracing. Note that this means the pattern has to be independent
+            # of its args.
+            specific_pattern = search_fn_pattern
 
-                def search_fn_new(*args_new):
-                    return search_fn(*args_new[len(args_new) - len(args) :])
+            if not specific_pattern:
+                if sym_args:
+                    # AOT Autograd and make fx will dedupe symbolic shape size
+                    # accesses of sym ints that appear as inputs
+                    # We don't want the sym_size uses to interfere with pattern matching
+                    # so we provide them as inputs.
+                    # Later, when we actually do the replacement, the symbolic shape
+                    # sizes will get re-traced and added to the graph.
 
-                try:
-                    specific_graph = trace_fn(search_fn_new, sym_args + args)
-                except RuntimeError as e:
-                    log_trace_failure(search_fn, e)
-                    return False
+                    def search_fn_new(*args_new):
+                        return search_fn(*args_new[len(args_new) - len(args) :])
 
-                # correct argnames in the graph
-                sym_arg_names = []
-                for i, placeholder in zip(
-                    range(len(sym_args) + len(args)),
-                    specific_graph.graph.nodes,
-                ):
-                    if i < len(sym_args):
-                        sym_arg_names.append(placeholder.target)
-                        continue
+                    try:
+                        specific_graph = trace_fn(search_fn_new, sym_args + args)
+                    except RuntimeError as e:
+                        log_trace_failure(search_fn, e)
+                        return False
 
-                    with specific_graph.graph.inserting_after(placeholder):
-                        new_node = specific_graph.graph.placeholder(
-                            argnames[i - len(sym_args)]
-                        )
-                        new_node.target = new_node.name
-                        placeholder.replace_all_uses_with(new_node)
-                        specific_graph.graph.erase_node(placeholder)
+                    # correct argnames in the graph
+                    sym_arg_names = []
+                    for i, placeholder in zip(
+                        range(len(sym_args) + len(args)),
+                        specific_graph.graph.nodes,
+                    ):
+                        if i < len(sym_args):
+                            sym_arg_names.append(placeholder.target)
+                            continue
 
-                argnames = sym_arg_names + argnames
-            else:
-                try:
-                    specific_graph = trace_fn(search_fn, args)
-                except RuntimeError as e:
-                    log_trace_failure(search_fn, e)
-                    return False
+                        with specific_graph.graph.inserting_after(placeholder):
+                            new_node = specific_graph.graph.placeholder(
+                                argnames[i - len(sym_args)]
+                            )
+                            new_node.target = new_node.name
+                            placeholder.replace_all_uses_with(new_node)
+                            specific_graph.graph.erase_node(placeholder)
 
-            specific_pattern = fx_to_pattern(
-                specific_graph,
-                argnames=argnames,
-                exclusive_arg_names=exclusive_arg_names,
-                scalar_workaround=scalar_workaround,
-            )
+                    argnames = sym_arg_names + argnames
+                else:
+                    try:
+                        specific_graph = trace_fn(search_fn, args)
+                    except RuntimeError as e:
+                        log_trace_failure(search_fn, e)
+                        return False
+
+                specific_pattern = fx_to_pattern(
+                    specific_graph,
+                    argnames=argnames,
+                    exclusive_arg_names=exclusive_arg_names,
+                    scalar_workaround=scalar_workaround,
+                )
+
             specific_pattern_match = specific_pattern.match(match.output_nodes()[0])  # type: ignore[arg-type]
+
             if specific_pattern_match and extra_check(specific_pattern_match):
                 # trace the pattern using the shapes from the user program
                 match.replacement_graph = trace_fn(replace_fn, args)  # type: ignore[assignment]
@@ -1101,6 +1190,150 @@ def register_replacement(
         )
         pattern.register(pass_dicts)
         return pattern.pattern
+
+
+_serialized_patterns: Set[str] = set()
+
+
+def _serialize_pattern(
+    unique_name: str,
+    search_fn,
+    example_inputs: Iterable[Any],
+    trace_fn: Callable[[Callable[..., Any], Iterable[Any]], torch.fx.GraphModule],
+    scalar_workaround,
+):
+    def get_file_template() -> str:
+        auto_generated_msg = textwrap.dedent(
+            """\
+            # This is an auto-generated file. Please do not modify it by hand.
+            # To re-generate, run:
+            # cd ~/pytorch && python torchgen/fuse/gen_patterns.py
+            """
+        )
+
+        file_template = textwrap.dedent(
+            """\
+            # mypy: ignore-errors
+
+            # noqa: F401, E501
+            {msg}
+            import torch
+            import torch._inductor
+
+            aten = torch.ops.aten
+            prims = torch.ops.prims
+
+            """
+        ).format(msg=auto_generated_msg)
+
+        pattern_matcher_imports = []
+        for name in dir(torch._inductor.pattern_matcher):
+            attr = getattr(torch._inductor.pattern_matcher, name)
+            if isinstance(attr, type) and issubclass(attr, (PatternExpr, _TargetExpr)):
+                pattern_matcher_imports.append(name)
+
+        formatted_imports = ",\n   ".join(pattern_matcher_imports)
+        formatted_imports = f"from torch._inductor.pattern_matcher import (\n   {formatted_imports},\n)\n"
+        return f"{file_template}{formatted_imports}"
+
+    if not SERIALIZED_PATTERN_PATH.is_dir():
+        raise Exception(  # noqa: TRY002
+            f"Could not find serialized patterns directory at {SERIALIZED_PATTERN_PATH}"
+        )
+
+    pattern_name = search_fn.__name__
+
+    from torch._functorch import config as functorch_config
+
+    with functorch_config.patch(functionalize_rng_ops=False):
+        pattern = gen_pattern(search_fn, example_inputs, trace_fn, scalar_workaround)
+
+    serialized_pattern = PatternPrettyPrinter.run(pattern, output_name=unique_name)
+    if pattern_name not in _serialized_patterns:
+        write_mode = "w"
+        _serialized_patterns.add(pattern_name)
+    else:
+        write_mode = "a"
+
+    file_template = get_file_template()
+
+    with open(SERIALIZED_PATTERN_PATH / f"{pattern_name}.py", write_mode) as f:
+        if write_mode == "w":
+            f.write(file_template)
+        else:
+            f.write("\n\n")
+        f.write(serialized_pattern)
+        f.write("\n")
+
+
+SERIALIZED_PATTERN_PATH = Path(__file__).parent / "fx_passes" / "serialized_patterns"
+
+# This is the set of serialized patterns that we've registered.  Used by
+# test_serialized_patterns_up_to_date() to ensure the patterns are up
+# to date.
+_known_precompiled_patterns: List[
+    Tuple[
+        Any,
+        Iterable[Any],
+        Callable[[Callable[..., Any], Iterable[Any]], torch.fx.GraphModule],
+        Any,
+        str,
+    ]
+] = []
+
+
+def gen_register_replacement(
+    unique_name: str,
+    search_fn,
+    replace_fn,
+    example_inputs: Iterable[Any],
+    trace_fn: Callable[[Callable[..., Any], Iterable[Any]], torch.fx.GraphModule],
+    pass_dicts,
+    extra_check=_return_true,
+    scalar_workaround=(),
+    exclusive_arg_names=(),
+):
+    # Make sure the example_inputs is materialized.
+    example_inputs = tuple(example_inputs)
+
+    if "PYTORCH_GEN_PATTERNS" in os.environ:
+        pat = _serialize_pattern(
+            unique_name, search_fn, example_inputs, trace_fn, scalar_workaround
+        )
+    else:
+        pattern_name = search_fn.__name__
+        m = importlib.import_module(
+            f"torch._inductor.fx_passes.serialized_patterns.{pattern_name}"
+        )
+        if not m or not hasattr(m, unique_name):
+            log.warning(
+                "Precompiled pattern %r not found. Run torchen/fuse/gen_patterns.py.",
+                unique_name,
+            )
+        pat = getattr(m, unique_name)
+
+    for arg in pytree.tree_iter(example_inputs):
+        if torch._subclasses.fake_tensor.is_fake(arg) and arg.constant is not None:
+            # This can be a problem - small fake tensors (e.g. `tensor(2)`) will
+            # hold onto their original constant value - and by stashing it here
+            # will cause a memory leak if the constant value is on GPU.
+            # Since this is just an optimization we can clear it out.
+            arg.constant = None
+
+    _known_precompiled_patterns.append(
+        (search_fn, example_inputs, trace_fn, scalar_workaround, pat)
+    )
+    register_replacement(
+        search_fn,
+        replace_fn,
+        example_inputs,
+        trace_fn,
+        pass_dicts,
+        extra_check,
+        scalar_workaround,
+        exclusive_arg_names,
+        search_fn_pattern=pat,
+    )
 
 
 @functorch_config.patch(functionalize_rng_ops=False)
@@ -1219,12 +1452,12 @@ class PatternMatcherPass:
     ):
         super().__init__()
         self.patterns: DefaultDict[
-            torch.fx.node.Target, List[PatternEntry]
+            Tuple[str, torch.fx.node.Target], List[PatternEntry]
         ] = defaultdict(list)
         self.prevent_match_across_mutations = prevent_match_across_mutations
         self.pass_name = pass_name
 
-    def __getitem__(self, item: torch.fx.node.Target) -> List[PatternEntry]:
+    def __getitem__(self, item: Tuple[str, torch.fx.node.Target]) -> List[PatternEntry]:
         return self.patterns[item]
 
     def apply(self, graph: torch.fx.GraphModule) -> int:
@@ -1239,36 +1472,45 @@ class PatternMatcherPass:
                 get_mutation_region_id, graph
             )
         count = 0
-        for node in reversed(graph.nodes):
+        nodes = []
+        has_call_module = False
+        for op, target in self.patterns:
+            if op == "call_module":
+                has_call_module = True
+            else:
+                nodes.append(graph.find_nodes(op=op, target=target, sort=False))
+        if has_call_module:
+            nodes.append(graph.find_nodes(op="call_module", sort=False))
+        for node in sorted(itertools.chain.from_iterable(nodes), reverse=True):
             target = extract_target(node)
-            if (
-                node.op in ["call_function", "call_method", "call_module"]
-                and target in self.patterns
-            ):
-                # conservatively not applying pattern for cpu input,
-                # since some of the patterns induce codegen and split nodes.
-                # Note: we will only skip cpu compute if disable_cpp_codegen=True
-                if fallback_node_due_to_unsupported_type(node, allow_cpu_inputs=False):
+            if node.op == "call_module":
+                if (node.op, target) not in self.patterns:
                     continue
 
-                for entry in self.patterns[target]:
-                    if node._erased:
-                        break
-                    m = entry.pattern.match(node)
-                    # pattern match crosses mutation barrier - discard
-                    if (
-                        self.prevent_match_across_mutations
-                        and is_match(m)
-                        and len(set(map(get_mutation_region_id_partial, m.nodes))) != 1  # type: ignore[possibly-undefined]
-                    ):
-                        continue
-                    if os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_DEBUG") == node.name:
-                        log.warning("%s%s %s %s", node, node.args, m, entry.pattern)
-                    if is_match(m) and entry.extra_check(m):
-                        count += 1
-                        entry.apply(m, graph, node)  # type: ignore[arg-type]
-                        counters["inductor"]["pattern_matcher_count"] += 1
-                        counters["inductor"]["pattern_matcher_nodes"] += len(m.nodes)
+            # conservatively not applying pattern for cpu input,
+            # since some of the patterns induce codegen and split nodes.
+            # Note: we will only skip cpu compute if disable_cpp_codegen=True
+            if fallback_node_due_to_unsupported_type(node, allow_cpu_inputs=False):
+                continue
+
+            for entry in self.patterns[(node.op, target)]:
+                if node._erased:
+                    break
+                m = entry.pattern.match(node)
+                # pattern match crosses mutation barrier - discard
+                if (
+                    self.prevent_match_across_mutations
+                    and is_match(m)
+                    and len(set(map(get_mutation_region_id_partial, m.nodes))) != 1  # type: ignore[possibly-undefined]
+                ):
+                    continue
+                if os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_DEBUG") == node.name:
+                    log.warning("%s%s %s %s", node, node.args, m, entry.pattern)
+                if is_match(m) and entry.extra_check(m):
+                    count += 1
+                    entry.apply(m, graph, node)  # type: ignore[arg-type]
+                    counters["inductor"]["pattern_matcher_count"] += 1
+                    counters["inductor"]["pattern_matcher_nodes"] += len(m.nodes)
         return count
 
     def clear(self):
@@ -1276,7 +1518,7 @@ class PatternMatcherPass:
 
 
 def _not_implemented(*args, **kwargs) -> NoReturn:
-    raise NotImplementedError()
+    raise NotImplementedError
 
 
 def fx_to_pattern(
@@ -1356,10 +1598,7 @@ def fwd_only(fn, args, *, run_dce=True) -> torch.fx.GraphModule:
     """Build a normalized inference graph, for use with fx_to_pattern"""
     # TODO - look into using aot autograd, asserting no mutating ops here
     with enable_python_dispatcher():
-        mode = (
-            "real" if not torch._inductor.utils.any_is_symbolic(*args) else "symbolic"
-        )
-        gm = make_fx(fn, select_decomp_table(), tracing_mode=mode)(*args)
+        gm = make_fx(fn, select_decomp_table(), tracing_mode="real")(*args)
     if run_dce:
         gm.graph.eliminate_dead_code()
     gm.recompile()

@@ -480,15 +480,6 @@ class PackageExporter:
             )
             return
 
-        # Exporting triton is not always possible, work around it
-        if module_name == "triton":
-            self.dependency_graph.add_node(
-                module_name,
-                action=_ModuleProviderAction.SKIP,
-                provided=True,
-            )
-            return
-
         if module_name == "_mock":
             self.dependency_graph.add_node(
                 module_name,
@@ -958,7 +949,7 @@ class PackageExporter:
             if _gate_torchscript_serialization and isinstance(
                 obj, torch.jit.RecursiveScriptModule
             ):
-                raise Exception(
+                raise Exception(  # noqa: TRY002
                     "Serializing ScriptModules directly into a package is a beta feature. "
                     "To use, set global "
                     "`torch.package.package_exporter._gate_torchscript_serialization` to `False`."
