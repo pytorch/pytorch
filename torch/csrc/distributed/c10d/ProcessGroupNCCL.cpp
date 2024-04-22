@@ -352,8 +352,11 @@ std::string dump_nccl_trace() {
 }
 #endif
 
-c10::optional<std::function<std::string()>>& get_cpp_trace_dumper() {
-  static c10::optional<std::function<std::string()>> dumper(c10::nullopt);
+c10::optional<std::function<void(std::function<void(const std::string&)>)>>&
+get_cpp_trace_dumper() {
+  static c10::optional<
+      std::function<void(std::function<void(const std::string&)>)>>
+      dumper(c10::nullopt);
   return dumper;
 }
 
@@ -1330,7 +1333,8 @@ void ProcessGroupNCCL::heartbeatMonitor() {
 
   auto& cpp_dumper = get_cpp_trace_dumper();
   if (cpp_dumper.has_value()) {
-    LOG(INFO) << "Dumping c++ stacktraces: " << cpp_dumper.value()();
+    LOG(INFO) << "Dumping c++ stacktraces:";
+    cpp_dumper.value()([](const std::string& line) { LOG(INFO) << line; });
   }
 
   // Store debug info to storage if no other thread does it. (By default to
