@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from torch._inductor.select_algorithm import TritonTemplateCaller
 
 from . import config
-from .utils import do_bench
+from .runtime.runtime_utils import do_bench
 from .virtualized import V
 
 CUDA_VISIBLE_DEVICES = "CUDA_VISIBLE_DEVICES"
@@ -495,14 +495,13 @@ class TestBenchmarkRequest(BenchmarkRequest):
         self, *input_tensors: torch.Tensor, output_tensor: Optional[torch.Tensor] = None
     ) -> float:
         if self.value is None:
-            raise Exception("Failed to run")
+            raise Exception("Failed to run")  # noqa: TRY002
         return self.value
 
 
 class TritonBenchmarkRequest(BenchmarkRequest):
     # Important: Instances of this class have to be serializable
     # across process boundaries. Do not put CUDA Tensors in here!
-
     def __init__(
         self,
         kernel_name: str,
@@ -545,6 +544,8 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         if "warmup" in inspect.signature(run_method).parameters:
             warmup_arg["warmup"] = False
 
+        from torch._C import _cuda_getCurrentRawStream as get_raw_stream
+
         if torch.version.hip and self.matrix_instr_nonkdim != 0:
             return functools.partial(
                 run_method,
@@ -553,9 +554,7 @@ class TritonBenchmarkRequest(BenchmarkRequest):
                 *self.extra_args,
                 grid=self.grid,
                 **warmup_arg,
-                num_stages=self.num_stages,
-                num_warps=self.num_warps,
-                matrix_instr_nonkdim=self.matrix_instr_nonkdim,
+                stream=get_raw_stream(self.output_tensor_meta.device.index),
             )
         else:
             return functools.partial(
@@ -565,9 +564,12 @@ class TritonBenchmarkRequest(BenchmarkRequest):
                 *self.extra_args,
                 grid=self.grid,
                 **warmup_arg,
-                num_stages=self.num_stages,
-                num_warps=self.num_warps,
+                stream=get_raw_stream(self.output_tensor_meta.device.index),
             )
+
+    def precompile(self):
+        mod = PyCodeCache.load_by_key_path(self.module_cache_key, self.module_path)
+        getattr(mod, self.kernel_name).precompile()
 
     def __str__(self) -> str:
         return f"{self.kernel_name=}, {self.module_path=}, {self.module_cache_key=}"

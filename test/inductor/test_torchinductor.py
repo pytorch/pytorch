@@ -88,6 +88,8 @@ from torch.utils._pytree import tree_flatten, tree_unflatten
 from torch.utils._triton import has_triton
 from torch.utils.weak import WeakTensorKeyDictionary
 
+DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
+
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
         "Windows CI does not have necessary dependencies for test_torchinductor yet\n"
@@ -9917,7 +9919,7 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
     copy_tests(CommonTemplate, GPUTests, GPU_TYPE)
 
     class TritonCodeGenTests(TestCase):
-        from torch._inductor.triton_heuristics import CachingAutotuner
+        from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 
         class NoOpCompilerBackend:
             def __init__(self):
@@ -9969,7 +9971,7 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
 
                 for val in mod.__dict__.values():
                     if isinstance(
-                        val, torch._inductor.triton_heuristics.CachingAutotuner
+                        val, torch._inductor.runtime.triton_heuristics.CachingAutotuner
                     ):
                         kernels.append(val)
 
@@ -10607,6 +10609,69 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
                         if res:
                             seq_nr_set.add(int(res.group(1)))
             self.assertTrue(bwd_seq_nr_set.issubset(fwd_seq_nr_set))
+
+        @config.patch(
+            {
+                "coordinate_descent_tuning": True,
+                "triton.unique_kernel_names": True,
+                "benchmark_kernel": True,
+            }
+        )
+        @skipIfRocm
+        @unittest.skipIf(
+            torch.cuda.get_device_capability() < (9, 0),
+            "Triton does not support fp8 on A100",
+        )
+        def test_red_followed_by_transposed_pointwise(self):
+            bs = 26624
+            dim = 1024
+
+            @torch.compile(dynamic=False)
+            def f(in1, in2, a, b):
+                out = torch.nn.functional.silu(in1) * in2
+                out_row = (out / out.amax(dim=1, keepdim=True)).to(torch.float8_e4m3fn)
+                out_col = (out / out.amax(dim=0, keepdim=True)).to(torch.float8_e4m3fn)
+
+                # setup strides for _scaled_mm
+                out_row = out_row.contiguous()
+                out_col = out_col.t().contiguous().t()
+
+                return (
+                    torch._scaled_mm(out_row, a, out_dtype=torch.bfloat16)[0],
+                    torch._scaled_mm(b, out_col, out_dtype=torch.bfloat16)[0],
+                )
+
+            in1 = torch.randn((bs, dim), dtype=torch.bfloat16, device=GPU_TYPE)
+            in2 = torch.randn((bs, dim), dtype=torch.bfloat16, device=GPU_TYPE)
+            a = (
+                torch.randn((dim, dim), dtype=torch.bfloat16, device=GPU_TYPE)
+                .t()
+                .to(torch.float8_e4m3fn)
+            )
+            b = torch.randn((dim, bs), dtype=torch.bfloat16, device=GPU_TYPE).to(
+                torch.float8_e4m3fn
+            )
+
+            # warmup
+            _, (wrapper,) = run_and_get_code(f, in1, in2, a, b)
+
+            # Previously indcutor decide reduction hint for a reduction kernel without considering
+            # the pointwise nodes. That will cause the third reduction kernel in this wrapper to be a
+            # persistent inner reduction and cause bad perf.
+            #
+            # We fix that by making the third reduction a non-persistent reduction
+            # and improve the perf by 4.14x (451us -> 109us)
+            self.assertEqual(3, wrapper.count("def triton_red_"))
+            self.assertEqual(0, wrapper.count("def triton_per_"))
+
+            if DO_PERF_TEST:
+                with torch.profiler.profile(
+                    activities=[torch.profiler.ProfilerActivity.CUDA]
+                ) as p:
+                    for _ in range(1000):
+                        f(in1, in2, a, b)
+
+                print(p.key_averages().table(max_name_column_width=200))
 
     class RNNTest(TestCase):
         class Model(torch.nn.Module):

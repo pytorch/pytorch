@@ -66,14 +66,22 @@ inline void unpack_tensor_ivalue(
   inputs.push_back(ivalue.toTensor());
 }
 
+inline void unpack_optional_tensor_ivalue(
+    const c10::IValue& ivalue,
+    const c10::Device& device,
+    std::vector<at::Tensor>& inputs) {
+  auto ivalue_opt_tensor = ivalue.toOptional<at::Tensor>();
+  if (ivalue_opt_tensor.has_value()) {
+    inputs.push_back(ivalue_opt_tensor.value());
+  }
+}
+
 inline void unpack_tensor_list_ivalue(
     const c10::IValue& ivalue,
     const c10::Device& device,
     std::vector<at::Tensor>& inputs) {
   for (const auto& item : ivalue.toListRef()) {
-    if (!item.isNone()) {
-      inputs.push_back(item.toTensor());
-    }
+    inputs.push_back(item.toTensor());
   }
 }
 
@@ -81,7 +89,9 @@ inline void unpack_optional_tensor_list_ivalue(
     const c10::IValue& ivalue,
     const c10::Device& device,
     std::vector<at::Tensor>& inputs) {
-  unpack_tensor_list_ivalue(ivalue, device, inputs);
+  for (const auto& item : ivalue.toListRef()) {
+    unpack_optional_tensor_ivalue(item, device, inputs);
+  }
 }
 
 inline void unpack_scalar_ivalue(
@@ -110,10 +120,7 @@ bool unpack_ivalue(
   } else if (
       *argument.real_type() == *c10::getTypePtr<c10::optional<at::Tensor>>()) {
     // ivalue is c10::optional<at::Tensor>
-    auto ivalue_opt_tensor = ivalue.toOptional<at::Tensor>();
-    if (ivalue_opt_tensor.has_value()) {
-      unpack_tensor_ivalue(ivalue, device, inputs);
-    }
+    unpack_optional_tensor_ivalue(ivalue, device, inputs);
   } else {
     // Unsupport IValue type.
     return false;
@@ -489,6 +496,8 @@ void AOTIPythonKernelHolder::cache_miss(
   auto device = c10::Device(device_type, device_index);
 
   std::shared_ptr<AOTIModelContainerRunner> kernel = nullptr;
+  // TODO: To enable the plugin mechanism to allow registration for other
+  // backends
   if (device_type == c10::DeviceType::CPU) {
     kernel = std::make_shared<AOTIModelContainerRunnerCpu>(kernel_lib_path);
   } else {
@@ -547,24 +556,20 @@ std::string AOTIPythonKernelHolder::produce_aoti_kernel_lib(
     }
   });
 
-  if (op_py_func.ptr() == nullptr || op_py_func.ptr() == Py_None) {
-    TORCH_WARN(
-        "Failed to get python operation. Operator Name is ",
-        op.operator_name().name,
-        ", Overload Name is ",
-        overload_name);
-    return kernel_lib_path;
-  }
+  TORCH_INTERNAL_ASSERT(
+      op_py_func.ptr() != nullptr && op_py_func.ptr() != Py_None,
+      "Failed to get python operation. Operator Name is ",
+      op.operator_name().name,
+      ", Overload Name is ",
+      overload_name);
 
   py::handle aot_compile_function =
       py::module::import("torch._inductor.utils")
           .attr("aoti_compile_with_persistent_cache");
-  if (aot_compile_function.ptr() == nullptr ||
-      aot_compile_function.ptr() == Py_None) {
-    TORCH_WARN(
-        "Failed to import - torch._inductor.utils.aoti_compile_with_persistent_cache");
-    return kernel_lib_path;
-  }
+  TORCH_INTERNAL_ASSERT(
+      aot_compile_function.ptr() != nullptr &&
+          aot_compile_function.ptr() != Py_None,
+      "Failed to import - torch._inductor.utils.aoti_compile_with_persistent_cache");
 
   // Pass the python operation to the AOT Inductor to generate the kernel
   // library.
