@@ -378,9 +378,18 @@ class Tensor(torch._C.TensorBase):
             )
             return (torch._utils._rebuild_nested_tensor, args_nested)
         elif (
-            self.data_ptr() == 0
-            and type(self) is not torch.Tensor
+            type(self) is not torch.Tensor
             and type(self).__torch_dispatch__ is not torch.Tensor.__torch_dispatch__
+            and (
+                isinstance(
+                    self,
+                    (
+                        torch._subclasses.fake_tensor.FakeTensor,
+                        torch._subclasses.functional_tensor.FunctionalTensor,
+                    ),
+                )
+                or self.data_ptr() == 0
+            )
         ):
             arg_wrapper_subclass = (
                 type(self),

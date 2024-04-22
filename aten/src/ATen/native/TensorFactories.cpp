@@ -35,6 +35,7 @@
 #include <ATen/ops/_efficientzerotensor_native.h>
 #include <ATen/ops/_empty_affine_quantized.h>
 #include <ATen/ops/_empty_per_channel_affine_quantized.h>
+#include <ATen/ops/_sparse_compressed_tensor_with_dims_native.h>
 #include <ATen/ops/arange.h>
 #include <ATen/ops/arange_native.h>
 #include <ATen/ops/bartlett_window_native.h>
@@ -277,8 +278,8 @@ Tensor empty_names(
   }
   TORCH_CHECK(options.layout() == Layout::Strided,
       "NYI: named tensors only support strided layout");
-  TORCH_CHECK(options.device().is_cpu() || options.device().is_cuda() || options.device().is_privateuseone(),
-      "NYI: named tensors only support CPU, CUDA or ", c10::get_privateuse1_backend(), " tensors.");
+  TORCH_CHECK(options.device().is_cpu() || options.device().is_cuda() || options.device().is_xpu() || options.device().is_privateuseone(),
+      "NYI: named tensors only support CPU, CUDA, XPU or ", c10::get_privateuse1_backend(), " tensors.");
   auto result = at::empty(size, options, optional_memory_format);
   internal_set_names_inplace(result, names);
   return result;
@@ -368,10 +369,9 @@ Tensor& empty_out(IntArrayRef size,
 
 // Some scalar types in CAST_OP have no declarations, they may be unused in Pytorch.
 // But we keep them and ignore the warning here until verified in the future.
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wmissing-prototypes"
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wmissing-prototypes")
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, DEFINE_CAST_OP)
-#pragma clang diagnostic pop
+C10_DIAGNOSTIC_POP()
 
 #undef DEFINE_CAST_OP
 
@@ -878,10 +878,10 @@ Tensor rand(IntArrayRef size,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
-  return native::rand(size, static_cast<const std::optional<Generator>&>(c10::nullopt), dtype, layout, device, pin_memory);
+  return native::rand(size, static_cast<c10::optional<Generator>>(c10::nullopt), dtype, layout, device, pin_memory);
 }
 
-Tensor rand(IntArrayRef size, const std::optional<Generator>& generator,
+Tensor rand(IntArrayRef size, c10::optional<Generator> generator,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
@@ -897,7 +897,7 @@ Tensor& rand_out(IntArrayRef size, Tensor& result) {
   return native::rand_out(size, c10::nullopt, result);
 }
 
-Tensor& rand_out(IntArrayRef size, const std::optional<Generator>& generator, Tensor& result) {
+Tensor& rand_out(IntArrayRef size, c10::optional<Generator> generator, Tensor& result) {
   result.resize_(size);
   return result.uniform_(0, 1, std::move(generator));
 }
@@ -929,7 +929,7 @@ Tensor randint(int64_t high, IntArrayRef size,
 Tensor randint(
     int64_t high,
     IntArrayRef size,
-    const std::optional<Generator>& generator,
+    c10::optional<Generator> generator,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
@@ -952,7 +952,7 @@ Tensor randint(
     int64_t low,
     int64_t high,
     IntArrayRef size,
-    const std::optional<Generator>& generator,
+    c10::optional<Generator> generator,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
@@ -970,7 +970,7 @@ Tensor& randint_out(int64_t high, IntArrayRef size, Tensor& result) {
 
 Tensor& randint_out(int64_t high,
     IntArrayRef size,
-    const std::optional<Generator>& generator,
+    c10::optional<Generator> generator,
     Tensor& result) {
   result.resize_(size);
   return result.random_(0, high, std::move(generator));
@@ -983,7 +983,7 @@ Tensor& randint_out(int64_t low, int64_t high, IntArrayRef size, Tensor& result)
 Tensor& randint_out(int64_t low,
     int64_t high,
     IntArrayRef size,
-    const std::optional<Generator>& generator,
+    c10::optional<Generator> generator,
     Tensor& result) {
   result.resize_(size);
   return result.random_(low, high, std::move(generator));
@@ -1027,10 +1027,10 @@ Tensor randn(IntArrayRef size,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
-  return native::randn(size, static_cast<const std::optional<Generator>&>(c10::nullopt), dtype, layout, device, pin_memory);
+  return native::randn(size, static_cast<c10::optional<Generator>>(c10::nullopt), dtype, layout, device, pin_memory);
 }
 
-Tensor randn(IntArrayRef size, const std::optional<Generator>& generator,
+Tensor randn(IntArrayRef size, c10::optional<Generator> generator,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
@@ -1046,13 +1046,13 @@ Tensor& randn_out(IntArrayRef size, Tensor& result) {
   return native::randn_out(size, c10::nullopt, result);
 }
 
-Tensor& randn_out(IntArrayRef size, const std::optional<Generator>& generator, Tensor& result) {
+Tensor& randn_out(IntArrayRef size, c10::optional<Generator> generator, Tensor& result) {
   result.resize_(size);
   return result.normal_(0, 1, std::move(generator));
 }
 
 Tensor normal(double mean, double std, IntArrayRef size,
-              const std::optional<Generator>& generator,
+              c10::optional<Generator> generator,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
@@ -1065,7 +1065,7 @@ Tensor normal(double mean, double std, IntArrayRef size,
 }
 
 Tensor& normal_out(double mean, double std,
-                   IntArrayRef size, const std::optional<Generator>& generator, Tensor& result) {
+                   IntArrayRef size, c10::optional<Generator> generator, Tensor& result) {
   result.resize_(size);
   return result.normal_(mean, std, std::move(generator));
 }
@@ -1120,7 +1120,7 @@ Tensor randperm(int64_t n,
   return native::randperm(n, c10::nullopt, dtype, layout, device, pin_memory);
 }
 
-Tensor randperm(int64_t n, const std::optional<Generator>& generator,
+Tensor randperm(int64_t n, c10::optional<Generator> generator,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
@@ -1140,7 +1140,7 @@ Tensor& randperm_out(int64_t n, Tensor& result) {
   return at::randperm_out(result, n, c10::nullopt);
 }
 
-Tensor& randperm_out_cpu(int64_t n, const std::optional<Generator>& generator, Tensor& result) {
+Tensor& randperm_out_cpu(int64_t n, c10::optional<Generator> generator, Tensor& result) {
   TORCH_CHECK(n >= 0, "n must be non-negative, got", n);
   TORCH_CHECK(!generator.has_value() || (generator.has_value() && result.device() == generator->device()), "Expected a '", result.device(), "' generator device but found '", generator->device(), "'");
   check_supported_max_int_with_precision(n, result);
@@ -1339,16 +1339,16 @@ Tensor _efficientzerotensor(IntArrayRef size,
     return out;
 }
 
-Tensor _efficientzerotensor_meta(IntArrayRef size,
-                                 c10::optional<ScalarType> dtype,
-                                 c10::optional<Layout> layout,
-                                 c10::optional<Device> device,
-                                 c10::optional<bool> pin_memory) {
+Tensor _efficientzerotensor_meta_symint(SymIntArrayRef size,
+                                        c10::optional<ScalarType> dtype,
+                                        c10::optional<Layout> layout,
+                                        c10::optional<Device> device,
+                                        c10::optional<bool> pin_memory) {
   auto device_ = device_or_default(device);
   auto allocator = at::native::ZeroTensorAllocator(device_);
   auto dtype_ = dtype_or_default(dtype);
   auto zero_ks = at::DispatchKeySet(c10::DispatchKey::Meta) | at::DispatchKeySet(c10::DispatchKey::ZeroTensor);
-  auto out = at::detail::empty_generic(size, &allocator, zero_ks, dtype_, c10::nullopt);
+  auto out = at::detail::empty_generic_symint(size, &allocator, zero_ks, dtype_, c10::nullopt);
   return out;
 }
 
@@ -1391,11 +1391,29 @@ Tensor zeros_like(
     if (self.is_sparse()) {
       res.sparse_resize_and_clear_(
           self.sizes(), self.sparse_dim(), self.dense_dim());
+    } else if (at::sparse_csr::is_sparse_compressed(self)) {
+      res.sparse_resize_and_clear_(
+          self.sizes(), self.sizes().size() - self.dense_dim(), self.dense_dim());
     } else {
       res.sparse_resize_and_clear_(self.sizes(), self.sizes().size(), 0);
     }
     res._coalesced_(true);
 
+    return res;
+  } else if (at::sparse_csr::is_sparse_compressed(options.layout())) {
+    int64_t nnz = 0;
+    int64_t dense_dim = (self.layout() == kStrided ? self.dim() - 2: self.dense_dim());
+    DimVector blocksize{};
+    if (self.layout() == kSparseBsr || self.layout() == kSparseBsc) {
+      blocksize.append(at::sparse_csr::getBlockSize(self));
+    }
+    ScalarType index_dtype = at::sparse_csr::getIndexDtype(self);
+    auto res = at::native::sparse_compressed_tensor_with_dims(
+      nnz, dense_dim, self.sizes(), blocksize, index_dtype,
+      typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
+    Tensor compressed_indices, plain_indices;
+    std::tie(compressed_indices, plain_indices) = at::sparse_csr::getCompressedPlainIndices(res);
+    compressed_indices.zero_();
     return res;
   }
   auto result = at::empty_like(self, options, optional_memory_format);
@@ -1809,7 +1827,7 @@ Tensor randn(
 
 Tensor randn(
     IntArrayRef size,
-    const std::optional<Generator>& generator,
+    c10::optional<Generator> generator,
     optional<DimnameList> names,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
@@ -1834,7 +1852,7 @@ Tensor rand(
 
 Tensor rand(
     IntArrayRef size,
-    const std::optional<Generator>& generator,
+    c10::optional<Generator> generator,
     optional<DimnameList> names,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,

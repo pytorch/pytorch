@@ -25,6 +25,7 @@ torch.fx.experimental.symbolic_shapes
     StatefulSymbolicContext
     SubclassSymbolicContext
     DimConstraints
+    ShapeEnvSettings
 
     hint_int
     is_concrete_int
@@ -40,4 +41,5 @@ torch.fx.experimental.symbolic_shapes
     constrain_unify
     canonicalize_bool_expr
     statically_known_true
-    rename_unbacked_to
+    lru_cache
+    check_consistent

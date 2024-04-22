@@ -9,6 +9,7 @@ from .bytecode_transformation import (
     create_call_function,
     create_call_method,
     create_instruction,
+    create_load_method,
 )
 from .codegen import PyCodegen
 from .exc import unimplemented
@@ -178,9 +179,9 @@ class SideEffects:
 
     @staticmethod
     def cls_supports_mutation_side_effects(cls):
-        return inspect.getattr_static(cls, "__setattr__", None) in (
-            object.__setattr__,
-            torch.nn.Module.__setattr__,
+        return (
+            inspect.getattr_static(cls, "__getattribute__", None)
+            is object.__getattribute__
         )
 
     def is_attribute_mutation(self, item):
@@ -190,6 +191,11 @@ class SideEffects:
         return self.is_attribute_mutation(item) and bool(
             self.store_attr_mutations.get(item.mutable_local)
         )
+
+    def has_pending_mutation_of_attr(self, item, name):
+        return self.is_attribute_mutation(
+            item
+        ) and name in self.store_attr_mutations.get(item.mutable_local, ())
 
     def is_modified(self, item):
         if isinstance(item.mutable_local, AttributeMutationNew):
@@ -359,9 +365,7 @@ class SideEffects:
 
         for ctx, args in self.save_for_backward:
             cg(ctx.source)
-            cg.extend_output(
-                [create_instruction("LOAD_METHOD", argval="save_for_backward")]
-            )
+            cg.load_method("save_for_backward")
             for arg in args:
                 cg(arg)
             cg.extend_output(
@@ -460,11 +464,11 @@ class SideEffects:
                 cg.tx.output.update_co_names("update")
 
                 cg(var.mutable_local.source)  # type: ignore[attr-defined]
-                cg.extend_output([create_instruction("LOAD_METHOD", argval="update")])
+                cg.extend_output([create_load_method("update")])
                 cg(var, allow_cache=False)
 
                 cg(var.mutable_local.source)  # type: ignore[attr-defined]
-                cg.extend_output([create_instruction("LOAD_METHOD", argval="clear")])
+                cg.extend_output([create_load_method("clear")])
 
                 suffixes.append(
                     [
@@ -495,6 +499,19 @@ class SideEffects:
                             suffixes.append(
                                 [create_instruction("DELETE_ATTR", argval=name)]
                             )
+                    elif (
+                        isinstance(var, variables.UserDefinedObjectVariable)
+                        and var.needs_slow_setattr()
+                    ):
+                        # __setattr__ is defined on this object, so call object.__setattr__ directly
+                        cg.load_import_from("builtins", "object")
+                        cg.load_method("__setattr__")
+                        cg(var.mutable_local.source)  # type: ignore[attr-defined]
+                        cg(variables.ConstantVariable(name))
+                        cg(value)
+                        suffixes.append(
+                            [*create_call_method(3), create_instruction("POP_TOP")]
+                        )
                     else:
                         cg.tx.output.update_co_names(name)
                         cg(value)
@@ -504,8 +521,8 @@ class SideEffects:
                 for _ in range(var.index):
                     cg.load_import_from(utils.__name__, "iter_next")
                     cg(var.mutable_local.source)  # type: ignore[attr-defined]
-                    cg.extend_output(create_call_function(1, True))
-                    cg.append_output(create_instruction("POP_TOP"))
+                    cg.call_function(1, True)
+                    cg.pop_top()
             else:
                 raise AssertionError(type(var))
 

@@ -58,7 +58,7 @@ Tensor& random_inplace_batching_rule(Tensor& self, ExtraArgs... extra_args) {
   }
 }
 
-static Tensor& bernoulli_inplace_Tensor_batching_rule(Tensor& self, const Tensor& p_, const std::optional<Generator>& gen) {
+static Tensor& bernoulli_inplace_Tensor_batching_rule(Tensor& self, const Tensor& p_, c10::optional<Generator> gen) {
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchVmapMode);
   auto maybe_layer = maybeCurrentDynamicLayer();
   auto cur_level = maybe_layer->layerId();
@@ -94,11 +94,11 @@ static Tensor& bernoulli_inplace_Tensor_batching_rule(Tensor& self, const Tensor
     "If this is necessary for your usage, please file an issue with functorch.");
   if (randomness == RandomnessType::Same && self_bdim) {
     auto intermediate = empty(self.sizes(), self.options());
-    intermediate.bernoulli_(other_, gen);
+    intermediate.bernoulli_(other_, std::move(gen));
     self.copy_(intermediate); // batching should make this just work out...
     return self;
   } else {
-    self_.bernoulli_(other_, gen);
+    self_.bernoulli_(other_, std::move(gen));
     return self;
   }
 }
@@ -199,8 +199,8 @@ static std::tuple<Tensor,Tensor> native_dropout_batching_rule(const Tensor& tens
     }
     auto [output, mask] = at::native_dropout(tensor_value, p, train);
     return std::make_tuple(
-        makeBatched(std::move(output), 0, cur_level),
-        makeBatched(std::move(mask), 0, cur_level));
+        makeBatched(output, 0, cur_level),
+        makeBatched(mask, 0, cur_level));
   }
 
   // repeated code from the CPU kernel since the CUDA one doesn't call bernoulli_ explicitly
@@ -213,7 +213,7 @@ static std::tuple<Tensor,Tensor> native_dropout_batching_rule(const Tensor& tens
   return std::make_tuple(output, mask);
 }
 
-static Tensor multinomial_batching_rule(const Tensor& self, const int64_t num_samples, const bool replacement, const std::optional<Generator>& generator) {
+static Tensor multinomial_batching_rule(const Tensor& self, const int64_t num_samples, const bool replacement, const c10::optional<Generator> generator) {
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchVmapMode);
   auto maybe_layer = maybeCurrentDynamicLayer();
   const auto cur_level = maybe_layer->layerId();
@@ -264,7 +264,7 @@ struct RandomBatchRuleHelper<F, Func, typelist<T1, T...>> {
 
 template <typename F, F Func, typename... T>
 Tensor rand_int_wrapper(SymIntArrayRef shape, c10::SymInt high, T... extra_args) {
-  return Func(high, std::move(shape), std::forward<T>(extra_args)...);
+  return Func(high, shape, std::forward<T>(extra_args)...);
 }
 
 template <typename A, A a, typename C>

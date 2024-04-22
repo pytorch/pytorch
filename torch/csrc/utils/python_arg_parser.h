@@ -246,7 +246,7 @@ struct PythonArgs {
   inline std::vector<int64_t> intlistWithDefault(
       int i,
       std::vector<int64_t> default_intlist);
-  inline std::optional<at::Generator> generator(int i);
+  inline c10::optional<at::Generator> generator(int i);
   inline at::Storage storage(int i);
   inline at::Storage storage(
       int i,
@@ -702,7 +702,7 @@ inline std::vector<double> PythonArgs::getDoublelist(int i) {
         tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
     try {
       res[idx] = THPUtils_unpackDouble(obj);
-    } catch (const std::exception& e) {
+    } catch (const std::exception&) {
       throw TypeError(
           "%s(): argument '%s' must be %s, but found element of type %s at pos %zu",
           signature.name.c_str(),
@@ -1069,7 +1069,7 @@ inline bool PythonArgs::isNone(int i) {
   return args[i] == nullptr;
 }
 
-inline std::optional<at::Generator> PythonArgs::generator(int i) {
+inline c10::optional<at::Generator> PythonArgs::generator(int i) {
   if (!args[i])
     return c10::nullopt;
   return reinterpret_cast<THPGenerator*>(args[i])->cdata;

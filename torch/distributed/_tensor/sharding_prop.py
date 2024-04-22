@@ -172,7 +172,7 @@ class ShardingPropagator:
         # special case op, we don't need to propagate for local
         # scalar. TODO: figure out a better way to handle this
         if op_schema.op is aten._local_scalar_dense.default:
-            return OutputSharding(None, [op_schema])
+            return OutputSharding(None, op_schema)
 
         out_tensor_meta = self._propagate_tensor_meta(op_schema)
 
@@ -232,17 +232,20 @@ class ShardingPropagator:
                         if output_strategy.input_specs is None
                         else output_strategy.input_specs[idx]
                     )
-                    expected_input_specs.append(desired_spec)
+                    expected_input_specs.append(
+                        desired_spec.shallow_copy_with_tensor_meta(
+                            input_spec.tensor_meta
+                        )
+                    )
                     if input_spec.placements != desired_spec.placements:
                         needs_redistribute = True
 
                 suggestion_schema = None
                 if needs_redistribute:
-                    reshard_schema = OpSchema(
+                    suggestion_schema = OpSchema(
                         op_schema.op, tuple(expected_input_specs), {}
                     )
-                    reshard_schema._inplace_rewrap_schema_suggestion(op_schema)
-                    suggestion_schema = [reshard_schema]
+                    suggestion_schema._inplace_rewrap_schema_suggestion(op_schema)
 
                 # construct output spec for the op
                 if op_schema.return_type_tuple_tensor_like():
@@ -323,10 +326,9 @@ class ShardingPropagator:
 
                 suggestion_schema = None
                 if needs_redistribute:
-                    reshard_schema = OpSchema(
+                    suggestion_schema = OpSchema(
                         op_schema.op, tuple(suggestion_args), op_schema.kwargs_schema
                     )
-                    suggestion_schema = [reshard_schema]
 
                 output_sharding = OutputSharding(
                     tuple(out_spec_list) if out_tensor_meta is not None else None,
@@ -362,7 +364,7 @@ class ShardingPropagator:
             # with schema suggestions, which can be used to
             # decide how to do redistribute on inputs
             if output_sharding.output_spec is None:
-                if output_sharding.schema_suggestions is None:
+                if output_sharding.redistribute_schema is None:
                     if output_sharding.failed_reason is not None:
                         raise RuntimeError(
                             f"Sharding propagation failed on op {op_schema}!"
@@ -370,14 +372,12 @@ class ShardingPropagator:
                         )
                 else:
                     # we do auto redistribute on inputs if necessary
-                    # to get an eligible input, which we will pick a
-                    # schema suggestion base on the redistribute cost.
-                    # For now we simply pick the first suggestion.
-                    suggested_input_schema = output_sharding.schema_suggestions[0]
                     # run sharding propagation again with suggested schema
-                    propagation_res = sharding_prop_func(suggested_input_schema)
+                    propagation_res = sharding_prop_func(
+                        output_sharding.redistribute_schema
+                    )
                     # we set the output sharding with the new propagation result
-                    # so that dispatching know both output_spec and schema_suggestions
+                    # so that dispatching know both output_spec and redistribute_schema
                     # exist, which indicates a reshard is needed
                     output_sharding.output_spec = propagation_res.output_spec
                     output_sharding.needs_redistribute = True

@@ -12,7 +12,6 @@ if we want to generate code for another C++ library.
 Add new types to `types.py` if these types are ATen/c10 related.
 Add new types to `types_base.py` if they are basic and not attached to ATen/c10.
 """
-
 from dataclasses import dataclass
 from typing import Dict
 
@@ -32,9 +31,10 @@ from .types_base import (
     shortT,
 )
 
+
 TENSOR_LIST_LIKE_CTYPES = [
     "at::TensorList",
-    "const c10::List<c10::optional<at::Tensor>> &",
+    "const c10::List<::std::optional<at::Tensor>> &",
     "const at::ITensorListRef &",
 ]
 
@@ -133,14 +133,10 @@ class OptionalCType(CType):
 
     def cpp_type(self, *, strip_ref: bool = False) -> str:
         # Do not pass `strip_ref` recursively.
-        if "Generator" in self.elem.cpp_type():
-            return f"::std::optional<{self.elem.cpp_type()}>"
-        return f"c10::optional<{self.elem.cpp_type()}>"
+        return f"::std::optional<{self.elem.cpp_type()}>"
 
     def cpp_type_registration_declarations(self) -> str:
-        if "Generator" in self.elem.cpp_type_registration_declarations():
-            return f"::std::optional<{self.elem.cpp_type_registration_declarations()}>"
-        return f"c10::optional<{self.elem.cpp_type_registration_declarations()}>"
+        return f"::std::optional<{self.elem.cpp_type_registration_declarations()}>"
 
     def remove_const_ref(self) -> "CType":
         return OptionalCType(self.elem.remove_const_ref())

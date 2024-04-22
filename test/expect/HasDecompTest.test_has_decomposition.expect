@@ -506,6 +506,7 @@ aten::_sparse_addmm.out
 aten::_sparse_broadcast_to
 aten::_sparse_broadcast_to_copy
 aten::_sparse_broadcast_to_copy.out
+aten::_sparse_compressed_tensor_with_dims
 aten::_sparse_coo_tensor_with_dims
 aten::_sparse_coo_tensor_with_dims.out
 aten::_sparse_coo_tensor_with_dims_and_tensors
@@ -522,7 +523,12 @@ aten::_sparse_mask_projection
 aten::_sparse_mask_projection.out
 aten::_sparse_mm_reduce_impl
 aten::_sparse_mm_reduce_impl_backward
+aten::_sparse_semi_structured_addmm
+aten::_sparse_semi_structured_apply
+aten::_sparse_semi_structured_apply_dense
 aten::_sparse_semi_structured_linear
+aten::_sparse_semi_structured_mm
+aten::_sparse_semi_structured_tile
 aten::_sparse_softmax
 aten::_sparse_softmax.out
 aten::_sparse_softmax_backward_data
@@ -1115,8 +1121,6 @@ aten::replication_pad3d_backward.grad_input
 aten::resize
 aten::resize.out
 aten::resize_
-aten::resize_as
-aten::resize_as.out
 aten::resize_as_
 aten::resize_as_sparse
 aten::resize_as_sparse.out

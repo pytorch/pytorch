@@ -171,7 +171,6 @@ class TestCuda(TestCase):
         tensor.fill_(1)
         self.assertTrue((tensor == 1).all())
 
-
     @unittest.skipIf(TEST_CUDAMALLOCASYNC or IS_JETSON, "Segmentation fault (core dumped)")
     def test_out_of_memory_retry(self):
         torch.cuda.empty_cache()
@@ -255,7 +254,6 @@ class TestCuda(TestCase):
         b.copy_(a, non_blocking=True)
         c.copy_(b, non_blocking=True)
         self.assertEqual(a, c, exact_dtype=False)
-
 
     def test_to_non_blocking(self):
         stream = torch.cuda.current_stream()
@@ -383,7 +381,6 @@ class TestCuda(TestCase):
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = not orig
         self.assertEqual(torch._C._get_cublas_allow_bf16_reduced_precision_reduction(), not orig)
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = orig
-
 
     def test_cudnn_allow_tf32_get_set(self):
         with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=False):
@@ -1362,8 +1359,7 @@ torch.cuda.synchronize()
                 output_method = getattr(args[0], op)(*args[1:], **add_kwargs)
                 if isinstance(output_method, torch.Tensor):
                     self.assertTrue(out_type == output_method.dtype,
-                                    "autocast for torch.{} produced {}, should produce torch.{}"
-                                    .format(op, output_method.dtype, out_type))
+                                    f"autocast for torch.{op} produced {output_method.dtype}, should produce torch.{out_type}")
 
             self.assertTrue((output is not None) or (output_method is not None),
                             f"{op} not found as an attribute on either Tensor or the requested module {module}")
@@ -1462,8 +1458,6 @@ torch.cuda.synchronize()
         with torch.backends.cudnn.flags(enabled=True, deterministic=True):
             for op, args in self.autocast_lists.nn_fp16:
                 self._run_autocast_outofplace(op, args, torch.float16, module=torch._C._nn)
-
-
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_nn_bf16(self):
@@ -1782,6 +1776,163 @@ torch.cuda.synchronize()
         g.replay()
 
         self.assertTrue(b.sum().item() == 11000.)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_graphsafe_set_get_rng_state(self):
+
+        # Define a function to create generator states, with optional graph registration
+        def create_states(generator):
+            """Initializes generator states and registers them with a CUDA graph if provided."""
+            # Ensure the CUDA generator is initialized
+            torch.rand(1, device="cuda")
+            generator.manual_seed(0)
+
+            # Save the current state of the generator
+            old_state = generator.graphsafe_get_state()
+            # Create and save a cloned state of the generator
+            new_state = generator.clone_state()
+            # Return the original generator and its two states
+            return generator, old_state, new_state
+
+        def register_states_to_graph(generator_state, graph):
+            generator, old_state, new_state = generator_state
+            graph.register_generator_state(old_state)
+            graph.register_generator_state(new_state)
+
+        # Define a function to perform specific RNG actions using the generator's states
+        def perform_random_generation_steps(generator_state):
+            generator, old_state, new_state = generator_state
+            random_values = []
+
+            # Generate random numbers with the new generator state
+            generator.graphsafe_set_state(new_state)
+            random_values.append(torch.rand(5, device="cuda", generator=generator))
+
+            # Generate random numbers twice with the old generator state
+            generator.graphsafe_set_state(old_state)
+            random_values.extend(
+                [torch.rand(5, device="cuda", generator=generator) for _ in range(2)]
+            )
+
+            return random_values
+
+        # Define a function to retrieve the final offsets of the original and new generator states
+        def get_final_offsets_of_states(generator_state):
+            generator, old_state, new_state = generator_state
+            old_state_offset = old_state.get_offset()
+            new_state_offset = new_state.get_offset()
+            return old_state_offset, new_state_offset
+
+        # Set up and test a new CUDA generator
+        generator = torch.Generator(device="cuda")
+        generator_state = create_states(generator)
+
+        # Set up and test the default CUDA generator with a CUDA Graph
+        g = torch.cuda.CUDAGraph()
+        s = torch.cuda.Stream()
+        default_generator = torch.cuda.default_generators[0]
+        default_generator_state = create_states(default_generator)
+        register_states_to_graph(default_generator_state, g)
+
+        # Perform random number generation within a CUDA graph
+        with torch.cuda.stream(s):
+            g.capture_begin()
+            graphed_random_values = perform_random_generation_steps(
+                default_generator_state
+            )
+            g.capture_end()
+
+        # Synchronize the streams and replay the graph
+        torch.cuda.current_stream().wait_stream(s)
+        for _ in range(3):
+            random_values = perform_random_generation_steps(generator_state)
+            g.replay()
+            offset = get_final_offsets_of_states(generator_state)
+            graph_offset = get_final_offsets_of_states(default_generator_state)
+
+            # Compare the final offsets of states for both generators to ensure consistency
+            self.assertTrue(offset == graph_offset)
+            # Compare the states generated outside and inside the graph
+            self.assertEqual(random_values, graphed_random_values)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_memory_stats_of_multiple_generators_and_graphs(self):
+        # Function to clear CUDA cache and collect garbage
+        def clear_cuda_cache():
+            gc.collect()
+            torch.cuda.empty_cache()
+
+        # Executes a simple graph task which includes capturing and executing a random number generation within a CUDA graph.
+        def simple_graph_task(graph):
+            s = torch.cuda.Stream()
+            with torch.cuda.stream(s):
+                graph.capture_begin()
+                torch.rand(1, device="cuda")
+                graph.capture_end()
+            torch.cuda.current_stream().wait_stream(s)
+            graph.replay()  # Replays the captured operations
+
+        def get_memory_stats():
+            stats = torch.cuda.memory_stats()
+            num_blocks = stats["active.all.current"]
+            total_size = stats["active_bytes.all.current"]
+            return num_blocks, total_size
+
+        def test(num_graphs, num_generators):
+            baseline = get_memory_stats()
+            baseline_num_blocks, baseline_total_size = baseline
+
+            # Allocate CUDA graphs
+            graphs = [torch.cuda.CUDAGraph() for _ in range(num_graphs)]
+
+            # Allocate and manage generator states
+            default_generator = torch.cuda.default_generators[0]
+            generators = [default_generator.graphsafe_get_state()]
+
+            # Starts from 1 as one state is already added
+            for _ in range(1, num_generators):
+                generators.append(default_generator.clone_state())
+
+            for graph in graphs:
+                for generator_state in generators:
+                    graph.register_generator_state(generator_state)
+                simple_graph_task(graph)
+
+            # Assert conditions after graph tasks
+            num_blocks, total_size = get_memory_stats()
+            # The allocated blocks should only be proportional to the number of generators
+            expected_blocks_diff = 2 * num_generators
+            expected_size_diff = 2 * 512 * num_generators  # Each block's size is 512
+
+            self.assertTrue(
+                (num_blocks - baseline_num_blocks) == expected_blocks_diff,
+                "Unexpected number of active blocks.",
+            )
+            self.assertTrue(
+                (total_size - baseline_total_size) == expected_size_diff,
+                "Unexpected total memory size.",
+            )
+
+            # Cleanup graphs and clear CUDA cache
+            while graphs:
+                graph = graphs.pop()
+                del graph
+            clear_cuda_cache()
+
+            # Assert that memory stats return to baseline after cleanup
+            self.assertTrue(
+                get_memory_stats() == baseline,
+                "Memory stats do not match baseline after cleanup.",
+            )
+
+        # Running the test function with different parameters
+        test(1, 1)
+        test(3, 2)
+        test(10, 20)
 
     @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
     def test_graph_capture_reset_recapture(self):
@@ -2332,14 +2483,18 @@ exit(2)
 
         s = torch.cuda.Stream()
 
-        for (numel,
-             delta_cudaMallocs,
-             delta_cudaMalloc_bytes,
-             delta_cudaMalloc_bytes_post_del_g,
-             pool_string) in cases:
+        for (
+            numel,
+            delta_cudaMallocs,
+            delta_cudaMalloc_bytes,
+            delta_cudaMalloc_bytes_post_del_g,
+            pool_string,
+        ) in cases:
             if pool_string == "small_pool":
                 delta_active_blocks = 3  # one from "b" plus a sneaky two from CUDAGraph's one-element rng seed and offset holders
-                delta_active_bytes = numel * elem + 1024  # + 1024 for CUDAGraph's rng seed and offset holders each
+                delta_active_bytes = (
+                    numel * elem + 1024
+                )  # + 1024 for CUDAGraph's rng seed and offset holders each
             else:
                 delta_active_blocks = 1  # We only check the large pool, which isn't affected by rng offset holder
                 delta_active_bytes = numel * elem
@@ -2748,6 +2903,9 @@ exit(2)
             for optimizer_ctor, foreach, decoupled_weight_decay, weight_decay in product(
                 (torch.optim.NAdam, torch.optim.RAdam,), (False, True,), (False, True,), (0.0, 0.1,))
         ] + [
+            (torch.optim.Rprop, {"lr": 0.1, "foreach": foreach, "maximize": maximize})
+            for foreach, maximize in product((False, True,), (False, True,))
+        ] + [
             (optimizer_ctor, {"lr": 0.1, "betas": (0.8, 0.7), "foreach": foreach, "amsgrad": amsgrad})
             for optimizer_ctor, foreach, amsgrad in product(
                 (torch.optim.Adam, torch.optim.AdamW), (False, True), (False, True),)
@@ -2757,8 +2915,8 @@ exit(2)
         ] + [
             (optimizer_ctor, {"lr": 0.1, "foreach": foreach, "maximize": maximize, "weight_decay": weight_decay})
             for optimizer_ctor, foreach, maximize, weight_decay in product((torch.optim.Adamax, torch.optim.ASGD,
-                                                                            torch.optim.Adadelta), (False, True),
-                                                                           (False, True), (0, 0.1))
+                                                                            torch.optim.Adadelta, torch.optim.RMSprop),
+                                                                           (False, True), (False, True), (0, 0.1))
         ]
 
         for optimizer_ctor, kwargs in cases:
@@ -2772,7 +2930,8 @@ exit(2)
         for optimizer, second_param_group_capturable in product((torch.optim.Adam, torch.optim.AdamW,
                                                                  torch.optim.ASGD, torch.optim.Adamax,
                                                                  torch.optim.NAdam, torch.optim.RAdam,
-                                                                 torch.optim.Adadelta), (True, False)):
+                                                                 torch.optim.Adadelta, torch.optim.RMSprop,
+                                                                 torch.optim.Rprop), (True, False)):
             ref_p1, param1 = (torch.nn.Parameter(torch.ones(1, device="cuda")) for _ in range(2))
             ref_p2, param2 = (torch.nn.Parameter(torch.ones(1, device="cuda")) for _ in range(2))
             grads1, grads2 = ([torch.randn_like(param1) for _ in range(n_warmup + n_replay)] for _ in range(2))
@@ -3084,7 +3243,23 @@ exit(2)
             rc = check_output(f"import torch; import ctypes;x=ctypes.c_int(-1);print({cuda_driver_api_call})")
             self.assertEqual(rc, "3")
 
+    @unittest.skipIf(not TEST_MULTIGPU, "requires multiple devices")
+    @unittest.skipIf(TEST_WITH_ROCM, "too lazy to debug this on ROCm")
+    def test_device_count_not_cached_pre_init(self):
+        test_script = """\
+import torch
+import os
+r1 = torch.cuda.device_count()
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+r2 = torch.cuda.device_count()
+torch.empty(10, device='cuda')
+print(f"{r1}, {r2}")
+"""
 
+        r = subprocess.check_output([sys.executable, "-c", test_script]).decode("ascii").strip()
+
+        x = torch.cuda.device_count()
+        self.assertEqual(f"{x}, 1", r)
 
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
@@ -3164,7 +3339,6 @@ class TestCudaMallocAsync(TestCase):
 
         finally:
             torch.cuda.memory._record_memory_history(None)
-
 
     @skipIfRocm
     def test_memory_profiler_viz(self):
@@ -3447,7 +3621,6 @@ class TestCudaMallocAsync(TestCase):
 
         with self.assertRaises(RuntimeError):
             torch.cuda.memory._set_allocator_settings("pinned_num_register_threads:1024")
-
 
     @parametrize(
         "max_split_size_mb_setting", [False, True]
