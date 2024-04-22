@@ -170,7 +170,6 @@ def aot_dispatch_base(
             fakified_out = None
             return out
 
-        # args is a list because compiled_fw is boxed_call
         if fw_metadata.is_rng_op_functionalized:
             # Add the seed and offset to args
             seed, offset = CUDARngStateHelper.get_torch_state_as_tuple()
@@ -370,8 +369,24 @@ def aot_dispatch_autograd(
                 len(bw_outs)
                 == len(fw_metadata.input_info) + inner_meta.num_outputs_rng_offset
             )
-            for i, (bw_out) in enumerate(bw_outs):
-                if bw_out is None and _can_detach(_input_node(fx_g, i)):
+            bw_outs_no_rng = bw_outs
+            if inner_meta.num_outputs_rng_offset > 0:
+                bw_outs_no_rng = bw_outs[: -inner_meta.num_outputs_rng_offset]
+            assert len(bw_outs_no_rng) == len(fw_metadata.input_info)
+
+            for i, (bw_out) in enumerate(bw_outs_no_rng):
+                # If our input experiences a metadata mutation inside the graph (e.g. set_()),
+                # we *must* not detach, otherwise it will be the detach'd input that gets the metadata mutation
+                metadata_mutation_in_graph = (
+                    fw_metadata.input_info[i].mutation_type
+                    == MutationType.MUTATED_IN_GRAPH
+                    and fw_metadata.input_info[i].mutates_storage_metadata
+                )
+                if (
+                    bw_out is None
+                    and not metadata_mutation_in_graph
+                    and _can_detach(_input_node(fx_g, i))
+                ):
                     _indices_of_inps_to_detach.append(i)
 
         if aot_config.enable_log:

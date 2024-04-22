@@ -562,6 +562,11 @@ class CppPrinter(ExprPrinter):
         r = f"std::floor({self._print(expr.args[0])})"
         return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
 
+    def _print_Trunc(self, expr):
+        assert len(expr.args) == 1
+        r = f"std::trunc({self._print(expr.args[0])})"
+        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
+
     def _print_Pow(self, expr):
         # Uses float constants to perform FP div
         base, exp = expr.args
@@ -2654,7 +2659,7 @@ class CppVecKernel(CppKernel):
                 mean, m2, weight = reduction_project(reduction_type, next_value)
             return f"welford_combine({var}, {{{mean}, {m2}, {weight}}})"
         else:
-            raise NotImplementedError()
+            raise NotImplementedError
 
     def indirect_assert(self, var, lower, upper, mask=None):
         assert not mask, "do not support mask in indirect_indexing assertion"
@@ -3618,8 +3623,7 @@ class CppScheduling(BaseScheduling):
                             if var_ranges is None:
                                 var_ranges = v
                             assert var_ranges == v, (var_ranges, v, node.snodes)
-                            for expr in exprs:
-                                indexing_exprs.add(expr)
+                            indexing_exprs.update(exprs)
                         return var_ranges, list(indexing_exprs)
                     else:
                         assert isinstance(node, SchedulerNode)

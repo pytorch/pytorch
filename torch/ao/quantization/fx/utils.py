@@ -137,7 +137,7 @@ def get_linear_prepack_op_for_dtype(dtype):
     elif dtype == torch.qint8:
         return torch.ops.quantized.linear_prepack
     else:
-        raise Exception("can't get linear prepack op for dtype:", dtype)
+        raise Exception("can't get linear prepack op for dtype:", dtype)  # noqa: TRY002
 
 def get_qconv_prepack_op(conv_op: Callable) -> Callable:
     prepack_ops = {

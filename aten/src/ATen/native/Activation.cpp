@@ -76,7 +76,6 @@
 #include <ATen/ops/tanh.h>
 #include <ATen/ops/threshold_backward_native.h>
 #include <ATen/ops/threshold_native.h>
-#include <ATen/ops/zeros_like.h>
 
 #include <utility>
 #endif
@@ -411,8 +410,8 @@ TORCH_IMPL_FUNC(gelu_backward_out_cpu) (
 auto approximate_type = get_gelutype_enum(approximate);
 #if AT_MKLDNN_ENABLED()
   if (use_mkldnn(self) && (approximate_type == GeluType::None)) {
-    const ideep::tensor& x = itensor_from_tensor(self);
-    ideep::tensor grady = itensor_from_tensor(grad);
+    const ideep::tensor& x = itensor_from_tensor(self, /*from_const_data_ptr*/true);
+    ideep::tensor grady = itensor_from_tensor(grad, /*from_const_data_ptr*/true);
     ideep::tensor gradx = itensor_from_tensor(grad_input);
     ideep::eltwise_backward::compute(x, grady, gradx,
       ideep::algorithm::eltwise_gelu_erf, /*alpha*/ 0.0);
@@ -730,9 +729,9 @@ std::tuple<Tensor, Tensor> _prelu_kernel_backward(const Tensor& grad_out, const 
   auto iter = TensorIteratorConfig()
     .add_output(grad_self)
     .add_output(grad_weight)
-    .add_input(self)
-    .add_input(weight)
-    .add_input(grad_out)
+    .add_const_input(self)
+    .add_const_input(weight)
+    .add_const_input(grad_out)
     .build();
   prelu_backward_stub(iter.device_type(), iter);
   return {grad_self, grad_weight};
@@ -748,9 +747,8 @@ Tensor infinitely_differentiable_gelu_backward(
 }
 
 std::tuple<Tensor, Tensor> log_sigmoid_forward_cpu(const Tensor& input) {
-  // FIXME: do these actually need to be zeros_like or can they be empty_like?
-  auto result = at::zeros_like(input, at::MemoryFormat::Contiguous);
-  auto buffer = at::zeros_like(input, at::MemoryFormat::Contiguous);
+  auto result = at::empty_like(input, at::MemoryFormat::Contiguous);
+  auto buffer = at::empty_like(input, at::MemoryFormat::Contiguous);
   log_sigmoid_cpu_stub(kCPU, result, buffer, input.contiguous());
   return std::make_tuple(result, buffer);
 }

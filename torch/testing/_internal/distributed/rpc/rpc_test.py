@@ -236,11 +236,11 @@ def build_complex_tensors():
 
 def non_cont_test(t_view, t_cont):
     if t_view.is_contiguous():
-        raise Exception('t_view is contiguous!')
+        raise Exception('t_view is contiguous!')  # noqa: TRY002
     if not t_cont.is_contiguous():
-        raise Exception('t_cont is not contiguous!')
+        raise Exception('t_cont is not contiguous!')  # noqa: TRY002
     if not torch.equal(t_view, t_cont):
-        raise Exception('t_view is not equal to t_cont!')
+        raise Exception('t_view is not equal to t_cont!')  # noqa: TRY002
     return t_view
 
 def my_function(a, b, c):
@@ -3162,9 +3162,8 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         )
         self.assertEqual(
             rref2.__str__(),
-            "UserRRef(RRefId = {0}(created_on={1}, local_id=1), ForkId = {0}(created_on={1}, local_id=2))".format(
-                id_class, self.rank
-            ),
+            f"UserRRef(RRefId = {id_class}(created_on={self.rank}, local_id=1), "
+            f"ForkId = {id_class}(created_on={self.rank}, local_id=2))",
         )
 
     @dist_init

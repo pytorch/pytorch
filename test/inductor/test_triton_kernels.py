@@ -16,7 +16,7 @@ from torch._higher_order_ops.triton_kernel_wrap import (
 from torch._inductor import metrics
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_utils import skipIfRocm
+from torch.testing._internal.common_utils import skipIfRocm, TEST_WITH_ROCM
 
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import *  # noqa: F403
@@ -24,6 +24,12 @@ from torch.testing._internal.triton_utils import *  # noqa: F403
 if HAS_CUDA:
     import triton
     from triton import language as tl
+
+    if not TEST_WITH_ROCM:
+        from triton.language.extra.cuda.libdevice import (
+            fast_dividef,
+            fast_dividef as my_fast_dividef,
+        )
 
 
 # Define shared triton constants here.
@@ -782,6 +788,42 @@ def forward(self, x_1, output_1):
         out.sum().backward()
 
     @requires_cuda
+    @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
+    def test_triton_kernel_inputs_buffer_reuse(self):
+        def _mul2(x):
+            y = torch.empty_like(x)
+            mul2_kernel[(10,)](
+                in_ptr0=x,
+                out_ptr=y,
+                n_elements=x.numel(),
+                BLOCK_SIZE=1,
+            )
+            return y
+
+        @torch.compile
+        def f(x):
+            for _ in range(4):
+                # The output of one kernel is the input to the next kernel, but
+                # at some point we should re-use buffers not allocate new ones.
+                x = _mul2(x)
+            return x + 1
+
+        x = torch.randn(10, device="cuda", dtype=torch.float32)
+        eager_out = f(x)
+        compiled_out, (code,) = run_and_get_code(torch.compile(f), x)
+        self.assertEqual(compiled_out, eager_out)
+
+        # Check that we're allocating the minimal # of buffers.
+        num_bufs_allocated = code.count(
+            "empty_strided_cuda((10, ), (1, ), torch.float32)"
+        )
+        self.assertEqual(num_bufs_allocated, 2)
+
+        # Check we're re-using buffers if not allocating.
+        num_bufs_reused = code.count("# reuse")
+        self.assertEqual(num_bufs_reused, 3)
+
+    @requires_cuda
     def test_triton_kernel_matmul_tracking(self):
         @triton.jit
         def ones_kernel(x_ptr, n_elements, BLOCK_SIZE: "tl.constexpr"):
@@ -1004,6 +1046,100 @@ def forward(self, x_1, output_1):
             self.assertTrue("equal_to_1=()" in sources[0])
         else:
             self.assertTrue("equal_to_1=(3,)" in sources[0])
+        self.assertEqual(compiled_out, eager_out)
+
+    @requires_cuda
+    @skipIfRocm
+    @common_utils.parametrize("dynamic", [False, True])
+    def test_triton_kernel_equal_to_1_float_arg(self, dynamic):
+        def f(x, y):
+            out = torch.empty_like(x)
+            n_elements = x.numel()
+            scaling_factor = (n_elements**0) / 1.0
+            add_kernel_with_scaling[(n_elements,)](
+                x,
+                y,
+                out,
+                n_elements,
+                scaling_factor,
+                BLOCK_SIZE=16,
+            )
+            return out
+
+        x = torch.randn(2, device="cuda")
+        y = torch.randn(2, device="cuda")
+        eager_out = f(x, y)
+        compiled_out, sources = run_and_get_code(
+            torch.compile(f, dynamic=dynamic), x, y
+        )
+
+        # float 1.0 (both literal or symbolic)
+        # should not be added to equal_to_1
+        self.assertTrue("equal_to_1=()" in sources[0])
+        self.assertEqual(compiled_out, eager_out)
+
+    @requires_cuda
+    @skipIfRocm
+    def test_triton_kernel_with_imported_symbol(self):
+        @triton.jit
+        def add_kernel_with_imported_symbol(
+            in_ptr,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr + offsets, mask=mask)
+            output = fast_dividef(x, 3.14)
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def f(x):
+            out = torch.empty_like(x)
+            n_elements = x.numel()
+            add_kernel_with_imported_symbol[(n_elements,)](
+                x, out, n_elements, BLOCK_SIZE=16
+            )
+            return out
+
+        x = torch.randn(4, device="cuda")
+        eager_out = f(x)
+        compiled_out = torch.compile(f)(x)
+
+        self.assertEqual(compiled_out, eager_out)
+
+    @requires_cuda
+    @skipIfRocm
+    def test_triton_kernel_with_imported_symbol_with_custom_name(self):
+        @triton.jit
+        def add_kernel_with_imported_symbol(
+            in_ptr,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr + offsets, mask=mask)
+            output = my_fast_dividef(x, 3.14)
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def f(x):
+            out = torch.empty_like(x)
+            n_elements = x.numel()
+            add_kernel_with_imported_symbol[(n_elements,)](
+                x, out, n_elements, BLOCK_SIZE=16
+            )
+            return out
+
+        x = torch.randn(4, device="cuda")
+        eager_out = f(x)
+        compiled_out = torch.compile(f)(x)
+
         self.assertEqual(compiled_out, eager_out)
 
     @requires_cuda
