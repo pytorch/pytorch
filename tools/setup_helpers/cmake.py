@@ -307,9 +307,7 @@ class CMake:
 
         CMake.defines(
             args,
-            PYTHON_EXECUTABLE=sys.executable,
-            PYTHON_LIBRARY=cmake_python_library,
-            PYTHON_INCLUDE_DIR=sysconfig.get_path("include"),
+            Python3_EXECUTABLE=sys.executable,
             TORCH_BUILD_VERSION=version,
             NUMPY_INCLUDE_DIR=NUMPY_INCLUDE_DIR,
             **build_options,
