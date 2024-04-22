@@ -7,9 +7,7 @@ from torch._inductor.codecache import _set_triton_ptxas_path, caching_device_pro
 from torch._inductor.compile_worker.subproc_pool import Pipe, SubprocMain
 from torch._inductor.compile_worker.watchdog import _async_compile_initializer
 
-
 _set_triton_ptxas_path()
-
 
 try:
     import triton

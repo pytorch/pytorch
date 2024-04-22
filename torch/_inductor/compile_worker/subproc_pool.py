@@ -10,7 +10,7 @@ import subprocess
 import sys
 import threading
 import typing
-from concurrent.futures import Future, ProcessPoolExecutor
+from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from typing import Any, Callable, Dict
 
 from torch._inductor.compile_worker.watchdog import _async_compile_initializer
@@ -200,7 +200,7 @@ class SubprocMain:
         return pickle.dumps(result, pickle.HIGHEST_PROTOCOL)
 
 
-AnyPool = typing.Union[ProcessPoolExecutor, SubprocPool]
+AnyPool = typing.Union[ProcessPoolExecutor, ThreadPoolExecutor, SubprocPool]
 
 
 def _warm_process_pool(pool: AnyPool, n: int):
