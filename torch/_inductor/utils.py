@@ -47,6 +47,7 @@ from typing_extensions import Concatenate, ParamSpec
 import torch
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import detect_fake_mode
+from torch._guards import TracingContext
 from torch.autograd import DeviceType
 from torch.autograd.profiler_util import EventList
 from torch.fx.passes.shape_prop import ShapeProp
@@ -138,7 +139,7 @@ def do_bench_using_profiling(fn: Callable[[], Any], warmup=25, rep=100) -> float
     log.debug("profiling time breakdown")
     log.debug(actual_events.table(row_limit=-1))
 
-    res = sum(event.cuda_time_total for event in actual_events) / 1000.0 / n_repeat
+    res = sum(event.device_time_total for event in actual_events) / 1000.0 / n_repeat
     log.debug("profiling results: %s ms", res)
     return res
 
@@ -1562,8 +1563,45 @@ def use_scatter_fallback(
     )
 
 
+def dump_node_schedule(node_schedule):
+    """
+    An API that can be used in pdb to dump a node_schedule.
+    Right mainly dump the read/write dependencies but can add more as needed.
+    """
+    from torch._inductor.codegen.triton import DisableReduction, EnableReduction
+    from torch._inductor.scheduler import SchedulerNode
+
+    print(f"Node schedule with {len(node_schedule)} nodes")
+    for idx, node in enumerate(node_schedule):
+        print(f" {idx:3}:")
+        if node is EnableReduction:
+            print("enable reduction")
+        elif node is DisableReduction:
+            print("disable reduction")
+        elif isinstance(node, SchedulerNode):
+            is_red = node.is_reduction()
+            print(f"{'red' if is_red else 'pw'} scheduler node")
+            if is_red:
+                print(f"original reduction hint {node.node.data.reduction_hint}")  # type: ignore[attr-defined]
+            print("ReadDep:")
+            for dep in node.read_writes.reads:
+                print(dep)
+            print("WriteDep:")
+            for dep in node.read_writes.writes:
+                print(dep)
+        else:
+            raise RuntimeError(f"Unrecognized node type: {type(node)}")
+
+
 def tensor_is_aligned(tensor: torch.Tensor):
-    return (tensor.storage_offset() * get_dtype_size(tensor.dtype)) % ALIGNMENT == 0
+    # See Note: [Input Alignment handling in Inductor]
+    # Right now, we don't try to guard on the alignment of the storage offset.
+    # When this comment was written, non-symbolic storage_offsets are not guarded on
+    # but symbolic storage_offsets are. For consistency, we suppress guard creation
+    # upon performing this check: that ensures that we don't add recompiles when we
+    # add this logic.
+    with TracingContext.get().fake_mode.shape_env.suppress_guards():
+        return bool((tensor.storage_offset() * get_dtype_size(tensor.dtype)) % ALIGNMENT == 0)
 
 
 def should_assume_input_aligned(example_input: torch.Tensor):
