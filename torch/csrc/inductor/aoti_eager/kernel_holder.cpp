@@ -59,23 +59,14 @@ c10::ScalarType parse_dtype(const std::string& dtype_str) {
   }
 }
 
-enum class IValueType : uint8_t {
-  Tensor,
-  TensorList,
-  OptionalTensorList,
-  Scalar,
-  Invalid,
-};
-
-static bool HandleTensor(
+inline void unpack_tensor_ivalue(
     const c10::IValue& ivalue,
     const c10::Device& device,
     std::vector<at::Tensor>& inputs) {
   inputs.push_back(ivalue.toTensor());
-  return true;
 }
 
-static bool HandleTensorList(
+inline void unpack_tensor_list_ivalue(
     const c10::IValue& ivalue,
     const c10::Device& device,
     std::vector<at::Tensor>& inputs) {
@@ -84,69 +75,64 @@ static bool HandleTensorList(
       inputs.push_back(item.toTensor());
     }
   }
-  return true;
 }
 
-static bool HandleOptionalTensorList(
+inline void unpack_optional_tensor_list_ivalue(
     const c10::IValue& ivalue,
     const c10::Device& device,
     std::vector<at::Tensor>& inputs) {
-  return HandleTensorList(ivalue, device, inputs);
+  unpack_tensor_list_ivalue(ivalue, device, inputs);
 }
 
-static bool HandleScalar(
+inline void unpack_scalar_ivalue(
     const c10::IValue& ivalue,
     const c10::Device& device,
     std::vector<at::Tensor>& inputs) {
   inputs.push_back(at::scalar_tensor(
       ivalue.toScalar(),
       c10::TensorOptions().device(device).dtype(ivalue.toScalar().type())));
+}
+
+bool unpack_ivalue(
+    const c10::Argument& argument,
+    const c10::IValue& ivalue,
+    const c10::Device& device,
+    std::vector<at::Tensor>& inputs) {
+  if (ivalue.isTensor()) {
+    unpack_tensor_ivalue(ivalue, device, inputs);
+  } else if (ivalue.isTensorList()) {
+    unpack_tensor_list_ivalue(ivalue, device, inputs);
+  } else if (ivalue.isOptionalTensorList()) {
+    unpack_optional_tensor_list_ivalue(ivalue, device, inputs);
+  } else if (ivalue.isScalar()) {
+    // ivalue is scalar
+    unpack_scalar_ivalue(ivalue, device, inputs);
+  } else if (
+      *argument.real_type() == *c10::getTypePtr<c10::optional<at::Tensor>>()) {
+    // ivalue is c10::optional<at::Tensor>
+    auto ivalue_opt_tensor = ivalue.toOptional<at::Tensor>();
+    if (ivalue_opt_tensor.has_value()) {
+      unpack_tensor_ivalue(ivalue, device, inputs);
+    }
+  } else {
+    // Unsupport IValue type.
+    return false;
+  }
+
   return true;
 }
 
-typedef bool (*HandlerFunc)(
-    const c10::IValue& ivalue,
-    const c10::Device& device,
-    std::vector<at::Tensor>& inputs);
-std::unordered_map<IValueType, HandlerFunc> handlers_ = {
-    {IValueType::Tensor, &HandleTensor},
-    {IValueType::TensorList, &HandleTensorList},
-    {IValueType::OptionalTensorList, &HandleOptionalTensorList},
-    {IValueType::Scalar, &HandleScalar}};
-
-bool HandleIValue(
-    const c10::IValue& ivalue,
-    const c10::Device& device,
-    std::vector<at::Tensor>& inputs) {
-  IValueType ivalue_type = IValueType::Invalid;
-  if (ivalue.isTensor()) {
-    ivalue_type = IValueType::Tensor;
-  } else if (ivalue.isTensorList()) {
-    ivalue_type = IValueType::TensorList;
-  } else if (ivalue.isOptionalTensorList()) {
-    ivalue_type = IValueType::OptionalTensorList;
-  } else if (ivalue.isScalar()) {
-    ivalue_type = IValueType::Scalar;
-  }
-
-  auto it = handlers_.find(ivalue_type);
-  if (it != handlers_.end()) {
-    return it->second(ivalue, device, inputs);
-  }
-
-  // Handle unsupported types or add a default handler
-  return false;
-}
-
-bool unpackTensors(
+bool unpack_tensors(
+    const std::vector<c10::Argument>& arguments,
     const torch::jit::Stack& stack,
     const c10::Device& device,
     std::vector<at::Tensor>& inputs) {
-  for (const auto& ivalue : stack) {
-    if (!HandleIValue(ivalue, device, inputs)) {
+  for (size_t idx = 0; idx < stack.size(); idx++) {
+    if (!unpack_ivalue(arguments[idx], stack[idx], device, inputs)) {
       return false;
     }
   }
+
   return true;
 }
 
@@ -157,14 +143,12 @@ AOTIPythonKernelHolder::AOTIPythonKernelHolder(
     c10::DispatchKey dispatch_key,
     c10::string_view ns,
     c10::string_view op_name,
-    c10::string_view op_overload_name,
-    bool is_symbolic)
+    c10::string_view op_overload_name)
     : python_kernel_holder_(func, dispatch_key),
       dispatch_key_(dispatch_key),
       ns_(std::string(ns)),
       op_name_(std::string(op_name)),
       op_overload_name_(std::string(op_overload_name)),
-      is_symbolic_(is_symbolic),
       has_fall_back_(func.ptr() != Py_None),
       device_(c10::Device(c10::dispatchKeyToDeviceType(dispatch_key_), 0)),
       pyinterpreter_(getPyInterpreter()) {
@@ -173,8 +157,6 @@ AOTIPythonKernelHolder::AOTIPythonKernelHolder(
     // Remove the namespace from the op_name as ns is already set
     op_name_ = op_name_.substr(pos + strlen("::"));
   }
-
-  (void)is_symbolic_; // Suppress unused variable warning
 
   // Initialize the AOTI kernel cache
   init_aoti_kernel_cache();
@@ -211,7 +193,7 @@ bool AOTIPythonKernelHolder::cache_lookup(
   }
 
   std::vector<at::Tensor> inputs;
-  auto res = unpackTensors(*stack, device_, inputs);
+  auto res = unpack_tensors(op.schema().arguments(), *stack, device_, inputs);
   if (!res || inputs.empty()) {
     return false;
   }
@@ -247,7 +229,7 @@ void AOTIPythonKernelHolder::cache_hit(
     const c10::DispatchKeySet& keyset,
     torch::jit::Stack* stack) {
   std::vector<at::Tensor> inputs;
-  unpackTensors(*stack, device_, inputs);
+  unpack_tensors(op.schema().arguments(), *stack, device_, inputs);
   torch::jit::drop(*stack, op.schema().arguments().size());
 
   auto outputs = kernel_state.kernel_runner_->run(inputs);
@@ -267,7 +249,7 @@ AOTIKernelMetaInfo AOTIPythonKernelHolder::get_inputs_meta_info(
     }
 
     inputs_meta_info.emplace_back(
-        is_symbolic_,
+        false, // is symbloic
         input.scalar_type(),
         device,
         input.sym_sizes().vec(),
@@ -414,15 +396,18 @@ void AOTIPythonKernelHolder::cache_miss(
   }
 
   std::vector<at::Tensor> inputs;
-  if (unpackTensors(*stack, device, inputs)) {
-    auto outputs = kernel->run(inputs);
-    if (outputs.size() > 0) {
-      torch::jit::drop(*stack, op.schema().arguments().size());
-      // TODO: Get the output type of this operation and then convert to the
-      // output type.
-      for (auto& output : outputs) {
-        torch::jit::push(*stack, std::move(output));
-      }
+  auto unpack_status =
+      unpack_tensors(op.schema().arguments(), *stack, device, inputs);
+  TORCH_INTERNAL_ASSERT(
+      unpack_status,
+      "Failed to unpack tensors for the stack to run the AOTI kernel.");
+  auto outputs = kernel->run(inputs);
+  if (outputs.size() > 0) {
+    torch::jit::drop(*stack, op.schema().arguments().size());
+    // TODO: Get the output type of this operation and then convert to the
+    // output type.
+    for (auto& output : outputs) {
+      torch::jit::push(*stack, std::move(output));
     }
   }
 }
@@ -486,7 +471,7 @@ std::string AOTIPythonKernelHolder::produce_aoti_kernel_lib(
       py::str(func_name).ptr(),
       py::str(overload_name).ptr(),
       py::str(c10::DeviceTypeName(device_.type())).ptr(),
-      py::bool_(is_symbolic_).ptr(),
+      py::bool_(false).ptr(),
       op_py_func.ptr(),
       args_kwargs.first.ptr(),
       args_kwargs.second.ptr(),
