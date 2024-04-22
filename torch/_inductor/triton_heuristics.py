@@ -20,13 +20,14 @@ import torch
 import torch.autograd.profiler as autograd_profiler
 from torch._dynamo.device_interface import DeviceGuard, get_interface_for_device
 from torch._dynamo.utils import dynamo_timed, get_first_attr
+from torch.utils._triton import has_triton_package
 
-from torch._inductor import config
-from torch._inductor.codecache import cache_dir, CudaKernelParamCache
-from torch._inductor.coordinate_descent_tuner import CoordescTuner
+from . import config
+from .codecache import cache_dir, CudaKernelParamCache
+from .coordinate_descent_tuner import CoordescTuner
 
-from torch._inductor.ir import ReductionHint, TileHint
-from torch._inductor.utils import (
+from .ir import ReductionHint, TileHint
+from .utils import (
     ceildiv,
     conditional_product,
     create_bandwidth_info_str,
@@ -36,7 +37,6 @@ from torch._inductor.utils import (
     next_power_of_2,
     triton_config_to_hashable,
 )
-from torch.utils._triton import has_triton_package
 
 
 log = logging.getLogger(__name__)
@@ -614,7 +614,7 @@ class CachingAutotuner(KernelInterface):
         return do_bench(kernel_call, rep=40, fast_flush=True)
 
     def clone_args(self, *args, **kwargs) -> Tuple[List[Any], Dict[str, Any]]:
-        from ..compile_fx import clone_preserve_strides
+        from .compile_fx import clone_preserve_strides
 
         # clone inplace buffers to avoid autotune contaminating them if
         # the kernel does in-place stores. avoid cloning other buffers because

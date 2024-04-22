@@ -49,7 +49,7 @@ def get_kernel_category(kernel_mod):
 
 
 def get_triton_kernel(mod):
-    from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+    from torch._inductor.triton_heuristics import CachingAutotuner
 
     cand_list = [
         v
