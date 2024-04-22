@@ -3372,22 +3372,14 @@ class TritonScheduling(BaseScheduling):
             buffer_names.update(node.used_buffer_names())
 
         # Get buffers objects
-        def _get_buffer(name: str) -> Union[ir.Buffer, ir.TensorBox]:
-            if name in V.graph.name_to_buffer:
-                return V.graph.name_to_buffer[name]
-            elif name in V.graph.graph_inputs:
-                return V.graph.graph_inputs[name]
-            elif name in V.graph.constants:
-                data = V.graph.constants[name]
-                return ir.ConstantBuffer(
-                    name,
-                    ir.FixedLayout(
-                        data.device, data.dtype, *V.graph.static_sizes_strides(data)
-                    ),
-                )
-            raise RuntimeError(f"Failed to find buffer matching name {name}")
 
-        buffers = [_get_buffer(name) for name in buffer_names]
+        def _get_buffer(name: str) -> Union[ir.Buffer, ir.TensorBox]:
+            buf = V.graph.get_buffer(name)
+            if buf is None:
+                raise RuntimeError(f"Failed to find buffer matching name {name}")
+            return buf
+
+        buffers = [V.graph.get_buffer(name) for name in buffer_names]
 
         # In theory we can separately check xnumel and rnumel are <= int_max
         # but some indexers do use the full linear index so we need to be
