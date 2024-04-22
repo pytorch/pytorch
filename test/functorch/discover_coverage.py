@@ -365,8 +365,7 @@ def get_all_tested_ops():
     result = set({})
     for op in get_covered_ops(overridable_outplace_we_care_about).values():
         opinfos = op_to_opinfo[op]
-        for opinfo in opinfos:
-            result.add(opinfo.name)
+        result.update(opinfo.name for opinfo in opinfos)
     return result
 
 
@@ -732,12 +731,12 @@ class Operator:
 
     def any_opinfo_attr(self, attr):
         if not self.has_opinfo():
-            raise RuntimeError()
+            raise RuntimeError
         return any(getattr(opinfo, attr) for opinfo in self.opinfos)
 
     def all_opinfo_attr(self, attr):
         if not self.has_opinfo():
-            raise RuntimeError()
+            raise RuntimeError
         return all(getattr(opinfo, attr) for opinfo in self.opinfos)
 
     def supports_vjp(self):
@@ -870,7 +869,7 @@ class OperatorSet:
             elif n.startswith(torch_dot):
                 names_sanitized.append(n[len(torch_dot) :])
             else:
-                raise AssertionError()
+                raise AssertionError
         return cls.from_names(names_sanitized)
 
     def query(self, operator_method, filter=(Support.NO, Support.YES, Support.UNKNOWN)):

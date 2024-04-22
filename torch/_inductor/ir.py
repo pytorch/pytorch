@@ -8,7 +8,6 @@ import re
 import textwrap
 import traceback
 from contextlib import nullcontext
-from enum import Enum
 from functools import partial
 from typing import (
     Any,
@@ -61,6 +60,8 @@ from .dependencies import (
     var_builder,
 )
 from .ops_handler import OpCounterCSE
+from .runtime.hints import ReductionHint
+from .runtime.runtime_utils import do_bench
 from .utils import (
     argsort,
     cache_on_self,
@@ -68,7 +69,6 @@ from .utils import (
     convert_shape_to_inductor,
     convert_shape_to_symint,
     developer_warning,
-    do_bench,
     get_kernel_metadata,
     is_dynamic,
     is_gpu,
@@ -531,18 +531,6 @@ class Scatter(Pointwise):
             loader(vars),
             mode=self.scatter_mode,
         )
-
-
-class ReductionHint(Enum):
-    INNER = 0
-    OUTER = 1
-    OUTER_TINY = 2
-    DEFAULT = 3
-
-
-class TileHint(Enum):
-    SQUARE = 0
-    DEFAULT = 1
 
 
 REDUCTION_COMBINE_FN = {
@@ -2252,7 +2240,7 @@ class View(GenericView):
                     size_old = size_old * modulus
                 V.graph.sizevars.guard_equals(size_new, size_old)
             else:
-                raise AssertionError()
+                raise AssertionError
 
         while stack_old:
             size_old = stack_old.pop()
@@ -2818,7 +2806,7 @@ class FlexibleLayout(Layout):
                 "stride_ordered_for_memory_format, unsuppored memory_format: %s",
                 memory_format,
             )
-            raise NotImplementedError()
+            raise NotImplementedError
 
     @staticmethod
     def same_ordered(sizes, stride):
@@ -3634,9 +3622,34 @@ class TemplateBuffer(Buffer):
 
 
 class TritonTemplateBuffer(TemplateBuffer):
-    def __init__(self, layout, inputs, make_kernel_render, debug_extra=None):
+    def __init__(
+        self,
+        layout,
+        inputs,
+        make_kernel_render,
+        debug_extra=None,
+        mutated_inputs: Optional[Iterable[IRNode]] = None,
+    ):
+        """
+        NOTE:[TritonTemplates with multiple outputs]
+        We want the ability for TritonTemplates to output multiple tensors. Triton
+        kernels have no notion of outputs and this is done by creating tensors that
+        are then mutated by the kernel. Currenlty our STORE_OUTPUT codegen doesn't
+        support creating multinode outputs for triton templates.
+        We work around this by creating an extra input buffer during the lowering
+        and we mark them as mutated inputs.
+        """
         super().__init__(layout, inputs, make_kernel_render)
         self.debug_extra = debug_extra
+        self.mutated_inputs = mutated_inputs
+        if mutated_inputs is not None:
+            # Ensure that the mutated inputs are only allowed for certain nodes
+            allowed_set = {"templated_attention"}
+            current_node = str(V.graph.current_node)
+            assert (
+                current_node in allowed_set
+            ), f"Mutated inputs are only allowed for {allowed_set} but got {current_node}"
+            mark_node_as_mutating(self, *mutated_inputs)
 
     def __str__(self):
         out = f"TritonTemplateBuffer(layout={self.layout}, {self.debug_extra})"
@@ -3666,16 +3679,16 @@ class ChoiceCaller:
         return do_bench(lambda: algo(*args, out=out))
 
     def call_name(self) -> str:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def to_callable(self):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def hash_key(self) -> str:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def output_node(self) -> "TensorBox":
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def info_dict(self) -> Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]:
         """Information returned here is logged to the autotune log file when that is enabled."""
@@ -3684,7 +3697,7 @@ class ChoiceCaller:
 
 class TritonTemplateCallerBase(ChoiceCaller):
     def get_make_kernel_render(self) -> Any:
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 class MultiTemplateBuffer(TritonTemplateBuffer):
@@ -3856,6 +3869,20 @@ class ConcatKernel(NopKernel):
                     # use CL stride for the output
                     output_stride = make_channels_last_strides_for(new_size)
                     break
+        any_input_is_storage_and_layout = any(is_storage_and_layout(x) for x in inputs)
+        fx_node_args = V.graph.current_node.args[0]
+        assert V.graph.current_node.target in [aten.cat, aten.cat.default]
+        assert isinstance(fx_node_args, list)
+        # If any of the inputs has meta tensor and the meta tensor is in CL format, use CL format for the output
+        if any_input_is_storage_and_layout is False and any(
+            "val" in arg.meta
+            and (
+                arg.meta["val"].is_contiguous(memory_format=torch.channels_last)
+                or arg.meta["val"].is_contiguous(memory_format=torch.channels_last_3d)
+            )
+            for arg in fx_node_args
+        ):
+            output_stride = make_channels_last_strides_for(new_size)
 
         concat_kernel = ConcatKernel(
             name=None,
@@ -3872,7 +3899,9 @@ class ConcatKernel(NopKernel):
         for i in range(len(inputs)):
             input_buffer = cls.realize_into(
                 inputs[i],
-                SliceView.create(kernel, dim, offsets_start[i], offsets_end[i]),
+                SliceView.create(
+                    kernel, dim, offsets_start[i], offsets_end[i], clamp=False
+                ),
             )
             concat_kernel.inputs.append(input_buffer)
 
@@ -4031,7 +4060,7 @@ class ExternKernel(InputsKernel):
             wrapper.writeline(origin_str)
 
     def codegen(self, wrapper):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def get_kernel_name(self):
         return self.cpp_kernel_name if V.graph.cpp_wrapper else self.python_kernel_name
@@ -4136,7 +4165,30 @@ class ExternKernel(InputsKernel):
 
         # NOTE: Don't use extract_read_writes here as it fails when
         # make_loader() inlines the computation
-        x.unwrap_view().freeze_layout()
+        x_unwrap_view = x.unwrap_view()
+        x_unwrap_view_fx_node = V.graph.get_buffer(
+            x_unwrap_view.get_name()
+        ).get_origin_node()
+        # Prefer channels last format according to how the format is set from eager.
+        if (
+            x_unwrap_view_fx_node is not None
+            and "val" in x_unwrap_view_fx_node.meta
+            and isinstance(x_unwrap_view.layout, FlexibleLayout)
+            and (
+                x_unwrap_view_fx_node.meta["val"].is_contiguous(
+                    memory_format=torch.channels_last
+                )
+                or x_unwrap_view_fx_node.meta["val"].is_contiguous(
+                    memory_format=torch.channels_last_3d
+                )
+            )
+        ):
+            x_unwrap_view.freeze_layout_with_same_order(
+                make_channels_last_strides_for(x_unwrap_view.get_size())
+            )
+        else:
+            x_unwrap_view.freeze_layout()
+
         index_args, var_ranges = dependencies.index_vars_squeeze(
             x.get_size(), prefix="r"
         )
@@ -4155,7 +4207,7 @@ class ExternKernel(InputsKernel):
                 offset,
                 index,
             )
-            raise NotImplementedError()
+            raise NotImplementedError
 
         return ReinterpretView(
             data=x.data,
@@ -4582,10 +4634,18 @@ class UserDefinedTritonKernel(ExternKernel):
         # modifies input in place, do not let it get DCEd
         return True
 
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
+        # add unbacked symbols used in the grid to the ones used
+        # in the kwargs (the latter is generated by ExternKernel)
+        return super().get_unbacked_symbol_uses() | free_unbacked_symbols(self.grid)
+
     def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
         return set()
 
     def get_mutation_names(self):
+        # NB: Inductor only allows a node to mutate 0 or 1 buffers.
+        # To get around that, we create MutationOutputs which marks their
+        # assigned input as mutable, thus, adhering to Inductor's constraint.
         return []
 
     def __init__(self, *, kernel_idx, grid, kernel_args):
@@ -4615,27 +4675,36 @@ class UserDefinedTritonKernel(ExternKernel):
         self.kernel_idx = kernel_idx
         self.grid = grid
 
-        kernel, _ = self.get_kernel_and_configs()
+        kernel, configs = self.get_kernel_and_configs()
         # If we are autotuning, not all arguments will be passed
         self.ordered_kwargs_for_cpp_kernel = [
             arg for arg in kernel.arg_names if arg in kernel_args
         ]
 
-        mark_node_as_mutating(
-            self, *[a for a in kernel_args.values() if isinstance(a, TensorBox)]
-        )
+        from torch._higher_order_ops.triton_kernel_wrap import identify_mutated_tensors
+
+        autotuned_kwargs = configs[0].kwargs if len(configs) > 0 else {}
+        self.mutable_args = [
+            kernel_args[key]
+            for key in identify_mutated_tensors(
+                kernel, {**kernel_args, **autotuned_kwargs}
+            )
+        ]
+        mark_node_as_mutating(self, *self.mutable_args)
 
     def get_inputs_that_alias_output(self):
-        return [i.get_name() for i in self.inputs]
+        return [i.get_name() for i in self.mutable_args]
 
 
-def mark_node_as_mutating(cur_buffer, *mutated_ops):
+def mark_node_as_mutating(cur_buffer, *mutated_ops: IRNode):
     """
     Allows ops in mutated_ops to be marked as being mutated as well as
     indicates to the scheduler that these ops depend on cur_buffer.
     """
     for op in mutated_ops:
-        assert isinstance(op, IRNode), op
+        assert isinstance(
+            op, IRNode
+        ), f"{op} op is type {type(op)} and is not an IRNode"
         V.graph.mark_buffer_mutated(op.get_name())
         assert hasattr(op, "layout")
         MutationOutput(op.layout, op, cur_buffer)
@@ -4841,7 +4910,7 @@ class ScatterFallback(ExternKernel):
         wrapper.generate_scatter_fallback(
             x,
             [x, self.constant_args[0], index, src],
-            self.get_kernel_name(),
+            self.cpp_kernel_name,
             self.python_kernel_name,
             self.src_is_tensor,
             reduce,
@@ -4850,25 +4919,6 @@ class ScatterFallback(ExternKernel):
 
     def should_allocate(self):
         return False
-
-    def get_cpp_kernel(self):
-        reduce = self.kwargs["reduce"]
-        if self.python_kernel_name == "aten.scatter_":
-            if self.src_is_tensor:
-                kernel = (
-                    "at::scatter_out" if reduce is None else "at::scatter_reduce_out"
-                )
-            else:
-                assert (
-                    reduce is None
-                ), "Expect reduce to be None for aten.scatter_ with scalar src"
-                kernel = "at::scatter_out"
-        else:
-            assert (
-                reduce is not None
-            ), "Expect reduce to be not None for aten.scatter_reduce_"
-            kernel = "at::scatter_reduce_out"
-        return kernel
 
     def get_mutation_names(self):
         return [self.inputs[0].get_name()]
@@ -4879,7 +4929,6 @@ class ScatterFallback(ExternKernel):
     def __init__(
         self,
         op_overload,
-        python_kernel_name,
         x,
         dim: int,
         index,
@@ -4888,7 +4937,6 @@ class ScatterFallback(ExternKernel):
         reduce: Optional[str] = None,
         include_self: bool = True,
     ):
-        assert python_kernel_name in {"aten.scatter_", "aten.scatter_reduce_"}
         self.src_is_tensor = isinstance(src, TensorBox)
 
         constant_args: Tuple[Any, ...]
@@ -4905,11 +4953,11 @@ class ScatterFallback(ExternKernel):
             self.unwrap_storage(tensors),
             constant_args,
             {"reduce": reduce, "include_self": include_self},
-            python_kernel_name=python_kernel_name,
+            python_kernel_name=str(op_overload),
             ordered_kwargs_for_cpp_kernel=["reduce", "include_self"],
             op_overload=op_overload,
         )
-        self.cpp_kernel_name = self.get_cpp_kernel()
+        self.cpp_kernel_name = get_aten_cpp_kernel_name(op_overload)
         self.name = V.graph.register_buffer(self)
         mark_node_as_mutating(self, x)
 
