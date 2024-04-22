@@ -1,26 +1,45 @@
-from typing import Any, Callable, Optional
+import dataclasses
+from typing import Any, Callable, Optional, Protocol
 
-from .. import _C, autograd, Tensor
+from .. import _C, _ops, autograd, Tensor
 
 from ..utils import _pytree
 from . import utils
 
 
-def make_autograd_impl(opdef: Any) -> Callable:
-    name: str = f"GeneratedBackwardFor_{opdef._namespace}_{opdef._name}"
+class InfoProtocol(Protocol):
+    _backward_fn: Optional[Callable]
+    _setup_context_fn: Optional[Callable]
+
+
+@dataclasses.dataclass
+class Info:
+    _backward_fn: Optional[Callable]
+    _setup_context_fn: Optional[Callable]
+
+
+def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
+    name: str = f"GeneratedBackwardFor_{op._namespace}_{op._opname}_{op._overloadname}"
+
+    saved_keyset = None
 
     def forward(ctx, *args):
         with _C._AutoDispatchBelowAutograd():
-            result = opdef._opoverload(*args)
-            if opdef._setup_context_fn:
-                opdef._setup_context_fn(ctx, args, result)
+            nonlocal saved_keyset
+            keyset = saved_keyset
+            assert keyset is not None, "Should have been set by autograd_impl"
+            saved_keyset = None
+            result = op.redispatch(keyset & _C._after_autograd_keyset, *args)
+            if info._setup_context_fn:
+                info._setup_context_fn(ctx, args, result)
             return result
 
     def backward(ctx, *grads):
-        if opdef._backward_fn:
-            return opdef._backward_fn(ctx, *grads)
+        if info._backward_fn:
+            result = info._backward_fn(ctx, *grads)
+            return result
         raise RuntimeError(
-            f"Trying to backward through {opdef} but no autograd "
+            f"Trying to backward through {op} but no autograd "
             f"formula was registered. "
             f"Please use register_autograd to add one."
         )
@@ -34,14 +53,20 @@ def make_autograd_impl(opdef: Any) -> Callable:
         },
     )
 
-    schema = opdef._opoverload._schema
+    schema = op._schema
     if any(
         utils.is_tensorlist_like_type(a.type)
         for a in (*schema.arguments, *schema.returns)
     ):
         Generated = supports_tensorlist(Generated)
 
-    def autograd_impl(*args):
+    def autograd_impl(keyset, *args):
+        # We set a nonlocal to ferry keyset from here to the forward.
+        # This supports recursive calls (we implement the forward carefully so
+        # that it'll read saved_keyset before making a recursive call to the op).
+        nonlocal saved_keyset
+        assert saved_keyset is None
+        saved_keyset = keyset
         result = Generated.apply(*args)  # type: ignore[attr-defined]
         return result
 
