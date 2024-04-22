@@ -736,11 +736,8 @@ class DistributedDataParallel(Module, Joinable):
                     ValueError,
                     "DistributedDataParallel device_ids and output_device arguments "
                     "only work with single-device/multiple-device GPU modules or CPU modules, "
-                    "but got device_ids {}, output_device {}, and module parameters {}.".format(
-                        device_ids,
-                        output_device,
-                        {p.device for p in self._module_parameters},
-                    ),
+                    f"but got device_ids {device_ids}, output_device {output_device}, "
+                    f"and module parameters {({p.device for p in self._module_parameters})}.",
                 )
 
             self.device_ids = None
