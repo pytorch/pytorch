@@ -47,26 +47,24 @@ from ..dependencies import Dep, MemoryDep, StarDep, WeakDep
 from ..ir import IRNode, TritonTemplateBuffer
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..runtime.hints import ReductionHint
-from ..runtime.runtime_utils import (
-    do_bench,
-    get_max_y_grid,
-    green_text,
-    next_power_of_2,
-    yellow_text,
-)
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
 from ..utils import (
     cache_on_self,
+    do_bench,
     get_dtype_size,
     get_fused_kernel_name,
     get_kernel_metadata,
+    get_max_y_grid,
+    green_text,
     is_welford_reduction,
+    next_power_of_2,
     Placeholder,
     sympy_dot,
     sympy_index_symbol,
     sympy_product,
     sympy_subs,
     unique,
+    yellow_text,
 )
 from ..virtualized import _ops as ops, OpsHandler, ReductionType, StoreMode, V
 from ..wrapper_benchmark import get_kernel_category_by_source_code
