@@ -2,7 +2,7 @@ import argparse
 import os
 import sys
 import xml.etree.ElementTree as ET
-from multiprocessing import Pool
+from multiprocessing import cpu_count, Pool
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Dict, List
@@ -131,7 +131,7 @@ def get_tests(workflow_run_id: int, workflow_run_attempt: int) -> List[Dict[str,
 
         # Parse the reports and transform them to JSON
         test_cases = []
-        mp = Pool(20)
+        mp = Pool(cpu_count())
         for xml_report in Path(".").glob("**/*.xml"):
             test_cases.append(
                 mp.apply_async(

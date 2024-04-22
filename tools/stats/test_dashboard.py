@@ -6,7 +6,7 @@ from collections import defaultdict
 from functools import lru_cache
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, Dict, List
+from typing import Any, cast, Dict, List
 
 import requests
 
@@ -25,11 +25,13 @@ REGEX_JOB_INFO = r"(.*) \/ .*test \(([^,]*), .*\)"
 @lru_cache(maxsize=1000)
 def get_job_name(job_id: int) -> str:
     try:
-        name: str = requests.get(
-            f"https://api.github.com/repos/pytorch/pytorch/actions/jobs/{job_id}",
-            headers=_get_request_headers(),
-        ).json()["name"]
-        return name
+        return cast(
+            str,
+            requests.get(
+                f"https://api.github.com/repos/pytorch/pytorch/actions/jobs/{job_id}",
+                headers=_get_request_headers(),
+            ).json()["name"],
+        )
     except Exception as e:
         print(f"Failed to get job name for job id {job_id}: {e}")
         return "NoJobName"
