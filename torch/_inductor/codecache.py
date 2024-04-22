@@ -485,23 +485,23 @@ class FxGraphCachePickler(pickle.Pickler):
     dispatch_table[torch.Tensor] = _reduce_tensor
     dispatch_table[torch.SymInt] = _reduce_symint
 
-    @staticmethod
-    def dumps(obj) -> bytes:
+    @classmethod
+    def dumps(cls, obj) -> bytes:
         """
         Pickle an object using the FxGraphCachePickler.
         """
         with io.BytesIO() as stream:
-            pickler = FxGraphCachePickler(stream)
+            pickler = cls(stream)
             pickler.dump(obj)
             return stream.getvalue()
 
-    @staticmethod
-    def get_hash(obj: Any) -> str:
+    @classmethod
+    def get_hash(cls, obj: Any) -> str:
         """
         Serialize an object using the FxGraphCachePickler and return a hash
         of the pickled object.
         """
-        serialized_data = FxGraphCachePickler.dumps(obj)
+        serialized_data = cls.dumps(obj)
         return sha256_hash(serialized_data)
 
 
