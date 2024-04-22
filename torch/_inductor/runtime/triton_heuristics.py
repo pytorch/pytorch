@@ -707,7 +707,8 @@ class CachingAutotuner(KernelInterface):
         }
 
         from torch._inductor.codecache import CudaKernelParamCache
-        
+
+
         binary = (
             launcher.bin.asm["cubin"]
             if torch.version.hip is None
