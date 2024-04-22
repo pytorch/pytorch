@@ -61,7 +61,7 @@ from pickle import (
     UnpicklingError,
 )
 from struct import unpack
-from sys import maxsize
+from sys import maxsize, modules
 from typing import Any, Callable, Dict, List
 
 import torch
@@ -101,28 +101,9 @@ def _get_allowed_globals():
         "torch.device": torch.device,
     }
     # dtype
-    for t in [
-        torch.complex32,
-        torch.complex64,
-        torch.complex128,
-        torch.float8_e5m2,
-        torch.float8_e4m3fn,
-        torch.float8_e5m2fnuz,
-        torch.float8_e4m3fnuz,
-        torch.float16,
-        torch.float32,
-        torch.float64,
-        torch.int8,
-        torch.int16,
-        torch.int32,
-        torch.int64,
-        # quantized dtypes
-        torch.qint8,
-        torch.qint32,
-        torch.quint8,
-        torch.quint4x2,
-        torch.quint2x4,
-    ]:
+    for t in torch.storage._dtype_to_storage_type_map().keys():
+        rc[str(t)] = t
+    for t in torch.storage._new_dtypes():
         rc[str(t)] = t
     # Tensor classes
     for tt in torch._tensor_classes:
@@ -198,7 +179,28 @@ class Unpickler:
                 elif full_path in _get_user_allowed_globals():
                     self.append(_get_user_allowed_globals()[full_path])
                 else:
-                    raise RuntimeError(f"Unsupported class {full_path}")
+                    class_type = getattr(modules[module], name)
+                    if issubclass(class_type, torch.Tensor):
+                        # __setstate__ is called by `_rebuild_from_type_v2`
+                        custom_set_state = (
+                            getattr(
+                                class_type, "__setstate__", torch.Tensor.__setstate__
+                            )
+                            is not torch.Tensor.__setstate__
+                        )
+                        # tp_alloc is called by `Tensor._rebuild_wrapper_subclass` and `Tensor.as_subclass`
+                        custom_tp_alloc = not torch._C._check_tp_alloc_is_default(
+                            class_type
+                        )
+                        if custom_set_state or custom_tp_alloc:
+                            raise RuntimeError(
+                                f"Trying to unpickle tensor subclass {full_path} that has defined a custom "
+                                "__setstate__ and/or tp_alloc. Please check whether these methods are safe "
+                                "and allowlist them with torch.serialization.mark_safe_globals if so."
+                            )
+                        self.append(class_type)
+                    else:
+                        raise RuntimeError(f"Unsupported class {full_path}")
             elif key[0] == NEWOBJ[0]:
                 args = self.stack.pop()
                 cls = self.stack.pop()

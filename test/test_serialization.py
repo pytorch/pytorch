@@ -4107,8 +4107,13 @@ class TestSubclassSerialization(TestCase):
         with tempfile.NamedTemporaryFile() as f:
             torch.save(sd, f)
             f.seek(0)
+            sd = torch.load(f, weights_only=True)
+
+            f.seek(0)
+            restore_setstate = TwoTensor.__setstate__
+            TwoTensor.__setstate__ = lambda self, state: self.__dict__.update(state)
             with self.assertRaisesRegex(pickle.UnpicklingError, "Weights only load failed"):
-                sd = torch.load(f, weights_only=True)
+                torch.load(f, weights_only=True)
 
             f.seek(0)
             torch.serialization.mark_safe_globals([TwoTensor])
@@ -4116,6 +4121,7 @@ class TestSubclassSerialization(TestCase):
             self.assertEqual(sd['t'], t)
             self.assertEqual(sd['p'], p)
 
+            TwoTensor.__setstate__ = restore_setstate
 
 instantiate_device_type_tests(TestBothSerialization, globals())
 instantiate_parametrized_tests(TestSubclassSerialization)
