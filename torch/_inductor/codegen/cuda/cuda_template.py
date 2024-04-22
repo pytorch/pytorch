@@ -269,7 +269,16 @@ class CKTemplate(CUDATemplate):
             """
                 // CK headers
 
+                #ifdef DEBUG_LOG
+                #define DEBUG_LOG_TMP DEBUG_LOG                
+                #undef DEBUG_LOG
+                #else
+                #define DEBUG_LOG_TMP 0
+                #endif
                 #include "ck/ck.hpp"
+                #undef DEBUG_LOG
+                #define DEBUG_LOG DEBUG_LOG_TMP
+
                 #include "ck/utility/data_type.hpp"
                 #include "ck/library/utility/check_err.hpp"
                 #include "ck/library/utility/device_memory.hpp"
