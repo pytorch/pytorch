@@ -35,6 +35,7 @@ from torch.utils._sympy.singleton_int import SingletonInt
 from .. import codecache, config, ir
 from ..ir import ReinterpretView
 from ..runtime import triton_heuristics
+from ..runtime.hints import DeviceProperties
 from ..utils import (
     cache_on_self,
     get_benchmark_name,
@@ -1088,8 +1089,7 @@ class WrapperCodeGen(CodeGen):
                 size_dtype=index_dtype,
                 indices=non_constant_indices,
             ),
-            "device": V.graph.scheduler.current_device.index,
-            "device_type": V.graph.scheduler.current_device.type,
+            "device": DeviceProperties.create(V.graph.scheduler.current_device),
             # Triton compiler includes equal_to_1 args into constants even
             # when they are not constexpr. otherwise there may be a segfault
             # during launching the Inductor-compiled Triton kernel.
