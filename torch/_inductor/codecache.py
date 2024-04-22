@@ -2585,7 +2585,7 @@ def _hipcc_device_compiler_options() -> List[str]:
         "-fPIC",
     ]
     if config.rocm.is_debug:
-        opts += ["-DDEBUG_LOG=1", "-g", "--save-temps='obj'", "-Rpass-analysis=kernel-resource-usage"]
+        opts += ["-DDEBUG_LOG=1", "-g", "--save-temps=obj", "-Rpass-analysis=kernel-resource-usage"]
     return opts
 
 
@@ -2755,7 +2755,7 @@ class CUDACodeCache:
                     cmd_parts = cmd.split(" ")
                     try:
                         output = subprocess.check_output(
-                            cmd_parts, stderr=subprocess.STDOUT, env=os.environ
+                            cmd_parts, stderr=subprocess.STDOUT, text=True, env=os.environ
                         )
                         log.debug(f"CUDA compilation output: {output}")
                     except subprocess.CalledProcessError as error:
