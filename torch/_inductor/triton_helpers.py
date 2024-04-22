@@ -1,18 +1,5 @@
-try:
-    import triton
-    import triton.language as tl
-except ImportError:
-
-    class triton:  # type: ignore[no-redef]
-        @staticmethod
-        def jit(x):
-            return x
-
-    class tl:  # type: ignore[no-redef]
-        constexpr = None  # type: ignore[var-annotated]
-        math = None  # type: ignore[var-annotated]
-        extra = None  # type: ignore[var-annotated]
-
+import triton
+import triton.language as tl
 
 # In the latest triton, math functions were shuffled around into different modules:
 # https://github.com/openai/triton/pull/3172

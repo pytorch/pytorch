@@ -16,8 +16,8 @@ except ImportError:
     raise unittest.SkipTest("requires triton")  # noqa: TRY200
 
 from torch._inductor import config
-from torch._inductor.runtime.triton_heuristics import triton_config
 from torch._inductor.test_case import run_tests, TestCase
+from torch._inductor.triton_heuristics import triton_config
 
 
 class TestTritonHeuristics(TestCase):
