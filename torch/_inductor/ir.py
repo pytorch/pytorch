@@ -5251,6 +5251,7 @@ class FallbackKernel(ExternKernelAlloc):
             return
 
         for s, keypath in unbacked_bindings.items():
+
             def go(expr, keypath):
                 if keypath == ():
                     return expr
