@@ -228,14 +228,8 @@ def out_wrapper(
 
     is_tensor = len(out_names) == 1
 
-    def compute_memory_format(t):
-        if (
-            preserve_memory_format
-            and utils.suggest_memory_format(t) == torch.channels_last
-        ):
-            return torch.channels_last
-        else:
-            return None
+    def maybe_compute_memory_format(t):
+        return utils.suggest_memory_format(t) if preserve_memory_format else None
 
     def _out_wrapper(fn: Callable) -> Callable:
         """
@@ -295,7 +289,9 @@ def out_wrapper(
                 if is_tensor:
                     assert isinstance(out, TensorLike)
                     # These two operations are done in-place
-                    _maybe_resize_out(out, result.shape, compute_memory_format(result))
+                    _maybe_resize_out(
+                        out, result.shape, maybe_compute_memory_format(result)
+                    )
                     _safe_copy_out(copy_from=result, copy_to=out, exact_dtype=exact_dtype)  # type: ignore[arg-type]
                 else:
                     assert isinstance(out, Tuple)  # type: ignore[arg-type]
@@ -305,7 +301,7 @@ def out_wrapper(
                     )
                     for r, o in zip(result, out):
                         # These two operations are done in-place
-                        _maybe_resize_out(o, r.shape, compute_memory_format(r))
+                        _maybe_resize_out(o, r.shape, maybe_compute_memory_format(r))
                         _safe_copy_out(copy_from=r, copy_to=o, exact_dtype=exact_dtype)  # type: ignore[arg-type]
             else:
                 out = result
