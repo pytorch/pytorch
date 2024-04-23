@@ -915,6 +915,7 @@ class CKGemmTemplate(CKTemplate):
         if op.c_layout != torch_layout_to_ck_layout(Y_meta):
             return None
         # try to avoid launching the instance with invalid problem size
+        # see GridwiseGemm_xdl_cshuffle_v3::CheckValidity
 
         M = X_meta.size[-2]
         K = X_meta.size[-1]
@@ -936,6 +937,9 @@ class CKGemmTemplate(CKTemplate):
             return None
         if (N if op.c_layout == "Row" else M) % op.c_shuffle_block_transfer_scalar_per_vector_n_per_block != 0:
             return None
+
+        # TBD disable instances with invalid number of pipeline prefetch stages
+        # It will avoid compiling a small percentage of unrunnable instances which fail the gemm argument check
 
         return op
 
