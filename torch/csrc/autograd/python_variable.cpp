@@ -631,6 +631,28 @@ static PyObject* THPVariable_view_func_unsafe(
   return view_func_impl(self_, args, kwargs, /*check_has_same_meta=*/false);
 }
 
+static PyObject* THPVariable_set_sizes_and_strides(
+    PyObject* self_,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  const auto& self = THPVariable_Unpack(self_);
+
+  static PythonArgParser parser({
+      "_set_sizes_and_strides(SymIntArrayRef size, SymIntArrayRef strides, SymInt? storage_offset=None)",
+  });
+  ParsedArgs<3> parsed_args{};
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto sym_sizes = r.symintlist(0);
+  auto sym_strides = r.symintlist(1);
+  auto sym_storage_offset = r.toSymIntOptional(2);
+
+  self.unsafeGetTensorImpl()->set_sizes_and_strides(sym_sizes, sym_strides);
+
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* rev_view_func_impl(PyObject* self_, PyObject* arg) {
   HANDLE_TH_ERRORS
   const auto& self = THPVariable_Unpack(self_);
@@ -1744,6 +1766,10 @@ static PyMethodDef extra_methods[] = {
     {"_rev_view_func_unsafe",
      THPVariable_rev_view_func_unsafe,
      METH_O,
+     nullptr},
+    {"_set_sizes_and_strides",
+     castPyCFunctionWithKeywords(THPVariable_set_sizes_and_strides),
+     METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {nullptr}};
 

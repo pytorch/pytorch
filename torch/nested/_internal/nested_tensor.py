@@ -102,6 +102,8 @@ class NestedTensor(torch.Tensor):
         stride = values.stride()
         self._strides = (ragged_size * stride[r], *stride)
 
+        self._set_sizes_and_strides(self._size, self._strides)  # type: ignore[attr-defined]
+
         self._values = values
         self._offsets = offsets
         self._lengths = lengths
