@@ -3225,6 +3225,7 @@ MOD_INLINELIST = {
     "torch._tensor",
     "torch._higher_order_ops.strict_mode",
     "torch._higher_order_ops.while_loop",
+    "torch._higher_order_ops.associative_scan",
 }
 
 
