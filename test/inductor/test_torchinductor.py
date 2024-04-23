@@ -1409,7 +1409,7 @@ class CommonTemplate:
 
         # Check everything is fused into a single kernel
         FileCheck().check_not("run(").check_regex(
-            r"triton_.*\.run\(arg0_1, arg1_1, buf1,"
+            r"triton_.*\.run\(arg[01]_1, arg[12]_1, buf1,"
         ).check_not("run(").run(code[0])
 
     def test_embedding_bag_byte_unpack(self):
