@@ -835,7 +835,7 @@ void TensorIteratorBase::cast_outputs() {
       // and tensor, this condition should no longer ever be true
       const auto &original_tensor = op.original_tensor();
       const auto &tensor = op.tensor();
-      if (original_tensor.sizes() != tensor.sizes()){
+      if (original_tensor.sizes() != tensor.sizes()) {
         original_tensor.resize_as_(tensor).as_strided_(tensor.sizes(), tensor.strides());
       }
       original_tensor.copy_(tensor);
@@ -1196,6 +1196,9 @@ void TensorIteratorBase::mark_resize_outputs(const TensorIteratorConfig& config)
   }
   for (const auto i : c10::irange(num_outputs_)) {
     const auto& output = tensor(i);
+    if (!output.defined()) {
+      operands_[i].will_resize = true;
+    }
     if (output.defined() && !output.sizes().equals(shape_)) {
       if (config.resize_outputs_ && !operands_[i].is_read_write) {
         operands_[i].will_resize = true;
@@ -1527,13 +1530,13 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
 
   // XLA and lazy tensors don't have storage, so they don't have an underlying data pointer.
   // Nothing beyond this point is important for meta functions, so it's fine to exit early here.
-  // Extend the condition to ORT tesnors as ORT tensors also don't have storage.
+  // Extend the condition to MAIA tesnors as MAIA tensors also don't have storage.
   if (privateuse1_without_storage  ||
       common_device_.type() == DeviceType::MTIA ||
       common_device_.type() == DeviceType::XLA  ||
       common_device_.type() == DeviceType::IPU  ||
       common_device_.type() == DeviceType::Lazy ||
-      common_device_.type() == DeviceType::ORT  ||
+      common_device_.type() == DeviceType::MAIA  ||
       common_device_.type() == DeviceType::HPU) return;
 
   for (auto& op : operands_) {

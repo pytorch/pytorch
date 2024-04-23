@@ -104,37 +104,40 @@ inline void maybe_wrap_dims(
 // dimension behavior and dimension size checking). We maintain this behavior
 // for backwards compatibility, but only for this specific size (i.e. other
 // empty sizes are not skipped).
-template <typename T>
-inline int64_t _legacy_cat_wrap_dim(
+inline int64_t legacy_cat_wrap_dim(
     int64_t dim,
-    const std::vector<std::vector<T>>& tensor_sizes) {
+    const std::vector<std::vector<int64_t>>& tensor_sizes) {
   for (auto& sizes : tensor_sizes) {
     if (sizes.size() == 1 && sizes[0] == 0) {
       continue;
     }
-    return maybe_wrap_dim(dim, sizes.size());
+    return maybe_wrap_dim(dim, static_cast<int64_t>(sizes.size()));
+  }
+  return dim;
+}
+
+inline int64_t legacy_cat_wrap_dim_symint(
+    int64_t dim,
+    const std::vector<std::vector<c10::SymInt>>& tensor_sizes) {
+  for (auto& sizes : tensor_sizes) {
+    if (sizes.size() == 1) {
+      if (TORCH_GUARD_SIZE_OBLIVIOUS(sizes[0].sym_eq(0))) {
+        continue;
+      }
+    }
+    return maybe_wrap_dim(dim, static_cast<int64_t>(sizes.size()));
   }
   return dim;
 }
 
 inline int64_t legacy_cat_wrap_dim(
     int64_t dim,
-    const std::vector<std::vector<int64_t>>& tensor_sizes) {
-  return _legacy_cat_wrap_dim<int64_t>(dim, tensor_sizes);
-}
-
-inline int64_t legacy_cat_wrap_dim_symint(
-    int64_t dim,
-    const std::vector<std::vector<c10::SymInt>>& tensor_sizes) {
-  return _legacy_cat_wrap_dim<c10::SymInt>(dim, tensor_sizes);
-}
-
-inline int64_t legacy_cat_wrap_dim(
-    int64_t dim,
     const MaterializedITensorListRef& tensors) {
   for (const Tensor& tensor : tensors) {
-    if (tensor.dim() == 1 && tensor.sizes()[0] == 0) {
-      continue;
+    if (tensor.dim() == 1) {
+      if (TORCH_GUARD_SIZE_OBLIVIOUS(tensor.sym_sizes()[0].sym_eq(0))) {
+        continue;
+      }
     }
     return maybe_wrap_dim(dim, tensor.dim());
   }

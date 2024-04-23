@@ -36,6 +36,7 @@ from torch.testing._internal.common_fsdp import (
     FSDPInitMode,
     FSDPTest,
     FSDPTestMultiThread,
+    MLP,
     NestedWrappedModule,
     TransformerWithSharedParams,
 )
@@ -967,6 +968,18 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
         ):
             inp = fsdp_model.module.get_input(torch.device("cuda"))
             fsdp_model(*inp)
+
+    @skip_if_lt_x_gpu(2)
+    def test_fsdp_unsupported_module_cls(self):
+        regex = r"FSDP does not support containers that do not implement forward"
+        model = nn.ModuleList([MLP(8, torch.device("cpu")) for _ in range(3)])
+        with self.assertRaisesRegex(ValueError, regex):
+            FSDP(model)
+        model = nn.ModuleDict(
+            {"1": MLP(8, torch.device("cpu")), "2": MLP(8, torch.device("cpu"))}
+        )
+        with self.assertRaisesRegex(ValueError, regex):
+            FSDP(model)
 
 
 class TestFSDPMiscWorldSize1(FSDPTestMultiThread):

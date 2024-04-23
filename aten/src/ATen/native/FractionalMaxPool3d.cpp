@@ -101,10 +101,10 @@ namespace {
 
 template<typename scalar_t>
 static void fractional_max_pool3d_out_single_batch_frame(
-  scalar_t* input,
+  const scalar_t* input,
   scalar_t* output,
   int64_t* indices,
-  scalar_t* randomSamples,
+  const scalar_t* randomSamples,
   int64_t numPlanes,
   int64_t inputT, int64_t inputH, int64_t inputW,
   int64_t outputT, int64_t outputH, int64_t outputW,
@@ -114,7 +114,7 @@ static void fractional_max_pool3d_out_single_batch_frame(
     for (const auto plane : c10::irange(start, end)) {
       /* each plane contains 3 random samples,
          one for T, one for W, and one for H */
-      scalar_t* randomSamplesForPlane = randomSamples + plane * 3;
+      const scalar_t* randomSamplesForPlane = randomSamples + plane * 3;
 
       /* Generate interval sequence */
       auto sequenceT = generate_intervals<scalar_t>(
@@ -128,7 +128,7 @@ static void fractional_max_pool3d_out_single_batch_frame(
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t t, h, w;
 
-      scalar_t* inputForPlane = input + plane * inputT * inputH * inputW;
+      const scalar_t* inputForPlane = input + plane * inputT * inputH * inputW;
       scalar_t* outputForPlane = output + plane * outputT * outputH * outputW;
       int64_t* indicesForPlane = indices + plane * outputT * outputH * outputW;
 
@@ -173,10 +173,10 @@ static void fractional_max_pool3d_out_single_batch_frame(
 
 template<typename scalar_t>
 static void fractional_max_pool3d_out_frame(
-  scalar_t* input,
+  const scalar_t* input,
   scalar_t* output,
   int64_t* indices,
-  scalar_t* randomSamples,
+  const scalar_t* randomSamples,
   int64_t numBatch, int64_t numPlanes,
   int64_t inputT, int64_t inputH, int64_t inputW,
   int64_t outputT, int64_t outputH, int64_t outputW,
@@ -244,10 +244,10 @@ TORCH_IMPL_FUNC(fractional_max_pool3d_out_cpu)(
     "fractional_max_pool3d_out_frame",
     [&] {
       fractional_max_pool3d_out_frame<scalar_t>(
-        input.data_ptr<scalar_t>(),
+        input.const_data_ptr<scalar_t>(),
         output.data_ptr<scalar_t>(),
         indices.data_ptr<int64_t>(),
-        randomSamples.data_ptr<scalar_t>(),
+        randomSamples.const_data_ptr<scalar_t>(),
         numBatch, numPlanes,
         inputT, inputH, inputW,
         outputT, outputH, outputW,
@@ -262,8 +262,8 @@ namespace {
 template<typename scalar_t>
 static void fractional_max_pool3d_backward_out_single_batch_frame(
   scalar_t* gradInput,
-  scalar_t* gradOutput,
-  int64_t* indices,
+  const scalar_t* gradOutput,
+  const int64_t* indices,
   int64_t numPlanes,
   int64_t inputT, int64_t inputH, int64_t inputW,
   int64_t outputT, int64_t outputH, int64_t outputW) {
@@ -271,9 +271,9 @@ static void fractional_max_pool3d_backward_out_single_batch_frame(
   at::parallel_for(0, numPlanes, 0, [&](int64_t start, int64_t end) {
     for (const auto plane : c10::irange(start, end)) {
       scalar_t* gradInputForPlane = gradInput + plane * inputT * inputH * inputW;
-      scalar_t* gradOutputForPlane = gradOutput +
+      const scalar_t* gradOutputForPlane = gradOutput +
                   plane * outputT * outputH * outputW;
-      int64_t* indicesForPlane = indices + plane * outputT * outputH * outputW;
+      const int64_t* indicesForPlane = indices + plane * outputT * outputH * outputW;
 
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t h, w, t;
@@ -294,8 +294,8 @@ static void fractional_max_pool3d_backward_out_single_batch_frame(
 template<typename scalar_t>
 static void fractional_max_pool3d_backward_out_frame(
   scalar_t* gradInput,
-  scalar_t* gradOutput,
-  int64_t* indices,
+  const scalar_t* gradOutput,
+  const int64_t* indices,
   int64_t numBatch, int64_t numPlanes,
   int64_t inputT, int64_t inputH, int64_t inputW,
   int64_t outputT, int64_t outputH, int64_t outputW) {
@@ -381,8 +381,8 @@ void fractional_max_pool3d_backward_out_cpu_template(
     [&]{
       fractional_max_pool3d_backward_out_frame<scalar_t>(
         gradInput.data_ptr<scalar_t>(),
-        gradOutput.data_ptr<scalar_t>(),
-        indices.data_ptr<int64_t>(),
+        gradOutput.const_data_ptr<scalar_t>(),
+        indices.const_data_ptr<int64_t>(),
         numBatch, numPlanes,
         inputT, inputH, inputW,
         outputT, outputH, outputW

@@ -116,8 +116,8 @@ def _init_process_group_state(
             # passed in, there is no way to ensure all wrapped FSDP instances use the same
             # process groups.
             raise ValueError(
-                f"Manual wrapping with {sharding_strategy}",
-                "requires explicit specification of process group or device_mesh.",
+                f"Manual wrapping with {sharding_strategy} "
+                "requires explicit specification of process group or device_mesh."
             )
         else:
             state = _init_process_group_state_for_hybrid_shard(

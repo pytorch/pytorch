@@ -242,7 +242,7 @@ def is_contiguous(a: TensorLikeType) -> bool:
         if guard_size_oblivious(x == 1):
             continue
 
-        if y != expected_stride:
+        if guard_size_oblivious(y != expected_stride):
             return False
         expected_stride = expected_stride * x
 
@@ -1344,6 +1344,7 @@ class RETURN_TYPE(Enum):
     NEW = (0,)
     VIEW = (1,)
     INPLACE = (2,)
+    NONE = (3,)
 
 
 # TODO: when NumberType contains the sym types, can simplify this
@@ -1773,10 +1774,9 @@ def check_in_bounds_for_storage(
     required_length = compute_required_storage_length(shape, strides, storage_offset)
     if a.size() < required_length:
         msg = (
-            "Can't view a storage of size {} with an offset of {}, shape of {}, and strides of {}, "
-            "which requires a storage of size {}".format(
-                a.size(), storage_offset, str(shape), str(strides), required_length
-            )
+            f"Can't view a storage of size {a.size()} with an offset of {storage_offset}, "
+            f"shape of {str(shape)}, and strides of {str(strides)}, "
+            f"which requires a storage of size {required_length}"
         )
         raise ValueError(msg)
 
