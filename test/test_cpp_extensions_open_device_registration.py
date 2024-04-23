@@ -551,14 +551,21 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         self.assertEqual(z_cpu, z[0])
         self.assertEqual(z_cpu, z[1])
 
-    @parametrize('dtype', all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
+    # FIXME: bfloat16 is failing due to https://github.com/pytorch/pytorch/blob/main/test/cpp_extensions/open_registration_extension.cpp?fbclid=IwAR2wOJYMX2tvKldsXFLeNYlLYaatmj0ts6nx09mxjt4Wr8DJbcWAiRfXZq0#L349
+    @parametrize('dtype', all_types_and_complex_and(torch.half, torch.bool))
     def test_open_device_numpy_serialization(self, dtype):
         torch.utils.rename_privateuse1_backend("foo")
         device = self.module.custom_device()
         default_protocol = torch.serialization.DEFAULT_PROTOCOL
         # This is a hack to test serialization through numpy
         with patch.object(torch._C, "_has_storage", return_value=False):
-            x = torch.randn(2, 3, dtype=torch.float32)
+            if dtype.is_floating_point or dtype.is_complex:
+                x = torch.randn(2, 3, dtype=dtype)
+            elif dtype == torch.bool:
+                x = torch.randn(2, 3) > 0.5
+            else:
+                info = torch.iinfo(dtype)
+                x = torch.randint(info.min, info.max, (2, 3), dtype=dtype)
             x_foo = x.to(device)
             sd = {"x": x_foo}
             rebuild_func = x_foo._reduce_ex_internal(default_protocol)[0]
