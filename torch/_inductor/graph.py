@@ -1,3 +1,4 @@
+import contextlib
 import itertools
 import logging
 import operator
@@ -872,9 +873,14 @@ class GraphLowering(torch.fx.Interpreter):
         # codegen based on this. But storage_offset guards turned out to be
         # expensive and cause recompiles; Instead, we're generating code
         # based on the alignment of the example input without guarding.
-        if should_assume_input_aligned(example):
-            self.aligned_inputs.add(target)
-        return tensor
+        ctx = contextlib.nullcontext()
+        if tracing_context := torch._guards.TracingContext.try_get():
+            # avoid creating guards on input's storage offset
+            ctx = tracing_context.fake_mode.shape_env.suppress_guards()
+        with ctx:
+            if should_assume_input_aligned(example):
+                self.aligned_inputs.add(target)
+            return tensor
 
     def call_function(self, target, args, kwargs):
         if target is operator.getitem and isinstance(args[0], (list, tuple, dict)):
