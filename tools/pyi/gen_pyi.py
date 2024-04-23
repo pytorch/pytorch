@@ -252,7 +252,7 @@ def sig_for_ops(opname: str) -> List[str]:
             tname = "builtins." + tname
         return [f"def {opname}(self) -> {tname}: ..."]
     else:
-        raise Exception("unknown op", opname)
+        raise Exception("unknown op", opname)  # noqa: TRY002
 
 
 def generate_type_hints(sig_group: PythonSignatureGroup) -> List[str]:
@@ -799,6 +799,15 @@ def gen_pyi(
                 "def _functionalize_are_all_mutations_under_no_grad_or_inference_mode(t: Tensor) -> _bool: ..."
             ],
             "_functionalize_sync": ["def _functionalize_sync(t: Tensor) -> None: ..."],
+            "_functionalize_was_storage_changed": [
+                "def _functionalize_was_storage_changed(tensor: Tensor) -> _bool: ..."
+            ],
+            "_functionalize_has_metadata_mutation": [
+                "def _functionalize_has_metadata_mutation(tensor: Tensor) -> _bool: ..."
+            ],
+            "_functionalize_apply_view_metas": [
+                "def _functionalize_apply_view_metas(tensor: Tensor,  base: Tensor) -> Tensor: ..."
+            ],
             "_enable_functionalization": [
                 "def _enable_functionalization(*, reapply_views: _bool = False): ..."
             ],

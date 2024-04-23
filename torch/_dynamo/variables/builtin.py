@@ -63,7 +63,7 @@ from .tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-from .user_defined import UserDefinedVariable
+from .user_defined import UserDefinedObjectVariable, UserDefinedVariable
 
 log = logging.getLogger(__name__)
 
@@ -518,6 +518,14 @@ class BuiltinVariable(VariableTracker):
             def compare_set_items(tx, left, right):
                 return ConstantVariable(op(left.set_items, right.set_items))
 
+            def compare_via_method(tx, left, right):
+                return left.call_method(tx, f"__{op.__name__}__", [right], {})
+
+            if op.__name__.startswith("is_"):
+                compare_user_defined = compare_by_value
+            else:
+                compare_user_defined = compare_via_method
+
             op_var = BuiltinVariable(op)
             result.extend(
                 [
@@ -546,14 +554,13 @@ class BuiltinVariable(VariableTracker):
                         list_compare_check,
                     ),
                     ((has_set_items, has_set_items), compare_set_items),
-                    # TODO(jansel): UserDefinedObjectVariable is wrong and could invoke user code
                     (
                         (UserDefinedObjectVariable, UserDefinedObjectVariable),
-                        compare_by_value,
+                        compare_user_defined,
                     ),
                     (
                         (UserDefinedClassVariable, UserDefinedClassVariable),
-                        compare_by_value,
+                        compare_user_defined,
                     ),
                     (
                         (
@@ -945,6 +952,17 @@ class BuiltinVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        if self.fn == object and name == "__setattr__":
+            assert len(args) == 3
+            assert len(kwargs) == 0
+            obj, name_var, val = args
+            obj = obj.realize()
+            if (
+                isinstance(obj, UserDefinedObjectVariable)
+                and tx.output.side_effects.is_attribute_mutation(obj)
+                and name_var.is_python_constant()
+            ):
+                return obj.method_setattr_standard(tx, name_var, val)
         if self.fn == dict and name == "fromkeys":
             return BuiltinVariable.call_custom_dict_fromkeys(tx, dict, *args, **kwargs)
         if self.fn == itertools.chain and name == "from_iterable":
@@ -1466,6 +1484,24 @@ class BuiltinVariable(VariableTracker):
             unimplemented("non-const getattr() name")
 
         if tx.output.side_effects.is_attribute_mutation(obj):
+            if isinstance(obj, variables.UnspecializedNNModuleVariable):
+                if (
+                    name
+                    in (
+                        "named_parameters",
+                        "parameters",
+                        "named_buffers",
+                        "buffers",
+                        "named_modules",
+                        "modules",
+                    )
+                    and obj.is_state_mutated
+                    and tx.output.side_effects.has_pending_mutation(obj)
+                ):
+                    unimplemented(
+                        f"pending mutation on nn module, so graph breaking at {name!r} call"
+                    )
+
             try:
                 # re-read a pending side effect?
                 return tx.output.side_effects.load_attr(obj, name)

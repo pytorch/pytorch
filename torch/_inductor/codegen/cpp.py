@@ -2016,7 +2016,7 @@ class CppKernel(Kernel):
             )
         else:
             par_depth = self.decide_parallel_depth(
-                self.call_ranges[: loop_nest.max_parallel_depth()], threads
+                loop_nest.max_parallel_depth(), threads
             )
 
         with contextlib.ExitStack() as stack:
@@ -2151,7 +2151,9 @@ class CppKernel(Kernel):
         else:
             return "TORCH_CHECK"
 
-    def decide_parallel_depth(self, ranges, threads):
+    def decide_parallel_depth(self, max_parallel_depth, threads):
+        assert self.call_ranges is not None
+        ranges = self.call_ranges[:max_parallel_depth]
         seq = self.size_hint()
         par = 1
         depth = 0
@@ -2668,7 +2670,7 @@ class CppVecKernel(CppKernel):
                 mean, m2, weight = reduction_project(reduction_type, next_value)
             return f"welford_combine({var}, {{{mean}, {m2}, {weight}}})"
         else:
-            raise NotImplementedError()
+            raise NotImplementedError
 
     def indirect_assert(self, var, lower, upper, mask=None):
         assert not mask, "do not support mask in indirect_indexing assertion"
@@ -3574,7 +3576,7 @@ class OuterLoopFusedKernel(CppKernel):
         super().__init__(kernel_group.args, kernel_group.ws.num_threads)
         self.inner: List["LoopLevel"] = []
 
-    def decide_parallel_depth(self, outer_loop_fusion_depth, threads) -> int:
+    def decide_parallel_depth(self, max_parallel_depth, threads) -> int:
         kernels_parallel_depth = []
         nested_kernels: List[List[CppKernel]] = [
             loop.get_kernels() for loop in self.inner
@@ -3583,12 +3585,13 @@ class OuterLoopFusedKernel(CppKernel):
             # For any ScalarKernel, VecKernel, or Tile2DKernel,
             # they should all have the same call_ranges
             call_ranges = kernels[0].call_ranges
+            assert call_ranges is not None
             assert all(kernel.call_ranges == call_ranges for kernel in kernels)
             kernels_parallel_depth.append(
-                kernels[0].decide_parallel_depth(call_ranges, threads)
+                kernels[0].decide_parallel_depth(len(call_ranges), threads)
             )
         return min(
-            outer_loop_fusion_depth,
+            max_parallel_depth,
             max(kernels_parallel_depth),
         )
 
@@ -3650,8 +3653,7 @@ class CppScheduling(BaseScheduling):
                             if var_ranges is None:
                                 var_ranges = v
                             assert var_ranges == v, (var_ranges, v, node.snodes)
-                            for expr in exprs:
-                                indexing_exprs.add(expr)
+                            indexing_exprs.update(exprs)
                         return var_ranges, list(indexing_exprs)
                     else:
                         assert isinstance(node, SchedulerNode)
