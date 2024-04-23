@@ -597,21 +597,30 @@ class OutputGraph:
             self.torch_function_enabled,
         )
         global_state["grad_enabled"] = (torch.set_grad_enabled, torch.is_grad_enabled())
+
+        def autocast_specific_backend(
+            device_type: str, func: Callable[[str, Any], None]
+        ):
+            def decorator(value):
+                return func(device_type, value)
+
+            return decorator
+
         global_state["autocast_enabled"] = (
-            torch.set_autocast_enabled,
-            torch.is_autocast_enabled(),
+            autocast_specific_backend("cuda", torch.set_autocast_enabled),
+            torch.is_autocast_enabled("cuda"),
         )
         global_state["autocast_cpu_enabled"] = (
-            torch.set_autocast_cpu_enabled,
-            torch.is_autocast_cpu_enabled(),
+            autocast_specific_backend("cpu", torch.set_autocast_enabled),
+            torch.is_autocast_enabled("cpu"),
         )
         global_state["autocast_gpu_dtype"] = (
-            torch.set_autocast_gpu_dtype,
-            torch.get_autocast_gpu_dtype(),
+            autocast_specific_backend("cuda", torch.set_autocast_dtype),
+            torch.get_autocast_dtype("cuda"),
         )
         global_state["autocast_cpu_dtype"] = (
-            torch.set_autocast_cpu_dtype,
-            torch.get_autocast_cpu_dtype(),
+            autocast_specific_backend("cpu", torch.set_autocast_dtype),
+            torch.get_autocast_dtype("cpu"),
         )
         global_state["autocast_cache_enabled"] = (
             torch.set_autocast_cache_enabled,
