@@ -18,6 +18,7 @@ from typing import (
     TypeVar,
     Union,
 )
+from torch.types import _bool
 from weakref import ReferenceType
 
 import torch
@@ -852,9 +853,7 @@ class FakeTensorMode(TorchDispatchMode):
         # in_kernel_invocation
         # If another fake mode was already active when we enter, we also stash it here.
         # That way when we exit, we know to re-enable the previous fake mode.
-        self.enter_stack: List[
-            Tuple[bool, Optional[FakeTensorMode], Optional[FakeTensorMode]]
-        ] = []
+        self.enter_stack: List[Tuple[bool, Optional[TorchDispatchMode], Optional[_bool]]] = []
 
         self.shape_env: ShapeEnv = shape_env
 

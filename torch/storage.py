@@ -387,6 +387,23 @@ _StorageBase.hpu = _hpu  # type: ignore[assignment]
 
 
 @lru_cache(maxsize=None)
+def _new_dtypes():
+    # These are dtypes serialized as UntypedStorage unlike those in
+    # _dtype_to_storage_type_map
+    return {
+        torch.float8_e5m2,
+        torch.float8_e4m3fn,
+        torch.float8_e5m2fnuz,
+        torch.float8_e4m3fnuz,
+        torch.bits8,
+        torch.bits16,
+        torch.bits1x8,
+        torch.bits2x4,
+        torch.bits4x2,
+        torch.complex32,
+    }
+
+@lru_cache(maxsize=None)
 def _dtype_to_storage_type_map():
     # NOTE: We should no longer add dtypes to this map. This map
     # is only used for BC/FC with older PyTorch versions. Going forward,
