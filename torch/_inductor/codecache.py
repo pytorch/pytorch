@@ -2579,10 +2579,16 @@ def _hipcc_host_compiler_options() -> List[str]:
 def _hipcc_device_compiler_options() -> List[str]:
     opts = [
         config.rocm.compile_opt_level,
+        "-x", 
+        "hip",
         "-std=c++17",
         "--offload-arch=native",
         "-fno-gpu-rdc",
         "-fPIC",
+        "-mllvm",
+        "-amdgpu-early-inline-all=true",
+        "-mllvm",
+        "-amdgpu-function-calls=false",
     ]
     if config.rocm.is_debug:
         opts += ["-DDEBUG_LOG=1", "-g", "--save-temps=obj", "-Rpass-analysis=kernel-resource-usage"]
@@ -2591,7 +2597,7 @@ def _hipcc_device_compiler_options() -> List[str]:
 
 def _hip_compiler() -> Optional[str]:
     if is_linux():
-        return "hipcc"
+        return "clang"
     return None
 
 
