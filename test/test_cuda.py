@@ -32,7 +32,8 @@ from torch.testing._internal.common_utils import TestCase, freeze_rng_state, run
 from torch.testing._internal.common_cuda import TEST_CUDNN, TEST_MULTIGPU, \
     _create_scaling_case, _get_torch_cuda_version
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
-from torch.testing._internal.common_optimizers import (optim_db, optims, _get_optim_inputs_including_global_cliquey_kwargs)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCUDA
+from torch.testing._internal.common_optimizers import (optim_db, optims)
 from torch.utils.viz._cycles import observe_tensor_cycles
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -2926,61 +2927,6 @@ exit(2)
                 self._test_graphed_optimizer(3, 2, optimizer_ctor, kwargs)
 
     @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
-    @optims(
-        [optim for optim in optim_db if optim.optim_cls in [torch.optim.Adam, torch.optim.AdamW,
-                                                                 torch.optim.ASGD, torch.optim.Adamax,
-                                                                 torch.optim.NAdam, torch.optim.RAdam,
-                                                                 torch.optim.Adadelta, torch.optim.RMSprop,
-                                                                 torch.optim.Rprop]],
-        dtypes=[torch.float32]
-    )
-    def test_graph_optims_with_explicitly_capturable_param_groups(self, dtype, optim_info):
-        # mimicking `_test_graphed_optimizer` maladroitly to pass two param_groups to optimizer.__init__
-        n_warmup, n_replay = 3, 2
-        device = torch.cuda.current_device()
-        optim_cls = optim_info.optim_cls
-        for second_param_group_capturable in [True, False]:
-            ref_p1, param1 = (torch.nn.Parameter(torch.ones(1, device="cuda")) for _ in range(2))
-            ref_p2, param2 = (torch.nn.Parameter(torch.ones(1, device="cuda")) for _ in range(2))
-            grads1, grads2 = ([torch.randn_like(param1) for _ in range(n_warmup + n_replay)] for _ in range(2))
-            ref_grads1, ref_grads2 = ([t.clone() for t in tensors] for tensors in (grads1, grads2))
-            params = [
-                {"params": [param1], "capturable": True},
-                {"params": [param2], "capturable": second_param_group_capturable},
-            ]
-            opt = optim_cls(params)
-            opt_ = optim_cls([
-                {"params": [ref_p1], "capturable": False},
-                {"params": [ref_p2], "capturable": False},
-            ])
-
-            for i in range(n_warmup + n_replay):
-                ref_p1.grad = ref_grads1[i]
-                ref_p2.grad = ref_grads2[i]
-                opt_.step()
-
-            for i in range(n_warmup):
-                param1.grad = grads1[i]
-                param2.grad = grads2[i]
-                opt.step()
-
-            g = torch.cuda.CUDAGraph()
-            if not second_param_group_capturable:
-                with self.assertRaisesRegex(RuntimeError, "Attempting CUDA graph"):
-                    with torch.cuda.graph(g):
-                        opt.step()
-            else:
-                with torch.cuda.graph(g):
-                    opt.step()
-
-                for i in range(n_replay):
-                    param1.grad.copy_(grads1[n_warmup + i])
-                    param2.grad.copy_(grads2[n_warmup + i])
-                    g.replay()
-                self.assertEqual(ref_p1, param1)
-                self.assertEqual(ref_p2, param2)
-
-    @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
     def test_graph_scaling_fused_optimizers(self):
         cases = [
             (optimizer_ctor, {"lr": 0.1, "betas": (0.8, 0.7), "fused": True, "amsgrad": amsgrad})
@@ -4155,9 +4101,66 @@ class TestBlockStateAbsorption(TestCase):
             cwd=os.path.dirname(os.path.realpath(__file__))).strip().decode('ascii')
         self.assertEqual(rc, "False", "Triton was imported when importing torch!")
 
+class TestCudaOptims(TestCase):
+    @onlyCUDA
+    @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
+    @parametrize("second_param_group_capturable", [False, True])
+    @optims(
+        [optim for optim in optim_db if optim.optim_cls in [torch.optim.Adam, torch.optim.AdamW,
+                                                                 torch.optim.ASGD, torch.optim.Adamax,
+                                                                 torch.optim.NAdam, torch.optim.RAdam,
+                                                                 torch.optim.Adadelta, torch.optim.RMSprop,
+                                                                 torch.optim.Rprop]],
+        dtypes=[torch.float32]
+    )
+    def test_graph_optims_with_explicitly_capturable_param_groups(self, device, dtype, optim_info, second_param_group_capturable):
+        # mimicking `_test_graphed_optimizer` maladroitly to pass two param_groups to optimizer.__init__
+        n_warmup, n_replay = 3, 2
+        optim_cls = optim_info.optim_cls
+        ref_p1, param1 = (torch.nn.Parameter(torch.ones(1, device="cuda")) for _ in range(2))
+        ref_p2, param2 = (torch.nn.Parameter(torch.ones(1, device="cuda")) for _ in range(2))
+        grads1, grads2 = ([torch.randn_like(param1) for _ in range(n_warmup + n_replay)] for _ in range(2))
+        ref_grads1, ref_grads2 = ([t.clone() for t in tensors] for tensors in (grads1, grads2))
+        params = [
+            {"params": [param1], "capturable": True},
+            {"params": [param2], "capturable": second_param_group_capturable},
+        ]
+        opt = optim_cls(params)
+        opt_ = optim_cls([
+            {"params": [ref_p1], "capturable": False},
+            {"params": [ref_p2], "capturable": False},
+        ])
+
+        for i in range(n_warmup + n_replay):
+            ref_p1.grad = ref_grads1[i]
+            ref_p2.grad = ref_grads2[i]
+            opt_.step()
+
+        for i in range(n_warmup):
+            param1.grad = grads1[i]
+            param2.grad = grads2[i]
+            opt.step()
+
+        g = torch.cuda.CUDAGraph()
+        if not second_param_group_capturable:
+            with self.assertRaisesRegex(RuntimeError, "Attempting CUDA graph"):
+                with torch.cuda.graph(g):
+                    opt.step()
+        else:
+            with torch.cuda.graph(g):
+                opt.step()
+
+            for i in range(n_replay):
+                param1.grad.copy_(grads1[n_warmup + i])
+                param2.grad.copy_(grads2[n_warmup + i])
+                g.replay()
+            self.assertEqual(ref_p1, param1)
+            self.assertEqual(ref_p2, param2)
 
 instantiate_parametrized_tests(TestCuda)
 instantiate_parametrized_tests(TestCudaMallocAsync)
+instantiate_device_type_tests(TestCudaOptims, globals())
+
 
 if __name__ == '__main__':
     run_tests()
