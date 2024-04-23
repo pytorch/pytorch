@@ -35,7 +35,6 @@ def insert_deferred_runtime_asserts(
     gm: GraphModule,
     shape_env: ShapeEnv,
     name: str,
-    export: bool = False,
 ) -> None:
     """
     During tracing, we may have discovered that some data-dependent values
@@ -207,15 +206,9 @@ def insert_deferred_runtime_asserts(
                 # normalise SymPy expressions... who knows.
 
                 if i0 in shape_env.size_like:
-                    if export:
-                        graph.call_function(
-                            torch.ops.aten.sym_constrain_range_for_size,
-                            (symbol_to_proxy[i0].node,),
-                        )
-                    else:
-                        graph.call_function(
-                            torch._check_is_size, (symbol_to_proxy[i0].node,)
-                        )
+                    graph.call_function(
+                        torch._check_is_size, (symbol_to_proxy[i0].node,)
+                    )
 
                 vr = shape_env.var_to_range[i0]
                 if not shape_env._default_unspecified_value_range().issubset(vr):

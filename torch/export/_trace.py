@@ -1000,6 +1000,19 @@ def _export(
                 pre_dispatch=pre_dispatch,
                 transform=_tuplify_outputs,
             )
+            insert_deferred_runtime_asserts(
+                ep_non_strict.gm,
+                fake_mode.shape_env,
+                f"non strict exported program: {first_call_function_nn_module_stack(ep_non_strict.gm.graph)}",
+            )
+            ep_non_strict = _export_non_strict(
+                ep_non_strict.gm,
+                fake_args,
+                fake_kwargs,
+                fake_params_buffers,
+                constant_attrs,
+                pre_dispatch=pre_dispatch,
+            )
         ep_non_strict.gm.meta["inline_constraints"] = {
             k: v
             for k, v in fake_mode.shape_env.var_to_range.items()
@@ -1052,7 +1065,7 @@ def _export(
         _verify_nn_module_stack(gm)
         _verify_stack_trace(gm)
         _verify_placeholder_names(gm, ep_non_strict.sig)
-        exported_program = ExportedProgram(
+        return ExportedProgram(
             root=gm,
             graph=gm.graph,
             graph_signature=ep_non_strict.sig,
@@ -1064,13 +1077,6 @@ def _export(
             example_inputs=(args, kwargs),
             constants=ep_non_strict.constants,
         )
-        insert_deferred_runtime_asserts(
-            exported_program.graph_module,
-            fake_mode.shape_env,
-            f"non strict exported program: {first_call_function_nn_module_stack(exported_program.graph)}",
-            export=True,
-        )
-        return exported_program
 
     gm_torch_level = _export_to_torch_ir(
         mod,
