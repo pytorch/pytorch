@@ -531,6 +531,8 @@ class TestExecutionTrace(TestCase):
         assert found_root_node
         assert loop_count == expected_loop_events
 
+    # TODO: Investigate why this pt2 test is causing timeouts >30mins for others.
+    @unittest.skipIf(True, "this test may be causing other tests to fail or timeout")
     @unittest.skipIf(IS_WINDOWS, "torch.compile does not support WINDOWS")
     def test_execution_trace_with_pt2(self):
         class ConvAndRelu(nn.Module):
