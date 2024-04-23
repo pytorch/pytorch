@@ -1283,7 +1283,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.is_mps.__get__: lambda self: -1,
         Tensor.is_mtia.__get__: lambda self: -1,
         Tensor.is_nested.__get__: lambda self: -1,
-        Tensor.is_ort.__get__: lambda self: -1,
+        Tensor.is_maia.__get__: lambda self: -1,
         Tensor.is_mkldnn.__get__: lambda self: -1,
         Tensor.is_quantized.__get__: lambda self: -1,
         Tensor.is_sparse.__get__: lambda self: -1,

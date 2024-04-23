@@ -2431,11 +2431,11 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA("prim::is_ort(Tensor a) -> bool"),
+        TORCH_SELECTIVE_SCHEMA("prim::is_maia(Tensor a) -> bool"),
         [](Stack& stack) {
           at::Tensor a;
           pop(stack, a);
-          push(stack, a.is_ort());
+          push(stack, a.is_maia());
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
