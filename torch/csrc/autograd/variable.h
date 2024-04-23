@@ -322,6 +322,91 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   }
 };
 
+/// Base class for view functions, providing reapplication of a view on a new
+/// base. Each view op should get a codegenerated subclass of this class
+/// containing any state needed to reconstruct the view. The class also provides
+/// convenience accessors for saved SymInts / tensor state. This is useful for
+/// e.g. fake-ification, where we want to use symbolic values or fake tensors
+/// instead.
+struct TORCH_API ViewFunc {
+  virtual ~ViewFunc() {}
+  /// Returns any SymInts in the saved state.
+  virtual std::vector<c10::SymInt> get_symints() const {
+    return {};
+  }
+  /// Returns the number of SymInts in the saved state.
+  virtual size_t num_symints() const {
+    return 0;
+  }
+  /// Returns any tensors in the saved state.
+  virtual std::vector<at::Tensor> get_tensors() const {
+    return {};
+  }
+  /// Returns the number of tensors in the saved state.
+  virtual size_t num_tensors() const {
+    return 0;
+  }
+  /// Reapplies the view on the given base using the saved state.
+  virtual at::Tensor operator()(const at::Tensor&) const = 0;
+  /// Returns a clone of this ViewFunc, optionally with the specified saved
+  /// state.
+  virtual std::unique_ptr<ViewFunc> clone_and_set(
+      std::optional<std::vector<c10::SymInt>> = c10::nullopt,
+      std::optional<std::vector<at::Tensor>> = c10::nullopt) const = 0;
+
+ protected:
+  /// Sets the values of any SymInts in the saved state. The input vector size
+  /// must match the number of SymInts in the saved state (i.e. the size of the
+  /// list returned by get_symints()).
+  virtual void set_symints(std::vector<c10::SymInt>) {}
+  /// Sets the values of any Tensors in the saved state. The input vector size
+  /// must match the number of Tensors in the saved state (i.e. the size of the
+  /// list returned by get_tensors()).
+  virtual void set_tensors(std::vector<at::Tensor>) {}
+};
+
+/// ViewFunc that represents a chain of two ViewFuncs.
+struct ChainedViewFunc : public ViewFunc {
+  ChainedViewFunc(
+      std::unique_ptr<ViewFunc> first,
+      std::unique_ptr<ViewFunc> second)
+      : first(std::move(first)), second(std::move(second)) {}
+  virtual ~ChainedViewFunc() override{};
+  virtual std::vector<c10::SymInt> get_symints() const override;
+  virtual size_t num_symints() const override {
+    return first->num_symints() + second->num_symints();
+  }
+  virtual std::vector<at::Tensor> get_tensors() const override;
+  virtual size_t num_tensors() const override {
+    return first->num_tensors() + second->num_tensors();
+  }
+  virtual at::Tensor operator()(const at::Tensor&) const override;
+  virtual std::unique_ptr<ViewFunc> clone_and_set(
+      std::optional<std::vector<c10::SymInt>> = c10::nullopt,
+      std::optional<std::vector<at::Tensor>> = c10::nullopt) const override;
+
+ private:
+  std::unique_ptr<ViewFunc> first;
+  std::unique_ptr<ViewFunc> second;
+};
+
+/// ViewFunc that errors with a specified error message when called.
+struct ErroringViewFunc : public ViewFunc {
+  ErroringViewFunc(const std::string& error_msg) : error_msg(error_msg) {}
+  virtual ~ErroringViewFunc() override{};
+  virtual at::Tensor operator()(const at::Tensor&) const override {
+    TORCH_CHECK(false, error_msg);
+  }
+  virtual std::unique_ptr<ViewFunc> clone_and_set(
+      std::optional<std::vector<c10::SymInt>> = c10::nullopt,
+      std::optional<std::vector<at::Tensor>> = c10::nullopt) const override {
+    return std::make_unique<ErroringViewFunc>(error_msg);
+  }
+
+ private:
+  std::string error_msg;
+};
+
 struct TORCH_API ViewInfo {
   /// The base `Variable`
   /// If this ViewInfo represents a forward (respectively backward) AD gradient,
@@ -331,7 +416,8 @@ struct TORCH_API ViewInfo {
   /// By default we use as_strided to recover views which is more efficient.
   /// view_fn is only saved when as_strided is not supported.
   /// If view_fn has value, we use it to recover views in backward.
-  std::function<Variable(const Variable&)> view_fn_;
+  std::unique_ptr<ViewFunc> view_fn_;
+
   /// Analogue of view_fn but in reverse: given a view -> produce the base by
   /// applying the inverse view.
   std::function<Variable(const Variable&)> rev_view_fn_;
@@ -342,10 +428,10 @@ struct TORCH_API ViewInfo {
     return view_fn_ != nullptr;
   }
 
-  std::function<Variable(const Variable&)> view_fn() const {
+  const ViewFunc& view_fn() const {
     TORCH_CHECK(
         has_view_fn(), "Can only access the view function if it exists.");
-    return view_fn_;
+    return *view_fn_;
   }
 
   std::function<Variable(const Variable&)> rev_view_fn() const {
@@ -366,12 +452,12 @@ struct TORCH_API ViewInfo {
   ViewInfo chain(
       const Variable& base,
       const Variable& tensor,
-      std::function<Variable(const Variable&)> view_func = nullptr,
+      std::unique_ptr<ViewFunc> view_func = nullptr,
       std::function<Variable(const Variable&)> rev_view_func = nullptr) const;
 
   ViewInfo(
       Variable base,
-      std::function<Variable(const Variable&)> view_fn,
+      std::unique_ptr<ViewFunc> view_fn,
       std::function<Variable(const Variable&)> rev_view_fn)
       : base_(std::move(base)),
         view_fn_(std::move(view_fn)),
@@ -595,7 +681,7 @@ TORCH_API void handle_view_on_rebase(
 
 struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
  private:
-  /// Informations about the views
+  /// Information about the views
   c10::optional<ViewInfo> backward_info_;
   c10::optional<ViewInfo> forward_info_;
 

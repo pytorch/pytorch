@@ -21,7 +21,7 @@ def FlopCounterMode(*args, **kwargs):
     return torch.utils.flop_counter.FlopCounterMode(*args, **kwargs, display=False)
 
 def get_total_flops(mode):
-    return str(sum([v for _, v in mode.flop_counts["Global"].items()]))
+    return str(sum(v for _, v in mode.flop_counts["Global"].items()))
 
 def T(*shape, requires_grad=False):
     return torch.randn(*shape, requires_grad=requires_grad)
@@ -131,7 +131,88 @@ class TestFlopCounter(TestCase):
 
         self.assertExpectedInline(get_total_flops(mode), """750""")
 
+    def test_conv_backwards_as_decomposition(self):
+        # [conv backwards decomposition as conv forwards]
 
+        class onlyConvs(torch.autograd.Function):
+            @staticmethod
+            def forward(inp, weight, transposed):
+                if not transposed:
+                    return F.conv1d(inp, weight)
+                else:
+                    return F.conv_transpose1d(inp, weight)
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                inp, weight, transposed = inputs
+                ctx.save_for_backward(inp, weight)
+                ctx.transposed = transposed
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                inp, weight = ctx.saved_tensors
+                if not ctx.transposed:
+                    grad_inp = F.conv_transpose1d(grad_out, weight)
+                    grad_weight = F.conv1d(inp, grad_out)
+                    return grad_inp, grad_weight, None
+                else:
+                    grad_inp = F.conv1d(grad_out, weight)
+                    grad_weight = F.conv1d(grad_out.transpose(1, 0), inp.transpose(1, 0))
+                    return grad_inp, grad_weight.transpose(1, 0), None
+
+
+        from torch.func import grad
+        x = torch.randn(2, 3, 16, dtype=torch.float64)
+        weight = torch.randn(3, 4, 4, dtype=torch.float64)
+
+        def boring_conv(x, weight, transposed):
+            if not transposed:
+                return F.conv1d(x, weight).pow(2).sum()
+            else:
+                return F.conv_transpose1d(x, weight).pow(2).sum()
+
+        def only_convs(x, weight, transposed):
+            return onlyConvs.apply(x, weight, transposed).pow(2).sum()
+
+        boring_grads = grad(boring_conv, argnums=(0, 1))(x, weight, True)
+        fun_grads = grad(only_convs, argnums=(0, 1))(x, weight, True)
+
+        self.assertEqual(boring_grads, fun_grads)
+
+
+    def test_convs(self):
+        def assert_equivalence(f, expected_forward=None):
+            mode = FlopCounterMode()
+            with mode:
+                f()
+            conv_forward_flops = mode.get_flop_counts()['Global'][torch.ops.aten.convolution]
+            conv_backward_flops = mode.get_flop_counts()['Global'][torch.ops.aten.convolution_backward]
+
+            self.assertEqual(conv_forward_flops * 2, conv_backward_flops)
+            if expected_forward is not None:
+                self.assertEqual(conv_forward_flops, expected_forward)
+
+        x = torch.rand(1, 1, 2, 2, requires_grad=True)
+        weight = torch.randn(1, 1, 2, 2, requires_grad=True)
+        assert_equivalence(lambda: F.conv_transpose2d(x, weight).sum().backward(), 32)
+
+        x = torch.rand(1, 1, 2, 2, requires_grad=True)
+        weight = torch.randn(1, 1, 1, 1, requires_grad=True)
+        assert_equivalence(lambda: F.conv2d(x, weight).sum().backward(), 8)
+
+        for in_channels, out_channels, groups in [
+            (1, 1, 1),
+            (1, 3, 1),
+            (3, 1, 1),
+            (3, 7, 1),
+            (2, 4, 2),
+            (4, 2, 2),
+        ]:
+            x = torch.rand(1, in_channels, 4, 4, requires_grad=True)
+            weight = torch.randn(out_channels, in_channels, 2, 2, requires_grad=True)
+            assert_equivalence(lambda: F.conv2d(x, weight).sum().backward())
+            transposed_weight = torch.randn(in_channels, out_channels, 2, 2, requires_grad=True)
+            assert_equivalence(lambda: F.conv_transpose2d(x, transposed_weight).sum().backward())
 
     @skipIfNoTorchVision
     def test_module(self):
@@ -147,6 +228,18 @@ class TestFlopCounter(TestCase):
         self.assertExpectedInline(str(layer1_conv_flops), """924844032""")
         self.assertExpectedInline(str(layer1_conv_back_flops), """1849688064""")
 
+
+    def test_conv_transpose_loop(self):
+        x = torch.rand(1, 4, 30, 2)
+        model = torch.nn.ConvTranspose2d(4, 8, (2, 2), stride=2)
+
+        mode = FlopCounterMode(model)
+        with mode:
+            for i in range(50):
+                out = model(x)
+                out.sum().backward()
+        self.assertExpectedInline(str(mode.get_total_flops()), """1536000""")
+
     def test_custom(self):
         mode = FlopCounterMode(custom_mapping={torch.ops.aten.add: lambda *args, out_shape: 5})
         with mode:
@@ -155,8 +248,8 @@ class TestFlopCounter(TestCase):
 
         self.assertExpectedInline(get_total_flops(mode), """5""")
 
-        def count(*args, out):
-            return out.numel()
+        def count(*args, out_val):
+            return out_val.numel()
         count._get_raw = True
 
         mode = FlopCounterMode(custom_mapping={torch.ops.aten.add: count})
@@ -234,6 +327,17 @@ class TestFlopCounter(TestCase):
         flops_fw_bw_math, flops_fw_bw_efficient = flops
         self.assertExpectedInline(str(flops_fw_bw_math), """805306368""")
         self.assertExpectedInline(str(flops_fw_bw_efficient), """939524096""")
+
+    def test_addmm_out(self):
+        def f(x):
+            y = torch.zeros(10, 10)
+            return torch.mm(x, x, out=y)
+
+        mode = FlopCounterMode()
+        with mode:
+            f(torch.randn(10, 10))
+
+        self.assertExpectedInline(get_total_flops(mode), """2000""")
 
     def test_hook_registration(self):
         model = torch.nn.Linear(100, 100)

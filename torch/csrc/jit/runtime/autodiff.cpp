@@ -391,7 +391,7 @@ static ReverseDetails addReverseInline(Gradient& grad_desc) {
     auto it = grad_map.find(v);
     if (it == grad_map.end()) {
       auto autograd_zero = graph.insertNode(graph.createAutogradZero());
-      std::tie(it, std::ignore) = grad_map.emplace(v, autograd_zero->output());
+      it = grad_map.emplace(v, autograd_zero->output()).first;
     }
     return it->second;
   };

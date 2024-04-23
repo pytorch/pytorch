@@ -15,7 +15,6 @@
 /// and inspired by Half implementation from pytorch/c10/util/Half.h
 
 #include <c10/macros/Macros.h>
-#include <c10/util/C++17.h>
 #include <c10/util/TypeSafeSignMath.h>
 #include <c10/util/floating_point_utils.h>
 #include <type_traits>
@@ -240,7 +239,12 @@ struct alignas(1) Float8_e4m3fn {
   inline C10_HOST_DEVICE bool isnan() const;
 };
 
-C10_API std::ostream& operator<<(std::ostream& out, const Float8_e4m3fn& value);
+C10_API inline std::ostream& operator<<(
+    std::ostream& out,
+    const Float8_e4m3fn& value) {
+  out << (float)value;
+  return out;
+}
 
 } // namespace c10
 

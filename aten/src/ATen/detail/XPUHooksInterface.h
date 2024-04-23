@@ -39,7 +39,7 @@ struct TORCH_API XPUHooksInterface {
         XPU_HELP);
   }
 
-  virtual int getGlobalIdxFromDevice(const Device& device) const {
+  virtual int32_t getGlobalIdxFromDevice(const Device& device) const {
     TORCH_CHECK(false, "Cannot get XPU global device index without ATen_xpu library.");
   }
 
@@ -51,12 +51,28 @@ struct TORCH_API XPUHooksInterface {
     TORCH_CHECK(false, "Cannot get default XPU generator without Intel Extension for Pytorch. ", XPU_HELP);
   }
 
-  virtual int getNumGPUs() const {
+  virtual DeviceIndex getNumGPUs() const {
     return 0;
+  }
+
+  virtual DeviceIndex current_device() const {
+    TORCH_CHECK(false, "Cannot get current device on XPU without ATen_xpu library.");
   }
 
   virtual Device getDeviceFromPtr(void* /*data*/) const {
     TORCH_CHECK(false, "Cannot get device of pointer on XPU without ATen_xpu library.");
+  }
+
+  virtual void deviceSynchronize(DeviceIndex /*device_index*/) const {
+    TORCH_CHECK(false, "Cannot synchronize XPU device without ATen_xpu library.");
+  }
+
+  virtual Allocator* getPinnedMemoryAllocator() const  {
+    TORCH_CHECK(false, "Cannot get XPU pinned memory allocator without ATen_xpu library.");
+  }
+
+  virtual bool isPinnedPtr(const void* /*data*/) const {
+    return false;
   }
 };
 

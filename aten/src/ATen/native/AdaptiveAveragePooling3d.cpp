@@ -25,7 +25,7 @@ namespace {
 
 template <typename scalar_t>
 static void adaptive_avg_pool3d_out_frame(
-    scalar_t* input_p,
+    const scalar_t* input_p,
     scalar_t* output_p,
     int64_t sizeD,
     int64_t isizeT,
@@ -57,7 +57,7 @@ static void adaptive_avg_pool3d_out_frame(
             int kW = iendW - istartW;
 
             /* local pointers */
-            scalar_t* ip = input_p + d * istrideD + istartT * istrideT +
+            const scalar_t* ip = input_p + d * istrideD + istartT * istrideT +
                 istartH * istrideH + istartW * istrideW;
             scalar_t* op = output_p + d * osizeT * osizeH * osizeW +
                 ot * osizeH * osizeW + oh * osizeW + ow;
@@ -128,7 +128,7 @@ void adaptive_avg_pool3d_out_cpu_template(
 
     AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
         input.scalar_type(), "adaptive_avg_pool3d_cpu", [&] {
-          auto input_data = input.data_ptr<scalar_t>();
+          auto input_data = input.const_data_ptr<scalar_t>();
           auto output_data = output.data_ptr<scalar_t>();
           adaptive_avg_pool3d_out_frame<scalar_t>(
               input_data,
@@ -151,7 +151,7 @@ void adaptive_avg_pool3d_out_cpu_template(
 
     AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
         input.scalar_type(), "adaptive_avg_pool3d_cpu", [&] {
-          auto input_data = input.data_ptr<scalar_t>();
+          auto input_data = input.const_data_ptr<scalar_t>();
           auto output_data = output.data_ptr<scalar_t>();
           at::parallel_for(0, n, 1, [&](int64_t start, int64_t end) {
             for (const auto b : c10::irange(start, end)) {
@@ -178,7 +178,7 @@ void adaptive_avg_pool3d_out_cpu_template(
 template <typename scalar_t>
 static void adaptive_avg_pool3d_backward_out_frame(
     scalar_t* gradInput_p,
-    scalar_t* gradOutput_p,
+    const scalar_t* gradOutput_p,
     int64_t sizeD,
     int64_t isizeT,
     int64_t isizeH,
@@ -189,7 +189,7 @@ static void adaptive_avg_pool3d_backward_out_frame(
   at::parallel_for(0, sizeD, 1, [&](int64_t start, int64_t end) {
     for (const auto d : c10::irange(start, end)) {
       scalar_t* gradInput_p_d = gradInput_p + d * isizeT * isizeW * isizeH;
-      scalar_t* gradOutput_p_d = gradOutput_p + d * osizeT * osizeW * osizeH;
+      const scalar_t* gradOutput_p_d = gradOutput_p + d * osizeT * osizeW * osizeH;
 
       /* calculate average */
       for (const auto ot : c10::irange(osizeT)) {
@@ -251,7 +251,7 @@ Tensor& adaptive_avg_pool3d_backward_out_cpu_template(
         input.scalar_type(), "adaptive_avg_pool3d_backward_cpu", [&] {
           /* get raw pointers */
           scalar_t* gradInput_data = gradInput.data_ptr<scalar_t>();
-          scalar_t* gradOutput_data = gradOutput.data_ptr<scalar_t>();
+          const scalar_t* gradOutput_data = gradOutput.const_data_ptr<scalar_t>();
 
           adaptive_avg_pool3d_backward_out_frame<scalar_t>(
               gradInput_data,
@@ -271,7 +271,7 @@ Tensor& adaptive_avg_pool3d_backward_out_cpu_template(
         input.scalar_type(), "adaptive_avg_pool3d_backward_cpu", [&] {
           /* get raw pointers */
           scalar_t* gradInput_data = gradInput.data_ptr<scalar_t>();
-          scalar_t* gradOutput_data = gradOutput.data_ptr<scalar_t>();
+          const scalar_t* gradOutput_data = gradOutput.const_data_ptr<scalar_t>();
           at::parallel_for(0, n, 1, [&](int64_t start, int64_t end) {
             for (const auto b : c10::irange(start, end)) {
               adaptive_avg_pool3d_backward_out_frame<scalar_t>(

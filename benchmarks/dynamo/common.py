@@ -135,6 +135,10 @@ CI_SKIP_DYNAMIC_BATCH_ONLY = {
     # We should be able to graphbreak there.
     "doctr_det_predictor",
     "dlrm",
+    "pyhpc_isoneutral_mixing",
+    "pyhpc_equation_of_state",
+    "pyhpc_turbulent_kinetic_energy",
+    "detectron2_fcos_r_50_fpn",
 }
 
 # These models currently fail accuracy with eager Adam optimizer
@@ -252,6 +256,15 @@ CI_USE_SGD = {
 
 
 DO_NOT_CAST_INPUTS = {"stable_diffusion"}
+
+
+# Maps a benchmark model name to a list of status codes. For any listed entry, we'll
+# capture TORCH_COMPILE_DEBUG logs in CI runs and preseve them (i.e., for upload) if
+# the result status matches one listed.
+CI_PRESERVE_COMPILE_DEBUG = {
+    # For example:
+    # "mnasnet1_0": ["fail_accuracy"],
+}
 
 
 def model_specified_by_path(path_and_class_str):
@@ -733,6 +746,11 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         row.append(kwargs["compression_ratio"])
         row.append(kwargs["eager_peak_mem"])
         row.append(kwargs["dynamo_peak_mem"])
+
+    if "cache_lookup_latency" in kwargs:
+        headers.append("cache_lookup_latency")
+        row.append(kwargs["cache_lookup_latency"])
+
     if "dynamo_stats" in kwargs:
         for k, v in kwargs["dynamo_stats"].items():
             headers.append(k)
@@ -1113,6 +1131,9 @@ class AOTInductorModelCache:
 
     @classmethod
     def load(cls, model, example_inputs, device):
+        import torch._inductor
+        import torch.export._trace
+
         key = weakref.ref(model)
         if key not in cls.cache:
             # Register the output dataclass to pytree
@@ -1121,9 +1142,27 @@ class AOTInductorModelCache:
                 # copy.deepcopy is required to prevent any surprising side-effect,
                 # see https://github.com/pytorch/pytorch/issues/113029
                 example_outputs = copy.deepcopy(model)(*example_args, **example_kwargs)
-            _register_dataclass_output_as_pytree(example_outputs)
 
-            so_path = torch._export.aot_compile(model, example_args, example_kwargs)
+            if pytree._is_namedtuple_instance(example_outputs):
+                typ = type(example_outputs)
+                pytree._register_namedtuple(
+                    typ,
+                    serialized_type_name=f"{typ.__module__}.{typ.__name__}",
+                )
+            else:
+                _register_dataclass_output_as_pytree(example_outputs)
+
+            gm = torch.export._trace._export(
+                model,
+                example_args,
+                example_kwargs,
+                pre_dispatch=True,
+            ).module()
+            with torch.no_grad():
+                so_path = torch._inductor.aot_compile(
+                    gm, example_args, example_kwargs
+                )  # type: ignore[arg-type]
+
             cls.cache[key] = torch._export.aot_load(so_path, device)
 
         return cls.cache[key]
@@ -1828,7 +1867,7 @@ class TimeOutException(Exception):
 
 
 def alarm_handler(signum, frame):
-    raise TimeOutException()
+    raise TimeOutException
 
 
 def exit_after(s):
@@ -1964,6 +2003,29 @@ def maybe_init_distributed(should_init_distributed, rank, world_size, port="6789
             torch.distributed.destroy_process_group()
 
 
+@contextmanager
+def maybe_snapshot_memory(should_snapshot_memory, suffix):
+    # Enables Memory Snapshot tool for memory deep dives:
+    # https://pytorch.org/blog/understanding-gpu-memory-1/
+    try:
+        if should_snapshot_memory:
+            torch.cuda.memory._record_memory_history(max_entries=100000)
+        yield
+    finally:
+        if should_snapshot_memory:
+            try:
+                torch.cuda.memory._dump_snapshot(
+                    os.path.join(
+                        torch._dynamo.config.base_dir,
+                        f"{output_filename.rstrip('.csv')}_{suffix}.pickle",
+                    )
+                )
+            except Exception as e:
+                logging.error("Failed to save memory snapshot, %s", e)
+
+            torch.cuda.memory._record_memory_history(enabled=None)
+
+
 class BenchmarkRunner:
     def __init__(self):
         self.model_iter_fn = None
@@ -2050,6 +2112,10 @@ class BenchmarkRunner:
         return set()
 
     @property
+    def skip_models_for_freezing(self):
+        return set()
+
+    @property
     def slow_models(self):
         return set()
 
@@ -2102,7 +2168,7 @@ class BenchmarkRunner:
         return set()
 
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @property
     def equal_nan(self):
@@ -2646,15 +2712,31 @@ class BenchmarkRunner:
         model = self.deepcopy_and_maybe_parallelize(model)
 
         self.init_optimizer(name, current_device, model.parameters())
-        with self.pick_grad(name, self.args.training):
+
+        # The self.autocast context is needed for the model we export with aot_compile,
+        # similar to what we do in the check_accuracy function
+        ctx = (
+            self.autocast(**self.autocast_arg)
+            if self.args.export_aot_inductor
+            else contextlib.nullcontext()
+        )
+
+        with self.pick_grad(name, self.args.training), ctx:
             ok, total = Stats.reset_counters()
             experiment_kwargs = {}
             if tag is not None:
                 experiment_kwargs["tag"] = tag
             results = []
-            eager_latency, eager_peak_mem, _ = warmup(
-                self.model_iter_fn, model, example_inputs, "eager"
-            )
+            with maybe_snapshot_memory(
+                self.args.snapshot_memory, f"eager_{self.args.only}"
+            ):
+                eager_latency, eager_peak_mem, _ = warmup(
+                    self.model_iter_fn, model, example_inputs, "eager"
+                )
+                if self.args.use_warm_peak_memory:
+                    _, eager_peak_mem, _ = warmup(
+                        self.model_iter_fn, model, example_inputs, "eager", niters=1
+                    )
 
             if self.args.export_aot_inductor:
                 t_0 = time.perf_counter()
@@ -2665,10 +2747,37 @@ class BenchmarkRunner:
                 optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
                 aot_compilation_time = 0
 
-            with maybe_enable_compiled_autograd(self.args.compiled_autograd):
+            with maybe_enable_compiled_autograd(
+                self.args.compiled_autograd
+            ), maybe_snapshot_memory(
+                self.args.snapshot_memory, f"compiled_{self.args.only}"
+            ):
                 dynamo_latency, dynamo_peak_mem, dynamo_stats = warmup(
                     optimized_model_iter_fn, model, example_inputs, "dynamo"
                 )
+                if self.args.use_warm_peak_memory:
+                    _, dynamo_peak_mem, _ = warmup(
+                        optimized_model_iter_fn,
+                        model,
+                        example_inputs,
+                        "dynamo",
+                        niters=1,
+                    )
+
+            if self.args.profile_dynamo_cache_lookup:
+                with torch.profiler.profile(
+                    activities=[torch.profiler.ProfilerActivity.CPU]
+                ) as prof:
+                    with maybe_enable_compiled_autograd(self.args.compiled_autograd):
+                        warmup(optimized_model_iter_fn, model, example_inputs, "dynamo")
+
+                events = list(
+                    filter(
+                        lambda event: "TorchDynamo Cache Lookup" in event.key,
+                        prof.key_averages(),
+                    )
+                )
+                dynamo_cache_lookup_latency = events[0].self_cpu_time_total
 
             compilation_time = dynamo_latency - eager_latency + aot_compilation_time
             compression_ratio = (
@@ -2681,12 +2790,19 @@ class BenchmarkRunner:
                     f"ratio: {compression_ratio:.2f}"
                 )
 
+            if self.args.print_compilation_time:
+                print(f"Compilation time: {compilation_time:.2f}")
+
             if experiment.func is speedup_experiment:
                 experiment_kwargs["compilation_latency"] = compilation_time
                 experiment_kwargs["compression_ratio"] = compression_ratio
                 experiment_kwargs["eager_peak_mem"] = eager_peak_mem
                 experiment_kwargs["dynamo_peak_mem"] = dynamo_peak_mem
                 experiment_kwargs["dynamo_stats"] = dynamo_stats
+                if self.args.profile_dynamo_cache_lookup:
+                    experiment_kwargs[
+                        "cache_lookup_latency"
+                    ] = dynamo_cache_lookup_latency
 
             if experiment.func is coverage_experiment:
                 ok, total = Stats.reset_counters()
@@ -2747,6 +2863,24 @@ class BenchmarkRunner:
                 repro_dir,
             )
 
+    def maybe_preserve_compile_debug(self, name, status):
+        if (
+            name in CI_PRESERVE_COMPILE_DEBUG
+            and status in CI_PRESERVE_COMPILE_DEBUG[name]
+        ):
+            src_dir = torch._dynamo.utils.get_debug_dir()
+            if os.path.isdir(src_dir):
+                dbg_dir = os.path.join(
+                    os.getcwd(), "test", "debug", "torch_compile_debug"
+                )
+                dst_dir = os.path.join(dbg_dir, os.path.basename(src_dir))
+                try:
+                    os.makedirs(dbg_dir, exist_ok=True)
+                    os.rename(src_dir, dst_dir)
+                    log.warning("Moved %s to %s", src_dir, dst_dir)
+                except OSError:
+                    log.exception("Failed to preserve %s", src_dir)
+
     def run_one_model(
         self,
         name,
@@ -2783,6 +2917,8 @@ class BenchmarkRunner:
             )
             print(status)
         torch.cuda.empty_cache()
+
+        self.maybe_preserve_compile_debug(name, status)
 
         if self.args.timing:
             from torch._dynamo.utils import op_count, print_time_report
@@ -2986,9 +3122,10 @@ def parse_args(args=None):
     """,
     )
     parser.add_argument(
-        "--no-optimize-ddp",
-        action="store_true",
-        help="Disables dynamo DDPOptimizer (graph breaks). (Applies only when using --ddp benchmark mode).",
+        "--optimize-ddp-mode",
+        type=str,
+        default="ddp_optimizer",
+        help="Specify the DDP optimization mode -- the value of torch._dynamo.config.optimize_ddp.",
     )
     parser.add_argument(
         "--distributed-master-port",
@@ -3079,9 +3216,20 @@ def parse_args(args=None):
         help="print graph counter stats",
     )
     parser.add_argument(
+        "--use-warm-peak-memory",
+        "--use_warm_peak_memory",
+        action="store_true",
+        help="Measure peak memory using a warm run to reduce autotuning noise",
+    )
+    parser.add_argument(
         "--print-memory",
         action="store_true",
         help="print extra memory statistics",
+    )
+    parser.add_argument(
+        "--print-compilation-time",
+        action="store_true",
+        help="print compilation latency",
     )
     parser.add_argument(
         "--print-dataframe-summary",
@@ -3190,6 +3338,20 @@ def parse_args(args=None):
         "--compiled-autograd",
         action="store_true",
         help="Enables compiled autograd on compiled benchmark",
+    )
+
+    parser.add_argument(
+        "--profile_dynamo_cache_lookup",
+        "--profile-dynamo-cache-lookup",
+        action="store_true",
+        help="profiles TorchDynamo cache lookup",
+    )
+
+    parser.add_argument(
+        "--snapshot-memory",
+        "--snapshot_memory",
+        action="store_true",
+        help="Enables Memory Snapshot tool for memory deep dives: https://pytorch.org/blog/understanding-gpu-memory-1/",
     )
 
     group_fuser = parser.add_mutually_exclusive_group()
@@ -3438,11 +3600,7 @@ def run(runner, args, original_dir=None):
         )
     if args.ddp:
         assert args.training, "DDP benchmark requires --training mode"
-        if args.no_optimize_ddp:
-            torch._dynamo.config.optimize_ddp = False
-        else:
-            # TODO(whc) after enabling DDPOptimizer by default this could be removed or assert
-            torch._dynamo.config.optimize_ddp = True
+        torch._dynamo.config.optimize_ddp = args.optimize_ddp_mode
         if args.only == "dlrm":
             log.error(
                 "DLRM+DDP is unsupported as it requires sharding the embedding layer separately from DDP"
@@ -3478,6 +3636,9 @@ def run(runner, args, original_dir=None):
             "Wav2Vec2ForCTC",
             "Wav2Vec2ForPreTraining",
             "sam",
+            "sam_fast",
+            "resnet50_quantized_qat",
+            "mobilenet_v2_quantized_qat",
         }:
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)
@@ -3575,6 +3736,9 @@ def run(runner, args, original_dir=None):
 
     if not args.multiprocess:
         runner.skip_models.update(runner.skip_multiprocess_models)
+
+    if args.freezing:
+        runner.skip_models.update(runner.skip_models_for_freezing)
 
     if args.no_skip:
         runner.skip_models.clear()
@@ -3933,8 +4097,13 @@ def run(runner, args, original_dir=None):
                 timeout = args.timeout
                 if should_diff_branch(args):
                     timeout *= 2
+                env = os.environ.copy()
+                if args.ci and name in CI_PRESERVE_COMPILE_DEBUG:
+                    env["TORCH_COMPILE_DEBUG"] = "1"
                 subprocess.check_call(
-                    [sys.executable] + sys.argv + [f"--only={name}"], timeout=timeout
+                    [sys.executable] + sys.argv + [f"--only={name}"],
+                    timeout=timeout,
+                    env=env,
                 )
             except subprocess.TimeoutExpired:
                 write_csv_when_exception(args, name, "timeout")

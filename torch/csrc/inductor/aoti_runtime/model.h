@@ -1,7 +1,12 @@
 #pragma once
 
+#include <dlfcn.h>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <unistd.h>
 #include <optional>
 #include <regex>
+#include <stdexcept>
 #include <unordered_map>
 
 // WARNING: Be careful when adding new includes here. This header will be used
@@ -26,8 +31,9 @@
 // the "binary-architecture" flag:
 // https://man7.org/linux/man-pages/man1/objcopy.1.html
 // todo: use #embed in C++ 23 once available
-extern const uint8_t _binary_constants_bin_start[];
-extern const uint8_t _binary_constants_bin_end[];
+// The constants are NOT readonly because they may be mutated.
+extern uint8_t _binary_constants_bin_start[];
+extern uint8_t _binary_constants_bin_end[];
 
 #define AOTI_CONST_GPU_ALIGNMENT 64
 
@@ -150,6 +156,33 @@ class AOTInductorModelBase {
 #endif // USE_CUDA
   }
 
+  std::unordered_map<std::string, AtenTensorHandle> run_const_fold(
+      DeviceStreamType stream,
+      AOTIProxyExecutorHandle proxy_executor,
+      bool initialization = false) {
+#ifdef USE_CUDA
+    if (!run_finished_) {
+      cudaEvent_t run_finished;
+      AOTI_RUNTIME_DEVICE_CHECK(cudaEventCreate(&run_finished));
+      run_finished_.emplace(run_finished);
+    }
+#else // USE_CUDA
+    run_finished_ = false;
+#endif // USE_CUDA
+
+    auto* model = static_cast<Model*>(this);
+    auto folded_constants =
+        model->const_run_impl(stream, proxy_executor, initialization);
+
+#ifdef USE_CUDA
+    AOTI_RUNTIME_DEVICE_CHECK(cudaEventRecord(*run_finished_, stream));
+#else // USE_CUDA
+    run_finished_ = true;
+#endif // USE_CUDA
+
+    return folded_constants;
+  }
+
   void load_constants() {
     size_t num_constants = this->num_constants();
     constants_map_->reserve(num_constants);
@@ -165,9 +198,15 @@ class AOTInductorModelBase {
 
     size_t bytes_read = 0;
     for (size_t i = 0; i < num_constants; i++) {
+      bool from_folded = this->constant_from_folded(i);
+#ifndef USE_CUDA
+      if (from_folded) {
+        // We do not reallocate and copy for CPU.
+        continue;
+      }
+#endif // USE_CUDA
       std::string name = this->constant_name(i);
       size_t data_size = this->constant_data_size(i);
-      bool from_folded = this->constant_from_folded(i);
       uint8_t* internal_ptr = (data_size != 0)
           ? constant_ptr(
                 constants_internal_offset[i],
@@ -212,6 +251,10 @@ class AOTInductorModelBase {
     return constants_;
   }
 
+  const int32_t get_device_idx() const {
+    return device_idx_;
+  }
+
   uint8_t* constant_ptr(
       size_t constant_offset,
       size_t bytes_read,
@@ -225,15 +268,16 @@ class AOTInductorModelBase {
     if (!skip_copy) {
       AOTI_RUNTIME_DEVICE_CHECK(cudaMemcpy(
           internal_ptr,
-          _binary_constants_bin_start + bytes_read,
+          _get_constants_start() + bytes_read,
           data_size,
           cudaMemcpyHostToDevice));
     }
     return internal_ptr;
-#else // !USE_CUDA
+
+#else
     // get pointer to constant which is packed in model during compile time.
     AOTI_RUNTIME_CHECK(!skip_copy, "pure cpu mode doesn't support skip copy");
-    return const_cast<uint8_t*>(_binary_constants_bin_start) + bytes_read;
+    return _get_constants_start() + bytes_read;
 #endif // USE_CUDA
   }
 
@@ -391,6 +435,45 @@ class AOTInductorModelBase {
   }
 
  protected:
+  uint8_t* _get_constants_start() {
+#ifndef USE_MMAP_SELF
+    return const_cast<uint8_t*>(_binary_constants_bin_start);
+#else
+    if (self_mmap) {
+      return self_mmap;
+    }
+    Dl_info dl_info;
+    // get pointer to constant which are appended to the binary
+    AOTI_RUNTIME_CHECK(
+        dladdr(__func__, &dl_info), "Can't find shared library name");
+    int fd = open(dl_info.dli_fname, O_RDONLY);
+    AOTI_RUNTIME_CHECK(fd >= 0, "Shared library file cannot be opened");
+    auto fsize = lseek(fd, 0, SEEK_END);
+    auto weights_size =
+        reinterpret_cast<const uint64_t*>(_binary_constants_bin_start)[0];
+    auto magic_number =
+        reinterpret_cast<const uint64_t*>(_binary_constants_bin_start)[1];
+    auto weights_offset = fsize - weights_size;
+    AOTI_RUNTIME_CHECK(
+        (weights_offset & 0x3fff) == 0,
+        "weights_offset must be aligned to 16K boundary");
+    auto ptr = mmap(
+        NULL,
+        weights_size,
+        PROT_READ | PROT_WRITE,
+        MAP_PRIVATE,
+        fd,
+        weights_offset);
+    close(fd);
+    AOTI_RUNTIME_CHECK(ptr != MAP_FAILED, "mmap() failed");
+    self_mmap = static_cast<uint8_t*>(ptr);
+    AOTI_RUNTIME_CHECK(
+        reinterpret_cast<uint64_t*>(
+            self_mmap + weights_size - sizeof(uint64_t))[0] == magic_number,
+        "Weigths data seems corrupt");
+    return self_mmap;
+#endif
+  }
   struct ParamInfo {
     const char* name = nullptr;
   };
@@ -419,6 +502,9 @@ class AOTInductorModelBase {
   // Holds the blob storage for constants' at::Tensor for CUDA.
   CUDAPtr constant_blob_;
 #endif // USE_CUDA
+#ifdef USE_MMAP_SELF
+  uint8_t* self_mmap = NULL;
+#endif
 
   // A directory with CUDA binary files, e.g. compiled kernels, etc.
   const std::optional<std::string> cubin_dir_;

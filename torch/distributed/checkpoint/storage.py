@@ -143,6 +143,15 @@ class StorageWriter(abc.ABC):
         """
         pass
 
+    @classmethod
+    @abc.abstractmethod
+    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
+        """
+        Check if the given checkpoint_id is supported by the stroage. This allow
+        us to enable automatic storage selection.
+        """
+        ...
+
 
 class StorageReader(abc.ABC):
     """
@@ -259,3 +268,12 @@ class StorageReader(abc.ABC):
             A future that completes once all reads are finished.
         """
         pass
+
+    @classmethod
+    @abc.abstractmethod
+    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
+        """
+        Check if the given checkpoint_id is supported by the stroage. This allow
+        us to enable automatic storage selection.
+        """
+        ...

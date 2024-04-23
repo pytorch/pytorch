@@ -25,7 +25,7 @@ from typing import (
 
 import torch
 from torch import Tensor
-from torch._utils import _get_device_module
+from torch._utils import _get_available_device_type, _get_device_module
 from torch.distributed._shard._utils import narrow_tensor_by_index
 from torch.futures import Future
 
@@ -114,7 +114,9 @@ class _OverlappingCpuLoader(_TensorLoader):
         self.current_items: collections.deque = collections.deque()
         self.idx = 0
         self.started = False
-        self.device_type = stream.device_type if stream else torch.device("cuda").type
+        self.device_type = (
+            stream.device_type if stream else _get_available_device_type()
+        )
         self.device_module = _get_device_module(self.device_type)
         self.stream = cast(
             torch.cuda.Stream, stream or self.device_module.current_stream()
@@ -145,7 +147,10 @@ class _OverlappingCpuLoader(_TensorLoader):
                 if tensor.device.type == self.device_type:
                     tensor = tensor.to(device="cpu", non_blocking=True)
                 elif tensor.device == torch.device("cpu"):
-                    if tensor.storage().size() != tensor.numel():
+                    if (
+                        tensor.untyped_storage().size()
+                        != tensor.numel() * tensor.itemsize
+                    ):
                         # this forces the tensor to be both contiguous and with minimal storage
                         tensor = tensor.clone()
 
@@ -258,12 +263,18 @@ def _write_files_from_queue(
             file_name, storage_key, write_items = file_queue.get_nowait()
             loader: _TensorLoader
 
+            custom_backend_name = torch._C._get_privateuse1_backend_name()
+            custom_device_mod = getattr(torch, custom_backend_name, None)
+
             # TODO: Using the OverlappingCpuLoader with multiple threads creates significant
             # performance degredation, observed as being related to cuda stream syncs. We
             # should try to fix this and use _OverlappingCpuLoader for all threaded cases
             if (
                 thread_count == 1
-                and torch.cuda.is_available()
+                and (
+                    torch.cuda.is_available()
+                    or (custom_device_mod and custom_device_mod.is_available())
+                )
                 and inflight_threshhold > 0
             ):
                 loader = _OverlappingCpuLoader(
@@ -297,7 +308,10 @@ def _write_files_from_queue(
                     )
 
                 if use_fsync:
-                    os.fsync(stream.fileno())
+                    try:
+                        os.fsync(stream.fileno())
+                    except AttributeError:
+                        os.sync()
             result_queue.put(write_results)
     except queue.Empty:
         pass
@@ -331,6 +345,11 @@ class FileSystemBase(ABC):
     def mkdir(self, path: Union[str, os.PathLike]) -> None:
         ...
 
+    @classmethod
+    @abstractmethod
+    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
+        ...
+
 
 class FileSystem(FileSystemBase):
     @contextmanager
@@ -357,6 +376,20 @@ class FileSystem(FileSystemBase):
 
     def mkdir(self, path: Union[str, os.PathLike]) -> None:
         cast(Path, path).mkdir(parents=True, exist_ok=True)
+
+    @classmethod
+    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
+        if isinstance(checkpoint_id, Path):
+            return True
+
+        if "://" in str(checkpoint_id):
+            return False
+
+        for p in Path(checkpoint_id).parents:
+            if p.exists() and os.access(str(p), os.W_OK):
+                return True
+
+        return False
 
 
 class FileSystemWriter(StorageWriter):
@@ -498,9 +531,23 @@ class FileSystemWriter(StorageWriter):
         with self.fs.create_stream(tmp_path, "wb") as metadata_file:
             pickle.dump(metadata, metadata_file)
             if self.sync_files:
-                os.fsync(metadata_file.fileno())
+                try:
+                    os.fsync(metadata_file.fileno())
+                except AttributeError:
+                    os.sync()
 
         self.fs.rename(tmp_path, meta_path)
+
+    @property
+    def checkpoint_id(self) -> Union[str, os.PathLike]:
+        """
+        return the checkpoint_id that will be used to save the checkpoint.
+        """
+        return self.path
+
+    @classmethod
+    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
+        return FileSystem.validate_checkpoint_id(checkpoint_id)
 
 
 class FileSystemReader(StorageReader):
@@ -572,3 +619,14 @@ class FileSystemReader(StorageReader):
 
     def prepare_global_plan(self, global_plan: List[LoadPlan]) -> List[LoadPlan]:
         return global_plan
+
+    @property
+    def checkpoint_id(self) -> Union[str, os.PathLike]:
+        """
+        return the checkpoint_id that will be used to save the checkpoint.
+        """
+        return self.path
+
+    @classmethod
+    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
+        return FileSystem.validate_checkpoint_id(checkpoint_id)

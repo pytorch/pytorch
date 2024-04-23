@@ -317,7 +317,7 @@ auto rnn_descriptor_sequence(
     uint32_t vector_size) { // packed case
   RNNDataDescriptor r;
   std::vector<int> seqLengthArray(batch_size, 1);
-  // cuDNN wants the sequence lenghts for a packed batch as if they
+  // cuDNN wants the sequence lengths for a packed batch as if they
   // were unpacked, e.g., for the
   // Sequence 1: ABCD
   // Sequence 2: EF
@@ -1315,9 +1315,7 @@ copy_weights_to_flat_buf_views(
 #endif
 
   // Slice off views into weight_buf
-  std::vector<Tensor> params_arr;
-  size_t params_stride0;
-  std::tie(params_arr, params_stride0) = get_parameters(
+  auto [params_arr, params_stride0] = get_parameters(
 #ifndef USE_CUDNN_RNN_V8_API
       handle, rnn, rnn_desc, x_desc, w_desc, weight_buf, include_bias);
 #else
@@ -1509,13 +1507,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     w_desc.set(weight_buf, 3);
 #endif
     weight_buf.zero_();
-    std::vector<Tensor> params;
-    size_t params_stride0;
 #ifndef USE_CUDNN_RNN_V8_API
-    std::tie(params, params_stride0) = get_parameters(
+    auto [params, params_stride0] = get_parameters(
         handle, fn.rnn, descs.rnn_desc, descs.x_descs[0], w_desc, weight_buf);
 #else
-    std::tie(params, params_stride0) =
+    auto [params, params_stride0] =
         get_parameters(handle, fn.rnn, descs.rnn_desc, weight_buf);
 #endif
     _copyParams(
@@ -2075,13 +2071,11 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
       fn_reserve.data_ptr()));
 #endif
 
-  std::vector<Tensor> grad_params_arr;
-  size_t grad_params_stride0;
 #ifndef USE_CUDNN_RNN_V8_API
-  std::tie(grad_params_arr, grad_params_stride0) = get_parameters(
+  auto [grad_params_arr, grad_params_stride0] = get_parameters(
       handle, fn.rnn, descs.rnn_desc, descs.x_descs[0], w_desc, dw);
 #else
-  std::tie(grad_params_arr, grad_params_stride0) =
+  auto [grad_params_arr, grad_params_stride0] =
       get_parameters(handle, fn.rnn, descs.rnn_desc, dw);
 #endif
   if (grad_params_stride0 == static_cast<size_t>(weight_stride0)) {
@@ -2159,9 +2153,8 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
              : at::zeros_like(cx, LEGACY_CONTIGUOUS_MEMORY_FORMAT))
       : grad_cy_r;
 
-  Tensor dx, dhx, dcx;
   // NB: unconditionally compute this gradient, because it mutates reserve
-  std::tie(dx, dhx, dcx) = at::native::_cudnn_rnn_backward_input(
+  auto [dx, dhx, dcx] = at::native::_cudnn_rnn_backward_input(
       input,
       weight_buf,
       hx,
@@ -2377,7 +2370,7 @@ DropoutState& get_dropout_state(
   static std::mutex state_cache_mut;
 
   AT_ASSERT(options.device().is_cuda());
-  int device = options.device().index();
+  auto device = options.device().index();
 
   std::unique_lock<std::mutex> lock{state_cache_mut};
   auto& state = dropout_state_cache.at(device);
@@ -2528,8 +2521,7 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
     double dropout_p,
     bool train,
     bool bidirectional) {
-  Tensor hx, cx;
-  std::tie(hx, cx) = unpack_hidden(hidden);
+  auto [hx, cx] = unpack_hidden(hidden);
   auto hidden_size = hx.sym_size(2);
   SymInt proj_size = 0;
   // For LSTM models with projections hidden size could be different
@@ -2603,8 +2595,7 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
     bool train,
     bool bidirectional,
     bool batch_first) {
-  Tensor hx, cx;
-  std::tie(hx, cx) = unpack_hidden(hidden);
+  auto [hx, cx] = unpack_hidden(hidden);
   auto hidden_size = hx.sym_size(2);
   c10::SymInt proj_size = 0;
   // For LSTM models with projections hidden size could be different

@@ -43,6 +43,7 @@ from .gen_inplace_or_view_type import gen_inplace_or_view_type
 from .gen_trace_type import gen_trace_type
 from .gen_variable_factories import gen_variable_factories
 from .gen_variable_type import gen_variable_type
+from .gen_view_funcs import gen_view_funcs
 from .load_derivatives import load_derivatives
 
 
@@ -94,6 +95,9 @@ def gen_autograd(
 
     # Generate variable_factories.h
     gen_variable_factories(out, native_functions_path, tags_path, template_path)
+
+    # Generate ViewFuncs.h/cpp
+    gen_view_funcs(out, fns_with_diff_infos, template_path)
 
 
 def gen_autograd_python(

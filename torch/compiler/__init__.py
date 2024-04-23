@@ -10,6 +10,8 @@ __all__ = [
     "disable",
     "cudagraph_mark_step_begin",
     "wrap_numpy",
+    "is_compiling",
+    "is_dynamo_compiling",
 ]
 
 def compile(*args, **kwargs):
@@ -149,3 +151,43 @@ def wrap_numpy(fn):
     """
     from torch._dynamo.external_utils import wrap_numpy as wrap
     return wrap(fn)
+
+_is_compiling_flag: bool = False
+
+def is_compiling() -> bool:
+    """
+    Indicates whether a graph is executed/traced as part of torch.compile() or torch.export().
+
+    Note that there are 2 other related flags that should deprecated eventually:
+      * torch._dynamo.external_utils.is_compiling()
+      * torch._utils.is_compiling()
+
+    Example::
+
+        >>> def forward(self, x):
+        >>>     if not torch.compiler.is_compiling():
+        >>>        ...logic that is not needed in a compiled/traced graph...
+        >>>
+        >>>     ...rest of the function...
+    """
+    if torch.jit.is_scripting():
+        return False
+    else:
+        return _is_compiling_flag
+
+def is_dynamo_compiling() -> bool:
+    """
+    Indicates whether a graph is traced via TorchDynamo.
+
+    It's stricter than is_compiling() flag, as it would only be set to True when
+    TorchDynamo is used.
+
+    Example::
+
+        >>> def forward(self, x):
+        >>>     if not torch.compiler.is_dynamo_compiling():
+        >>>        ...logic that is not needed in a TorchDynamo-traced graph...
+        >>>
+        >>>     ...rest of the function...
+    """
+    return False

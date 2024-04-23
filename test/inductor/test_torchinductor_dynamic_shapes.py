@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import contextlib
 import importlib
+
 import math
 import os
 import sys
@@ -11,6 +12,11 @@ import torch
 import torch._custom_ops as custom_ops
 import torch.library
 from torch._dynamo.testing import make_test_cls_with_patches
+from torch._inductor.codegen.common import device_codegens, register_backend_for_device
+from torch._inductor.codegen.cpp import CppScheduling
+from torch._inductor.codegen.wrapper import WrapperCodeGen
+from torch._inductor.test_case import TestCase
+from torch._inductor.virtualized import V
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCPU,
@@ -24,7 +30,6 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA_MEM_LEAK_CHECK,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
-    TestCaseBase as TestCase,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
@@ -275,31 +280,30 @@ class TestInductorDynamic(TestCase):
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_item_to_inputs_kernel_nobreak(self, device):
-        lib = torch.library.Library("test", "DEF")
+        with torch.library._scoped_library("test", "DEF") as lib:
+            try:
 
-        try:
+                @custom_ops.custom_op("test::foo")
+                def foo(x: torch.Tensor, y: int) -> torch.Tensor:
+                    raise NotImplementedError
 
-            @custom_ops.custom_op("test::foo")
-            def foo(x: torch.Tensor, y: int) -> torch.Tensor:
-                raise NotImplementedError()
+                @custom_ops.impl("test::foo")
+                def foo_impl(x: torch.Tensor, y: int) -> torch.Tensor:
+                    return x.clone()
 
-            @custom_ops.impl("test::foo")
-            def foo_impl(x: torch.Tensor, y: int) -> torch.Tensor:
-                return x.clone()
+                @torch.library.impl_abstract("test::foo", lib=lib)
+                def foo_meta(x: torch.Tensor, y: int) -> torch.Tensor:
+                    return x.clone()
 
-            @torch.library.impl_abstract("test::foo", lib=lib)
-            def foo_meta(x: torch.Tensor, y: int) -> torch.Tensor:
-                return x.clone()
+                @torch.compile(fullgraph=True)
+                def f(x, r):
+                    y = x.item()
+                    return torch.ops.test.foo(r, y)
 
-            @torch.compile(fullgraph=True)
-            def f(x, r):
-                y = x.item()
-                return torch.ops.test.foo(r, y)
+                f(torch.tensor([3], device=device), torch.randn(10, device=device))
 
-            f(torch.tensor([3], device=device), torch.randn(10, device=device))
-
-        finally:
-            custom_ops._destroy("test::foo")
+            finally:
+                custom_ops._destroy("test::foo")
 
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
@@ -324,6 +328,24 @@ class TestInductorDynamic(TestCase):
         cf = torch.compile(fullgraph=True)(f)
         arg = torch.tensor(5, device=device)
         self.assertEqual(f(arg), cf(arg))
+
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    def test_return_unbacked_view_split(self, device):
+        def f(values, length_per_key):
+            u0, u1 = length_per_key.tolist()
+            torch._check_is_size(u0)
+            torch._check_is_size(u1)
+            v1, v2 = torch.functional.split(values, [u0, u1])
+            return v1, v2
+
+        cf = torch.compile(fullgraph=True)(f)
+        args = (
+            torch.randn(8, requires_grad=True, device=device),
+            torch.tensor([3, 5], device=device),
+        )
+        self.assertEqual(f(*args), cf(*args))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_unbacked_matmul(self, device):
@@ -357,37 +379,51 @@ class TestInductorDynamic(TestCase):
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
+    def test_cat_unbacked_duplicate_size(self, device):
+        def f(x):
+            device = x.device
+            s, s2 = x.tolist()
+            g = torch.zeros(s, device=device)
+            g2 = torch.ones(s2, device=device)
+            return torch.ops.aten.cat.default([g, g, g2])
+
+        cf = torch.compile(fullgraph=True)(f)
+        arg = torch.tensor([4, 6], device="cuda")
+        self.assertEqual(f(arg), cf(arg))
+
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_dynamic_stride_nobreak(self, device):
-        lib = torch.library.Library("test", "DEF")
+        with torch.library._scoped_library("test", "DEF") as lib:
+            try:
 
-        try:
+                @custom_ops.custom_op("test::foo")
+                def foo(x: torch.Tensor) -> torch.Tensor:
+                    raise NotImplementedError
 
-            @custom_ops.custom_op("test::foo")
-            def foo(x: torch.Tensor) -> torch.Tensor:
-                raise NotImplementedError()
+                @custom_ops.impl("test::foo")
+                def foo_impl(x: torch.Tensor) -> torch.Tensor:
+                    stride = x.item()
+                    return torch.empty_strided((1,), (stride,), device=x.device)
 
-            @custom_ops.impl("test::foo")
-            def foo_impl(x: torch.Tensor) -> torch.Tensor:
-                stride = x.item()
-                return torch.empty_strided((1,), (stride,), device=x.device)
+                @torch.library.impl_abstract("test::foo", lib=lib)
+                def foo_meta(x: torch.Tensor) -> torch.Tensor:
+                    ctx = torch.library.get_ctx()
+                    stride = ctx.new_dynamic_size()
+                    return torch.empty_strided((1,), (stride,), device=x.device)
 
-            @torch.library.impl_abstract("test::foo", lib=lib)
-            def foo_meta(x: torch.Tensor) -> torch.Tensor:
-                ctx = torch.library.get_ctx()
-                stride = ctx.new_dynamic_size()
-                return torch.empty_strided((1,), (stride,), device=x.device)
+                @torch.compile(fullgraph=True)
+                def f(x):
+                    r = torch.ops.test.foo(x)
+                    y = r.stride(0)
+                    return torch.empty(y, device=x.device)
 
-            @torch.compile(fullgraph=True)
-            def f(x):
-                r = torch.ops.test.foo(x)
-                y = r.stride(0)
-                return torch.empty(y, device=x.device)
+                f(torch.tensor([3], device=device))
 
-            f(torch.tensor([3], device=device))
-
-        finally:
-            custom_ops._destroy("test::foo")
+            finally:
+                custom_ops._destroy("test::foo")
 
     @torch._inductor.config.patch(disable_cpp_codegen=True)
     def test_floor(self):
@@ -557,7 +593,7 @@ class TestInductorDynamic(TestCase):
         actual = cfn(3)
         self.assertEqual(expect, actual)
 
-    def test_full(self, device):
+    def test_full_symbolic_value(self, device):
         def fn(a):
             return torch.full((3,), a), torch.full((3,), torch.sym_float(a))
 
@@ -565,6 +601,25 @@ class TestInductorDynamic(TestCase):
         expect = fn(5)
         actual = cfn(5)
         self.assertEqual(expect, actual)
+
+    def test_full_recompiles(self, device):
+        def fn(x):
+            _, L = x.shape
+            return torch.full((L, L), torch.finfo(torch.float16).min, device=device)
+
+        cfn = self.compile_fn(fn)
+
+        import functools
+
+        input_fn = functools.partial(torch.randint, 10, 1000, device=device)
+
+        cfn(input_fn((2, 3)))
+        cfn(input_fn((2, 4)))  # expect don't recompile here
+
+        # check compiled times of frame 0
+        from torch._dynamo.convert_frame import FRAME_COMPILE_COUNTER
+
+        self.assertEqual(FRAME_COMPILE_COUNTER[0], 1)
 
     @parametrize(
         "op",
@@ -593,11 +648,102 @@ class TestInductorDynamic(TestCase):
         output = cfunc(x, op, a)
         self.assertEqual(output, expected)
 
+    def test_wrapper_codegen_statically_known_int_or_none(self):
+        torch._dynamo.reset()
+
+        _x = torch.randn([5, 3, 3])
+        torch._dynamo.maybe_mark_dynamic(_x, 0)
+
+        # Simple functions introducing constraints on x.shape[0]
+        def fn_1(x):
+            # no constraint
+            return x.sin()
+
+        def fn_2(x):
+            # constrain in two directions
+            if x.shape[0] > 5:
+                return x.cos()
+            if x.shape[0] < 5:
+                return x * 2
+            # x.shape[0] == 5 at this point
+            return x.sin()
+
+        def fn_3(x):
+            # equality constraint, which matches example shape
+            if x.size(0) == 5:
+                return x.sin()
+            else:
+                return x.cos()
+
+        call_count = 0
+
+        def _test_wrapper_codegen_statically_known_int_or_none_in_context():
+            nonlocal call_count
+            call_count += 1
+            graph = V.graph
+            input_layouts = [
+                inp.layout
+                for inp in graph.graph_inputs.values()
+                if hasattr(inp, "layout")
+            ]
+            batch_dim = input_layouts[0].size[0]
+            if call_count == 1:
+                # testing fn_1
+                assert (
+                    WrapperCodeGen.statically_known_int_or_none(batch_dim) is None
+                ), "Should not be statically known on first call"
+            elif call_count == 2:
+                # testing fn_2
+                assert (
+                    WrapperCodeGen.statically_known_int_or_none(batch_dim) == 5
+                ), "Should be limited to exactly 5 on second call due to multiple constraints"
+            elif call_count == 2:
+                # testing fn_3
+                assert (
+                    WrapperCodeGen.statically_known_int_or_none(batch_dim) == 5
+                ), "Should be exactly 5 on third call"
+
+        class TestWrapperCodegen(WrapperCodeGen):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+
+            def generate(self, is_inference, *args, **kwargs):
+                _test_wrapper_codegen_statically_known_int_or_none_in_context()
+                return super().generate(is_inference, *args, **kwargs)
+
+        if "cpu" not in device_codegens:
+            register_backend_for_device("cpu", CppScheduling, WrapperCodeGen)
+        orig_cpu_codegens = device_codegens["cpu"]
+        try:
+            register_backend_for_device(
+                "cpu", orig_cpu_codegens.scheduling, TestWrapperCodegen
+            )
+            # Compile each of the functions above, with an example input
+            # that has 5 in the first dimension, but is marked as dynamic
+
+            torch.compile(backend="inductor", dynamic=None)(fn_1)(_x)
+            torch.compile(backend="inductor", dynamic=None)(fn_2)(_x)
+            torch.compile(backend="inductor", dynamic=None)(fn_3)(_x)
+        finally:
+            register_backend_for_device(
+                "cpu", orig_cpu_codegens.scheduling, orig_cpu_codegens.wrapper_codegen
+            )
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_item_unbacked_stride_nobreak(self, device):
+        @torch.compile(fullgraph=True, dynamic=True)
+        def f(x):
+            a = x.item()
+            torch._constrain_as_size(a, min=1, max=10)
+            return torch.ones(a, a)
+
+        f(torch.tensor([5], device=device))
+
 
 instantiate_device_type_tests(TestInductorDynamic, globals())
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     # Slow on ASAN after https://github.com/pytorch/pytorch/pull/94068
     if (HAS_CPU or HAS_GPU) and not TEST_WITH_ASAN:

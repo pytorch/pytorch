@@ -69,6 +69,7 @@ Features described in this documentation are classified by release status:
    torch.cuda.memory <torch_cuda_memory>
    mps
    xpu
+   mtia
    meta
    torch.backends <backends>
    torch.export <export>
@@ -107,6 +108,7 @@ Features described in this documentation are classified by release status:
    torch.random <random>
    masked
    torch.nested <nested>
+   size
    sparse
    storage
    torch.testing <testing>
@@ -128,6 +130,7 @@ Features described in this documentation are classified by release status:
    torch.__config__ <config_mod>
    torch.__future__ <future_mod>
    logging
+   torch_environment_variables
 
 .. toctree::
    :maxdepth: 1

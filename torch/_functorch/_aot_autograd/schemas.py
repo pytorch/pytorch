@@ -4,7 +4,8 @@ input/output types, metadata, config, function signatures etc.
 """
 
 import collections
-from dataclasses import dataclass
+import functools
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Dict, List, NewType, Optional, Set, Tuple, Union
 
@@ -16,6 +17,7 @@ from torch._subclasses.fake_tensor import is_fake
 
 from .. import config
 
+from .functional_utils import _check_if_mutation_can_be_in_graph, has_same_metadata
 from .utils import strict_zip
 
 zip = strict_zip
@@ -52,6 +54,27 @@ OutputType = Enum(
 )
 
 
+# Wrapper around a FunctionalTensorWrapper for comparing only the resulting metadata
+# after applying all the ViewMeta operations.
+class FunctionalTensorMetadataEq:
+    def __init__(self, tensor: torch.Tensor) -> None:
+        assert torch._is_functional_tensor(tensor)
+        self.tensor = tensor
+
+    def __eq__(self, other: object) -> bool:
+        # If other is None, then it probably means that we weren't able to recreate
+        # the FunctionalTensorMetadataEq. One of this cases is when we update the
+        # view metadata by calling: create_synthetic_base_metadata.
+        if other is None:
+            return True
+
+        # Comparison agains any other type is not implemented.
+        if not isinstance(other, FunctionalTensorMetadataEq):
+            return NotImplemented
+
+        return has_same_metadata(self.tensor, other.tensor)
+
+
 # This class stores info about every user output.
 @dataclass(frozen=True)
 class OutputAliasInfo:
@@ -82,6 +105,15 @@ class OutputAliasInfo:
     dynamic_dims: Optional[Set[int]]
     # requires_grad
     requires_grad: bool
+    # FunctionalTensorWrapper that represents this output.
+    #
+    # Provides us the means to replay views from it.
+    #
+    # We need to wrap the actual FunctionalTensorWrapper with this class so that
+    # we only compare the tensor's metadata. That's because with the transformations
+    # of the model throughout AOTAutograd, the sequence of ViewMeta and the base
+    # tensor might change.
+    functional_tensor: Optional[FunctionalTensorMetadataEq] = None
 
 
 class MutationType(Enum):
@@ -100,7 +132,7 @@ class InputAliasInfo:
     mutations_under_no_grad_or_inference_mode: bool
     mutates_storage_metadata: bool
     requires_grad: bool
-    mutation_type: MutationType
+    keep_input_mutations: bool
 
     def __post_init__(self):
         if self.mutates_storage_metadata:
@@ -109,6 +141,24 @@ class InputAliasInfo:
             # to additionally fix  up the tensor metadata, since our runtime
             # call to inp.set_(updated_inp) will already have the right metadata
             assert self.mutates_metadata
+
+    @functools.cached_property
+    def mutation_type(self) -> MutationType:
+        if (not self.mutates_data) and (not self.mutates_metadata):
+            return MutationType.NOT_MUTATED
+
+        if _check_if_mutation_can_be_in_graph(
+            self.keep_input_mutations,
+            self.mutates_data,
+            self.mutates_metadata,
+            self.mutations_hidden_from_autograd,
+            self.mutations_under_no_grad_or_inference_mode,
+            self.mutates_storage_metadata,
+            self.requires_grad,
+        ):
+            return MutationType.MUTATED_IN_GRAPH
+
+        return MutationType.MUTATED_OUT_GRAPH
 
 
 @dataclass
@@ -232,9 +282,6 @@ class ViewAndMutationMeta:
     # TODO: we should kill this
     # (need to default it to not break internal)
     is_train: bool = False
-    # We're plumbing this requires_subclass_dispatch here is because it's painful to support input mutations
-    # on subclasses, and that info isn't easily available.
-    requires_subclass_dispatch: bool = False
 
     num_symints_saved_for_bw: Optional[int] = None
 
@@ -251,33 +298,26 @@ class ViewAndMutationMeta:
     # raised
     deterministic: Optional[bool] = None
 
+    # Map of effect type (ex. _EffectType.ORDERED) to token.  If there are
+    # side-effectful operators, FunctionalTensorMode will populate this
+    # dictionary telling us how many tokens we will need during tracing.
+    tokens: Dict[Any, torch.Tensor] = field(default_factory=dict)
+
     def __post_init__(self):
         # pre-compute the indices of the inputs that are mutated.
         # When keep_input_mutations is set, we don't need to worry about our epilogue
         # handling data-only mutations, because we keep them directly in the graph.
 
-        # TODO (tmanlaibaatar) Ideally input mutation type should be calculated
-        # based on requires_subclass_dispatch argument but this is not easy to do because you would
-        # have to pass around this argument multiple level down.
-        if not self.requires_subclass_dispatch:
-            mutated_inp_runtime_indices = [
-                i
-                for i, m in enumerate(self.input_info)
-                if (m.mutation_type == MutationType.MUTATED_OUT_GRAPH)
-            ]
-        else:
-            mutated_inp_runtime_indices = [
-                i
-                for i, m in enumerate(self.input_info)
-                if m.mutation_type
-                in (MutationType.MUTATED_IN_GRAPH, MutationType.MUTATED_OUT_GRAPH)
-            ]
+        mutated_inp_runtime_indices = [
+            i
+            for i, m in enumerate(self.input_info)
+            if (m.mutation_type == MutationType.MUTATED_OUT_GRAPH)
+        ]
 
         mutated_graph_handled_indices = [
             i
             for i, m in enumerate(self.input_info)
             if m.mutation_type == MutationType.MUTATED_IN_GRAPH
-            and not self.requires_subclass_dispatch
         ]
         self.mutated_graph_handled_indices = mutated_graph_handled_indices
         self.num_mutated_graph_handled_indices = len(self.mutated_graph_handled_indices)
@@ -384,11 +424,12 @@ class ViewAndMutationMeta:
         # separately.
         self.num_outputs_rng_offset = 1 if self.is_rng_op_functionalized else 0
 
-        # Our forward() returns both (mutated_inputs, outputs, output_intermediate_bases, saved_tensors, saved_symints)
+        # Our forward() returns both (tokens, mutated_inputs, outputs, output_intermediate_bases, saved_tensors, saved_symints)
         self.num_forward_returns = (
             self.num_mutated_inp_runtime_indices
             + self.num_outputs
             + self.num_intermediate_bases
+            + len(self.tokens)
         )
         # In case of functionalization of rng ops, the fw_module returns one
         # additional output for rng offset. This rng offset is used right
@@ -463,7 +504,7 @@ class SubclassMeta:
     # in case we made incorrect assumptions about the subclass-ness of our grad_outputs
     #
     # Optional field because we don't compute for inference graphs
-    grad_input_metas: Optional[List[Union[int, SubclassCreationMeta]]]
+    grad_input_metas: Optional[List[Union[int, SubclassCreationMeta]]] = None
 
     def __init__(self):
         # The fields in this class get set after its construction.
@@ -538,11 +579,15 @@ class GraphSignature:
     # "graph outputs that correspond to updated buffers"
     # to the FQN names of those mutated buffers.
     buffers_to_mutate: Dict[GraphOutputName, FQN]
+    user_inputs_to_mutate: Dict[GraphOutputName, GraphInputName]
 
     in_spec: pytree.TreeSpec
     out_spec: pytree.TreeSpec
 
     backward_signature: Optional[BackwardSignature]
+
+    input_tokens: List[GraphInputName]
+    output_tokens: List[GraphOutputName]
 
     @classmethod
     def from_tracing_metadata(
@@ -564,40 +609,64 @@ class GraphSignature:
         graph_outputs = graph_output_names
         parameters = list(named_parameters)
         buffers = list(named_buffers)
+        num_tokens = len(view_mutation_metadata.tokens)
 
         # Calling convention assumptions:
-        # (1) graph inputs = (params, buffers, user_inputs)
-        # (2) graph outputs = (mutated_inputs, user_outs, param_gradients)
+        # (1) graph inputs = (input_tokens, params, buffers, user_inputs)
+        # (2) graph outputs = (output_tokens, mutated_inputs, user_outs, param_gradients)
         # (If we are capturing an inference graph, this convention is identical
         #  except that param_gradients is empty)
-        user_inputs = graph_inputs[len(parameters) + len(buffers) :]
-        assert num_user_inputs == len(user_inputs)
-        assert len(graph_inputs) == (len(parameters) + len(buffers) + len(user_inputs))
+        # See Note [Side-Effectful Tokens in AOTAutograd] for information on tokens
 
-        inputs_to_parameters = dict(zip(graph_inputs[: len(parameters)], parameters))
+        # Address input calling conventions:
+        start, stop = 0, num_tokens
+        input_tokens = graph_inputs[start:stop]
+
+        start, stop = stop, stop + len(parameters)
+        inputs_to_parameters = dict(zip(graph_inputs[start:stop], parameters))
+
+        start, stop = stop, stop + len(buffers)
         inputs_to_buffers = dict(
             zip(
-                graph_inputs[len(parameters) : len(parameters) + len(buffers)],
+                graph_inputs[start:stop],
                 buffers,
             )
         )
 
-        state_names = [*parameters, *buffers]
-        mutated_buffers = []
+        start, stop = stop, stop + num_user_inputs
+        user_inputs = graph_inputs[start:stop]
+
+        # We should've gone through all the inputs now
+        assert len(graph_inputs) - stop == 0
+
+        # Address output calling conventions:
+        start, stop = 0, num_tokens
+        output_tokens = graph_outputs[start:stop]
+
+        names = [*input_tokens, *parameters, *buffers, *user_inputs]
+        mutations = []
         for idx, input_info in enumerate(view_mutation_metadata.input_info):
             if input_info.mutates_data:
                 # Only buffers can be mutated, not parameters
                 assert idx >= len(parameters)
-                buffer_name = state_names[idx]
-                mutated_buffers.append(buffer_name)
+                mutations.append(names[idx + num_tokens])
 
-        assert (
-            len(mutated_buffers)
-            == view_mutation_metadata.num_mutated_inp_runtime_indices
+        assert len(mutations) == view_mutation_metadata.num_mutated_inp_runtime_indices
+
+        start, stop = (
+            stop,
+            stop + view_mutation_metadata.num_mutated_inp_runtime_indices,
         )
+        outputs_to_mutations = dict(zip(graph_outputs[start:stop], mutations))
 
-        start, stop = 0, view_mutation_metadata.num_mutated_inp_runtime_indices
-        buffers_to_mutate = dict(zip(graph_outputs[start:stop], mutated_buffers))
+        user_inputs_to_mutate = {}
+        buffers_to_mutate = {}
+        for output_name, mutation_name in outputs_to_mutations.items():
+            if mutation_name in user_inputs:
+                user_inputs_to_mutate[output_name] = mutation_name
+            else:
+                assert mutation_name in buffers
+                buffers_to_mutate[output_name] = mutation_name
 
         start, stop = stop, stop + num_user_outputs
         user_outputs = graph_outputs[start:stop]
@@ -616,10 +685,13 @@ class GraphSignature:
             user_outputs=user_outputs,  # type: ignore[arg-type]
             inputs_to_buffers=inputs_to_buffers,  # type: ignore[arg-type]
             inputs_to_parameters=inputs_to_parameters,  # type: ignore[arg-type]
+            user_inputs_to_mutate=user_inputs_to_mutate,
             buffers_to_mutate=buffers_to_mutate,  # type: ignore[arg-type]
             in_spec=in_spec,
             out_spec=out_spec,
             backward_signature=backward_signature,
+            input_tokens=input_tokens,  # type: ignore[arg-type]
+            output_tokens=output_tokens,  # type: ignore[arg-type]
         )
 
 

@@ -1,7 +1,7 @@
 # Owner(s): ["module: dynamo"]
 import functools
 import math
-import unittest
+import unittest  # noqa: F811
 from importlib import import_module
 
 import torch
@@ -9,6 +9,7 @@ import torch._dynamo.config
 
 import torch._dynamo.test_case
 import torch._functorch.config
+import torch.distributed as dist
 import torch.utils.checkpoint
 from functorch.compile import min_cut_rematerialization_partition
 from torch._dynamo.backends.common import aot_autograd
@@ -20,6 +21,9 @@ from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils.checkpoint import _pt2_selective_checkpoint_context_fn_gen, checkpoint
 
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
+requires_distributed = functools.partial(
+    unittest.skipIf, not dist.is_available(), "requires distributed"
+)
 
 
 def checkpoint_wrapper(fn):
@@ -42,6 +46,7 @@ def count_ops(
 
     # assert ((freq or freq_ge) and op) or ((freqs or freqs_ge) and ops)
     if op is not None:
+        assert not isinstance(op, list)
         ops = [op]
     if freq is not None:
         freqs = [freq]
@@ -53,9 +58,8 @@ def count_ops(
             for node in gm.graph.nodes:
                 if match_rng_op(node, op) or node.target == op:
                     actual_count += 1
-            assert (
-                actual_count == freq
-            ), f"In graph {gm}, expected {op} to have occurred {freq} times in the graph, but got {actual_count}."
+            err_msg = f"In graph {gm}, expected {op} to have occurred {freq} times in the graph, but got {actual_count}."
+            assert actual_count == freq, err_msg
     else:
         assert freqs_ge is not None
         for op, freq_ge in zip(ops, freqs_ge):
@@ -238,6 +242,31 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )  # mm recomputed in the bwd
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(fn, backend, x, y)
+
+    @requires_cuda
+    def test_tags_sequential_layers(self):
+        def gn(x):
+            x = x.cos()
+            for _ in range(3):
+                x = torch.mm(x, x)
+            x = x.cos()
+            return x
+
+        def fn(x):
+            x = torch.utils.checkpoint.checkpoint(gn, x)
+            x = torch.utils.checkpoint.checkpoint(gn, x)
+            return x
+
+        x = torch.randn(4, 4, device="cuda", requires_grad=True)
+
+        fw_compiler = functools.partial(count_ops, freq=6, op=torch.ops.aten.mm.default)
+        bw_compiler = functools.partial(
+            count_ops,
+            freqs=[2, 18],
+            ops=[torch.ops.aten.cos.default, torch.ops.aten.mm.default],
+        )  # mm recomputed in the bwd
+        backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
+        self._validate(fn, backend, x)
 
     @requires_cuda
     def test_tags_multiple_checkpoints(self):
@@ -1053,6 +1082,32 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 op=torch.ops.aten._scaled_dot_product_flash_attention.default,
             )
         )
+
+    @requires_cuda
+    @requires_distributed()
+    def test_distributed_utils_checkpoint_wrapper(self):
+        from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+            checkpoint_wrapper as dist_checkpoint_wrapper,
+        )
+
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+                self.c = 2
+
+            def forward(self, x):
+                x = torch.sin(x)
+                x = self.linear(x)
+                x = torch.cos(x)
+                return x * self.c
+
+        mod = dist_checkpoint_wrapper(MockModule())
+        x = torch.randn(4, 4)
+        ref = mod(x)
+        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+        res = opt_mod(x)
+        self.assertEqual(ref, res)
 
 
 if __name__ == "__main__":

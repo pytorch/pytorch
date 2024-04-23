@@ -228,6 +228,7 @@ filegroup(
         [
             "aten/src/ATen/cuda/*.cpp",
             "aten/src/ATen/cuda/detail/*.cpp",
+            "aten/src/ATen/cuda/tunable/*.cpp",
             "aten/src/ATen/cudnn/*.cpp",
             "aten/src/ATen/native/cuda/*.cpp",
             "aten/src/ATen/native/cuda/linalg/*.cpp",
@@ -1761,12 +1762,10 @@ py_library(
     visibility = ["//visibility:public"],
     srcs = glob(["torch/**/*.py"], exclude = ["torch/version.py"]) + [":torch/version.py"] + glob(["functorch/**/*.py"]),
     deps = [
-        rules.requirement("future"),
         rules.requirement("numpy"),
         rules.requirement("pyyaml"),
         rules.requirement("requests"),
         rules.requirement("setuptools"),
-        rules.requirement("six"),
         rules.requirement("sympy"),
         rules.requirement("typing_extensions"),
         "//torchgen",
