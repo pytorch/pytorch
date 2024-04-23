@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/EmptyTensor.h>
 #include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/detail/XPUHooksInterface.h>
 #include <ATen/Context.h>
 #include <ATen/detail/PrivateUse1HooksInterface.h>
 #include <c10/core/CPUAllocator.h>
@@ -17,6 +18,8 @@ c10::Allocator* GetCPUAllocatorMaybePinned(bool pin_memory) {
     // To properly support this, see https://github.com/pytorch/pytorch/issues/14560
     if (at::globalContext().hasCUDA()) {
       return at::detail::getCUDAHooks().getPinnedMemoryAllocator();
+    } else if (at::globalContext().hasXPU()) {
+      return at::detail::getXPUHooks().getPinnedMemoryAllocator();
     } else if(at::isPrivateUse1HooksRegistered()) {
       return at::GetPrivateUse1HooksInterface()->getPinnedMemoryAllocator();
     } else {
@@ -198,6 +201,15 @@ TensorBase empty_generic(
   return _empty_generic(size, allocator, ks, scalar_type, memory_format_opt);
 }
 
+TensorBase empty_generic_symint(
+    SymIntArrayRef size,
+    c10::Allocator* allocator,
+    c10::DispatchKeySet ks,
+    ScalarType scalar_type,
+    c10::optional<c10::MemoryFormat> memory_format_opt) {
+  return _empty_generic(size, allocator, ks, scalar_type, memory_format_opt);
+}
+
 template <typename T>
 TensorBase _empty_strided_generic(
     T size,
@@ -316,7 +328,7 @@ struct MetaAllocator final : public at::Allocator {
   static void deleter(void* const pointer) {
     TORCH_INTERNAL_ASSERT(!pointer);
   }
-  DataPtr allocate(const size_t nbytes) const override {
+  DataPtr allocate(const size_t nbytes) override {
     return {nullptr, nullptr, &deleter, at::Device(DeviceType::Meta)};
   }
   DeleterFnPtr raw_deleter() const override {

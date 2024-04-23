@@ -1678,6 +1678,13 @@ graph(%Ra, %Rb):
                   torch.bfloat16, torch.complex64, torch.complex128, torch.bool]:
             self.assertEqual(scr(x, t), foo(x, t))
 
+    def test_script_bool_literal_conversion(self):
+        def foo(x):
+            return torch.mul(x, True)
+        scr = torch.jit.script(foo)
+        x = torch.rand(3, 4)
+        self.assertEqual(scr(x), foo(x))
+
     def test_shape_analysis_masked_select(self):
         input_str = """graph(%0 : Float(),
           %1 : Bool()):
@@ -5859,7 +5866,7 @@ a")
 
     def test_python_frontend_source_range(self):
         def fn():
-            raise Exception("hello")
+            raise Exception("hello")  # noqa: TRY002
         ast = torch.jit.frontend.get_jit_def(fn, fn.__name__)
         FileCheck().check("SourceRange at:") \
                    .check("def fn():") \
@@ -5870,7 +5877,7 @@ a")
 
     def test_python_frontend_py3(self):
         def fn():
-            raise Exception("hello")
+            raise Exception("hello")  # noqa: TRY002
         ast = torch.jit.frontend.get_jit_def(fn, fn.__name__)
         self.assertExpected(str(ast))
 
@@ -16234,7 +16241,7 @@ def normalize_check_ad(check_ad, name):
     elif len(check_ad) == 3:
         check_ad = list(check_ad)
     else:
-        raise Exception('Invalid check_ad, requires (bool, str|List[str], str|List[str])')
+        raise Exception('Invalid check_ad, requires (bool, str|List[str], str|List[str])')  # noqa: TRY002
 
     check_ad = [[t] if isinstance(t, str) else t for t in check_ad]
 

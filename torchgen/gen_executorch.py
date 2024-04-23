@@ -123,10 +123,19 @@ class ComputeFunction:
 
     @method_with_native_function
     def __call__(self, f: NativeFunction) -> Optional[str]:
+        is_method_variant = False
         if not self.selector.is_root_operator(f"{f.namespace}::{f.func.name}"):
             return None
-        if Variant.function not in f.variants:
-            return None
+
+        if Variant.function not in f.variants and Variant.method in f.variants:
+            is_method_variant = True
+
+        # only valid remaining case is only function is in f.variants
+        elif not (Variant.function in f.variants and Variant.method not in f.variants):
+            raise Exception(  # noqa: TRY002
+                f"Can't handle native function {f.func} with the following variant specification {f.variants}."
+            )
+
         sig: Union[CppSignature, ExecutorchCppSignature] = (
             CppSignatureGroup.from_native_function(
                 f, method=False, fallback_binding=f.manual_cpp_binding
@@ -137,7 +146,15 @@ class ComputeFunction:
         if self.use_aten_lib and not self.is_custom_op(f):
             comma = ", "
 
-            return f"""
+            if is_method_variant:
+                return f"""
+// {f.namespace}::{f.func}
+TORCH_API inline {_sig_decl_wrapper(sig)} {{
+    return {sig.arguments()[0].name}.{sig.name()}({comma.join(e.name for e in sig.arguments()[1:])});
+}}
+"""
+            else:
+                return f"""
 // {f.namespace}::{f.func}
 TORCH_API inline {_sig_decl_wrapper(sig)} {{
     return at::{sig.name()}({comma.join(e.name for e in sig.arguments())});
@@ -211,7 +228,7 @@ class ComputeCodegenUnboxedKernels:
 
         if len(f.func.returns) == 0:
             if len(f.func.arguments.out) == 0:
-                raise Exception(
+                raise Exception(  # noqa: TRY002
                     f"Can't handle native function {f.func} with no returns and no out yet."
                 )
             out = f.func.arguments.out[0]
@@ -350,7 +367,6 @@ def gen_functions_declarations(
     # convert kernel index to BackendIndex. This is because we can't handle ETKernelIndex yet.
     # TODO larryliu: evaluate if this code is still needed. If yes let it handle ETKernelIndex.
 
-    dispatch_key = DispatchKey.CPU
     backend_index = kernel_index._to_backend_index()
 
     ns_grouped_functions = defaultdict(list)

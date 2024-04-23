@@ -146,7 +146,7 @@ struct Dist {
 
   template <typename F>
   static void run_parallel_pdist(Tensor& result, const Tensor& self, const scalar_t p) {
-    const scalar_t * const self_start = self.data_ptr<scalar_t>();
+    const scalar_t * const self_start = self.const_data_ptr<scalar_t>();
     const scalar_t * const self_end = self_start + self.numel();
     int64_t n = self.size(0);
     int64_t m = self.size(1);
@@ -203,8 +203,8 @@ struct Dist {
 
   template <typename F>
   static void run_parallel_cdist(Tensor& result, const Tensor& t1, const Tensor& t2, const scalar_t p) {
-    const scalar_t * const t1_start = t1.data_ptr<scalar_t>();
-    const scalar_t * const t2_start = t2.data_ptr<scalar_t>();
+    const scalar_t * const t1_start = t1.const_data_ptr<scalar_t>();
+    const scalar_t * const t2_start = t2.const_data_ptr<scalar_t>();
     int64_t d = t1.size(0);
     int64_t r1 = t1.size(-2);
     int64_t r2 = t2.size(-2);
@@ -296,9 +296,9 @@ struct Dist {
     const int64_t m = self.size(1);
     const int64_t gs = grad.stride(0);
 
-    const scalar_t * const grad_start = grad.data_ptr<scalar_t>();
-    const scalar_t * const dist_start = dist.data_ptr<scalar_t>();
-    const scalar_t * const self_start = self.data_ptr<scalar_t>();
+    const scalar_t * const grad_start = grad.const_data_ptr<scalar_t>();
+    const scalar_t * const dist_start = dist.const_data_ptr<scalar_t>();
+    const scalar_t * const self_start = self.const_data_ptr<scalar_t>();
     scalar_t * const res_start = result.data_ptr<scalar_t>();
 
     // The only way to parallelize and avoid locking requires parallelizing
@@ -367,10 +367,10 @@ struct Dist {
     //don't use grad.stride(-1), because if last dimension is 1, stride can be bogus.
     const int64_t gs = 1;
 
-    const scalar_t * const grad_start = grad.data_ptr<scalar_t>();
-    const scalar_t * const dist_start = dist.data_ptr<scalar_t>();
-    const scalar_t * const t1_start = t1.data_ptr<scalar_t>();
-    const scalar_t * const t2_start = t2.data_ptr<scalar_t>();
+    const scalar_t * const grad_start = grad.const_data_ptr<scalar_t>();
+    const scalar_t * const dist_start = dist.const_data_ptr<scalar_t>();
+    const scalar_t * const t1_start = t1.const_data_ptr<scalar_t>();
+    const scalar_t * const t2_start = t2.const_data_ptr<scalar_t>();
     scalar_t * const res_start = result.data_ptr<scalar_t>();
 
     at::parallel_for(0, m / Vec::size(), internal::GRAIN_SIZE / (16 * r1), [=](int64_t l, int64_t end) {

@@ -1,5 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from typing import List, Tuple
+from typing import List, Sequence, Tuple
 
 import torch
 
@@ -17,7 +17,6 @@ from torch.distributed._tensor.op_schema import (
 from torch.distributed._tensor.ops.utils import (
     generate_redistribute_costs,
     infer_broadcast_dims_map,
-    is_tensor_partial,
     map_placements_after_broadcast,
     normalize_dim,
     register_op_strategy,
@@ -52,13 +51,16 @@ aten = torch.ops.aten
 
 linear_pointwise_ops = [
     aten.div.Scalar,  # this op is linear on the first argument, and the second argument is scalar, so it fits as a linear op.
+    aten.div_.Scalar,  # this op is linear on the first argument, and the second argument is scalar, so it fits as a linear op.
     aten.to.dtype,
     aten.add.Tensor,
+    aten.add_.Tensor,
 ]
 
 
 pointwise_ops = [
     # please keep the entries below alphabetically sorted
+    aten._conj.default,
     aten.abs.default,
     aten.abs.out,
     aten.abs_.default,
@@ -71,7 +73,6 @@ pointwise_ops = [
     aten.add.Scalar,
     aten.add.out,
     aten.add_.Scalar,
-    aten.add_.Tensor,
     aten.addcdiv.default,
     aten.addcdiv.out,
     aten.addcdiv_.default,
@@ -406,17 +407,9 @@ pointwise_ops = [
 
 def pointwise_strategy(
     mesh: DeviceMesh, op_schema: OpSchema, linearity: bool = False
-) -> StrategyType:
+) -> OpStrategy:
     max_shards_strategy_index = -1
     max_shards = -1
-    # handle broadcasting
-    common_shape = torch.broadcast_shapes(
-        *[
-            arg.output_shape
-            for arg in op_schema.args_schema
-            if isinstance(arg, OpStrategy)
-        ]
-    )
 
     if _is_inplace_op(op_schema.op):
         # inplace op should follow the first arg strategy
@@ -437,20 +430,30 @@ def pointwise_strategy(
                 max_shards = arg_max_shards
 
         followed_strategy = op_schema.args_schema[max_shards_strategy_index]
-        assert isinstance(followed_strategy, OpStrategy)
-        follow_operand_dims_map = infer_broadcast_dims_map(
-            common_shape, followed_strategy.output_shape
-        )
 
     assert isinstance(
         followed_strategy, OpStrategy
     ), f"no strategy to follow for {op_schema}!"
+    return common_pointwise_strategy(
+        mesh, op_schema.args_schema, followed_strategy, linearity
+    )
+
+
+def common_pointwise_strategy(
+    mesh: DeviceMesh,
+    args_schema: Sequence[object],
+    followed_strategy: OpStrategy,
+    linearity: bool,
+) -> OpStrategy:
+    # handle broadcasting
+    common_shape = torch.broadcast_shapes(
+        *[arg.output_shape for arg in args_schema if isinstance(arg, OpStrategy)]
+    )
     pointwise_strategy = OpStrategy([])
 
     for placement_strategy in followed_strategy.strategies:
         spec_to_follow = placement_strategy.output_spec
         out_placements: List[Placement] = []
-
         for placement in spec_to_follow.placements:
             if isinstance(placement, Shard):
                 shard_dim = normalize_dim(placement.dim, len(spec_to_follow.shape))
@@ -465,9 +468,9 @@ def pointwise_strategy(
             else:
                 out_placements.append(placement)
 
-        input_specs = []
+        input_specs: List[DTensorSpec] = []
         redistribute_costs: List[List[float]] = []
-        for idx, input_arg in enumerate(op_schema.args_schema):
+        for idx, input_arg in enumerate(args_schema):
             if isinstance(input_arg, OpStrategy):
                 # every arg follow the out_placements, but need to handle broadcasting
                 input_arg_spec = input_arg.strategies[0].output_spec
@@ -524,6 +527,7 @@ for op in pointwise_ops:
 
 # TODO: add all for_each ops
 for_each_ops = [
+    aten._foreach_abs.default,
     aten._foreach_abs_.default,
     aten._foreach_addcdiv_.Scalar,
     aten._foreach_addcdiv_.ScalarList,
@@ -532,6 +536,8 @@ for_each_ops = [
     aten._foreach_addcmul_.Scalar,
     aten._foreach_addcmul_.ScalarList,
     aten._foreach_addcmul_.Tensor,
+    aten._foreach_clamp_max_.Scalar,
+    aten._foreach_clamp_min_.Scalar,
     aten._foreach_div_.List,
     aten._foreach_div_.ScalarList,
     aten._foreach_lerp_.Scalar,
@@ -540,10 +546,12 @@ for_each_ops = [
     aten._foreach_mul.List,
     aten._foreach_mul_.Scalar,
     aten._foreach_mul_.ScalarList,
+    aten._foreach_mul_.Tensor,
     aten._foreach_mul_.List,
     aten._foreach_neg.default,
     aten._foreach_neg_.default,
     aten._foreach_reciprocal_.default,
+    aten._foreach_sub.List,
     aten._foreach_sub_.Scalar,
     aten._foreach_sqrt.default,
     aten._foreach_sqrt_.default,
@@ -563,9 +571,11 @@ def foreach_list_pointwise_strategy(
     mesh: DeviceMesh, op_schema: OpSchema, linearity: bool = False
 ) -> StrategyType:
     """
-    for each list op stratgy mostly follow the same logic as pointwise strategy
-    except that it handles list of tensors instead, and normally we don't need to
-    handle implicit broadcasting
+    Apply the pointwise strategy to the zipped arguments. For example, if we
+    run a foreach add of two lists l1 and l2, then we apply the pointwise
+    strategy on each pair (l1[i], l2[i]). If the first argument is a list but
+    the second (or later) one is a tensor, then we broadcast the tensor by
+    replicating it into a list with the length of the first argument.
     """
 
     def args_tuple_strategies(args_schema: Tuple[object, ...]) -> List[TupleStrategy]:
@@ -573,56 +583,34 @@ def foreach_list_pointwise_strategy(
         assert isinstance(first_arg, TupleStrategy)
         strategy_len = len(first_arg.childs)
         tuple_strategies: List[TupleStrategy] = []
-        for arg in args_schema:
+        for arg_idx, arg in enumerate(args_schema):
             if isinstance(arg, TupleStrategy):
                 # every tuple strategy should have the same length
                 assert len(arg.childs) == strategy_len
                 tuple_strategies.append(arg)
             elif isinstance(arg, OpStrategy):
-                raise RuntimeError("foreach list op only supports tuple strategy!")
+                if arg_idx > 0:  # implicitly broadcast
+                    tuple_strategies.append(
+                        TupleStrategy([arg for _ in range(strategy_len)])
+                    )
+                else:
+                    raise RuntimeError(
+                        f"foreach list op only supports tuple strategy! {op_schema}"
+                    )
         return tuple_strategies
 
     args_strategies = args_tuple_strategies(op_schema.args_schema)
-
-    # foreach op should follow the first arg's TupleStrategy
-    follow_strategy = args_strategies[0]
-
-    foreach_strategy_list = []
-    for idx, child_strtgy in enumerate(follow_strategy.childs):
+    follow_strategy: TupleStrategy = args_strategies[0]
+    foreach_strategy_list: List[OpStrategy] = []
+    for child_idx, child_strtgy in enumerate(follow_strategy.childs):
         assert isinstance(child_strtgy, OpStrategy)
-
-        strategies = []
-        for strtgy in child_strtgy.strategies:
-            spec_to_follow = strtgy.output_spec
-            if not linearity:
-                assert not is_tensor_partial(
-                    spec_to_follow
-                ), f"{op_schema.op} does not support operation on partial tensor!"
-
-            # new expected input spec is the same as the output spec
-            expected_input_spec = DTensorSpec(
-                mesh=mesh,
-                placements=spec_to_follow.placements,
-            )
-            redistribute_costs: List[List[float]] = []
-
-            for arg_strtgy in args_strategies:
-                # only check the corresponding idx of each TupleStrategy
-                idx_op_strtgy = arg_strtgy.childs[idx]
-                assert isinstance(idx_op_strtgy, OpStrategy)
-                redistribute_costs.append(
-                    generate_redistribute_costs(idx_op_strtgy, expected_input_spec)
-                )
-            strategies.append(
-                PlacementStrategy(
-                    output_specs=spec_to_follow,
-                    input_specs=(expected_input_spec,),
-                    redistribute_cost=redistribute_costs,
-                )
-            )
-
-        foreach_strategy_list.append(OpStrategy(strategies))
-
+        args_schema: List[StrategyType] = [
+            arg_strategy.childs[child_idx] for arg_strategy in args_strategies
+        ]
+        pointwise_strategy: OpStrategy = common_pointwise_strategy(
+            mesh, args_schema, child_strtgy, linearity
+        )
+        foreach_strategy_list.append(pointwise_strategy)
     return TupleStrategy(foreach_strategy_list)
 
 

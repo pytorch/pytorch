@@ -859,7 +859,7 @@ def _save(obj, zip_file, pickle_module, pickle_protocol, _disable_byteorder_reco
             storage = storage.cpu()
         # Now that it is on the CPU we can directly copy it into the zip file
         num_bytes = storage.nbytes()
-        zip_file.write_record(name, storage.data_ptr(), num_bytes)
+        zip_file.write_record(name, storage, num_bytes)
 
 
 def load(
@@ -1028,8 +1028,9 @@ def load(
                              overall_storage=overall_storage,
                              **pickle_load_args)
         if mmap:
+            f_name = "" if not isinstance(f, str) else f"{f}, "
             raise RuntimeError("mmap can only be used with files saved with "
-                               "`torch.save(_use_new_zipfile_serialization=True), "
+                               f"`torch.save({f_name}_use_new_zipfile_serialization=True), "
                                "please torch.save your checkpoint with this option in order to use mmap.")
         if weights_only:
             try:
@@ -1196,7 +1197,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
             nbytes = numel * torch._utils._element_size(dtype)
 
             if root_key not in deserialized_objects:
-                if torch._guards.detect_fake_mode(None) is not None:
+                if torch._guards.active_fake_mode() is not None:
                     obj = cast(Storage, torch.UntypedStorage(nbytes, device='meta'))
                 else:
                     obj = cast(Storage, torch.UntypedStorage(nbytes))
@@ -1272,7 +1273,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
 
     deserialized_storage_keys = pickle_module.load(f, **pickle_load_args)
 
-    if torch._guards.detect_fake_mode(None) is None:
+    if torch._guards.active_fake_mode() is None:
         offset = f.tell() if f_should_read_directly else None
         for key in deserialized_storage_keys:
             assert key in deserialized_objects

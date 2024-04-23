@@ -215,6 +215,8 @@ def _get_edge_or_node_to_group_id(edge_or_node_to_qspec: Dict[EdgeOrNode, Quanti
 
                 # sharing with other users of the producer node
                 # (arg, user)
+                if not isinstance(arg, Node) or not isinstance(n, Node):
+                    raise Exception(f"Expected input_edge to have type Tuple[Node, Node], but got: {arg, n}")  # noqa: TRY002
                 for user in arg.users:
                     if user is n:
                         continue
@@ -376,11 +378,13 @@ def _maybe_insert_input_observers_for_node(
         numeric_debug_handle = node.meta["numeric_debug_handle"]
         node.meta["numeric_debug_handle"] = {remap_fn(k): v for k, v in numeric_debug_handle.items()}
 
-    # Clone has a memory_format kwarg and zeros_like has a pin_memory kwarg
-    # that persist in exported graph. This is just a work around for these.
+    # Clone has a memory_format kwarg, zeros_like has a pin_memory kwarg, and
+    # gelu has a has an approximate kwarg that persist in exported graph.
+    # This is just a work around for these.
     assert (
         node.target == torch.ops.aten.clone.default or
         node.target == torch.ops.aten.zeros_like.default or
+        node.target == torch.ops.aten.gelu.default or
         len(node.kwargs) == 0
     ), " expecting kwargs for aten op IR to be empty"
 

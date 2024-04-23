@@ -28,6 +28,8 @@
 #include <ATen/ops/_linalg_eigh.h>
 #include <ATen/ops/_linalg_eigh_meta.h>
 #include <ATen/ops/_linalg_eigh_native.h>
+#include <ATen/ops/_linalg_eigvals.h>
+#include <ATen/ops/_linalg_eigvals_native.h>
 #include <ATen/ops/_linalg_solve_ex.h>
 #include <ATen/ops/_linalg_solve_ex_meta.h>
 #include <ATen/ops/_linalg_solve_ex_native.h>
@@ -3100,12 +3102,13 @@ Tensor linalg_eigvals(const Tensor& input) {
   if (_may_require_fw_or_bw_grad(input)) {
     return std::get<0>(at::linalg_eig(input));
   }
+  return at::_linalg_eigvals(input);
+}
 
+Tensor _linalg_eigvals(const Tensor& input) {
   ScalarType complex_dtype = toComplexType(input.scalar_type());
   Tensor values = at::empty({0}, input.options().dtype(complex_dtype));
-
-  at::linalg_eigvals_outf(input, values);
-
+  linalg_eigvals_out(input, values);
   return values;
 }
 

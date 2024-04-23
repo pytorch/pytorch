@@ -359,7 +359,7 @@ inline c10::optional<TypePtr> unifyOrInitializeType(
 
 using InferredType = c10::InferredType;
 
-InferredType tryToInferContainerType(py::handle input);
+InferredType tryToInferContainerType(py::handle input, bool primitiveTypeOnly);
 
 // Try to infer the type of a Python object
 // The type cannot be inferred if:
@@ -496,17 +496,44 @@ inline InferredType tryToInferType(py::handle input) {
   }
 
   // Try container types
-  return tryToInferContainerType(input);
+  return tryToInferContainerType(input, false);
 }
 
-inline InferredType tryToInferContainerType(py::handle input) {
+// This function is similar to tryToInferType, but it only tries to infer
+// primitive types (int, float, bool, complex) or nested container of primitive
+// types.
+inline InferredType tryToInferPrimitiveType(py::handle input) {
+  if (input.is_none()) {
+    return InferredType(NoneType::get());
+  }
+
+  // Only primitive data type
+  if (py::isinstance<py::bool_>(input)) {
+    return InferredType(BoolType::get());
+    // NOLINTNEXTLINE(bugprone-branch-clone)
+  } else if (py::isinstance<py::int_>(input)) {
+    return InferredType(IntType::get());
+  } else if (py::isinstance<py::float_>(input)) {
+    return InferredType(FloatType::get());
+  } else if (PyComplex_CheckExact(input.ptr())) {
+    return InferredType(ComplexType::get());
+  }
+
+  // Try container types
+  return tryToInferContainerType(input, true);
+}
+
+inline InferredType tryToInferContainerType(
+    py::handle input,
+    bool primitiveTypeOnly = false) {
   if (six::isTuple(input)) {
     py::tuple tuple = py::cast<py::tuple>(input);
     std::vector<TypePtr> element_types;
     element_types.reserve(tuple.size());
 
     for (py::handle elem : tuple) {
-      auto type_match = tryToInferType(elem);
+      auto type_match = primitiveTypeOnly ? tryToInferPrimitiveType(elem)
+                                          : tryToInferType(elem);
       if (type_match.success()) {
         element_types.push_back(type_match.type());
       } else {
@@ -528,7 +555,9 @@ inline InferredType tryToInferContainerType(py::handle input) {
 
     for (auto entry : dict) {
       // Try to infer the key type and unify it with the existing one
-      auto entry_key_type_match = tryToInferType(entry.first);
+      auto entry_key_type_match = primitiveTypeOnly
+          ? tryToInferPrimitiveType(entry.first)
+          : tryToInferType(entry.first);
       if (!entry_key_type_match.success()) {
         return entry_key_type_match.reason();
       }
@@ -543,7 +572,9 @@ inline InferredType tryToInferContainerType(py::handle input) {
       }
 
       // Try to infer the value type and unify it with the existing one
-      auto entry_value_type_match = tryToInferType(entry.second);
+      auto entry_value_type_match = primitiveTypeOnly
+          ? tryToInferPrimitiveType(entry.second)
+          : tryToInferType(entry.second);
       if (!entry_value_type_match.success()) {
         return entry_value_type_match.reason();
       }
@@ -571,7 +602,9 @@ inline InferredType tryToInferContainerType(py::handle input) {
 
     TypePtr element_type = nullptr;
     for (auto elem : list) {
-      auto element_type_match = tryToInferType(elem);
+      auto element_type_match = primitiveTypeOnly
+          ? tryToInferPrimitiveType(elem)
+          : tryToInferType(elem);
       if (!element_type_match.success()) {
         return InferredType(c10::str(
             "Could not infer type of list element: ",
@@ -590,16 +623,26 @@ inline InferredType tryToInferContainerType(py::handle input) {
     }
     return InferredType(ListType::create(element_type));
   } else {
-    // TODO: this message is not correct anymore, since this InferredType is
-    // used from a bunch of circumstances unrelated to tracing. We can re-use
-    // this instead of the attribute_failure stuff in concreteType
-    return InferredType(c10::str(
-        "Only tensors and (possibly nested) tuples of tensors, lists, or dicts",
-        "are supported ",
-        "as inputs or outputs of traced functions",
-        ", but instead got value of type ",
-        py::str(input.get_type().attr("__name__")),
-        "."));
+    if (primitiveTypeOnly) {
+      return InferredType(c10::str(
+          "Only tuple, list, or dict (possibly nested) of primitive types (bool, float, int, complex)",
+          "are supported ",
+          "as inputs or outputs of traced functions",
+          ", but instead got value of type ",
+          py::str(input.get_type().attr("__name__")),
+          "."));
+    } else {
+      // TODO: this message is not correct anymore, since this InferredType is
+      // used from a bunch of circumstances unrelated to tracing. We can re-use
+      // this instead of the attribute_failure stuff in concreteType
+      return InferredType(c10::str(
+          "Only tensors and (possibly nested) tuples of tensors, lists, or dicts",
+          "are supported ",
+          "as inputs or outputs of traced functions",
+          ", but instead got value of type ",
+          py::str(input.get_type().attr("__name__")),
+          "."));
+    }
   }
 }
 
@@ -829,6 +872,116 @@ struct VISIBILITY_HIDDEN tuple_slice {
   int64_t b;
   int64_t e;
 };
+
+inline bool validateFakeScriptObjectSchema(
+    const c10::FunctionSchema& schema,
+    size_t argumentPosition,
+    py::handle object) {
+  auto argument = schema.arguments().at(argumentPosition);
+  auto class_type = argument.real_type()->expect<c10::ClassType>();
+  auto fake_class_registry =
+      py::module::import("torch._library.fake_class_registry");
+  auto fake_class = fake_class_registry.attr("find_fake_class")(
+      class_type->name().value().qualifiedName());
+  if (!py::isinstance(object.attr("wrapped_obj"), fake_class)) {
+    throw schema_match_error(c10::str(
+        schema.formatTypeMismatchMsg(
+            argument,
+            friendlyTypeName(object),
+            argumentPosition,
+            py::repr(object.attr("wrapped_obj"))),
+        "\nCast error details: ",
+        argument.name(),
+        " is expected to be a FakeScriptObject of ",
+        class_type->name().value().qualifiedName()));
+  }
+  return true;
+}
+
+inline bool matchSchemaAllowFakeScriptObject(
+    const FunctionSchema& schema,
+    const tuple_slice& args,
+    const py::kwargs& kwargs) {
+  size_t all_arguments = args.size() + kwargs.size();
+  if (all_arguments > schema.arguments().size()) {
+    throw schema_match_error(c10::str(
+        schema.name(),
+        "() expected at most ",
+        schema.arguments().size(),
+        " argument(s) but received ",
+        all_arguments,
+        " argument(s). Declaration: ",
+        schema));
+  }
+
+  int64_t arg_idx = 0;
+  auto fake_class_registry =
+      py::module::import("torch._library.fake_class_registry");
+
+  // First push all positional args.
+  for (const auto& arg : args) {
+    // ...but refuse to do it if the schema says that this was supposed
+    // to be keyword only
+    if (schema.arguments()[arg_idx].kwarg_only()) {
+      throw schema_match_error(c10::str(
+          schema.name(),
+          "() takes ",
+          arg_idx,
+          " positional argument(s) but ",
+          args.size(),
+          " was/were given.  Declaration: ",
+          schema));
+    }
+    // Use the type information from the schema to convert the PyObject.
+    const auto& argument = schema.arguments().at(arg_idx);
+    if (argument.real_type()->kind() == TypeKind::ClassType &&
+        py::isinstance(arg, fake_class_registry.attr("FakeScriptObject"))) {
+      validateFakeScriptObjectSchema(schema, arg_idx, arg);
+    } else {
+      argumentToIValue(schema, arg_idx, arg);
+    }
+
+    arg_idx++;
+  }
+
+  // Now for every remaining non-positional argument in the schema, look for it
+  // in the kwargs dict and push it if found, or use its default value if it
+  // has one.
+  size_t consumed_kwargs = 0;
+  for (size_t i = arg_idx; i < schema.arguments().size(); ++i) {
+    const auto& arg = schema.arguments()[i];
+    if (kwargs.contains(arg.name().c_str())) {
+      auto cur_kwarg = kwargs[arg.name().c_str()];
+      if (arg.real_type()->kind() == TypeKind::ClassType &&
+          py::isinstance(
+              cur_kwarg, fake_class_registry.attr("FakeScriptObject"))) {
+        validateFakeScriptObjectSchema(schema, i, cur_kwarg);
+      } else {
+        argumentToIValue(schema, i, cur_kwarg);
+      }
+      consumed_kwargs += 1;
+    } else if (arg.default_value()) {
+      continue;
+    } else {
+      throw schema_match_error(c10::str(
+          schema.name(),
+          "() is missing value for argument '",
+          arg.name(),
+          "'. Declaration: ",
+          schema));
+    }
+  }
+
+  if (consumed_kwargs != kwargs.size()) {
+    std::vector<std::string> names;
+    for (const auto& kwarg : kwargs) {
+      names.emplace_back(py::cast<std::string>(kwarg.first));
+    }
+    throw schema_match_error(schema.findErrorInKwargs(names));
+  }
+
+  return true;
+}
 
 inline Stack createStackForSchema(
     const FunctionSchema& schema,
@@ -1103,6 +1256,19 @@ TORCH_PYTHON_API py::object invokeOperatorFromPython(
     py::args args,
     const py::kwargs& kwargs,
     c10::optional<c10::DispatchKey> dk = c10::nullopt);
+
+TORCH_PYTHON_API py::tuple _maybe_handle_torch_function(
+    const std::string& ns,
+    const std::string& method_name,
+    const std::string& overload_name,
+    bool is_overload,
+    py::args args,
+    const py::kwargs& kwargs);
+
+TORCH_PYTHON_API bool checkSchemaAllowFakeScriptObject(
+    const FunctionSchema& schema,
+    py::args args,
+    const py::kwargs& kwargs);
 
 TORCH_PYTHON_API py::object _get_operation_for_overload_or_packet(
     const std::vector<std::shared_ptr<Operator>>& operations,

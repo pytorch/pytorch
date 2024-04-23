@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/BlasBackend.h>
 #include <ATen/CPUGeneratorImpl.h>
 #include <ATen/DeviceAccelerator.h>
 #include <ATen/LinalgBackend.h>
@@ -11,9 +12,9 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/detail/HIPHooksInterface.h>
 #include <ATen/detail/IPUHooksInterface.h>
+#include <ATen/detail/MAIAHooksInterface.h>
 #include <ATen/detail/MPSHooksInterface.h>
 #include <ATen/detail/MTIAHooksInterface.h>
-#include <ATen/detail/ORTHooksInterface.h>
 #include <ATen/detail/PrivateUse1HooksInterface.h>
 #include <ATen/detail/XPUHooksInterface.h>
 #include <c10/core/QEngine.h>
@@ -24,7 +25,6 @@
 #include <c10/util/irange.h>
 
 #include <cstdint>
-#include <memory>
 #include <mutex>
 
 namespace at {
@@ -121,6 +121,9 @@ class TORCH_API Context {
   static bool hasCuSOLVER() {
     return detail::getCUDAHooks().hasCuSOLVER();
   }
+  static bool hasCuBLASLt() {
+    return detail::getCUDAHooks().hasCuBLASLt();
+  }
   static bool hasHIP() {
     return detail::getHIPHooks().hasHIP();
   }
@@ -139,8 +142,8 @@ class TORCH_API Context {
   static bool hasLazy() {
     return c10::impl::hasDeviceGuardImpl(c10::DeviceType::Lazy);
   }
-  static bool hasORT() {
-    return c10::impl::hasDeviceGuardImpl(c10::DeviceType::ORT);
+  static bool hasMAIA() {
+    return c10::impl::hasDeviceGuardImpl(c10::DeviceType::MAIA);
   }
   // defined in header so that getNonVariableType has ability to inline
   // call_once check. getNonVariableType is called fairly frequently
@@ -208,6 +211,9 @@ class TORCH_API Context {
 
   at::LinalgBackend linalgPreferredBackend() const;
   void setLinalgPreferredBackend(at::LinalgBackend);
+
+  at::BlasBackend blasPreferredBackend() const;
+  void setBlasPreferredBackend(at::BlasBackend);
 
   // Note [Enabling Deterministic Operations]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -289,7 +295,7 @@ class TORCH_API Context {
   // Throws an error if `Context::deterministicAlgorithms()` is true, CUDA
   // >= 10.2, and CUBLAS_WORKSPACE_CONFIG is not set to either ":16:8" or
   // ":4096:8". For more details:
-  // https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility
+  // https://docs.nvidia.com/cuda/cublas/index.html#results-reproducibility
   void alertCuBLASConfigNotDeterministic() const;
 
   void setFloat32MatmulPrecision(const std::string& s);
@@ -320,6 +326,8 @@ class TORCH_API Context {
 
   void setDefaultMobileCPUAllocator();
   void unsetDefaultMobileCPUAllocator();
+  bool allowFP16ReductionCPU() const;
+  void setAllowFP16ReductionCPU(bool);
 
  private:
   void initCUDAIfNeeded(c10::DeviceType p) {
@@ -370,6 +378,11 @@ class TORCH_API Context {
       c10::utils::check_env("TORCH_LINALG_PREFER_CUSOLVER") == true
       ? at::LinalgBackend::Cusolver
       : at::LinalgBackend::Default;
+  at::BlasBackend blas_preferred_backend =
+      (c10::utils::check_env("TORCH_BLAS_PREFER_CUBLASLT") == true ||
+       c10::utils::check_env("TORCH_BLAS_PREFER_HIPBLASLT") == true)
+      ? at::BlasBackend::Cublaslt
+      : at::BlasBackend::Cublas;
 #ifdef C10_MOBILE
   bool release_original_weights = true;
 #else
@@ -378,6 +391,7 @@ class TORCH_API Context {
   bool display_vmap_fallback_warnings_ = false;
   c10::optional<at::QEngine> quantized_engine = c10::nullopt;
   bool enable_sparse_tensor_invariant_checks = false;
+  bool allow_fp16_reduction_cpu = false;
 
   Allocator* prev_allocator_ptr_{nullptr};
 };
@@ -441,8 +455,8 @@ static inline bool hasMPS() {
   return globalContext().hasMPS();
 }
 
-static inline bool hasORT() {
-  return globalContext().hasORT();
+static inline bool hasMAIA() {
+  return globalContext().hasMAIA();
 }
 
 static inline bool hasXPU() {
@@ -549,15 +563,10 @@ struct TORCH_API NoTF32Guard {
   bool changed = false;
 };
 
-#ifdef USE_ROCM
 struct TORCH_API ROCmBackwardPassGuard {
   ROCmBackwardPassGuard();
   ~ROCmBackwardPassGuard();
   static bool is_backward_pass();
-
- private:
-  static thread_local bool is_backward_pass_;
 };
-#endif
 
 } // namespace at

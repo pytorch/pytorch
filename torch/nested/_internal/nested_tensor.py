@@ -45,7 +45,7 @@ class NestedTensor(torch.Tensor):
     # For example, a jagged tensor with shape [B, x, D] can be strided in two
     # ways: [xD, D, 1] and [x, 1, sum(x)], where xD represents x multiplied by D
     _size: Tuple[int, ...]
-    _stride: Tuple[int, ...]
+    _strides: Tuple[int, ...]
     # Indicates that the nth dimension is ragged
     _ragged_idx: int
     _metadata_cache: Dict[str, Any]
@@ -85,6 +85,7 @@ class NestedTensor(torch.Tensor):
         assert offsets is not None
         assert offsets.ndim == 1
         assert not isinstance(values, NestedTensor)
+        assert values.device == offsets.device
 
         # Query cache for the symint associated with offsets or lengths
         # (create a new one if needed).
@@ -92,22 +93,15 @@ class NestedTensor(torch.Tensor):
         ragged_size = get_tensor_symint(ragged_source, coeff=1)
         self._ragged_idx = kwargs.get("_ragged_idx", 1)
         B = offsets.shape[0] - 1
-        Ds = values.shape[: self._ragged_idx - 1] + values.shape[self._ragged_idx :]
+        if lengths is not None:
+            assert B == lengths.shape[0]
 
-        nested_size = [B]
-        nested_size.extend(Ds[: self._ragged_idx - 1])
-        nested_size.append(ragged_size)
-        nested_size.extend(Ds[self._ragged_idx - 1 :])
-        self._size = tuple(nested_size)
-
+        # subtract 1 to convert to values dim space
+        r = self._ragged_idx - 1
+        self._size = (B, *values.shape[:r], ragged_size, *values.shape[r + 1 :])
         stride = values.stride()
-        self._strides = (ragged_size * stride[self._ragged_idx - 1], *stride)
+        self._strides = (ragged_size * stride[r], *stride)
 
-        if values.requires_grad:
-            raise ValueError(
-                "NestedTensor values cannot require grad, please "
-                "detach before passing to NestedTensor constructor"
-            )
         self._values = values
         self._offsets = offsets
         self._lengths = lengths
@@ -120,7 +114,8 @@ class NestedTensor(torch.Tensor):
         torch._dynamo.mark_dynamic(self._values, self._ragged_idx - 1)
 
     def values(self):
-        return self._values
+        # dispatch to get proper view relationship
+        return torch._nested_get_values(self)  # type: ignore[attr-defined]
 
     def offsets(self):
         return self._offsets
@@ -184,6 +179,7 @@ class NestedTensor(torch.Tensor):
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors: Dict, meta, outer_size, outer_stride):
+        # inner tensors: _values, _offsets, [_lengths]
         assert len(inner_tensors) >= 2 and len(inner_tensors) <= 3
         values = inner_tensors["_values"]
         offsets = inner_tensors["_offsets"]
@@ -237,6 +233,11 @@ class NestedTensor(torch.Tensor):
             return func(*args, **kwargs)
 
 
+# NB: These fake view autograd.Functions are superseded by real view ops. Don't use them!
+# TODO: Remove ViewBufferFromNested, ViewNestedFromBuffer, and buffer_from_jagged once the
+# internal BC period has passed.
+
+
 # Not actually a view!
 class ViewBufferFromNested(torch.autograd.Function):
     @staticmethod
@@ -244,7 +245,7 @@ class ViewBufferFromNested(torch.autograd.Function):
         ctx.save_for_backward(x.offsets())
         ctx.metadata_cache = x._metadata_cache
         ctx.ragged_idx = x._ragged_idx
-        return x.values()
+        return x._values
 
     @staticmethod
     def backward(ctx, gO: torch.Tensor):  # type: ignore[override]
@@ -274,23 +275,11 @@ class ViewNestedFromBuffer(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, gO: NestedTensor):  # type: ignore[override]
-        return gO.values(), None, None
+        return gO._values, None, None
 
 
-# Not actually a view!
-# NOTE: @jbschlosser is working on making it a view
-class ViewNonContiguousNestedFromBuffer(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, values: torch.Tensor, offsets: torch.Tensor, lengths: torch.Tensor):  # type: ignore[override]
-        return NestedTensor(
-            values.detach(),
-            offsets=offsets,
-            lengths=lengths,
-        )
-
-    @staticmethod
-    def backward(ctx, gO: NestedTensor):  # type: ignore[override]
-        return gO.values(), None, None
+def buffer_from_jagged(jagged):
+    return ViewBufferFromNested.apply(jagged)
 
 
 # Need to make it obvious that users should be passing in offsets
@@ -336,6 +325,8 @@ def jagged_from_list(
     # Calculate jagged offsets if not provided.
     if offsets is None:
         # Jagged layout specifies that offsets are stored as int64 on the same device as values.
+        # TODO: An alternative way to construct offsets is to use F.pad. This avoids creating
+        # an extra leaf tensor during the forward, potentially resolving compatibility issues.
         offsets = torch.cat(
             [
                 torch.zeros(1, dtype=torch.int64, device=values.device),
@@ -343,11 +334,11 @@ def jagged_from_list(
             ]
         )
 
-    ret_nt = ViewNestedFromBuffer.apply(values, offsets)
+    ret_nt = nested_view_from_values_offsets(values, offsets)
     ret_nt._metadata_cache = {
         # compute this now since it's easy
-        "max_seqlen": max([t.shape[0] for t in tensors]),
-        "min_seqlen": min([t.shape[0] for t in tensors]),
+        "max_seqlen": max(t.shape[0] for t in tensors),
+        "min_seqlen": min(t.shape[0] for t in tensors),
     }
     return (ret_nt, offsets)  # type: ignore[return-value]
 
@@ -404,12 +395,11 @@ def jagged_from_tensor_and_lengths(
     min_seqlen = int(torch.min(lengths).item())
 
     if is_contiguous:
-        ret_nt = ViewNestedFromBuffer.apply(
-            values[offsets[0] : offsets[-1]],
-            offsets - offsets[0],
+        ret_nt = nested_view_from_values_offsets(
+            values[offsets[0] : offsets[-1]], offsets - offsets[0]
         )
     else:
-        ret_nt = ViewNonContiguousNestedFromBuffer.apply(values, offsets, length_list)
+        ret_nt = nested_view_from_values_offsets_lengths(values, offsets, length_list)
 
     # populate metadata cache with computed seqlen extremes
     ret_nt._metadata_cache = {
@@ -420,5 +410,30 @@ def jagged_from_tensor_and_lengths(
     return (ret_nt, offsets, None if is_contiguous else length_list)
 
 
-def buffer_from_jagged(jagged):
-    return ViewBufferFromNested.apply(jagged)
+# NB: A dummy arg is required so that NestedTensor.__torch_dispatch__() is invoked
+# for _nested_view_from_values_offsets(). Sizes don't matter much, but they shouldn't be
+# 0/1 because the dummy can be fake-ified and we want to avoid specializing.
+# This arg is otherwise unused.
+_dummy_instance: Optional[torch.Tensor] = None
+
+
+def _nt_view_dummy() -> torch.Tensor:
+    global _dummy_instance
+    if _dummy_instance is None:
+        _dummy_instance = NestedTensor(
+            values=torch.zeros(3, 3, device="meta"),
+            offsets=torch.zeros(3, device="meta", dtype=torch.int64),
+        ).detach()
+    return _dummy_instance
+
+
+def nested_view_from_values_offsets(values, offsets, ragged_idx=1):
+    return torch._nested_view_from_jagged(  # type: ignore[attr-defined]
+        values, offsets, _nt_view_dummy(), None, ragged_idx
+    )
+
+
+def nested_view_from_values_offsets_lengths(values, offsets, lengths, ragged_idx=1):
+    return torch._nested_view_from_jagged(  # type: ignore[attr-defined]
+        values, offsets, _nt_view_dummy(), lengths, ragged_idx
+    )

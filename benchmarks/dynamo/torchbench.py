@@ -7,6 +7,7 @@ import os
 import re
 import sys
 import warnings
+from collections import namedtuple
 from os.path import abspath, exists
 
 import torch
@@ -22,6 +23,20 @@ from torch._dynamo.utils import clone_inputs
 
 # We are primarily interested in tf32 datatype
 torch.backends.cuda.matmul.allow_tf32 = True
+
+
+def _reassign_parameters(model):
+    # torch_geometric models register parameter as tensors due to
+    # https://github.com/pyg-team/pytorch_geometric/blob/master/torch_geometric/nn/dense/linear.py#L158-L168
+    # Since it is unusual thing to do, we just reassign them to parameters
+    def state_dict_hook(module, destination, prefix, local_metadata):
+        for name, param in module.named_parameters():
+            if isinstance(destination[name], torch.Tensor) and not isinstance(
+                destination[name], torch.nn.Parameter
+            ):
+                destination[name] = torch.nn.Parameter(destination[name])
+
+    model._register_state_dict_hook(state_dict_hook)
 
 
 def setup_torchbench_cwd():
@@ -73,6 +88,30 @@ def load_yaml_file():
     return maybe_list_to_set(data)
 
 
+def process_hf_reformer_output(out):
+    assert isinstance(out, list)
+    # second output is unstable
+    return [elem for i, elem in enumerate(out) if i != 1]
+
+
+def process_hf_whisper_output(out):
+    out_ret = []
+    for i, elem in enumerate(out):
+        if i == 0:
+            assert isinstance(elem, dict)
+            out_ret.append({k: v for k, v in elem.items() if k != "logits"})
+        elif i != 1:
+            out_ret.append(elem)
+
+    return out_ret
+
+
+process_train_model_output = {
+    "hf_Reformer": process_hf_reformer_output,
+    "hf_Whisper": process_hf_whisper_output,
+}
+
+
 class TorchBenchmarkRunner(BenchmarkRunner):
     def __init__(self):
         super().__init__()
@@ -112,6 +151,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return self._skip["device"]["cuda"]
 
     @property
+    def skip_models_for_freezing(self):
+        return self._skip["freezing"]
+
+    @property
     def slow_models(self):
         return self._config["slow"]
 
@@ -122,6 +165,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
     @property
     def non_deterministic_models(self):
         return self._config["non_deterministic"]
+
+    @property
+    def get_output_amp_train_process_func(self):
+        return process_train_model_output
 
     @property
     def skip_not_suitable_for_training_models(self):
@@ -225,6 +272,11 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         if part:
             extra_args += ["--part", part]
 
+        # sam_fast only runs with amp
+        if model_name == "sam_fast":
+            self.args.amp = True
+            self.setup_amp()
+
         if model_name == "vision_maskrcnn" and is_training:
             # Output of vision_maskrcnn model is a list of bounding boxes,
             # sorted on the basis of their scores. This makes accuracy
@@ -255,6 +307,13 @@ class TorchBenchmarkRunner(BenchmarkRunner):
                 extra_args=extra_args,
             )
         model, example_inputs = benchmark.get_module()
+        if model_name in [
+            "basic_gnn_edgecnn",
+            "basic_gnn_gcn",
+            "basic_gnn_sage",
+            "basic_gnn_gin",
+        ]:
+            _reassign_parameters(model)
 
         # Models that must be in train mode while training
         if is_training and (
@@ -265,7 +324,18 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             model.eval()
         gc.collect()
         batch_size = benchmark.batch_size
-
+        if model_name == "torchrec_dlrm":
+            batch_namedtuple = namedtuple(
+                "Batch", "dense_features sparse_features labels"
+            )
+            example_inputs = tuple(
+                batch_namedtuple(
+                    dense_features=batch.dense_features,
+                    sparse_features=batch.sparse_features,
+                    labels=batch.labels,
+                )
+                for batch in example_inputs
+            )
         # Torchbench has quite different setup for yolov3, so directly passing
         # the right example_inputs
         if model_name == "yolov3":

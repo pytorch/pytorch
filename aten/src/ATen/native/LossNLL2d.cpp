@@ -35,7 +35,11 @@ inline Tensor optional_contiguous(const Tensor& source) {
 // or nullptr if the tensor is undefined.
 template <typename scalar_t>
 inline scalar_t* optional_data(const Tensor& source) {
-  return source.defined() ? source.data_ptr<scalar_t>() : nullptr;
+  if constexpr (std::is_const<scalar_t>::value) {
+    return source.defined() ? source.const_data_ptr<scalar_t>() : nullptr;
+  } else {
+    return source.defined() ? source.data_ptr<scalar_t>() : nullptr;
+  }
 }
 
 inline void check_inputs_nll_loss2d(
@@ -109,7 +113,7 @@ static void nll_loss2d_forward_out_frame(
   *total_weight_data = 0;
 
   auto weight_contiguous = optional_contiguous(weight);
-  const scalar_t* weight_data = optional_data<scalar_t>(weight_contiguous);
+  const scalar_t* weight_data = optional_data<const scalar_t>(weight_contiguous);
 
   if (reduction == Reduction::None) {
     const int64_t batch_size = input.size(0);
@@ -117,9 +121,9 @@ static void nll_loss2d_forward_out_frame(
     const int64_t W = input.size(3);
 
     at::native::resize_output(output, {batch_size, H, W});
-    auto input_acc = input.accessor<scalar_t, 4>();
+    auto input_acc = input.accessor<const scalar_t, 4>();
     auto output_acc = output.accessor<scalar_t, 3>();
-    auto target_acc = target.accessor<int64_t, 3>();
+    auto target_acc = target.accessor<const int64_t, 3>();
 
     at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
       for (const auto b : c10::irange(start, end)) {
@@ -170,8 +174,8 @@ static void nll_loss2d_forward_out_frame(
   auto input_contiguous = input.contiguous();
   auto target_contiguous = target.contiguous();
 
-  const scalar_t* input_data = input_contiguous.data_ptr<scalar_t>();
-  const int64_t* target_data = target_contiguous.data_ptr<int64_t>();
+  const scalar_t* input_data = input_contiguous.const_data_ptr<scalar_t>();
+  const int64_t* target_data = target_contiguous.const_data_ptr<int64_t>();
 
   const int64_t batch_size = input.size(0);
   const int64_t map_size = input.size(2) * input.size(3);
@@ -258,8 +262,9 @@ void nll_loss2d_forward_out_cpu_template(
   check_inputs_nll_loss2d(input, target, weight);
   total_weight.resize_({});
 
-  AT_DISPATCH_FLOATING_TYPES_AND(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::BFloat16,
+      ScalarType::Half,
       input.scalar_type(),
       "nll_loss2d_forward_out_frame",
       [&] {
@@ -285,7 +290,7 @@ static void nll_loss2d_backward_out_frame(
     int64_t ignore_index,
     const Tensor& total_weight) {
   auto weight_contiguous = optional_contiguous(weight);
-  const scalar_t* weight_data = optional_data<scalar_t>(weight_contiguous);
+  const scalar_t* weight_data = optional_data<const scalar_t>(weight_contiguous);
 
   if (reduction == at::Reduction::None) {
     check_gradout_shape_nll_loss2d(grad_output, target);
@@ -295,8 +300,8 @@ static void nll_loss2d_backward_out_frame(
     const int64_t W = input.size(3);
 
     auto grad_input_acc = grad_input.accessor<scalar_t, 4>();
-    auto grad_output_acc = grad_output.accessor<scalar_t, 3>();
-    auto target_acc = target.accessor<int64_t, 3>();
+    auto grad_output_acc = grad_output.accessor<const scalar_t, 3>();
+    auto target_acc = target.accessor<const int64_t, 3>();
 
     at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
       for (const auto b : c10::irange(start, end)) {
@@ -319,17 +324,17 @@ static void nll_loss2d_backward_out_frame(
     return;
   }
 
-  const scalar_t total_weight_value = *total_weight.data_ptr<scalar_t>();
+  const scalar_t total_weight_value = *total_weight.const_data_ptr<scalar_t>();
 
   TORCH_CHECK(
       grad_output.dim() <= 1 && grad_output.numel() == 1,
       "Expected a single element grad_output tensor, but got: ",
       grad_output.sizes());
 
-  const scalar_t grad_output_value = *grad_output.data_ptr<scalar_t>();
+  const scalar_t grad_output_value = *grad_output.const_data_ptr<scalar_t>();
 
   const auto target_contiguous = target.contiguous();
-  const int64_t* target_data = target_contiguous.data_ptr<int64_t>();
+  const int64_t* target_data = target_contiguous.const_data_ptr<int64_t>();
 
   scalar_t* grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
 
@@ -379,8 +384,9 @@ void nll_loss2d_backward_out_cpu_template(
       total_weight.numel(),
       " elements)");
 
-  AT_DISPATCH_FLOATING_TYPES_AND(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::BFloat16,
+      ScalarType::Half,
       input.scalar_type(),
       "nll_loss2d_backward_out_frame",
       [&] {

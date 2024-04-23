@@ -1,4 +1,3 @@
-import copy
 import functools
 import itertools
 import logging
@@ -44,22 +43,24 @@ from ..pattern_matcher import (
 )
 from ..utils import decode_device, is_pointwise_use
 from ..virtualized import V
+from .ddp_fusion import fuse_ddp_communication
 from .group_batch_fusion import group_batch_fusion_passes
+from .pre_grad import is_same_dict, save_inductor_dict
 from .reinplace import reinplace_inplaceable_ops
+from .split_cat import POST_GRAD_PATTERNS
+
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
 prims = torch.ops.prims
 
+pattern_matcher_passes = POST_GRAD_PATTERNS.values()
 # First pass_patterns[0] are applied, then [1], then [2]
 pass_patterns = [
     PatternMatcherPass(),
     PatternMatcherPass(),
     PatternMatcherPass(),
 ]
-# patterns applied only in inference
-inference_patterns = PatternMatcherPass()
-decompose_mm_pass = PatternMatcherPass()
 
 
 def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
@@ -83,16 +84,27 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     if config.pattern_matcher:
         lazy_init()
-        inductor_before_change = copy.deepcopy(counters["inductor"])
+        optimus_scuba_log["before_recompile_post_grad"] = upload_graph(gm.graph)
         group_batch_fusion_passes(gm.graph, pre_grad=False)
-        if counters["inductor"] != inductor_before_change:
-            optimus_scuba_log["group_batch_fusion_post_grad"] = upload_graph(gm.graph)
         remove_noop_ops(gm.graph)
         for patterns in pass_patterns:
             patterns.apply(gm.graph)  # type: ignore[arg-type]
-        if is_inference:
-            inference_patterns.apply(gm.graph)  # type: ignore[arg-type]
-        decompose_mm_pass.apply(gm.graph)  # type: ignore[arg-type]
+        for pattern_matcher_pass in pattern_matcher_passes:
+            inductor_before_change = save_inductor_dict(
+                [pattern_matcher_pass.pass_name]
+            )
+            pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
+            if not is_same_dict(counters["inductor"], inductor_before_change):
+                optimus_scuba_log[
+                    f"{pattern_matcher_pass.pass_name}_post_grad"
+                ] = upload_graph(gm.graph)
+
+    if config._fuse_ddp_communication:
+        fuse_ddp_communication(
+            gm.graph,
+            config._fuse_ddp_communication_passes,
+            config._fuse_ddp_bucket_size,
+        )
 
     if config.post_grad_custom_post_pass is not None:
         config.post_grad_custom_post_pass(gm.graph)
@@ -109,6 +121,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     decompose_auto_functionalized(gm.graph)
 
     gm.recompile()
+    optimus_scuba_log["after_recompile_post_grad"] = upload_graph(gm.graph)
     gm.graph.lint()
 
 
@@ -139,12 +152,7 @@ def reorder_for_locality(graph: torch.fx.Graph):
     # copy_ will appear at the end of functionalized graphs when there is mutation on inputs,
     # and this reordering doesnt work well with mutation
     first_copy = next(
-        (
-            node
-            for node in graph.nodes
-            if node.op == "call_function"
-            and node.target == torch.ops.aten.copy_.default
-        ),
+        iter(graph.find_nodes(op="call_function", target=torch.ops.aten.copy_.default)),
         None,
     )
     past_mutating_epilogue = True if first_copy is None else False
@@ -414,7 +422,7 @@ def cat_tuned_op(match, inputs, dim, *, op, shape_of):
         dst = ir.SliceView.create(kernel_tensor, dim, offsets_start[i], offsets_end[i])
         src = op(*inputs[i], layout=dst.get_layout()).data.data
         assert isinstance(src, (ir.ExternKernelOut, ir.TemplateBuffer))
-        src.layout = ir.AliasedLayout(dst)
+        src.layout = ir.NonOwningLayout(dst)
         kernel.inputs.append(src)
 
     kernel.name = V.graph.register_buffer(kernel)
@@ -616,16 +624,21 @@ def remove_noop_ops(graph: torch.fx.Graph):
     """
     Removes both operations that are essentially aten.clone and operations that are essentially aten.alias from the graph.
     """
+    inputs = set()
     input_storages = set()
     output_storages = set()
 
-    for node in graph.nodes:
-        if node.op == "placeholder":
-            input_storages.add(get_node_storage(node))
-        else:
-            break
+    for node in graph.find_nodes(op="placeholder"):
+        inputs.add(node)
+        input_storages.add(get_node_storage(node))
 
-    for out in next(iter(reversed(graph.nodes))).args[0]:
+    output_node = next(iter(reversed(graph.nodes)))
+    assert output_node.op == "output"
+    outputs = output_node.args[0]
+    if not isinstance(outputs, (list, tuple)):
+        # nested subgraphs can have singleton outputs
+        outputs = (outputs,)
+    for out in outputs:
         if isinstance(out, torch.fx.Node):
             output_storages.add(get_node_storage(out))
 
@@ -638,13 +651,28 @@ def remove_noop_ops(graph: torch.fx.Graph):
                 src = src_index(node.args)
             if not isinstance(src, torch.fx.Node):
                 continue
+            # Don't introduce new aliasing between inputs and outputs.
             # See fx_passes/README.md for a discussion of why this is
             # necessary.
-            if get_node_storage(node) in output_storages and (
-                get_node_storage(src) in input_storages
-                or get_node_storage(src) in output_storages
+            node_storage = get_node_storage(node)
+            src_storage = get_node_storage(src)
+            node_is_view = node_storage == src_storage
+            if (
+                not node_is_view
+                and node_storage in output_storages
+                and (src_storage in input_storages or src_storage in output_storages)
             ):
                 continue
+
+            # Even if input and outputs are expected to alias,
+            # don't make "node is src" True
+            if (
+                node_is_view
+                and node in output_node.args
+                and (src in inputs or src in output_node.args)
+            ):
+                continue
+
             is_valid, args, kwargs = get_fake_args_kwargs(node)
             if not is_valid:
                 continue
@@ -663,6 +691,10 @@ def decompose_auto_functionalized(graph):
     def replacement(match: Match, *args, **kwargs):
         from torch._higher_order_ops.auto_functionalize import auto_functionalized_dense
 
+        only_clone_these_tensors = tuple(
+            match.nodes[0].meta.get("only_clone_these_tensors", [])
+        )
+
         flat_args, spec = pytree.tree_flatten((args, kwargs))
 
         # NB: we combine (args, kwargs) into flat args for replacing.
@@ -670,15 +702,16 @@ def decompose_auto_functionalized(graph):
         # tracing a function with kwargs.
         def decomp(*flat_args):
             args, kwargs = pytree.tree_unflatten(flat_args, spec)
-            return auto_functionalized_dense(*args, **kwargs)
+            return auto_functionalized_dense(*args, only_clone_these_tensors, **kwargs)
 
         with V.fake_mode:
             match.replace_by_example(decomp, flat_args, run_dce=False)
 
     graph_pass.apply(graph)
-    for node in graph.nodes:
-        if node.target is torch.ops.higher_order.auto_functionalized:
-            raise AssertionError("auto_functionalized was not removed")
+    for node in graph.find_nodes(
+        op="call_function", target=torch.ops.higher_order.auto_functionalized
+    ):
+        raise AssertionError("auto_functionalized was not removed")
 
 
 @register_lowering_pattern(
@@ -764,9 +797,10 @@ def view_to_reshape(gm):
     """
     Replace view ops in the GraphModule to reshape ops.
     """
-    for nd in gm.graph.nodes:
-        if nd.target == torch.ops.aten.view.default:
-            nd.target = torch.ops.aten.reshape.default
+    for nd in gm.graph.find_nodes(
+        op="call_function", target=torch.ops.aten.view.default
+    ):
+        nd.target = torch.ops.aten.reshape.default
 
 
 def should_prefer_unfused_addmm(match):

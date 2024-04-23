@@ -24,8 +24,8 @@
 
 namespace at::indexing {
 
-const int64_t INDEX_MIN = c10::SymInt::min_representable_int();
-const int64_t INDEX_MAX = -(INDEX_MIN + 1);
+constexpr int64_t INDEX_MIN = c10::SymInt::min_representable_int();
+constexpr int64_t INDEX_MAX = -(INDEX_MIN + 1);
 
 enum class TensorIndexType { None, Ellipsis, SymInt, Boolean, Slice, Tensor };
 
@@ -317,12 +317,12 @@ static inline void recordTensorIndex(
   (*dim_ptr)++;
 };
 
-static inline c10::List<c10::optional<Tensor>> typeConvertIndices(
+static inline c10::List<::std::optional<Tensor>> typeConvertIndices(
     const Tensor& /*self*/,
     std::vector<Tensor>&& indices) {
-  c10::List<c10::optional<Tensor>> converted_inds;
+  c10::List<::std::optional<Tensor>> converted_inds;
   converted_inds.reserve(indices.size());
-  for (const auto& i : indices) {
+  for (auto&& i : std::move(indices)) {
     converted_inds.push_back(std::move(i));
   }
   return converted_inds;
@@ -538,9 +538,9 @@ static inline Tensor applySlicing(
         /*prev_dim_result=*/result,
         /*original_tensor=*/self,
         /*index=*/obj,
-        /*dim=*/&dim,
+        /*dim_ptr=*/&dim,
         /*specified_dims_ptr=*/&specified_dims,
-        /*real_dim=*/i,
+        /*real_dim=*/static_cast<int64_t>(i),
         /*outIndices=*/outIndices,
         /*disable_slice_optimization=*/disable_slice_optimization,
         /*original_tensor_device=*/self_device,

@@ -218,7 +218,7 @@ def _verify_options(
             fqn_param_mapping[fqn] = param
             all_fqns.add(fqn)
 
-    submodule_prefixes = set()
+    submodule_prefixes: Set[str] = set()
     if submodules:
         submodules = set(submodules)
         for name, module in model.named_modules():
@@ -226,8 +226,7 @@ def _verify_options(
                 continue
             fqns = _get_fqns(model, name)
             assert len(fqns) == 1, "Submodule FQN should only have 1 instance"
-            for fqn in fqns:
-                submodule_prefixes.add(f"{fqn}.")
+            submodule_prefixes.update(f"{fqn}." for fqn in fqns)
 
     fsdp_modules = FSDP.fsdp_modules(model)
     state_dict_config: StateDictConfig
@@ -279,16 +278,9 @@ def _verify_state_dict(
     optim_state_dict: OptimizerStateType,
     info: _StateDictInfo,
 ) -> None:
-    # FSDP root must exist otherwise FSDP state_dict will be incorrect.
-    has_fsdp_root = False
     for module in info.fsdp_modules:
         fsdp_state = _get_module_fsdp_state_if_fully_sharded_module(module)
         assert fsdp_state is not None, "Expected a fsdp_state with a fsdp module."
-        if fsdp_state._is_root:
-            has_fsdp_root = True
-            break
-    if info.fsdp_modules and not has_fsdp_root:
-        raise RuntimeError("The model has FSDP modules but no FSDP root module exists.")
 
     # Verify if the model_state_dict and optim_state_dict are valid. This API
     # should give the users an explicit error message to debug or report.
@@ -645,6 +637,8 @@ def get_model_state_dict(
 
     Returns:
         The state_dict for ``model``.
+
+    :rtype: typing.Dict[str, ValueType]
     """
     with gc_context():
         info = _verify_options(
@@ -683,6 +677,8 @@ def get_optimizer_state_dict(
 
     Returns:
         The state_dict for ``optimizers``.
+
+    :rtype: OptimizerStateType
     """
     with gc_context():
         optimizers = (
@@ -819,9 +815,7 @@ def _unflatten_model_state_dict(
 
 def set_model_state_dict(
     model: nn.Module,
-    model_state_dict: Union[
-        Dict[nn.Module, Dict[str, ValueType]], Dict[str, ValueType]
-    ],
+    model_state_dict: Dict[str, ValueType],
     *,
     options: Optional[StateDictOptions] = None,
 ) -> _IncompatibleKeys:
@@ -832,7 +826,7 @@ def set_model_state_dict(
 
     Args:
         model (nn.Module): the nn.Module to the model.
-        model_state_dict: (Union[Dict[nn.Module, Dict[str, ValueType]], Dict[str, ValueType]]):
+        model_state_dict: (Dict[str, ValueType]):
            the model state_dict to load. If the key of the ``model_state_dict``
            is nn.Module, the key is a submodule of ``model`` and the value should
            be the state_dict of the submodule. When loading the state_dict,
@@ -845,6 +839,8 @@ def set_model_state_dict(
         ``NamedTuple`` with ``missing_keys`` and ``unexpected_keys`` fields:
             * **missing_keys** is a list of str containing the missing keys
             * **unexpected_keys** is a list of str containing the unexpected keys
+
+    :type model_state_dict: typing.Dict[str, ValueType]
     """
     model_state_dict: Dict[str, ValueType] = _unflatten_model_state_dict(
         model, model_state_dict
@@ -880,6 +876,8 @@ def set_optimizer_state_dict(
 
     Returns:
         None
+
+    :type optim_state_dict: typing.OptimizerStateType
     """
     with gc_context():
         optimizers = (
@@ -897,9 +895,7 @@ def set_state_dict(
     model: nn.Module,
     optimizers: Union[torch.optim.Optimizer, Iterable[torch.optim.Optimizer]],
     *,
-    model_state_dict: Union[
-        Dict[nn.Module, Dict[str, ValueType]], Dict[str, ValueType]
-    ],
+    model_state_dict: Dict[str, ValueType],
     optim_state_dict: OptimizerStateType,
     options: Optional[StateDictOptions] = None,
 ) -> _IncompatibleKeys:
@@ -932,6 +928,9 @@ def set_state_dict(
         ``NamedTuple`` with ``missing_keys`` and ``unexpected_keys`` fields:
             * **missing_keys** is a list of str containing the missing keys of the model state_dict.
             * **unexpected_keys** is a list of str containing the unexpected keys of the model state_dict.
+
+    :type model_state_dict: typing.Dict[str, ValueType]
+    :type optim_state_dict: typing.OptimizerStateType
     """
 
     model_state_dict: Dict[str, ValueType] = _unflatten_model_state_dict(

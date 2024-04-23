@@ -7,6 +7,7 @@ from torch.nested._internal.sdpa import jagged_scaled_dot_product_attention
 
 from .nested_tensor import NestedTensor
 from typing import *  # noqa: F403
+import torch.nn.functional as F
 from torch.fx.operator_schemas import normalize_function
 
 __all__: List[Any] = []
@@ -21,14 +22,16 @@ def _outer_to_inner_dim(ndim, dim):
     return 0 if dim < 2 else dim - 1
 
 
-def _wrap_jagged_dim(ndim, dim, op_name, convert_to_inner_dim=True):
+def _wrap_jagged_dim(
+    ndim, dim, op_name, convert_to_inner_dim=True, allow_batch_dim=False
+):
     from torch._prims_common import canonicalize_dims
 
     wrapped = canonicalize_dims(ndim, dim)
-    if wrapped < 2:
-        raise RuntimeError(
-            f"{op_name}(): not supported for NestedTensor on dim=0 or dim=1"
-        )
+    if wrapped == 1:
+        raise RuntimeError(f"{op_name}(): not supported for NestedTensor on dim=1")
+    elif wrapped == 0 and not allow_batch_dim:
+        raise RuntimeError(f"{op_name}(): not supported for NestedTensor on dim=0")
     return _outer_to_inner_dim(ndim, wrapped) if convert_to_inner_dim else wrapped
 
 
@@ -56,7 +59,7 @@ def _wrap_jagged_dims(ndim, dims, op_name):
 
 def check_schema(schema_str: str, func, *args, **kwargs) -> None:
     named_arg_types = schema_str.split(", ")
-    num_optional_args = sum([x.endswith("?") for x in named_arg_types])
+    num_optional_args = [x.endswith("?") for x in named_arg_types].count(True)
     min_args = len(named_arg_types) - num_optional_args
 
     # special case: ellipses allows for any number of unchecked args at the end
@@ -95,9 +98,18 @@ def check_schema(schema_str: str, func, *args, **kwargs) -> None:
                 )
             continue
 
-        if not arg_type_check_fns[normalized_arg_type](args[i]):
+        _check_fn = arg_type_check_fns[normalized_arg_type]
+
+        def check_fn(x, is_optional=is_optional):
+            if is_optional:
+                return x is None or _check_fn(x)
+            else:
+                return _check_fn(x)
+
+        if not check_fn(args[i]):
             type_to_desc = {
                 "t": "tensor",
+                "t?": "optional tensor",
                 "jt": "contiguous jagged layout NestedTensor",
                 "jt_all": "jagged layout NestedTensor",
                 "any": "<any type>",
@@ -189,7 +201,7 @@ def lookup_jagged(func, *args, **kwargs) -> Optional[Callable]:
     # Handle pointwise fallbacks
     if torch.Tag.pointwise in func.tags:
         # Assume there aren't additional tensors that aren't the "unary/binary" args
-        num_tensor_args = sum([isinstance(x, torch.Tensor) for x in args])
+        num_tensor_args = sum(isinstance(x, torch.Tensor) for x in args)
         if num_tensor_args == 1:
             check_schema("self: jt_all, ...", func, *args, **kwargs)
             return functools.partial(jagged_unary_pointwise, func)
@@ -380,7 +392,7 @@ def is_contiguous_general(func, *args, **kwargs):
     )
     if new_kwargs["memory_format"] == torch.preserve_format:
         return True
-    return is_contiguous_for_memory_format(inp.values(), **new_kwargs)
+    return is_contiguous_for_memory_format(inp._values, **new_kwargs)
 
 
 register_jagged_func(
@@ -423,6 +435,8 @@ def linear_backward_default(func, *args, **kwargs):
 
 @register_jagged_func(torch.ops.aten._to_copy.default, "self: jt_all")
 def to_copy_default(func, *args, **kwargs):
+    from .nested_tensor import _tensor_symint_registry
+
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
@@ -432,12 +446,17 @@ def to_copy_default(func, *args, **kwargs):
     new_kwargs.pop("layout")
 
     new_values = func(inp._values, **new_kwargs)
-    # NB: Purposefully keep offsets on the old device.
-    return NestedTensor(new_values, **extract_kwargs(inp))
+    new_offsets = inp._offsets.to(device=new_values.device)
+    _tensor_symint_registry[new_offsets] = _tensor_symint_registry[inp._offsets]
+    inp_kwargs = extract_kwargs(inp)
+    inp_kwargs["offsets"] = new_offsets
+
+    return NestedTensor(new_values, **inp_kwargs)
 
 
 register_jagged_func(
     [
+        torch.ops.aten.empty_like.default,
         torch.ops.aten.ones_like.default,
         torch.ops.aten.zeros_like.default,
         torch.ops.aten.randn_like.default,
@@ -547,12 +566,38 @@ def chunk_default(func, *args, **kwargs):
 
     inp = new_kwargs.pop("input")
 
-    new_kwargs["dim"] = _wrap_jagged_dim(inp.dim(), new_kwargs["dim"], "chunk")
+    new_kwargs["dim"] = _wrap_jagged_dim(
+        inp.dim(), new_kwargs["dim"], "chunk", allow_batch_dim=True
+    )
 
-    return [
-        NestedTensor(values=x, **extract_kwargs(inp))
-        for x in func(inp._values, **new_kwargs)
-    ]
+    if new_kwargs["dim"] == 0:
+        chunks = new_kwargs["chunks"]
+        dim0_size = inp._size[0]
+        chunk_size = math.ceil(dim0_size / chunks)
+
+        # get _offsets of the chunks
+        lengths = inp._offsets.diff()
+        chunked_lengths = lengths.chunk(chunks)
+        chunked_offsets = [torch.cumsum(x, dim=0) for x in chunked_lengths]
+        chunked_offsets = [F.pad(x, (1, 0), value=0) for x in chunked_offsets]
+        nested_kwargs = [
+            {"offsets": per_offsets, "_ragged_idx": inp._ragged_idx}
+            for per_offsets in chunked_offsets
+        ]
+
+        # get _values of the chunks
+        split_sizes = [x.sum().item() for x in chunked_lengths]
+        chunk_values = inp._values.split(split_sizes)
+
+        return [
+            NestedTensor(values=chunk_values[i], **(nested_kwargs[i]))
+            for i in range(0, chunk_size)
+        ]
+    else:
+        return [
+            NestedTensor(values=x, **extract_kwargs(inp))
+            for x in func(inp._values, **new_kwargs)
+        ]
 
 
 @register_jagged_func(torch.ops.aten.unbind.int, "self: jt_all, dim: any?")
@@ -997,3 +1042,85 @@ def embedding_default(func, *args, **kwargs):
     return NestedTensor(
         func(weight, indices._values, **new_kwargs), **extract_kwargs(indices)
     )
+
+
+@register_jagged_func(
+    [
+        torch.ops.aten.values.default,
+        torch.ops.aten._nested_get_values.default,
+    ],
+    "self: jt_all",
+)
+def values_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+
+    # TODO: Handle inference mode properly.
+    # See https://github.com/pytorch/pytorch/issues/112024#issuecomment-1779554292
+    return inp._values.detach()
+
+
+@register_jagged_func(
+    torch.ops.aten._nested_view_from_jagged.default,
+    "values: t, offsets: t, dummy: jt_all, lengths: t?, ragged_idx: any?",
+)
+def _nested_view_from_jagged_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    values, offsets, lengths = (
+        new_kwargs["input"],
+        new_kwargs["offsets"],
+        new_kwargs["lengths"],
+    )
+    ragged_idx = new_kwargs["ragged_idx"]
+
+    return NestedTensor(values, offsets, lengths=lengths, _ragged_idx=ragged_idx)
+
+
+@register_jagged_func(torch.ops.aten._nested_get_offsets.default, "self: jt_all")
+def _nested_get_offsets(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+    return inp._offsets
+
+
+@register_jagged_func(torch.ops.aten._nested_get_lengths.default, "self: jt_all")
+def _nested_get_lengths(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+    return inp._lengths
+
+
+@register_jagged_func(torch.ops.aten._nested_get_ragged_idx.default, "self: jt_all")
+def _nested_get_ragged_idx(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+    return inp._ragged_idx
+
+
+# Make the dummy available on the C++ side.
+@register_jagged_func(torch.ops.aten._nested_get_jagged_dummy.default, "self: any")
+def _nested_get_jagged_dummy(func, *args, **kwargs):
+    from torch.nested._internal.nested_tensor import _nt_view_dummy
+
+    return _nt_view_dummy()
+
+
+with torch.library._scoped_library("aten", "IMPL") as aten:
+    aten.impl("_nested_get_jagged_dummy", _nested_get_jagged_dummy, "CPU")
+    aten.impl("_nested_get_jagged_dummy", _nested_get_jagged_dummy, "CUDA")
+    aten.impl("_nested_get_jagged_dummy", _nested_get_jagged_dummy, "Meta")

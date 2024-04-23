@@ -75,7 +75,7 @@ def _rand_shape(dim, min_size, max_size):
 # DOES NOT INCLUDE view ops, which are tested in TestViewOps (currently in
 #   test_torch.py) OR numpy interop (which is also still tested in test_torch.py)
 #
-# See https://pytorch.org/docs/master/torch.html#creation-ops
+# See https://pytorch.org/docs/main/torch.html#creation-ops
 
 class TestTensorCreation(TestCase):
     exact_dtype = True
@@ -945,7 +945,7 @@ class TestTensorCreation(TestCase):
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half))
     def test_vstack_row_stack(self, device, dtype):
-        ops = ((torch.vstack, np.vstack), (torch.row_stack, np.row_stack))
+        ops = ((torch.vstack, np.vstack), (torch.row_stack, np.vstack))
         for torch_op, np_op in ops:
             self._test_special_stacks(0, 2, torch_op, np_op, device, dtype)
             for i in range(5):
@@ -3822,7 +3822,7 @@ def to_memview(tensor):
 
 class TestAsArray(TestCase):
     def _check(self, original, cvt=lambda t: t, is_alias=True, same_dtype=True, same_device=True, **kwargs):
-        """Check the output of 'asarray', given its input and assertion informations.
+        """Check the output of 'asarray', given its input and assertion information.
 
         Besides calling 'asarray' itself, this function does 4 different checks:
             1. Whether the result is aliased or not, depending on 'is_alias'

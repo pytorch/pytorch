@@ -767,7 +767,7 @@ std::vector<int64_t> reverse_list(const IntArrayRef list) {
 
 Tensor reverse_dim(const Tensor& t, int64_t dim) {
   Tensor index =
-      at::arange(t.size(dim) - 1, -1, -1, t.options().dtype(at::kLong));
+      at::arange(t.sym_size(dim) - 1, -1, -1, t.options().dtype(at::kLong));
   return t.index_select(dim, index);
 }
 
@@ -782,19 +782,19 @@ Tensor prod_safe_zeros_backward(
     return grad.expand_as(inp);
   }
 
-  if (inp.size(dim) == 1) {
+  if (inp.sym_size(dim) == 1) {
     return grad;
   }
 
-  auto ones_size = inp.sizes().vec();
+  auto ones_size = inp.sym_sizes().vec();
   ones_size[dim] = 1;
-  Tensor ones = at::ones(ones_size, grad.options());
+  Tensor ones = at::ones_symint(ones_size, grad.options());
   Tensor exclusive_normal_nocp =
-      at::cat({ones, inp.narrow(dim, 0, inp.size(dim) - 1)}, dim);
+      at::cat({ones, inp.narrow_symint(dim, 0, inp.sym_size(dim) - 1)}, dim);
   Tensor exclusive_normal = exclusive_normal_nocp.cumprod(dim);
 
   Tensor narrow_reverse =
-      reverse_dim(inp.narrow(dim, 1, inp.size(dim) - 1), dim);
+      reverse_dim(inp.narrow_symint(dim, 1, inp.sym_size(dim) - 1), dim);
   Tensor exclusive_reverse_nocp =
       at::cat({std::move(ones), std::move(narrow_reverse)}, dim);
   Tensor exclusive_reverse =
@@ -825,7 +825,7 @@ Tensor prod_backward(
   Tensor zero_idx = (input == 0).nonzero();
   if (zero_idx.sym_numel() == 0) {
     return grad * (result / input).conj();
-  } else if (!at::GradMode::is_enabled() && zero_idx.size(0) > 1) {
+  } else if (!at::GradMode::is_enabled() && zero_idx.sym_size(0) > 1) {
     return at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   } else {
     return prod_safe_zeros_backward(grad, input.contiguous().view(-1), 0)
@@ -842,7 +842,7 @@ Tensor prod_backward(
   if (input.dim() == 0) {
     return grad;
   }
-  dim = at::maybe_wrap_dim(dim, static_cast<int64_t>(input.sizes().size()));
+  dim = at::maybe_wrap_dim(dim, static_cast<int64_t>(input.sym_sizes().size()));
   if (!keepdim) {
     // `prod` reduces the dimension at `dim`,
     // so, unsqueeze `grad` and `result` at dim.
@@ -1078,9 +1078,11 @@ std::vector<Tensor> cat_tensors_backward(
     }
     auto& shape = sizes[i];
     // If input was empty tensor, gradInput should be empty tensor.
-    if (shape == std::vector<c10::SymInt>({c10::SymInt(0)})) {
-      grad_inputs[i] = at::zeros({0}, grad_val.options());
-      continue;
+    if (shape.size() == 1) {
+      if (TORCH_GUARD_SIZE_OBLIVIOUS(shape[0].sym_eq(0))) {
+        grad_inputs[i] = at::zeros({0}, grad_val.options());
+        continue;
+      }
     }
     const auto& size = shape[dim];
     accumulate += size;
@@ -3235,12 +3237,11 @@ Tensor as_strided_scatter_backward(
   // take the perf hit and contiguify grad for now.
   auto grad_ = grad.contiguous();
   auto grad_slice = grad_.as_strided_symint(sizes, strides, storage_offset);
-  auto result =
-      grad_.new_zeros_symint(input_geometry.sym_sizes())
-          .as_strided_symint(
-              input_geometry.sym_sizes(), input_geometry.sym_strides());
-  auto result_slice =
-      result.as_strided_symint(sizes, strides, std::move(storage_offset));
+  auto result_buffer = grad_.new_zeros_symint(input_geometry.sym_sizes());
+  auto result = result_buffer.as_strided_symint(
+      input_geometry.sym_sizes(), input_geometry.sym_strides());
+  auto result_slice = result_buffer.as_strided_symint(
+      sizes, strides, std::move(storage_offset));
   result_slice.copy_(grad_slice);
   return result;
 }
@@ -6943,8 +6944,7 @@ Tensor take_backward(
   // For Composite Compliance,
   // if `grad` and `indices` are CCT but `grad_self` is not
   // then we use the out-of-place variant of `put`.
-  if (!isTensorSubclassLike(grad_self) &&
-      areAnyTensorSubclassLike({grad, indices})) {
+  if (areAnyTensorSubclassLike({grad, indices})) {
     return grad_self.put(indices, grad, true);
   }
   return grad_self.put_(indices, grad, true);

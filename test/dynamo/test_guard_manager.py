@@ -6,11 +6,12 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 from torch._C._dynamo import guards
+from torch._dynamo.convert_frame import GlobalStateGuard
 from torch.testing._internal.common_utils import set_default_dtype
 
 RootGuardManager = guards.RootGuardManager
 DictGuardManager = guards.DictGuardManager
-KeyValueDictGuardManager = guards.KeyValueDictGuardManager
+DictSubclassGuardManager = guards.DictSubclassGuardManager
 GetAttrGuardAccessor = guards.GetAttrGuardAccessor
 GetItemGuardAccessor = guards.GetItemGuardAccessor
 TypeGuardAccessor = guards.TypeGuardAccessor
@@ -67,14 +68,41 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(guard(None))
         with set_default_dtype(torch.double):
             self.assertFalse(guard(None))
+            self.assertExpectedInline(
+                str(guard.check_verbose(None)),
+                """\
+GuardDebugInfo(
+result=0,
+verbose_code_parts=['GLOBAL_STATE changed: default_dtype '],
+num_guards_executed=0)
+""",
+            )
         self.assertTrue(guard(None))
+        self.assertTrue(guard.check_verbose(None).result)
         _orig = torch.are_deterministic_algorithms_enabled()
         try:
             torch.use_deterministic_algorithms(not _orig)
             self.assertFalse(guard(None))
+            self.assertExpectedInline(
+                str(guard.check_verbose(None)),
+                """\
+GuardDebugInfo(
+result=0,
+verbose_code_parts=['GLOBAL_STATE changed: deterministic_algorithms '],
+num_guards_executed=0)
+""",
+            )
         finally:
             torch.use_deterministic_algorithms(_orig)
         self.assertTrue(guard(None))
+        self.assertTrue(guard.check_verbose(None).result)
+
+    def test_global_state_reason(self):
+        with torch.enable_grad():
+            guards = GlobalStateGuard()
+        with torch.no_grad():
+            self.assertIs(guards.check(), False)
+            self.assertEqual(guards.reason(), "grad_mode ")
 
     def test_python_lambda_leaf_guard(self):
         const_guard = guards.LAMBDA_GUARD(
@@ -210,8 +238,8 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
 
         f_locals = Foo(a, a)
 
-        x_guard_mgr = guard_manager.getattr_manager("x", a)
-        y_guard_mgr = guard_manager.getattr_manager("y", a)
+        x_guard_mgr = guard_manager.getattr_manager("x", "", a)
+        y_guard_mgr = guard_manager.getattr_manager("y", "", a)
         install_tensor_aliasing_guard(x_guard_mgr, y_guard_mgr, ["x is y"])
 
         # Check structure
@@ -243,8 +271,8 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(guard({}))
 
     def test_dynamic_indices_guard(self):
-        guard1 = guards.DYNAMIC_INDICES(False, set(), ["x.size(0) == y.size(0)"])
-        guard2 = guards.DYNAMIC_INDICES(True, set({0, 1}), ["x.size(0) == y.size(0)"])
+        guard1 = guards.DYNAMIC_INDICES(set(), ["x.size(0) == y.size(0)"])
+        guard2 = guards.DYNAMIC_INDICES(set({0, 1}), ["x.size(0) == y.size(0)"])
 
         x = torch.randn(4)
         self.assertTrue(guard1(x))
@@ -291,9 +319,9 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
 
         f_locals = Foo(a, a, a)
 
-        x_guard_mgr = guard_manager.getattr_manager("x", a)
-        y_guard_mgr = guard_manager.getattr_manager("y", a)
-        z_guard_mgr = guard_manager.getattr_manager("z", a)
+        x_guard_mgr = guard_manager.getattr_manager("x", "", a)
+        y_guard_mgr = guard_manager.getattr_manager("y", "", a)
+        z_guard_mgr = guard_manager.getattr_manager("z", "", a)
         install_no_tensor_aliasing_guard(
             [x_guard_mgr, y_guard_mgr, z_guard_mgr],
             ["x", "y", "z"],
@@ -337,7 +365,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         x = torch.rand(3, 4)
         weakref_x = weakref.ref(x)
 
-        guard = guards.WEAKREF_ALIVE(["weakref_x is not None"])
+        guard = guards.NOT_NONE(["weakref_x is not None"])
         self.assertTrue(guard(weakref_x()))
         del x
         self.assertFalse(guard(weakref_x()))
@@ -368,11 +396,11 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         foo = Foo(1, 2)
         guard_manager = RootGuardManager()
         guard_manager.add_type_match_guard(id_type(foo), ["type(x) == Foo"])
-        guard_manager.getattr_manager("x", 1).add_lambda_guard(
+        guard_manager.getattr_manager("x", "x", 1).add_lambda_guard(
             functools.partial(equals_match, expected=foo.x),
             equals_match_verbose_code_parts(foo.x),
         )
-        guard_manager.getattr_manager("y", 2).add_lambda_guard(
+        guard_manager.getattr_manager("y", "y", 2).add_lambda_guard(
             functools.partial(equals_match, expected=foo.y),
             equals_match_verbose_code_parts(foo.y),
         )
@@ -387,10 +415,15 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         )
         # Check leaf guards on child managers
         self.assertEqual(
-            len(guard_manager.getattr_manager("x", None).get_leaf_guards()), 1
+            len(
+                guard_manager.getattr_manager(
+                    attr="x", source="x", example_value=None
+                ).get_leaf_guards()
+            ),
+            1,
         )
         self.assertEqual(
-            len(guard_manager.getattr_manager("y", None).get_leaf_guards()), 1
+            len(guard_manager.getattr_manager("y", "y", None).get_leaf_guards()), 1
         )
 
         self.assertTrue(guard_manager.check(foo))
@@ -401,11 +434,11 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         foo = [1, 2]
         guard_manager = RootGuardManager()
         guard_manager.add_type_match_guard(id_type(foo), ["type(x) == Foo"])
-        guard_manager.getitem_manager(0, 1).add_lambda_guard(
+        guard_manager.getitem_manager(0, "", 1).add_lambda_guard(
             functools.partial(equals_match, expected=foo[0]),
             equals_match_verbose_code_parts(foo[0]),
         )
-        guard_manager.getitem_manager(1, 2).add_lambda_guard(
+        guard_manager.getitem_manager(1, "", 2).add_lambda_guard(
             functools.partial(equals_match, expected=foo[1]),
             equals_match_verbose_code_parts(foo[1]),
         )
@@ -420,10 +453,10 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         )
         # Check leaf guards on child managers
         self.assertEqual(
-            len(guard_manager.getitem_manager(0, None).get_leaf_guards()), 1
+            len(guard_manager.getitem_manager(0, "", None).get_leaf_guards()), 1
         )
         self.assertEqual(
-            len(guard_manager.getitem_manager(1, None).get_leaf_guards()), 1
+            len(guard_manager.getitem_manager(1, "", None).get_leaf_guards()), 1
         )
 
         self.assertTrue(guard_manager.check(foo))
@@ -438,10 +471,10 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
 
         guards_manager = RootGuardManager()
         guards_manager.add_type_match_guard(id_type(foo), ["type(x) == Foo"])
-        guards_manager.dict_getitem_manager("a", 1).add_equals_match_guard(
+        guards_manager.dict_getitem_manager("a", "", 1).add_equals_match_guard(
             1, ["a == 1"]
         )
-        guards_manager.dict_getitem_manager("b", 2).add_equals_match_guard(
+        guards_manager.dict_getitem_manager("b", "", 2).add_equals_match_guard(
             2, ["b == 2"]
         )
 
@@ -451,9 +484,9 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
     def test_globals(self):
         global global_pair, Pair
         guard_manager = RootGuardManager()
-        gpair_mgr = guard_manager.globals_dict_manager(globals(), None).getitem_manager(
-            "global_pair", global_pair
-        )
+        gpair_mgr = guard_manager.globals_dict_manager(
+            globals(), "", None
+        ).getitem_manager("global_pair", "", global_pair)
 
         gpair_mgr.add_lambda_guard(
             lambda x: isinstance(x, Pair)
@@ -480,10 +513,10 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         f_locals = {"foo": foo}
 
         # len(type(foo).__mro__) == 2
-        foo_mgr = guard_manager.getitem_manager("foo", foo)
-        type_manager = foo_mgr.type_manager(type(foo))
+        foo_mgr = guard_manager.getitem_manager("foo", "", foo)
+        type_manager = foo_mgr.type_manager("", type(foo))
         self.assertTrue(isinstance(foo_mgr.get_accessors()[0], TypeGuardAccessor))
-        mro_manager = type_manager.getattr_manager("__mro__", type(foo).__mro__)
+        mro_manager = type_manager.getattr_manager("__mro__", "", type(foo).__mro__)
         self.assertTrue(
             isinstance(type_manager.get_accessors()[0], GetAttrGuardAccessor)
         )
@@ -493,11 +526,11 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         )
 
         # type(foo).__mro__[0].a = 4
-        item_manager = mro_manager.getitem_manager(1, type(foo).__mro__[1])
+        item_manager = mro_manager.getitem_manager(1, "", type(foo).__mro__[1])
         self.assertTrue(
             isinstance(mro_manager.get_accessors()[0], GetItemGuardAccessor)
         )
-        attr_manager = item_manager.getattr_manager("a", type(foo).__mro__[0].a)
+        attr_manager = item_manager.getattr_manager("a", "", type(foo).__mro__[0].a)
         self.assertTrue(
             isinstance(item_manager.get_accessors()[0], GetAttrGuardAccessor)
         )
@@ -518,7 +551,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         guard_manager.add_tuple_iterator_length_guard(
             5, id_type(iter(tuple())), ["len == 5"]
         )
-        guard_manager.tuple_iterator_getitem_manager(2, foo).add_equals_match_guard(
+        guard_manager.tuple_iterator_getitem_manager(2, "", foo).add_equals_match_guard(
             a[3], ["x==4"]
         )
 
@@ -534,8 +567,8 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
 
     def test_global_weakref(self):
         guard_manager = RootGuardManager()
-        globals_manager = guard_manager.globals_dict_manager(globals(), None)
-        weakref_manager = globals_manager.global_weakref_manager("weakref_x", None)
+        globals_manager = guard_manager.globals_dict_manager(globals(), "", None)
+        weakref_manager = globals_manager.global_weakref_manager("weakref_x", "", None)
 
         weakref_manager.add_lambda_guard(
             lambda x: isinstance(x, torch.Tensor),
@@ -553,7 +586,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         guard_manager = RootGuardManager()
 
         # Check that we can use the same accessor
-        foo_mgr = guard_manager.lambda_manager(lambda x: x[2], None)
+        foo_mgr = guard_manager.lambda_manager(lambda x: x[2], "", None)
         foo_mgr.add_lambda_guard(
             lambda x: x == 3,
             "Expected value 3",
@@ -567,12 +600,27 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
             raise AssertionError("Test")
             return x
 
-        foo_mgr = guard_manager.lambda_manager(fn, None)
+        foo_mgr = guard_manager.lambda_manager(fn, "", None)
 
         self.assertFalse(guard_manager.check(None))
         debug_info = guard_manager.check_verbose(None)
         self.assertFalse(debug_info.result)
         self.assertTrue("Test" in debug_info.verbose_code_parts[0])
+
+    def test_dict_contains_guard(self):
+        foo = {"a": 1, "b": 2}
+        guard = guards.DICT_CONTAINS(True, "a", ["has a"])
+
+        self.assertTrue(guard(foo))
+        self.assertTrue(guard({"a": 1, "b": 2}))
+        self.assertFalse(guard({"b": 2, "c": 3}))
+        self.assertFalse(guard({}))
+
+        guard = guards.DICT_CONTAINS(False, "c", ["not has c"])
+        self.assertTrue(guard(foo))
+        self.assertTrue(guard({"a": 1, "b": 2}))
+        self.assertFalse(guard({"b": 2, "c": 3}))
+        self.assertTrue(guard({}))
 
     def test_dict_guard_manager(self):
         root = RootGuardManager()
@@ -586,18 +634,18 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
 
         # its a getitem_manager just for f_locals. But the child guard manager
         # should be a DictGuardManager.
-        dict_mgr = root.getitem_manager("d", f_locals["d"])
+        dict_mgr = root.getitem_manager("d", "", f_locals["d"])
         self.assertTrue(isinstance(dict_mgr, DictGuardManager))
 
         self.assertTrue(root.check(f_locals))
 
         # Check that no one can add a leaf guard
         with self.assertRaises(RuntimeError):
-            dict_mgr.add_length_check_guard(3, "len check")
+            dict_mgr.add_id_match_guard(id_type(f_locals), "id match")
 
         # Check that no one can add an arbitrary accessor
         with self.assertRaises(RuntimeError):
-            dict_mgr.getitem_manager("a", f_locals["d"]["a"])
+            dict_mgr.getitem_manager("a", "", f_locals["d"]["a"])
 
         # Check that it fails with different length dict
         f_locals_prime = {
@@ -606,40 +654,28 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(root.check(f_locals_prime))
 
         # Add key-value manager ("a" : 1)
-        mgr0 = dict_mgr.get_key_value_manager(0)
         self.assertTrue(root.check(f_locals))
-        mgr0.get_key_manager("a").add_equals_match_guard("a", ["dict.keys()[0] == a"])
+        dict_mgr.get_key_manager(0, "", "a").add_equals_match_guard(
+            "a", ["dict.keys()[0] == a"]
+        )
         self.assertTrue(root.check(f_locals))
-        mgr0.get_value_manager(1).add_equals_match_guard(1, ["d[0] == 1"])
+        dict_mgr.get_value_manager(0, "", 1).add_equals_match_guard(1, ["d[0] == 1"])
         self.assertTrue(root.check(f_locals))
-
-        # Check that we can't add a guard to a key-value manager
-        with self.assertRaises(RuntimeError):
-            mgr0.add_length_check_guard(2, "len check")
-
-        # Check that we can't add an accessor to the key-value manager
-        with self.assertRaises(RuntimeError):
-            mgr0.getitem_manager("a", f_locals["d"]["a"])
 
         # Add key-value manager (nothing : {"z" : 3})
-        mgr1 = dict_mgr.get_key_value_manager(1)
         self.assertTrue(root.check(f_locals))
-        mgr1.get_key_manager(nothing).add_lambda_guard(
+        dict_mgr.get_key_manager(1, "", nothing).add_lambda_guard(
             lambda x: x is nothing, ["x is nothing"]
         )
         self.assertTrue(root.check(f_locals))
-        value_mgr = mgr1.get_value_manager(f_locals["d"][nothing])
+        value_mgr = dict_mgr.get_value_manager(1, "", f_locals["d"][nothing])
         self.assertTrue(isinstance(value_mgr, DictGuardManager))
         self.assertTrue(root.check(f_locals))
 
         # Check structure
         # Check that we are only guarding on two keys. This is common in
         # LazyVariableTracker.
-        self.assertEqual(len(dict_mgr.get_child_managers()), 2)
-        self.assertTrue(isinstance(mgr0, KeyValueDictGuardManager))
-        self.assertTrue(isinstance(mgr1, KeyValueDictGuardManager))
-        self.assertEqual(len(mgr0.get_child_managers()), 2)
-        self.assertEqual(len(mgr1.get_child_managers()), 2)
+        self.assertEqual(len(dict_mgr.get_key_value_managers()), 2)
 
         f_locals["d"]["a"] = 2
         self.assertFalse(root.check(f_locals))
@@ -651,6 +687,69 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         f_locals["d"].pop(100)
         # fails because of len check
         self.assertFalse(root.check(f_locals))
+
+    def test_dict_guard_manager2(self):
+        root = RootGuardManager()
+
+        f_locals = {
+            "d": {"a": 1, 100: torch.randn(4)},
+        }
+        dict_mgr = root.getitem_manager("d", "", f_locals["d"])
+        self.assertTrue(type(dict_mgr) is DictGuardManager)
+        self.assertTrue(root.check(f_locals))
+
+        # defaultdict
+        root = RootGuardManager()
+        from collections import defaultdict
+
+        f_locals = {}
+        f_locals["d"] = defaultdict()
+        f_locals["d"]["a"] = 1
+        f_locals["d"][100] = torch.randn(4)
+        dict_mgr = root.getitem_manager("d", "", f_locals["d"])
+        self.assertTrue(type(dict_mgr) is DictGuardManager)
+        self.assertTrue(root.check(f_locals))
+
+        # ordereddict
+        root = RootGuardManager()
+        from collections import OrderedDict
+
+        f_locals = {}
+        f_locals["d"] = OrderedDict()
+        f_locals["d"]["a"] = 1
+        f_locals["d"][100] = torch.randn(4)
+        dict_mgr = root.getitem_manager("d", "", f_locals["d"])
+        self.assertTrue(type(dict_mgr) is DictSubclassGuardManager)
+        self.assertTrue(root.check(f_locals))
+
+        # dict subclass - should be treated as a dict
+        root = RootGuardManager()
+
+        class MyDict(dict):
+            pass
+
+        f_locals = {}
+        f_locals["d"] = MyDict()
+        f_locals["d"]["a"] = 1
+        f_locals["d"][100] = torch.randn(4)
+        dict_mgr = root.getitem_manager("d", "", f_locals["d"])
+        self.assertTrue(type(dict_mgr) is DictGuardManager)
+        self.assertTrue(root.check(f_locals))
+
+        # dict subclass - with modified keys
+        root = RootGuardManager()
+
+        class ReversedDict(dict):
+            def keys(self):
+                return [10, 100]
+
+        f_locals = {}
+        f_locals["d"] = ReversedDict()
+        f_locals["d"][100] = torch.randn(4)
+        f_locals["d"][10] = torch.randn(4)
+        dict_mgr = root.getitem_manager("d", "", f_locals["d"])
+        self.assertTrue(type(dict_mgr) is DictSubclassGuardManager)
+        self.assertTrue(root.check(f_locals))
 
 
 if __name__ == "__main__":

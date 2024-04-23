@@ -467,6 +467,11 @@ class XPUAllocator : public Allocator {
     Block* block = device_allocators[device]->malloc(device, size, queue);
     add_allocated_block(block);
     *devPtr = block->ptr;
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      (*interp)->trace_gpu_memory_allocation(
+          c10::kXPU, reinterpret_cast<uintptr_t>(*devPtr));
+    }
   }
 
   void free(void* ptr) {
@@ -476,6 +481,11 @@ class XPUAllocator : public Allocator {
     Block* block = get_allocated_block(ptr, /* remove */ true);
     TORCH_CHECK(block, "invalid device pointer: ", ptr);
     device_allocators[block->device]->free(block);
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      (*interp)->trace_gpu_memory_deallocation(
+          c10::kXPU, reinterpret_cast<uintptr_t>(block->ptr));
+    }
   }
 
   void emptyCache() {
@@ -497,13 +507,11 @@ class XPUAllocator : public Allocator {
     device_allocators[block->device]->recordStream(block, stream);
   }
 
-  DataPtr allocate(size_t size) const override {
+  DataPtr allocate(size_t size) override {
     auto device = c10::xpu::current_device();
     void* r = nullptr;
     if (size != 0) {
-      // Allocator declares allocate const!
-      const_cast<XPUAllocator*>(this)->malloc(
-          &r, device, size, xpu::getCurrentXPUStream(device));
+      this->malloc(&r, device, size, xpu::getCurrentXPUStream(device));
     }
     return {r, r, &local_raw_delete, Device(DeviceType::XPU, device)};
   }

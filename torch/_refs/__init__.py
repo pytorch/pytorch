@@ -1146,9 +1146,7 @@ def copysign(
     if isinstance(b, Number) and isinstance(a, Tensor):
         b = scalar_tensor(b, dtype=a.dtype, device=a.device)
     elif isinstance(a, Tensor) and isinstance(b, Tensor) and a.device != b.device:
-        msg = "Expected divisor (b) to be on the same device ({}) as dividend (a), but it is found on {}!".format(
-            a.device, b.device
-        )
+        msg = f"Expected divisor (b) to be on the same device ({a.device}) as dividend (a), but it is found on {b.device}!"
         raise RuntimeError(msg)
     return where(signbit(b), neg(abs(a)), abs(a))
 
@@ -1288,9 +1286,7 @@ def floor_divide(
         a = scalar_tensor(a, dtype=b.dtype, device=b.device)
     elif isinstance(a, Tensor) and isinstance(b, Tensor) and a.device != b.device:
         if a.device == torch.device("cpu"):
-            msg = "Expected divisor (b) to be on the same device ({}) as dividend (a), but it is found on {}!".format(
-                a.device, b.device
-            )
+            msg = f"Expected divisor (b) to be on the same device ({a.device}) as dividend (a), but it is found on {b.device}!"
             raise RuntimeError(msg)
         else:
             b = prims.device_put(b, device=a.device)
@@ -1936,9 +1932,7 @@ def clone(
 
 def copy_to(a: Tensor, b: Tensor, *, allow_cross_device=True):
     if not allow_cross_device and a.device != b.device:
-        msg = "Attempting to copy from device {} to device {}, but cross-device copies are not allowed!".format(
-            b.device, a.device
-        )
+        msg = f"Attempting to copy from device {b.device} to device {a.device}, but cross-device copies are not allowed!"
         raise RuntimeError(msg)
 
     return prims.copy_to(a, b)
@@ -3708,9 +3702,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
                 if allow_copy:
                     return prims.reshape(a, shape)
 
-                msg = "Cannot view a tensor with shape {} and strides {} as a tensor with shape {}!".format(
-                    a.shape, a.stride(), shape
-                )
+                msg = f"Cannot view a tensor with shape {a.shape} and strides {a.stride()} as a tensor with shape {shape}!"
                 raise ValueError(msg)
 
             a_ = flatten(a_, idx, end)
@@ -4070,8 +4062,9 @@ def tensor_split(
     # If indices_or_sections is a tensor, it must be a CPU Long tensor
     if isinstance(indices_or_sections, TensorLike):
         if not indices_or_sections.device.type == "cpu":
-            msg = "tensor_split: if indices_or_sections is a tensor it must be on the CPU, but received one on {}".format(
-                indices_or_sections.device
+            msg = (
+                f"tensor_split: if indices_or_sections is a tensor it must be on the CPU, "
+                f"but received one on {indices_or_sections.device}"
             )
             raise ValueError(msg)
         if indices_or_sections.dtype != torch.long:
@@ -4932,9 +4925,10 @@ def arange(
         lambda: f"step must be finite but got {step}",
     )
 
+    args = (start, end, step)
+    integer_args = builtins.all(isinstance(arg, IntLike) for arg in args)
+
     if dtype is None:
-        args = (start, end, step)
-        integer_args = builtins.all(isinstance(arg, IntLike) for arg in args)
         dtype = torch.int64 if integer_args else torch.get_default_dtype()
 
     is_integer = utils.is_integer_dtype(dtype)
@@ -4962,7 +4956,6 @@ def arange(
             requires_grad=requires_grad,
         )
 
-    computation_dtype = utils.get_acc_type(dtype, device)
     index = prims.iota(
         length,
         start=0,
@@ -4970,6 +4963,10 @@ def arange(
         dtype=torch.int64,
         device=device,
         requires_grad=False,
+    )
+
+    computation_dtype = (
+        torch.long if integer_args else utils.get_acc_type(dtype, device)
     )
     index = _maybe_convert_to_dtype(index, computation_dtype)
     result = start + step * index
@@ -6296,6 +6293,8 @@ def _infer_scalar_type(obj):
             return torch.cfloat
         elif default_dtype is torch.double:
             return torch.cdouble
+        elif default_dtype is torch.half:
+            return torch.chalf
         else:
             raise RuntimeError("invalid default scalar type for complex")
     if isinstance(obj, torch.Tensor):
@@ -6332,21 +6331,15 @@ def _infer_scalar_type(obj):
 
 # Analogous to recursive_store
 # xref: recursive_store in torch/csrc/utils/tensor_new.cpp
-def _recursive_build(sizes, dim, scalarType, obj):
-    ndim = len(sizes)
-    assert dim <= ndim
-    if dim == ndim:
+def _recursive_build(scalarType: torch.dtype, obj: TensorOrNumberLikeType):
+    if isinstance(obj, Tensor) and obj.ndim <= 1:
+        obj = obj.item()
+        # fall through into next case
+    if isinstance(obj, Number):
         return torch.scalar_tensor(obj, dtype=scalarType)
-    n = sizes[dim]
+
     seq = obj
-    seq_size = len(seq)
-    if seq_size != n:
-        raise ValueError(
-            f"expected sequence of length {n} at dim {dim} (got {seq_size})"
-        )
-    return torch.stack(
-        [_recursive_build(sizes, dim + 1, scalarType, item) for item in seq]
-    )
+    return torch.stack([_recursive_build(scalarType, item) for item in seq])
 
 
 # xref: internal_new_from_data in torch/csrc/utils/tensor_new.cpp
@@ -6383,7 +6376,6 @@ def _internal_new_from_data(
     # TODO: test for numpy input with PyArray_Check
 
     device = device_opt if device_opt is not None else options["device"]
-    sizes = _compute_sizes(data, scalar_type)
     inferred_scalar_type = _infer_scalar_type(data) if type_inference else scalar_type
 
     # NB: Don't need to avoid tracing, as we aren't going to do any manual
@@ -6398,7 +6390,7 @@ def _internal_new_from_data(
         # of a freshly allocated CPU tensor.  Here, we're going to do an
         # alternate, heinously slow implementation: turn each individual
         # scalar into a tensor, and then repeatedly cat them together
-        tensor = _recursive_build(sizes, 0, inferred_scalar_type, data)
+        tensor = _recursive_build(inferred_scalar_type, data)
 
         tensor = tensor.to(device, inferred_scalar_type, non_blocking=False, copy=False)
 
@@ -6429,7 +6421,8 @@ def tensor(data, *, dtype=None, device=None, pin_memory=False, requires_grad=Fal
         pin_memory=pin_memory,
     )
     new_tensor.detach_()
-    new_tensor.requires_grad_(requires_grad)
+    if requires_grad:
+        new_tensor.requires_grad_(requires_grad)
     return new_tensor
 
 

@@ -1,20 +1,11 @@
-#include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
-#include <fstream>
-#include <mutex>
-#include <sstream>
-
-#if defined(__linux__)
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
-#endif
 
 #ifdef USE_C10D_NCCL
 
 #include <exception>
+#include <fstream>
 #include <map>
+#include <mutex>
+#include <sstream>
 #include <stdexcept>
 #include <tuple>
 #include <unordered_set>
@@ -32,9 +23,13 @@
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/cuda/nccl.h>
+#include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
+#include <torch/csrc/distributed/c10d/PrefixStore.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/logger.hpp>
 #include <torch/torch.h>
 
 namespace c10d {
@@ -83,6 +78,22 @@ ncclDataType_t getNcclDataType(at::ScalarType type) {
       "Input tensor data type is not supported for NCCL process group: ",
       type);
   return it->second;
+}
+
+bool complexViewAsRealAllowed(const ReduceOp reduceOp) {
+  switch (reduceOp) {
+    case ReduceOp::SUM:
+      return true;
+    case ReduceOp::AVG:
+      return true;
+    case ReduceOp::PREMUL_SUM:
+      return true;
+    case ReduceOp::UNUSED:
+      return true;
+    default:
+      return false;
+  }
+  return false;
 }
 
 #ifdef ENABLE_NCCL_PREMUL_SUM_SUPPORT
@@ -151,7 +162,7 @@ ncclRedOpRAII getNcclReduceOp(
 #endif
     }
     return ncclOp.at(reduceOp);
-  } catch (const std::out_of_range& e) {
+  } catch (const std::out_of_range&) {
     switch (reduceOp) {
       case ReduceOp::AVG:
         C10_THROW_ERROR(
@@ -273,6 +284,9 @@ inline void errorIfCapturingNonCapturableNCCL(c10::cuda::CaptureStatus status) {
 static std::unordered_map<std::shared_ptr<NCCLComm>, int> ncclCommDevIdxMap;
 static std::mutex ncclCommDevIdxMapMutex;
 static bool allocatorHooksAttached = false;
+
+std::atomic<bool> ProcessGroupNCCL::shouldDump_(false);
+
 void cacheAllocatorRegisterHook(
     const c10::cuda::CUDACachingAllocator::TraceEntry& te) {
   // Register after SEGMENT_ALLOC
@@ -338,8 +352,11 @@ std::string dump_nccl_trace() {
 }
 #endif
 
-c10::optional<std::function<std::string()>>& get_cpp_trace_dumper() {
-  static c10::optional<std::function<std::string()>> dumper(c10::nullopt);
+c10::optional<std::function<void(std::function<void(const std::string&)>)>>&
+get_cpp_trace_dumper() {
+  static c10::optional<
+      std::function<void(std::function<void(const std::string&)>)>>
+      dumper(c10::nullopt);
   return dumper;
 }
 
@@ -650,9 +667,9 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
 bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
   RECORD_PARAM_COMMS(
       static_cast<int>(this->seq_), // seq
-      0, // process group ptr
+      std::make_tuple("", ""), // PG name tuple
       rank_, // rank
-      "wait", // colName
+      "wait", // collective name
       0, // inNelems
       0, // outNelems
       at::kByte, // dType
@@ -715,15 +732,17 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       ValueError,
       at::cuda::getNumGPUs() != 0,
       "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
+  this->setGroupName(options_->group_name);
   logPrefix_ = createLogPrefix();
   blockingWait_ = getCvarBool(TORCH_NCCL_BLOCKING_WAIT, false);
-  abortInDestroyProcessGroup_ =
-      getCvarBool(TORCH_NCCL_ABORT_IN_DESTROY_PG, false);
   asyncErrorHandling_ = static_cast<ErrorHandlingMode>(
       getCvarInt(TORCH_NCCL_ASYNC_ERROR_HANDLING, 3 /*SkipCleanUp*/));
   desyncDebug_ = getCvarBool(TORCH_NCCL_DESYNC_DEBUG, false) ||
       (dist_debug_level_ >= DebugLevel::Detail);
-  dumpOnTimeout_ = getCvarBool(TORCH_NCCL_DUMP_ON_TIMEOUT, false) ||
+  // TODO, we should either deprecate TORCH_NCCL_DUMP_ON_TIMEOUT
+  // or change its name to reflect that dump happens on exception including
+  // both timeout and other errors.
+  dumpOnException_ = getCvarBool(TORCH_NCCL_DUMP_ON_TIMEOUT, false) ||
       (dist_debug_level_ >= DebugLevel::Detail);
   heartbeat_ = 1ULL;
   monitorThreadEnabled_.store(getCvarBool(TORCH_NCCL_ENABLE_MONITORING, true));
@@ -733,7 +752,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       getCvarInt(TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC, 60 * 1000 /*60 Sec*/);
   coordCheckIntervalMilSec_ = getCvarInt(TORCH_NCCL_COORD_CHECK_MILSEC, 1000);
   ncclTraceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 0);
-  NCCLTraceBuffer::get()->record_pg_ranks(uid_, groupRanks());
   enableCollecticeHashDebug_ = (dist_debug_level_ >= DebugLevel::Detail);
   // store_ usually is wrapped with PrefixStore and the prefix is different
   // across different ProcessGroupNCCL(PG) instances. We need to get the
@@ -793,7 +811,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << "NCCL version: " << getNcclVersion() << ", size: " << size
             << ", global rank: " << globalRank()
             << ", TORCH_NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
-            << ", TORCH_NCCL_DUMP_ON_TIMEOUT: " << dumpOnTimeout_
+            << ", TORCH_NCCL_DUMP_ON_TIMEOUT: " << dumpOnException_
             << ", TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC: "
             << waitTimeoutDumpInMilSec_
             << ", TORCH_NCCL_DESYNC_DEBUG: " << desyncDebug_
@@ -814,7 +832,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << ", TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: " << heartbeatTimeoutInSec_
             << ", TORCH_NCCL_TRACE_BUFFER_SIZE: " << ncclTraceBufferSize_
             << ", TORCH_NCCL_COORD_CHECK_MILSEC: " << coordCheckIntervalMilSec_
-            << ", ID=" << this->getID();
+            << ", PG Name: " << options_->group_name;
 
   if (options_->global_ranks_in_group.empty()) {
     this->globalRankStart = 0;
@@ -847,20 +865,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       this->globalRankStride = -1;
     }
   }
-
-  RECORD_PARAM_COMMS(
-      0, // seq
-      this->getID(),
-      rank, // rank
-      "init", // colName
-      0, // inNelems
-      0, // outNelems
-      at::kByte, // dType
-      std::vector<int64_t>(), // inSplitSizes
-      std::vector<int64_t>(), // outSplitSizes
-      globalRankStart, // globalRankStart
-      globalRankStride, // globalRankStride
-      size_); // worldSize
 
   // Attach hooks to cache allocator to trigger the hooks whenever a traced
   // action is called. In the following hooks, we register a newly allocated
@@ -901,8 +905,17 @@ void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
 
 c10::intrusive_ptr<intra_node_comm::IntraNodeComm> ProcessGroupNCCL::
     initIntraNodeComm() {
-  return intra_node_comm::IntraNodeComm::rendezvous(
-      store_, std::to_string(uid_), rank_, size_);
+  using IntraNodeComm = intra_node_comm::IntraNodeComm;
+  if (!IntraNodeComm::isEnabled()) {
+    return nullptr;
+  }
+  auto prefixStore = c10::make_intrusive<PrefixStore>("IntraNodeComm", store_);
+  auto comm = c10::make_intrusive<IntraNodeComm>(prefixStore, rank_, size_);
+  if (comm->rendezvous()) {
+    return comm;
+  } else {
+    return nullptr;
+  }
 }
 
 void ProcessGroupNCCL::setSequenceNumberForGroup() {
@@ -1071,20 +1084,18 @@ bool ProcessGroupNCCL::abort(c10::optional<std::string> abortReason) {
   return true;
 }
 
-void ProcessGroupNCCL::shutdown() {
+void ProcessGroupNCCL::shutdown(c10::optional<std::string> reason) {
   // Don't join threads here since the purpose of this method is to abort all
   // communicators and signal the threads to exit. Joining on the threads could
   // potentially block and hence avoid it in this method.
   terminateProcessGroup_.store(true);
   workMetaListCV_.notify_one();
 
-  std::string abortReason = c10::str("Process Group shutdown on rank ", rank_);
   // lauch abort asynchrounously and wait for it to complete or timeout
   LOG(INFO) << logPrefix()
             << "Launching ProcessGroupNCCL abort asynchrounously.";
-  std::future<bool> fut = std::async(std::launch::async, [this, abortReason]() {
-    return this->abort(abortReason);
-  });
+  std::future<bool> fut = std::async(
+      std::launch::async, [this, &reason]() { return this->abort(reason); });
 
   waitForFutureOrTimeout(fut, options_->timeout, "ProcessGroup abort", true);
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL aborts successfully.";
@@ -1099,17 +1110,13 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL destructor entered.";
 
   if (!terminateProcessGroup_.load()) {
-    // Only if TORCH_NCCL_ABORT_IN_DESTROY_PG is enabled, terminateProcessGroup_
-    // will be set to true through destroy_process_group
-    if (abortInDestroyProcessGroup_) {
-      LOG(WARNING) << c10::str(
-          "WARNING: process group has NOT been destroyed before it is being destructed. ",
-          "On normal program exit, the application should call destroy_process_group to ",
-          "ensure that any pending NCCL data transfers have finished in this process. "
-          "In rare cases this process can exit before this point and block the progress of "
-          "another member of the process group. This constraint has always been present, "
-          " but this warning has only been added since PyTorch 2.3");
-    }
+    LOG(WARNING) << c10::str(
+        "WARNING: process group has NOT been destroyed before it is being destructed. ",
+        "On normal program exit, the application should call destroy_process_group to ",
+        "ensure that any pending NCCL data transfers have finished in this process. "
+        "In rare cases this process can exit before this point and block the progress of "
+        "another member of the process group. This constraint has always been present, "
+        " but this warning has only been added since PyTorch 2.4");
     // If user haven't explicitly destroy/shutdown process group, destructor
     // needs to do so
     shutdown();
@@ -1147,6 +1154,8 @@ bool ProcessGroupNCCL::dumpDebuggingInfo() {
     // `registerDebugInfoWriter`.
     auto ncclTrace = dump_nccl_trace();
     DebugInfoWriter& writer = DebugInfoWriter::getWriter(globalRank());
+    LOG(INFO) << logPrefix() << "ProcessGroupNCCL dumping nccl trace to "
+              << writer.getWriterTarget();
     writer.write(ncclTrace);
     return true;
   }
@@ -1170,11 +1179,18 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   uint64_t heartBeatCounter = 0ULL;
   std::string errorMsg;
   std::string exitMsg;
-  bool checkTimeoutSignal = (dumpOnTimeout_ && uid_ == 0);
-  int monitorPollInterval = checkTimeoutSignal ? coordCheckIntervalMilSec_
-                                               : heartbeatTimeoutInSec_ * 1000;
+  bool checkDumpSignal = (dumpOnException_ && uid_ == 0);
+  int monitorPollInterval = checkDumpSignal ? coordCheckIntervalMilSec_
+                                            : heartbeatTimeoutInSec_ * 1000;
   auto lastTimePollStore = std::chrono::steady_clock::now();
   auto lastTimeHeartBeatCheck = std::chrono::steady_clock::now();
+  c10::optional<DumpPipe> dumpPipe = c10::nullopt;
+  if (uid_ == 0) {
+    // DumpPipe is one per-trainer process, and its convenient to name them
+    // after 'global' ranks in the system, So we assume processgroup (uid)==0 is
+    // the global PG and has globally unique rank ids across trainers.
+    dumpPipe.emplace(rank_);
+  }
   while (true) {
     // This won't have any lock since this lock is only used here.
     // Please be aware that mutex `monitorMutex_` should not be used
@@ -1197,7 +1213,33 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     // to see if any PG on any rank observed a timeout and signaled peers to
     // dump debugging info, and we avoid hammering the TCPStore from all PGs on
     // the same rank.
-    if (checkTimeoutSignal) {
+    if (checkDumpSignal) {
+      // There are two scenarios where monitor thread will dump on timeout:
+      // 1. The local rank is the first to observe a timeout.shouldDump_ will be
+      // set to true.
+      // 2. other ranks detected the timeout and signal the local rank to dump
+      // In addtion, monitor threads will dump if watchdog threads has no
+      // heartbeat or dumpPipe is not empty.
+      if (shouldDump_.load()) {
+        errorMsg = c10::str(
+            logPrefix(),
+            "Received a dump signal from this local rank and will ",
+            "start to dump the debug info. ",
+            "Last enqueued NCCL work: ",
+            lastEnqueuedSeq_,
+            ", last completed NCCL work: ",
+            lastCompletedSeq_,
+            ".");
+        exitMsg = c10::str(
+            "ProcessGroupNCCL's watchdog detected an exception from the local rank. ",
+            "This is most likely caused by incorrect usages of collectives, e.g., wrong ",
+            "sizes used across ranks, the order of collectives is not same for all ranks ",
+            "or the scheduled collective, for some reason, didn't run. Additionally, ",
+            "this can be caused by GIL deadlock or other reasons such as network errors or ",
+            "bugs in the communications library (e.g. NCCL), etc. We tried our best to ",
+            "dump the debug info into the storage to help you debug the issue.");
+        break;
+      }
       // We poll store to see if some ranks have flagged a timeout when
       // we haven't polled for `heartbeat_timeout` seconds and there haven't
       // any work added or removed for `watchdog_timeout` seconds.
@@ -1206,18 +1248,34 @@ void ProcessGroupNCCL::heartbeatMonitor() {
           computeDeltaMS(lastTimePollStore, currentTime) >=
               coordCheckIntervalMilSec_) {
         lastTimePollStore = currentTime;
-        if (globalStore_->check({std::string(TIMEOUT_DUMP)})) {
+        if (globalStore_->check({std::string(EXCEPTION_DUMP)})) {
+          int timeOutRank = -1;
+          shouldDump_.store(true);
+          try {
+            auto vec = globalStore_->get(std::string(EXCEPTION_DUMP));
+            TORCH_CHECK_WITH(
+                DistBackendError,
+                vec.size() == sizeof(int),
+                "Invalid size for the timeout rank ID");
+            std::memcpy(&timeOutRank, vec.data(), vec.size());
+          } catch (const std::exception& e) {
+            LOG(ERROR)
+                << "Failed to get timeout rank ID from the global store.";
+          }
           errorMsg = c10::str(
               logPrefix(),
-              "Received a global timeout from another rank and will ",
-              "start to dump the debug info. ",
+              "Received a global dump signal from rank ",
+              timeOutRank,
+              ", and will start to dump the debug info. ",
               "Last enqueued NCCL work: ",
               lastEnqueuedSeq_,
               ", last completed NCCL work: ",
               lastCompletedSeq_,
               ".");
           exitMsg = c10::str(
-              "ProcessGroupNCCL's watchdog detected a collective timeout and notified current rank. ",
+              "ProcessGroupNCCL's watchdog detected a dump signal from rank ",
+              timeOutRank,
+              " and notified the current rank. ",
               "This is most likely caused by incorrect usages of collectives, e.g., wrong ",
               "sizes used across ranks, the order of collectives is not same for all ranks ",
               "or the scheduled collective, for some reason, didn't run. Additionally, ",
@@ -1237,6 +1295,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
       if (heartbeat != heartBeatCounter) {
         heartBeatCounter = heartbeat;
       } else {
+        shouldDump_.store(true);
         // No heartbeat increase detected and timeout.
         errorMsg = c10::str(
             logPrefix(),
@@ -1261,12 +1320,21 @@ void ProcessGroupNCCL::heartbeatMonitor() {
         break;
       }
     }
+    // process a request to dump the trace. only PG uid 0 will respond to dump
+    // requests, but this is fine since all PG's feed into the same flight
+    // recorder and dump. After dump, the training should continue.
+    if (dumpPipe.has_value() && dumpPipe->shouldDump()) {
+      // best effort dump, not waiting for the dump here
+      std::future<bool> fut = std::async(
+          std::launch::async, [this]() { return this->dumpDebuggingInfo(); });
+    }
   }
   LOG(ERROR) << errorMsg;
 
   auto& cpp_dumper = get_cpp_trace_dumper();
   if (cpp_dumper.has_value()) {
-    LOG(INFO) << "Dumping c++ stacktraces: " << cpp_dumper.value()();
+    LOG(INFO) << "Dumping c++ stacktraces:";
+    cpp_dumper.value()([](const std::string& line) { LOG(INFO) << line; });
   }
 
   // Store debug info to storage if no other thread does it. (By default to
@@ -1305,7 +1373,8 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   // Case two: desync might be slow or get stuck. Or we get stuck in
   // destructors, we will sleep for some time before calling std::abort() to
   // kill the whole process.
-  if ((terminateProcessGroup_.load() || collectiveDebugInfoMode_.load()) &&
+  if ((terminateProcessGroup_.load() || collectiveDebugInfoMode_.load() ||
+       shouldDump_.load()) &&
       !terminateHeartbeatMonitorThread_.load()) {
     // Leave another two mins for desync report generation or process group
     // destroy.
@@ -1407,61 +1476,12 @@ std::string ProcessGroupNCCL::getNCCLWatchdogDebugInfo() {
   return retrieveDesyncReport(store_, "NCCL", rank_, size_);
 }
 
-#if defined(__linux__)
-struct DumpPipe {
-  DumpPipe(int rank) {
-    std::string fileStem =
-        getCvarString({"TORCH_NCCL_DEBUG_INFO_PIPE_FILE"}, "");
-    if (fileStem.empty() ||
-        getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0) <= 0) {
-      return;
-    }
-    TORCH_CHECK(!fileStem.empty(), "TORCH_NCCL_DEBUG_INFO_TEMP_FILE is empty");
-    std::string filename = c10::str(fileStem, rank, ".pipe");
-    TORCH_CHECK(
-        unlink(filename.c_str()) != -1 || errno == ENOENT,
-        "Error removing existing named pipe ",
-        filename);
-    TORCH_CHECK(
-        mkfifo(filename.c_str(), 0666) != -1,
-        "Error creating named pipe ",
-        filename);
-    fd_ = open(filename.c_str(), O_RDONLY | O_NONBLOCK);
-    LOG(INFO) << "Pipe file " << filename
-              << " has been opened, write to it to trigger NCCL Debug Dump.";
-    TORCH_CHECK(fd_ != -1, "Error opening named pipe ", filename);
-  }
-  bool shouldDump() {
-    if (fd_ == -1) {
-      return false;
-    }
-    char buf[128];
-    // non-blocking from O_NONBLOCK above.
-    // Ignore EINTR because we already will poll this
-    // again later.
-    ssize_t bytesRead = read(fd_, &buf, 128);
-    return bytesRead > 0;
-  }
-  ~DumpPipe() {
-    if (fd_ != -1) {
-      close(fd_);
-    }
-  }
-
- private:
-  int fd_ = -1;
-};
-#else
-struct DumpPipe {
-  DumpPipe(int rank) {}
-  bool shouldDump() {
-    return false;
-  }
-};
-#endif
-
 std::string ProcessGroupNCCL::createLogPrefix() const {
-  return c10::str("[PG ", uid_, " Rank ", rank_, "] ");
+  if (!pg_desc_.empty() && pg_desc_ != "undefined") {
+    return c10::str("[PG ", pg_name_, " (", pg_desc_, ") Rank ", rank_, "] ");
+  } else {
+    return c10::str("[PG ", pg_name_, " Rank ", rank_, "] ");
+  }
 }
 
 const std::string& ProcessGroupNCCL::logPrefix() const {
@@ -1485,17 +1505,9 @@ const std::vector<uint64_t>& ProcessGroupNCCL::groupRanks() const {
 void ProcessGroupNCCL::watchdogHandler() {
   bool done = false;
   lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
-  c10::optional<std::future<bool>> optAsyncDebugDump;
-
+  auto lastStatusUpdateTime = std::chrono::steady_clock::now();
   std::list<ProcessGroupNCCL::WorkNCCL> completedWorkList;
 
-  c10::optional<DumpPipe> dumpPipe = c10::nullopt;
-  if (uid_ == 0) {
-    // DumpPipe is one per-trainer process, and its convenient to name them
-    // after 'global' ranks in the system, So we assume processgroup (uid)==0 is
-    // the global PG and has globally unique rank ids across trainers.
-    dumpPipe.emplace(rank_);
-  }
   while (!done || !terminateProcessGroup_.load()) {
     std::unique_lock<std::mutex> lock(workMetaListMutex_);
     // We busy-poll the work vector every kWatchdogThreadSleepMillis
@@ -1520,6 +1532,26 @@ void ProcessGroupNCCL::watchdogHandler() {
         lastCompletedSeq_,
         ".");
 #endif
+    auto logger = ::c10d::C10dLogger::getLogger();
+    if (logger &&
+        computeDeltaMS(
+            lastStatusUpdateTime, std::chrono::steady_clock::now()) >=
+            kWorkStatusUpdatePeriodMs) {
+      ::c10d::C10dLoggingData data;
+      // logging integers
+      data.integers["pg_id"] = uid_;
+      data.integers["rank"] = rank_;
+      data.integers["global_rank"] = globalRank();
+      data.integers["last_enqueued_work"] = lastEnqueuedSeq_;
+      data.integers["last_started_work"] = lastStartedSeq_;
+      data.integers["last_completed_work"] = lastCompletedSeq_;
+      // logging strings
+      data.strings["last_enqueued_work_name"] = lastEnqueuedWorkName_;
+      data.strings["last_started_work_name"] = lastStartedWorkName_;
+      data.strings["last_completed_work_name"] = lastCompletedWorkName_;
+      logger->log(data);
+      lastStatusUpdateTime = std::chrono::steady_clock::now();
+    }
 
     for (auto it = workMetaList_.begin(); it != workMetaList_.end();
          /* no increment */) {
@@ -1535,6 +1567,28 @@ void ProcessGroupNCCL::watchdogHandler() {
 
       // If work hits an exception (either an error or timeout)
       if (work.exception()) {
+        // try to dump flight records if exception happens.
+        // Flight recorder behavior should be independent of desync Debug
+        if (dumpOnException_) {
+          try {
+            auto rank = globalRank();
+            auto vec = std::vector<uint8_t>(
+                reinterpret_cast<uint8_t*>(&rank),
+                reinterpret_cast<uint8_t*>(&rank) + sizeof(rank));
+            globalStore_->set(std::string(EXCEPTION_DUMP), vec);
+            // signal the monitor thread to start dumping
+            shouldDump_.store(true);
+            // This sleep is used to give time for dumping before throwing
+            // exception
+            std::this_thread::sleep_for(
+                std::chrono::seconds(heartbeatTimeoutInSec_));
+          } catch (const std::exception& e) {
+            LOG(ERROR) << logPrefix()
+                       << "Failed to set dump signal in tcpstore. "
+                       << "Error: " << e.what();
+          }
+        }
+
         if (SHOULD_CLEAN_UP(asyncErrorHandling_)) {
           // Abort work and corresponding communicators
           work.abort();
@@ -1554,47 +1608,22 @@ void ProcessGroupNCCL::watchdogHandler() {
               ", last completed NCCL work: ",
               lastCompletedSeq_,
               ".");
-          try {
-            if (desyncDebug_ || dumpOnTimeout_) {
-              // Set shutdown mode, so the heartbeat monitor thread will not
-              // abort process immediately.
+          if (desyncDebug_) {
+            try {
               collectiveDebugInfoMode_.store(true);
-              std::vector<uint8_t> vec(1);
-              globalStore_->set(std::string(TIMEOUT_DUMP), vec);
-            }
-
-            if (dumpOnTimeout_ && !optAsyncDebugDump) {
-              // Store debug info to storage. (By default to local disk)
-              optAsyncDebugDump = std::async(std::launch::async, [this]() {
-                return this->dumpDebuggingInfo();
-              });
-              // wait for the dump until timeout
-              waitForFutureOrTimeout(
-                  *optAsyncDebugDump,
-                  std::chrono::milliseconds(waitTimeoutDumpInMilSec_),
-                  "Flight recorder dump in watchdog");
-              // This sleep is used to give additional time for other ranks to
-              // receive the dump signal and then dump flight records, the same
-              // sleep time used in the heartbeatmonitor thread
-              // TODO, we should probably dump from a single thread in the
-              // future
-              std::this_thread::sleep_for(
-                  std::chrono::seconds(heartbeatTimeoutInSec_));
-            }
-
-            if (desyncDebug_) {
               auto desyncMsg = getNCCLWatchdogDebugInfo();
               LOG(ERROR) << logPrefix() << desyncMsg;
+            } catch (const std::exception& e) {
+              LOG(ERROR)
+                  << logPrefix()
+                  << "Failed to retrieve TORCH_NCCL_DESYNC_DEBUG report. "
+                  << " Please file an issue. Error: " << e.what();
+            } catch (...) {
+              LOG(ERROR)
+                  << logPrefix()
+                  << "Failed to rerieve TORCH_NCCL_DESYNC_DEBUG report with unknown error."
+                  << " Please file an issue.";
             }
-          } catch (const std::exception& e) {
-            LOG(ERROR) << logPrefix()
-                       << "Failed to retrieve TORCH_NCCL_DESYNC_DEBUG report. "
-                       << " Please file an issue. Error: " << e.what();
-          } catch (...) {
-            LOG(ERROR)
-                << logPrefix()
-                << "Failed to rerieve TORCH_NCCL_DESYNC_DEBUG report with unknown error."
-                << " Please file an issue.";
           }
         }
         // Throw exception
@@ -1611,9 +1640,19 @@ void ProcessGroupNCCL::watchdogHandler() {
         }
       }
 
+      // a work could be started but not completed, so we should not update
+      // lastStartedSeq_ and lastStartedOpName_ if the work state is checked
+      // multiple times after the start
+      if (lastStartedSeq_ < static_cast<int64_t>(work.seq_) &&
+          work.isStarted()) {
+        lastStartedSeq_ = work.seq_;
+        lastStartedWorkName_ = opTypeToString(work.opType_);
+      }
+
       // Clean up completed work
       if (work.isCompleted()) {
         lastCompletedSeq_ = work.seq_;
+        lastCompletedWorkName_ = opTypeToString(work.opType_);
         NCCLTraceBuffer::get()->retire_id(work.trace_id_, true);
         if (onCompletionHook_) {
           // Move Work object to completedWorkList_ to be consumed by the hook
@@ -1637,14 +1676,6 @@ void ProcessGroupNCCL::watchdogHandler() {
       // Increment heartbeat after each work processed,
       // in case processing is slowed down (but not hung) by cuda api contention
       heartbeat_++;
-    }
-    // process a request to dump the trace. only PG uid 0 will respond to dump
-    // requests, but this is fine since all PG's feed into the same flight
-    // recorder and dump.
-    if (dumpPipe.has_value() && dumpPipe->shouldDump()) {
-      std::future<bool> fut = std::async(
-          std::launch::async, [this]() { return this->dumpDebuggingInfo(); });
-      // best effort dump, watchdog is not waiting for the dump here
     }
     done = workMetaList_.empty();
   }
@@ -1887,6 +1918,15 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
   // Create the unique NCCL ID and broadcast it
   ncclUniqueId ncclID;
 
+  // reset log prefix to include group_desc
+  logPrefix_ = createLogPrefix();
+
+#ifdef NCCL_COMM_DESCRIPTION
+  // Pass process group name and description to NCCL communicator
+  std::string commDesc = pg_desc_ + ':' + pg_name_;
+  options_->config.commDesc = strdup(commDesc.c_str());
+#endif
+
   // For batch_isend_irecv, ncclGroupStart() would be called upfront
   bool batchP2P = ncclActiveGroupCounter_ > 0;
   bool singleP2POp = isP2POp(opType, batchP2P);
@@ -1898,7 +1938,16 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
   // For point-to-point communication on the same process, don't need broadcast.
   if (!isSendRecvSelf) {
     // Broadcast so that each process can have a unique NCCL ID
+    auto timeStarted = std::chrono::steady_clock::now();
     broadcastUniqueNCCLID(&ncclID, singleP2POp, deviceKey, p2pRank);
+    auto timerDeltaMs =
+        std::chrono::duration_cast<std::chrono::duration<double>>(
+            std::chrono::steady_clock::now() - timeStarted)
+            .count() *
+        1000;
+    LOG(INFO) << logPrefix()
+              << "ProcessGroupNCCL broadcast unique ID through store took "
+              << timerDeltaMs << " ms";
   }
 
   at::cuda::OptionalCUDAGuard gpuGuard;
@@ -1908,10 +1957,8 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
   // example: Using the batch_isend_irecv to send a tensor to a target process.
   // On the sender side, the corresponding underlying NCCL calls will look like
   //   ncclGroupStart() // This is in batch_isend_irecv
-  //   ncclGroupStart() // This is [Note 1]
   //   ncclCommInitRank() // Inside NCCLComm::create
   //   ncclSend()
-  //   ncclGroupEnd() // This is [Note 2]
   //   ncclGroupEnd() // This is in batch_isend_irecv
   // With this pattern, the nccl communicator will be created in the last
   // ncclGroupEnd which means when ncclSend is processed, the passed
@@ -1924,9 +1971,6 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
     // comms have not been initiated yet, so can only check in blocking-way
     C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
   }
-
-  // [Note 1] Create the NCCL communicators for each GPU
-  C10D_NCCL_CHECK(ncclGroupStart(), c10::nullopt);
 
   // GPU world size and GPU rank
   int numRanks, rank;
@@ -1979,26 +2023,31 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
   }
 
   // Creates the NCCL streams
-  auto streamVal =
-      at::cuda::getStreamFromPool(options_->is_high_priority_stream);
+  bool force_high = getCvarBool(TORCH_NCCL_HIGH_PRIORITY, false);
+  auto streamVal = at::cuda::getStreamFromPool(
+      options_->is_high_priority_stream || force_high);
 
   {
     std::lock_guard<std::mutex> lock(mutex_);
     inInitializationCommMap_.emplace(deviceKey, ncclComm);
   }
 
-  // [Note 2 ]
-#ifndef NCCL_HAS_COMM_NONBLOCKING
-  C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
-#else
-  if (nccl_use_nonblocking()) {
-    // If we use nonblocking mode, allow communicators to be
-    // uninitialized/ncclInProgress until the first communication
-    C10D_NCCL_CHECK_NONBLOCKING(ncclGroupEnd(), c10::nullopt);
-  } else {
-    C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
-  }
-#endif
+  NCCLTraceBuffer::get()->record_pg_ranks(
+      std::make_tuple(pg_name_, pg_desc_), groupRanks());
+
+  RECORD_PARAM_COMMS(
+      0, // seq
+      std::make_tuple(pg_name_, pg_desc_), // PG name tuple
+      rank, // rank
+      "init", // collective name
+      0, // inNelems
+      0, // outNelems
+      at::kByte, // dType
+      std::vector<int64_t>(), // inSplitSizes
+      std::vector<int64_t>(), // outSplitSizes
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
+      size_); // worldSize
 
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL created ncclComm_ "
             << ncclComm->ncclComm_ << " on CUDA device: " << deviceIndex;
@@ -2048,16 +2097,15 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
             reinterpret_cast<void*>(segmentInfo.address),
             segmentInfo.total_size);
       }
-
-      // Record the mapping between ncclComm and device index so that later
-      // register hook can register a newly allocated segment to communicators
-      // on the same device.
-      // NOTE: we need remove the communicator from this map when it is
-      // destroyed, otherwise may register onto an invalid communicator.
-      ncclCommDevIdxMapMutex.lock();
-      ncclCommDevIdxMap.emplace(ncclComm, device.index());
-      ncclCommDevIdxMapMutex.unlock();
     }
+    // Record the mapping between ncclComm and device index so that later
+    // register hook can register a newly allocated segment to communicators
+    // on the same device.
+    // NOTE: we need remove the communicator from this map when it is
+    // destroyed, otherwise may register onto an invalid communicator.
+    ncclCommDevIdxMapMutex.lock();
+    ncclCommDevIdxMap.emplace(ncclComm, device.index());
+    ncclCommDevIdxMapMutex.unlock();
   }
 
   it = devNCCLCommMap_.find(deviceKey);
@@ -2184,6 +2232,7 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
     //   between threads
     r->trace_id_ = NCCLTraceBuffer::get()->record(
         uid_,
+        std::make_tuple(pg_name_, pg_desc_),
         seq_,
         op_id_,
         profilingTitle ? profilingTitle : "",
@@ -2230,6 +2279,7 @@ void ProcessGroupNCCL::workEnqueue(
     // get deadlock. Here we enqueue work without outputs_.
     workMetaList_.emplace_back(*work);
     lastEnqueuedSeq_ = work->seq_;
+    lastEnqueuedWorkName_ = opTypeToString(work->opType_);
     lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
   }
 }
@@ -2241,8 +2291,8 @@ ProcessGroupNCCL::Options::Options(bool is_high_priority_stream)
 static constexpr int CoalActive = 0x01, CoalColl = 0x02, CoalP2P = 0x04;
 
 void ProcessGroupNCCL::startCoalescing() {
-  coalescedDevices_.clear();
-  coalescedComms_.clear();
+  coalescedDevice_.set_index(-1);
+  coalescedComm_ = nullptr;
   coalescing_state_ |= CoalActive;
   groupStart();
   // Other collective ops bump seq_ before creating a work. Thus, if coalesced
@@ -2262,17 +2312,20 @@ void ProcessGroupNCCL::startCoalescing() {
 // `optype` is for specifying a composite optype, such as ALLGATHER and
 // REDUCE_SCATTER
 c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
-  if (coalescedComms_.size() == 0) {
+  if (coalescedComm_ == nullptr) {
     // There is no actual work being coalesced, return here
     groupEnd();
     coalescing_state_ = 0;
     return nullptr;
   }
+  TORCH_CHECK(
+      coalescedDevice_.index() >= 0,
+      "Somthing went wrong. Did you call end_coalescing before start_coalescing?");
 
-  // `coalescedComms_` should have same set of comms across collectives
-  auto comm = coalescedComms_[0];
-  // `coalescedDevices_` should have same set of devices across collectives
-  auto device = coalescedDevices_[0];
+  // `coalescedComm_` should have same set of comms across collectives
+  auto comm = coalescedComm_;
+  // `coalescedDevice_` should have same set of devices across collectives
+  auto device = coalescedDevice_;
 
   // `getKeyFromDevice` is how we get keys for both collectives and batch P2P
   const auto key = getKeyFromDevice(device);
@@ -2322,6 +2375,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
   }
 
   coalescing_state_ = 0;
+  coalescedComm_ = nullptr;
   return work;
 }
 
@@ -2356,8 +2410,17 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
 
   if (coalescing_state_ & CoalActive) {
     coalescing_state_ |= CoalColl;
-    coalescedDevices_.push_back(device);
-    coalescedComms_.push_back(ncclComm);
+    if (coalescedDevice_.index() < 0) {
+      coalescedDevice_ = device;
+    } else {
+      TORCH_CHECK(
+          coalescedDevice_.index() == device.index(), MULTI_DEVICE_ERROR_MSG);
+    }
+    if (coalescedComm_ == nullptr) {
+      coalescedComm_ = ncclComm;
+    } else {
+      TORCH_CHECK(coalescedComm_ == ncclComm, MULTI_DEVICE_ERROR_MSG);
+    }
   }
 
   // Used many times below, so we stash the unordered_map lookup
@@ -2512,6 +2575,21 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   const auto key = getKeyFromDevice(device);
   auto ncclComm = getNCCLComm(key, device, opType);
 
+  if (coalescing_state_ & CoalActive) {
+    coalescing_state_ |= CoalColl;
+    if (coalescedDevice_.index() < 0) {
+      coalescedDevice_ = device;
+    } else {
+      TORCH_CHECK(
+          coalescedDevice_.index() == device.index(), MULTI_DEVICE_ERROR_MSG);
+    }
+    if (coalescedComm_ == nullptr) {
+      coalescedComm_ = ncclComm;
+    } else {
+      TORCH_CHECK(coalescedComm_ == ncclComm, MULTI_DEVICE_ERROR_MSG);
+    }
+  }
+
   // Used many times below, so we stash the unordered_map lookup
   auto ncclStream = ncclStreams_.at(key);
 
@@ -2519,7 +2597,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   syncStream(device, ncclEvents_[key], ncclStream);
 
   auto work = initWork(
-      device, rank_, opType, nullptr, inputs, outputs, /*record=*/true);
+      device, rank_, opType, profilingTitle, inputs, outputs, /*record=*/true);
 
   // Store references to outputs to be used by WorkNCCL::result and operator<<.
   work->outputs_ = std::make_shared<std::vector<at::Tensor>>(outputs);
@@ -2531,7 +2609,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
 
   at::cuda::OptionalCUDAGuard gpuGuard;
 
-  // Start event should only be recorded before the ncclGroupStart()
+  // Start event should only be recorded before the ncclGroupStart() (which
+  // happens inside AutoNcclGroup guard below)
   if (work->timingEnabled_) {
     work->ncclStartEvent_->record(ncclStream);
   }
@@ -2588,10 +2667,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
     }
   }
 
-  // End event should only be recorded after the ncclGroupEnd()
-  if (!coalescing_state_) {
-    work->ncclEndEvent_->record(ncclStream);
-  }
+  work->ncclEndEvent_->record(ncclStream);
   work->ncclComm_ = ncclComm;
 
   {
@@ -2626,15 +2702,41 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   work->numelIn_ = inputs[0].numel();
   work->numelOut_ = outputs[0].numel();
 
-  // Notify graphs before we check the capture status preemptively
-  at::cuda::CUDAGraph::inc_pending_event_queries();
+  /* Note [cuda graph capture and workEnqueue]
 
-  if (!coalescing_state_ && capture_status == c10::cuda::CaptureStatus::None) {
+  Normal behavior of the C10D watchdog is to query cuda events on work objects
+  periodically, but when cuda graph recording is active these event queries
+  would crash or mess up the recording.
+
+  To ensure we do not enqueue a work object to the watchdog when cuda graph
+  capture is active, we use a one-way sync. We increment a flag pre-emptively,
+  indicating our intent to enqueue a work object. Then we check capture_status
+  to see if (a) capturing is already in progress (we cannot enqueue in this
+  case), (b) capturing hasn't started yet, so we can trust that no capture will
+  start (since a pre-condition of starting a capture is to check the event query
+  count is 0).
+
+  If we are not able to enqueue the work due to capture-in-progress, we finally
+  decrement the counter.
+
+  For this reason we cannot easily move the increment inside workEnqueue unless
+  we also change the semantic of workEnqueue to 'maybeWorkEnqueue'.
+
+  TODO:
+   - Is our design for flight recorder safe in this context?  are we recording
+  any FR events during cudagraph capture? if so, they won't be safe to poll for
+  completion status.
+  */
+  at::cuda::CUDAGraph::inc_pending_event_queries();
+  if (capture_status == c10::cuda::CaptureStatus::None) {
     workEnqueue(work);
   } else {
     at::cuda::CUDAGraph::dec_pending_event_queries();
   }
-
+  // TODO(whc) if the work isn't enqueued, I don't feel great about returning
+  // it, since interactions with it by usercode won't behave normally - they
+  // won't observe work completion, for instance.  Will this lead to silent
+  // problems during capture?
   return work;
 }
 
@@ -2695,8 +2797,17 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
 
   if (coalescing_state_ & CoalActive) {
     coalescing_state_ |= CoalP2P;
-    coalescedDevices_.push_back(device);
-    coalescedComms_.push_back(ncclComm);
+    if (coalescedDevice_.index() < 0) {
+      coalescedDevice_ = device;
+    } else {
+      TORCH_CHECK(
+          coalescedDevice_.index() == device.index(), MULTI_DEVICE_ERROR_MSG);
+    }
+    if (coalescedComm_ == nullptr) {
+      coalescedComm_ = ncclComm;
+    } else {
+      TORCH_CHECK(coalescedComm_ == ncclComm, MULTI_DEVICE_ERROR_MSG);
+    }
   }
 
   // Used many times below, so we stash the unordered_map lookup
@@ -2714,6 +2825,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     // input/output sizes and profilingTitle per-op in the group.
     auto trace_id = NCCLTraceBuffer::get()->record(
         uid_,
+        std::make_tuple(pg_name_, pg_desc_),
         seq_,
         op_id_,
         profilingTitle,
@@ -2744,6 +2856,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     // information it wants.
     work->trace_id_ = NCCLTraceBuffer::get()->record(
         uid_,
+        std::make_tuple(pg_name_, pg_desc_),
         seq_,
         op_id_,
         profilingTitle,
@@ -2947,7 +3060,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_sparse(
   // If the nccl branch is not "exp" then we just error
   C10_THROW_ERROR(
       Error,
-      "allreduce_sparse is only available in the NCCL experimental branch.");
+      "NCCL does not support all_reduce with sparse tensors. Please use dense tensors instead.");
 #endif
 }
 
@@ -2982,6 +3095,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
     const AllreduceOptions& opts) {
   TORCH_CHECK(tensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
   auto tensor = tensors.back();
+  if (tensor.is_complex()) {
+    TORCH_CHECK(
+        complexViewAsRealAllowed(opts.reduceOp),
+        "all_reduce does not support",
+        opts.reduceOp,
+        "on complex tensors");
+    tensor = at::view_as_real(tensor);
+  }
   check_gpu_single_tensor(tensor);
 
   if (intraNodeComm_ != nullptr && opts.reduceOp == ReduceOp::SUM) {
@@ -2997,11 +3118,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      std::make_tuple(pg_name_, pg_desc_), // PG name tuple
       tensors, // inputTensors
       tensors, // outputTensors
       rank_, // rank
-      "allreduce", // colName
+      "allreduce", // collective name
       tensor.numel(), // inNelems
       tensor.numel(), // outNelems
       tensor.scalar_type(), // dType
@@ -3024,11 +3145,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_coalesced(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      std::make_tuple(pg_name_, pg_desc_), // PG name tuple
       tensors, // inputTensors
       tensors, // outputTensors
       rank_, // rank
-      "allreduce_coalesced", // colName
+      "allreduce_coalesced", // collective name
       total_numel, // inNelems
       total_numel, // outNelems
       tensors[0].scalar_type(), // dType
@@ -3068,17 +3189,20 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::broadcast(
     const BroadcastOptions& opts) {
   TORCH_CHECK(tensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
   auto tensor = tensors.back();
+  if (tensor.is_complex()) {
+    tensor = at::view_as_real(tensor);
+  }
   check_gpu_single_tensor(tensor);
 
   // @lint-ignore CLANGTIDY
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      std::make_tuple(pg_name_, pg_desc_), // PG name tuple
       tensors, // inputTensors
       tensors, // outputTensors
       opts.rootRank, // root rank
-      "broadcast", // colName
+      "broadcast", // collective name
       tensor.numel(), // inNelems
       tensor.numel(), // outNelems
       tensor.scalar_type(), // dType
@@ -3156,15 +3280,23 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce(
   TORCH_CHECK(tensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
   // @lint-ignore CLANGTIDY
   auto tensor = tensors.back();
+  if (tensor.is_complex()) {
+    TORCH_CHECK(
+        complexViewAsRealAllowed(opts.reduceOp),
+        "reduce does not support",
+        opts.reduceOp,
+        "on complex tensors");
+    tensor = at::view_as_real(tensor);
+  }
   check_gpu_single_tensor(tensor);
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      std::make_tuple(pg_name_, pg_desc_), // PG name tuple
       tensors, // inputTensors
       tensors, // outputTensors
       opts.rootRank, // root rank
-      "reduce", // colName
+      "reduce", // collective name
       tensor.numel(), // inNelems
       tensor.numel(), // outNelems
       tensor.scalar_type(), // dType
@@ -3256,11 +3388,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      std::make_tuple(pg_name_, pg_desc_), // PG name tuple
       inputTensors, // inputTensors
       outputTensors, // outputTensors
       rank_, // rank
-      "all_gather", // colName
+      "all_gather", // collective name
       inputTensor.numel(), // inNelems
       inputTensor.numel() * // outNelems
           this->getSize(),
@@ -3384,11 +3516,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      std::make_tuple(pg_name_, pg_desc_), // PG name tuple
       inputTensors, // inputTensors
       outputTensors, // outputTensors
       rank_, // rank
-      "reduce_scatter", // colName
+      "reduce_scatter", // collective name
       outputTensor.numel() * this->getSize(), // inNelems
       outputTensor.numel(), // outNelems
       outputTensor.scalar_type(), // dType
@@ -3494,11 +3626,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_scatter_base(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      std::make_tuple(pg_name_, pg_desc_), // PG name tuple
       inputTensor, // inputTensor
       outputTensor, // outputTensor
       rank_, // rank
-      "_reduce_scatter_base", // colName
+      "_reduce_scatter_base", // collective name
       inputTensor.numel(), // inNelems
       tensor.numel(), // outNelems
       tensor.scalar_type(), // dtype
@@ -3582,9 +3714,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
   RECORD_PARAM_COMMS(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      std::make_tuple(pg_name_, pg_desc_), // PG name tuple
       rank_, // rank
-      "barrier", // colName
+      "barrier", // collective name
       0, // inNelems
       0, // outNelems
       at::kByte, // dType
@@ -3651,11 +3783,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
         static_cast<int>(
             this->getSequenceNumberForGroup() +
             1), // seq + 1 to match collective
-        this->getID(),
+        std::make_tuple(pg_name_, pg_desc_), // PG name tuple
         inputTensor, // inputTensor
         outputTensor, // outputTensor
         rank_, // rank
-        "all_to_all", // colName
+        "all_to_all", // collective name
         inputTensor.numel(), // inNelems
         outputTensor.numel(), // outNelems
         inputTensor.scalar_type(), // dType
@@ -3693,11 +3825,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
         static_cast<int>(
             this->getSequenceNumberForGroup() +
             1), // seq + 1 to match collective
-        this->getID(),
+        std::make_tuple(pg_name_, pg_desc_), // PG name tuple
         inputTensor, // inputTensor
         outputTensor, // outputTensor
         rank_, // rank
-        "all_to_allv", // colName
+        "all_to_allv", // collective name
         inputTensor.numel(), // inNelems
         outputTensor.numel(), // outNelems
         inputTensor.scalar_type(), // dType
@@ -3771,11 +3903,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      std::make_tuple(pg_name_, pg_desc_), // PG name tuple
       inputTensors, // inputTensors
       outputTensors, // outputTensors
       rank_, // rank
-      "all_to_all", // colName
+      "all_to_all", // collective name
       total_numel, // inNelems
       total_numel, // outNelems
       inputTensors.front().scalar_type(), // dType
@@ -3823,11 +3955,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::send(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      std::make_tuple(pg_name_, pg_desc_), // PG name tuple
       tensors, // inputTensors
       tensors, // outputTensors
       dstRank, // dst rank
-      "send", // colName
+      "send", // collective name
       tensor.numel(), // inNelems
       tensor.numel(), // outNelems
       tensor.scalar_type(), // dType
@@ -3864,11 +3996,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::recv(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      std::make_tuple(pg_name_, pg_desc_), // PG name tuple
       tensors, // inputTensors
       tensors, // outputTensors
       srcRank, // src rank
-      "recv", // colName
+      "recv", // collective name
       tensor.numel(), // inNelems
       tensor.numel(), // outNelems
       tensor.scalar_type(), // dType
@@ -3964,11 +4096,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      std::make_tuple(pg_name_, pg_desc_), // PG name tuple
       inputTensors, // inputTensors
       outputTensors, // outputTensors
       opts.rootRank, // root rank
-      "gather", // colName
+      "gather", // collective name
       inputTensor.numel(), // inNelems
       inputTensor.numel() * this->getSize(), // outNelems
       inputTensor.scalar_type(), // dType
@@ -4051,11 +4183,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      std::make_tuple(pg_name_, pg_desc_), // PG name tuple
       inputTensors, // inputTensors
       outputTensors, // outputTensors
       opts.rootRank, // root rank
-      "scatter", // colName
+      "scatter", // collective name
       outputTensor.numel() * this->getSize(), // inNelems
       outputTensor.numel(), // outNelems
       outputTensor.scalar_type(), // dType
@@ -4121,11 +4253,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      std::make_tuple(pg_name_, pg_desc_), // PG name tuple
       input_tensor, // inputTensors
       output_tensor, // outputTensors
       rank_, // rank
-      "_allgather_base", // colName
+      "_allgather_base", // collective name
       input_tensor.numel(), // inNelems
       output_tensor.numel(), // outNelems
       output_tensor.scalar_type(), // dType

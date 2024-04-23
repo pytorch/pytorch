@@ -48,7 +48,7 @@ def patch_file(
 
     # These are hand written skips
     extra_dynamo_skips = set()
-    with open(filename, "r") as f:
+    with open(filename) as f:
         start = False
         for text in f.readlines():
             text = text.strip()
