@@ -55,6 +55,7 @@ from torch.types import (
 )
 
 from torch._prims_common import DeviceLikeType
+from torch.utils._python_dispatch import TorchDispatchMode
 
 # This module is defined in torch/csrc/Module.cpp
 
