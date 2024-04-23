@@ -312,8 +312,8 @@ at::Tensor pinnedLike(at::Tensor& tensor) {
   auto* allocator = at::detail::getCUDAHooks().getPinnedMemoryAllocator();
   auto storage = c10::Storage(
       c10::Storage::use_byte_size_t(),
-      at::detail::computeStorageNbytes(
-          tensor.sizes(), tensor.strides(), tensor.dtype().itemsize()),
+      static_cast<int64_t>(at::detail::computeStorageNbytes(
+          tensor.sizes(), tensor.strides(), tensor.dtype().itemsize())),
       allocator,
       /*resizable=*/false);
   return at::empty({0}, tensor.options().device(at::kCPU))
@@ -754,7 +754,7 @@ ProcessGroupGloo::ProcessGroupGloo(
       options_(std::move(options)),
       stop_(false),
       collectiveCounter_(0) {
-  auto& devices = options->devices;
+  auto& devices = options_->devices;
   if (devices.empty()) {
     TORCH_CHECK(false, "No device(s) specified");
   }
@@ -771,13 +771,13 @@ ProcessGroupGloo::ProcessGroupGloo(
   // option is needed if you have a fast NIC that cannot be saturated
   // by a single I/O thread.
   //
-  contexts_.reserve(options->devices.size());
-  for (const auto i : c10::irange(options->devices.size())) {
+  contexts_.reserve(options_->devices.size());
+  for (const auto i : c10::irange(options_->devices.size())) {
     auto context = std::make_shared<::gloo::rendezvous::Context>(rank_, size_);
     auto store = ::gloo::rendezvous::PrefixStore(std::to_string(i), *store_);
-    context->setTimeout(options->timeout);
+    context->setTimeout(options_->timeout);
     try {
-      context->connectFullMesh(store, options->devices[i]);
+      context->connectFullMesh(store, options_->devices[i]);
     } catch (const std::runtime_error& e) {
       auto err = e.what();
       // TORCH_CHECK to print the cpp stacktrace.
@@ -791,9 +791,9 @@ ProcessGroupGloo::ProcessGroupGloo(
   // working on in the workInProgress_ vector. It must have size equal
   // to the number of workers such that they can simply index into it
   // using the worker index they are started with.
-  workInProgress_.resize(options->threads);
+  workInProgress_.resize(options_->threads);
 
-  threads_.resize(options->threads);
+  threads_.resize(options_->threads);
   for (const auto i : c10::irange(threads_.size())) {
     threads_[i] = std::thread(&ProcessGroupGloo::runLoop, this, i);
   }
@@ -1285,13 +1285,13 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     const auto sparseDim = tensor.sparse_dim();
 
     std::vector<size_t> counts(context->size);
-    int64_t totalSize = 0;
+    size_t totalSize = 0;
     for (const auto i : c10::irange(metadata.size())) {
       counts[i] = metadata[i].nnz() * sparseDim;
       totalSize += counts[i];
     }
 
-    auto output = at::empty({totalSize}, at::kLong);
+    auto output = at::empty({static_cast<int64_t>(totalSize)}, at::kLong);
 
     // tensors copied from cuda may not be contiguous, get a contiguous
     // tensor before use its data_ptr

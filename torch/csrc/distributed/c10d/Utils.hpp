@@ -280,7 +280,7 @@ inline void assertLayoutMatch(
 }
 
 inline void assertNonEmpty(
-    std::function<void(const std::string&)> fn,
+    const std::function<void(const std::string&)>& fn,
     const at::ArrayRef<at::Tensor> tensors) {
   if (tensors.empty()) {
     fn("requires non-empty tensor list");
@@ -288,7 +288,7 @@ inline void assertNonEmpty(
 }
 
 inline void assertSingleElement(
-    std::function<void(const std::string&)> fn,
+    const std::function<void(const std::string&)>& fn,
     const at::ArrayRef<at::Tensor> tensors) {
   if (tensors.size() != 1) {
     fn("requires a single-element tensor list");
@@ -296,7 +296,7 @@ inline void assertSingleElement(
 }
 
 inline void assertSingleElementInput(
-    std::function<void(const std::string&)> fn,
+    const std::function<void(const std::string&)>& fn,
     const at::ArrayRef<at::Tensor> tensors) {
   if (tensors.size() != 1) {
     fn("requires a single-element input tensor list");
@@ -304,7 +304,7 @@ inline void assertSingleElementInput(
 }
 
 inline void assertSingleElementOutput(
-    std::function<void(const std::string&)> fn,
+    const std::function<void(const std::string&)>& fn,
     const at::ArrayRef<at::Tensor> tensors) {
   if (tensors.size() != 1) {
     fn("requires a single-element output tensor list");
@@ -312,25 +312,25 @@ inline void assertSingleElementOutput(
 }
 
 inline void assertRootRank(
-    std::function<void(const std::string&)> fn,
-    int rank,
-    int size) {
-  if (rank < 0 || rank >= size) {
+    const std::function<void(const std::string&)>& fn,
+    int64_t rank,
+    size_t size) {
+  if (rank < 0 || static_cast<size_t>(rank) >= size) {
     fn("invalid root rank: " + std::to_string(rank));
   }
 }
 
 inline void assertRootTensor(
-    std::function<void(const std::string&)> fn,
-    int rank,
-    int size) {
-  if (rank < 0 || rank >= size) {
+    const std::function<void(const std::string&)>& fn,
+    int64_t rank,
+    size_t size) {
+  if (rank < 0 || static_cast<size_t>(rank) >= size) {
     fn("invalid root tensor: " + std::to_string(rank));
   }
 }
 
 inline void assertDense(
-    std::function<void(const std::string&)> fn,
+    const std::function<void(const std::string&)>& fn,
     const at::ArrayRef<at::Tensor> tensors) {
   const auto& layout = tensors[0].layout();
   if (layout != at::kStrided) {
@@ -339,7 +339,7 @@ inline void assertDense(
 }
 
 inline void assertCPU(
-    std::function<void(const std::string&)> fn,
+    const std::function<void(const std::string&)>& fn,
     const at::ArrayRef<at::Tensor> tensors) {
   const auto& device = tensors[0].device();
   if (device.type() != at::kCPU) {
@@ -348,7 +348,7 @@ inline void assertCPU(
 }
 
 inline void assertSameDevice(
-    std::function<void(const std::string&)> fn,
+    const std::function<void(const std::string&)>& fn,
     const at::ArrayRef<at::Tensor> tensors) {
   if (tensors.size() < 2) {
     return;
