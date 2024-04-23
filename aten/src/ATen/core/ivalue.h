@@ -537,7 +537,7 @@ struct TORCH_API IValue final {
     } else if (isSymFloat()) {
       return toSymFloat().guard_float(__FILE__, __LINE__);
     } else {
-      TORCH_INTERNAL_ASSERT(0, "expected double, got ", tag);
+      TORCH_INTERNAL_ASSERT(0, "expected double");
     }
   }
 
@@ -649,7 +649,7 @@ struct TORCH_API IValue final {
     } else if (isSymInt()) {
       return toSymInt().guard_int(__FILE__, __LINE__);
     } else {
-      TORCH_INTERNAL_ASSERT(0, "expected int, got ", tag);
+      TORCH_INTERNAL_ASSERT(0, "expected int");
     }
   }
 
@@ -673,7 +673,7 @@ struct TORCH_API IValue final {
     } else if (isSymBool()) {
       return toSymBool().guard_bool(__FILE__, __LINE__);
     } else {
-      TORCH_INTERNAL_ASSERT(0, "expected bool, got ", tag);
+      TORCH_INTERNAL_ASSERT(0, "expected bool");
     }
   }
 
