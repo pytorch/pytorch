@@ -790,7 +790,8 @@ class cuda:
     )
 
     # Keep only Cutlass op configs which contain this regular expression pattern
-    # Set this to "warpspecialized_cooperative_epi_tma" to enable only SM90 TMA Cutlass Kernels for large GEMMs
+    # Set this to "warpspecialized_cooperative_epi_tma" to enable only
+    # SM90 TMA Cutlass Kernels for large GEMMs
     cutlass_op_allowlist_regex: Optional[str] = None
 
     # Filter Cutlass configs which contain this regular expression pattern
