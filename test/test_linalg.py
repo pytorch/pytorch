@@ -4532,6 +4532,14 @@ class TestLinalg(TestCase):
         assert file1_contents == file2_contents
         assert file1_contents == file3_contents
 
+        # remove the files created above to avoid error 'Build left local git repository checkout dirty', ignore errors
+        for filename in [filename1, filename2, filename3]:
+            try:
+                import os
+                os.remove(filename)
+            finally:
+                pass
+
         # disables TunableOp, no file will be written, restore to default values
         torch.cuda.tunable.enable(False)
         torch.cuda.tunable.set_filename(filename1)  # reset back to default filename for next unit test
