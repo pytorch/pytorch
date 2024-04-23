@@ -1600,8 +1600,14 @@ def tensor_is_aligned(tensor: torch.Tensor):
     # but symbolic storage_offsets are. For consistency, we suppress guard creation
     # upon performing this check: that ensures that we don't add recompiles when we
     # add this logic.
-    with TracingContext.get().fake_mode.shape_env.suppress_guards():
-        return bool((tensor.storage_offset() * get_dtype_size(tensor.dtype)) % ALIGNMENT == 0)
+    ctx = contextlib.nullcontext()
+    if tracing_context := TracingContext.try_get():
+        # TracingContext may not exist if we're doing cudagraphs
+        ctx = tracing_context.fake_mode.shape_env.suppress_guards()
+    with ctx:
+        return bool(
+            (tensor.storage_offset() * get_dtype_size(tensor.dtype)) % ALIGNMENT == 0
+        )
 
 
 def should_assume_input_aligned(example_input: torch.Tensor):
