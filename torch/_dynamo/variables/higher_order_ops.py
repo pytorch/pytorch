@@ -1287,7 +1287,7 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
     store_target: int
 
-    NOT_SET_SENTINEL = None
+    NOT_SET_SENTINEL = 0xDEADBEEF
 
     def __init__(self, value: "RangeIteratorVariable", **kwargs):
         from ..source import GlobalSource

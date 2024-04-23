@@ -4620,6 +4620,90 @@ class GraphModule(torch.nn.Module):
         # Just not crashing is good enough.
         self.assertEqual(result, f(x))
 
+    @torch._dynamo.config.patch(for_loop_medium_size_boundary=10)
+    def test_loop_to_higher_order_non_tensors(self):
+        counters.clear()
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+        loop_count = torch._dynamo.config.for_loop_medium_size_boundary
+
+        def f(x):
+            res = x
+            for i in range(loop_count):
+                res = res + i + x
+                foo = None
+            return (i, foo)
+
+        def eager(x):
+            res = x
+            for i in range(loop_count):
+                res = res + i + x
+                foo = None
+            return (i, foo)
+
+        x = torch.tensor(1)
+        f = torch._dynamo.optimize(cnt)(f)
+        result = f(x)
+        self.assertEqual(result, eager(x))
+        self.assertExpectedInline(
+            normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        res = L_x_
+
+        _lambda_ = torch__dynamo_variables_higher_order_ops_call_function_lambda_a_a_proxy_args_kwargs_i_(0)
+        for_loop_body_0 = self.for_loop_body_0
+        _lambda__1 = torch__dynamo_variables_higher_order_ops_call_function_lambda_a_a_proxy_args_kwargs_i__1(0)
+        for_loop_wrapper = torch__dynamo_variables_higher_order_ops_for_loop_wrapper(for_loop_body_0, res, res, _lambda__1, 3735928559);  res = _lambda__1 = None
+        getitem = for_loop_wrapper[0]
+        getitem_1 = for_loop_wrapper[1];  for_loop_wrapper = None
+        _lambda__2 = torch__dynamo_variables_higher_order_ops_call_function_lambda_a_a_proxy_args_kwargs_i__2(1)
+        for_loop_wrapper_1 = torch__dynamo_variables_higher_order_ops_for_loop_wrapper(for_loop_body_0, getitem, getitem_1, _lambda__2, None);  getitem = getitem_1 = _lambda__2 = None
+        getitem_3 = for_loop_wrapper_1[0]
+        getitem_4 = for_loop_wrapper_1[1];  for_loop_wrapper_1 = None
+        _lambda__3 = torch__dynamo_variables_higher_order_ops_call_function_lambda_a_a_proxy_args_kwargs_i__3(2)
+        for_loop_wrapper_2 = torch__dynamo_variables_higher_order_ops_for_loop_wrapper(for_loop_body_0, getitem_3, getitem_4, _lambda__3, None);  getitem_3 = getitem_4 = _lambda__3 = None
+        getitem_6 = for_loop_wrapper_2[0]
+        getitem_7 = for_loop_wrapper_2[1];  for_loop_wrapper_2 = None
+        _lambda__4 = torch__dynamo_variables_higher_order_ops_call_function_lambda_a_a_proxy_args_kwargs_i__4(3)
+        for_loop_wrapper_3 = torch__dynamo_variables_higher_order_ops_for_loop_wrapper(for_loop_body_0, getitem_6, getitem_7, _lambda__4, None);  getitem_6 = getitem_7 = _lambda__4 = None
+        getitem_9 = for_loop_wrapper_3[0]
+        getitem_10 = for_loop_wrapper_3[1];  for_loop_wrapper_3 = None
+        _lambda__5 = torch__dynamo_variables_higher_order_ops_call_function_lambda_a_a_proxy_args_kwargs_i__5(4)
+        for_loop_wrapper_4 = torch__dynamo_variables_higher_order_ops_for_loop_wrapper(for_loop_body_0, getitem_9, getitem_10, _lambda__5, None);  getitem_9 = getitem_10 = _lambda__5 = None
+        getitem_12 = for_loop_wrapper_4[0]
+        getitem_13 = for_loop_wrapper_4[1];  for_loop_wrapper_4 = None
+        _lambda__6 = torch__dynamo_variables_higher_order_ops_call_function_lambda_a_a_proxy_args_kwargs_i__6(5)
+        for_loop_wrapper_5 = torch__dynamo_variables_higher_order_ops_for_loop_wrapper(for_loop_body_0, getitem_12, getitem_13, _lambda__6, None);  getitem_12 = getitem_13 = _lambda__6 = None
+        getitem_15 = for_loop_wrapper_5[0]
+        getitem_16 = for_loop_wrapper_5[1];  for_loop_wrapper_5 = None
+        _lambda__7 = torch__dynamo_variables_higher_order_ops_call_function_lambda_a_a_proxy_args_kwargs_i__7(6)
+        for_loop_wrapper_6 = torch__dynamo_variables_higher_order_ops_for_loop_wrapper(for_loop_body_0, getitem_15, getitem_16, _lambda__7, None);  getitem_15 = getitem_16 = _lambda__7 = None
+        getitem_18 = for_loop_wrapper_6[0]
+        getitem_19 = for_loop_wrapper_6[1];  for_loop_wrapper_6 = None
+        _lambda__8 = torch__dynamo_variables_higher_order_ops_call_function_lambda_a_a_proxy_args_kwargs_i__8(7)
+        for_loop_wrapper_7 = torch__dynamo_variables_higher_order_ops_for_loop_wrapper(for_loop_body_0, getitem_18, getitem_19, _lambda__8, None);  getitem_18 = getitem_19 = _lambda__8 = None
+        getitem_21 = for_loop_wrapper_7[0]
+        getitem_22 = for_loop_wrapper_7[1];  for_loop_wrapper_7 = None
+        _lambda__9 = torch__dynamo_variables_higher_order_ops_call_function_lambda_a_a_proxy_args_kwargs_i__9(8)
+        for_loop_wrapper_8 = torch__dynamo_variables_higher_order_ops_for_loop_wrapper(for_loop_body_0, getitem_21, getitem_22, _lambda__9, None);  getitem_21 = getitem_22 = _lambda__9 = None
+        getitem_24 = for_loop_wrapper_8[0]
+        getitem_25 = for_loop_wrapper_8[1];  for_loop_wrapper_8 = None
+        _lambda__10 = torch__dynamo_variables_higher_order_ops_call_function_lambda_a_a_proxy_args_kwargs_i__10(9)
+        for_loop_wrapper_9 = torch__dynamo_variables_higher_order_ops_for_loop_wrapper(for_loop_body_0, getitem_24, getitem_25, _lambda__10, None);  for_loop_body_0 = getitem_24 = getitem_25 = _lambda__10 = None
+        return ()
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, res, res_0, _lambda_, const):
+            add = res_0 + _lambda_;  res_0 = None
+            add_1 = add + res;  add = None
+            return (res, add_1, _lambda_, None)
+""",  # noqa: B950
+        )
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertLessEqual(cnt.op_count, 40)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
