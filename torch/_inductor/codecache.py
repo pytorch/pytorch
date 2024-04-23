@@ -2582,16 +2582,26 @@ def _hipcc_device_compiler_options() -> List[str]:
         "-x", 
         "hip",
         "-std=c++17",
-        "--offload-arch=native",
+        f"--offload-arch={';'.join(config.rocm.arch) if config.rocm.arch else 'native'}",
         "-fno-gpu-rdc",
         "-fPIC",
         "-mllvm",
         "-amdgpu-early-inline-all=true",
         "-mllvm",
         "-amdgpu-function-calls=false",
+        "-mllvm",
+        "-enable-post-misched=0",
     ]
     if config.rocm.is_debug:
-        opts += ["-DDEBUG_LOG=1", "-g", "--save-temps=obj", "-Rpass-analysis=kernel-resource-usage"]
+        opts += ["-DDEBUG_LOG=1", "-g"]
+    if config.rocm.save_temps:
+        opts += ["--save-temps=obj"]
+    if config.rocm.print_kernel_resource_usage:
+        opts += ["-Rpass-analysis=kernel-resource-usage"]
+    if config.rocm.flush_denormals:
+        opts += ["-fgpu-flush-denormals-to-zero"]
+    if config.rocm.use_fast_math:
+        opts += ["-ffast-math"]
     return opts
 
 

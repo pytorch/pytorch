@@ -780,7 +780,7 @@ class rocm:
     compile_opt_level = "-O1"
 
     # Flag to keep debug information in compiled objects
-    is_debug = True
+    is_debug = False
 
     # Flag to keep intermediate files (assembly listings, preprocessed sources, etc.)
     save_temps = False
