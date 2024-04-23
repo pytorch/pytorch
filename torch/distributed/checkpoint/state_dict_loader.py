@@ -52,7 +52,6 @@ def load(
     storage_reader: Optional[StorageReader] = None,
     planner: Optional[LoadPlanner] = None,
     process_group: Optional[dist.ProcessGroup] = None,
-    strict: bool = True,
 ) -> None:
     """
     Load a distributed ``state_dict`` in SPMD style.
@@ -103,9 +102,6 @@ def load(
         process_group (Optional[ProcessGroup]):
             ProcessGroup to be used for cross-rank synchronization.
             (Default: ``None``)
-        strict (bool): Specifically only applied to nn.modules, whether to strictly enforce that the keys
-                in :attr:`state_dict` match the keys returned by this module's
-                :meth:`~torch.nn.Module.state_dict` function. (Default: ``True``)
 
     Returns:
         None.
@@ -177,9 +173,7 @@ def load(
             if key not in state_dict:
                 continue
             elem = state_dict[key]
-            if isinstance(elem, torch.nn.Module):
-                elem.load_state_dict(statetful_sd[key], strict=strict)
-            elif isinstance(elem, Stateful):
+            if isinstance(elem, Stateful):
                 elem.load_state_dict(statetful_sd[key])
 
 
