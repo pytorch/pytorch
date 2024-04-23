@@ -140,7 +140,7 @@ class Library:
         self._registration_handles.append(handle)
 
     def _impl_with_aoti_compile(self, op_name, op_overload_name='', dispatch_key='', fallback_fn=None):
-        r'''Register the operator to use the AOT-compiled implementation.
+        r'''Register the operator to use the AOTI-compiled implementation.
 
         Args:
             op_name: operator name or OpOverload object.
@@ -182,9 +182,8 @@ class Library:
         if key in _impls:
             # TODO: in future, add more info about where the existing function is registered (this info is
             # today already returned by the C++ warning when _impl_with_aoti_compile is called but we error out before that)
-            raise RuntimeError("This is not allowed since there's already a kernel registered from python overriding {}"
-                               "'s behavior for {} dispatch key and {} namespace.".
-                               format(op_name_with_overload, dispatch_key, self.ns))
+            raise RuntimeError(f"This is not allowed since there's already a kernel registered from python overriding "
+                               f"{op_name_with_overload}'s behavior for {dispatch_key} dispatch key and {self.ns} namespace.")
 
         impl_fn(self.ns, op_name_no_overload, op_overload_name, dispatch_key, fallback_fn)
 
