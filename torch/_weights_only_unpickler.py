@@ -9,8 +9,6 @@
 # - `torch.nn.Parameter`
 # - `collections.Counter`
 # - `collections.OrderedDict`
-# Additionally, users can allowlist classes they have deemed as safe using
-# `_mark_safe_globals()` (`torch.serialization.mark_safe_globals`)
 
 # Based of https://github.com/python/cpython/blob/main/Lib/pickle.py
 # Expected to be useful for loading PyTorch model weights
@@ -61,31 +59,19 @@ from pickle import (
     UnpicklingError,
 )
 from struct import unpack
-from sys import maxsize, modules
-from typing import Any, Callable, Dict, List
+from sys import maxsize
+from typing import Any, Dict, List
 
 import torch
 
-_marked_safe_globals_list: List[Callable] = []
+try:
+    import _codecs
 
+    import numpy as np
 
-def _mark_safe_globals(safe_globals: List[Callable]):
-    global _marked_safe_globals_list
-    _marked_safe_globals_list += safe_globals
-
-
-# Separate from _get_allowed_globals because of the lru_cache on _get_allowed_globals
-# For example if user had a script like
-#   torch.load(file_a)
-#   torch.serialization._mark_safe_globals([torch.foo])
-#   torch.load(file_b)
-# the dynamic additions to safe_globals would not be picked up by
-# _get_allowed_globals due to the lru_cache
-def _get_user_allowed_globals():
-    rc: Dict[str, Any] = {}
-    for f in _marked_safe_globals_list:
-        rc[f"{f.__module__}.{f.__name__}"] = f
-    return rc
+    HAS_NUMPY = True
+except ModuleNotFoundError:
+    np = None  # type: ignore[assignment]
 
 
 # Unpickling machinery
@@ -98,12 +84,24 @@ def _get_allowed_globals():
         "torch.serialization._get_layout": torch.serialization._get_layout,
         "torch.Size": torch.Size,
         "torch.Tensor": torch.Tensor,
-        "torch.device": torch.device,
     }
     # dtype
-    for t in torch.storage._dtype_to_storage_type_map().keys():
-        rc[str(t)] = t
-    for t in torch.storage._new_dtypes():
+    for t in [
+        torch.complex32,
+        torch.complex64,
+        torch.complex128,
+        torch.float8_e5m2,
+        torch.float8_e4m3fn,
+        torch.float8_e5m2fnuz,
+        torch.float8_e4m3fnuz,
+        torch.float16,
+        torch.float32,
+        torch.float64,
+        torch.int8,
+        torch.int16,
+        torch.int32,
+        torch.int64,
+    ]:
         rc[str(t)] = t
     # Tensor classes
     for tt in torch._tensor_classes:
@@ -117,35 +115,70 @@ def _get_allowed_globals():
             )
         else:
             rc[f"{ts.__module__}.{ts.__name__}"] = ts
-    # Quantization specific
-    for qt in [
-        torch.per_tensor_affine,
-        torch.per_tensor_symmetric,
-        torch.per_channel_affine,
-        torch.per_channel_symmetric,
-        torch.per_channel_affine_float_qparams,
-    ]:
-        rc[str(qt)] = qt
     # Rebuild functions
     for f in [
         torch._utils._rebuild_parameter,
-        torch._utils._rebuild_parameter_with_state,
-        torch._utils._rebuild_qtensor,
         torch._utils._rebuild_tensor,
         torch._utils._rebuild_tensor_v2,
         torch._utils._rebuild_tensor_v3,
         torch._utils._rebuild_sparse_tensor,
         torch._utils._rebuild_meta_tensor_no_storage,
         torch._utils._rebuild_nested_tensor,
-        torch._utils._rebuild_wrapper_subclass,
         torch._utils._rebuild_device_tensor_from_numpy,
     ]:
         rc[f"torch._utils.{f.__name__}"] = f
+
+    # numpy (for _rebuild_device_tensor_from_numpy)
+    if HAS_NUMPY:
+        for f in [
+            np.core.multiarray._reconstruct,
+            np.ndarray,
+            np.dtype,
+            _codecs.encode,
+        ]:
+            rc[f"{f.__module__}.{f.__name__}"] = f
 
     # Handles Tensor Subclasses, Tensor's with attributes.
     # NOTE: It calls into above rebuild functions for regular Tensor types.
     rc["torch._tensor._rebuild_from_type_v2"] = torch._tensor._rebuild_from_type_v2
     return rc
+
+
+# for _rebuild_device_tensor_from_numpy
+def _get_allowed_numpy_rebuild_types():
+    if HAS_NUMPY:
+        return [
+            np.ndarray,
+            np.dtypes.BoolDType,
+            np.dtypes.ByteDType,
+            np.dtypes.BytesDType,
+            np.dtypes.CLongDoubleDType,
+            np.dtypes.Complex128DType,
+            np.dtypes.Complex64DType,
+            np.dtypes.Float16DType,
+            np.dtypes.Float32DType,
+            np.dtypes.Float64DType,
+            np.dtypes.Int16DType,
+            np.dtypes.Int32DType,
+            np.dtypes.Int64DType,
+            np.dtypes.Int8DType,
+            np.dtypes.IntDType,
+            np.dtypes.LongDType,
+            np.dtypes.LongDoubleDType,
+            np.dtypes.LongLongDType,
+            np.dtypes.ShortDType,
+            np.dtypes.UByteDType,
+            np.dtypes.UInt16DType,
+            np.dtypes.UInt32DType,
+            np.dtypes.UInt64DType,
+            np.dtypes.UInt8DType,
+            np.dtypes.UIntDType,
+            np.dtypes.ULongDType,
+            np.dtypes.ULongLongDType,
+            np.dtypes.UShortDType,
+            np.dtypes.VoidDType,
+        ]
+    return []
 
 
 class Unpickler:
@@ -177,46 +210,8 @@ class Unpickler:
                 full_path = f"{module}.{name}"
                 if full_path in _get_allowed_globals():
                     self.append(_get_allowed_globals()[full_path])
-                elif full_path in _get_user_allowed_globals():
-                    self.append(_get_user_allowed_globals()[full_path])
                 else:
-                    # For tensor subclasses.
-                    if module == "__builtin__":
-                        raise RuntimeError(f"Unsupported class {full_path}")
-                    elif module not in modules:
-                        raise RuntimeError(
-                            f"Found global `{full_path}` in the checkpoint but `{module}` was "
-                            f"not found in `sys.modules`, please import `{name}` from `{module}` "
-                            f"if `{full_path}` is a tensor subclass and you trust the package "
-                            "that provides it."
-                        )
-                    else:
-                        class_type = getattr(modules[module], name)
-                        if isinstance(class_type, type) and issubclass(
-                            class_type, torch.Tensor
-                        ):
-                            # Tensor.__setstate__ is called by `_rebuild_from_type_v2`
-                            custom_set_state = (
-                                getattr(
-                                    class_type,
-                                    "__setstate__",
-                                    torch.Tensor.__setstate__,
-                                )
-                                is not torch.Tensor.__setstate__
-                            )
-                            # tp_alloc is called by `Tensor._rebuild_wrapper_subclass` and `Tensor.as_subclass`
-                            custom_tp_alloc = not torch._C._check_tp_alloc_is_default(
-                                class_type
-                            )
-                            if custom_set_state or custom_tp_alloc:
-                                raise RuntimeError(
-                                    f"Trying to unpickle tensor subclass `{full_path}` that has defined a custom "
-                                    "`__setstate__` and/or `tp_alloc`. Please check whether these methods are safe "
-                                    "and allowlist them with `torch.serialization.mark_safe_globals` if so."
-                                )
-                            self.append(class_type)
-                        else:
-                            raise RuntimeError(f"Unsupported class {full_path}")
+                    raise RuntimeError(f"Unsupported class {full_path}")
             elif key[0] == NEWOBJ[0]:
                 args = self.stack.pop()
                 cls = self.stack.pop()
@@ -226,10 +221,7 @@ class Unpickler:
             elif key[0] == REDUCE[0]:
                 args = self.stack.pop()
                 func = self.stack[-1]
-                if (
-                    func not in _get_allowed_globals().values()
-                    and func not in _get_user_allowed_globals().values()
-                ):
+                if func not in _get_allowed_globals().values():
                     raise RuntimeError(
                         f"Trying to call reduce for unrecognized function {func}"
                     )
@@ -244,6 +236,8 @@ class Unpickler:
                     inst.__setstate__(state)
                 elif type(inst) is OrderedDict:
                     inst.__dict__.update(state)
+                elif type(inst) in _get_allowed_numpy_rebuild_types():
+                    inst.__setstate__(state)
                 else:
                     raise RuntimeError(
                         f"Can only build Tensor, parameter or dict objects, but got {type(inst)}"

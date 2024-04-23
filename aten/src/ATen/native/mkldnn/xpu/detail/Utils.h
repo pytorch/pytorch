@@ -53,9 +53,4 @@ bool binary_valid(
     const at::Tensor& other,
     bool is_fusion = false);
 
-bool use_channels_last_for_conv(
-    const at::Tensor& src,
-    const at::Tensor& weight,
-    bool is_transpose);
-
 } // namespace at::native::onednn

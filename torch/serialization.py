@@ -51,7 +51,6 @@ __all__ = [
     'LoadEndianness',
     'get_default_load_endianness',
     'set_default_load_endianness',
-    'mark_safe_globals',
 ]
 
 
@@ -105,15 +104,6 @@ def set_default_load_endianness(endianness):
     if not isinstance(endianness, LoadEndianness) and endianness is not None:
         raise TypeError("Invalid argument type in function set_default_load_endianness")
     _default_load_endian = endianness
-
-def mark_safe_globals(safe_globals: List[Callable]):
-    '''
-    Marks the given globals as safe for ``weights_only`` load.
-
-    Args:
-        safe_globals (List[Callable]): list of globals to mark as safe
-    '''
-    _weights_only_unpickler._mark_safe_globals(safe_globals)
 
 def _is_zipfile(f) -> bool:
     # This is a stricter implementation than zipfile.is_zipfile().
@@ -982,9 +972,7 @@ def load(
     UNSAFE_MESSAGE = (
         "Weights only load failed. Re-running `torch.load` with `weights_only` set to `False`"
         " will likely succeed, but it can result in arbitrary code execution."
-        " Do it only if you get the file from a trusted source. Alternatively, to load"
-        " with `weights_only` please check the recommended steps in the following error message."
-        " WeightsUnpickler error: "
+        "Do it only if you get the file from a trusted source. WeightsUnpickler error: "
     )
     # Add ability to force safe only weight loads via environment variable
     if os.getenv("TORCH_FORCE_WEIGHTS_ONLY_LOAD", "0").lower() in ['1', 'y', 'yes', 'true']:

@@ -6,8 +6,7 @@ from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 
 from .. import config
 from ..codecache import PyCodeCache, TritonFuture
-from ..runtime.runtime_utils import do_bench
-from ..utils import cache_on_self
+from ..utils import cache_on_self, do_bench
 from ..virtualized import V
 from .common import TensorArg
 
