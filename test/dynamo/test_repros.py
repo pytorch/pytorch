@@ -235,6 +235,7 @@ class _ReversibleFunction(torch.autograd.Function):
                 all_hidden_states.append(hidden_states)
 
             attn_output = layer(attn_output)
+            all_buckets = all_buckets + (attn_output,)
 
         # Add last layer
         if output_hidden_states is True:
@@ -256,45 +257,8 @@ class _ReversibleFunction(torch.autograd.Function):
             grad_hidden_states, 2, dim=-1
         )
 
-        # retrieve params from ctx for backward
-        attn_output, hidden_states = ctx.saved_tensors
-
-        # create tuple
-        output = ReformerBackwardOutput(
-            attn_output=attn_output,
-            hidden_states=hidden_states,
-            grad_attn_output=grad_attn_output,
-            grad_hidden_states=grad_hidden_states,
-        )
-
         # free memory
-        del grad_attn_output, grad_hidden_states, attn_output, hidden_states
-
-        layers = ctx.layers
-        all_buckets = ctx.all_buckets
-        head_mask = ctx.head_mask
-        attention_mask = ctx.attention_mask
-
-        for idx, layer in enumerate(layers[::-1]):
-            # pop last buckets from stack
-            buckets = all_buckets[-1]
-            all_buckets = all_buckets[:-1]
-
-            # backprop
-            output = layer.backward_pass(
-                next_attn_output=output.attn_output,
-                hidden_states=output.hidden_states,
-                grad_attn_output=output.grad_attn_output,
-                grad_hidden_states=output.grad_hidden_states,
-                head_mask=head_mask[len(layers) - idx - 1],
-                attention_mask=attention_mask,
-                buckets=buckets,
-            )
-
-        assert all_buckets == (), "buckets have to be empty after backpropagation"
-        grad_hidden_states = torch.cat(
-            [output.grad_attn_output, output.grad_hidden_states], dim=-1
-        )
+        del grad_attn_output
 
         # num of return vars has to match num of forward() args
         # return gradient for hidden_states arg and None for other args
@@ -1160,11 +1124,11 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             cnt = self._reformer(nopython=False)
         # cant inline torch.autograd.Function means graph break
         if torch._dynamo.config.assume_static_by_default:
-            self.assertExpectedInline(cnt.frame_count, """3""")
-            self.assertExpectedInline(cnt.op_count, """10""")
+            self.assertExpectedInline(cnt.frame_count, """1""")
+            self.assertExpectedInline(cnt.op_count, """5""")
         else:
-            self.assertExpectedInline(cnt.frame_count, """3""")
-            self.assertExpectedInline(cnt.op_count, """10""")
+            self.assertExpectedInline(cnt.frame_count, """1""")
+            self.assertExpectedInline(cnt.op_count, """5""")
 
     @disable_translation_validation_if_dynamic_shapes
     def test_longformer_chunk(self):
