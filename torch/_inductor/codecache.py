@@ -655,7 +655,7 @@ def compiled_fx_graph_hash(
     log.debug(
         "FX graph cache hash details for key %s:\n%s",
         key,
-        FxGraphCachePickler.debug_str(details),
+        details.debug_str(),
     )
     return key
 
