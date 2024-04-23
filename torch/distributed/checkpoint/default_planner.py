@@ -82,8 +82,8 @@ class DefaultSavePlanner(SavePlanner):
     def set_up_planner(
         self,
         state_dict: STATE_DICT_TYPE,
-        storage_meta: Optional[StorageMeta] = None,
-        is_coordinator: bool = False,
+        storage_meta: Optional[StorageMeta],
+        is_coordinator: bool,
     ) -> None:
         if self.flatten_state_dict:
             state_dict, self.mappings = flatten_state_dict(state_dict)
