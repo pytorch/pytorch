@@ -1,7 +1,7 @@
 import dataclasses
+import inspect
 import logging
 import threading
-import warnings
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Union
 
@@ -31,6 +31,7 @@ log = logging.getLogger("torch._dynamo")
 class KernelSideTable:
     id_to_kernel: Dict[int, Any] = dict()
     kernel_to_id: Dict[Any, int] = dict()
+    constant_args: Dict[int, Any] = dict()
     lock = threading.Lock()
 
     # Returns index on the table
@@ -50,11 +51,26 @@ class KernelSideTable:
         assert idx in self.id_to_kernel
         return self.id_to_kernel[idx]
 
+    # Not every constant arg can be added to the graph. Use this side table
+    # for constant args.
+    def add_constant_args(self, args) -> int:
+        with self.lock:
+            idx = len(self.constant_args)
+            self.constant_args[idx] = args
+            return idx
+
+    # Returns the constant args
+    def get_constant_args(self, idx: int):
+        # No need to lock here as fetching from dict is atomic
+        assert idx in self.constant_args
+        return self.constant_args[idx]
+
     # Resets the table (only meant to be used in unit tests)
     # This is only safe assuming single threaded execution
     def reset_table(self) -> None:
         self.id_to_kernel = dict()
         self.kernel_to_id = dict()
+        self.constant_args = dict()
 
 
 kernel_side_table = KernelSideTable()
@@ -95,6 +111,7 @@ def generate_ttir(kernel, kwargs):
     """
     Uses Triton's internal code generation to create TTIR
     """
+    import sympy
     import triton
     from triton.compiler.compiler import ASTSource
     from triton.runtime.autotuner import Autotuner
@@ -116,15 +133,16 @@ def generate_ttir(kernel, kwargs):
         raise ValueError("Incorrect number of arguments passed to kernel")
 
     # Replace all SymExprs with a regular value for TTIR generation
-    # Replace all FakeTensor with real tensors
+    # Replace all FakeTensor/TensorBox with real tensors
     # These replacements are needed for triton's type, key and config functions
     ordered_args: Dict[str, Any] = {}
     for name in kernel.arg_names:
         a = kwargs[name]
-        if isinstance(a, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+        if isinstance(a, (torch.SymInt, torch.SymFloat, torch.SymBool, sympy.Expr)):
             ordered_args[name] = 2
-        elif isinstance(a, FakeTensor):
-            ordered_args[name] = torch.empty(2, dtype=a.dtype)
+        elif isinstance(a, (FakeTensor, torch._inductor.ir.TensorBox)):
+            with torch._C._DisableTorchDispatch():
+                ordered_args[name] = torch.empty(2, dtype=a.dtype)
         else:
             ordered_args[name] = a
 
@@ -153,7 +171,14 @@ def generate_ttir(kernel, kwargs):
     backend.load_dialects(context)
 
     src = ASTSource(kernel, signature, constants, specialization)
-    ttir_module = src.make_ir(options, context)
+
+    # Triton changes ASTSource.make_ir to take 3 arguments. Handle
+    # backward compatibility here.
+    if len(inspect.signature(src.make_ir).parameters) == 2:
+        ttir_module = src.make_ir(options, context)
+    else:
+        codegen_fns = backend.get_codegen_implementation()
+        ttir_module = src.make_ir(options, codegen_fns, context)
     if not ttir_module.verify():
         raise RuntimeError("Verification for TTIR module has failed")
 
@@ -238,8 +263,16 @@ def ttir_to_functions(ttir_module) -> Dict[str, Dict[Intermediate, List[Op]]]:
                 for fn_op in fn_op_list:
                     for i in range(len(fn_op.args)):
                         arg = fn_op.args[i]
-                        if isinstance(arg, Intermediate) and arg.idx in replacements:
-                            fn_op.args[i] = replacements[arg.idx]
+                        seen = set()  # to break cycles
+                        # there can be transitive replacements, but likely
+                        # no cycles (we keep the `seen` set just in case)
+                        while (
+                            isinstance(arg, Intermediate)
+                            and arg.idx in replacements
+                            and arg.idx not in seen
+                        ):
+                            seen.add(arg.idx)
+                            arg = fn_op.args[i] = replacements[arg.idx]
 
             # next function capture starts
             # with empty replacements
@@ -248,7 +281,7 @@ def ttir_to_functions(ttir_module) -> Dict[str, Dict[Intermediate, List[Op]]]:
             fn_name = op.get_str_attr("sym_name")
             functions[fn_name] = fn_ops
         elif child_block_ids:
-            if name in ("scf.if", "scf.for", "scf.while", "tt.reduce"):
+            if name in {"scf.if", "scf.for", "scf.while", "tt.reduce", "tt.scan"}:
                 # for blocked ops: inline the enclosed ops into
                 # the parent block + rewire the last op in each
                 # child block to return the block result
@@ -265,16 +298,17 @@ def ttir_to_functions(ttir_module) -> Dict[str, Dict[Intermediate, List[Op]]]:
                             next_fake_intermediate -= 1
                             replacements[idx] = Intermediate(next_fake_intermediate)
                     else:
-                        # for tt.reduce, wire the block arguments to the op arguments
+                        assert name in ("tt.reduce", "tt.scan")
+                        # wire the block arguments to the op arguments
                         num_operands = len(operand_ids)
                         block_arg_ids = block_id_to_block_arg_ids[block_id]
                         assert len(block_arg_ids) == 2 * num_operands, (
-                            "tt.reduce is expected to have twice as "
+                            f"{name} is expected to have twice as "
                             "many block arguments as op arguments: "
                             f"{operand_ids=}, {block_arg_ids=}."
                         )
                         for i, idx in enumerate(block_arg_ids):
-                            # for a tt.reduce op with N arguments, the block
+                            # for a tt.reduce/tt.scan op with N arguments, the block
                             # arguments comprise N reduced values followed by
                             # N current values corresponding to the N op args
                             replacements[idx] = Intermediate(
@@ -287,7 +321,8 @@ def ttir_to_functions(ttir_module) -> Dict[str, Dict[Intermediate, List[Op]]]:
                             continue
                         last_ret, last_ops = block_ops.popitem()
                         if all(
-                            op.name in ("scf.yield", "tt.reduce.return")
+                            op.name
+                            in ("scf.yield", "tt.reduce.return", "tt.scan.return")
                             for op in last_ops
                         ):
                             # if last_ops are all return ops, treat them separately
@@ -325,193 +360,6 @@ def ttir_to_functions(ttir_module) -> Dict[str, Dict[Intermediate, List[Op]]]:
 
     ttir_module.walk(mlir_to_functions)
 
-    return functions
-
-
-def parse_ttir(ttir, kwargs):
-    """
-    Given a Triton emitted TTIR text, this function lexes and parses the
-    code using a minimal grammar defined inside. During the lexing/parsing,
-    we drop any constant value and type information as they are not
-    necessary to us.
-    Being able to choose what we need makes this not a general purpose TTIR
-    parser which further makes parsing much simpler.
-    """
-    # TODO(oulgen):
-    # - Support closures (e.g. "tt.reduce")
-
-    try:
-        import lark  # type: ignore[import-not-found]
-        from lark import Lark, Transformer, v_args
-    except ModuleNotFoundError:
-        warnings.warn(
-            "Using slow path for user-defined Triton kernels. `pip install lark` to fix this."
-        )
-        raise
-
-    # Ops looks like one of the following forms:
-    #
-    # %14 = tt.addptr %13, %4 : tensor<4x!tt.ptr<f32, 1>>, tensor<4xi32>
-    # tt.store %14, %12, %5 {cache = 1 : i32, evict = 1 : i32} : tensor<4xf32>
-    # %15 = "tt.atomic_rmw"(%14, %12, %5) <{atomic_rmw_op = 5 : i32, scope = 1 : i32, sem = 4 : i32}> : (tensor<4x!tt.ptr<f32, 1>>, tensor<4xf32>, tensor<4xi1>) -> tensor<4xf32>  # noqa: B950
-    grammar = """
-        start: (module_block | loc_line)+
-
-        loc_line: "#loc" /.+/ NEWLINE
-
-        module_block: "module" "{" func_block+ "}" LOC
-
-        func_block: "tt.func" ("public"|"private") FN_NAME "(" /.+/ NEWLINE stmt* "}" LOC -> process_func
-
-        ?stmt: op | if | for | while | condition_stmt | label_stmt | cf_stmt
-
-        if: [assign_lhs "="] "scf.if" args rest stmt* "}" "else" "{" stmt* "}" LOC -> process_if
-        for: [assign_lhs "="] "scf.for" args rest stmt* "}" divisibility_annot? LOC -> process_for
-        while: [assign_lhs "="] "scf.while" args rest stmt* "}" "do" "{" stmt* "}" LOC -> process_while
-
-        condition_stmt: "scf.condition" "(" arg ")" args rest
-        label_stmt: LABEL ":" "// pred:" LABEL
-                  | LABEL "(" /.+/ NEWLINE
-        cf_stmt: "cf" "." NAME /.+/ NEWLINE
-
-        op: OP_NAME LOC
-          | [assign_lhs "="] OP_NAME [FN_NAME] args rest?  -> process_op
-
-        ?rest: (":" | "{" | "\\"" | "->" | "<" | "=") /.+/ NEWLINE
-        divisibility_annot: "{" "tt.divisibility_arg1" /[^}]+/ "}"
-
-        args: | "(" ")" | "("? arg ("," arg)* ")"?
-
-        ?arg: INTERMEDIATE
-            | INTERMEDIATE_CONSTANT
-            | CONSTANT
-            | PARAM
-            | "[" args "]"
-            | arg_with_index
-
-        ?arg_with_index: arg "#" DIGIT+
-
-        ?assign_lhs: (INTERMEDIATE | INTERMEDIATE_CONSTANT) [":" DIGIT+]
-
-        PARAM.5: "%arg" DIGIT+
-        INTERMEDIATE.4: "%" DIGIT+
-        INTERMEDIATE_CONSTANT.3: "%" NAME
-        CONSTANT: FLOAT | DIGIT+ | NAME ("<" DIGIT+ ">")?
-        LABEL: "^bb" DIGIT+
-
-        NAME: (LETTER | DIGIT | "_")+
-        NON_CF_NAME: /(?!(cf))/ NAME
-        FN_NAME: "@" (NAME | ESCAPED_STRING)
-        OP_NAME: "\\""? NON_CF_NAME ("." NAME)+ "\\""?
-
-        LOC.5: "loc(#loc" DIGIT* ")"
-
-        %import common.LETTER
-        %import common.DIGIT
-        %import common.WS
-        %import common.NEWLINE
-        %import common.ESCAPED_STRING
-        %import common.FLOAT
-        %ignore WS
-    """
-
-    next_fake_intermediate = 0
-
-    def convert(token):
-        if isinstance(token, lark.tree.Tree):
-            if token.data == "args":
-                res = []
-                for a in token.children:
-                    c = convert(a)
-                    if isinstance(c, list):
-                        res.extend(c)
-                    else:
-                        res.append(c)
-                return res
-            elif token.data in {"assign_lhs", "arg_with_index"}:
-                # Drop length/index qualifier
-                return convert(token.children[0])
-            else:
-                raise AssertionError(f"Tree node with {token.data}")
-
-        if token is None or (
-            isinstance(token, lark.lexer.Token)
-            and token.type in ("CONSTANT", "INTERMEDIATE_CONSTANT")
-        ):
-            nonlocal next_fake_intermediate
-            next_fake_intermediate -= 1
-            return Intermediate(next_fake_intermediate)
-
-        assert isinstance(token, lark.lexer.Token)
-
-        if token.type == "INTERMEDIATE":
-            return Intermediate(int(token.value[len("%") :]))
-        if token.type == "PARAM":
-            return Param(int(token.value[len("%arg") :]))
-
-        raise AssertionError(f"{type(token.type)} => {token.value} invalid")
-
-    # In alternative representation, function names are quoted.
-    # It should be possible to move this into the grammar alltogether.
-    def convert_name(token):
-        if token is None:
-            return None
-        s = token.value
-        if len(s) > 2 and s[0] == '"' and s[-1] == '"':
-            return s[1:-1]
-        return s
-
-    functions: Dict[str, Dict[Intermediate, List[Op]]] = {}
-
-    def extend_dict_list(d1, d2):
-        for key, values in d2.items():
-            d1[key].extend(values)
-
-    @v_args(inline=True)
-    class TransformOps(Transformer):
-        def process_op(self, ret, op_name, fn_name, args, *rest):
-            return Op(
-                convert_name(op_name),
-                convert_name(fn_name),
-                convert(args),
-                convert(ret),
-            )
-
-        def process_func(self, name, _args, *stmts):
-            ops: Dict[Intermediate, List[Op]] = defaultdict(list)
-            for e in stmts:
-                if isinstance(e, Op):
-                    ops[e.ret].append(e)
-                elif isinstance(e, dict):
-                    extend_dict_list(ops, e)
-            functions[name.value] = ops
-
-        def _process_scf(self, ret, stmts):
-            ret = convert(ret)
-            ops: Dict[Intermediate, List[Op]] = defaultdict(list)
-            for e in stmts:
-                if isinstance(e, Op):
-                    if e.name == "scf.yield":
-                        ops[ret].append(Op(e.name, None, e.args, ret))
-                    else:
-                        ops[e.ret].append(e)
-                elif isinstance(e, dict):
-                    extend_dict_list(ops, e)
-            return ops
-
-        def process_if(self, ret, _args, _rest, *stmts):
-            return self._process_scf(ret, stmts)
-
-        def process_for(self, ret, _args, _rest, *stmts):
-            return self._process_scf(ret, stmts)
-
-        def process_while(self, ret, _args, _rest, *stmts):
-            return self._process_scf(ret, stmts)
-
-    parser = Lark(
-        grammar, parser="lalr", maybe_placeholders=True, transformer=TransformOps()
-    )
-    parser.parse(ttir)
     return functions
 
 
@@ -602,20 +450,10 @@ def identify_mutated_tensors(kernel, kwargs):
     ttir_module = None
     functions = None
     try:
-        from torch._dynamo import config
-
-        if not config.optimize_user_defined_triton_kernels:
-            raise ValueError("optimize_user_defined_triton_kernels is False")
-
         ttir_module, ordered_tensor_names = generate_ttir(kernel, kwargs)
 
-        # extract functions from TTIR
-        if hasattr(ttir_module, "walk"):
-            # use MLIR bindings exposed by Triton code
-            functions = ttir_to_functions(ttir_module)
-        else:
-            # parse string representation of Triton IR
-            functions = parse_ttir(str(ttir_module), kwargs)
+        # extract functions from TTIR using MLIR bindings exposed by Triton code
+        functions = ttir_to_functions(ttir_module)
 
         assert functions is not None
         kernel_name = next(iter(functions.keys()))
@@ -671,10 +509,13 @@ triton_kernel_wrapper_functional = TritonKernelWrapperFunctional()
 
 
 @triton_kernel_wrapper_mutation.py_impl(DispatchKey.CompositeExplicitAutograd)
-def triton_kernel_wrapper_mutation_dense(*, kernel_idx, grid, kwargs):
+def triton_kernel_wrapper_mutation_dense(
+    *, kernel_idx, constant_args_idx, grid, kwargs
+):
     from torch._inductor.codegen.wrapper import user_defined_kernel_grid_fn_code
 
     kernel = kernel_side_table.get_kernel(kernel_idx)
+    constant_args = kernel_side_table.get_constant_args(constant_args_idx)
 
     if len(grid) == 1:
         grid_fn = grid[0]
@@ -686,11 +527,13 @@ def triton_kernel_wrapper_mutation_dense(*, kernel_idx, grid, kwargs):
         exec(code, namespace)
         grid_fn = namespace[fn_name]
 
-    kernel[grid_fn](**kwargs)
+    kernel[grid_fn](**kwargs, **constant_args)
 
 
 @triton_kernel_wrapper_mutation.py_impl(FakeTensorMode)
-def triton_kernel_wrapper_mutation_fake_tensor_mode(mode, *, kernel_idx, grid, kwargs):
+def triton_kernel_wrapper_mutation_fake_tensor_mode(
+    mode, *, kernel_idx, constant_args_idx, grid, kwargs
+):
     with mode:
         return None
 
@@ -712,32 +555,48 @@ def trace_triton_kernel_wrapper(proxy_mode, func_overload, node_args):
 
 @triton_kernel_wrapper_mutation.py_impl(ProxyTorchDispatchMode)
 def triton_kernel_wrapper_mutation_proxy_torch_dispatch_mode(
-    mode, *, kernel_idx, grid, kwargs
+    mode, *, kernel_idx, constant_args_idx, grid, kwargs
 ):
     if mode.enable_tracing:
         trace_triton_kernel_wrapper(
             mode,
             triton_kernel_wrapper_mutation,
-            {"kernel_idx": kernel_idx, "grid": grid, "kwargs": kwargs},
+            {
+                "kernel_idx": kernel_idx,
+                "constant_args_idx": constant_args_idx,
+                "grid": grid,
+                "kwargs": kwargs,
+            },
         )
     else:
-        triton_kernel_wrapper_mutation(kernel_idx=kernel_idx, grid=grid, kwargs=kwargs)
+        triton_kernel_wrapper_mutation(
+            kernel_idx=kernel_idx,
+            constant_args_idx=constant_args_idx,
+            grid=grid,
+            kwargs=kwargs,
+        )
 
     return None
 
 
 @triton_kernel_wrapper_mutation.py_functionalize_impl
-def triton_kernel_wrapper_mutation_functionalize(ctx, kernel_idx, grid, kwargs):
+def triton_kernel_wrapper_mutation_functionalize(
+    ctx, kernel_idx, constant_args_idx, grid, kwargs
+):
     unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
     kernel = kernel_side_table.get_kernel(kernel_idx)
+    constant_args = kernel_side_table.get_constant_args(constant_args_idx)
     # TODO(oulgen): Preexisting bug, if two kernel inputs are views of each
     # other, and one gets mutated in kernel, and later another gets mutated,
     # they are no longer equal. Fix this by graph breaking on this condition
     # earlier in dynamo.
-    tensors_to_clone = identify_mutated_tensors(kernel, unwrapped_kwargs)
+    tensors_to_clone = identify_mutated_tensors(
+        kernel, {**unwrapped_kwargs, **constant_args}
+    )
     with ctx.redispatch_to_next():
         unwrapped_outputs = triton_kernel_wrapper_functional(
             kernel_idx=kernel_idx,
+            constant_args_idx=constant_args_idx,
             grid=grid,
             kwargs=unwrapped_kwargs,
             tensors_to_clone=tensors_to_clone,
@@ -755,15 +614,12 @@ def triton_kernel_wrapper_mutation_functionalize(ctx, kernel_idx, grid, kwargs):
         ctx.mark_mutation_hidden_from_autograd(input_arg)
         ctx.commit_update(input_arg)
         ctx.sync(input_arg)
-        # sync calls replace_ under the hood, so again indicate that
-        # this indirect replace is hidden from autograd
-        ctx.mark_mutation_hidden_from_autograd(input_arg)
     return None
 
 
 @triton_kernel_wrapper_functional.py_impl(DispatchKey.CompositeExplicitAutograd)
 def triton_kernel_wrapper_functional_dense(
-    *, kernel_idx, grid, kwargs, tensors_to_clone
+    *, kernel_idx, constant_args_idx, grid, kwargs, tensors_to_clone
 ):
     # TODO(oulgen): For performance reasons, we want to ensure that these
     # `clone_preserve_strides` calls are never executed at runtime
@@ -773,13 +629,18 @@ def triton_kernel_wrapper_functional_dense(
         key: (clone_preserve_strides(val) if key in tensors_to_clone else val)
         for key, val in kwargs.items()
     }
-    triton_kernel_wrapper_mutation(kernel_idx=kernel_idx, grid=grid, kwargs=kwargs)
+    triton_kernel_wrapper_mutation(
+        kernel_idx=kernel_idx,
+        constant_args_idx=constant_args_idx,
+        grid=grid,
+        kwargs=kwargs,
+    )
     return {key: val for key, val in kwargs.items() if key in tensors_to_clone}
 
 
 @triton_kernel_wrapper_functional.py_impl(FakeTensorMode)
 def triton_kernel_wrapper_functional_fake_tensor_mode(
-    mode, *, kernel_idx, grid, kwargs, tensors_to_clone
+    mode, *, kernel_idx, constant_args_idx, grid, kwargs, tensors_to_clone
 ):
     # TODO(oulgen): For performance reasons, we want to ensure that these
     # `clone_preserve_strides` calls are never executed at runtime
@@ -795,7 +656,7 @@ def triton_kernel_wrapper_functional_fake_tensor_mode(
 
 @triton_kernel_wrapper_functional.py_impl(ProxyTorchDispatchMode)
 def triton_kernel_wrapper_functional_proxy_torch_dispatch_mode(
-    mode, *, kernel_idx, grid, kwargs, tensors_to_clone
+    mode, *, kernel_idx, constant_args_idx, grid, kwargs, tensors_to_clone
 ):
     if mode.enable_tracing:
         return trace_triton_kernel_wrapper(
@@ -803,6 +664,7 @@ def triton_kernel_wrapper_functional_proxy_torch_dispatch_mode(
             triton_kernel_wrapper_functional,
             {
                 "kernel_idx": kernel_idx,
+                "constant_args_idx": constant_args_idx,
                 "grid": grid,
                 "kwargs": kwargs,
                 "tensors_to_clone": tensors_to_clone,
@@ -819,12 +681,13 @@ def triton_kernel_wrapper_functional_proxy_torch_dispatch_mode(
 
 @triton_kernel_wrapper_functional.py_functionalize_impl
 def triton_kernel_wrapper_functional_functionalize(
-    ctx, kernel_idx, grid, kwargs, tensors_to_clone
+    ctx, kernel_idx, constant_args_idx, grid, kwargs, tensors_to_clone
 ):
     unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
     with ctx.redispatch_to_next():
         outputs = triton_kernel_wrapper_functional(
             kernel_idx=kernel_idx,
+            constant_args_idx=constant_args_idx,
             grid=grid,
             kwargs=unwrapped_kwargs,
             tensors_to_clone=tensors_to_clone,

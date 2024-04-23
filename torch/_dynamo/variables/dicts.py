@@ -14,6 +14,7 @@ from ..bytecode_transformation import (
     create_call_function,
     create_call_method,
     create_instruction,
+    create_load_method,
 )
 from ..eval_frame import skip_code
 
@@ -50,6 +51,7 @@ def is_hashable(x):
                 variables.SkipFunctionVariable,
                 variables.misc.NumpyVariable,
                 variables.NNModuleVariable,
+                variables.UnspecializedNNModuleVariable,
                 variables.MethodWrapperVariable,
                 variables.TorchInGraphFunctionVariable,
                 variables.TypingVariable,
@@ -59,6 +61,11 @@ def is_hashable(x):
 
 
 class ConstDictVariable(VariableTracker):
+    _nonvar_fields = {
+        "user_cls",
+        *VariableTracker._nonvar_fields,
+    }
+
     class _HashableTracker:
         """
         Auxiliary opaque internal class that wraps a VariableTracker and makes it hashable
@@ -84,6 +91,8 @@ class ConstDictVariable(VariableTracker):
                 x = tuple(Hashable(e).underlying_value for e in self.vt.items)
             elif isinstance(self.vt, variables.NNModuleVariable):
                 return self.vt.module
+            elif isinstance(self.vt, variables.UnspecializedNNModuleVariable):
+                return self.vt.value
             elif isinstance(self.vt, variables.UserFunctionVariable):
                 return self.vt.get_function()
             else:
@@ -411,7 +420,7 @@ class DictView(VariableTracker):
     def view_items_vt(self):
         # Returns an iterable of the unpacked items
         # Implement in the subclasses
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def unpack_var_sequence(self, tx):
         def unwrap(x):
@@ -423,7 +432,7 @@ class DictView(VariableTracker):
         codegen(self.dv_dict)
         codegen.extend_output(
             [
-                create_instruction("LOAD_METHOD", argval=self.kv),
+                create_load_method(self.kv),
                 *create_call_method(0),
             ]
         )
@@ -606,7 +615,7 @@ class DataClassVariable(ConstDictVariable):
         assert self.is_matching_cls(user_cls)
 
     def as_proxy(self):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def reconstruct(self, codegen):
         codegen.extend_output([codegen._create_load_const(self.user_cls)])
@@ -699,9 +708,20 @@ class CustomizedDictVariable(ConstDictVariable):
                         "expect VariableTracker or ConstantVariable.is_literal"
                     )
 
+            bound_args = {}
+            if _is_matching_transformers_cls(user_cls) or _is_matching_diffusers_cls(
+                user_cls
+            ):
+                # Skip none
+                for k, v in bound.arguments.items():
+                    if isinstance(v, ConstantVariable) and v.value is None or v is None:
+                        continue
+                    bound_args[k] = v
+            else:
+                bound_args = bound.arguments
+
             items = {
-                ConstantVariable.create(k): make_var(v)
-                for k, v in bound.arguments.items()
+                ConstantVariable.create(k): make_var(v) for k, v in bound_args.items()
             }
         elif not args:
             # CustomDict(a=1, b=2) in the general (non-dataclass) case.
@@ -717,19 +737,40 @@ class CustomizedDictVariable(ConstDictVariable):
     # called from builder.py
     @classmethod
     def wrap(cls, builder, obj):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def __init__(self, items, user_cls, **options):
         super().__init__(items, user_cls, **options)
         assert self.is_matching_cls(user_cls)
 
     def as_proxy(self):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     # 'RETURN_VALUE triggered compile'
     # called from torch/_dynamo/codegen.py
     def reconstruct(self, codegen):
+        is_hf_model_output = _is_matching_transformers_cls(
+            self.user_cls
+        ) or _is_matching_diffusers_cls(self.user_cls)
+
+        # If the user class is a ModelOutput, then wrap the instance creation in
+        # torch._dynamo.disable(). Even though we mark the __post_init__ as skip
+        # in `create` function, this is not enough. TorchDynamo can still get
+        # triggered on the child functions of __post_init__. This upsets export.
+        # Since, we know that ModelOutput __post_init__ is not worth optimizing,
+        # we just wrap the instance creation in torch._dynamo.disable(),
+        # regardless whether its export or not.
+        if is_hf_model_output:
+            # load torch._dynamo.disable
+            codegen.append_output(codegen.create_load_global("torch", True, add=True))
+            codegen.append_output(codegen.create_load_attr("_dynamo"))
+            codegen.append_output(codegen.create_load_attr("disable"))
         codegen.extend_output([codegen._create_load_const(self.user_cls)])
+
+        if is_hf_model_output:
+            # Wrap user_cls with disable
+            codegen.extend_output(create_call_function(1, False))
+
         # All the keys are just wrapped strings
         d = self.keys_as_python_constant()
         codegen.foreach(d.values())

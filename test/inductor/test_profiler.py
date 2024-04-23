@@ -3,20 +3,21 @@ import json
 import unittest
 
 import torch
-import torch._dynamo.test_case
+import torch._inductor.test_case
 import torch._inductor.utils
 
 from torch._inductor import config
 from torch.profiler import ProfilerActivity
 
 from torch.testing._internal.common_utils import skipIfRocm, TemporaryFileName
+from torch.testing._internal.inductor_utils import HAS_CUDA
 
 from torch.utils._triton import has_triton
 
 HAS_TRITON = has_triton()
 
 
-class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
+class DynamoProfilerTests(torch._inductor.test_case.TestCase):
     @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
     def test_inductor_profiling_triton_launch(self):
         # Verify that we get some sort of CPU-side indication of triton kernel launches
@@ -58,7 +59,9 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         for _ in range(2):
             fn_opt(*args)
 
-        with torch.profiler.profile(activities=[ProfilerActivity.CPU]) as prof:
+        with torch.profiler.profile(
+            activities=[ProfilerActivity.CPU], record_shapes=True
+        ) as prof:
             fn_opt(*args)
 
         # The name of the kernel is expected to match the name of the kernel in debug
@@ -78,6 +81,7 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
                 for event in prof.events()
             )
         )
+        return prof.events()
 
     @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
     def test_inductor_profiling_kernel_names_pointwise(self):
@@ -86,7 +90,13 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
 
         args = [torch.rand((4, 4), device="cuda") for _ in range(2)]
 
-        self._test_profiling_kernel_names(fn, args, "sin")
+        events = self._test_profiling_kernel_names(fn, args, "sin")
+        event_found = False
+        for event in events:
+            if event.name == "triton_poi_fused_add_cos_sin_0":
+                event_found = True
+                self.assertTrue(event.input_shapes == [[4, 4], [4, 4], [4, 4], []])
+        self.assertTrue(event_found)
 
     @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
     @skipIfRocm
@@ -100,7 +110,13 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
 
             args = [torch.rand((4, 4), device="cuda") for _ in range(2)]
 
-            self._test_profiling_kernel_names(fn, args, "mm")
+            events = self._test_profiling_kernel_names(fn, args, "mm")
+            event_found = False
+            for event in events:
+                if event.name == "triton_tem_fused_mm_0":
+                    event_found = True
+                    self.assertTrue(event.input_shapes == [[4, 4], [4, 4], [4, 4]])
+            self.assertTrue(event_found)
 
     @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
     def test_inductor_profiling_kernel_names_foreach(self):
@@ -116,7 +132,26 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
 
             args = (x, y)
 
-            self._test_profiling_kernel_names(fn, args, "_for_")
+            events = self._test_profiling_kernel_names(fn, args, "_for_")
+            event_found = False
+            for event in events:
+                if event.name == "triton_for_fused_0":
+                    event_found = True
+                    self.assertTrue(
+                        event.input_shapes
+                        == [
+                            [4, 4],
+                            [4, 4],
+                            [4, 4],
+                            [4, 4],
+                            [4, 4],
+                            [4, 4],
+                            [4, 4],
+                            [4, 4],
+                            [4, 4],
+                        ]
+                    )
+            self.assertTrue(event_found)
 
     @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
     def test_inductor_profiling_triton_hooks(self):
@@ -148,6 +183,7 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
-    run_tests()
+    if HAS_CUDA:
+        run_tests()

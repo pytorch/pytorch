@@ -207,7 +207,7 @@ def _create_obs_or_fq_from_qspec(
         kwargs = _get_observer_kwargs(quantization_spec)
         observer_ctr = FixedQParamsObserver.with_args(**kwargs)
         if is_qat:
-            return FixedQParamsFakeQuantize.with_args(observer=observer_ctr)
+            return FixedQParamsFakeQuantize.with_args(observer=observer_ctr)()
         else:
             return observer_ctr()
 
@@ -1099,7 +1099,7 @@ def _maybe_insert_observers_before_graph_output(
         elif maybe_node is None:
             return None
         else:
-            raise Exception("Unhandled type for returned node:", maybe_node)
+            raise Exception("Unhandled type for returned node:", maybe_node)  # noqa: TRY002
 
     new_args = []
     for old_arg in graph_output_node.args:
