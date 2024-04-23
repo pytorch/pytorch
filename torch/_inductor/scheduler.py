@@ -617,9 +617,15 @@ class BaseSchedulerNode:
                 from torch._subclasses.fake_tensor import FakeTensorMode
                 from torch.utils.flop_counter import FlopCounterMode
 
-                with FakeTensorMode(), FlopCounterMode(
+                assert self.node.fx_node is not None
+                with FakeTensorMode() as fake_mode, FlopCounterMode(
                     display=False
-                ) as flop_counter_mode:
+                ) as flop_counter_mode, V.set_current_node(
+                    self.node.fx_node
+                ), V.set_fake_mode(
+                    fake_mode
+                ):
+                    assert V.current_node is not None
                     from .ir import ir_node_to_tensor
 
                     fake_inputs = [
