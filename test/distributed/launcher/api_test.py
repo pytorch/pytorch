@@ -70,7 +70,7 @@ def get_test_launch_config(
         nproc_per_node=nproc_per_node,
         run_id=run_id,
         rdzv_endpoint=rdzv_endpoint,
-        monitor_interval=1,
+        monitor_interval=0.1,
         rdzv_backend=rdzv_backend,
         start_method="spawn",
         max_restarts=0,
