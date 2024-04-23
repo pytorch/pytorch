@@ -1386,7 +1386,15 @@ at::Tensor& _fill_mem_eff_dropout_mask_(
 #if defined(USE_MEM_EFF_ATTENTION)
 
 #ifdef USE_ROCM
-  TORCH_CHECK(false, "FIXME: Implement _fill_mem_eff_dropout_mask")
+  using aotriton::v2::flash::debug_fill_dropout_rng;
+  using sdp::aotriton_adapter::mk_aotensor;
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+  hipError_t err; // TODO: Error handling
+
+  err = debug_fill_dropout_rng(mk_aotensor(self, "r")
+                               static_cast<uint64_t>(seed),
+                               static_cast<uint64_t>(offset),
+                               stream);
 #else
   at::PhiloxCudaState rng_engine_inputs;
   rng_engine_inputs = at::PhiloxCudaState(seed, offset);
