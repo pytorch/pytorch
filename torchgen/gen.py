@@ -1151,7 +1151,7 @@ def compute_cpp_argument_yaml(
             arg["default"] = cpp_a.default
         return arg
     elif isinstance(cpp_a.argument, SelfArgument):
-        raise AssertionError()
+        raise AssertionError
     elif isinstance(cpp_a.argument, Argument):
         return compute_argument_yaml(
             cpp_a.argument,
@@ -1399,7 +1399,9 @@ def get_grouped_by_view_native_functions(
             assert kind not in grouped_by_views[schema]
             grouped_by_views[schema][kind] = f
         else:
-            assert view_kind not in grouped_by_views[schema]
+            assert (
+                view_kind not in grouped_by_views[schema]
+            ), f"{view_kind} already in {grouped_by_views[schema].keys()}"
             grouped_by_views[schema][view_kind] = f
 
     return list(concatMap(maybe_create_view_group, grouped_by_views.values()))
@@ -2125,7 +2127,7 @@ def gen_headers(
     )
 
     def gen_aten_interned_strings() -> Dict[str, str]:
-        attrs = set()  # All function argument names
+        attrs: Set[str] = set()  # All function argument names
         names = set()  # All ATen function names
         for func in native_functions:
             names.add(str(func.func.name.name))
@@ -2133,8 +2135,7 @@ def gen_headers(
             # symbol without the underscore
             names.add(func.func.name.name.base)
 
-            for arg in func.func.schema_order_arguments():
-                attrs.add(arg.name)
+            attrs.update(arg.name for arg in func.func.schema_order_arguments())
 
         # These are keywords in C++, so aren't valid symbol names
         # https://en.cppreference.com/w/cpp/language/operator_alternative

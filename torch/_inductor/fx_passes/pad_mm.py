@@ -2,6 +2,7 @@ import functools
 from typing import List, Optional, Union
 
 import torch
+import torch._inductor.runtime.runtime_utils
 from torch import Tensor
 from torch._inductor import utils
 from torch._subclasses.fake_tensor import FakeTensor
@@ -241,7 +242,7 @@ def should_pad_bench(
         return False
 
     do_bench = functools.partial(
-        utils.do_bench,
+        torch._inductor.runtime.runtime_utils.do_bench,
         warmup=5,
     )
 

@@ -88,8 +88,6 @@ if config.abi_compatible:
         "test_qlinear_cpu",
         "test_qlinear_dequant_promotion_cpu",
         "test_qlinear_relu_cpu",
-        "test_scatter5_cpu",
-        "test_scatter6_cpu",
         "test_tensor2_cpu",
     ]
     for test_name in xfail_list:
@@ -240,7 +238,10 @@ if RUN_CPU:
         ),
         BaseTest("test_mm_views"),
         BaseTest("test_multihead_attention", "cpu", test_cpu_repro.CPUReproTests()),
-        BaseTest("test_multi_threading"),
+        BaseTest(
+            "test_multi_threading",
+            code_string_count={"py::gil_scoped_release release;": 1},
+        ),
         BaseTest("test_profiler_mark_wrapper_call"),
         BaseTest(
             "test_qconv2d",
