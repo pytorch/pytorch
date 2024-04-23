@@ -143,6 +143,16 @@ class DeviceMeshTest(DTensorTestBase):
             )
             self.assertEqual(global_ranks, current_rank_expected_group_ranks)
 
+    @with_comms
+    def test_device_mesh_init_backend(self):
+        mesh = DeviceMesh(self.device_type, [1], _init_backend=False)
+
+        with self.assertRaisesRegex(RuntimeError, "process groups not initialized!"):
+            mesh.get_group()
+
+        with self.assertRaisesRegex(AttributeError, "no attribute"):
+            mesh.get_coordinate()
+
     def test_fake_pg_device_mesh(self):
         fake_store = FakeStore()
         init_process_group("fake", store=fake_store, rank=0, world_size=self.world_size)
