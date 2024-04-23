@@ -28,7 +28,12 @@ import torch._ops
 from torch._dynamo.utils import counters, dynamo_timed
 
 from torch._inductor.codegen.multi_kernel import MultiKernelState
-from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, SymTypes
+from torch.fx.experimental.symbolic_shapes import (
+    ConvertIntKey,
+    DivideByKey,
+    free_unbacked_symbols,
+    SymTypes,
+)
 from torch.fx.node import _get_qualified_name
 from torch.utils._sympy.singleton_int import SingletonInt
 
@@ -861,18 +866,23 @@ class WrapperCodeGen(CodeGen):
             filter(lambda x: not is_expr(x), graph_inputs.items())
         )
 
+        def is_unbacked_symbol(s):
+            return isinstance(s, sympy.Symbol) and free_unbacked_symbols(s)
+
         for name, shape in graph_inputs_expr:
             shape = V.graph.sizevars.simplify(shape)  # type: ignore[arg-type]
-            if shape in needed:
-                needed.remove(shape)  # type: ignore[arg-type]
+            if (b := shape in needed) or is_unbacked_symbol(shape):
+                if b:
+                    needed.remove(shape)  # type: ignore[arg-type]
                 code.writeline(f"{self.declare}{shape} = {name}{self.ending}")
 
         for name, value in graph_inputs_tensors:
             shapes = value.get_size()
             for dim, shape in enumerate(shapes):
                 shape = V.graph.sizevars.simplify(shape)  # type: ignore[arg-type]
-                if shape in needed:
-                    needed.remove(shape)  # type: ignore[arg-type]
+                if (b := shape in needed) or is_unbacked_symbol(shape):
+                    if b:
+                        needed.remove(shape)  # type: ignore[arg-type]
                     code.writeline(
                         f"{self.declare}{shape} = {sizeof(name)}[{dim}]{self.ending}"
                     )
@@ -881,8 +891,9 @@ class WrapperCodeGen(CodeGen):
             shapes = value.get_stride()
             for dim, shape in enumerate(shapes):
                 shape = V.graph.sizevars.simplify(shape)  # type: ignore[arg-type]
-                if shape in needed:
-                    needed.remove(shape)  # type: ignore[arg-type]
+                if (b := shape in needed) or is_unbacked_symbol(shape):
+                    if b:
+                        needed.remove(shape)  # type: ignore[arg-type]
                     code.writeline(
                         f"{self.declare}{shape} = {strideof(name)}[{dim}]{self.ending}"
                     )
@@ -1007,10 +1018,20 @@ class WrapperCodeGen(CodeGen):
                     # the subclass.
                     continue
                 if isinstance(value, sympy.Expr):  # Don't need to add symbolic
-                    add_expr_input(name, V.graph.sizevars.size_hint(value))
+                    # TODO: this fallback and those below actually will generate possibly
+                    # invalid benchmark code, because it's not guaranteed 42
+                    # is actually a valid value for the kernel in question.
+                    # See https://github.com/pytorch/pytorch/issues/124686
+                    add_expr_input(name, V.graph.sizevars.size_hint(value, fallback=42))
                 else:
-                    shape = [V.graph.sizevars.size_hint(x) for x in value.get_size()]
-                    stride = [V.graph.sizevars.size_hint(x) for x in value.get_stride()]
+                    shape = [
+                        V.graph.sizevars.size_hint(x, fallback=42)
+                        for x in value.get_size()
+                    ]
+                    stride = [
+                        V.graph.sizevars.size_hint(x, fallback=42)
+                        for x in value.get_stride()
+                    ]
                     add_fake_input(
                         name, shape, stride, value.get_device(), value.get_dtype()
                     )

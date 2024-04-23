@@ -946,6 +946,13 @@ def slice_(x, dim=0, start=0, end=2**63, step=1, clamp=True):
     return TensorBox(ir.SliceView.create(x.data, dim, start, end, step, clamp=clamp))
 
 
+@register_lowering(aten.slice_strict, type_promotion_kind=None)
+def slice_strict(x, dim=0, start=0, end=2**63, step=1):
+    assert isinstance(x, TensorBox)
+    dim = _validate_dim(x, dim, 0)
+    return TensorBox(ir.SliceView.create(x.data, dim, start, end, step, clamp=False))
+
+
 @register_lowering(aten.as_strided, type_promotion_kind=None)
 def as_strided(x, size, stride, storage_offset=None):
     if isinstance(x, TensorBox) and isinstance(x.data, ir.BaseView):

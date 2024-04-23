@@ -2505,7 +2505,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
   }
 }
 
-Tensor slice_impl(
+static Tensor slice_impl(
     const Tensor& self,
     int64_t dim,
     c10::optional<int64_t> start,
