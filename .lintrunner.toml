@@ -1058,8 +1058,6 @@ exclude_patterns = [
     'test/test_cuda_primary_ctx.py',
     'test/test_cuda_sanitizer.py',
     'test/test_cuda_trace.py',
-    'test/test_custom_op_testing.py',
-    'test/test_dataloader.py',
     'test/test_datapipe.py',
     'test/test_decomp.py',
     'test/test_deploy.py',
