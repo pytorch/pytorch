@@ -13,7 +13,6 @@ from typing_extensions import Self
 
 import torch
 import torch.autograd.profiler as prof
-from torch._C import _get_privateuse1_backend_name
 from torch._C._profiler import (
     _add_execution_trace_observer,
     _disable_execution_trace_observer,
