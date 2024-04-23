@@ -81,7 +81,7 @@ def check_for_skip(aot_model: torch.fx.GraphModule, num_fixed) -> Optional[str]:
     ):
         return skip
 
-    if node := get_first_incompatible_cudagraph_ops(aot_model):
+    if node := get_first_incompatible_cudagraph_node(aot_model):
         return format_default_skip_message(f"incompatible op ({node.name})")
 
     return None

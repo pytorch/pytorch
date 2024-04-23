@@ -253,7 +253,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 opt = torch.compile(model.forward, mode="reduce-overhead")(x, y, z)
 
             FileCheck().check(
-                "skipping cudagraphs due to mutation on input. Found from"
+                "skipping cudagraphs due to mutated inputs (1 instances). Found from"
             ).check("torch.logical_xor").run(captured_output[0])
 
         @requires_multigpu()
@@ -266,9 +266,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             with capture_stderr() as captured_output:
                 foo(torch.ones([10], device="cuda"), torch.ones([20]))
 
-            FileCheck().check("skipping cudagraphs due to cpu device.").check(
-                "y + 2"
-            ).run(captured_output[0])
+            FileCheck().check(
+                "skipping cudagraphs due to cpu device (arg1_1). Found from"
+            ).check("y + 2").run(captured_output[0])
 
             with capture_stderr() as captured_output:
                 foo(
@@ -307,9 +307,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             with capture_stderr() as captured_output:
                 foo(inp())
 
-            FileCheck().check("skipping cudagraphs due to mutation on input.").check(
-                ".add_(2)"
-            ).run(captured_output[0])
+            FileCheck().check(
+                "skipping cudagraphs due to mutated inputs (1 instances)"
+            ).check(".add_(2)").run(captured_output[0])
 
             # mutation on inp doesnt hit cudagraphs
             self.assertEqual(len(self.get_manager().roots), 0)
@@ -362,7 +362,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     mut_out = mut(tmp)
                     self.assertEqual(mut_out, non_mut(foo(inp)))
             FileCheck().check_count(
-                "skipping cudagraphs due to mutation on input.", 0, exactly=True
+                "skipping cudagraphs due to mutated inputs (1 instances)",
+                0,
+                exactly=True,
             ).run(captured_output[0])
 
             torch.compiler.cudagraph_mark_step_begin()
@@ -373,9 +375,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             # now its an input from eager we should fallback to inductor without cudagraphs
             with capture_stderr() as captured_output:
                 mut(mut_inp)
-            FileCheck().check("skipping cudagraphs due to mutation on input.").check(
-                "x.add_(2)"
-            ).run(captured_output[0])
+            FileCheck().check(
+                "skipping cudagraphs due to mutated inputs (1 instances)."
+            ).check("x.add_(2)").run(captured_output[0])
             self.assertEqual(mut_inp, non_mut(foo(inp)))
 
         @parametrize("backend", ("inductor", "cudagraphs"))
@@ -398,7 +400,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     torch.compiler.cudagraph_mark_step_begin()
                     fee(inp(), foo(inp()))
             FileCheck().check_count(
-                "skipping cudagraphs due to mutation on input.", 1, exactly=True
+                "skipping cudagraphs due to mutated inputs (1 instances).",
+                1,
+                exactly=True,
             ).run(captured_output[0])
 
         @parametrize("backend", ("inductor", "cudagraphs"))
@@ -430,7 +434,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 mut(mut_inp)  # should not warn since mut has warned
 
             FileCheck().check_count(
-                "skipping cudagraphs due to mutation on input.", 1, exactly=True
+                "skipping cudagraphs due to mutated inputs (1 instances).",
+                1,
+                exactly=True,
             ).run(captured_output[0])
 
         def test_function_compiled_multiple_times(self):
@@ -1573,8 +1579,15 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             def foo(x):
                 return x.item()
 
-            self.assertEqual(foo(torch.tensor(3.0, device="cuda")), 3.0)
-            self.assertEqual(foo(torch.tensor(6.0, device="cuda")), 6.0)
+            with capture_stderr() as captured_output:
+                self.assertEqual(foo(torch.tensor(3.0, device="cuda")), 3.0)
+                self.assertEqual(foo(torch.tensor(6.0, device="cuda")), 6.0)
+
+            # NOTE: this test is named after incompatible ops, but is not skipping due to incompatible ops.
+            # This should get fixed.
+            FileCheck().check(
+                "skipping cudagraphs due to cpu device (_local_scalar_dense)"
+            ).run(captured_output[0])
 
         @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
         def test_incompatible_cudagraph_ops_nonzero(self):
@@ -1582,12 +1595,37 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             def foo(x):
                 return x.nonzero()
 
-            self.assertEqual(
-                foo(torch.tensor([1, 0, 2], device="cuda")), torch.tensor([[0], [2]])
+            with capture_stderr() as captured_output:
+                self.assertEqual(
+                    foo(torch.tensor([1, 0, 2], device="cuda")),
+                    torch.tensor([[0], [2]]),
+                )
+                self.assertEqual(
+                    foo(torch.tensor([1, 0, 0], device="cuda")), torch.tensor([[0]])
+                )
+
+            FileCheck().check("skipping cudagraphs due to ['incompatible ops']").run(
+                captured_output[0]
             )
-            self.assertEqual(
-                foo(torch.tensor([1, 0, 0], device="cuda")), torch.tensor([[0]])
-            )
+
+        @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
+        def test_incompatible_cudagraph_ops_nonzero_backend(self):
+            @torch.compile(backend="cudagraphs")
+            def foo(x):
+                return x.nonzero()
+
+            with capture_stderr() as captured_output:
+                self.assertEqual(
+                    foo(torch.tensor([1, 0, 2], device="cuda")),
+                    torch.tensor([[0], [2]]),
+                )
+                self.assertEqual(
+                    foo(torch.tensor([1, 0, 0], device="cuda")), torch.tensor([[0]])
+                )
+
+            FileCheck().check(
+                "skipping cudagraphs due to incompatible op (nonzero)"
+            ).run(captured_output[0])
 
         def test_storage_access_error(self):
             x = torch.rand([4], device="cuda")
