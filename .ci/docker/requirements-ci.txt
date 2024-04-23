@@ -264,10 +264,11 @@ unittest-xml-reporting<=3.2.0,>=2.0.0
 #Pinned versions:
 #test that import:
 
-#wheel not found on aarch64, and source build requires rust
 lintrunner==0.10.7 ; platform_machine == "x86_64"
+#lintrunner is supported on aarch64-linux only from 0.12.4 version
+lintrunner==0.12.5 ; platform_machine == "aarch64"
 #Description: all about linters!
-#Pinned versions: 0.10.7
+#Pinned versions: 0.10.7 on x86 and 0.12.5 on aarch64
 #test that import:
 
 rockset==1.0.3
