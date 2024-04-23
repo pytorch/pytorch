@@ -1374,7 +1374,6 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         body_name = add_subgraph(
             tx,
-            self.source,
             "for_loop_body",
             torch.fx.GraphModule(body_nn_modules, body_graph),
         )

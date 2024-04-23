@@ -6138,12 +6138,12 @@ class RangeHigherOrderTests(torch._dynamo.test_case.TestCase):
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
-        res = L_x_
+        l_x_ = L_x_
 
         _lambda_ = torch__dynamo_variables_higher_order_ops_call_function_lambda_a_a_proxy_args_kwargs_i_(0)
         for_loop_body_0 = self.for_loop_body_0
         _lambda__1 = torch__dynamo_variables_higher_order_ops_call_function_lambda_a_a_proxy_args_kwargs_i__1(0)
-        for_loop_wrapper = torch__dynamo_variables_higher_order_ops_for_loop_wrapper(for_loop_body_0, res, res, _lambda__1);  res = _lambda__1 = None
+        for_loop_wrapper = torch__dynamo_variables_higher_order_ops_for_loop_wrapper(for_loop_body_0, l_x_, l_x_, _lambda__1);  l_x_ = _lambda__1 = None
         getitem = for_loop_wrapper[0]
         getitem_1 = for_loop_wrapper[1];  for_loop_wrapper = None
         _lambda__2 = torch__dynamo_variables_higher_order_ops_call_function_lambda_a_a_proxy_args_kwargs_i__2(1)
@@ -6184,10 +6184,10 @@ class GraphModule(torch.nn.Module):
         return (getitem_28,)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, res, res_0, _lambda_):
-            add = res_0 + _lambda_;  res_0 = None
-            add_1 = add + res;  add = None
-            return (res, add_1, _lambda_)
+        def forward(self, l_x_, l_x__0, _lambda_):
+            add = l_x__0 + _lambda_;  l_x__0 = None
+            add_1 = add + l_x_;  add = None
+            return (l_x_, add_1, _lambda_)
 """,  # noqa: B950
         )
         self.assertEqual(cnt.frame_count, 1)
@@ -6221,12 +6221,12 @@ class GraphModule(torch.nn.Module):
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
-        res = L_x_
+        l_x_ = L_x_
 
         _lambda_ = torch__dynamo_variables_higher_order_ops_call_function_lambda_a_a_proxy_args_kwargs_i_(0)
         for_loop_body_0 = self.for_loop_body_0
         _lambda__1 = torch__dynamo_variables_higher_order_ops_call_function_lambda_a_a_proxy_args_kwargs_i__1(0)
-        for_loop_wrapper = torch__dynamo_variables_higher_order_ops_for_loop_wrapper(for_loop_body_0, res, res, _lambda__1);  res = _lambda__1 = None
+        for_loop_wrapper = torch__dynamo_variables_higher_order_ops_for_loop_wrapper(for_loop_body_0, l_x_, l_x_, _lambda__1);  l_x_ = _lambda__1 = None
         getitem = for_loop_wrapper[0]
         getitem_1 = for_loop_wrapper[1];  for_loop_wrapper = None
         _lambda__2 = torch__dynamo_variables_higher_order_ops_call_function_lambda_a_a_proxy_args_kwargs_i__2(1)
@@ -6266,10 +6266,10 @@ class GraphModule(torch.nn.Module):
         return ()
 
     class GraphModule(torch.nn.Module):
-        def forward(self, res, res_0, _lambda_):
-            add = res_0 + _lambda_;  res_0 = None
-            add_1 = add + res;  add = None
-            return (res, add_1, _lambda_)
+        def forward(self, l_x_, l_x__0, _lambda_):
+            add = l_x__0 + _lambda_;  l_x__0 = None
+            add_1 = add + l_x_;  add = None
+            return (l_x_, add_1, _lambda_)
 """,  # noqa: B950
         )
         self.assertEqual(cnt.frame_count, 1)
@@ -6303,12 +6303,12 @@ class GraphModule(torch.nn.Module):
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
-        res = L_x_
+        l_x_ = L_x_
 
         _lambda_ = torch__dynamo_variables_higher_order_ops_call_function_lambda_a_a_proxy_args_kwargs_i_(0)
         for_loop_body_0 = self.for_loop_body_0
         _lambda__1 = torch__dynamo_variables_higher_order_ops_call_function_lambda_a_a_proxy_args_kwargs_i__1(0)
-        for_loop_wrapper = torch__dynamo_variables_higher_order_ops_for_loop_wrapper(for_loop_body_0, res, res, _lambda__1);  res = _lambda__1 = None
+        for_loop_wrapper = torch__dynamo_variables_higher_order_ops_for_loop_wrapper(for_loop_body_0, l_x_, l_x_, _lambda__1);  l_x_ = _lambda__1 = None
         getitem = for_loop_wrapper[0]
         getitem_1 = for_loop_wrapper[1];  for_loop_wrapper = None
         _lambda__2 = torch__dynamo_variables_higher_order_ops_call_function_lambda_a_a_proxy_args_kwargs_i__2(2)
@@ -6349,10 +6349,10 @@ class GraphModule(torch.nn.Module):
         return (getitem_28,)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, res, res_0, _lambda_):
-            add = res_0 + _lambda_;  res_0 = None
-            add_1 = add + res;  add = None
-            return (res, add_1, _lambda_)
+        def forward(self, l_x_, l_x__0, _lambda_):
+            add = l_x__0 + _lambda_;  l_x__0 = None
+            add_1 = add + l_x_;  add = None
+            return (l_x_, add_1, _lambda_)
 """,  # noqa: B950
         )
         self.assertEqual(cnt.frame_count, 1)
@@ -6403,12 +6403,12 @@ class GraphModule(torch.nn.Module):
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
-        res = L_x_
+        l_x_ = L_x_
 
         _lambda_ = torch__dynamo_variables_higher_order_ops_call_function_lambda_a_a_proxy_args_kwargs_i_(0)
         for_loop_body_0 = self.for_loop_body_0
         _lambda__1 = torch__dynamo_variables_higher_order_ops_call_function_lambda_a_a_proxy_args_kwargs_i__1(0)
-        for_loop_wrapper = torch__dynamo_variables_higher_order_ops_for_loop_wrapper(for_loop_body_0, res, res, _lambda__1, 3735928559);  res = _lambda__1 = None
+        for_loop_wrapper = torch__dynamo_variables_higher_order_ops_for_loop_wrapper(for_loop_body_0, l_x_, l_x_, _lambda__1, 3735928559);  l_x_ = _lambda__1 = None
         getitem = for_loop_wrapper[0]
         getitem_1 = for_loop_wrapper[1];  for_loop_wrapper = None
         _lambda__2 = torch__dynamo_variables_higher_order_ops_call_function_lambda_a_a_proxy_args_kwargs_i__2(1)
@@ -6448,10 +6448,10 @@ class GraphModule(torch.nn.Module):
         return ()
 
     class GraphModule(torch.nn.Module):
-        def forward(self, res, res_0, _lambda_, const):
-            add = res_0 + _lambda_;  res_0 = None
-            add_1 = add + res;  add = None
-            return (res, add_1, _lambda_, None)
+        def forward(self, l_x_, l_x__0, _lambda_, const):
+            add = l_x__0 + _lambda_;  l_x__0 = None
+            add_1 = add + l_x_;  add = None
+            return (l_x_, add_1, _lambda_, None)
 """,  # noqa: B950
         )
         self.assertEqual(cnt.frame_count, 1)
