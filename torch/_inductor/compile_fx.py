@@ -828,23 +828,35 @@ def get_input_idxs_to_check(
     might need to do a copy to preserve alignment requirements.
     """
     ids_to_check = []
+
+    tracing_context = torch._guards.TracingContext.try_get()
+    suppress_guards_ctx = (
+        tracing_context.fake_mode.shape_env.suppress_guards
+        if tracing_context
+        else contextlib.nullcontext
+    )
+
     for i, input in enumerate(inputs):
-        if (
-            isinstance(input, torch.Tensor)  # non-tensors don't need alignment
-            and input.device.type == "cuda"  # right now we only care for cuda tensors
-            and not (
-                i in static_input_idxs and tensor_is_aligned(input)
-            )  # tensor is NOT (aligned and constant)
-            and should_assume_input_aligned(
-                input
-            )  # See Note: [Input Alignment handling in Inductor]
-        ):
-            # if we get here, then
-            # (a) our triton code assumes that the input is aligned
-            # (b) we can't be sure ahead of time that the input will actually be aligned.
-            # therefore, at runtime, we'll need to check that the input is aligned
-            # (and if not, clone it to make it aligned.)
-            ids_to_check.append(i)
+        if not isinstance(input, torch.Tensor):
+            # non-tensors don't need alignment
+            continue
+        if input.device.type != "cuda":
+            # right now we only care for cuda tensors
+            continue
+        with suppress_guards_ctx():
+            # suppress guards so that tensor_is_aligned and should_assume_input_aligned
+            # do not add guards on input's storage offset
+            if i in static_input_idxs and tensor_is_aligned(input):
+                continue
+            if not should_assume_input_aligned(input):
+                continue
+
+        # if we get here, then
+        # (a) our triton code assumes that the input is aligned
+        # (b) we can't be sure ahead of time that the input will actually be aligned.
+        # therefore, at runtime, we'll need to check that the input is aligned
+        # (and if not, clone it to make it aligned.)
+        ids_to_check.append(i)
 
     return ids_to_check
 
