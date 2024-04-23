@@ -13,6 +13,7 @@ from torch.distributed.checkpoint.metadata import (
     TensorStorageMetadata,
 )
 from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 
 class TestDCPCompatbility(TestCase):
@@ -56,6 +57,18 @@ class TestDCPCompatbility(TestCase):
             {"a": torch.zeros(4, 4)},
             dcp.FileSystemReader("/tmp/dcp_testing"),
         )
+
+    @with_temp_dir
+    def test_storage_meta(self) -> None:
+        writer = dcp.FileSystemWriter(self.temp_dir)
+        dcp.save({"a": torch.zeros(4, 4)}, storage_writer=writer)
+
+        reader = dcp.FileSystemReader(self.temp_dir)
+        storage_meta = reader.read_metadata().storage_meta
+        self.assertNotEqual(storage_meta, None)
+        self.assertEqual(str(storage_meta.checkpoint_id), self.temp_dir)
+        self.assertEqual(storage_meta.save_id, writer.save_id)
+        self.assertEqual(storage_meta.load_id, reader.load_id)
 
 
 if __name__ == "__main__":

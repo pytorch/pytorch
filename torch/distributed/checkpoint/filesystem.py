@@ -552,7 +552,7 @@ class FileSystemWriter(StorageWriter):
 
         self.fs.rename(tmp_path, meta_path)
 
-    def storage_metadata(self) -> StorageMeta:
+    def storage_meta(self) -> Optional[StorageMeta]:
         return StorageMeta(checkpoint_id=self.checkpoint_id, save_id=self.save_id)
 
     @property
