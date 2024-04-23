@@ -1041,6 +1041,7 @@ def _export(
                                     "kind": node.kwargs["kind"],
                                 },
                             )
+                            new_node.meta = node.meta
                             node.replace_all_uses_with(new_node)
                             gm.graph.erase_node(node)
 
