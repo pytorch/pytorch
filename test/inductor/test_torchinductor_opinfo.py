@@ -254,6 +254,7 @@ inductor_expected_failures_single_sample["cuda"] = {
 
 # intentionally not handled
 intentionally_not_handled = {
+    ("as_strided", "partial_views"): {b8, f16, f32, f64, i32, i64},
     "resize_": {b8, f16, f32, f64, i32, i64},
     "resize_as_": {b8, f16, f32, f64, i32, i64},
 }

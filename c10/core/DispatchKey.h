@@ -181,13 +181,11 @@ enum class DispatchKey : uint16_t {
   // https://gitlab.com/pytorch-complex/vitis_kernels
 
   // TODO: put this in BackendComponents
-  // ONNX Runtime, lives out of tree at https://github.com/pytorch/ort and
-  // https://github.com/microsoft/onnxruntime, and is also used to test general
-  // backend/extension machinery in the core. cf:
-  // - test/cpp_extensions/ort_extension.cpp
+  // MAIA backend lives out of tree
+  // - test/cpp_extensions/maia_extension.cpp
   // - test/test_torch.py
   // - aten/src/ATen/test/extension_backend_test.cpp
-  ORT,
+  MAIA,
 
   Vulkan, // TODO: put this in BackendComponents
   Metal, // TODO: put this in BackendComponents
