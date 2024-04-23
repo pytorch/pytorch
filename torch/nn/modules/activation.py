@@ -1333,7 +1333,7 @@ class PReLU(Module):
     .. math::
         \text{PReLU}(x) =
         \begin{cases}
-        x, & \text{ if } x \geq 0 \\
+        x, & \text{ if } x \ge 0 \\
         ax, & \text{ otherwise }
         \end{cases}
 

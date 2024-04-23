@@ -36,6 +36,7 @@ from torch._guards import detect_fake_mode
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch._utils_internal import log_export_usage
 from torch.export.exported_program import OutputKind
+from torch.fx._utils import first_call_function_nn_module_stack
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     free_unbacked_symbols,
@@ -43,6 +44,7 @@ from torch.fx.experimental.symbolic_shapes import (
     ShapeEnv,
 )
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
+from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.utils._pytree import TreeSpec
 from torch.utils._sympy.value_ranges import ValueRangeError
 
@@ -306,10 +308,8 @@ def _rename_constants_nodes(
     const_prefix = placeholder_prefixes[InputKind.CONSTANT_TENSOR]
     buffer_to_constant = {}
     for spec in graph_signature.input_specs:
-        if (
-            spec.kind == InputKind.CONSTANT_TENSOR
-            and isinstance(spec.arg, TensorArgument)
-            and not spec.arg.name.startswith(const_prefix)
+        if spec.kind == InputKind.CONSTANT_TENSOR and not spec.arg.name.startswith(
+            const_prefix
         ):
             if spec.arg.name.startswith(buffer_prefix):  # map from buffer to constants
                 c_name = rename_constant(
@@ -320,8 +320,6 @@ def _rename_constants_nodes(
             buffer_to_constant[spec.arg.name] = c_name
             spec.arg.name = c_name
     for spec in graph_signature.output_specs:
-        if isinstance(spec.arg, ConstantArgument):
-            continue
         if spec.arg.name in buffer_to_constant:
             spec.arg.name = buffer_to_constant[spec.arg.name]
 
@@ -570,7 +568,7 @@ def _export_non_strict(
     def make_argument_spec(i, node) -> ArgumentSpec:
         if isinstance(node, (int, bool, float, type(None))):
             # For const outputs we just directly return this
-            return ConstantArgument(value=node)
+            return ConstantArgument(name="", value=node)
 
         assert (
             "val" in node.meta
@@ -590,7 +588,7 @@ def _export_non_strict(
         else:
             # TODO: this branch is likely wrong, all permissible ConstantArgument type
             # should have been handled already
-            return ConstantArgument(value=val)
+            return ConstantArgument(name=node.name, value=val)
 
     input_specs, output_specs = _sig_to_specs(
         user_inputs=set(graph_signature.user_inputs),
@@ -773,11 +771,7 @@ def _verify_placeholder_names(gm: torch.fx.GraphModule, sig: ExportGraphSignatur
     - User input nodes: no restrictions, should match the original forward() signature
     - Params/buffers/constants/custom_obj/token nodes: should start with prefixes defined in <placeholder_prefixes>
     """
-    name_to_kind = {
-        spec.arg.name: spec.kind
-        for spec in sig.input_specs
-        if not isinstance(spec.arg, ConstantArgument)
-    }
+    name_to_kind = {spec.arg.name: spec.kind for spec in sig.input_specs}
     for mod in gm.modules():
         if not isinstance(mod, torch.fx.GraphModule):
             continue
@@ -1047,6 +1041,7 @@ def _export(
                                     "kind": node.kwargs["kind"],
                                 },
                             )
+                            new_node.meta = node.meta
                             node.replace_all_uses_with(new_node)
                             gm.graph.erase_node(node)
 
@@ -1069,6 +1064,12 @@ def _export(
             ),
             example_inputs=(args, kwargs),
             constants=ep_non_strict.constants,
+        )
+        insert_deferred_runtime_asserts(
+            exported_program.graph_module,
+            fake_mode.shape_env,
+            f"non strict exported program: {first_call_function_nn_module_stack(exported_program.graph)}",
+            export=True,
         )
         return exported_program
 
@@ -1254,6 +1255,11 @@ def _export(
         assert res is not None
         gm = res.graph_module
 
+    if len(range_constraints) > 0:
+        res = _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints)(gm)
+        assert res is not None
+        gm = res.graph_module
+
     assert orig_out_spec is not None
     _verify_nn_module_stack(gm)
     _verify_stack_trace(gm)
@@ -1274,10 +1280,5 @@ def _export(
         constants=constants,
     )
     log.debug("Exported program from AOTAutograd:\n%s", exported_program)
-
-    if len(range_constraints) > 0:
-        exported_program = exported_program._transform_do_not_use(
-            _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints)
-        )
 
     return exported_program
