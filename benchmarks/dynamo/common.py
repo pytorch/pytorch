@@ -60,6 +60,7 @@ from torch._dynamo.testing import (
     reset_rng_state,
     same,
 )
+from torch._C import _has_cuda as HAS_CUDA, _has_xpu as HAS_XPU
 
 try:
     from torch._dynamo.utils import (
@@ -3667,14 +3668,9 @@ def run(runner, args, original_dir=None):
             log.warning("torch.cuda.is_available() == False, using CPU")
             args.devices = ["cpu"]
 
-    if args.devices != ["cpu"]:
+    if args.devices != ["cpu"] and (HAS_CUDA or HAS_XPU):
         global synchronize
-        if torch.cuda.is_available():
-            synchronize = torch.cuda.synchronize
-        elif torch.xpu.is_available():
-            synchronize = torch.xpu.synchronize
-        else:
-            log.warning(f"Trying to set synchronize for non CUDA/XPU device. Device is: {args.devices}")
+        synchronize = torch.cuda.synchronize if HAS_CUDA else torch.xpu.synchronize
 
     if (
         args.devices == ["cuda"]
