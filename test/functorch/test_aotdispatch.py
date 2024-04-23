@@ -4103,6 +4103,40 @@ class <lambda>(torch.nn.Module):
         for g_ref, g_test in zip(grads_ref, grads_test):
             self.assertEqual(g_ref, g_test)
 
+    def test_aot_export_module_includes_stacktrace(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, weight):
+                r = x @ weight
+                y = r.sin()
+                return (y,)
+
+        mod = M()
+        inp = [torch.randn(4, 4, requires_grad=True), torch.randn(4, 4)]
+        gm, _ = aot_export_module(mod, inp, trace_joint=False)
+
+        readable = gm.print_readable(print_output=False).strip()
+        self.assertIn("in forward, code: r = x @ weight", readable)
+        self.assertIn("in forward, code: y = r.sin()", readable)
+
+    def test_aot_export_simple_includes_stacktrace_for_callables(self):
+        def f(x, weight):
+            r = x @ weight
+            y = r.sin()
+            return (y,)
+
+        gm = aot_export_joint_simple(
+            f,
+            [torch.randn(4, 4, requires_grad=True), torch.randn(4, 4)],
+            trace_joint=True,
+        )
+
+        readable = gm.print_readable(print_output=False).strip()
+        self.assertIn("in f, code: r = x @ weight", readable)
+        self.assertIn("in f, code: y = r.sin()", readable)
+
     def test_aot_export_metadata_mutation_banned(self):
         def fn(p, x):
             x.t_()
