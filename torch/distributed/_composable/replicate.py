@@ -226,6 +226,7 @@ def replicate(
 
             module.register_forward_pre_hook(_reconstruct_dtensor)
             module.register_forward_hook(_localize_dtensor)
+
     module.register_forward_hook(state.forward_post_hook)  # type: ignore[arg-type]
 
     state.record_init_args(module, ignored_modules, **kwargs)
