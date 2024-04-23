@@ -147,9 +147,9 @@ optree==0.11.0
 #test_pointwise_ops.py, test_dtensor_ops.py, test_torchinductor.py, test_fx.py,
 #test_fake_tensor.py, test_mps.py
 
-pillow==10.2.0
+pillow==10.3.0
 #Description:  Python Imaging Library fork
-#Pinned versions: 10.2.0
+#Pinned versions: 10.3.0
 #test that import:
 
 protobuf==3.20.2
