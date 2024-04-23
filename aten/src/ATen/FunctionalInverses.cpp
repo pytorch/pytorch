@@ -231,6 +231,17 @@ Tensor FunctionalInverses::slice_Tensor_inverse(const Tensor& base, const Tensor
     }
 }
 
+Tensor FunctionalInverses::slice_strict_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, int64_t dim, c10::optional<c10::SymInt> start, c10::optional<c10::SymInt> end, c10::SymInt step) {
+    if (inverse_return_mode == InverseReturnMode::AlwaysView) {
+      // NB: assumes mutated_view is a narrowed view of base.
+      // We should NOT do this for functionalization
+      return at::slice_strict_inverse_symint(mutated_view,
+          base, dim, std::move(start), std::move(end), std::move(step));
+    } else {
+      return at::slice_strict_scatter_symint(base, mutated_view, dim, std::move(start), std::move(end), std::move(step));
+    }
+}
+
 Tensor FunctionalInverses::split_Tensor_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, int64_t mutated_view_idx, c10::SymInt split_size, int64_t dim) {
     // It would be nice if this logic could be re-used from autograd's split_backward(), but I don't think it can.
     // For functionalization, we have only have one of the tensors from the TensorList outputed by split(), and we want to layer i
@@ -465,6 +476,17 @@ Tensor FunctionalInverses::slice_inverse_inverse(const at::Tensor & base, const 
           mutated_view, dim, std::move(start), std::move(end), std::move(step));
     } else {
       return mutated_view.slice_symint(
+          dim, std::move(start), std::move(end), std::move(step));
+    }
+}
+
+Tensor FunctionalInverses::slice_strict_inverse_inverse(const at::Tensor & base, const at::Tensor & mutated_view, InverseReturnMode inverse_return_mode, const at::Tensor & src, int64_t dim, std::optional<c10::SymInt> start, std::optional<c10::SymInt> end, c10::SymInt step) {
+    // slice_inverse() inverse is just slice()
+    if (inverse_return_mode == InverseReturnMode::NeverView) {
+      return at::slice_strict_copy_symint(
+          mutated_view, dim, std::move(start), std::move(end), std::move(step));
+    } else {
+      return at::slice_strict_symint(mutated_view,
           dim, std::move(start), std::move(end), std::move(step));
     }
 }

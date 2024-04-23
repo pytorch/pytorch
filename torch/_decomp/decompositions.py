@@ -1,7 +1,6 @@
 import functools
 import numbers
 import operator
-import sys
 from enum import Enum
 from functools import partial, reduce
 from itertools import chain, product
@@ -724,14 +723,15 @@ def slice_backward(
     return torch.slice_scatter(grad_input, grad_output, dim, start, end, step)
 
 
-@register_decomposition(aten.slice.Tensor)
-def slice_forward(
+def slice_forward_impl(
     # Tensor(a) self, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1
     self: Tensor,
     dim: int = 0,
     start: Optional[int] = None,
     end: Optional[int] = None,
     step: int = 1,
+    *,
+    strict: bool = False,
 ):
     ndim = self.dim()
     if ndim == 0:
@@ -744,23 +744,38 @@ def slice_forward(
         raise RuntimeError("slice step must be positive")
 
     start_val = start if start is not None else 0
-    end_val = end if end is not None else sys.maxsize  # 2^63 – 1
+    end_val = end if end is not None else sizes[dim]
 
-    if start_val < 0:
-        start_val += sizes[dim]
+    if strict:
+        torch._check(
+            start_val >= 0,
+            lambda: f"slice start must be non-negative, but got {start_val}",
+        )
+        torch._check(
+            start_val <= end_val,
+            lambda: f"slice start must be before slice end, but got {start_val} > {end_val}",
+        )
+        torch._check(
+            end_val <= sizes[dim],
+            lambda: f"slice end must be less than or equal to size at dimension, but got {end_val} > {sizes[dim]}",
+        )
 
-    if end_val < 0:
-        end_val += sizes[dim]
+    else:
+        if start_val < 0:
+            start_val += sizes[dim]
 
-    if start_val < 0:
-        start_val = 0
-    elif start_val > sizes[dim]:
-        start_val = sizes[dim]
+        if end_val < 0:
+            end_val += sizes[dim]
 
-    if end_val < start_val:
-        end_val = start_val
-    elif end_val > sizes[dim]:
-        end_val = sizes[dim]
+        if start_val < 0:
+            start_val = 0
+        elif start_val > sizes[dim]:
+            start_val = sizes[dim]
+
+        if end_val < start_val:
+            end_val = start_val
+        elif end_val > sizes[dim]:
+            end_val = sizes[dim]
 
     storage_offset = self.storage_offset() + start_val * strides[dim]
     len = end_val - start_val
@@ -773,6 +788,29 @@ def slice_forward(
         )
     else:
         return self.as_strided(sizes, strides, storage_offset)
+
+
+@register_decomposition(aten.slice.Tensor)
+def slice_forward(
+    # Tensor(a) self, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1
+    self: Tensor,
+    dim: int = 0,
+    start: Optional[int] = None,
+    end: Optional[int] = None,
+    step: int = 1,
+):
+    return slice_forward_impl(self, dim, start, end, step, strict=False)
+
+
+@register_decomposition(aten.slice_strict)
+def slice_forward(
+    self: Tensor,
+    dim: int = 0,
+    start: Optional[int] = None,
+    end: Optional[int] = None,
+    step: int = 1,
+):
+    return slice_forward_impl(self, dim, start, end, step, strict=True)
 
 
 @register_decomposition(aten.select_backward)
@@ -3040,6 +3078,34 @@ def _rnn_helper(
 
     input = input.transpose(0, 1) if batch_first else input
     return input, final_hiddens
+
+
+# Equivalent to C++ except that it calls slice_strict.  We only override it in
+# Python dispatcher to reduce blast radius of change
+@aten.narrow.default.py_impl(DispatchKey.CompositeImplicitAutograd)
+@aten.narrow.default.py_impl(DispatchKey.Autograd)
+def narrow(self, dim, start, length):
+    torch._check(
+        self.dim() > 0, lambda: "narrow() cannot be applied to a 0-dim tensor."
+    )
+    torch._check(length >= 0, lambda: "narrow(): length must be non-negative.")
+    cur_size = self.size(dim)
+    torch._check_index(
+        -cur_size <= start,
+        lambda: f"start out of range (expected to be in range of [{-cur_size}, {cur_size}], but got {start})",
+    )
+    torch._check_index(
+        start <= cur_size,
+        lambda: f"start out of range (expected to be in range of [{-cur_size}, {cur_size}], but got {start})",
+    )
+    if start < 0:
+        start = start + cur_size
+    torch._check(
+        start <= cur_size - length,
+        lambda: f"start ({start}) + length ({length}) exceeds dimension size ({cur_size}).",
+    )
+    # Only difference here!
+    return torch.ops.aten.slice_strict.default(self, dim, start, start + length, 1)
 
 
 @register_decomposition(aten.rnn_tanh.input)
