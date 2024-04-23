@@ -598,7 +598,7 @@ class FunctionEvent(FormattedTimesMixin):
                 child.privateuse1_time_total for child in self.cpu_children
             )
         else:
-            assert self.device_type == DeviceType.PrivateUse1
+            assert self.device_type == DeviceType.CUDA
             return self.privateuse1_time_total
 
     @property
@@ -633,30 +633,12 @@ class FunctionEvent(FormattedTimesMixin):
             else self.privateuse1_memory_usage
         )
         return (
-            "<FunctionEvent id={} name={} device_type={} node_id={} cpu_time={} start_us={} end_us={} "
-            "cpu_children={} {}_time={} name={} thread={} input_shapes={} "
-            "cpu_memory_usage={} {}_memory_usage={} is_async={} is_remote={} seq_nr={} is_legacy={}>".format(
-                self.id,
-                self.name,
-                self.device_type,
-                self.node_id,
-                self.cpu_time_str,
-                self.time_range.start,
-                self.time_range.end,
-                str([child.id for child in self.cpu_children]),
-                device_name,
-                device_time,
-                self.name,
-                self.thread,
-                str(self.input_shapes),
-                self.cpu_memory_usage,
-                device_name,
-                device_memory_usage,
-                self.is_async,
-                self.is_remote,
-                self.sequence_nr,
-                self.is_legacy,
-            )
+            f"<FunctionEvent id={self.id} name={self.name} device_type={self.device_type} node_id={self.node_id} "
+            f"cpu_time={self.cpu_time_str} start_us={self.time_range.start} end_us={self.time_range.end} "
+            f"cpu_children={str([child.id for child in self.cpu_children])} {device_name}_time={device_time} "
+            f"name={self.name} thread={self.thread} input_shapes={str(self.input_shapes)} "
+            f"cpu_memory_usage={self.cpu_memory_usage} {device_name}_memory_usage={device_memory_usage} "
+            f"is_async={self.is_async} is_remote={self.is_remote} seq_nr={self.sequence_nr} is_legacy={self.is_legacy}>"
         )
 
 
@@ -749,21 +731,9 @@ class FunctionEventAvg(FormattedTimesMixin):
             else self.privateuse1_memory_usage
         )
         return (
-            "<FunctionEventAvg key={} self_cpu_time={} cpu_time={} "
-            " self_{}_time={} {}_time={} input_shapes={} "
-            "cpu_memory_usage={} {}_memory_usage={}>".format(
-                self.key,
-                self.self_cpu_time_total_str,
-                self.cpu_time_str,
-                device_name,
-                self_device_time,
-                device_name,
-                device_time,
-                str(self.input_shapes),
-                self.cpu_memory_usage,
-                device_name,
-                device_memory,
-            )
+            f"<FunctionEventAvg key={self.key} self_cpu_time={self.self_cpu_time_total_str} cpu_time={self.cpu_time_str} "
+            f" self_{device_name}_time={self_device_time} {device_name}_time={device_time} input_shapes={str(self.input_shapes)} "
+            f"cpu_memory_usage={self.cpu_memory_usage} {device_name}_memory_usage={device_memory}>"
         )
 
 
@@ -867,10 +837,7 @@ def _build_table(
         event.self_privateuse1_memory_usage > 0 for event in events
     )
     use_device = events[0].use_device
-    # Running on PrivateUse1 device with profiler but not enable
-    # ProfilerActivity.PrivateUse1 can also catch privateuse1 memory usage.
-    # Here only need to check has_privateuse1_time if not use_device.
-    if not use_device and has_privateuse1_time:
+    if not use_device and (has_privateuse1_mem or has_privateuse1_time):
         raise RuntimeError(
             "use_device is None, but there is private device performance data."
         )
@@ -954,7 +921,7 @@ def _build_table(
                     "Self CUDA Mem",
                 ]
             )
-        if use_device and has_privateuse1_mem:
+        if has_privateuse1_mem:
             privateuse1 = use_device.upper()
             headers.extend(
                 [
@@ -1135,7 +1102,7 @@ def _build_table(
                         _format_memory(evt.self_cuda_memory_usage),
                     ]
                 )
-            if use_device and has_privateuse1_mem:
+            if has_privateuse1_mem:
                 row_values.extend(
                     [
                         # PrivateUse1 Mem Total

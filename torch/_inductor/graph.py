@@ -18,6 +18,7 @@ from torch._decomp import get_decompositions
 from torch._dynamo.utils import defake, dynamo_timed
 from torch._higher_order_ops.effects import _EffectType
 from torch._logging import LazyString, trace_structured
+from torch._prims_common import make_channels_last_strides_for
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
@@ -634,8 +635,7 @@ class GraphLowering(torch.fx.Interpreter):
         # - sebotnet33ts_256
         for n in self.module.graph.nodes:
             if n in output_set:
-                for child in n.users:
-                    output_set.add(child)
+                output_set.update(n.users)
 
         return output_set
 
@@ -954,10 +954,10 @@ class GraphLowering(torch.fx.Interpreter):
         return self.add_tensor_constant(value, target)
 
     def call_module(self, target, args, kwargs):
-        raise AssertionError()
+        raise AssertionError
 
     def call_method(self, target, args, kwargs):
-        raise AssertionError()
+        raise AssertionError
 
     def output(self, target, args, kwargs):
         result = super().output(target, args, kwargs)
@@ -1148,6 +1148,20 @@ class GraphLowering(torch.fx.Interpreter):
             is_input_for_as_strided = any(
                 user.target in as_strided_ops for user in n.users
             )
+
+            if n.meta.get("inductor_realize_to_strides", False) and isinstance(
+                result, TensorBox
+            ):
+                result.realize()
+                strides = n.meta["val"].stride()
+                sym_strides = torch._inductor.utils.any_is_symbolic(*strides)
+                if (
+                    not hasattr(result, "get_stride")
+                    or result.get_stride() != strides
+                    and not sym_strides
+                ):
+                    stride_order = ir.get_stride_order(strides)
+                    result = ir.ExternKernel.require_stride_order(result, stride_order)
             if (
                 is_output
                 and isinstance(result, TensorBox)
@@ -1204,21 +1218,24 @@ class GraphLowering(torch.fx.Interpreter):
                             torch.ops.aten.mm.default,
                             torch.ops.aten._int_mm.default,
                         ]
+                        need_fixed_channels_last_layout = []
                         if not self.layout_opt:
                             need_fixed_layout.append(torch.ops.aten.convolution.default)
                         if torch._C._has_mkldnn:
                             need_fixed_layout += [
+                                torch.ops.mkldnn._linear_pointwise.default,
+                                torch.ops.mkldnn._linear_pointwise.binary,
+                                torch.ops.aten.mkldnn_rnn_layer.default,
+                                torch.ops.onednn.qlinear_pointwise.default,
+                                torch.ops.onednn.qlinear_pointwise.tensor,
+                            ]
+                            need_fixed_channels_last_layout += [
                                 torch.ops.mkldnn._convolution_pointwise.default,
                                 torch.ops.mkldnn._convolution_pointwise.binary,
                                 torch.ops.mkldnn._convolution_pointwise_.binary,
                                 torch.ops.mkldnn._convolution_transpose_pointwise.default,
-                                torch.ops.mkldnn._linear_pointwise.default,
-                                torch.ops.mkldnn._linear_pointwise.binary,
-                                torch.ops.aten.mkldnn_rnn_layer.default,
                                 torch.ops.onednn.qconv2d_pointwise.default,
                                 torch.ops.onednn.qconv2d_pointwise.binary,
-                                torch.ops.onednn.qlinear_pointwise.default,
-                                torch.ops.onednn.qlinear_pointwise.tensor,
                             ]
                             if torch._C.has_mkl:
                                 need_fixed_layout += [torch.ops.mkl._mkl_linear.default]
@@ -1227,6 +1244,13 @@ class GraphLowering(torch.fx.Interpreter):
                                 result,
                                 ir.get_stride_order(n.meta["val"].stride()),
                                 allow_padding=True,
+                            )
+                        if user.target in need_fixed_channels_last_layout:
+                            result = ir.ExternKernel.require_stride_order(
+                                result,
+                                ir.get_stride_order(
+                                    make_channels_last_strides_for(n.meta["val"].shape)
+                                ),
                             )
                     if user.op == "output":
                         if isinstance(result.data.data, (Pointwise, Reduction)):

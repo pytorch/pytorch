@@ -107,6 +107,7 @@ Features described in this documentation are classified by release status:
    torch.random <random>
    masked
    torch.nested <nested>
+   size
    sparse
    storage
    torch.testing <testing>

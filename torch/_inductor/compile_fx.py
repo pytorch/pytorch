@@ -29,14 +29,14 @@ from torch._dynamo.utils import (
 from torch._functorch import config as functorch_config
 from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
 from torch._inductor.codecache import code_hash, CompiledFxGraph, FxGraphCache
-from torch._inductor.cudagraph_utils import BoxedDeviceIndex
+from torch._inductor.cudagraph_utils import BoxedDeviceIndex, get_placeholders
 
 from torch._inductor.debug import save_args_for_compile_fx_inner
 from torch._inductor.utils import BoxedBool, count_tangents
 from torch._logging import trace_structured
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
-from torch._utils_internal import compiletime_sl_profile_meta
+from torch._utils_internal import compiletime_strobelight_meta
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
@@ -513,16 +513,7 @@ def compile_fx_inner(
             if isinstance(t, torch.Tensor)
         )
 
-        from torch._inductor.cudagraph_utils import check_for_mutation
-
-        has_mutation_str = check_for_mutation(gm, compiled_graph, num_fixed)
-        has_mutation = has_mutation_str is not None
-
-        if has_mutation:
-            compiled_graph.disabled_cudagraphs_reason = has_mutation_str
-
         cudagraph_tests = [
-            (not has_mutation, "mutated inputs"),
             (not has_incompatible_cudagraph_ops(gm), "incompatible ops"),
             (not complex_memory_overlap_inputs, "complex memory overlap"),
             (
@@ -557,6 +548,8 @@ def compile_fx_inner(
                 is_backward=is_backward,
                 is_inference=is_inference,
                 constants=tuple(compiled_graph.constants.values()),
+                placeholders=tuple(get_placeholders(gm.graph)),
+                mutated_input_idxs=tuple(compiled_graph.mutated_input_idxs),
             )
         else:
             BoxedBool.disable(cudagraphs)
@@ -576,7 +569,7 @@ def compile_fx_inner(
                 assert manager is not None
 
                 def compiled_artifact(new_inputs):
-                    manager.set_to_running_backward()
+                    manager.set_to_running_backward()  # type: ignore[union-attr]
                     return compiled_graph_callable(new_inputs)
 
                 compiled_graph.current_callable = compiled_artifact
@@ -611,6 +604,7 @@ def compile_fx_inner(
     return compiled_graph
 
 
+@dynamo_utils.preserve_rng_state()
 def fx_codegen_and_compile(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
@@ -878,6 +872,8 @@ def cudagraphify(
     is_backward: bool,
     is_inference: bool,
     constants: Tuple[torch.Tensor, ...] = (),
+    placeholders: Tuple[torch.fx.Node, ...] = (),
+    mutated_input_idxs: Tuple[int, ...] = (),
 ):
     from torch._inductor.cudagraph_trees import (
         cudagraphify_impl as new_cudagraphify_impl,
@@ -892,6 +888,8 @@ def cudagraphify(
             is_backward=is_backward,
             is_inference=is_inference,
             constants=constants,
+            placeholders=placeholders,
+            mutated_input_idxs=mutated_input_idxs,
         )
     else:
         cudagraphify_fn = cudagraphify_impl
@@ -1351,7 +1349,7 @@ def compile_fx(
             graph, joint_inputs, **kwargs, compiler="inductor"
         )
 
-    @compiletime_sl_profile_meta(phase_name="bw_compiler")
+    @compiletime_strobelight_meta(phase_name="bw_compiler")
     @dynamo_utils.dynamo_timed
     @dynamo_utils.maybe_cprofile
     def bw_compiler(model: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
