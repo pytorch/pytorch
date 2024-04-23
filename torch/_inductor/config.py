@@ -603,6 +603,9 @@ class triton:
     # TODO - need to debug why this prevents cleanup
     cudagraph_trees_history_recording = False
 
+    # Enable cudagraph support for mutated inputs from prior cudagraph pool
+    cudagraph_support_input_mutation = False
+
     # synchronize after cudagraph invocation
     force_cudagraph_sync = False
 
