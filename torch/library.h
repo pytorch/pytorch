@@ -370,8 +370,8 @@ inline CppFunction dispatch(c10::DeviceType type, Func&& raw_f) {
         return c10::DispatchKey::Meta;
       case c10::DeviceType::HIP:
         return c10::DispatchKey::HIP;
-      case c10::DeviceType::ORT:
-        return c10::DispatchKey::ORT;
+      case c10::DeviceType::MAIA:
+        return c10::DispatchKey::MAIA;
       case c10::DeviceType::HPU:
         return c10::DispatchKey::HPU;
       case c10::DeviceType::MTIA:
