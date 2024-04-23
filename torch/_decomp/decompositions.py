@@ -2720,9 +2720,10 @@ def _compute_upsample_nearest_indices(input, output_size, scales, exact=False):
     return indices
 
 
-@register_decomposition(aten.upsample_nearest1d.default)
+@register_decomposition([aten.upsample_nearest1d.default, aten.upsample_nearest1d.out])
 @aten.upsample_nearest1d.default.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.upsample_nearest1d.default.py_impl(DispatchKey.Autograd)
+@out_wrapper(preserve_memory_format=True, exact_dtype=True)
 def upsample_nearest1d(
     input: Tensor,
     output_size: List[int],
@@ -2731,9 +2732,12 @@ def upsample_nearest1d(
     return _upsample_nearest(input, output_size, [scales])
 
 
-@register_decomposition(aten._upsample_nearest_exact1d.default)
+@register_decomposition(
+    [aten._upsample_nearest_exact1d.default, aten._upsample_nearest_exact1d.out]
+)
 @aten._upsample_nearest_exact1d.default.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten._upsample_nearest_exact1d.default.py_impl(DispatchKey.Autograd)
+@out_wrapper(preserve_memory_format=True, exact_dtype=True)
 def upsample_nearest_exact1d(
     input: Tensor,
     output_size: List[int],
@@ -2742,9 +2746,10 @@ def upsample_nearest_exact1d(
     return _upsample_nearest(input, output_size, [scales], exact=True)
 
 
-@register_decomposition(aten.upsample_nearest2d.default)
+@register_decomposition([aten.upsample_nearest2d.default, aten.upsample_nearest2d.out])
 @aten.upsample_nearest2d.default.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.upsample_nearest2d.default.py_impl(DispatchKey.Autograd)
+@out_wrapper(preserve_memory_format=True, exact_dtype=True)
 def upsample_nearest2d(
     input: Tensor,
     output_size: List[int],
@@ -2754,9 +2759,12 @@ def upsample_nearest2d(
     return _upsample_nearest(input, output_size, [scales_h, scales_w])
 
 
-@register_decomposition(aten._upsample_nearest_exact2d.default)
+@register_decomposition(
+    [aten._upsample_nearest_exact2d.default, aten._upsample_nearest_exact2d.out]
+)
 @aten._upsample_nearest_exact2d.default.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten._upsample_nearest_exact2d.default.py_impl(DispatchKey.Autograd)
+@out_wrapper(preserve_memory_format=True, exact_dtype=True)
 def _upsample_nearest_exact2d(
     input: Tensor,
     output_size: List[int],
@@ -2766,9 +2774,10 @@ def _upsample_nearest_exact2d(
     return _upsample_nearest(input, output_size, [scales_h, scales_w], exact=True)
 
 
-@register_decomposition(aten.upsample_nearest3d.default)
+@register_decomposition([aten.upsample_nearest3d.default, aten.upsample_nearest3d.out])
 @aten.upsample_nearest3d.default.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.upsample_nearest3d.default.py_impl(DispatchKey.Autograd)
+@out_wrapper(preserve_memory_format=True, exact_dtype=True)
 def upsample_nearest3d(
     input: Tensor,
     output_size: List[int],
@@ -2779,9 +2788,12 @@ def upsample_nearest3d(
     return _upsample_nearest(input, output_size, [scales_d, scales_h, scales_w])
 
 
-@register_decomposition(aten._upsample_nearest_exact3d.default)
+@register_decomposition(
+    [aten._upsample_nearest_exact3d.default, aten._upsample_nearest_exact3d.out]
+)
 @aten._upsample_nearest_exact3d.default.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten._upsample_nearest_exact3d.default.py_impl(DispatchKey.Autograd)
+@out_wrapper(preserve_memory_format=True, exact_dtype=True)
 def _upsample_nearest_exact3d(
     input: Tensor,
     output_size: List[int],
@@ -4251,8 +4263,9 @@ def matmul(tensor1, tensor2, *, is_out=False):
         torch._check(False, lambda: "both arguments to matmul need to be at least 1D")
 
 
-@register_decomposition(aten.upsample_bicubic2d.default)
+@register_decomposition([aten.upsample_bicubic2d.default, aten.upsample_bicubic2d.out])
 @aten.upsample_bicubic2d.default.py_impl(DispatchKey.Autograd)
+@out_wrapper()
 @pw_cast_for_opmath
 def upsample_bicubic2d_default(
     input: Tensor,
