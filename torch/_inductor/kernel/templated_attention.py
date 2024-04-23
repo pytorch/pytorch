@@ -3,7 +3,6 @@ import logging
 from typing import Any, List
 
 import torch
-from .. import config
 from ..lowering import empty_strided, lowerings, register_lowering
 from ..select_algorithm import autotune_select_algorithm, TritonTemplate
 
@@ -115,14 +114,12 @@ sdpa_template = TritonTemplate(
         qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
         qk = tl.dot(q, k.to(MATMUL_PRECISION), acc=qk)
         # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
-        m = offs_m[:, None]
-        n = start_n + offs_n[None, :]
         {{ modification(
             score="qk",
             b="off_hz // H",
             h="off_hz % H",
-            m="m",
-            n="n",
+            m="offs_m[:, None]",
+            n="start_n + offs_n[None, :]",
             out="qk"
         ) | indent_except_first(2) }}
         # TODO: In the case that score_mod is linear, this can be LICMed
@@ -173,8 +170,7 @@ sdpa_template = TritonTemplate(
 )
 
 
-# TODO: We probably also need a layout constraint?
-@register_lowering(torch.ops.higher_order.templated_attention, type_promotion_kind=None)
+@register_lowering(torch.ops.higher_order.templated_attention)
 def templated_attention(*args, **kwargs):
     from torch._prims_common import make_contiguous_strides_for
     from ..ir import (
@@ -186,7 +182,7 @@ def templated_attention(*args, **kwargs):
         TensorBox,
     )
 
-    query, key, value, subgraph, *other_buffers = args
+    query, key, value, subgraph = args
 
     def create_placeholder(name: str, dtype: torch.dtype) -> InputBuffer:
         return TensorBox.create(
@@ -276,22 +272,17 @@ def templated_attention(*args, **kwargs):
             configs: List[Any] = []
             if query.get_dtype() == torch.float32:
                 configs.append((64, 64, 4, 3))
-            else:
-                configs.append((128, 64, 4, 3))
-            if config.max_autotune:
-                configs += [
-                    (128, 64, 4, 3),
-                    (128, 128, 4, 3),
-                    (128, 128, 8, 2),
-                    (64, 128, 4, 3),
-                ]
-            # Note, we don't need to pass in the captured buffers explicitly
-            # because they're implicitly added by the score_mod function
-            # We do need to explicitly pass it in for autotuning though.
+            configs += [
+                (128, 64, 4, 3),
+                (128, 128, 4, 3),
+                (128, 128, 8, 2),
+                (64, 128, 4, 3),
+            ]
+
             for BLOCK_M, BLOCK_N, num_warps, num_stages in configs:
                 sdpa_template.maybe_append_choice(
                     choices=choices,
-                    input_nodes=[query, key, value, logsumexp],
+                    input_nodes=(query, key, value, logsumexp),
                     layout=layout,
                     subgraphs=subgraph_buffer,
                     mutated_inputs=[
@@ -307,10 +298,9 @@ def templated_attention(*args, **kwargs):
                     ROWS_GUARANTEED_SAFE=False,
                     OUTPUT_LOGSUMEXP=True,
                 )
-            inputs_for_autotuning = [query, key, value, logsumexp] + list(other_buffers)
             return (
                 autotune_select_algorithm(
-                    "sdpa", choices, inputs_for_autotuning, layout
+                    "sdpa", choices, [query, key, value, logsumexp], layout
                 ),
                 logsumexp,
             )
