@@ -709,7 +709,7 @@ class RangeIteratorVariable(ListIteratorVariable):
 
     def next_variables(self, tx) -> "Tuple[VariableTracker, ListIteratorVariable]":
         """
-        This should only be attempted once, so on the second time,
+        We only attempt converting the loop body once. So further iterations,
         just return the original list iterator.
         """
         if self.index >= len(self.items):

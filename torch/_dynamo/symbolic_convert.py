@@ -1226,7 +1226,6 @@ class InstructionTranslatorBase(
         it = self.pop().realize()
         if (
             isinstance(it, variables.RangeIteratorVariable)
-            and inst.starts_line is not None
         ):
             try:
                 # Converts a loop to a function body, to benefit
@@ -1243,7 +1242,7 @@ class InstructionTranslatorBase(
                     self.symbolic_locals,
                 )
 
-                new_locals = op.functionalize(self)
+                new_locals = op.to_function(self)
                 for loc in new_locals:
                     if isinstance(loc, torch.fx.Proxy):
                         del loc.node.meta["example_value"]
@@ -1273,7 +1272,6 @@ class InstructionTranslatorBase(
                     self.push(ConstantVariable.create(None))                
             except CannotConvertRangeToHigherOrder:
                 pass
-
         try:
             val = it.next_variable(self)
             self.push(it)

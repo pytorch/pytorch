@@ -1955,7 +1955,7 @@ class GraphModule(torch.nn.Module):
         assert_dict_matches_regex(
             self,
             dict(counters["graph_break"]),
-            {".*HigherOrderOperator body's output must consist of tensors only": 1},
+            {".*HigherOrderOperator body's output must consist of tensors or constants only": 1},
         )
 
     def test_nested_tuple_output(self):

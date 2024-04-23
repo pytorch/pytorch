@@ -455,6 +455,7 @@ def speculate_subgraph(
                 ):
                     unimplemented(
                         "HigherOrderOperator body's output must consist of tensors only"
+                        "HigherOrderOperator body's output must consist of tensors or constants only"
                     )
 
                 # The output proxies might not belong to this SubgraphTracer
@@ -1203,6 +1204,7 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         tx,
         value: "RangeIteratorVariable",
         real_globals: dict,
+        # The code object the loop was defined in.
         host_code_object: types.CodeType,
         loop_body_instructions: List["Instruction"],
         symbolic_locals: Dict[str, VariableTracker],
@@ -1338,7 +1340,7 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         obj.store_target = store_target
         return obj
 
-    def functionalize(self, tx) -> tuple:
+    def to_function(self, tx) -> tuple:
         """Converts a for loop into a series of function calls. Returns the modified
         locals as a tuple of Proxies and VariableTrackers.
         """
