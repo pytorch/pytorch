@@ -218,8 +218,10 @@ def replicate(
             #
             # This won't conflict with what is done in DDP class as the module
             # replicate is going to pass is NOT the original module.
-            from torch.distributed.tensor.parallel.ddp import _reconstruct_dtensor
-            from torch.distributed.tensor.parallel.ddp import _localize_dtensor
+            from torch.distributed.tensor.parallel.ddp import (
+                _localize_dtensor,
+                _reconstruct_dtensor,
+            )
             module.register_forward_pre_hook(_reconstruct_dtensor)
             module.register_forward_hook(_localize_dtensor)
     module.register_forward_hook(state.forward_post_hook)  # type: ignore[arg-type]
