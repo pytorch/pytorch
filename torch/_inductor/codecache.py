@@ -51,7 +51,6 @@ from typing import (
 )
 
 import torch
-
 from torch._dynamo.device_interface import (
     get_interface_for_device,
     get_registered_device_interfaces,
@@ -59,7 +58,10 @@ from torch._dynamo.device_interface import (
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
-from torch._inductor.utils import cache_dir, clear_on_fresh_inductor_cache, is_linux
+from torch._inductor.runtime.runtime_utils import cache_dir
+from torch._inductor.utils import clear_on_fresh_inductor_cache, is_linux
+
+from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import (
     extract_tensor_metadata,
     FakeTensor,
@@ -301,7 +303,7 @@ class PersistentCache(CacheBase):
             return hit
 
         if config.max_autotune or config.max_autotune_gemm:
-            local_cache = self.get_local_cache()
+            local_cache = self.get_local_cache() if config.autotune_local_cache else {}
             # check local cache first since it is data specific to the current machine
             if (
                 not check_cache(local_cache)
@@ -768,17 +770,21 @@ class FxGraphCache:
 
         # See _save_graph(); we don't store the callable in the cache entry so
         # recreate it here from the PyCodeCache disk cache.
+        artifact_path = get_path(graph.cache_key, "py")[2]
+        if not os.path.exists(artifact_path):
+            counters["inductor"]["fxgraph_lookup_write_file"] += 1
+            write_atomic(artifact_path, graph.source_code)
         try:
             graph.current_callable = PyCodeCache.load_by_key_path(
                 graph.cache_key,
-                graph.artifact_path,
+                artifact_path,
                 graph.cache_linemap,
                 graph.constants,
             ).call
         except OSError:
             # Not expected, but in case the PyCodeCache entry is removed from
             # underneath us, treat it as a cache miss and recompile.
-            log.error("Failed to load cached artifact: %s", graph.artifact_path)
+            log.error("Failed to load cached artifact: %s", artifact_path)
             return None
 
         # Now re-evaluate with the symints to add any guards to the current env.
@@ -914,7 +920,7 @@ class CompiledFxGraph:
 
     current_callable: Optional[Callable[..., Any]]
     cache_key: str
-    artifact_path: str
+    source_code: str = dataclasses.field(repr=False)  # Do not display source_code
     cache_linemap: Optional[List[Tuple[int, str]]]
     device_types: Set[str]
     device_idxs: Set[int]
@@ -943,7 +949,9 @@ class CompiledFxGraph:
     ):
         self.current_callable = current_callable
         self.cache_key = graph.cache_key
-        self.artifact_path = graph.cache_path
+        if graph.cache_path:
+            with open(graph.cache_path) as f:
+                self.source_code = f.read()
         self.cache_linemap = graph.cache_linemap
         self.device_types = graph.device_types
         self.device_idxs = graph.device_idxs
@@ -1714,6 +1722,15 @@ class AotCodeCompiler:
             specified_dir=specified_output_path,
         )
         output_code_log.info("Output code written to: %s", input_path)
+        trace_structured(
+            "graph_dump",
+            lambda: {
+                "name": "inductor_aot_code",
+                "type": "cpp",
+                "filename": input_path,
+            },
+            payload_fn=lambda: source_code,
+        )
 
         def _compile_consts_linux(consts: bytes) -> str:
             _, consts_path = write(
@@ -1831,10 +1848,8 @@ class AotCodeCompiler:
                 if name not in graph.folded_constants
             )
             # TODO: Fix mmap weights with cuda
-            use_mmap_weights = (
-                not cuda and not config.is_fbcode() and consts_size > 2_000_000_000
-            )
-            if config.aot_inductor.force_mmap_weights and not cuda:
+            use_mmap_weights = not config.is_fbcode() and consts_size > 2_000_000_000
+            if config.aot_inductor.force_mmap_weights:
                 use_mmap_weights = True
             compile_cmd = cpp_compile_command(
                 input=input_path,
