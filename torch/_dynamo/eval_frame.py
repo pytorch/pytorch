@@ -1051,6 +1051,7 @@ def export(
     tracing_mode: str = "symbolic",
     dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
     assume_static_by_default: bool = False,
+    _log_export_usage:bool = True;
     same_signature: bool = True,
     disable_constraint_solver: bool = False,
     _log_export_usage: bool = True,
@@ -1109,6 +1110,15 @@ def export(
 
     Note - this headerdoc was authored by ChatGPT, with slight modifications by the author.
     """
+
+    if hasattr(f, 'assume_constant_result') and f.assume_constant_result:
+        # Apply constant result optimization
+        # Implement your logic here to handle constant result optimization
+        # For example, you can replace the function with a constant value
+        constant_result = f(*extra_args, **extra_kwargs)
+        return lambda *args, **kwargs: constant_result
+
+
     if _log_export_usage:
         log_export_usage(event="export.private_api", flags={"_dynamo"})
 
