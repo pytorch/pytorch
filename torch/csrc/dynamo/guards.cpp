@@ -2580,22 +2580,22 @@ class DictGetItemGuardAccessor : public GuardAccessor {
  public:
   DictGetItemGuardAccessor(
       RootGuardManager* root,
-      py::str name,
+      py::object key,
       std::string source,
       py::handle example_value,
       py::handle guard_manager_enum)
       : GuardAccessor(
             root,
-            name,
+            key,
             std::move(source),
             example_value,
             guard_manager_enum),
-        _attr_name(name.ptr()) {}
+        _key(key.ptr()) {}
 
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
   bool check_nopybind(PyObject* obj) override { // borrowed ref
-    PyObject* x = PyDict_GetItem(obj, _attr_name); // borrowed ref
+    PyObject* x = PyDict_GetItem(obj, _key); // borrowed ref
     if (x == nullptr) {
       PyErr_Clear();
       return false;
@@ -2606,7 +2606,7 @@ class DictGetItemGuardAccessor : public GuardAccessor {
 
   GuardDebugInfo check_verbose_nopybind(
       PyObject* obj) override { // borrowed ref
-    PyObject* x = PyDict_GetItem(obj, _attr_name); // borrowed ref
+    PyObject* x = PyDict_GetItem(obj, _key); // borrowed ref
     if (x == nullptr) {
       PyErr_Clear();
       return GuardDebugInfo(
@@ -2617,12 +2617,12 @@ class DictGetItemGuardAccessor : public GuardAccessor {
   }
 
   std::string repr() const override {
-    return "DictGetItemGuardAccessor(" +
-        py::str(_attr_name).cast<std::string>() + ")";
+    return "DictGetItemGuardAccessor(" + py::str(_key).cast<std::string>() +
+        ")";
   }
 
  private:
-  PyObject* _attr_name;
+  PyObject* _key;
 };
 
 /**

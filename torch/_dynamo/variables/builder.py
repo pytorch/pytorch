@@ -446,6 +446,10 @@ class VariableBuilder:
             # For SUPPORTED_NODES, we guard on the dictionary version (PEP509)
             # under the assumption that the values themselves don't change.
             self.install_guards(GuardBuilder.DICT_VERSION)
+
+            # The keys on the SUPPORTED_NODES can be arbitrary, so save on the
+            # key order.
+            self.tx.output.guard_on_key_order[self.source] = True
             result = {
                 ConstantVariable.create(k): UserDefinedObjectVariable(
                     v,

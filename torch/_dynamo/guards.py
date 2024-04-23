@@ -648,6 +648,11 @@ class GuardBuilder(GuardBuilderBase):
                         guard_manager_enum,
                     )
                 else:
+                    if isinstance(source.index, ConstDictKeySource):
+                        raise RuntimeError(
+                            "Expecting clean index here. Likely Dynamo forgot to mark"
+                            " a dict as guard_on_key_order"
+                        )
                     return base_guard_manager.dict_getitem_manager(
                         key=source.index,
                         source=source_name,
@@ -1301,7 +1306,11 @@ class GuardBuilder(GuardBuilderBase):
 
         self._set_guard_export_info(guard, code)
         if config.enable_cpp_guard_manager:
-            self.guard_on_dict_keys_and_order(value, guard)
+            dict_info = self.check_fn_manager.output_graph.guard_on_key_order
+            if dict_info.get(guard.originating_source):
+                self.guard_on_dict_keys_and_order(value, guard)
+            else:
+                self.guard_on_dict_keys_and_ignore_order(value, guard)
         else:
             self._produce_guard_code(guard, code)
 
