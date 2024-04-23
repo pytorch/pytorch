@@ -585,14 +585,14 @@ class Function(_SingleLevelFunction):
         return (ctx._autograd_function_id,)
 
 
-def autograd_function_forward_rewritten(fn_cls):
+def autograd_function_forward_rewritten(original_forward, original_setup_context):
     @staticmethod
-    def forward(ctx, *args, **kwargs):
-        output = fn_cls.forward(*args, **kwargs)
-        fn_cls.setup_context(ctx, args, output)
+    def new_forward(ctx, *args, **kwargs):
+        output = original_forward(*args, **kwargs)
+        original_setup_context(ctx, args, output)
         return output
 
-    return forward
+    return new_forward
 
 
 def once_differentiable(fn):
