@@ -1,9 +1,26 @@
 # Owner(s): ["oncall: profiler"]
+
+# if tqdm is not shutdown properly, it will leave the monitor thread alive.
+# This causes an issue in the multithreading test because we check all events
+# in that test with their tids. The events that correspond to these lingering
+# threads all have TID of (uint64_t)(-1) which is invalid.
+# The work around is turnning off monitoring thread when tqdm is loaded.
+# Since these are unit tests, it is safe to turn off monitor thread.
+try:
+    import tqdm
+
+    tqdm.tqdm.monitor_interval = 0
+except ImportError:
+    pass
+
 import collections
 import gc
 import json
+import mmap
 import os
+import random
 import re
+import struct
 import subprocess
 import sys
 import tempfile
@@ -56,7 +73,9 @@ from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_ARM64,
     IS_JETSON,
+    IS_LINUX,
     IS_WINDOWS,
     parametrize,
     run_tests,
@@ -526,16 +545,17 @@ class TestExecutionTrace(TestCase):
                 return x
 
         # Create a temp file to save execution trace data.
-        fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
+        fp = tempfile.NamedTemporaryFile("w+t", suffix="_et.json", delete=False)
         fp.close()
 
-        test_module = torch.compile(ConvAndRelu())
+        with torch._inductor.config.patch(compile_threads=1):
+            test_module = torch.compile(ConvAndRelu())
 
-        x = torch.rand(128, 4096)
-        et = ExecutionTraceObserver().register_callback(fp.name)
-        et.start()
-        test_module.forward(x)
-        et.stop()
+            x = torch.rand(128, 4096)
+            et = ExecutionTraceObserver().register_callback(fp.name)
+            et.start()
+            test_module.forward(x)
+            et.stop()
 
         assert fp.name == et.get_output_file_path()
         et.unregister_callback()
@@ -3563,6 +3583,70 @@ aten::mm""",
                 self.assertEqual(expected_fields, actual_fields)
         finally:
             os.remove("torchtidy_report.json")
+
+    @unittest.skipIf(IS_ARM64 or not IS_LINUX, "x86 linux only cpp unwinding")
+    def test_fuzz_symbolize(self):
+        # generate some random addresses in the text section and make sure the
+        # symbolizers do not throw exceptions/crash
+        def get_text_sections():
+            text_sections = []
+            seen = set()
+            for filename in os.listdir("/proc/self/map_files"):
+                library = os.readlink("/proc/self/map_files/" + filename)
+                if ".so" not in library or library in seen:
+                    continue
+                seen.add(library)
+                with open(os.path.join("/proc/self/map_files", library), "rb") as f:
+                    mm = mmap.mmap(f.fileno(), 0, prot=mmap.PROT_READ)
+
+                    def unpack(fmt, offset):
+                        return struct.unpack(
+                            fmt, mm[offset : offset + struct.calcsize(fmt)]
+                        )
+
+                    if mm[:4] != b"\x7fELF":
+                        continue
+                    (section_headers_start,) = unpack("Q", 40)
+                    (section_header_size,) = unpack("H", 58)
+                    (num_section_headers,) = unpack("H", 60)
+                    (shstrndx,) = unpack("H", 62)
+                    (shstrtab_offset,) = unpack(
+                        "Q", section_headers_start + shstrndx * section_header_size + 24
+                    )
+                    for i in range(num_section_headers):
+                        (section_name_offset,) = unpack(
+                            "I", section_headers_start + i * section_header_size
+                        )
+                        name_start = shstrtab_offset + section_name_offset
+                        section_name = mm[name_start : name_start + 6]
+                        if section_name != b".text\0":
+                            continue
+                        (section_offset,) = unpack(
+                            "Q", section_headers_start + i * section_header_size + 24
+                        )
+                        (section_size,) = unpack(
+                            "Q", section_headers_start + i * section_header_size + 32
+                        )
+                        start = int(filename.split("-")[0], 16) + section_offset
+                        text_sections.append((start, section_size))
+                        break
+                    mm.close()
+            return text_sections
+
+        r = random.Random()
+        r.seed(1)
+        text_sections = get_text_sections()
+        addrs = []
+        for i in range(200):
+            s = r.randrange(0, len(text_sections))
+            start, size = text_sections[s]
+            addr = r.randrange(start, start + size)
+            addrs.append(addr)
+        fast = torch._C._profiler.symbolize_addresses(addrs, "fast")
+        dladdr = torch._C._profiler.symbolize_addresses(addrs, "dladdr")
+        addr2line = torch._C._profiler.symbolize_addresses(addrs, "addr2line")
+        self.assertEqual(len(fast), len(addrs))
+        self.assertEqual(len(addr2line), len(fast))
 
 
 if __name__ == "__main__":
