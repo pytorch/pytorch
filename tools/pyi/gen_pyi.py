@@ -252,7 +252,7 @@ def sig_for_ops(opname: str) -> List[str]:
             tname = "builtins." + tname
         return [f"def {opname}(self) -> {tname}: ..."]
     else:
-        raise Exception("unknown op", opname)
+        raise Exception("unknown op", opname)  # noqa: TRY002
 
 
 def generate_type_hints(sig_group: PythonSignatureGroup) -> List[str]:
