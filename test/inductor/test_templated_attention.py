@@ -13,8 +13,16 @@ from torch._higher_order_ops.templated_attention import (
 )
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
-from torch.nn.attention._templated_attention import _compose, _templated_attention
-from torch.nn.attention._score_mod import *  # noqa: F403
+from torch.nn.attention._templated_attention import (
+    _alibi_bias,
+    _alibi_causal,
+    _causal,
+    _compose,
+    _identity,
+    _rel_bias,
+    _rel_causal,
+    _templated_attention,
+)
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16
@@ -50,12 +58,12 @@ if common_utils.TEST_WITH_ROCM:
     test_dtypes = [torch.float32]
 
 test_score_modes = [
-    identity,
-    causal,
-    rel_bias,
-    rel_causal,
-    alibi_bias,
-    alibi_causal,
+    _identity,
+    _causal,
+    _rel_bias,
+    _rel_causal,
+    _alibi_bias,
+    _alibi_causal,
 ]
 
 
@@ -258,7 +266,7 @@ class TestTemplatedSDPA(InductorTestCase):
             requires_grad=True,
         )
         q, k, v = make_tensor(), make_tensor(), make_tensor()
-        out = _templated_attention(q, k, v, identity)
+        out = _templated_attention(q, k, v, _identity)
         with self.assertRaisesRegex(
             RuntimeError, "Autograd not implemented for templated_attention"
         ):
@@ -272,7 +280,7 @@ class TestTemplatedSDPA(InductorTestCase):
         with self.assertRaisesRegex(
             ValueError, "Expected query, key, and value to have the same dtype"
         ):
-            _templated_attention(query, key, value, identity)
+            _templated_attention(query, key, value, _identity)
 
     @supported_platform
     def test_different_sequence_length_fails(self):
@@ -280,7 +288,7 @@ class TestTemplatedSDPA(InductorTestCase):
         key = torch.randn((1, 1, 1024, 64), dtype=torch.float32, device="cuda")
         value = torch.randn((1, 1, 1024, 64), dtype=torch.float32, device="cuda")
         with self.assertRaisesRegex(ValueError, "NYI: The target sequence length"):
-            _templated_attention(query, key, value, identity)
+            _templated_attention(query, key, value, _identity)
 
     @supported_platform
     @patch.object(torch._inductor.config, "max_autotune", True)
@@ -307,7 +315,7 @@ class TestTemplatedSDPA(InductorTestCase):
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
-    @common_utils.parametrize("score_mod", [identity, causal])
+    @common_utils.parametrize("score_mod", [_identity, _causal])
     def test_logsumexp_correctness(self, dtype, score_mod):
         @torch.compile
         def sdpa_hop(q, k, v, score_mod):
@@ -370,7 +378,7 @@ class TestTemplatedSDPA(InductorTestCase):
             lse_2 = lse * 2
             return lse_2
 
-        _, code = run_and_get_code(func, q, k, v, identity)
+        _, code = run_and_get_code(func, q, k, v, _identity)
         # Ensure that two kernels are generated
         FileCheck().check_count(".run(", 2, True).run(code[0])
 
@@ -391,7 +399,7 @@ class TestTemplatedSDPA(InductorTestCase):
             lse_2 = lse * 2
             return out, lse_2
 
-        _, code = run_and_get_code(func, q, k, v, identity)
+        _, code = run_and_get_code(func, q, k, v, _identity)
         # Ensure that two kernels are generated
         FileCheck().check_count(".run(", 2, True).run(code[0])
 
