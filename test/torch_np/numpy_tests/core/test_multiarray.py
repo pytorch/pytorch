@@ -1136,14 +1136,14 @@ class TestCreation(TestCase):
                 return 1
 
             def __getitem__(self, index):
-                raise ValueError()
+                raise ValueError
 
         class Map:
             def __len__(self):
                 return 1
 
             def __getitem__(self, index):
-                raise KeyError()
+                raise KeyError
 
         a = np.array([Map()])
         assert_(a.shape == (1,))
@@ -1160,7 +1160,7 @@ class TestCreation(TestCase):
                 if ind in [0, 1]:
                     return ind
                 else:
-                    raise IndexError()
+                    raise IndexError
 
         d = np.array([Point2(), Point2(), Point2()])
         assert_equal(d.dtype, np.dtype(object))
@@ -1181,7 +1181,7 @@ class TestCreation(TestCase):
         # Special case where a bad __getitem__ makes us fall back on __iter__:
         class C:
             def __getitem__(self, x):
-                raise Exception
+                raise Exception  # noqa: TRY002
 
             def __iter__(self):
                 return iter(())
