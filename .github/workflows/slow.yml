@@ -149,6 +149,19 @@ jobs:
         ]}
       sync-tag: asan-build
 
+  linux-jammy-py3_10-clang15-asan-build-arc:
+    name: linux-jammy-py3.10-clang15-asan-arc
+    uses: ./.github/workflows/_linux-build-rg.yml
+    with:
+      build-environment: linux-jammy-py3.10-clang15-asan
+      docker-image-name: pytorch-linux-jammy-py3-clang15-asan
+      test-matrix: |
+        { include: [
+          { config: "slow", shard: 1, num_shards: 2, runner: "linux.4xlarge" },
+          { config: "slow", shard: 2, num_shards: 2, runner: "linux.4xlarge" },
+        ]}
+      sync-tag: asan-build
+
   linux-jammy-py3_10-clang15-asan-test:
     name: linux-jammy-py3.10-clang15-asan
     uses: ./.github/workflows/_linux-test.yml
