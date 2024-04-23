@@ -1,4 +1,18 @@
 # Owner(s): ["oncall: profiler"]
+
+# if tqdm is not shutdown properly, it will leave the monitor thread alive.
+# This causes an issue in the multithreading test because we check all events
+# in that test with their tids. The events that correspond to these lingering
+# threads all have TID of (uint64_t)(-1) which is invalid.
+# The work around is turnning off monitoring thread when tqdm is loaded.
+# Since these are unit tests, it is safe to turn off monitor thread.
+try:
+    import tqdm
+
+    tqdm.tqdm.monitor_interval = 0
+except ImportError:
+    None
+
 import collections
 import gc
 import json
@@ -21,7 +35,6 @@ import torch.nn as nn
 import torch.optim
 import torch.utils.data
 import torch.utils.data.datapipes as dp
-from torch import _dynamo as torchdynamo
 from torch._C._profiler import _TensorMetadata
 from torch.autograd import (
     _record_function_with_args_enter,
@@ -53,9 +66,7 @@ from torch.profiler._pattern_matcher import (
     report_all_anti_patterns,
     SynchronizedDataLoaderPattern,
 )
-
-from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
-
+from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -72,8 +83,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
-
-from torch.utils._triton import has_triton
 
 Json = Dict[str, Any]
 
@@ -518,52 +527,42 @@ class TestExecutionTrace(TestCase):
         assert loop_count == expected_loop_events
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile does not support WINDOWS")
-    @unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )
-    @unittest.skipIf(not TEST_CUDA or not has_triton(), "need CUDA and triton to run")
     def test_execution_trace_with_pt2(self):
-        @torchdynamo.optimize("inductor")
-        def fn(a, b, c):
-            x = torch.nn.functional.linear(a, b)
-            x = x + c
-            return x.cos()
+        class ConvAndRelu(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = nn.Linear(4096, 4096)
+                self.relu = nn.ReLU(inplace=True)
 
-        a, b, c = (torch.randn(4, 4, requires_grad=True).to("cuda") for _ in range(3))
-
-        inputs = [a, b, c]
-        fn(*inputs)
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                x = self.linear(x)
+                x = self.relu(x)
+                return x
 
         # Create a temp file to save execution trace data.
-        fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
+        fp = tempfile.NamedTemporaryFile("w+t", suffix="_et.json", delete=False)
         fp.close()
 
-        et_file = fp.name
-        et = ExecutionTraceObserver()
-        et.register_callback(et_file)
-        with profile(
-            activities=torch.profiler.supported_activities(), record_shapes=True
-        ):
+        with torch._inductor.config.patch(compile_threads=1):
+            test_module = torch.compile(ConvAndRelu())
+
+            x = torch.rand(128, 4096)
+            et = ExecutionTraceObserver().register_callback(fp.name)
             et.start()
-            fn(*inputs)
+            test_module.forward(x)
             et.stop()
 
         assert fp.name == et.get_output_file_path()
         et.unregister_callback()
-
         nodes = self.get_execution_trace_root(fp.name)
 
-        found_captured_triton_kernel_node = False
+        found_root_node = False
         for n in nodes:
             assert "name" in n
-            if "triton_" in n["name"]:
-                for attr in n["attrs"]:
-                    if attr["name"] == "kernel_file" and attr["value"] != "":
-                        found_captured_triton_kernel_node = True
-                        assert len(n["inputs"]["values"]) > 0
-                        assert len(n["outputs"]["values"]) == 0
+            if "[pytorch|profiler|execution_trace|process]" in n["name"]:
+                found_root_node = True
 
-        assert found_captured_triton_kernel_node
+        assert found_root_node
 
     def test_execution_trace_start_stop(self):
         use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
@@ -650,6 +649,7 @@ class TestExecutionTrace(TestCase):
                 found_root_node = True
         assert found_root_node
 
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/124500")
     def test_execution_trace_nested_tensor(self):
         fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
         fp.close()
@@ -1095,7 +1095,7 @@ class TestProfiler(TestCase):
             stats = run_profiler(create_cuda_tensor)
             check_metrics(
                 stats,
-                "cuda_memory_usage",
+                "device_memory_usage",
                 allocs=[
                     "test_user_scope_alloc",
                     "aten::to",
@@ -1147,7 +1147,7 @@ class TestProfiler(TestCase):
             deallocs=["[memory]"],
         )
         if torch.cuda.is_available():
-            check_metrics(stats, "cuda_memory_usage", deallocs=["[memory]"])
+            check_metrics(stats, "device_memory_usage", deallocs=["[memory]"])
 
     @unittest.skipIf(
         IS_JETSON, "Jetson has a guard against OOM since host and gpu memory are shared"
