@@ -487,14 +487,14 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         # Set epilogue.
         # TODO: update epilogue functor according to epilogues.
         op.element_epilogue = op.accumulator_type()
-        if inductor_cuda_config.cutlass_op_whitelist_regex is not None:
+        if inductor_cuda_config.cutlass_op_allowlist_regex is not None:
             if not re.search(
-                inductor_cuda_config.cutlass_op_whitelist_regex, op.configuration_name()
+                inductor_cuda_config.cutlass_op_allowlist_regex, op.configuration_name()
             ):
                 return None
-        if inductor_cuda_config.cutlass_op_blacklist_regex is not None:
+        if inductor_cuda_config.cutlass_op_denylist_regex is not None:
             if re.search(
-                inductor_cuda_config.cutlass_op_blacklist_regex, op.configuration_name()
+                inductor_cuda_config.cutlass_op_denylist_regex, op.configuration_name()
             ):
                 return None
         # Set bias layout and alignment.

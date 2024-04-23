@@ -789,11 +789,11 @@ class cuda:
     cutlass_only_evt_capable_ops: bool = False
     # Keep only Cutlass op configs which contain this regular expression pattern
     # Set this to "warpspecialized_cooperative_epi_tma" to enable only SM90 TMA Cutlass Kernels for large GEMMs
-    cutlass_op_whitelist_regex: Optional[str] = None
+    cutlass_op_allowlist_regex: Optional[str] = None
 
     # Filter Cutlass configs which contain this regular expression pattern
     # Set this to "pingpong" to avoid nondeterministic numerical issues
-    cutlass_op_blacklist_regex: Optional[str] = "pingpong"
+    cutlass_op_denylist_regex: Optional[str] = "pingpong"
 
 
 # create a directory containing lots of debug information
