@@ -2651,9 +2651,7 @@ exit(2)
                 if share_mem != "Don't share":
                     self.assertEqual(
                         reserved_no_sharing  # noqa: F821
-                        - torch.cuda.memory_stats()[
-                            "reserved_bytes.all.current"
-                        ],
+                        - torch.cuda.memory_stats()["reserved_bytes.all.current"],
                         kSmallBuffer,
                     )
                 else:
