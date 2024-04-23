@@ -536,16 +536,9 @@ class FxGraphCachePickler(pickle.Pickler):
         return "\n".join(lines)
 
 
-@functools.lru_cache(None)
-def get_inductor_code_hash() -> bytes:
-    """
-    Compute a hash of all inductor code modules. Used by the FxGraph cache
-    so any inductor code changes would result in new cache keys.
-    """
-    inductor_root = os.path.dirname(__file__)
-
+def get_code_hash(roots) -> bytes:
     contents: Dict[str, bytes] = {}
-    for lib in pkgutil.iter_modules([inductor_root]):
+    for lib in pkgutil.iter_modules(roots):
         spec = lib.module_finder.find_spec(lib.name, None)
         assert spec is not None
         module = spec.origin
@@ -554,6 +547,20 @@ def get_inductor_code_hash() -> bytes:
             contents[module] = f.read()
 
     return hashlib.sha256(pickle.dumps(contents)).digest()
+
+
+def get_inductor_root():
+    return os.path.dirname(__file__)
+
+
+@functools.lru_cache(None)
+def get_inductor_code_hash() -> bytes:
+    """
+    Compute a hash of all inductor code modules. Used by the FxGraph cache
+    so any inductor code changes would result in new cache keys.
+    """
+    inductor_root = get_inductor_root()
+    return get_code_hash([inductor_root])
 
 
 @dataclasses.dataclass
