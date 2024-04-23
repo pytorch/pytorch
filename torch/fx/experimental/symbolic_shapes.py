@@ -278,6 +278,10 @@ def rebind_unbacked(shape_env, n: torch.fx.Node, result):
     """
     from torch._dynamo.tensor_version_op import _tensor_version
 
+    # Inputs never need rebinding
+    if n.op == "placeholder":
+        return
+
     if bindings := n.meta.get("unbacked_bindings"):
         for raw_u0, path in bindings.items():
             u1 = pytree.key_get(result, path)
