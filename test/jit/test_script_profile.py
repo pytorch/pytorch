@@ -41,8 +41,7 @@ class Sequence(nn.Module):
         outputs = torch.cat(outputs, dim=1)
         return outputs
 
-import unittest
-@unittest.skip # core dump
+
 class TestScriptProfile(JitTestCase):
     def test_basic(self):
         seq = torch.jit.script(Sequence())
