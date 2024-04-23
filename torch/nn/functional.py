@@ -3160,8 +3160,8 @@ def binary_cross_entropy(
         reduction_enum = _Reduction.get_enum(reduction)
     if target.size() != input.size():
         raise ValueError(
-            "Using a target size ({}) that is different to the input size ({}) is deprecated. "
-            "Please ensure they have the same size.".format(target.size(), input.size())
+            f"Using a target size ({target.size()}) that is different to the input size ({input.size()}) is deprecated. "
+            "Please ensure they have the same size."
         )
 
     if weight is not None:
@@ -5426,7 +5426,7 @@ def multi_head_attention_forward(
         assert bias_v is None
 
     #
-    # reshape q, k, v for multihead attention and make em batch first
+    # reshape q, k, v for multihead attention and make them batch first
     #
     q = q.view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
     if static_k is None:

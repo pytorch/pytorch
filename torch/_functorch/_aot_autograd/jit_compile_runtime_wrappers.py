@@ -16,7 +16,13 @@ import torch
 import torch.utils.dlpack
 from torch import Tensor
 from torch._dynamo.utils import lazy_format_graph_code
-from torch._guards import detect_fake_mode, tracing, TracingContext
+from torch._guards import (
+    compile_context,
+    CompileContext,
+    detect_fake_mode,
+    tracing,
+    TracingContext,
+)
 from torch._logging import getArtifactLogger, trace_structured
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses import FakeTensor
@@ -56,6 +62,7 @@ from .utils import (
     make_boxed_func,
     normalize_as_list,
     strict_zip,
+    unlift_tokens,
 )
 
 zip = strict_zip
@@ -161,7 +168,7 @@ def aot_dispatch_base(
 
     # Create a wrapper to set up the rng functionalize bits
     @wraps(compiled_fw)
-    def rng_functionalization_wrapper(args):
+    def rng_functionalization_wrapper(args: List[Any]):
         # see note: [Returning Fake Tensors on First AOT Autograd Call]
         nonlocal fakified_out
         if fakified_out is not None:
@@ -169,7 +176,6 @@ def aot_dispatch_base(
             fakified_out = None
             return out
 
-        # args is a list because compiled_fw is boxed_call
         if fw_metadata.is_rng_op_functionalized:
             # Add the seed and offset to args
             seed, offset = CUDARngStateHelper.get_torch_state_as_tuple()
@@ -207,17 +213,16 @@ def aot_dispatch_base(
 def _output_node(gm: torch.fx.GraphModule) -> torch.fx.Node:
     """Return the output node of a graph"""
     # reversed() since we expect output at end of graph
-    return next(n for n in reversed(gm.graph.nodes) if n.op == "output")
+    return next(reversed(gm.graph.find_nodes(op="output")))
 
 
 def _input_node(gm: torch.fx.GraphModule, i: int) -> torch.fx.Node:
     """Fetch the i-th placeholder in the graph"""
     seen = 0
-    for n in gm.graph.nodes:
-        if n.op == "placeholder":
-            if seen == i:
-                return n
-            seen += 1
+    for n in gm.graph.find_nodes(op="placeholder"):
+        if seen == i:
+            return n
+        seen += 1
     raise IndexError(f"input {i} does not exist, only {seen} inputs in graph")
 
 
@@ -271,21 +276,26 @@ def aot_dispatch_autograd(
                     fw_metadata, inner_meta
                 )
             )
+            num_tokens = len(fw_metadata.tokens)
             num_mutated_inp_runtime_indices = len(mutated_inp_runtime_indices)
             num_inner_fwd_outputs = (
                 num_mutated_inp_runtime_indices
                 + inner_meta.num_outputs
                 + inner_meta.num_intermediate_bases
                 + inner_meta.num_outputs_rng_offset
-                + len(
-                    fw_metadata.tokens
-                )  # See Note [Side-Effectful Tokens in AOTAutograd]
+                + num_tokens  # See Note [Side-Effectful Tokens in AOTAutograd]
             )
             fw_module, bw_module = aot_config.partition_fn(
                 fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
             )
 
-            fw_outs = next(n for n in fw_module.graph.nodes if n.op == "output").args[0]
+            # See Note [Side-Effectful Tokens in AOTAutograd]
+            if num_tokens != 0 and config.unlift_effect_tokens:
+                unlift_tokens(fw_module, fw_metadata)
+                num_inner_fwd_outputs -= num_tokens
+                joint_inputs = (joint_inputs[0][num_tokens:], joint_inputs[1])
+
+            fw_outs = next(iter(fw_module.graph.find_nodes(op="output"))).args[0]
             # we only need to bookkeep the symints that are saved for bw, not any symints
             # the user forward might have returned in its own output
             fw_outs_saved_for_bw = fw_outs[num_inner_fwd_outputs:]
@@ -365,8 +375,24 @@ def aot_dispatch_autograd(
                 len(bw_outs)
                 == len(fw_metadata.input_info) + inner_meta.num_outputs_rng_offset
             )
-            for i, (bw_out) in enumerate(bw_outs):
-                if bw_out is None and _can_detach(_input_node(fx_g, i)):
+            bw_outs_no_rng = bw_outs
+            if inner_meta.num_outputs_rng_offset > 0:
+                bw_outs_no_rng = bw_outs[: -inner_meta.num_outputs_rng_offset]
+            assert len(bw_outs_no_rng) == len(fw_metadata.input_info)
+
+            for i, (bw_out) in enumerate(bw_outs_no_rng):
+                # If our input experiences a metadata mutation inside the graph (e.g. set_()),
+                # we *must* not detach, otherwise it will be the detach'd input that gets the metadata mutation
+                metadata_mutation_in_graph = (
+                    fw_metadata.input_info[i].mutation_type
+                    == MutationType.MUTATED_IN_GRAPH
+                    and fw_metadata.input_info[i].mutates_storage_metadata
+                )
+                if (
+                    bw_out is None
+                    and not metadata_mutation_in_graph
+                    and _can_detach(_input_node(fx_g, i))
+                ):
                     _indices_of_inps_to_detach.append(i)
 
         if aot_config.enable_log:
@@ -512,6 +538,7 @@ def aot_dispatch_autograd(
                 _LazyGraphModule.force_recompile(bw_module)
 
     saved_context = TracingContext.try_get()
+    saved_compile_context = CompileContext.try_get()
 
     backward_state_indices = [
         idx for idx, x in enumerate(flat_args) if isinstance(x, BackwardState)
@@ -898,9 +925,9 @@ Got grad_output types: {str(grad_output_types)}"""
                 ctx.maybe_clear_saved_tensors()
                 if CompiledFunction.compiled_bw is None:
                     context = torch._C._DisableAutocast if disable_amp else nullcontext
-                    with tracing(saved_context), context(), track_graph_compiling(
-                        aot_config, "backward"
-                    ):
+                    with tracing(saved_context), compile_context(
+                        saved_compile_context
+                    ), context(), track_graph_compiling(aot_config, "backward"):
                         CompiledFunction.compiled_bw = aot_config.bw_compiler(
                             bw_module, placeholder_list
                         )
@@ -988,7 +1015,7 @@ Got grad_output types: {str(grad_output_types)}"""
     ]
 
     @wraps(compiled_function)
-    def debug_compiled_function(*args):
+    def debug_compiled_function(args: List[Any]):
         # TODO: Check aliasing relationships
         # TODO: Check strides for metadata mutation
         # (NB: ideally, this logic is factored out of this function and
@@ -1008,6 +1035,6 @@ Got grad_output types: {str(grad_output_types)}"""
                     f"{describe_input(i, aot_config)} would not require grad",
                 )
 
-        return compiled_function(*args)
+        return compiled_function(args)
 
     return debug_compiled_function

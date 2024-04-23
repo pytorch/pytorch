@@ -7,9 +7,12 @@ import importlib
 import inspect
 import itertools
 import random
+import re
 import sys
 import threading
 import types
+import warnings
+
 from typing import Dict, Generic, List
 
 from ..bytecode_transformation import create_call_function
@@ -50,6 +53,13 @@ from ..utils import (
 from .base import MutableLocal, VariableTracker
 from .ctx_manager import GenericContextWrappingVariable, NullContextVariable
 from .dicts import DefaultDictVariable
+
+
+def is_standard_setattr(val):
+    return val in (
+        object.__setattr__,
+        torch.nn.Module.__setattr__,
+    )
 
 
 class UserDefinedVariable(VariableTracker):
@@ -102,6 +112,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         if name == "__name__":
             return ConstantVariable.create(self.value.__name__)
+        elif name == "__qualname__":
+            return ConstantVariable.create(self.value.__qualname__)
 
         source = AttrSource(self.source, name) if self.source is not None else None
         try:
@@ -238,6 +250,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return BuiltinVariable.call_custom_dict_fromkeys(
                 tx, self.value, *args, **kwargs
             )
+        elif name == "__eq__" and len(args) == 1 and hasattr(args[0], "value"):
+            return variables.ConstantVariable(self.value == args[0].value)
+        elif name == "__ne__" and len(args) == 1 and hasattr(args[0], "value"):
+            return variables.ConstantVariable(self.value != args[0].value)
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -296,6 +312,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.functions.FunctoolsPartialVariable(
                 fn, args=rest_args, keywords=kwargs
             )
+        elif self.value is warnings.catch_warnings and not args:
+            return variables.CatchWarningsCtxManagerVariable.create(tx, kwargs)
         elif (
             issubclass(type(self.value), type)
             and hasattr(
@@ -443,6 +461,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
         return super().const_getattr(tx, name)
 
 
+class NO_SUCH_SUBOBJ:
+    pass
+
+
 class UserDefinedObjectVariable(UserDefinedVariable):
     """
     Mostly objects of defined type.  Catch-all for something where we only know the type.
@@ -540,6 +562,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if method is object.__init__:
                 return ConstantVariable.create(None)
 
+            if is_standard_setattr(method):
+                return self.method_setattr_standard(tx, *args, **kwargs)
+
             # [NOTE] OrderedDict, dict subtypes must always have source
             # We cannot instantiate such subtypes in-graph due to builtin __new__
             if method is collections.OrderedDict.keys:
@@ -585,6 +610,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 assert self.source  # OrderedDict, dict subtypes must always have source
                 return self.odict_getitem(tx, args[0])
 
+            if (
+                method in (object.__ne__, object.__eq__)
+                and len(args) == 1
+                and not kwargs
+                and hasattr(args[0], "value")
+            ):
+                return ConstantVariable(
+                    (self.value is args[0].value) is (method is object.__eq__)
+                )
+
             # check for methods implemented in C++
             if isinstance(method, types.FunctionType):
                 source = (
@@ -602,6 +637,22 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return ConstantVariable(len(self.value))
 
         return super().call_method(tx, name, args, kwargs)
+
+    def method_setattr_standard(self, tx, name, value):
+        try:
+            name = name.as_python_constant()
+        except NotImplementedError:
+            unimplemented(f"non-const setattr name: {name}")
+        if not tx.output.side_effects.is_attribute_mutation(self):
+            unimplemented(f"setattr({self}, {name}, ...)")
+
+        tx.output.side_effects.store_attr(self, name, value)
+        return variables.ConstantVariable(None)
+
+    def needs_slow_setattr(self):
+        return not is_standard_setattr(
+            inspect.getattr_static(self.value, "__setattr__", None)
+        )
 
     def unpack_var_sequence(self, tx):
         if (
@@ -673,6 +724,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return variables.TorchCtxManagerClassVariable(
                     obj.__class__
                 ).call_function(tx, [var], kwargs)
+
+            if self.source is None:
+                unimplemented(
+                    "Sourceless UserDefinedObjectVariable method not supported"
+                )
+            func_src = AttrSource(self.source, "__func__")
+            func_var = VariableBuilder(tx, func_src)(func)
+            obj_src = AttrSource(self.source, "__self__")
+            obj_var = VariableBuilder(tx, obj_src)(obj)
+            return func_var.call_function(tx, [obj_var] + args, kwargs)
         elif (
             istype(self.value, functools.partial)
             and trace_rules.lookup(self.value.func)
@@ -729,7 +790,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             or "__slots__" in self.value.__class__.__dict__
             or type(self.value) == threading.local
         ):
-            # getattr_static doesn't work on these
+            try:
+                cls_var = inspect.getattr_static(
+                    self.value.__class__, name, NO_SUCH_SUBOBJ
+                )
+                if cls_var is not NO_SUCH_SUBOBJ and name not in self.value.__dict__:
+                    # maybe user-defined @property that we need to inline
+                    return cls_var
+            except AttributeError:
+                pass  # __slots__
+            # this might call torch.nn.Module.__getattr__
             subobj = getattr(self.value, name)
         else:
             subobj = inspect.getattr_static(self.value, name)
@@ -743,15 +813,15 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         value = self.value
         source = AttrSource(self.source, name) if self.source else None
         self._check_for_getattribute()
-        getattr_fn = self._check_for_getattr()
 
-        class NO_SUCH_SUBOBJ:
-            pass
+        if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
+            return tx.output.side_effects.load_attr(self, name)
 
         try:
             subobj = self._getattr_static(name)
         except AttributeError:
             subobj = NO_SUCH_SUBOBJ
+            getattr_fn = self._check_for_getattr()
             if isinstance(getattr_fn, types.FunctionType):
                 return variables.UserMethodVariable(
                     getattr_fn, self, source=source
@@ -824,6 +894,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 (
                     torch.Tensor,
                     torch.nn.Module,
+                    re.Pattern,
                 ),
             )
         ):
@@ -832,10 +903,21 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return VariableBuilder(tx, source)(subobj)
             elif ConstantVariable.is_literal(subobj):
                 return ConstantVariable.create(subobj)
+            elif (
+                type(subobj) == torch.utils._pytree.TreeSpec
+                or type(subobj) == torch.utils._pytree.LeafSpec
+                or type(value) == torch.utils._pytree.TreeSpec
+            ):
+                from .builder import SourcelessBuilder
+
+                return SourcelessBuilder.create(tx, subobj)
 
         if (
             name not in getattr(value, "__dict__", {})
-            and type(value).__module__.startswith("torch.")
+            and (
+                type(value).__module__.startswith("torch.")
+                or isinstance(subobj, re.Pattern)
+            )
             and "torch.optim" not in type(value).__module__
             and not callable(value)
             and not isinstance(subobj, types.MethodDescriptorType)
@@ -913,6 +995,30 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             tx,
             ODictGetItemSource(self.source, index),
         )(collections.OrderedDict.__getitem__(self.value, key.as_python_constant()))
+
+
+class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
+    def __init__(
+        self,
+        value,
+        **kwargs,
+    ):
+        super().__init__(value, **kwargs)
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        fn_variable = variables.UserFunctionVariable(self.value.forward.__func__)
+        args = [self] + args
+        return tx.inline_user_function_return(
+            fn_variable,
+            args,
+            kwargs,
+        )
 
 
 class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
