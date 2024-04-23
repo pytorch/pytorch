@@ -11,6 +11,7 @@
 #include <cusparse.h>
 #include <cstdint>
 #include <unordered_map>
+#include <set>
 
 #if AT_CUSPARSELT_ENABLED()
 
@@ -447,13 +448,19 @@ int64_t _cslt_sparse_mm_search(
 #ifdef USE_ROCM
 
 static bool isSupportedHipSparseLtArch(int idx) {
+    static std::unordered_map<int, bool> cache;
+    if (cache.find(idx) != cache.end()) {
+        return cache[idx];
+    }
     hipDeviceProp_t prop = at::cuda::getCurrentDeviceProperties(idx);
     std::string_view arch = prop.gcnArchName;
     constexpr std::set<std::string> supported_archs = {"gfx940", "gfx941", "gfx942", "gfx1200", "gfx1201"};
-    if (supported_archs.find(arch) == supported_archs.end()) {
+    bool result = (supported_archs.find(arch) != supported_archs.end());
+    cache[idx] = result;
+    if (!result) {
         TORCH_CHECK(false, "hipSPARSELt not supported on your machine.");
     }
-    return true;
+    return result;
 }
 
 #endif
