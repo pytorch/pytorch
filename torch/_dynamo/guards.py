@@ -457,7 +457,7 @@ def getattr_on_nn_module(
 
 
 def getitem_on_dict_manager(
-    source, base_guard_manager, base_example_value, example_value
+    source, base_guard_manager, base_example_value, example_value, guard_manager_enum
 ):
     base_source_name = source.base.name()
     source_name = source.name()
@@ -477,13 +477,19 @@ def getitem_on_dict_manager(
         # We have to insert a key manager guard here
         # TODO - source debug string is probably wrong here.
         base_guard_manager.get_key_manager(
-            index=index, source=key_source, example_value=source.index
+            index=index,
+            source=key_source,
+            example_value=source.index,
+            guard_manager_enum=GuardManagerType.GUARD_MANAGER,
         ).add_equals_match_guard(
             source.index, [f"{key_source} == {key_example_value!r}"]
         )
 
     return base_guard_manager.get_value_manager(
-        index=index, source=value_source, example_value=example_value
+        index=index,
+        source=value_source,
+        example_value=example_value,
+        guard_manager_enum=guard_manager_enum,
     )
 
 
@@ -498,6 +504,12 @@ def match_on_id_for_tensor(guard):
 class GuardCodeList:
     code_list: List[str]
     guard: Guard
+
+
+class GuardManagerType(enum.Enum):
+    GUARD_MANAGER = 1
+    DICT_GUARD_MANAGER = 2
+    DICT_SUBCLASS_GUARD_MANAGER = 3
 
 
 class GuardBuilder(GuardBuilderBase):
@@ -560,15 +572,42 @@ class GuardBuilder(GuardBuilderBase):
         # limit the number of cache entries with same ID_MATCH'd object.
         self.id_matched_objs: Dict[str, ReferenceType[object]] = {}
 
-    def add_dict_keys_guard(self, value, guard):
+    def guard_on_dict_keys_and_ignore_order(self, value, guard):
+        dict_mgr = self.get_guard_manager(guard)
+        if isinstance(dict_mgr, DictGuardManager):
+            raise NotImplementedError(
+                "Not expecting a DictGuardManager. Seems like Dynamo incorrectly "
+                "added the dict to tx.output.guard_on_key_order"
+            )
+
+        # Iterate over the dicts and install a dict_getitem_manager.
+        dict_source = guard.originating_source.name()
+        for idx, key in enumerate(value.keys()):
+            dict_mgr.dict_getitem_manager(
+                key=key,
+                source=f"{dict_source}[{key!r}]",
+                example_value=value[key],
+                guard_manager_enum=GuardManagerType.GUARD_MANAGER,
+            )
+
+    def guard_on_dict_keys_and_order(self, value, guard):
         # Add key managers for the DictGuardManager. Then add either an
         # ID_MATCH or EQUALS_MATCH guard on the key.
         dict_mgr = self.get_guard_manager(guard)
+        if not isinstance(dict_mgr, DictGuardManager):
+            raise NotImplementedError(
+                "Expecting a DictGuardManager. Seems like Dynamo forgot "
+                "to add the dict in tx.output.guard_on_key_order"
+            )
         assert isinstance(dict_mgr, DictGuardManager)
+
         for idx, key in enumerate(value.keys()):
             key_source = get_key_index_source(guard.name, idx)
             key_manager = dict_mgr.get_key_manager(
-                index=idx, source=key_source, example_value=key
+                index=idx,
+                source=key_source,
+                example_value=key,
+                guard_manager_enum=GuardManagerType.GUARD_MANAGER,
             )
             if key_is_id(key):
                 # Install ID_MATCH guard
@@ -585,10 +624,31 @@ class GuardBuilder(GuardBuilderBase):
                     key, get_verbose_code_parts(f"{key_source} == {key!r}", guard)
                 )
 
+    def get_guard_manager_type(self, source, example_value):
+        guard_manager_enum = GuardManagerType.GUARD_MANAGER
+        if source.name() in self.check_fn_manager.output_graph.guard_on_key_order:
+            assert isinstance(example_value, dict)
+            # If keys method is not overriden, we can use PyDict_Next to get key
+            # orderings. Read more in guards.cpp
+            if type(example_value).keys is type({}).keys:
+                guard_manager_enum = GuardManagerType.DICT_GUARD_MANAGER
+            else:
+                guard_manager_enum = GuardManagerType.DICT_SUBCLASS_GUARD_MANAGER
+        return guard_manager_enum
+
+    def manager_guards_on_keys(self, mgr_enum):
+        return (
+            mgr_enum == GuardManagerType.DICT_GUARD_MANAGER
+            or mgr_enum == GuardManagerType.DICT_SUBCLASS_GUARD_MANAGER
+        )
+
     def get_global_guard_manager(self):
         assert self.guard_manager  # to make mypy happy
         return self.guard_manager.root.globals_dict_manager(
-            f_globals=self.scope["G"], source="G", example_value=None
+            f_globals=self.scope["G"],
+            source="G",
+            example_value=self.scope["G"],
+            guard_manager_enum=GuardManagerType.GUARD_MANAGER,
         )
 
     def get_guard_manager_from_source(self, source):
@@ -600,28 +660,20 @@ class GuardBuilder(GuardBuilderBase):
         if source_name != "":
             example_value = self.get(source_name)
 
+        guard_manager_enum = self.get_guard_manager_type(source, example_value)
+
         # Get base manager related information
         base_source_name = None
         base_example_value = None
         base_guard_manager = None
+        base_guard_manager_enum = GuardManagerType.GUARD_MANAGER
         if isinstance(source, ChainedSource):
             base_source_name = source.base.name()
             base_example_value = self.get(base_source_name)
             base_guard_manager = self.get_guard_manager_from_source(source.base)
-
-        # TODO(anijain2305) - We special case for sys.modules in builder.py with
-        # PythonSysModulesVariable. We specialize because otherwise using a
-        # ConstDictVariable tracker installs guards on all the keys, resulting
-        # in a large number of guards. Even with LazyVariable trackers, we still
-        # install guards on all the keys because of how HashableTracker is
-        # currently implemented. Therefore to fix this issue, we will need to
-        # improve key guard installation for ConstDictVariable tracker and
-        # then remove specialization for sys.modules in builder.py.
-        # Set example_value to None to prevent installation fo DictGuardManager.
-        if example_value is sys.modules:
-            example_value = None
-        if base_example_value is sys.modules:
-            base_example_value = None
+            base_guard_manager_enum = self.get_guard_manager_type(
+                source.base, base_example_value
+            )
 
         # Use istype instead of isinstance to check for exact type of source.
         if istype(source, LocalSource):
@@ -632,6 +684,7 @@ class GuardBuilder(GuardBuilderBase):
                 key=source.local_name,
                 source=source_name,
                 example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
             )
         elif istype(source, GlobalSource):
             # Global manager accepts a dict but it is not a DictGuardManager
@@ -641,12 +694,14 @@ class GuardBuilder(GuardBuilderBase):
                 key=source.global_name,
                 source=source_name,
                 example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
             )
         elif istype(source, GlobalWeakRefSource):
             return self.get_global_guard_manager().global_weakref_manager(
                 global_name=source.global_name,
                 source=source_name,
                 example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
             )
         elif istype(source, GlobalStateSource):
             # Don't do anything here. We guard on global state completely in
@@ -657,7 +712,9 @@ class GuardBuilder(GuardBuilderBase):
         elif istype(source, TypeSource):
             assert base_guard_manager  # to make mypy happy
             return base_guard_manager.type_manager(
-                source=source_name, example_value=example_value
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
             )
         elif istype(
             source,
@@ -684,67 +741,79 @@ class GuardBuilder(GuardBuilderBase):
                 )
 
             return base_guard_manager.getattr_manager(
-                attr=source.member, source=source_name, example_value=example_value
+                attr=source.member,
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
             )
         elif istype(source, GetItemSource):
             assert base_guard_manager  # to make mypy happy
-            if isinstance(base_guard_manager, DictGuardManager):
+            if isinstance(base_example_value, (dict, collections.OrderedDict)):
                 # TODO(anijain2305) - Consider isolating GetItemSource and
                 # DictGetItemSource (or maybe use ODictGetItemSource for
                 # dicts) so that GetItemSource is only for non dict objects.
-                return getitem_on_dict_manager(
-                    source,
-                    base_guard_manager,
-                    base_example_value,
-                    example_value,
-                )
-
-            # TODO(anijain2305) - Ideally we should have an assert here that
-            # base_example_value should not be a dict subclass. It should be
-            # a dict manager and should already be handled. Infact PyTorch
-            # CI is happy with that assert. But lets wait for a few weeks
-            # with some more testing on real models before turning this into
-            # an assertion.
-            if isinstance(base_example_value, (dict, collections.OrderedDict)):
-                guards_log.debug(
-                    "%s",
-                    (
-                        f"Using a generic GuardManager instead of DictGuardManager for {source_name}."
-                        " Could give a small perf improvement in guard eval with DictGuardManager.",
-                    ),
-                )
-                return base_guard_manager.dict_getitem_manager(
-                    key=source.index,
-                    source=source_name,
-                    example_value=example_value,
-                )
+                if isinstance(base_guard_manager, DictGuardManager):
+                    assert self.manager_guards_on_keys(base_guard_manager_enum)
+                    return getitem_on_dict_manager(
+                        source,
+                        base_guard_manager,
+                        base_example_value,
+                        example_value,
+                        guard_manager_enum,
+                    )
+                else:
+                    if isinstance(source.index, ConstDictKeySource):
+                        raise RuntimeError(
+                            "Expecting clean index here. Likely Dynamo forgot to mark"
+                            " a dict as guard_on_key_order"
+                        )
+                    return base_guard_manager.dict_getitem_manager(
+                        key=source.index,
+                        source=source_name,
+                        example_value=example_value,
+                        guard_manager_enum=guard_manager_enum,
+                    )
             elif isinstance(base_example_value, list) and not source.index_is_slice:
                 return base_guard_manager.list_getitem_manager(
                     key=source.index,
                     source=source_name,
                     example_value=example_value,
+                    guard_manager_enum=guard_manager_enum,
                 )
             elif isinstance(base_example_value, tuple) and not source.index_is_slice:
                 return base_guard_manager.tuple_getitem_manager(
                     key=source.index,
                     source=source_name,
                     example_value=example_value,
+                    guard_manager_enum=guard_manager_enum,
                 )
 
             index = source.index
             if source.index_is_slice:
                 index = source.unpack_slice()
             return base_guard_manager.getitem_manager(
-                key=index, source=source_name, example_value=example_value
+                key=index,
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
             )
         elif istype(source, ODictGetItemSource):
-            assert isinstance(base_guard_manager, DictGuardManager)
-            return getitem_on_dict_manager(
-                source,
-                base_guard_manager,
-                base_example_value,
-                example_value,
-            )
+            if isinstance(base_guard_manager, DictGuardManager):
+                assert self.manager_guards_on_keys(base_guard_manager_enum)
+                return getitem_on_dict_manager(
+                    source,
+                    base_guard_manager,
+                    base_example_value,
+                    example_value,
+                    guard_manager_enum,
+                )
+            else:
+                return base_guard_manager.dict_getitem_manager(
+                    key=source.index,
+                    source=source_name,
+                    example_value=example_value,
+                    guard_manager_enum=guard_manager_enum,
+                )
         elif istype(source, DefaultsSource):
             assert base_guard_manager  # to make mypy happy
             assert callable(base_example_value)
@@ -752,34 +821,32 @@ class GuardBuilder(GuardBuilderBase):
                 return base_guard_manager.func_defaults_manager(
                     source=base_source_name,
                     example_value=base_example_value.__defaults__,
+                    guard_manager_enum=GuardManagerType.GUARD_MANAGER,
                 ).getitem_manager(
                     key=source.idx_key,
                     source=source_name,
                     example_value=example_value,
+                    guard_manager_enum=guard_manager_enum,
                 )
             else:
                 # kwdefauts is a dict, so use a DictGuardManager
                 kwdefaults = base_example_value.__kwdefaults__
                 assert base_source_name is not None
                 kw_source = base_source_name + ".__kwdefaults__"
+
+                # kwdefaults is a dict. No need to guard on dict order.
                 dict_mgr = base_guard_manager.func_kwdefaults_manager(
                     source=kw_source,
                     example_value=kwdefaults,
+                    guard_manager_enum=GuardManagerType.GUARD_MANAGER,
                 )
-                assert isinstance(dict_mgr, DictGuardManager)
-                index = get_key_index(kwdefaults, source.idx_key)
-                key_source = get_key_index_source(kw_source, index)
+                assert not isinstance(dict_mgr, DictGuardManager)
 
-                # Add key manager and equals match guard
-                dict_mgr.get_key_manager(
-                    index=index, source=key_source, example_value=source.idx_key
-                ).add_equals_match_guard(
-                    source.idx_key, [f"{key_source} == {source.idx_key}"]
-                )
-
-                # Add value manager and return it
-                return dict_mgr.get_value_manager(
-                    index=index, source=source_name, example_value=example_value
+                return dict_mgr.dict_getitem_manager(
+                    key=source.idx_key,
+                    source=source_name,
+                    example_value=example_value,
+                    guard_manager_enum=guard_manager_enum,
                 )
         elif istype(source, NumpyTensorSource):
             assert base_guard_manager  # to make mypy happy
@@ -791,7 +858,10 @@ class GuardBuilder(GuardBuilderBase):
         elif istype(source, TupleIteratorGetItemSource):
             assert base_guard_manager  # to make mypy happy
             return base_guard_manager.tuple_iterator_getitem_manager(
-                index=source.index, source=source_name, example_value=example_value
+                index=source.index,
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
             )
         elif isinstance(source, ConstDictKeySource):
             if not isinstance(base_guard_manager, DictGuardManager):
@@ -799,7 +869,10 @@ class GuardBuilder(GuardBuilderBase):
                     "ConstDictKeySource can only work on DictGuardManager"
                 )
             return base_guard_manager.get_key_manager(
-                index=source.index, source=source_name, example_value=example_value
+                index=source.index,
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
             )
         else:
             raise AssertionError(
@@ -900,8 +973,12 @@ class GuardBuilder(GuardBuilderBase):
                 # Just install a getattr manager. GetAttrGuardAccessor itself
                 # acts as hasattr guard.
                 example_value = self.get(source.name())
+                guard_manager_enum = self.get_guard_manager_type(source, example_value)
                 base_manager.getattr_manager(
-                    attr=attr, source=guard.name, example_value=example_value
+                    attr=attr,
+                    source=guard.name,
+                    example_value=example_value,
+                    guard_manager_enum=guard_manager_enum,
                 )
             else:
                 base_manager.add_no_hasattr_guard(
@@ -1256,14 +1333,16 @@ class GuardBuilder(GuardBuilderBase):
 
         self._set_guard_export_info(guard, code)
         if config.enable_cpp_guard_manager:
-            self.get_guard_manager(guard).add_length_check_guard(
-                len(value), get_verbose_code_parts(code, guard)
-            )
+            if isinstance(value, dict):
+                self.get_guard_manager(guard).add_dict_length_check_guard(
+                    len(value), get_verbose_code_parts(code, guard)
+                )
+            else:
+                self.get_guard_manager(guard).add_length_check_guard(
+                    len(value), get_verbose_code_parts(code, guard)
+                )
         else:
             self._produce_guard_code(guard, code)
-
-    def DICT_LENGTH(self, guard):
-        self.SEQUENCE_LENGTH(guard)
 
     def TUPLE_ITERATOR_LEN(self, guard):
         ref = self.arg_ref(guard)
@@ -1330,7 +1409,11 @@ class GuardBuilder(GuardBuilderBase):
 
         self._set_guard_export_info(guard, code)
         if config.enable_cpp_guard_manager:
-            self.add_dict_keys_guard(value, guard)
+            dict_info = self.check_fn_manager.output_graph.guard_on_key_order
+            if guard.originating_source.name() in dict_info:
+                self.guard_on_dict_keys_and_order(value, guard)
+            else:
+                self.guard_on_dict_keys_and_ignore_order(value, guard)
         else:
             self._produce_guard_code(guard, code)
 
@@ -1384,7 +1467,11 @@ class GuardBuilder(GuardBuilderBase):
         self._set_guard_export_info(guard, code)
 
         if config.enable_cpp_guard_manager:
-            self.add_dict_keys_guard(value, guard)
+            dict_info = self.check_fn_manager.output_graph.guard_on_key_order
+            if guard.originating_source.name() in dict_info:
+                self.guard_on_dict_keys_and_order(value, guard)
+            else:
+                self.guard_on_dict_keys_and_ignore_order(value, guard)
         else:
             self._produce_guard_code(guard, code)
 
