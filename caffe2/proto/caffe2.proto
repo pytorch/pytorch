@@ -218,7 +218,7 @@ enum DeviceTypeProto {
   PROTO_IDEEP = 5; // IDEEP.
   PROTO_HIP = 6; // AMD HIP
   PROTO_FPGA = 7; // FPGA
-  PROTO_ORT = 8; // ONNX Runtime
+  PROTO_MAIA = 8; // MAIA
   PROTO_XLA = 9; // XLA / TPU
   PROTO_MPS = 10; // MPS
   // Change the following number if you add more devices in the code.

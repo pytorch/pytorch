@@ -1,3 +1,4 @@
+import abc
 import collections
 import dataclasses
 import itertools
@@ -25,12 +26,37 @@ from .virtualized import OpsHandler, ReductionType, V
 
 log = logging.getLogger(__name__)
 is_indirect = re.compile(r"indirect|tmp").search
-Dep = Union["MemoryDep", "StarDep", "WeakDep"]
 
 
-class MemoryDep(typing.NamedTuple):
+class Dep(abc.ABC):
     name: str
-    index: sympy.Expr  # type: ignore[assignment]
+    index: sympy.Expr
+
+    @abc.abstractmethod
+    def rename(self, renames: Dict[str, str]) -> "Dep":
+        pass
+
+    @abc.abstractmethod
+    def get_numel(self) -> sympy.Expr:
+        pass
+
+    @abc.abstractmethod
+    def numbytes_hint(self):
+        pass
+
+    @abc.abstractmethod
+    def has_unbacked_symbols(self) -> bool:
+        pass
+
+    @abc.abstractmethod
+    def is_contiguous(self) -> bool:
+        pass
+
+
+@dataclasses.dataclass(frozen=True)
+class MemoryDep(Dep):
+    name: str
+    index: sympy.Expr
     var_names: Tuple[sympy.Symbol, ...]
     size: Tuple[sympy.Expr, ...]
 
@@ -109,10 +135,11 @@ class MemoryDep(typing.NamedTuple):
         return any(is_indirect(v.name) for v in self.index.free_symbols)  # type: ignore[attr-defined]
 
 
-class StarDep(typing.NamedTuple):
-    # depends on the entire buffer
+@dataclasses.dataclass(frozen=True)
+class StarDep(Dep):
     name: str
 
+    # depends on the entire buffer
     @property
     def index(self):
         raise NotImplementedError("StarDep does not have an index")
@@ -149,7 +176,8 @@ class StarDep(typing.NamedTuple):
 #
 # It is weak because if it turns out A's read is never used, we can still
 # eliminate it
-class WeakDep(typing.NamedTuple):
+@dataclasses.dataclass(frozen=True)
+class WeakDep(Dep):
     name: str
 
     @property
@@ -174,7 +202,8 @@ class WeakDep(typing.NamedTuple):
         return False
 
 
-class IndexExprDep(typing.NamedTuple):
+@dataclasses.dataclass(frozen=True)
+class IndexExprDep:
     index: sympy.Expr  # type: ignore[assignment]
     var_names: Tuple[sympy.Symbol, ...]
     size: Tuple[sympy.Expr, ...]
