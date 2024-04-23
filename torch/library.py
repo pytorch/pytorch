@@ -774,14 +774,14 @@ def opcheck(
     - test_schema: if the operator's schema is correct.
     - test_autograd_registration: if autograd was registered correctly.
     - test_faketensor: If the operator has a FakeTensor kernel
-        (and if it is correct). The FakeTensor kernel is necessary (
-        but not sufficient) for the operator to work with PyTorch compilation
-        APIs (torch.compile/export/FX).
+    (and if it is correct). The FakeTensor kernel is necessary (
+    but not sufficient) for the operator to work with PyTorch compilation
+    APIs (torch.compile/export/FX).
     - test_aot_dispatch_dynamic: If the operator has correct behavior
-        with PyTorch compilation APIs (torch.compile/export/FX).
-        This checks that the outputs (and gradients, if applicable) are the
-        same under eager-mode PyTorch and torch.compile.
-        This test is a superset of ``test_faketensor``.
+    with PyTorch compilation APIs (torch.compile/export/FX).
+    This checks that the outputs (and gradients, if applicable) are the
+    same under eager-mode PyTorch and torch.compile.
+    This test is a superset of ``test_faketensor``.
 
     For best results, please call ``opcheck`` multiple times with a
     representative set of inputs. If your operator supports
