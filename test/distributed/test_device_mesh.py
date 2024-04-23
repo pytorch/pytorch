@@ -360,10 +360,10 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         dp_mesh_2 = mesh["dp"]
         self.assertEqual(ref_pg_count, _world.group_count)
 
-        # When we call the "tp" slice, it should create a new pg, as the "tp" slice is called
-        # for the first time.
+        # When we call the "tp" slice, it should not create a new pg, as the "tp" slice would
+        # just reuse the parent mesh pg.
         tp_mesh = mesh["tp"]
-        self.assertTrue(_world.group_count > ref_pg_count)
+        self.assertEqual(_world.group_count, ref_pg_count)
 
 
 class TestMeshEnv(DTensorTestBase):

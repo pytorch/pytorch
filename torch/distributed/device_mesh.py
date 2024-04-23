@@ -226,12 +226,20 @@ else:
 
             # Skip process group initialization if xla device or init backend is False
             # TODO(yeounoh) implement DeviceMesh backend and register XLA backend.
-            if device_type != "xla" and _init_backend:
+            if device_type != "xla":
                 # always try to create default (world) pg, even if it is not initialized
                 # already. The world pg is used for device mesh identity (rank) on each
                 # process (we need to know if the current global rank is in the mesh or not).
-                self._get_or_create_default_group()
-                self._init_process_groups()
+                if _init_backend:
+                    self._get_or_create_default_group()
+                    self._init_process_groups()
+
+                # calculate the coordinates of the current global rank on the mesh
+                rank_coords = (self.mesh == get_rank()).nonzero()
+                assert rank_coords.size(0) in (0, 1)
+                self._coordinate_on_dim: Optional[List[int]] = (
+                    rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
+                )
 
         def _get_or_create_default_group(self):
             default_initialized = is_initialized()
@@ -260,12 +268,6 @@ else:
                     )
                 device_handle.set_device(get_rank() % num_devices_per_host)
 
-            # calculate the coordinates of the current global rank on the mesh
-            rank_coords = (self.mesh == get_rank()).nonzero()
-            assert rank_coords.size(0) in (0, 1)
-            self._coordinate_on_dim: Optional[List[int]] = (
-                rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
-            )
             return _get_default_group()
 
         def _init_process_groups(self):
