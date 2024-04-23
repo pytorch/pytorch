@@ -162,6 +162,25 @@ def validate_args_and_maybe_create_graph_inputs(
             if set_subgraph_inputs == "automatic":
                 args.append(a)
                 continue
+            elif set_subgraph_inputs == "semi_automatic":
+                if isinstance(a, AutogradFunctionContextVariable):
+                    tracer.create_graph_input(a.as_proxy().node.name)
+                elif a.maybe_fx_node() is not None:
+                    node = a.maybe_fx_node()
+                    new_proxy = tracer.create_graph_input(node.name)
+                    example_value = (
+                        node.meta["example_value"]
+                        if "example_value" in node.meta
+                        else None
+                    )
+                    a = wrap_fx_proxy_cls(
+                        target_cls=type(a),
+                        tx=tx,
+                        proxy=new_proxy,
+                        example_value=example_value,
+                    )
+                args.append(a)
+                continue
 
             if a.is_python_constant():
                 # This arg is not used in the body of the higher order op.
@@ -334,6 +353,7 @@ def speculate_subgraph(
 
     assert set_subgraph_inputs in {
         "automatic",
+        "semi_automatic",
         "flatten_manual",
         "manual",
     }, "Please use one of the supported set_subgraph_inputs options."
@@ -1523,13 +1543,10 @@ class AutogradFunctionApplyVariable(VariableTracker):
             fwd_args,
             kwargs,
             "autograd.Function",
-            set_subgraph_inputs="manual",
+            set_subgraph_inputs="semi_automatic",
             restore_side_effects=False,
             tracer=fwd_tracer,
         )
-
-        if fwd_freevars:
-            unimplemented("NYI")
 
         if ctx.mutable_local in tx.output.side_effects.store_attr_mutations:
             if (
@@ -1602,12 +1619,23 @@ class AutogradFunctionApplyVariable(VariableTracker):
             fwd_graph.erase_node(node)
             break
 
-        new_fwd_graph_outputs = (fwd_out.as_proxy(), list(bwd_freevars.keys()))
+        # Because we lift the bwd_freevars as inputs of the bwd_graph,
+        # we have to manually add the bwd_freevars as output of fwd_graph.
+        # However, the bwd_freevars got from speculate_subgraph use the Proxies in the bwd_graph,
+        # we need to convert them to Proxies in the fwd_graph and then generate new fwd_graph output.
+        fwd_proxy_of_bwd_freevars = []
+        for k in bwd_freevars.keys():
+            if k in fwd_freevars:
+                fwd_proxy_of_bwd_freevars.append(fwd_freevars[k])
+            else:
+                fwd_proxy_of_bwd_freevars.append(k)
+
+        new_fwd_graph_outputs = (fwd_out.as_proxy(), fwd_proxy_of_bwd_freevars)
         new_fwd_graph_outputs = pytree.tree_map(lambda x: x.node, new_fwd_graph_outputs)
         fwd_graph.output(new_fwd_graph_outputs)
+        fwd_graph.lint()
 
         # Store fwd_body
-
         fwd_nn_modules = tx.output.tracing_context.module_context.copy_graphstate()
         fwd_name = add_subgraph(
             tx,
@@ -1616,6 +1644,62 @@ class AutogradFunctionApplyVariable(VariableTracker):
         )
 
         fwd_node = make_attr(tx, fwd_name)
+
+        # The type of original args can be arbitrary, but we only support basic type in FX graph.
+        # So the speculated subgraph input includes original tensor args and the lifted freevars.
+        # We need to filter out the original tensor args and concat them with the lifted freevars
+        # to generate the proxy args for the FX call_function node.
+        filtered_args = []
+        # A boolean list to mark if the type of corresponding argument is tensor.
+        # This is used to determine if a FX node's argument should be an argument of
+        # ApplyTemplate.forward and if we should skip the output from ApplyTemplate.backward
+        # at torch._functorch.autograd_function.AutogradFunctionApply.
+        args_tensor_mask = [False] * len(args)
+        for i, arg in enumerate(args):
+            if isinstance(arg, (variables.TensorVariable, variables.SymNodeVariable)):
+                filtered_args.append(arg)
+                args_tensor_mask[i] = True
+
+        # Rewrite the output of bwd_graph to remove the grad output for the non-Tensor args.
+        new_bwd_graph_outputs = None
+        for node in bwd_graph.find_nodes(op="output"):
+            bwd_graph.erase_node(node)
+            break
+
+        # The same as the above fwd proxies, we need to use the bwd proxies in the bwd_graph
+        # if some of the output is from fwd_freevars.
+        bwd_out_proxy = bwd_out.as_proxy()
+        bwd_proxy_of_fwd_freevars = []
+        if isinstance(bwd_out_proxy, (tuple, list)):
+            for k in bwd_out_proxy:
+                if k in bwd_freevars:
+                    bwd_proxy_of_fwd_freevars.append(bwd_freevars[k])
+                else:
+                    bwd_proxy_of_fwd_freevars.append(k)
+        else:
+            if bwd_out_proxy in bwd_freevars:
+                bwd_proxy_of_fwd_freevars = bwd_freevars[bwd_out_proxy]
+            else:
+                bwd_proxy_of_fwd_freevars = bwd_out_proxy
+
+        # Remove bwd output for non-Tensor args.
+        output_proxy = bwd_proxy_of_fwd_freevars
+        if isinstance(output_proxy, (tuple, list)):
+            new_bwd_graph_outputs = ()
+            for x, mask in zip(output_proxy, args_tensor_mask):
+                if mask:
+                    new_bwd_graph_outputs = new_bwd_graph_outputs + (x,)
+                else:
+                    assert x is None, f"Grad of non-Tensor arg {x} is not None."
+        else:
+            new_bwd_graph_outputs = output_proxy
+
+        # Update the bwd graph output.
+        new_bwd_graph_outputs = pytree.tree_map(
+            lambda x: None if x is None else x.node, new_bwd_graph_outputs
+        )
+        bwd_graph.output(new_bwd_graph_outputs)
+        bwd_graph.lint()
 
         # Store bwd_body
         bwd_nn_modules = tx.output.tracing_context.module_context.copy_graphstate()
@@ -1629,7 +1713,11 @@ class AutogradFunctionApplyVariable(VariableTracker):
 
         tx.output.side_effects = prev_side_effects
 
-        p_args = (fwd_node, bwd_node, *(arg.as_proxy() for arg in args))
+        p_args = (
+            fwd_node,
+            bwd_node,
+            *([arg.as_proxy() for arg in filtered_args] + list(fwd_freevars.keys())),
+        )
         example_value = pytree.tree_map_only(
             torch.fx.Proxy,
             lambda a: a.node.meta["example_value"],
@@ -1645,7 +1733,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 "call_function",
                 autograd_function_apply,
                 args=p_args,
-                kwargs={},
+                kwargs={"args_tensor_mask": args_tensor_mask},
             ),
             example_value=example_value,
         )

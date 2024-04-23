@@ -1,4 +1,18 @@
 # Owner(s): ["oncall: profiler"]
+
+# if tqdm is not shutdown properly, it will leave the monitor thread alive.
+# This causes an issue in the multithreading test because we check all events
+# in that test with their tids. The events that correspond to these lingering
+# threads all have TID of (uint64_t)(-1) which is invalid.
+# The work around is turnning off monitoring thread when tqdm is loaded.
+# Since these are unit tests, it is safe to turn off monitor thread.
+try:
+    import tqdm
+
+    tqdm.tqdm.monitor_interval = 0
+except ImportError:
+    None
+
 import collections
 import gc
 import json
@@ -526,16 +540,17 @@ class TestExecutionTrace(TestCase):
                 return x
 
         # Create a temp file to save execution trace data.
-        fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
+        fp = tempfile.NamedTemporaryFile("w+t", suffix="_et.json", delete=False)
         fp.close()
 
-        test_module = torch.compile(ConvAndRelu())
+        with torch._inductor.config.patch(compile_threads=1):
+            test_module = torch.compile(ConvAndRelu())
 
-        x = torch.rand(128, 4096)
-        et = ExecutionTraceObserver().register_callback(fp.name)
-        et.start()
-        test_module.forward(x)
-        et.stop()
+            x = torch.rand(128, 4096)
+            et = ExecutionTraceObserver().register_callback(fp.name)
+            et.start()
+            test_module.forward(x)
+            et.stop()
 
         assert fp.name == et.get_output_file_path()
         et.unregister_callback()
@@ -1080,7 +1095,7 @@ class TestProfiler(TestCase):
             stats = run_profiler(create_cuda_tensor)
             check_metrics(
                 stats,
-                "cuda_memory_usage",
+                "device_memory_usage",
                 allocs=[
                     "test_user_scope_alloc",
                     "aten::to",
@@ -1132,7 +1147,7 @@ class TestProfiler(TestCase):
             deallocs=["[memory]"],
         )
         if torch.cuda.is_available():
-            check_metrics(stats, "cuda_memory_usage", deallocs=["[memory]"])
+            check_metrics(stats, "device_memory_usage", deallocs=["[memory]"])
 
     @unittest.skipIf(
         IS_JETSON, "Jetson has a guard against OOM since host and gpu memory are shared"
