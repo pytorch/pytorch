@@ -12,37 +12,41 @@ import os.path
 import re
 import threading
 import time
-from enum import auto, Enum
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 import torch
 
-import torch.autograd.profiler as autograd_profiler
-from torch._dynamo.device_interface import DeviceGuard, get_interface_for_device
-from torch._dynamo.utils import dynamo_timed, get_first_attr
-from torch.utils._triton import has_triton_package
-
-from . import config
-from .codecache import cache_dir, CudaKernelParamCache
 from .coordinate_descent_tuner import CoordescTuner
 
-from .ir import ReductionHint, TileHint
-from .utils import (
+from .hints import (
+    _NUM_THREADS_PER_WARP,
+    AutotuneHint,
+    DeviceProperties,
+    HeuristicType,
+    ReductionHint,
+    TileHint,
+    TRITON_MAX_BLOCK,
+)
+from .runtime_utils import (
+    cache_dir,
     ceildiv,
     conditional_product,
     create_bandwidth_info_str,
     do_bench,
+    dynamo_timed,
+    get_first_attr,
     get_max_y_grid,
     get_num_bytes,
     next_power_of_2,
     triton_config_to_hashable,
 )
 
-
-log = logging.getLogger(__name__)
-
-if has_triton_package():
+try:
     import triton
+except ImportError:
+    triton = None
+
+if triton is not None:
     from triton import Config
     from triton.runtime.autotuner import OutOfResources
     from triton.runtime.jit import KernelInterface
@@ -53,32 +57,19 @@ if has_triton_package():
         ASTSource = None
 else:
     Config = object
-    triton = None
     KernelInterface = object
     OutOfResources = object
     ASTSource = None
 
+try:
+    autograd_profiler = torch.autograd.profiler
+except AttributeError:  # Compile workers only have a mock version of torch
 
-_NUM_THREADS_PER_WARP = 32
-
-
-class HeuristicType(Enum):
-    PERSISTENT_REDUCTION = auto()
-    POINTWISE = auto()
-    REDUCTION = auto()
-    SPLIT_SCAN = auto()
-    TEMPLATE = auto()
-    USER_AUTOTUNE = auto()
+    class autograd_profiler:  # type: ignore[no-redef]
+        _is_profiler_enabled = False
 
 
-class AutotuneHint(Enum):
-    ELEMENTS_PER_WARP_32 = 0
-
-    # Triton codegen tries to codegen set of AutotuneHints.
-    # Enum.__repr__ looks like "<AutotuneHint.ELEMENTS_PER_WARP_32: 0>""
-    # which isn't valid python.
-    # Enum.__str__ will just return "AutotuneHint.ELEMENTS_PER_WARP_32".
-    __repr__ = Enum.__str__
+log = logging.getLogger(__name__)
 
 
 def autotune_hints_to_configs(
@@ -120,12 +111,12 @@ def autotune_hints_to_configs(
     return configs
 
 
-def disable_pointwise_autotuning():
+def disable_pointwise_autotuning(inductor_meta):
     # Autotuning can give different benchmarking results from run to run, and
     # therefore we disable autotuning when use_deterministic flag is on.
-    if torch.are_deterministic_algorithms_enabled():
+    if inductor_meta.get("are_deterministic_algorithms_enabled"):
         return True
-    return not config.triton.autotune_pointwise
+    return not inductor_meta.get("autotune_pointwise", True)
 
 
 class CachingAutotuner(KernelInterface):
@@ -153,7 +144,12 @@ class CachingAutotuner(KernelInterface):
 
         assert len(configs) > 0, "Non-empty TritonConfig list required for compiling"
         self.fn = fn
-        self.triton_meta = triton_meta
+        self.device_props: DeviceProperties = triton_meta["device"]
+        self.triton_meta = {
+            **triton_meta,
+            "device": self.device_props.index,
+            "device_type": self.device_props.type,
+        }
         self.inductor_meta = {} if inductor_meta is None else inductor_meta
         self.save_cache_hook = save_cache_hook
         self.mutated_arg_names = mutated_arg_names
@@ -161,13 +157,6 @@ class CachingAutotuner(KernelInterface):
         self.heuristic_type = heuristic_type
         self.custom_kernel = custom_kernel
         self.cuda_kernel_saved = False
-
-        # Align the default design that default as cuda
-        self.device_type = (
-            triton_meta["device_type"] if "device_type" in triton_meta else "cuda"
-        )
-        self.device_interface = get_interface_for_device(self.device_type)
-
         if log.isEnabledFor(logging.DEBUG):
             log.debug(
                 "CachingAutotuner gets %d configs for %s",
@@ -188,11 +177,14 @@ class CachingAutotuner(KernelInterface):
 
         self.size_hints = size_hints
         self.coordesc_tuner = CoordescTuner(
-            is_mm=False, name=self.fn.__name__, size_hints=size_hints
+            is_mm=False,
+            name=self.fn.__name__,
+            size_hints=size_hints,
+            inductor_meta=self.inductor_meta,
         )
         self.filename = filename
 
-    def precompile(self, warm_cache_only_with_cc=None):
+    def precompile(self, warm_cache_only=False):
         with self.lock:
             if self.launchers:
                 return
@@ -204,7 +196,7 @@ class CachingAutotuner(KernelInterface):
             for c in self.configs:
                 try:
                     compiled_binary, launcher = self._precompile_config(
-                        c, warm_cache_only_with_cc
+                        c, warm_cache_only
                     )
                 except OutOfResources as e:
                     if len(self.configs) == 1:
@@ -225,19 +217,19 @@ class CachingAutotuner(KernelInterface):
 
             seen_configs = set(self.configs)
 
-            device_prop = self.device_interface.Worker.get_device_properties(
-                self.triton_meta["device"]
-            )
+            device_prop = self.device_props
             if (
-                config.dynamic_scale_rblock
+                self.inductor_meta.get("dynamic_scale_rblock", True)
                 and self.heuristic_type == HeuristicType.REDUCTION
                 and self.size_hints is not None
-                # Disable for AMDGPU as Triton is not ready to return n_regs for a compiled_binary.
-                and torch.version.hip is None
-                # Disable for Intel GPU as Triton is not ready to return n_regs for a compiled_binary.
-                and self.device_type != "xpu"
+                # Disable for AMDGPU/Intel as Triton is not ready to return n_regs for a compiled_binary.
+                and device_prop.type == "cuda"
+                and device_prop.major
                 and device_prop.major >= 8
             ):
+                assert device_prop.regs_per_multiprocessor
+                assert device_prop.max_threads_per_multi_processor
+                assert device_prop.multi_processor_count
                 for triton_config, compiled_binary in zip(
                     self.configs, compiled_binaries
                 ):
@@ -298,15 +290,21 @@ class CachingAutotuner(KernelInterface):
                         continue
                     seen_configs.add(new_config)
                     self.launchers.append(
-                        self._precompile_config(new_config, warm_cache_only_with_cc)[1]
+                        self._precompile_config(new_config, warm_cache_only)[1]
                     )
             self.configs = None
 
-    def _precompile_config(self, cfg: Config, warm_cache_only_with_cc: Optional[int]):
+    def get_device_interface(self):
+        # this code cannot run in compile workers, because it imports from torch
+        from torch._dynamo.device_interface import get_interface_for_device
+
+        return get_interface_for_device(self.device_props.type.replace("hip", "cuda"))
+
+    def _precompile_config(self, cfg: Config, warm_cache_only: bool):
         """Ahead of time compile a given autotuner config."""
         compile_meta = copy.deepcopy(self.triton_meta)
         for k, v in cfg.kwargs.items():
-            if torch.version.hip is not None:
+            if self.device_props.type != "hip":
                 if k == "matrix_instr_nonkdim":
                     compile_meta["matrix_instr_nonkdim"] = v
                     continue
@@ -316,26 +314,13 @@ class CachingAutotuner(KernelInterface):
             compile_meta["constants"][self.fn.arg_names.index(k)] = v
         compile_meta["num_warps"] = cfg.num_warps
         compile_meta["num_stages"] = cfg.num_stages
-        compile_meta["debug"] = (
-            config.assert_indirect_indexing and torch.version.hip is None
-        )
+        compile_meta["debug"] = self.inductor_meta.get(
+            "assert_indirect_indexing", True
+        ) and not self.inductor_meta.get("is_hip", False)
 
-        # Setting device_type="hip" required on ROCm to pass down to triton
-        compile_meta["device_type"] = (
-            self.device_type if torch.version.hip is None else "hip"
-        )
-
-        if warm_cache_only_with_cc:
-            cc = warm_cache_only_with_cc
-        else:
-            # Use device_type 'cuda' for both cuda and hip devices to retrieve
-            # the compute capability.
-            device_type = self.device_type if torch.version.hip is None else "cuda"
-            device_id = compile_meta["device"]
-            device = torch.device(device_type, device_id)
-            cc = self.device_interface.get_compute_capability(device)
-
-        compile_meta["cc"] = cc
+        # device type will be "hip" rather than "cuda" here
+        compile_meta["device_type"] = self.device_props.type
+        compile_meta["cc"] = self.device_props.cc
 
         if ASTSource:
             compile_args = (
@@ -347,13 +332,13 @@ class CachingAutotuner(KernelInterface):
                 ),
             )
 
-            target = (compile_meta["device_type"], cc)
+            target = (compile_meta["device_type"], compile_meta["cc"])
             options = {
                 "num_warps": compile_meta["num_warps"],
                 "num_stages": compile_meta["num_stages"],
                 "debug": compile_meta["debug"],
             }
-            if torch.version.hip is not None:
+            if self.device_props.type != "hip":
                 if "waves_per_eu" in compile_meta:
                     options["waves_per_eu"] = compile_meta["waves_per_eu"]
                 if "matrix_instr_nonkdim" in compile_meta:
@@ -368,16 +353,21 @@ class CachingAutotuner(KernelInterface):
             compile_args = (self.fn,)
             compile_kwargs = compile_meta
 
-        if warm_cache_only_with_cc:
+        if warm_cache_only:
             return (
                 triton.compile(*compile_args, **compile_kwargs),
                 None,
             )
 
+        # importing from torch is safe now that precompile has returned
+        from torch._dynamo.device_interface import DeviceGuard
+
+        device_interface = self.get_device_interface()
+
         # load binary to the correct device
-        with DeviceGuard(self.device_interface, compile_meta["device"]):  # type: ignore[attr-defined]
+        with DeviceGuard(device_interface, compile_meta["device"]):  # type: ignore[attr-defined]
             # need to initialize context
-            self.device_interface.synchronize(self.device_interface.current_device())
+            device_interface.synchronize(device_interface.current_device())
 
             try:
                 binary = triton.compile(*compile_args, **compile_kwargs)
@@ -570,7 +560,7 @@ class CachingAutotuner(KernelInterface):
         launcher.n_regs = getattr(binary, "n_regs", None)
         launcher.n_spills = getattr(binary, "n_spills", None)
         launcher.shared = binary_shared
-        launcher.store_cubin = config.triton.store_cubin
+        launcher.store_cubin = self.inductor_meta.get("store_cubin", False)
         # store this global variable to avoid the high overhead of reading it when calling run
         if launcher.store_cubin:
             launcher.fn = self.fn
@@ -585,7 +575,9 @@ class CachingAutotuner(KernelInterface):
         # control over the kernel code; (ii) there is empirical evidence that
         # for some (complicated) custom Triton kernels, a register-spilling
         # config may yield the best latency.
-        if not self.custom_kernel and launcher.n_spills > config.triton.spill_threshold:
+        if not self.custom_kernel and launcher.n_spills > self.inductor_meta.get(
+            "spill_threshold", 16
+        ):
             log.debug(
                 "Skip config %s because of register spilling: %d",
                 launcher.config,
@@ -593,8 +585,9 @@ class CachingAutotuner(KernelInterface):
             )
             return float("inf")
 
-        stream = self.device_interface.get_raw_stream(  # type: ignore[call-arg]
-            self.device_interface.current_device()
+        device_interface = self.get_device_interface()
+        stream = device_interface.get_raw_stream(  # type: ignore[call-arg]
+            device_interface.current_device()
         )
 
         def kernel_call():
@@ -614,7 +607,7 @@ class CachingAutotuner(KernelInterface):
         return do_bench(kernel_call, rep=40, fast_flush=True)
 
     def clone_args(self, *args, **kwargs) -> Tuple[List[Any], Dict[str, Any]]:
-        from .compile_fx import clone_preserve_strides
+        from ..compile_fx import clone_preserve_strides
 
         # clone inplace buffers to avoid autotune contaminating them if
         # the kernel does in-place stores. avoid cloning other buffers because
@@ -699,7 +692,9 @@ class CachingAutotuner(KernelInterface):
             "meta": launcher.config.kwargs,
         }
 
-        if torch.version.hip is None:
+        from torch._inductor.codecache import CudaKernelParamCache
+
+        if self.device_props.type != "hip":
             CudaKernelParamCache.set(key, params, launcher.bin.asm["cubin"])
         else:
             # There is some divergence between CUDA and ROCm here.
@@ -737,7 +732,7 @@ class CachingAutotuner(KernelInterface):
 
         def benchmark_one_config(config):
             with self.lock:
-                _, launcher = self._precompile_config(config, None)
+                _, launcher = self._precompile_config(config, False)
             config2launcher[config] = launcher
 
             out = self.bench(launcher, *cloned_args, **kwargs)
@@ -773,10 +768,9 @@ class CachingAutotuner(KernelInterface):
             if len(self.launchers) > 1:
                 self.autotune_to_one_config(*args, grid=grid, **kwargs)
 
-        if (
-            not getattr(self.launchers[0].config, "found_by_coordesc", False)
-            and config.coordinate_descent_tuning
-        ):
+        if not getattr(
+            self.launchers[0].config, "found_by_coordesc", False
+        ) and self.inductor_meta.get("coordinate_descent_tuning", False):
             self.launchers = [
                 self.coordinate_descent_tuning(
                     self.launchers[0], *args, grid=grid, **kwargs
@@ -851,7 +845,7 @@ def start_graph():
     collected_calls.clear()
 
 
-def end_graph():
+def end_graph(output_file):
     if len(collected_calls) == 0:
         return
     overall_time = sum(call[0] for call in collected_calls)
@@ -863,7 +857,6 @@ def end_graph():
     )
     print(summary_str)
     print()
-    output_file = config.profile_bandwidth_output
     if output_file is not None:
         # sort perf numbers in descending order, i.e. placing the
         # most runtime-heavy kernels at the top of the list
@@ -946,6 +939,7 @@ def load_cached_autotuning(
     best_config,
     configs_hash: str,
     configs: List[Config],
+    inductor_meta: Dict[str, Any],
 ):
     if best_config is None:
         return None
@@ -955,7 +949,9 @@ def load_cached_autotuning(
     # Remove time taken for comparison
     best_config.pop("time_taken_ms", None)
 
-    if config.coordinate_descent_tuning and best_config.pop("found_by_coordesc", False):
+    if inductor_meta.get("coordinate_descent_tuning") and best_config.pop(
+        "found_by_coordesc", False
+    ):
         num_warps = best_config.pop("num_warps")
         num_stages = best_config.pop("num_stages")
         triton_config = Config(best_config, num_warps=num_warps, num_stages=num_stages)
@@ -975,12 +971,12 @@ def load_cached_autotuning(
     return matching_configs[0]
 
 
-def should_use_remote_autotune_cache():
-    if config.autotune_remote_cache:
+def should_use_remote_autotune_cache(inductor_meta):
+    if inductor_meta.get("autotune_remote_cache"):
         return True
-    if not config.is_fbcode():
+    if not inductor_meta.get("is_fbcode"):
         return False
-    if torch.version.hip is not None:
+    if inductor_meta.get("is_hip"):
         return False
 
     from triton.runtime.fb_memcache import MEMCACHE_VERSION
@@ -1009,22 +1005,24 @@ def cached_autotune(
     inductor_meta = {} if inductor_meta is None else inductor_meta
 
     # on disk caching logic and/or remote caching
-    if filename is not None and (len(configs) > 1 or config.coordinate_descent_tuning):
+    if filename is not None and (
+        len(configs) > 1 or inductor_meta.get("coordinate_descent_tuning")
+    ):
         configs_hash = hash_configs(configs)
 
         cache_filename = None
         remote_cache = None
         remote_cache_key = None
-        if config.autotune_local_cache:
+        if inductor_meta.get("autotune_local_cache", True):
             cache_filename = os.path.splitext(filename)[0] + ".best_config"
-        if should_use_remote_autotune_cache():
+        if should_use_remote_autotune_cache(inductor_meta):
             backend_hash = inductor_meta.get("backend_hash", None)
             if backend_hash is not None:
                 key = backend_hash + configs_hash + "autotune-best-config-v2"
                 key = hashlib.sha256(key.encode("utf-8")).hexdigest()
 
                 try:
-                    if config.is_fbcode():
+                    if inductor_meta.get("is_fbcode"):
                         remote_cache = triton.runtime.fb_memcache.FbMemcacheRemoteAutotuneCacheBackend(
                             key
                         )
@@ -1047,7 +1045,9 @@ def cached_autotune(
         elif remote_cache is not None and remote_cache_key is not None:
             best_config = remote_cache.get(remote_cache_key)
 
-        best_config = load_cached_autotuning(best_config, configs_hash, configs)
+        best_config = load_cached_autotuning(
+            best_config, configs_hash, configs, inductor_meta
+        )
         if best_config:
             configs = [best_config]
 
@@ -1088,12 +1088,12 @@ def cached_autotune(
                     assert tconfig.kwargs["XBLOCK"] == 1
                     tconfig.kwargs.pop("XBLOCK")
 
-        if config.profile_bandwidth:
+        if inductor_meta.get("profile_bandwidth"):
             return DebugAutotuner(
                 fn,
                 triton_meta=triton_meta,
                 inductor_meta=inductor_meta,
-                regex_filter=config.profile_bandwidth_regex,
+                regex_filter=inductor_meta["profile_bandwidth_regex"],
                 configs=configs,
                 save_cache_hook=save_cache_hook,
                 mutated_arg_names=mutated_arg_names,
@@ -1141,7 +1141,7 @@ def check_config(cfg, *, xnumel=None, ynumel=None, znumel=None):
                 f"TritonKernel.indexing assumes numel == 1 => BLOCK == 1"
                 f" but {label.lower()}numel=={numel} and {label}BLOCK={block} (cfg={cfg})."
             )
-        max_block = config.triton.max_block[label]
+        max_block = TRITON_MAX_BLOCK[label]
         max_block_str = f'config.triton.max_block["{label}"]'
         assert max_block % block == 0, (
             f"TritonKernel.indexing assumes {label}BLOCK divides {max_block_str}"
@@ -1193,13 +1193,13 @@ def triton_config(
 
     # if we are below original block size, scale up where we can;
     # or if the calculated grid size is larger than the limit, we bump up the corresponding dimension
-    while x < min(size_hints[0], config.triton.max_block["X"]) and (
+    while x < min(size_hints[0], TRITON_MAX_BLOCK["X"]) and (
         x * maxGridSize[0] < size_hints[0] or conditional_product(x, y, z) < target
     ):
         x *= 2
     while (
         y
-        and y < min(size_hints[1], config.triton.max_block["Y"])
+        and y < min(size_hints[1], TRITON_MAX_BLOCK["Y"])
         and (
             y * maxGridSize[1] < size_hints[1] or conditional_product(x, y, z) < target
         )
@@ -1207,7 +1207,7 @@ def triton_config(
         y *= 2
     while (
         z
-        and z < min(size_hints[2], config.triton.max_block["Z"])
+        and z < min(size_hints[2], TRITON_MAX_BLOCK["Z"])
         and (
             z * maxGridSize[2] < size_hints[2] or conditional_product(x, y, z) < target
         )
@@ -1270,9 +1270,7 @@ def triton_config_reduction(size_hints, x, r, num_stages=1, num_warps=None) -> C
         num_warps = conditional_product(x, r) // 128
     num_warps = next_power_of_2(min(max(num_warps, 2), 8))
     check_config(cfg, xnumel=size_hints[0])
-    assert (
-        r <= config.triton.max_block["R"]
-    ), f"increase config.triton.MAX_BLOCK['r'] to {r}"
+    assert r <= TRITON_MAX_BLOCK["R"], f"increase TRITON_MAX_BLOCK['r'] to {r}"
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
@@ -1303,9 +1301,7 @@ def triton_config_tiled_reduction(size_hints, x, y, r, num_stages=1):
     cfg = {"XBLOCK": x, "YBLOCK": y, "RBLOCK": r}
     num_warps = next_power_of_2(min(max(conditional_product(x, y, r) // 256, 1), 8))
     check_config(cfg, xnumel=size_hints[0], ynumel=size_hints[1])
-    assert (
-        r <= config.triton.max_block["R"]
-    ), f"increase config.triton.MAX_BLOCK['r'] to {r}"
+    assert r <= TRITON_MAX_BLOCK["R"], f"increase TRITON_MAX_BLOCK['r'] to {r}"
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
@@ -1335,8 +1331,9 @@ def pointwise(
     )
 
     if len(size_hints) == 1:
-        if disable_pointwise_autotuning() and not (
-            config.max_autotune or config.max_autotune_pointwise
+        if disable_pointwise_autotuning(inductor_meta) and not (
+            inductor_meta.get("max_autotune")
+            or inductor_meta.get("max_autotune_pointwise")
         ):
             return cached_autotune(
                 size_hints,
@@ -1364,8 +1361,11 @@ def pointwise(
                 filename=filename,
             )
     if len(size_hints) == 2:
-        if (disable_pointwise_autotuning() or tile_hint == TileHint.SQUARE) and not (
-            config.max_autotune or config.max_autotune_pointwise
+        if (
+            disable_pointwise_autotuning(inductor_meta) or tile_hint == TileHint.SQUARE
+        ) and not (
+            inductor_meta.get("max_autotune")
+            or inductor_meta.get("max_autotune_pointwise")
         ):
             return cached_autotune(
                 size_hints,
@@ -1392,7 +1392,7 @@ def pointwise(
             heuristic_type=HeuristicType.POINTWISE,
         )
     if len(size_hints) == 3:
-        if disable_pointwise_autotuning():
+        if disable_pointwise_autotuning(inductor_meta):
             return cached_autotune(
                 size_hints,
                 [triton_config_with_settings(size_hints, 16, 16, 16)],
@@ -1435,7 +1435,7 @@ def _reduction_configs(
     tiny_config = triton_config_reduction(
         size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, min(rnumel, 2048)
     )
-    if config.max_autotune or config.max_autotune_pointwise:
+    if inductor_meta.get("max_autotune") or inductor_meta.get("max_autotune_pointwise"):
         pass  # skip all these cases
     elif reduction_hint == ReductionHint.INNER:
         return [contiguous_config]
@@ -1443,7 +1443,7 @@ def _reduction_configs(
         return [outer_config]
     elif reduction_hint == ReductionHint.OUTER_TINY:
         return [tiny_config]
-    if disable_pointwise_autotuning():
+    if disable_pointwise_autotuning(inductor_meta):
         return [triton_config_reduction(size_hints, 32, 128)]
     return [
         contiguous_config,
@@ -1522,7 +1522,7 @@ def persistent_reduction(
         # we don't need RBLOCK for persistent reduction
         c.kwargs.pop("RBLOCK")
 
-    if disable_pointwise_autotuning():
+    if disable_pointwise_autotuning(inductor_meta):
         configs = configs[:1]
 
     return cached_autotune(
@@ -1549,14 +1549,13 @@ def split_scan(
         size_hints = [1, *size_hints[1:]]
 
     assert triton_meta is not None
-    rnumel = size_hints[-1]
     if len(size_hints) != 2:
         raise NotImplementedError(f"size_hints: {size_hints}")
 
     configs = _reduction_configs(size_hints=size_hints, inductor_meta=inductor_meta)
 
     # Fixup configs to enforce the minimum RBLOCK size
-    min_rblock = config.triton.min_split_scan_rblock
+    min_rblock = inductor_meta.get("min_split_scan_rblock", 256)
     for cfg in configs:
         if cfg.kwargs["RBLOCK"] < min_rblock:
             cfg.kwargs["RBLOCK"] = min_rblock
@@ -1654,21 +1653,19 @@ def grid(*numels):
             return numel
         return ceildiv(numel, block)
 
-    max_grid_dims = config.triton.max_tiles
-
     def grid_fn(meta):
         x_grid = get_grid_dim(xnumel, meta.get("XBLOCK", 1))
         y_grid = get_grid_dim(ynumel, meta.get("YBLOCK", None))
 
-        MAX_Y_GRID = get_max_y_grid()
-        if znumel is None and max_grid_dims <= 2:
-            div = ceildiv(y_grid, MAX_Y_GRID)
+        max_y_grid = get_max_y_grid()
+        if znumel is None:
+            div = ceildiv(y_grid, max_y_grid)
             y_grid = y_grid // div
             z_grid = div
         else:
             z_grid = get_grid_dim(znumel, meta.get("ZBLOCK", None))
             torch._check(
-                y_grid <= MAX_Y_GRID,
+                y_grid <= max_y_grid,
                 lambda: f"Generated y grid beyond 2^16 ({y_grid}) not supported with z dimension present. File issue",
             )
 
