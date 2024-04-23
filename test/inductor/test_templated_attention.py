@@ -307,7 +307,7 @@ class TestTemplatedSDPA(InductorTestCase):
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
-    @common_utils.parametrize("score_mod", [_identity_mod, _causal_mod])
+    @common_utils.parametrize("score_mod", [identity, causal])
     def test_logsumexp_correctness(self, dtype, score_mod):
         @torch.compile
         def sdpa_hop(q, k, v, score_mod):
@@ -370,7 +370,7 @@ class TestTemplatedSDPA(InductorTestCase):
             lse_2 = lse * 2
             return lse_2
 
-        _, code = run_and_get_code(func, q, k, v, _identity_mod)
+        _, code = run_and_get_code(func, q, k, v, identity)
         # Ensure that two kernels are generated
         FileCheck().check_count(".run(", 2, True).run(code[0])
 
@@ -391,7 +391,7 @@ class TestTemplatedSDPA(InductorTestCase):
             lse_2 = lse * 2
             return out, lse_2
 
-        _, code = run_and_get_code(func, q, k, v, _identity_mod)
+        _, code = run_and_get_code(func, q, k, v, identity)
         # Ensure that two kernels are generated
         FileCheck().check_count(".run(", 2, True).run(code[0])
 
