@@ -45,16 +45,12 @@ from typing import (
     Optional,
     Set,
     Tuple,
-    Type,
     TYPE_CHECKING,
     Union,
 )
 
 import torch
-from torch._dynamo.device_interface import (
-    get_interface_for_device,
-    get_registered_device_interfaces,
-)
+from torch._dynamo.device_interface import get_registered_device_interfaces
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
@@ -70,7 +66,6 @@ from torch._subclasses.fake_tensor import (
 from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
 
 if TYPE_CHECKING:
-    from torch._dynamo.device_interface import DeviceInterface
     from torch._inductor.graph import GraphLowering
     from torch._inductor.ir import ChoiceCaller
 
@@ -2772,14 +2767,9 @@ def _set_triton_ptxas_path() -> None:
 
 def _worker_compile_triton(
     load_kernel: Callable[[], Any],
-    cc: int,
-    device: torch.device,
-    device_interface: Type[DeviceInterface],
 ):
     _set_triton_ptxas_path()
-    device_interface.Worker.set_device(device.index)
-    kernel = load_kernel()
-    kernel.precompile(warm_cache_only_with_cc=cc)
+    load_kernel().precompile(warm_cache_only=True)
 
 
 class CodeCacheFuture:
@@ -2942,17 +2932,13 @@ class AsyncCompile:
 
         kernel = TritonCodeCache.load(kernel_name, source_code)
         if config.compile_threads > 1:
-            device_interface = get_interface_for_device(device_str)
-            device = torch.device(device_str, device_interface.current_device())
-            cc = device_interface.get_compute_capability(device)
-            future = self.process_pool().submit(
-                _worker_compile_triton,
-                kernel._reload_in_subproc,
-                cc,
-                device,
-                device_interface,
+            return TritonFuture(
+                kernel,
+                self.process_pool().submit(
+                    _worker_compile_triton,
+                    kernel._reload_in_subproc,
+                ),
             )
-            return TritonFuture(kernel, future)
         else:
             kernel.precompile()
             return kernel
