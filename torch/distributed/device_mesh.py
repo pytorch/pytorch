@@ -37,6 +37,7 @@ else:
         _find_pg_by_ranks_and_tag,
         _get_default_group,
         _get_group_tag,
+        get_process_group_ranks,
         get_rank,
         get_world_size,
         init_process_group,
@@ -89,6 +90,10 @@ else:
                     device_mesh.device_type,
                     mesh_1d,
                     mesh_dim_names=(mesh_dim_name,),
+                    # TODO: This is not right at the moment since we still need
+                    # `_dim_group_infos` and `_coordinate_on_dim`.
+                    # Update following https://github.com/pytorch/pytorch/pull/124780/
+                    # _init_backend=False,
                 )
                 if cur_rank in mesh_1d:
                     res_sub_mesh = sub_mesh
@@ -207,6 +212,7 @@ else:
             mesh: Union[torch.Tensor, "ArrayLike"],
             *,
             mesh_dim_names: Optional[Tuple[str, ...]] = None,
+            _init_backend: bool = True,
         ) -> None:
             self.device_type = device_type
             if isinstance(mesh, torch.Tensor) and mesh.device.type != "cpu":
@@ -222,9 +228,9 @@ else:
             self._flatten_mesh_list = tuple(self.mesh.flatten().tolist())
             self._hash = hash((self._flatten_mesh_list, self.mesh.shape, id(self)))
 
-            # Skip process group initialization if xla device.
+            # Skip process group initialization if xla device or init backend is False
             # TODO(yeounoh) implement DeviceMesh backend and register XLA backend.
-            if device_type != "xla":
+            if device_type != "xla" and _init_backend:
                 # always try to create default (world) pg, even if it is not initialized
                 # already. The world pg is used for device mesh identity (rank) on each
                 # process (we need to know if the current global rank is in the mesh or not).
@@ -433,6 +439,23 @@ else:
                         )
                     )
                 return dim_groups
+
+        @staticmethod
+        def from_group(group: ProcessGroup, device_type: str) -> "DeviceMesh":
+            # Manually define `_dim_group_infos` and `_coordinate_on_dim`
+            # instead of relying the normal logic to init groups since we
+            # already have the PG
+            group_ranks = get_process_group_ranks(group)
+            mesh = DeviceMesh(device_type, group_ranks, _init_backend=False)
+            mesh._dim_group_infos = [
+                (_get_group_tag(group), group_ranks, group.group_name)
+            ]
+            rank_coords = (mesh.mesh == get_rank()).nonzero()
+            assert rank_coords.size(0) in (0, 1)
+            mesh._coordinate_on_dim = (
+                rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
+            )
+            return mesh
 
         def size(self, mesh_dim: Optional[int] = None) -> int:
             return self.mesh.numel() if mesh_dim is None else self.mesh.size(mesh_dim)
