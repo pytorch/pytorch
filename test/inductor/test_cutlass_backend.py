@@ -135,7 +135,7 @@ class TestCutlassBackend(TestCase):
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_precompile_ck(self):
         """
-        Make sure autotuning mm in sub processes work without crashes.
+        Make sure autotuning mm in subprocesses doesn't crash.
         """
 
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
@@ -143,16 +143,20 @@ class TestCutlassBackend(TestCase):
         def mm(a, b):
             return a @ b
 
-        a = torch.randn(2240, 256).cuda().half()
-        b = torch.randn(256, 2048).cuda().half()
+        tensor_options = {
+            'device': 'cuda',
+            'dtype': torch.half
+        }
 
+        a = torch.randn(2240, 256, **tensor_options)
+        b = torch.randn(256, 2048, **tensor_options)
         with config.patch(
             {
                 "max_autotune": True,
                 "autotune_in_subproc": True,
-                "max_autotune_gemm_backends": "CK",
-                # "max_autotune_gemm_backends": "CK,Triton,ATen",
-                "compile_threads": -1,
+                "max_autotune_gemm_backends": "CK,Triton,ATen",
+                "compile_threads": 64,
+                "rocm.n_max_profiling_configs": 4,
             }
         ):
             Y_compiled = torch.compile(mm, dynamic=False)(a, b)
