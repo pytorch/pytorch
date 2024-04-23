@@ -73,6 +73,9 @@ Tensor toNonOptFwGrad(const c10::optional<Tensor>& t) {
 }
 
 Tensor toNonOptPrimal(const c10::optional<Tensor>& t) {
+  // if (t.has_value()) {
+  //   std::cout << "toNonOptPrimal: " << std::endl;
+  // }
   return (t.has_value() && t->defined()) ? t->_fw_primal(/*level */ 0)
                                          : Tensor();
 }

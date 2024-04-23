@@ -314,6 +314,17 @@ def unique2(
     return tuple(ret)
 
 
+@register_op_impl(aten.alias.default)
+def alias(fake_mode, func, *args, **kwargs):
+    with in_kernel_invocation_manager(fake_mode):
+        if isinstance(args[0], int):
+            return args[0]
+        else:
+            r = func(*args, **kwargs)
+    device = args[0].device
+    return FakeTensor(fake_mode, r, device=device)
+
+
 @register_op_impl(aten.repeat_interleave.Tensor)
 def repeat_interleave_tensor(fake_mode, func, repeats, output_size=None):
     if output_size is None:

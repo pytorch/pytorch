@@ -95,7 +95,8 @@ bool should_allow_numbers_as_tensors(const std::string& name) {
       "subtract",     "subtract_",     "subtract_out", // alias of sub
       "true_divide",  "true_divide_",  "true_divide_out",
       "to",           "_to_copy",      "copy_",
-      "floor_divide", "floor_divide_", "floor_divide_out"};
+      "floor_divide", "floor_divide_", "floor_divide_out",
+      "alias"};
   return allowed.find(name) != allowed.end();
 }
 

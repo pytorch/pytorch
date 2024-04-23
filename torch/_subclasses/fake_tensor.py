@@ -1116,6 +1116,8 @@ class FakeTensorMode(TorchDispatchMode):
         view_idx = None
         if func.is_view:
             idxs = [i for i, t in enumerate(args) if isinstance(t, torch.Tensor)]
+            if len(idxs) == 0:
+                raise _BypassDispatchCache("no arg tensor")
             assert len(idxs) == 1
             view_idx = idxs[0]
 
