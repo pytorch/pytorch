@@ -5602,8 +5602,6 @@ symbolic_aot_autograd_module_failures = {
     torch.nn.GaussianNLLLoss,  # NotImplementedError: local_scalar_dense/item NYI for torch.bool
     torch.nn.GroupNorm,  # in native_group_norm_backward cpg, _rem = divmod(C, group)
     # TypeError: unsupported operand type(s) for divmod(): 'SymInt' and 'int'
-    torch.nn.FractionalMaxPool2d,  # int() argument must be a string, a bytes-like object or a number, not 'SymFloat'
-    torch.nn.FractionalMaxPool3d,  # int() argument must be a string, a bytes-like object or a number, not 'SymFloat'
     torch.nn.BCELoss,  # new_size = _infer_size(target.size(), weight.size())
     # RuntimeError: expected int at position 0, but got: SymInt
 }
