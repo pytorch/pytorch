@@ -131,7 +131,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         with self.assertRaisesRegex(
             optests.OpCheckError, "Argument x is not defined as mutable but was mutated"
         ):
-            optests.opcheck(op, (x,), {})
+            torch.library.opcheck(op, (x,), {})
 
     def test_incorrect_schema_view(self, device):
         lib = self.lib()
@@ -167,7 +167,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
             optests.OpCheckError,
             "Argument x is not defined to alias output but was aliasing",
         ):
-            optests.opcheck(op, (x,), {})
+            torch.library.opcheck(op, (x,), {})
 
     def test_missing_abstract_impl(self, device):
         lib = self.lib()
@@ -196,7 +196,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
             optests.OpCheckError,
             "_test_custom_op.foo.default",
         ):
-            optests.opcheck(op, (x,), {})
+            torch.library.opcheck(op, (x,), {})
 
     def test_incorrect_abstract_impl(self, device):
         lib = self.lib()
@@ -234,7 +234,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
 
         x = torch.tensor([0, 1.0], requires_grad=True)
         with self.assertRaisesRegex(optests.OpCheckError, "Shapes .* are not equal"):
-            optests.opcheck(op, (x,), {})
+            torch.library.opcheck(op, (x,), {})
 
     def test_missing_functionalization(self, device):
         lib = self.lib()
@@ -269,7 +269,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
             optests.OpCheckError,
             "We only support functionalizing operators whose outputs do not have alias annotations",
         ):
-            optests.opcheck(op, (y,), {})
+            torch.library.opcheck(op, (y,), {})
 
     def test_autograd_registered_at_backend(self, device):
         lib = self.lib()
@@ -295,7 +295,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
             torch.testing._internal.optests.OpCheckError,
             "does not have an autograd kernel",
         ):
-            optests.opcheck(op, (x,), {})
+            torch.library.opcheck(op, (x,), {})
 
         # I'm not sure why this is necessary
         del lib
@@ -323,7 +323,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         with self.assertRaisesRegex(
             optests.OpCheckError, "eager-mode PyTorch vs AOTAutograd"
         ):
-            optests.opcheck(op, (x,), {})
+            torch.library.opcheck(op, (x,), {})
 
     @ops(custom_op_db.custom_op_db, dtypes=OpDTypes.any_one)
     def test_opcheck_opinfo(self, device, dtype, op):
@@ -332,7 +332,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         ):
             args = [sample_input.input] + list(sample_input.args)
             kwargs = sample_input.kwargs
-            optests.opcheck(
+            torch.library.opcheck(
                 op.op,
                 args,
                 kwargs,
@@ -352,7 +352,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         with self.assertRaisesRegex(
             optests.OpCheckError, "Autograd has not been implemented for operator"
         ):
-            optests.opcheck(self.get_op(f"{self.test_ns}::foo"), (x,), {})
+            torch.library.opcheck(self.get_op(f"{self.test_ns}::foo"), (x,), {})
 
     def test_autograd_registration_check_autograd_kernel(self, device):
         lib = self.lib()
@@ -1740,6 +1740,17 @@ dynamic shape operator: _torch_testing.numpy_nonzero.default
             res = torch._library.utils.is_functional_schema(schema)
             self.assertEqual(res, expected)
 
+    def test_incorrect_schema_types(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            with self.assertRaisesRegex(RuntimeError, "unknown type specifier"):
+                lib.define("foo12(Tensor a) -> asdfasdf")
+            with self.assertRaisesRegex(RuntimeError, "unknown type specifier"):
+                lib.define("foo12(asdf a) -> Tensor")
+            with self.assertRaisesRegex(RuntimeError, "Use `SymInt` or `int`"):
+                lib.define("foo12(int64_t a) -> Tensor")
+            with self.assertRaisesRegex(RuntimeError, "Use `float`"):
+                lib.define("foo12(double a) -> Tensor")
+
     def test_is_tensorlist_like_type(self):
         tensorlists = [
             # Tensor[]
@@ -2922,10 +2933,10 @@ opcheck(op, args, kwargs, test_utils="test_schema")
     def test_opcheck(self):
         x = torch.randn(3, requires_grad=True)
         with self.assertRaisesRegex(ValueError, "OpOverload"):
-            optests.opcheck(torch.sin, (x,))
+            torch.library.opcheck(torch.sin, (x,))
         with self.assertRaisesRegex(ValueError, "test_utils to be subset of"):
-            optests.opcheck(torch.ops.aten.sin.default, (x,), test_utils="blah")
-        result = optests.opcheck(torch.ops.aten.sin.default, (x,))
+            torch.library.opcheck(torch.ops.aten.sin.default, (x,), test_utils="blah")
+        result = torch.library.opcheck(torch.ops.aten.sin.default, (x,))
 
         self.assertEqual(
             result,
@@ -2937,7 +2948,7 @@ opcheck(op, args, kwargs, test_utils="test_schema")
             },
         )
 
-        result = optests.opcheck(
+        result = torch.library.opcheck(
             torch.ops.aten.sin.default, (x,), test_utils="test_schema"
         )
         self.assertEqual(
@@ -2947,7 +2958,7 @@ opcheck(op, args, kwargs, test_utils="test_schema")
             },
         )
 
-        result = optests.opcheck(
+        result = torch.library.opcheck(
             torch.ops.aten.sin.default,
             (x,),
             test_utils=["test_schema", "test_faketensor"],
@@ -2960,6 +2971,21 @@ opcheck(op, args, kwargs, test_utils="test_schema")
             },
         )
 
+    def test_opcheck_customopdef(self):
+        sample_inputs = [
+            (torch.randn(3),),
+            (torch.randn(3, requires_grad=True),),
+        ]
+        if torch.cuda.is_available():
+            sample_inputs.extend(
+                [
+                    (torch.randn(3, device="cuda"),),
+                    (torch.randn(3, device="cuda", requires_grad=True),),
+                ]
+            )
+        for args in sample_inputs:
+            torch.library.opcheck(custom_op_db.numpy_cube, args)
+
     def test_is_inside_opcheck_mode(self):
         self.assertFalse(optests.is_inside_opcheck_mode())
         with optests.generate_tests.OpCheckMode(
@@ -2971,9 +2997,9 @@ opcheck(op, args, kwargs, test_utils="test_schema")
         op = op_with_incorrect_schema(self, "foo")
         x = torch.randn(3)
         with self.assertRaisesRegex(Exception, "is not defined to alias output"):
-            optests.opcheck(op, (x,))
+            torch.library.opcheck(op, (x,))
 
-        result = optests.opcheck(op, (x,), raise_exception=False)
+        result = torch.library.opcheck(op, (x,), raise_exception=False)
         self.assertTrue(isinstance(result["test_schema"], RuntimeError))
         del result["test_schema"]
         self.assertEqual(

@@ -20,6 +20,12 @@ try:
 except ImportError as e:
     print(f"Unable to import boto3. Will not be emitting metrics.... Reason: {e}")
 
+# Sometimes our runner machines are located in one AWS account while the metrics table may be in
+# another, so we need to specify the table's ARN explicitly.
+TORCHCI_METRICS_TABLE_ARN = (
+    "arn:aws:dynamodb:us-east-1:308535385114:table/torchci-metrics"
+)
+
 
 class EnvVarMetric:
     name: str
@@ -153,7 +159,7 @@ def emit_metric(
     if EMIT_METRICS:
         try:
             session = boto3.Session(region_name="us-east-1")
-            session.resource("dynamodb").Table("torchci-metrics").put_item(
+            session.resource("dynamodb").Table(TORCHCI_METRICS_TABLE_ARN).put_item(
                 Item={
                     **reserved_metrics,
                     **metrics,
