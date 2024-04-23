@@ -42,7 +42,7 @@ enum class DeviceType : int8_t {
   IDEEP = 5, // IDEEP.
   HIP = 6, // AMD HIP
   FPGA = 7, // FPGA
-  ORT = 8, // ONNX Runtime / Microsoft
+  MAIA = 8, // ONNX Runtime / Microsoft
   XLA = 9, // XLA / TPU
   Vulkan = 10, // Vulkan
   Metal = 11, // Metal
@@ -66,7 +66,7 @@ constexpr DeviceType kCPU = DeviceType::CPU;
 constexpr DeviceType kCUDA = DeviceType::CUDA;
 constexpr DeviceType kHIP = DeviceType::HIP;
 constexpr DeviceType kFPGA = DeviceType::FPGA;
-constexpr DeviceType kORT = DeviceType::ORT;
+constexpr DeviceType kMAIA = DeviceType::MAIA;
 constexpr DeviceType kXLA = DeviceType::XLA;
 constexpr DeviceType kMPS = DeviceType::MPS;
 constexpr DeviceType kMeta = DeviceType::Meta;
