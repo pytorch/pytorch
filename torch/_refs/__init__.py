@@ -3597,7 +3597,7 @@ def repeat(a: Tensor, *repeat_shape) -> Tensor:
 
     # derive permute order by sorting urtensor strides
     enumerated_stride = list(enumerate(urtensor_stride))
-    enumerated_stride.sort(key=lambda item: item[1], reverse=True)
+    enumerated_stride.sort(key=operator.itemgetter(1), reverse=True)
     permute_order, sorted_stride = zip(*enumerated_stride)
 
     # add new and expand dimensions according to urtensor

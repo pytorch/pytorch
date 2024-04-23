@@ -894,7 +894,7 @@ class ReplacementPatternEntry(PatternEntry):
                 for n in output_nodes
                 if isinstance(n, torch.fx.Node)
             ]
-            last_node = min(indices, key=lambda tup: tup[0])[1]
+            last_node = min(indices, key=operator.itemgetter(0))[1]
 
         def percolate_tags(node, recompute_tag, input_stops):
             queue = [node]

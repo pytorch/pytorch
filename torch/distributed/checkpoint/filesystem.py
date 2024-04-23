@@ -1,6 +1,7 @@
 import collections
 import dataclasses
 import io
+import operator
 import os
 import pickle
 import queue
@@ -177,7 +178,7 @@ class _OverlappingCpuLoader(_TensorLoader):
         if self.started:
             return
         self.started = True
-        self.items.sort(key=lambda x: x[0])
+        self.items.sort(key=operator.itemgetter(0))
         self._refill()
 
     def values(self) -> Iterator[Tuple[torch.Tensor, object]]:
@@ -218,7 +219,7 @@ def _split_by_size_and_type(bins: int, items: List[WriteItem]) -> List[List[Writ
 
     for wi in tensor_w:
         # TODO replace with headq
-        idx = min(enumerate(bucket_sizes), key=lambda x: x[1])[0]
+        idx = min(enumerate(bucket_sizes), key=operator.itemgetter(1))[0]
         buckets[idx].append(wi)
         bucket_sizes[idx] += _item_size(wi)
 

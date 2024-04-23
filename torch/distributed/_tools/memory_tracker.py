@@ -17,6 +17,7 @@ import torch
 import torch.nn as nn
 from torch.utils.hooks import RemovableHandle
 from torch.utils._python_dispatch import TorchDispatchMode
+import operator
 
 
 BYTES_PER_MB = 1024 * 1024.0
@@ -148,7 +149,7 @@ class MemoryTracker:
         print("------------------------------------------------")
         print(f"The number of cuda retries are: {self._num_cuda_retries}")
         print(f"Top {top} ops that generates memory are:")
-        for k, v in sorted(op_diff.items(), key=lambda item: item[1], reverse=True)[
+        for k, v in sorted(op_diff.items(), key=operator.itemgetter(1), reverse=True)[
             :top
         ]:
             print(f"{k}: {v}MB")

@@ -6,6 +6,7 @@ from typing import DefaultDict, List, Optional, Tuple
 
 from torch.utils.benchmark.utils import common
 from torch import tensor as _tensor
+import operator
 
 __all__ = ["Colorize", "Compare"]
 
@@ -167,7 +168,7 @@ class Table:
         )
 
         self.row_keys = common.ordered_unique([self.row_fn(i) for i in results])
-        self.row_keys.sort(key=lambda args: args[:2])  # preserve stmt order
+        self.row_keys.sort(key=operator.itemgetter(slice(2)))  # preserve stmt order
         self.column_keys = common.ordered_unique([self.col_fn(i) for i in results])
         self.rows, self.columns = self.populate_rows_and_columns()
 
