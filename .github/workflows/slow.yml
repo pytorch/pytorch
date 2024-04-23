@@ -160,7 +160,7 @@ jobs:
           { config: "slow", shard: 1, num_shards: 2, runner: "linux.4xlarge" },
           { config: "slow", shard: 2, num_shards: 2, runner: "linux.4xlarge" },
         ]}
-      sync-tag: asan-build
+      sync-tag: asan-build-arc
 
   linux-jammy-py3_10-clang15-asan-test:
     name: linux-jammy-py3.10-clang15-asan

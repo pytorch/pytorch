@@ -166,7 +166,7 @@ jobs:
           { config: "default", shard: 5, num_shards: 6, runner: "linux.4xlarge" },
           { config: "default", shard: 6, num_shards: 6, runner: "linux.4xlarge" },
         ]}
-      sync-tag: asan-build
+      sync-tag: asan-build-arc
 
   linux-jammy-py3_10-clang15-asan-test:
     name: linux-jammy-py3.10-clang15-asan
