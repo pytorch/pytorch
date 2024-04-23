@@ -12682,7 +12682,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         class M(torch.nn.Module):
             def forward(self, t: Tensor) -> Tuple[Tensor, Tensor]:
                 if float(t) < 0:
-                    raise Exception("Negative input")
+                    raise Exception("Negative input")  # noqa: TRY002
                 else:
                     return torch.zeros(5), torch.zeros(5)
 

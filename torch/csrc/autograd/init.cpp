@@ -162,7 +162,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .value("IDEEP", c10::DeviceType::IDEEP)
       .value("HIP", c10::DeviceType::HIP)
       .value("FPGA", c10::DeviceType::FPGA)
-      .value("ORT", c10::DeviceType::ORT)
+      .value("MAIA", c10::DeviceType::MAIA)
       .value("XLA", c10::DeviceType::XLA)
       .value("Vulkan", c10::DeviceType::Vulkan)
       .value("Metal", c10::DeviceType::Metal)
@@ -331,9 +331,6 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
     }
     if (at::hasMTIA()) {
       activities.insert(torch::profiler::impl::ActivityType::MTIA);
-    }
-    if (c10::get_privateuse1_backend() != "privateuseone") {
-      activities.insert(torch::profiler::impl::ActivityType::PrivateUse1);
     }
 #endif
     return activities;
