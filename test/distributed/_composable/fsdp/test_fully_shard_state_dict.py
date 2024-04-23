@@ -33,8 +33,6 @@ class TestFullyShardStateDict(FSDPTest):
         )
 
     def _test_1d_state_dict_save_load(self, mlp_dim: int):
-        if self.rank == 0:
-            print(f"testing mlp_dim={mlp_dim}")
         torch.manual_seed(42)
         base_model = nn.Sequential(
             MLP(mlp_dim),
