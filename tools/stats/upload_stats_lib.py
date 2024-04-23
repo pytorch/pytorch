@@ -5,7 +5,7 @@ import os
 import zipfile
 
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import boto3  # type: ignore[import]
 import requests
@@ -32,6 +32,7 @@ def _get_artifact_urls(prefix: str, workflow_run_id: int) -> Dict[Path, str]:
     """Get all workflow artifacts with 'test-report' in the name."""
     response = requests.get(
         f"{PYTORCH_REPO}/actions/runs/{workflow_run_id}/artifacts?per_page=100",
+        headers=_get_request_headers(),
     )
     artifacts = response.json()["artifacts"]
     while "next" in response.links.keys():
@@ -228,3 +229,15 @@ def is_rerun_disabled_tests(tests: Dict[str, Dict[str, int]]) -> bool:
         t.get("num_green", 0) + t.get("num_red", 0) > MAX_RETRY_IN_NON_DISABLED_MODE
         for t in tests.values()
     )
+
+
+def get_job_id(report: Path) -> Optional[int]:
+    # [Job id in artifacts]
+    # Retrieve the job id from the report path. In our GHA workflows, we append
+    # the job id to the end of the report name, so `report` looks like:
+    #     unzipped-test-reports-foo_5596745227/test/test-reports/foo/TEST-foo.xml
+    # and we want to get `5596745227` out of it.
+    try:
+        return int(report.parts[0].rpartition("_")[2])
+    except ValueError:
+        return None

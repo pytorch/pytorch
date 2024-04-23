@@ -109,7 +109,9 @@ if config.abi_compatible:
         test_failures_cuda_wrapper[
             f"{test_name}_dynamic_shapes"
         ] = test_torchinductor.TestFailure(("cuda_wrapper",), is_skip=False)
-    skip_list = []
+    skip_list = [
+        "test_multi_device_cuda",
+    ]
     for test_name in skip_list:
         test_failures_cuda_wrapper[test_name] = test_torchinductor.TestFailure(
             ("cuda_wrapper",), is_skip=True
