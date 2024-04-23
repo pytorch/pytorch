@@ -9643,7 +9643,7 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
     copy_tests(CommonTemplate, GPUTests, GPU_TYPE)
 
     class TritonCodeGenTests(TestCase):
-        from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+        from torch._inductor.triton_heuristics import CachingAutotuner
 
         class NoOpCompilerBackend:
             def __init__(self):
@@ -9695,7 +9695,7 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
 
                 for val in mod.__dict__.values():
                     if isinstance(
-                        val, torch._inductor.runtime.triton_heuristics.CachingAutotuner
+                        val, torch._inductor.triton_heuristics.CachingAutotuner
                     ):
                         kernels.append(val)
 

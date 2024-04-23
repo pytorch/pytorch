@@ -14,6 +14,7 @@ from torch.testing._internal.common_cuda import SM75OrLater, SM80OrLater, SM90Or
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfRocm,
 )
 
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
@@ -26,11 +27,6 @@ _CUTLASS_DIR = os.path.join(os.path.dirname(__file__), "../../third_party/cutlas
 
 log = logging.getLogger(__name__)
 
-HAS_CUDA = HAS_CUDA and not torch.version.hip
-SM75OrLater = SM75OrLater and not torch.version.hip
-SM80OrLater = SM80OrLater and not torch.version.hip
-SM90OrLater = SM90OrLater and not torch.version.hip
-
 
 def _get_path_without_sccache() -> str:
     """
@@ -41,6 +37,7 @@ def _get_path_without_sccache() -> str:
     return ":".join(path_envs)
 
 
+@skipIfRocm
 @instantiate_parametrized_tests
 class TestCutlassBackend(TestCase):
     def setUp(self):
@@ -133,7 +130,7 @@ class TestCutlassBackend(TestCase):
     # TODO: Enable dynamic test cases when dynamic support is added.
     @unittest.skipIf(not SM75OrLater, "need sm_75")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
-    @parametrize("dynamic", (False, True))
+    @parametrize("dynamic", (False,))
     @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen,Triton,CUTLASS"))
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_regular_mm(
@@ -401,7 +398,12 @@ class TestCutlassBackend(TestCase):
             # Broadcast first dim.
             compare_results(4096, 25728, 2048, 2.0, 0.4, [2048])
             # Broadcast last dim.
-            compare_results(4096, 25728, 2048, 2.0, 0.4, [4096, 1])
+            if not SM90OrLater and max_autotune_gemm_backends == "CUTLASS":
+                with self.assertRaisesRegex(RuntimeError, "No choices to select"):
+                    # CUTLASS2 doesn't support Bias last-dim broadcast.
+                    compare_results(4096, 25728, 2048, 2.0, 0.4, [4096, 1])
+            else:
+                compare_results(4096, 25728, 2048, 2.0, 0.4, [4096, 1])
 
     # TODO: Enable dynamic test cases when dynamic support is added.
     @unittest.skipIf(not SM80OrLater, "need sm_80")
