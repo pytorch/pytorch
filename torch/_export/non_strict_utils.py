@@ -98,7 +98,7 @@ def make_fake_params_buffers(
     return faked_params_buffers
 
 
-def make_fake_inputs(nn_module, args, kwargs, dynamic_shapes):
+def make_fake_inputs(nn_module, args, kwargs, dynamic_shapes, _is_torch_jit_trace=False):
     """
     Given an nn module, example inputs, and constraints, return a new fake mode,
     fake inputs created in that mode whose dynamic shape dimensions are constrained
@@ -115,7 +115,7 @@ def make_fake_inputs(nn_module, args, kwargs, dynamic_shapes):
     #   - [post-tracing] guards.py processes input shape equalities.
 
     constraints = torch.export.dynamic_shapes._process_dynamic_shapes(
-        nn_module, args, kwargs, dynamic_shapes
+        nn_module, args, kwargs, dynamic_shapes, _is_torch_jit_trace=_is_torch_jit_trace
     )
     constraints = constraints or []
     t_constraints: Dict[int, Dict[int, Constraint]] = defaultdict(dict)
@@ -124,19 +124,24 @@ def make_fake_inputs(nn_module, args, kwargs, dynamic_shapes):
         if constraint.shared is not None:
             t_constraints[constraint.shared.t_id][constraint.shared.dim] = constraint
 
-# TODO(ycao): torch._C.ScriptMethod doesn't have a __code__ attribute, we should add
-# one and it should ideally point to the original code object of traced module.
-#    code = nn_module.forward.__code__
-#    co_fields = {
-#        "co_name": code.co_name,
-#        "co_filename": code.co_filename,
-#        "co_firstlineno": code.co_firstlineno,
-#    }
+    if not _is_torch_jit_trace:
+        code = nn_module.forward.__code__
+        co_fields = {
+            "co_name": code.co_name,
+            "co_filename": code.co_filename,
+            "co_firstlineno": code.co_firstlineno,
+        }
 
-    fake_mode = FakeTensorMode(
-        shape_env=ShapeEnv(tracked_fakes=[]),
-        allow_non_fake_inputs=True,
-    )
+        fake_mode = FakeTensorMode(
+            shape_env=ShapeEnv(tracked_fakes=[], co_fields=co_fields),
+            allow_non_fake_inputs=True,
+        )
+    else:
+        fake_mode = FakeTensorMode(
+            shape_env=ShapeEnv(tracked_fakes=[]),
+            allow_non_fake_inputs=True,
+        )
+
     if fake_mode.shape_env is None or fake_mode.shape_env.tracked_fakes is None:
         raise ValueError(
             "Detected fake_mode does not have a shape_env with tracked fakes. "
@@ -146,9 +151,11 @@ def make_fake_inputs(nn_module, args, kwargs, dynamic_shapes):
 
 
     with fake_mode:
-        # original_signature = inspect.signature(nn_module.forward)
         # FIXME(ycao) ScriptMethod doesn't have signature, I am using an empty one to unblock
-        original_signature = None
+        if not _is_torch_jit_trace:
+            original_signature = inspect.signature(nn_module.forward)
+        else:
+            original_signature = None
         sources: Dict[Tuple[int, int], List[Source]] = defaultdict(list)
         fake_args, fake_kwargs = tree_map_with_path(
             lambda kp, val: fakify(fake_mode, kp, val, t_constraints, sources),
@@ -186,6 +193,7 @@ def make_constraints(
     input_specs: List[InputSpec],
     original_signature: inspect.Signature,
     gm: torch.fx.GraphModule,
+    _is_torch_jit_trace=False,
 ):
     """
     Given a fake mode, sources pairs corresponding to equal dynamic shape dimensions,
@@ -250,11 +258,13 @@ def make_constraints(
     dim_constraints.solve()
     dim_constraints.remove_redundant_dynamic_results()
     forced_specializations = dim_constraints.forced_specializations()
-    # msg = dim_constraints.prettify_results(
-    #     original_signature, constraint_violation_error, forced_specializations
-    # )
-    # FIXME(ycao): This is a hack to get around missing signature from ScriptMethod
-    msg = "dummy constraint violation message"
+    if not _is_torch_jit_trace:
+        msg = dim_constraints.prettify_results(
+            original_signature, constraint_violation_error, forced_specializations
+        )
+    else:
+        # FIXME(ycao): This is a hack to get around missing signature from ScriptMethod
+        msg = "dummy constraint violation message"
     if constraint_violation_error:
         constraint_violation_error.args = (constraint_violation_error.args[0] + msg,)
     elif forced_specializations:

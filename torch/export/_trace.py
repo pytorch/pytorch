@@ -491,6 +491,7 @@ def _export_non_strict(
     *,
     transform=lambda x: x,  # TODO(zhxchen17) Revisit if this is needed later.
     pre_dispatch=False,
+    _is_torch_jit_trace=False,
 ):
     # [NOTE] If the user is exporting under training mode, we want to detect if there is any
     # state change in the autograd global state and error. If the user is exporting under inference
@@ -620,16 +621,17 @@ def _export_non_strict(
     constants.update(lift_constants_pass(gm, export_graph_signature, constant_attrs))
 
     # FIXME(ycao): Skipping this because traced modules do not have signature yet
-    # # prettify names for placeholder nodes
-    # placeholder_naming_pass(
-    #     gm,
-    #     export_graph_signature,
-    #     mod,
-    #     fake_args,
-    #     fake_kwargs,
-    #     fake_params_buffers,
-    #     constants,
-    # )
+    if not _is_torch_jit_trace:
+        # prettify names for placeholder nodes
+        placeholder_naming_pass(
+            gm,
+            export_graph_signature,
+            mod,
+            fake_args,
+            fake_kwargs,
+            fake_params_buffers,
+            constants,
+        )
 
     @dataclasses.dataclass
     class _ExportedProgramNonStrict:
@@ -850,6 +852,7 @@ def _export(
     strict: bool = True,
     preserve_module_call_signature: Tuple[str, ...] = (),
     pre_dispatch: bool = False,
+    _is_torch_jit_trace: bool = False,
 ) -> ExportedProgram:
     """
     Traces either an nn.Module's forward function or just a callable with PyTorch
@@ -901,7 +904,7 @@ def _export(
     _EXPORT_FLAGS = flags
 
     kwargs = kwargs or {}
-    _process_dynamic_shapes(mod, args, kwargs, dynamic_shapes)  # TODO(avik): remove
+    _process_dynamic_shapes(mod, args, kwargs, dynamic_shapes, _is_torch_jit_trace=_is_torch_jit_trace)  # TODO(avik): remove
 
     constant_attrs = _gather_constant_attrs(mod)
 
@@ -984,7 +987,7 @@ def _export(
             fake_kwargs,
             equalities_inputs,
             original_signature,
-        ) = make_fake_inputs(mod, args, kwargs, dynamic_shapes)
+        ) = make_fake_inputs(mod, args, kwargs, dynamic_shapes, _is_torch_jit_trace=_is_torch_jit_trace)
 
         fake_params_buffers = make_fake_params_buffers(
             fake_mode, _get_params_buffers(mod)
@@ -998,13 +1001,13 @@ def _export(
                 constant_attrs,
                 pre_dispatch=pre_dispatch,
                 transform=_tuplify_outputs,
+                _is_torch_jit_trace=_is_torch_jit_trace,
             )
         ep_non_strict.gm.meta["inline_constraints"] = {
             k: v
             for k, v in fake_mode.shape_env.var_to_range.items()
             if free_unbacked_symbols(k)
         }
-        print("GRAPH", ep_non_strict.gm.graph)
         try:
             range_constraints = make_constraints(
                 fake_mode,
@@ -1013,6 +1016,7 @@ def _export(
                 ep_non_strict.sig.input_specs,
                 original_signature,
                 ep_non_strict.gm,
+                _is_torch_jit_trace=_is_torch_jit_trace,
             )
         except (ConstraintViolationError, ValueRangeError) as e:
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: TRY200

@@ -323,7 +323,9 @@ def patch_forward(obj: torch.nn.Module, new_method):
 class WrapperModule(torch.nn.Module):
     def __init__(self, f):
         super().__init__()
-        self.forward = f
+        self.f = f
+    def forward(self, *args, **kwargs):
+        return self.f(*args, **kwargs)
 
 
 class TracingCheckError(Exception):
@@ -835,6 +837,23 @@ def process_callable_into_module(func):
 
     return FunctionModuleWrapper(func)
 
+def analyze_result(export, trace):
+    import torch.utils._pytree as pytree
+    flat_export = pytree.tree_leaves(export)
+    flat_trace = pytree.tree_leaves(trace)
+
+    for orig, loaded in zip(flat_export, flat_trace):
+        if type(orig) != type(loaded):
+            return False
+
+        if isinstance(orig, torch.Tensor):
+            if not torch.allclose(orig, loaded):
+                return False
+        else:
+            if orig != loaded:
+                return False
+    return True
+
 
 def trace(
     func,
@@ -1002,18 +1021,28 @@ def trace(
     export_example_inputs = process_trace_inputs_for_export(example_inputs)
     traced_func = _trace_impl(func, example_inputs, optimize, check_trace, check_inputs, check_tolerance, strict, _force_outplace, _module_class, _compilation_unit, example_kwarg_inputs, _store_inputs)
 
+    if example_kwarg_inputs is None:
+        example_kwarg_inputs = {}
 
-    if isinstance(traced_func, torch._C.ScriptModule):
+    if isinstance(traced_func, TopLevelTracedModule):
         try:
             from torch.export import export
-            exported = export(traced_func, export_example_inputs, example_kwarg_inputs, strict=False).module()
+            exported = export(traced_func, export_example_inputs, example_kwarg_inputs, strict=False, _is_torch_jit_trace=True).module()
         except Exception as e:
             raise RuntimeError(f"Failed to export {func} with error message:\n{e}")
 
-        result_exported = exported(*export_example_inputs, **example_kwarg_inputs)
+        try:
+            result_exported = exported(*export_example_inputs, **example_kwarg_inputs)
+        except Exception as e:
+            raise RuntimeError(f"Failed to run exported {func} with error message:\n{e}")
+
         result_traced = traced_func(*export_example_inputs, **example_kwarg_inputs)
-        if not torch.allclose(result_exported, result_traced):
-            raise RuntimeError("Accuracy error")
+
+        res = analyze_result(result_exported, result_traced)
+
+        if not res:
+            raise RuntimeError("Accuracy error for trace and export")
+
 
     elif isinstance(traced_func, torch._C.ScriptMethod) and isinstance(traced_func.owner(), torch._C.ScriptModule):
         with patch_forward(traced_func.owner(), traced_func):
@@ -1024,13 +1053,19 @@ def trace(
                     export_example_inputs,
                     example_kwarg_inputs,
                     strict=False,
+                    _is_torch_jit_trace=True,
                 ).module()
             except Exception as e:
                 raise RuntimeError(f"Failed to export {func} with error message:\n{e}")
-        result_exported = exported(*export_example_inputs, **example_kwarg_inputs)
+        try:
+            result_exported = exported(*export_example_inputs, **example_kwarg_inputs)
+        except Exception as e:
+            raise RuntimeError(f"Failed to run exported {func} with error message:\n{e}")
         result_traced = traced_func(*export_example_inputs, **example_kwarg_inputs)
-        if not torch.allclose(result_exported, result_traced):
-            raise RuntimeError("Accuracy error")
+
+        res = analyze_result(result_exported, result_traced)
+        if not res:
+            raise RuntimeError("Accuracy error for trace and export")
     else:
         try:
             from torch.export import export
@@ -1039,16 +1074,21 @@ def trace(
                 export_example_inputs,
                 example_kwarg_inputs,
                 strict=False,
+                _is_torch_jit_trace=True,
             ).module()
         except Exception as e:
             raise RuntimeError(f"Failed to export {func} with error message:\n{e}")
 
-        result_exported = exported(*export_example_inputs, **example_kwarg_inputs)
+        try:
+            result_exported = exported(*export_example_inputs, **example_kwarg_inputs)
+        except Exception as e:
+            raise RuntimeError(f"Failed to run exported {func} with error message:\n{e}")
         result_traced = traced_func(*export_example_inputs, **example_kwarg_inputs)
-        if not torch.allclose(result_exported, result_traced):
-            raise RuntimeError("Accuracy error")
+        res = analyze_result(result_exported, result_traced)
+        if not res:
+            raise RuntimeError("Accuracy error for trace and export")
 
-    warnings.warn("TORCH.EXPORT SUCCEEDED")
+    raise RuntimeError("TORCH EXPORT SUCCEEDED")
     return traced_func
 
 _trace_module_map: Optional[Dict[Any, Any]] = None
