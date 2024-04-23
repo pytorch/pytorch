@@ -25,6 +25,7 @@ from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
     free_unbacked_symbols,
     has_free_symbols,
+    resolve_unbacked_bindings,
     ShapeEnv,
     SymTypes,
 )
@@ -1317,7 +1318,9 @@ class GraphLowering(torch.fx.Interpreter):
             return "***\n".join(r)
 
         if n.op != "placeholder":
-            unbacked_bindings = n.meta.get("unbacked_bindings", {})
+            unbacked_bindings = resolve_unbacked_bindings(
+                V.graph.sizevars.shape_env, n.meta.get("unbacked_bindings", {})
+            )
             # When we do lowering, it is possible we reallocate unbacked SymInts.
             # So we need to line up the unbacked SymInts when performing the test
             # here
@@ -1332,11 +1335,12 @@ class GraphLowering(torch.fx.Interpreter):
             # end up needing to test equalities on the symbols, and a fresh
             # symbol is likely to hit lots of GuardOnDataDependent errors that
             # we already know facts for.
-            assert new_unbacked_defs >= {
+            renamed_unbacked_bindings = {
                 V.fake_mode.shape_env.unbacked_renamings.get(s, s)
                 for s in unbacked_bindings.keys()
-            }, (
-                f"{unbacked_bindings} != {new_unbacked_defs} (fx != inductor)\n"
+            }
+            assert new_unbacked_defs >= renamed_unbacked_bindings, (
+                f"failed {new_unbacked_defs} >= {renamed_unbacked_bindings} (inductor >= fx)\n"
                 f"fx node is: {n.format_node()}\n"
                 f"new buffers are:\n\n{format_buffers()}"
             )

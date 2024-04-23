@@ -2344,6 +2344,8 @@ def long_tensor(data):
 
 @register_lowering(aten._local_scalar_dense)
 def _local_scalar_dense(data):
+    from torch.fx.experimental.symbolic_shapes import resolve_unbacked_bindings
+
     # This is interesting!  Most lowerings return tensors, so you can just
     # return the buffer you allocated and it will get used (or not used, if
     # it's dead.)  But _local_scalar_dense (aka item) returns an int,
@@ -2354,7 +2356,9 @@ def _local_scalar_dense(data):
     # solely responsible for generating this .item().  The buffer is
     # not used for anything (notice we discard it); at codegen time,
     # the "buffer" just gets assigned None.
-    unbacked_bindings = V.graph.current_node.meta["unbacked_bindings"]
+    unbacked_bindings = resolve_unbacked_bindings(
+        V.graph.sizevars.shape_env, V.graph.current_node.meta["unbacked_bindings"]
+    )
     assert len(unbacked_bindings) == 1, unbacked_bindings
     # NB: Have to be very careful here.  V.graph.current_node.meta["val"]
     # seemingly also contains a symbol which you want to do binding for,
