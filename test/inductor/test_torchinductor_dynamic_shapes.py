@@ -218,6 +218,15 @@ class TestInductorDynamic(TestCase):
         opt_r = opt_f(x, b)
         self.assertEqual(r, opt_r)
 
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_nonzero_no_realloc(self, device):
+        @torch.compile(fullgraph=True, dynamic=True)
+        def f(x, y):
+            z = x.nonzero()
+            return torch.split(z, [y.size(0)])
+
+        f(torch.tensor([1, 0, 1, 1, 0, 1, 0]), torch.randn(4))
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_item_nobreak(self, device):
         @torch.compile(fullgraph=True)
@@ -234,6 +243,18 @@ class TestInductorDynamic(TestCase):
             return x.item()
 
         f(torch.tensor([True], device=device))
+
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    def test_noops_tensor_repropagate(self, device):
+        @torch.compile(fullgraph=True)
+        def f(x):
+            b = torch.ops.prims.convert_element_type.default(x, torch.int64)
+            r = b.nonzero()
+            return r * 2
+
+        f(torch.tensor([0, 4, 2, 0, 1], dtype=torch.int64, device=device))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_item_zeros_nobreak(self, device):
@@ -379,6 +400,29 @@ class TestInductorDynamic(TestCase):
         cf = torch.compile(fullgraph=True)(f)
         arg = torch.tensor([4, 6], device="cuda")
         self.assertEqual(f(arg), cf(arg))
+
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    def test_unbacked_cat_backwards(self, device):
+        def f(x, w):
+            device = w.device
+            a, b = x.tolist()
+            ta = torch.ones(a, device=device)
+            tb = torch.ones(b, device=device)
+            pa = ta * w  # make it require gradients
+            pb = tb * w
+            r = torch.cat([pa, pb])
+            return r.sum()
+
+        x = torch.tensor([4, 9])
+        w = torch.randn(1, requires_grad=True)
+        f(x, w).backward()
+        orig_w = w.grad
+        w.grad = None
+
+        torch.compile(fullgraph=True)(f)(x, w).backward()
+        self.assertEqual(orig_w, w.grad)
 
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
