@@ -363,8 +363,10 @@ class AutogradFunctionVariable(VariableTracker):
                 self.fn_cls.setup_context
                 != torch.autograd.function._SingleLevelFunction.setup_context
             ):
-                unimplemented(
-                    "NYI - autograd.Function with custom setup_context method"
+                self.fn_cls.forward = (
+                    torch.autograd.function.autograd_function_forward_rewritten(
+                        self.fn_cls
+                    )
                 )
 
             vjp_fn = self.fn_cls.vjp  # type: ignore[attr-defined]
@@ -412,6 +414,26 @@ class AutogradFunctionVariable(VariableTracker):
             unimplemented(
                 f"non-function or method in subclass of torch.autograd.Function: {fn}"
             )
+
+    def var_getattr(self, tx, name: str) -> "VariableTracker":
+        from .. import trace_rules
+
+        source = AttrSource(self.source, name) if self.source is not None else None
+        try:
+            obj = inspect.getattr_static(self.fn_cls, name)
+        except AttributeError:
+            obj = None
+
+        if isinstance(obj, staticmethod):
+            func = obj.__get__(self.fn_cls)
+            if source is not None:
+                return trace_rules.lookup(func).create_with_source(func, source=source)
+            else:
+                return trace_rules.lookup(func)(func)
+        elif isinstance(obj, classmethod):
+            return variables.UserMethodVariable(obj.__func__, self, source=source)
+        else:
+            unimplemented(f"unsupported attribute: {name}")
 
     def call_function(self, tx, args, kwargs):
         return AutogradFunctionVariable(self.fn_cls)
