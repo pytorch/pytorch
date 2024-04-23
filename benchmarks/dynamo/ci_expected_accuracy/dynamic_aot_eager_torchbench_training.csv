@@ -2,6 +2,10 @@ name,accuracy,graph_breaks
 
 
 
+torchrec_dlrm,fail_to_run,3
+
+
+
 BERT_pytorch,pass,6
 
 
@@ -159,10 +163,6 @@ mobilenet_v3_large,pass,7
 
 
 moco,pass,11
-
-
-
-moondream,model_fail_to_load,0
 
 
 

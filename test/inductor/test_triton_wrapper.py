@@ -4,8 +4,8 @@ import subprocess
 import sys
 
 import torch
-from torch._dynamo.test_case import run_tests, TestCase
 from torch._inductor.codecache import PyCodeCache
+from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 

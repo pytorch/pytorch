@@ -3,15 +3,18 @@ import logging
 import os
 import unittest
 from typing import Callable, List
+from unittest import mock
 
 import torch
-from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
 from torch._inductor import config
-from torch.testing._internal.common_cuda import SM75OrLater, SM90OrLater
+from torch._inductor.ir import ChoiceCaller
+from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_cuda import SM75OrLater, SM80OrLater, SM90OrLater
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfRocm,
 )
 
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
@@ -34,11 +37,62 @@ def _get_path_without_sccache() -> str:
     return ":".join(path_envs)
 
 
+@skipIfRocm
 @instantiate_parametrized_tests
 class TestCutlassBackend(TestCase):
     def setUp(self):
         super().setUp()
         torch.random.manual_seed(1234)
+
+    @unittest.skipIf(not SM75OrLater, "need sm_75")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_max_autotune_cutlass_threshold(self):
+        """
+        Make sure Cutlass GEMM threshold works as intended.
+        """
+
+        if torch.version.hip:
+            return
+
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+
+        def mm(a, b):
+            return a @ b
+
+        a = torch.randn(100, 10).cuda().half()
+        b = torch.randn(10, 100).cuda().half()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": True,
+                "max_autotune_gemm_backends": "CUTLASS,ATen",
+                "compile_threads": 4,
+                "cuda.cutlass_backend_min_gemm_size": 100000,
+                "cuda.cutlass_dir": _CUTLASS_DIR,
+                "cuda.cutlass_max_profiling_configs": 2,
+            }
+        ):
+            from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
+
+            with mock.patch(
+                "torch._inductor.select_algorithm.autotune_select_algorithm"
+            ) as mocked_select_algorithm:
+                Y_compiled = torch.compile(mm, dynamic=False)(a, b)
+                Y = mm(a, b)
+                passed_choice_callers: List[ChoiceCaller] = mocked_select_algorithm[0][
+                    1
+                ]
+                assert all(
+                    isinstance(cc, ChoiceCaller) for cc in passed_choice_callers
+                ), "Argument 1 to autotune_select_algorithm should be a list of ChoiceCaller instances"
+                # We expect that no Cutlass Kernels are considered, due to the threshold
+                assert all(
+                    not isinstance(cc, CUDATemplateCaller)
+                    for cc in passed_choice_callers
+                ), "Cutlass Kernels should have been filtered, GEMM size is too small"
+            torch.testing.assert_close(Y_compiled, Y)
 
     @unittest.skipIf(not SM75OrLater, "need sm_75")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
@@ -331,10 +385,12 @@ class TestCutlassBackend(TestCase):
         with config.patch(
             {
                 "max_autotune": True,
-                "autotune_in_subproc": False,
+                # Some Cutlass Kernels fail with IMA on this example, which leads to unrecoverable CUDA errors
+                # unless we tune in a subproc here.
+                "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_dir": _CUTLASS_DIR,
-                "cuda.cutlass_max_profiling_configs": 2,
+                "cuda.cutlass_max_profiling_configs": 4,
             }
         ):
             # No broadcast
@@ -348,6 +404,89 @@ class TestCutlassBackend(TestCase):
                     compare_results(4096, 25728, 2048, 2.0, 0.4, [4096, 1])
             else:
                 compare_results(4096, 25728, 2048, 2.0, 0.4, [4096, 1])
+
+    # TODO: Enable dynamic test cases when dynamic support is added.
+    @unittest.skipIf(not SM80OrLater, "need sm_80")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    @parametrize("dynamic", (False,))
+    @parametrize("max_autotune_gemm_backends", ("CUTLASS", "CUTLASS,ATen"))
+    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_max_autotune_cutlass_backend_int_mm(
+        self, dynamic: bool, max_autotune_gemm_backends: str
+    ):
+        """
+        Make sure autotuning mm in sub processes work without crashes.
+        """
+
+        if "CUTLASS" in max_autotune_gemm_backends.upper() and torch.version.hip:
+            return
+
+        def mm(a, b):
+            return torch._int_mm(a, b)
+
+        # CUTLASS only supports row-major/column-major combination of
+        # layouts for this operation, thus the transpose of tensor b
+        # (on the other side, Triton at the moment doesn't support
+        # this combination, so it's excluded from the test).  Also,
+        # for CUTLASS alignment requirements, number of columns in
+        # both tensors has to be divisible by 16.
+        a = torch.randint(0, 5, (100, 16), dtype=torch.int8).cuda()
+        b = torch.randint(0, 5, (32, 16), dtype=torch.int8).cuda().T
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": False,
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "cuda.cutlass_dir": _CUTLASS_DIR,
+                "cuda.cutlass_max_profiling_configs": 2,
+            }
+        ):
+            Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
+            Y = mm(a, b)
+            torch.testing.assert_close(Y_compiled, Y)
+
+    # TODO: Enable dynamic test cases when dynamic support is added.
+    @unittest.skipIf(not SM80OrLater, "need sm_80")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    @parametrize("dynamic", (False,))
+    @parametrize("max_autotune_gemm_backends", ("CUTLASS", "CUTLASS,Triton,ATen"))
+    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_max_autotune_cutlass_backend_mixed_mm(
+        self, dynamic: bool, max_autotune_gemm_backends: str
+    ):
+        """
+        Make sure autotuning mm in sub processes work without crashes.
+        """
+
+        if max_autotune_gemm_backends == "CUTLASS" and torch.version.hip:
+            return
+
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+
+        def mm(a, b):
+            return torch.mm(a, b.to(torch.half))
+
+        # CUTLASS only supports row-major/column-major combination of
+        # layouts for this operation, thus the transpose of tensor b.
+        # Also, for CUTLASS alignment requirements, number of columns
+        # of the first tensor has to be divisible by 16.
+        a = torch.randn(100, 16).cuda().half()
+        b = torch.randint(0, 5, (100, 16), dtype=torch.int8).cuda().T
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": False,
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "cuda.cutlass_dir": _CUTLASS_DIR,
+                "cuda.cutlass_max_profiling_configs": 2,
+                "use_mixed_mm": True,
+            }
+        ):
+            Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
+            Y = mm(a, b)
+            torch.testing.assert_close(Y_compiled, Y)
 
 
 if __name__ == "__main__":

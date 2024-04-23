@@ -10,7 +10,7 @@ import threading
 import traceback
 import unittest.mock
 import weakref
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from contextlib import contextmanager
 from typing import (
     Any,
@@ -172,7 +172,16 @@ class Guard:
         return self._hash
 
     def sort_key(self):
+        # Put the duplicate input guards at the end. The duplicate guards have
+        # two sources while guard.name only considers one source.
+        from ._dynamo.guards import GuardBuilder
+
+        is_duplicate_input = (
+            isinstance(self.create_fn, functools.partial)
+            and self.create_fn.func is GuardBuilder.DUPLICATE_INPUT
+        )
         return (
+            is_duplicate_input,
             self.source.value if self.source else -1,
             len(self.name),
             self.name,
@@ -248,7 +257,7 @@ class Guard:
         try:
             return self.create_fn(builder, self)
         except Exception:
-            log.error("Error while creating guard:\n%s", str(self).rstrip())
+            log.exception("Error while creating guard:\n%s", str(self).rstrip())
             if self.stack:
                 log.error("Created at:\n%s", "".join(self.stack.format()[-4:]).rstrip())
             raise
@@ -329,7 +338,7 @@ In the future, it will have a closer coupling to a generic Checkpoint management
 """
 
 
-class Checkpointable(ABC, Generic[T]):
+class Checkpointable(Generic[T]):
     @abstractmethod
     def copy_graphstate(self) -> T:
         ...
@@ -606,6 +615,8 @@ class TracingContext:
         self.loc_in_frame = None
         # this is only set after aot_autograd
         self.fw_metadata = None
+        # this is only set after aot_autograd
+        self.aot_graph_name = None
         self.params_flat = None
         # this is for extended return calling convention from backend
         # compiler to aot_autograd
@@ -734,7 +745,7 @@ class TracingContext:
     @staticmethod
     def set_current_loc(filename, lineno, frame_name):
         TracingContext.get().loc_in_frame = traceback.FrameSummary(
-            filename, lineno, frame_name
+            filename, lineno, frame_name, lookup_line=False
         )
 
 
@@ -786,17 +797,17 @@ class Source:
         return False
 
     def reconstruct(self, codegen):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def guard_source(self) -> GuardSource:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def name(self) -> str:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def make_guard(self, fn) -> Guard:
         if self.guard_source() is GuardSource.CONSTANT:
-            raise NotImplementedError()
+            raise NotImplementedError
         return Guard(self, fn)
 
     def is_nn_module(self) -> bool:

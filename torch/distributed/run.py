@@ -68,6 +68,27 @@ to ``torchrun`` follow these steps:
     |                                                       |                                                    |
     +-------------------------------------------------------+----------------------------------------------------+
 
+.. versionchanged:: 2.0.0
+
+    The launcher will pass the ``--local-rank=<rank>`` argument to your script.
+    From PyTorch 2.0.0 onwards, the dashed ``--local-rank`` is preferred over the
+    previously used underscored ``--local_rank``.
+
+    For backward compatibility, it may be necessary for users to handle both
+    cases in their argument parsing code. This means including both ``"--local-rank"``
+    and ``"--local_rank"`` in the argument parser. If only ``"--local_rank"`` is
+    provided, the launcher will trigger an error: "error: unrecognized arguments:
+    --local-rank=<rank>". For training code that only supports PyTorch 2.0.0+,
+    including ``"--local-rank"`` should be sufficient.
+
+    ::
+
+        >>> # xdoctest: +SKIP
+        >>> import argparse
+        >>> parser = argparse.ArgumentParser()
+        >>> parser.add_argument("--local-rank", "--local_rank", type=int)
+        >>> args = parser.parse_args()
+
 The aformentioned changes suffice to migrate from ``torch.distributed.launch`` to ``torchrun``.
 To take advantage of new features such as elasticity, fault-tolerance, and error reporting of ``torchrun``
 please refer to:
@@ -389,7 +410,7 @@ from torch.distributed.elastic.utils.logging import get_logger
 from torch.distributed.launcher.api import LaunchConfig, elastic_launch
 from torch.utils.backend_registration import _get_custom_mod_func
 
-log = get_logger(__name__)
+logger = get_logger(__name__)
 
 
 def get_args_parser() -> ArgumentParser:
@@ -680,7 +701,7 @@ def determine_local_world_size(nproc_per_node: str):
         else:
             raise ValueError(f"Unsupported nproc_per_node value: {nproc_per_node}") from e
 
-        log.info(
+        logger.info(
             "Using nproc_per_node=%s,"
             " setting to %s since the instance "
             "has %s %s",
@@ -746,7 +767,7 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
     assert args.max_restarts >= 0
 
     if hasattr(args, "master_addr") and args.rdzv_backend != "static" and not args.rdzv_endpoint:
-        log.warning(
+        logger.warning(
             "master_addr is only used for static rdzv_backend and when rdzv_endpoint "
             "is not specified."
         )
@@ -754,7 +775,7 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
     nproc_per_node = determine_local_world_size(args.nproc_per_node)
     if "OMP_NUM_THREADS" not in os.environ and nproc_per_node > 1:
         omp_num_threads = 1
-        log.warning(
+        logger.warning(
             "\n*****************************************\n"
             "Setting OMP_NUM_THREADS environment variable for each process to be "
             "%s in default, to avoid your system being overloaded, "
@@ -781,7 +802,7 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
             ranks = set(map(int, args.local_ranks_filter.split(",")))
             assert ranks
         except Exception as e:
-            raise Exception(
+            raise Exception(  # noqa: TRY002
                 "--local_ranks_filter must be a comma-separated list of integers e.g. --local_ranks_filter=0,1,2"
             ) from e
 
@@ -856,7 +877,7 @@ def run(args):
         args.rdzv_backend = "c10d"
         args.rdzv_endpoint = "localhost:0"
         args.rdzv_id = str(uuid.uuid4())
-        log.info(
+        logger.info(
             "\n**************************************\n"
             "Rendezvous info:\n"
             "--rdzv-backend=%s "

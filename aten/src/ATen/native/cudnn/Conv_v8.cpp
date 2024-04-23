@@ -52,7 +52,7 @@ constexpr int64_t operator"" _TiB(unsigned long long n) {
 uint8_t getAlignment(const Tensor& t) {
   // alignment are in bytes
   uint8_t alignment = 1;
-  uintptr_t address = reinterpret_cast<uintptr_t>(t.data_ptr());
+  uintptr_t address = reinterpret_cast<uintptr_t>(t.const_data_ptr());
   for (; alignment < 32; alignment *= 2) {
     if (address % (alignment * 2)) {
       return alignment;
@@ -358,12 +358,36 @@ void run_conv_plan(
     const Tensor& x,
     const Tensor& y,
     const Tensor& w,
-    const cudnn_frontend::ExecutionPlan& plan) {
+    const cudnn_frontend::ExecutionPlan& plan,
+    const cudnnBackendDescriptorType_t operation) {
   c10::DeviceGuard g(x.options().device());
   auto workspace_size = plan.getWorkspaceSize();
   auto workspace_ptr =
       c10::cuda::CUDACachingAllocator::get()->allocate(workspace_size);
-  void* data_ptrs[] = {x.data_ptr(), y.data_ptr(), w.data_ptr()};
+  void* data_ptrs[3];
+
+  if (operation == CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR) {
+    data_ptrs[0] = const_cast<void*>(x.const_data_ptr());
+    data_ptrs[1] = y.data_ptr();
+    data_ptrs[2] = const_cast<void*>(w.const_data_ptr());
+  } else if (
+      operation ==
+      CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DATA_DESCRIPTOR) {
+    data_ptrs[0] = x.data_ptr();
+    data_ptrs[1] = const_cast<void*>(y.const_data_ptr());
+    data_ptrs[2] = const_cast<void*>(w.const_data_ptr());
+  } else if (
+      operation ==
+      CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR) {
+    data_ptrs[0] = const_cast<void*>(x.const_data_ptr());
+    data_ptrs[1] = const_cast<void*>(y.const_data_ptr());
+    data_ptrs[2] = w.data_ptr();
+  } else {
+    data_ptrs[0] = x.data_ptr();
+    data_ptrs[1] = y.data_ptr();
+    data_ptrs[2] = w.data_ptr();
+  }
+
   int64_t uids[] = {'x', 'y', 'w'};
   auto variantPack =
       cudnn_frontend::VariantPackBuilder()
@@ -843,26 +867,21 @@ void try_plans(
     const cudnnHandle_t handle,
     const Tensor& x,
     const Tensor& y,
-    const Tensor& w) {
+    const Tensor& w,
+    const cudnnBackendDescriptorType_t operation) {
   for (auto& plan : plans) {
     try {
-      run_conv_plan(handle, x, y, w, plan);
+      run_conv_plan(handle, x, y, w, plan, operation);
       benchmark_cache.update(key, plan);
       return;
     } catch (cudnn_frontend::cudnnException& e) {
-      TORCH_WARN("Plan failed with a cudnnException: ", e.what());
     } catch (CuDNNError& e) {
-      TORCH_WARN("Plan failed with a CuDNNError: ", e.what());
     } catch (c10::OutOfMemoryError& e) {
       (void)cudaGetLastError(); // clear CUDA error
-      TORCH_WARN("Plan failed with an OutOfMemoryError: ", e.what());
     }
   }
   TORCH_CHECK(
-      false,
-      "FIND was unable to find an engine to execute this computation after trying ",
-      plans.size(),
-      " plans.");
+      false, "FIND was unable to find an engine to execute this computation");
 }
 
 void try_plans_fused(
@@ -880,19 +899,13 @@ void try_plans_fused(
       benchmark_cache_fused.update(key, plan);
       return;
     } catch (cudnn_frontend::cudnnException& e) {
-      TORCH_WARN("Plan failed with a cudnnException: ", e.what());
     } catch (CuDNNError& e) {
-      TORCH_WARN("Plan failed with a CuDNNError: ", e.what());
     } catch (c10::OutOfMemoryError& e) {
       (void)cudaGetLastError(); // clear CUDA error
-      TORCH_WARN("Plan failed with an OutOfMemoryError: ", e.what());
     }
   }
   TORCH_CHECK(
-      false,
-      "FIND was unable to find an engine to execute this computation after trying ",
-      plans.size(),
-      " plans.");
+      false, "FIND was unable to find an engine to execute this computation");
 }
 
 bool try_configs(
@@ -902,7 +915,8 @@ bool try_configs(
     const cudnnHandle_t handle,
     const Tensor& x,
     const Tensor& y,
-    const Tensor& w) {
+    const Tensor& w,
+    const cudnnBackendDescriptorType_t operation) {
   for (auto& config : configs) {
     try {
       auto plan = cudnn_frontend::ExecutionPlanBuilder()
@@ -912,16 +926,13 @@ bool try_configs(
       if (plan_errata_exception(handle, plan.getTag())) {
         continue;
       }
-      run_conv_plan(handle, x, y, w, plan);
+      run_conv_plan(handle, x, y, w, plan, operation);
       benchmark_cache.update(key, plan);
       return true;
     } catch (cudnn_frontend::cudnnException& e) {
-      TORCH_WARN("Plan failed with a cudnnException: ", e.what());
     } catch (CuDNNError& e) {
-      TORCH_WARN("Plan failed with a CuDNNError: ", e.what());
     } catch (c10::OutOfMemoryError& e) {
       (void)cudaGetLastError(); // clear CUDA error
-      TORCH_WARN("Plan failed with an OutOfMemoryError: ", e.what());
     }
   }
   return false;
@@ -950,12 +961,9 @@ bool try_configs_fused(
       benchmark_cache_fused.update(key, plan);
       return true;
     } catch (cudnn_frontend::cudnnException& e) {
-      TORCH_WARN("Plan failed with a cudnnException: ", e.what());
     } catch (CuDNNError& e) {
-      TORCH_WARN("Plan failed with a CuDNNError: ", e.what());
     } catch (c10::OutOfMemoryError& e) {
       (void)cudaGetLastError(); // clear CUDA error
-      TORCH_WARN("Plan failed with an OutOfMemoryError: ", e.what());
     }
   }
   return false;
@@ -989,7 +997,7 @@ void run_single_conv(
   auto search = benchmark_cache.find(key);
   if (search) {
     try {
-      run_conv_plan(handle, x, y, w, *search);
+      run_conv_plan(handle, x, y, w, *search, operation);
       return;
     } catch (c10::OutOfMemoryError& e) {
       (void)cudaGetLastError(); // clear CUDA error
@@ -1012,7 +1020,7 @@ void run_single_conv(
         deterministic,
         allow_tf32,
         false);
-    if (try_configs(configs, opgraph_tag, key, handle, x, y, w)) {
+    if (try_configs(configs, opgraph_tag, key, handle, x, y, w, operation)) {
       return;
     }
     // fallback configs
@@ -1030,7 +1038,7 @@ void run_single_conv(
         deterministic,
         allow_tf32,
         true);
-    if (try_configs(configs, opgraph_tag, key, handle, x, y, w)) {
+    if (try_configs(configs, opgraph_tag, key, handle, x, y, w, operation)) {
       return;
     }
     TORCH_CHECK(
@@ -1053,7 +1061,7 @@ void run_single_conv(
     if (at::native::_cudnn_get_conv_benchmark_empty_cache()) {
       c10::cuda::CUDACachingAllocator::emptyCache();
     }
-    try_plans(plans, key, handle, x, y, w);
+    try_plans(plans, key, handle, x, y, w, operation);
   }
 }
 
