@@ -2,7 +2,7 @@
 import logging
 import os
 import unittest
-from typing import Callable, List
+from typing import Callable, List, Optional
 from unittest import mock
 
 import torch
@@ -175,6 +175,7 @@ class TestCutlassBackend(TestCase):
         fp16=True,
         expected_fuse_count=1,
         mm: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = None,
+        batch_size: Optional[int] = None,
     ):
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
             mixed_precision
@@ -185,8 +186,12 @@ class TestCutlassBackend(TestCase):
         # so if these shapes don't all align to at least 8 elements
         # it can happen that no Cutlass 3.x op is available
         # that allows fusions
-        a = torch.randn(256, 32).cuda()
-        b = torch.randn(32, 256).cuda()
+        if batch_size is None:
+            a = torch.randn(256, 32).cuda()
+            b = torch.randn(32, 256).cuda()
+        else:
+            a = torch.randn(batch_size, 256, 32).cuda()
+            b = torch.randn(batch_size, 32, 256).cuda()
         if fp16:
             a = a.half()
             b = b.half()
@@ -302,6 +307,18 @@ class TestCutlassBackend(TestCase):
 
         self._test_max_autotune_cutlass_backend_epilogue_fusion(
             mixed_precision=True, fp16=True, expected_fuse_count=0, mm=mm
+        )
+
+    def test_max_autotune_cutlass_backend_simple_bmm(self):
+        def bmm(a, b):
+            return torch.bmm(a, b)
+
+        self._test_max_autotune_cutlass_backend_epilogue_fusion(  # test bmm
+            mixed_precision=False,
+            fp16=True,
+            expected_fuse_count=0,
+            mm=bmm,
+            batch_size=10,
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
