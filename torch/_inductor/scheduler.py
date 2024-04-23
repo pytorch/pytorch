@@ -35,7 +35,6 @@ from .codegen.common import get_scheduling_for_device, Kernel
 from .comm_analysis import estimate_nccl_collective_runtime
 from .dependencies import Dep, MemoryDep, StarDep, WeakDep
 from .ir import ComputedBuffer, MultiOutput, MultiOutputLayout
-from .runtime.runtime_utils import green_text, red_text
 from .sizevars import SimplifyIndexing
 from .utils import (
     cache_on_self,
@@ -45,9 +44,11 @@ from .utils import (
     get_device_tflops,
     get_dtype_size,
     get_gpu_dram_gbps,
+    green_text,
     is_collective,
     is_gpu,
     is_wait,
+    red_text,
     sympy_product,
 )
 from .virtualized import V

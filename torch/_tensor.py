@@ -403,7 +403,18 @@ class Tensor(torch._C.TensorBase):
             )
             return (torch._utils._rebuild_wrapper_subclass, arg_wrapper_subclass)
         else:
-            v3_dtypes = torch.storage._new_dtypes()
+            v3_dtypes = [
+                torch.float8_e5m2,
+                torch.float8_e4m3fn,
+                torch.float8_e5m2fnuz,
+                torch.float8_e4m3fnuz,
+                torch.bits8,
+                torch.bits16,
+                torch.bits1x8,
+                torch.bits2x4,
+                torch.bits4x2,
+                torch.complex32,
+            ]
             if self.dtype in v3_dtypes:
                 rebuild_func = torch._utils._rebuild_tensor_v3
                 storage = self.untyped_storage()

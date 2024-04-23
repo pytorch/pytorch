@@ -15,7 +15,6 @@ import pickle
 import shutil
 import pathlib
 import platform
-from collections import OrderedDict
 from copy import deepcopy
 from itertools import product
 
@@ -989,8 +988,7 @@ class TestSerialization(TestCase, SerializationMixin):
             self.assertTrue('_anneal_func_type' in lr_scheduler_state)
         self.assertTrue(size < 1024 * 1024)  # Must be less than 1MB
 
-    @parametrize('weights_only', (True, False))
-    def test_serialization_python_attr(self, weights_only):
+    def test_serialization_python_attr(self):
         def _test_save_load_attr(t):
             t.foo = 'foo'
             t.pi = 3.14
@@ -998,7 +996,7 @@ class TestSerialization(TestCase, SerializationMixin):
             with BytesIOContext() as f:
                 torch.save(t, f)
                 f.seek(0)
-                loaded_t = torch.load(f, weights_only=weights_only)
+                loaded_t = torch.load(f)
 
             self.assertEqual(t, loaded_t)
             self.assertEqual(t.foo, loaded_t.foo)
@@ -3970,6 +3968,7 @@ class TestSerialization(TestCase, SerializationMixin):
             y['even'][0] = torch.tensor(-0.25, dtype=dtype)
             self.assertEqual(y['x'][:2].to(dtype=torch.float32), torch.tensor([-0.25, 0.25]))
 
+
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):
             return super().run(*args, **kwargs)
@@ -4097,54 +4096,6 @@ class TestSubclassSerialization(TestCase):
             torch.save(tensor, f)
             f.seek(0)
             tensor2 = torch.load(f)
-
-    def test_allowlist_for_weights_only(self):
-        # Doing the import here as this test later dels the import from sys.modules
-        from torch.testing._internal.two_tensor import TwoTensor
-        t = TwoTensor(torch.randn(2, 3), torch.randn(2, 3))
-        p = torch.nn.Parameter(t)
-        sd = OrderedDict([('t', t), ('p', p)])
-
-        with tempfile.NamedTemporaryFile() as f:
-            torch.save(sd, f)
-            # unimport TwoTensor
-            del sys.modules['torch.testing._internal.two_tensor']
-
-            # Loading tensor subclass with weights_only=True should fail
-            # if tensor subclass has not been imported
-            with self.assertRaisesRegex(pickle.UnpicklingError,
-                                        "`torch.testing._internal.two_tensor` was not found in `sys.modules`"):
-                f.seek(0)
-                sd = torch.load(f, weights_only=True)
-
-            # Loading tensor subclass with weights_only=True should work
-            # if __setstate__ and tp_alloc are not overriden and user has imported the subclass
-            from torch.testing._internal.two_tensor import TwoTensor
-            f.seek(0)
-            sd = torch.load(f, weights_only=True)
-            self.assertEqual(sd['t'], t)
-            self.assertEqual(sd['p'], p)
-
-            # Loading tensor subclass with weights_only=True should fail
-            # if __setstate__ is overriden
-            f.seek(0)
-            restore_setstate = TwoTensor.__setstate__
-            try:
-                TwoTensor.__setstate__ = lambda self, state: self.__dict__.update(state)
-                with self.assertRaisesRegex(pickle.UnpicklingError, "defined a custom `__setstate__`"):
-                    torch.load(f, weights_only=True)
-
-                # Loading tensor subclass with overriden __setstate__ with weights_only=True should work
-                # if the class is marked safe
-                f.seek(0)
-                torch.serialization.mark_safe_globals([TwoTensor])
-                sd = torch.load(f, weights_only=True)
-                self.assertEqual(sd['t'], t)
-                self.assertEqual(sd['p'], p)
-            finally:
-                TwoTensor.__setstate__ = restore_setstate
-
-
 
 
 instantiate_device_type_tests(TestBothSerialization, globals())
