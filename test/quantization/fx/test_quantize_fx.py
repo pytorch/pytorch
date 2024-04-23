@@ -3121,10 +3121,10 @@ class TestQuantizeFx(QuantizationTestCase):
 
         b = io.BytesIO()
         torch.save(obs_dict, b)
-        b.seek(0)
 
         # Load the stats into new model
         for weights_only in [True, False]:
+            b.seek(0)
             model_2 = orig
             model_2 = prepare_fx(model_2, qconfig_dict, example_inputs=(x,))
 
