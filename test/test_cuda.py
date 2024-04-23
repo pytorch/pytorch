@@ -4107,10 +4107,10 @@ class TestCudaOptims(TestCase):
     @parametrize("second_param_group_capturable", [False, True])
     @optims(
         [optim for optim in optim_db if optim.optim_cls in [torch.optim.Adam, torch.optim.AdamW,
-                                                                 torch.optim.ASGD, torch.optim.Adamax,
-                                                                 torch.optim.NAdam, torch.optim.RAdam,
-                                                                 torch.optim.Adadelta, torch.optim.RMSprop,
-                                                                 torch.optim.Rprop]],
+                                                            torch.optim.ASGD, torch.optim.Adamax,
+                                                            torch.optim.NAdam, torch.optim.RAdam,
+                                                            torch.optim.Adadelta, torch.optim.RMSprop,
+                                                            torch.optim.Rprop]],
         dtypes=[torch.float32]
     )
     def test_graph_optims_with_explicitly_capturable_param_groups(self, device, dtype, optim_info, second_param_group_capturable):
