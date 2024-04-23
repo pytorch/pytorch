@@ -196,7 +196,7 @@ class SavePlanner(abc.ABC):
     """
 
     @abc.abstractmethod
-    def set_up_planner(self, state_dict: STATE_DICT_TYPE, is_coordinator: bool) -> None:
+    def set_up_planner(self, state_dict: STATE_DICT_TYPE, metadata: Metadata, is_coordinator: bool) -> None:
         """
         Initialize this planner to save ``state_dict``.
 

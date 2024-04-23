@@ -277,8 +277,15 @@ def _save_state_dict(
     @_dcp_method_logger(**ckpt_kwargs)
     def local_step():
         assert planner is not None
-        planner.set_up_planner(state_dict, distW.is_coordinator)
+        storage_meta = storage_writer.storage_metadata()
+        #TODO: make sure this call does not break BC
+        planner.set_up_planner(
+            state_dict=state_dict,
+            metadata=storage_meta,
+            is_coordinator=distW.is_coordinator
+        )
         storage_writer.set_up_storage_writer(distW.is_coordinator)
+
         local_plan = planner.create_local_plan()
         local_plan = storage_writer.prepare_local_plan(local_plan)
         return local_plan

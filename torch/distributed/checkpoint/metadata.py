@@ -122,6 +122,12 @@ STATE_DICT_TYPE = Dict[str, Union[StatefulT, Any]]
 
 
 @dataclass
+class StorageMeta:
+    checkpoint_id: Optional[str] = None
+    save_id: Optional[str] = None
+    load_id: Optional[str] = None
+
+@dataclass
 class Metadata:
     """This class represents the metadata of the checkpoint."""
 
@@ -133,6 +139,7 @@ class Metadata:
     # the metadata of the built-in planner and storage plugins.
     planner_data: Any = None
     storage_data: Any = None
+    storage_metadata: StorageMeta = None
 
 
 @dataclass(frozen=True)

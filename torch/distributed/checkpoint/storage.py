@@ -1,11 +1,11 @@
 import abc
 import os
 from dataclasses import dataclass
-from typing import Any, List, Union
+from typing import Any, List, Union, Optional
 
 from torch.futures import Future
 
-from .metadata import Metadata, MetadataIndex
+from .metadata import Metadata, MetadataIndex, StorageMeta
 from .planner import LoadPlan, LoadPlanner, SavePlan, SavePlanner
 
 __all__ = ["WriteResult", "StorageWriter", "StorageReader"]
@@ -56,7 +56,7 @@ class StorageWriter(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def set_up_storage_writer(self, is_coordinator: bool) -> None:
+    def set_up_storage_writer(self, is_coordinator: bool) -> Optional[StorageMeta]:
         """
         Initialize this instance.
 
@@ -152,6 +152,10 @@ class StorageWriter(abc.ABC):
         """
         ...
 
+    def storage_metadata(self) -> StorageMeta:
+        """Return the storage metadata for this instance."""
+        pass
+
 
 class StorageReader(abc.ABC):
     """
@@ -201,7 +205,7 @@ class StorageReader(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def set_up_storage_reader(self, metadata: Metadata, is_coordinator: bool) -> None:
+    def set_up_storage_reader(self, metadata: Metadata, is_coordinator: bool) -> Optional[StorageMeta]:
         """
         Initialize this instance.
 

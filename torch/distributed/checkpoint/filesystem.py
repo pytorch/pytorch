@@ -3,6 +3,7 @@ import dataclasses
 import io
 import os
 import pickle
+import random
 import queue
 import threading
 from abc import ABC, abstractmethod
@@ -29,7 +30,7 @@ from torch._utils import _get_available_device_type, _get_device_module
 from torch.distributed._shard._utils import narrow_tensor_by_index
 from torch.futures import Future
 
-from .metadata import Metadata, MetadataIndex
+from .metadata import Metadata, MetadataIndex, StorageMeta
 from .planner import (
     LoadItemType,
     LoadPlan,
@@ -45,6 +46,9 @@ from .utils import _create_file_view
 
 __all__ = ["FileSystemWriter", "FileSystemReader"]
 
+
+def _generate_random_int64() -> int:
+    return random.randint(0, 2**63 - 1)
 
 @dataclass
 class _StorageInfo:
@@ -433,10 +437,12 @@ class FileSystemWriter(StorageWriter):
         self.sync_files = sync_files
         self.thread_count = thread_count
         self.per_thread_copy_ahead = per_thread_copy_ahead
+        self.save_id: int = _generate_random_int64()
 
     def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
         if checkpoint_id:
             self.path = self.fs.init_path(checkpoint_id)
+        self.save_id = _generate_random_int64()
 
     def set_up_storage_writer(self, is_coordinator: bool) -> None:
         pass
@@ -549,6 +555,12 @@ class FileSystemWriter(StorageWriter):
     def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
         return FileSystem.validate_checkpoint_id(checkpoint_id)
 
+    def storage_metadata(self) -> Metadata:
+        return StorageMeta(
+            checkpoint_id=self.checkpoint_id,
+            save_id=self.save_id,
+        )
+
 
 class FileSystemReader(StorageReader):
     def __init__(self, path: Union[str, os.PathLike]) -> None:
@@ -556,6 +568,7 @@ class FileSystemReader(StorageReader):
         self.fs = FileSystem()
         self.path = self.fs.init_path(path)
         self.storage_data: Dict[MetadataIndex, _StorageInfo] = dict()
+        self.load_id = _generate_random_int64()
 
     def _slice_file(self, file, sinfo: _StorageInfo) -> io.IOBase:
         return _create_file_view(file, sinfo.offset, sinfo.length)
@@ -564,6 +577,7 @@ class FileSystemReader(StorageReader):
         self.storage_data = dict()
         if checkpoint_id:
             self.path = self.fs.init_path(checkpoint_id)
+        self.load_id = _generate_random_int64()
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
         # group requests by file
@@ -608,7 +622,14 @@ class FileSystemReader(StorageReader):
     def read_metadata(self) -> Metadata:
         path = self.fs.concat_path(self.path, ".metadata")
         with self.fs.create_stream(path, "rb") as metadata_file:
-            return pickle.load(metadata_file)
+            metadata = pickle.load(metadata_file)
+
+        if not hasattr(metadata, "storage_metadata"):
+            #TODO: check if this breaks BC
+            metadata.storage_metadata = StorageMeta()
+
+        metadata.storage_metadata.load_id = self.load_id
+        return metadata
 
     def set_up_storage_reader(self, metadata: Metadata, is_coordinator: bool) -> None:
         self.storage_data = metadata.storage_data
