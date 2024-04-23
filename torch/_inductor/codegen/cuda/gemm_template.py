@@ -920,12 +920,16 @@ class CKGemmTemplate(CKTemplate):
         K = X_meta.size[-1]
         N = W_meta.size[-1]
 
-        if M % op.m_per_block != 0:
-            return None
-        if N % op.n_per_block != 0:
-            return None
-        if K % op.k_per_block != 0:
-            return None
+        if not any(m_padding in op.gemm_specialization for m_padding in ["MPadding", "MNPadding", "MKPadding", "MNKPadding"]):
+            if M % op.m_per_block != 0:
+                return None
+        if not any(n_padding in op.gemm_specialization for n_padding in ["NPadding", "MNPadding", "NKPadding", "MNKPadding"]):
+            if N % op.n_per_block != 0:
+                return None
+        if not any(k_padding in op.gemm_specialization for k_padding in ["KPadding", "MKPadding", "NKPadding", "MNKPadding"]):
+            if K % op.k_per_block != 0:
+                return None
+
         if K % op.a_block_transfer_src_scalar_per_vector != 0:
             return None
         if N % op.b_block_transfer_src_scalar_per_vector != 0:
@@ -1108,8 +1112,12 @@ class CKGemmTemplate(CKTemplate):
             ]
             gemm_specs = [
                 "GemmSpecialization::Default",
+                "GemmSpecialization::MPadding",
+                "GemmSpecialization::NPadding",
                 "GemmSpecialization::KPadding",
                 "GemmSpecialization::MNPadding",
+                "GemmSpecialization::MKPadding",
+                "GemmSpecialization::NKPadding",
                 "GemmSpecialization::MNKPadding",
             ]
             if new_instance.block_gemm_pipeline_scheduler == "BlkGemmPipeSched":
