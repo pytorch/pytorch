@@ -487,7 +487,7 @@ def run_test(
         os.close(log_fd)
 
     command = (launcher_cmd or []) + executable + argv
-    should_retry = "--subprocess" not in command and not RERUN_DISABLED_TESTS
+    should_retry = "--subprocess" not in command and not RERUN_DISABLED_TESTS and not is_cpp_test
     is_slow = "slow" in os.environ.get("TEST_CONFIG", "") or "slow" in os.environ.get(
         "BUILD_ENVRIONMENT", ""
     )
