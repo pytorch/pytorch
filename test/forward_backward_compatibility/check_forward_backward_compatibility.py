@@ -46,6 +46,7 @@ ALLOW_LIST = [
     ("prim::ModuleDictIndex", datetime.date(9999, 1, 1)),
     ("prim::MKLDNNRelu6", datetime.date(9999, 1, 1)),
     ("prim::MKLDNNRelu6_", datetime.date(9999, 1, 1)),
+    ("prim::is_ort", datetime.date(9999, 1, 1)),
     ("prim::Concat", datetime.date(9999, 1, 1)),
     ("aten::_NestedTensor_GeneralizedBMM", datetime.date(9999, 1, 1)),
     # Internal, profiler-specific ops

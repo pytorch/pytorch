@@ -750,7 +750,7 @@ class TracingContext:
 
 
 @contextmanager
-def compile_context(context: CompileContext):
+def compile_context(context: Optional[CompileContext]):
     old_context = getattr(_TLS, "compile_context", None)
     _TLS.compile_context = context
     try:
