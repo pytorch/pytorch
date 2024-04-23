@@ -83,6 +83,7 @@ class _ReplicateState(_State):
         self.module = module
         ignored_params = {p for m in ignored_modules for p in m.parameters()}
         from torch.distributed.tensor.parallel.ddp import _localize_dtensor
+
         _localize_dtensor(module)
         self._collect_params(module, ignored_modules, ignored_params)
 
@@ -224,6 +225,7 @@ def replicate(
             )
             module.register_forward_pre_hook(_reconstruct_dtensor)
             module.register_forward_hook(_localize_dtensor)
+
     module.register_forward_hook(state.forward_post_hook)  # type: ignore[arg-type]
 
     state.record_init_args(module, ignored_modules, **kwargs)
