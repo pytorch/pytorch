@@ -401,10 +401,6 @@ _efficient_attention_backward(
   at::Tensor dq_t = grad_q.permute({0,2,1,3});
   at::Tensor dk_t = grad_k.permute({0,2,1,3});
   at::Tensor dv_t = grad_v.permute({0,2,1,3});
-  at::Tensor db_t;
-  if (bias_requires_grad) {
-    db_t = grad_bias.permute({0,2,1,3});
-  }
   at::Tensor dout_t = grad_out.permute({0,2,1,3});
   at::Tensor softmax_lse = logsumexp.view({B * nH, max_seqlen_q});
   at::Tensor delta = at::empty_like(softmax_lse).contiguous();
@@ -424,7 +420,7 @@ _efficient_attention_backward(
                  mk_aotensor(dq_t, "dq"),
                  mk_aotensor(dk_t, "dk"),
                  mk_aotensor(dv_t, "dv"),
-                 bias_requires_grad ? mk_aotensor(db_t, "db") : empty_t4,
+                 bias_requires_grad ? mk_aotensor(grad_bias, "db") : empty_t4,
                  mk_aotensor<2>(softmax_lse, "L"),
                  mk_aotensor<2>(delta, "delta"),
                  float(dropout_p),
