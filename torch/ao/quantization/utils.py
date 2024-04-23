@@ -337,7 +337,7 @@ def get_quant_type(qconfig):
         elif activation.dtype == torch.float16:
             return QuantType.STATIC
 
-    raise Exception(f"Unrecognized dtype combination in get_quant_type: activation({activation.dtype}),"
+    raise Exception(f"Unrecognized dtype combination in get_quant_type: activation({activation.dtype}),"  # noqa: TRY002
                     f"weight({weight.dtype})")
 
 def check_min_max_valid(min_val: torch.Tensor, max_val: torch.Tensor) -> bool:

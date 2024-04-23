@@ -615,7 +615,7 @@ def choose_qparams_per_token(
         n_bits = 8
         quant_max = 2 ** (n_bits - 1) - 1
     else:
-        raise Exception(f"unsupported dtype in choose_qparams_per_token: {dtype}")
+        raise Exception(f"unsupported dtype in choose_qparams_per_token: {dtype}")  # noqa: TRY002
 
     scales = scales.clamp(min=1e-5).div(quant_max)
     zero_points = torch.zeros_like(scales)

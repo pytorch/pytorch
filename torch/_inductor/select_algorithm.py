@@ -35,11 +35,12 @@ from .codegen.triton import (
 from .codegen.triton_utils import config_of, signature_to_meta
 from .exc import CUDACompileError
 from .ir import ChoiceCaller, PrimitiveInfoType
+from .runtime.runtime_utils import do_bench
 from .utils import (
-    do_bench,
     get_dtype_size,
     Placeholder,
     sympy_dot,
+    sympy_index_symbol,
     sympy_product,
     unique,
 )
@@ -168,7 +169,7 @@ class TritonTemplateKernel(TritonKernel):
 
         inductor_meta = {
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
-            "backend_hash": torch.utils._triton.triton_hash_with_backend(),
+            **TritonKernel.inductor_meta_common(),
         }
         if config.profile_bandwidth or config.benchmark_kernel:
             num_gb = self.estimate_kernel_num_bytes() / 1e9
@@ -275,20 +276,23 @@ class TritonTemplateKernel(TritonKernel):
         potential multiple modifications
         """
 
+        def add_input(name):
+            return self.args.input(name)
+
         class PlaceholderSubstitution(V.WrapperHandler):  # type: ignore[name-defined]
             self.name = "PlaceholderSubstitution"
 
             def load(self, name: str, index: sympy.Expr):
                 if name not in fixed_inputs:
-                    raise AssertionError(
-                        f"All loads should be coming from fixed inputs - {name}"
-                    )
+                    # If it's not a fixed input, it's a load from a captured
+                    # tensor
+                    var = add_input(name)
+                    return f"tl.load({var} + {index})"
+
                 return f"({fixed_inputs[name]})"
 
-            # TODO Doesn't work yet
             def indirect_indexing(self, index_var, size, check):
-                return self._inner.indirect_indexing(index_var, size, False)
-                # return sympy_symbol(str(index_var))
+                return sympy_index_symbol(str(index_var))
 
         # if self.modification_cache is None:
         with V.set_ops_handler(PlaceholderSubstitution(V.ops)):
@@ -517,8 +521,25 @@ class TritonTemplate(KernelTemplate):
         suffix_args=0,
         epilogue_fn=identity,
         subgraphs=None,
+        mutated_inputs=None,
         **kwargs,
     ):
+        """This function generates a TritonTemplateCaller
+
+        Args:
+            input_nodes: List of input nodes
+            layout: Output layout
+            num_stages: Number of stages for triton launch
+            num_warps: Number of warps for triton launch
+            prefix_args: Number of input nodes to be passed as arguments
+            suffix_args: Number of input nodes to be passed as arguments
+            epilogue_fn: Optional epilogue function to be called on the output
+            subgraphs: Optional subgraphs to be passed as arguments, these will be inlined
+                into the triton template string
+            mutated_inputs: Optional list of input nodes that are mutated by the kernel, this is helpful
+                if you need to return multiple outputs. You can pass them as inputs and mark them as
+                being mutated by the kernel.
+        """
         assert self.template, "requires jinja2"
         defines = StringIO()
         for name, val in kwargs.items():
@@ -578,16 +599,25 @@ class TritonTemplate(KernelTemplate):
                 + "-"
             )
             mod = PyCodeCache.load(code, extra)
-            _, call_args, _ = kernel.args.python_argdefs()
 
-        expected_args = list(unique(x.get_name() for x in input_nodes))
-        expected_args.extend([fake_out.get_name()])
-        assert list(call_args)[: len(expected_args)] == expected_args, (
-            call_args,
-            expected_args,
+        input_call_args = tuple(kernel.args.input_buffers.keys())
+        output_call_args = tuple(kernel.args.output_buffers.keys())
+
+        # We expect the input_buffer order to be [*input_nodes, *captured_buffers]
+        expected_input_args = tuple(unique(x.get_name() for x in input_nodes))
+        expected_output_args = (fake_out.get_name(),)
+        assert input_call_args[: len(expected_input_args)] == expected_input_args, (
+            input_call_args,
+            expected_input_args,
         )
+        assert output_call_args == expected_output_args, (
+            output_call_args,
+            expected_output_args,
+        )
+
+        full_input_nodes = tuple([V.graph.get_buffer(k) for k in input_call_args])
         extra_args = V.graph.sizevars.size_hints(
-            map(sympy.expand, call_args[len(expected_args) :]),
+            map(sympy.expand, tuple(kernel.args.sizevars.keys())),
             fallback=config.unbacked_symint_fallback,
         )
 
@@ -625,13 +655,13 @@ class TritonTemplate(KernelTemplate):
             num_stages=num_stages,
             num_warps=num_warps,
             matrix_instr_nonkdim=kwargs.get("matrix_instr_nonkdim", 0),
-            input_tensor_meta=TensorMeta.from_irnodes(input_nodes),
+            input_tensor_meta=TensorMeta.from_irnodes(full_input_nodes),
             output_tensor_meta=TensorMeta.from_irnodes(layout),
         )
 
         return TritonTemplateCaller(
             kernel_hash_name,
-            input_nodes,
+            full_input_nodes,
             layout,
             make_kernel_render,
             extra.strip("-").replace("-", ", "),
@@ -649,6 +679,7 @@ class TritonTemplate(KernelTemplate):
                 "allow_tf32": str(kwargs.get("ALLOW_TF32", None)),
                 "acc_type": str(kwargs.get("ACC_TYPE", None)),
             },
+            mutated_inputs=mutated_inputs,
         )
 
 
@@ -719,6 +750,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         log_info: Optional[
             Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]
         ] = None,
+        mutated_inputs=None,
     ):
         super().__init__(name, input_nodes, layout)
         self.make_kernel_render = make_kernel_render
@@ -735,6 +767,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
                 "num_warps": self.bmreq.num_warps,
             }
         )
+        self.mutated_inputs = mutated_inputs
 
     def benchmark(self, *args, out):
         assert self.bmreq is not None
@@ -765,6 +798,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
                 inputs=self.input_nodes,
                 make_kernel_render=self.make_kernel_render,
                 debug_extra=self.debug_extra,
+                mutated_inputs=self.mutated_inputs,
             )
         )
 
@@ -865,7 +899,20 @@ class ErrorFromChoice(RuntimeError):
         self.choice = choice
 
 
+class NoValidChoicesError(RuntimeError):
+    pass
+
+
 class AlgorithmSelectorCache(PersistentCache):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        # the autotuning will get occur in the scheduler, so there is
+        # no guarantee that the first lowering for a given key will also be the
+        # first to benchmark it. share a single precompilation function for all lowerings
+        # of a particular key
+        self.precompile_cache: Dict[str, Callable[[], None]] = {}
+
     def __call__(
         self,
         name,
@@ -882,6 +929,13 @@ class AlgorithmSelectorCache(PersistentCache):
         return_multi_template=False,
     ):
         from .codegen.cuda.cuda_kernel import CUDATemplateCaller
+
+        # Templates selected with input_gen_fns require specific input data to avoid IMA
+        # Passing custom input gen fns to benchmark_fusion NYI, so skip deferred template selection
+        if input_gen_fns is not None:
+            return_multi_template = False
+
+        # TODO - assert that we have not mutating kernels here
 
         # TODO(nmacchioni): remove once CI tests are fixed
         choices = [choice for choice in choices if choice is not None]
@@ -901,6 +955,8 @@ class AlgorithmSelectorCache(PersistentCache):
         @functools.lru_cache(None)
         def make_benchmark_fn():
             return self.make_benchmark_fn(choices, input_nodes, layout, input_gen_fns)
+
+        inputs_key = repr([self.key_of(x) for x in input_nodes])
 
         def precompile(choices) -> Callable[[], None]:
             def no_op(*args, **kwargs):
@@ -927,12 +983,18 @@ class AlgorithmSelectorCache(PersistentCache):
             timings = self.lookup(
                 choices,
                 name,
-                repr([self.key_of(x) for x in input_nodes]),
+                inputs_key,
                 benchmark=None,
             )
 
             if timings:
                 return no_op
+
+            precompile_key = (
+                f"{name}: {inputs_key} : {torch.get_float32_matmul_precision()}"
+            )
+            if precompile_func := self.precompile_cache.get(precompile_key):
+                return precompile_func
 
             log.info(
                 "Multithreaded precompilation for %d choices using %d worker threads",
@@ -947,7 +1009,9 @@ class AlgorithmSelectorCache(PersistentCache):
                 timeout=precompilation_timeout_seconds,
             )
 
+            @functools.lru_cache(None)
             def wait_on_futures():
+                counters["inductor"]["select_algorithm_precompile"] += 1
                 try:
                     iterator = iter(futures)
                     while True:
@@ -963,7 +1027,10 @@ class AlgorithmSelectorCache(PersistentCache):
                     )
                 except StopIteration:
                     pass
+
                 executor.shutdown(wait=True)
+
+            self.precompile_cache[precompile_key] = wait_on_futures
 
             return wait_on_futures
 
@@ -985,7 +1052,7 @@ class AlgorithmSelectorCache(PersistentCache):
             timings = self.lookup(
                 choices,
                 name,
-                repr([self.key_of(x) for x in input_nodes]),
+                inputs_key,
                 autotune,
             )
             autotune_elapse = time.time() - autotune_start_ts
@@ -1006,7 +1073,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         precompile_fn = precompile(choices)
 
-        if return_multi_template:
+        if return_multi_template and (config.max_autotune or config.max_autotune_gemm):
 
             def get_timings():
                 timings = do_autotuning(precompile_fn)
@@ -1054,43 +1121,47 @@ class AlgorithmSelectorCache(PersistentCache):
         if input_gen_fns is None:
             input_gen_fns = {}
 
-        # de-duplicate args
-        unique_example_inputs = {
-            x.get_name(): input_gen_fns.get(i, cls.benchmark_example_value)(x)
-            for i, x in enumerate(input_nodes)
-        }
-        example_inputs = list(unique_example_inputs.values())
-        example_inputs_extern = [
-            torch.as_strided(
-                unique_example_inputs[input_node.get_name()],
-                V.graph.sizevars.size_hints(
-                    input_node.get_size(),
-                    fallback=config.unbacked_symint_fallback,
-                ),
-                V.graph.sizevars.size_hints(
-                    input_node.get_stride(),
-                    fallback=config.unbacked_symint_fallback,
-                ),
-                V.graph.sizevars.size_hint(
-                    input_node.get_layout().offset,
-                    fallback=config.unbacked_symint_fallback,
-                ),
-            )
-            for input_node in input_nodes
-        ]
+        def get_inputs():
+            # de-duplicate args
+            unique_example_inputs = {
+                x.get_name(): input_gen_fns.get(i, cls.benchmark_example_value)(x)
+                for i, x in enumerate(input_nodes)
+            }
+            example_inputs = list(unique_example_inputs.values())
+            example_inputs_extern = [
+                torch.as_strided(
+                    unique_example_inputs[input_node.get_name()],
+                    V.graph.sizevars.size_hints(
+                        input_node.get_size(),
+                        fallback=config.unbacked_symint_fallback,
+                    ),
+                    V.graph.sizevars.size_hints(
+                        input_node.get_stride(),
+                        fallback=config.unbacked_symint_fallback,
+                    ),
+                    V.graph.sizevars.size_hint(
+                        input_node.get_layout().offset,
+                        fallback=config.unbacked_symint_fallback,
+                    ),
+                )
+                for input_node in input_nodes
+            ]
 
-        out = cls.benchmark_example_value(layout)
-        out_extern = torch.as_strided(
-            out, out.size(), out.stride(), V.graph.sizevars.size_hint(layout.offset)
-        )
-        if VERIFY:
-            choices[0].benchmark(*example_inputs_extern, out=out_extern)
-            expected = out_extern.clone()
+            out = cls.benchmark_example_value(layout)
+            out_extern = torch.as_strided(
+                out, out.size(), out.stride(), V.graph.sizevars.size_hint(layout.offset)
+            )
+            expected = None
+            if VERIFY:
+                choices[0].benchmark(*example_inputs_extern, out=out_extern)
+                expected = out_extern.clone()
+
+            return example_inputs, example_inputs_extern, out, out_extern, expected
 
         if DEBUG:
             print(f"{len(choices)} tuning requests:")
 
-        def debug_str():
+        def debug_str(example_inputs, out):
             def tensor_repr(x):
                 return (
                     f"torch.empty_strided({tuple(x.size())!r}, {tuple(x.stride())!r}, "
@@ -1105,7 +1176,9 @@ class AlgorithmSelectorCache(PersistentCache):
             lines += ["]", f"out = {tensor_repr(out)}", ""]
             return "\n".join(lines)
 
-        def benchmark_choice_in_current_process(choice):
+        def benchmark_choice_in_current_process(
+            choice, example_inputs, example_inputs_extern, out, out_extern, expected
+        ):
             out.zero_()
             if isinstance(choice, ExternKernelCaller):
                 # aten kernels want the offset baked in for sliced tensors
@@ -1121,10 +1194,12 @@ class AlgorithmSelectorCache(PersistentCache):
         def benchmark_in_current_process(choices):
             from triton.runtime.autotuner import OutOfResources
 
+            inputs = get_inputs()
+            example_inputs, _, out, _, _ = inputs
             timings = {}
             for choice in choices:
                 try:
-                    timing = benchmark_choice_in_current_process(choice)
+                    timing = benchmark_choice_in_current_process(choice, *inputs)
                 except CUDACompileError as e:
                     log.warning(
                         "CUDA compilation error: \n%s. \nIgnore this choice.", str(e)
@@ -1139,10 +1214,13 @@ class AlgorithmSelectorCache(PersistentCache):
                     else:
                         if "illegal memory access" in msg:
                             msg += "\n\nEither error in template or triton bug.\n"
-                        raise ErrorFromChoice(msg, choice, debug_str())  # noqa: TRY200
+                        raise ErrorFromChoice(
+                            msg, choice, debug_str(example_inputs, out)
+                        ) from e
                 except OutOfResources as e:
                     log.warning(e)
                     timing = float("inf")
+
                 except AssertionError as e:
                     raise AssertionError(  # noqa: TRY200
                         f"Incorrect result from choice {choice}\n\n{e}"
@@ -1282,11 +1360,9 @@ def autotune_select_algorithm(*args, **kwargs):
         _ALGORITHM_SELECTOR_CACHE = AlgorithmSelectorCache()
 
     if "return_multi_template" not in kwargs:
-        # TODO - enable multi templates even if benchmark_fusion not enabled
-        kwargs["return_multi_template"] = (
-            torch._inductor.config.benchmark_multi_templates
-            and torch._inductor.config.benchmark_fusion
-        )
+        kwargs[
+            "return_multi_template"
+        ] = torch._inductor.config.benchmark_multi_templates
 
     return _ALGORITHM_SELECTOR_CACHE(*args, **kwargs)
 

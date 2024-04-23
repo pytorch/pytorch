@@ -11,7 +11,12 @@ import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
 import torch.nn as nn
 from torch.distributed._composable import checkpoint, replicate
-from torch.distributed._composable.fsdp import FSDP, fully_shard
+from torch.distributed._composable.fsdp import (
+    CPUOffloadPolicy,
+    FSDP,
+    fully_shard,
+    OffloadPolicy,
+)
 from torch.distributed._tensor import DTensor, init_device_mesh
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
@@ -278,6 +283,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             {
                 "reshard_after_forward": [True, False, 2],
                 "device_type": ["cuda"],
+                "offload_policy": [OffloadPolicy()],
                 "delay_after_forward": [False, True],
                 "delay_before_all_gather": [False, True],
                 "delay_before_reduce_scatter": [False, True],
@@ -292,6 +298,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             {
                 "reshard_after_forward": [True, False],
                 "device_type": ["cuda"],
+                "offload_policy": [OffloadPolicy()],
                 "delay_after_forward": [False, True],
                 "delay_before_all_gather": [False],
                 "delay_before_reduce_scatter": [False],
@@ -300,9 +307,32 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             self._test_train_parity_multi_group,
         )
 
+    @skip_if_lt_x_gpu(2)
+    def test_train_parity_multi_group_cpu_offload_eager(self):
+        """
+        Tests train parity against DDP when using multiple parameter groups for
+        communication and CPU offloading.
+        """
+        self.run_subtests(
+            {
+                "reshard_after_forward": [True],  # save CI time
+                "offload_policy": [
+                    CPUOffloadPolicy(pin_memory=True),
+                    CPUOffloadPolicy(pin_memory=False),
+                ],
+                "device_type": ["cuda"],
+                "delay_after_forward": [False, True],
+                "delay_before_all_gather": [False, True],
+                "delay_before_reduce_scatter": [False, True],
+                "delay_before_optim": [False, True],
+            },
+            self._test_train_parity_multi_group,
+        )
+
     def _test_train_parity_multi_group(
         self,
         reshard_after_forward: Union[bool, int],
+        offload_policy: OffloadPolicy,
         device_type: str,
         delay_after_forward: bool,
         delay_before_all_gather: bool,
@@ -330,9 +360,15 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             replicate(ref_model, process_group=gloo_pg)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
         mesh = init_device_mesh(device_type, (self.world_size,))
+        fully_shard_fn = functools.partial(
+            fully_shard,
+            mesh=mesh,
+            reshard_after_forward=reshard_after_forward,
+            offload_policy=offload_policy,
+        )
         for mlp in model:
-            fully_shard(mlp, mesh=mesh, reshard_after_forward=reshard_after_forward)
-        fully_shard(model, mesh=mesh, reshard_after_forward=reshard_after_forward)
+            fully_shard_fn(mlp)
+        fully_shard_fn(model)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
 
         delay_in_ms = 100
@@ -616,46 +652,72 @@ class TestFullyShardGradientAccumulation(FSDPTest):
         return min(2, torch.cuda.device_count())
 
     @skip_if_lt_x_gpu(2)
-    def test_set_requires_gradient_sync(self):
+    def test_gradient_accumulation(self):
         """
-        Tests the ``set_requires_gradient_sync`` API to exercise gradient
-        accumulation without gradient reduction. This test includes mixing with
-        gradient accumulation *with* gradient reduction.
+        Tests gradient accumulation with/without gradient reduction and
+        with/without resharding after backward.
         """
         self.run_subtests(
             {
                 "reshard_after_forward": [True, False, 2],
-                # For `True`, disable reduce-scatter for all MLPs, and for
-                # `False`, only disable it for some MLPs
-                "recurse": [True, False],
+                # "all": disable reduce-scatter for all modules
+                # "root_only": disable reduce-scatter for root's linear only
+                # "some_mlps": disable reduce-scatter for some MLPs
+                "mode": ["all", "root_only", "some_mlps"],
+                "reshard_after_backward": [False, True],
+                "offload_policy": [OffloadPolicy(), CPUOffloadPolicy()],
             },
-            self._test_set_requires_gradient_sync,
+            self._test_gradient_accumulation,
         )
 
-    def _test_set_requires_gradient_sync(
+    def _test_gradient_accumulation(
         self,
         reshard_after_forward: Union[bool, int],
-        recurse: bool,
+        mode: str,
+        reshard_after_backward: bool,
+        offload_policy: OffloadPolicy,
     ):
+        if (
+            not reshard_after_backward
+            and (reshard_after_forward is not False or mode == "some_mlps")
+        ) or (
+            isinstance(offload_policy, CPUOffloadPolicy)
+            and reshard_after_forward is not True
+        ):
+            return  # skip since not common
+
         torch.manual_seed(42)
         local_batch_size, lin_dim, num_mlps, num_microbatches = (2, 32, 3, 3)
         global_batch_size = local_batch_size * self.world_size
-        if not recurse:
+        if mode == "some_mlps":
             num_mlps_to_disable_reduce_scatter = 2
         model = nn.Sequential(
-            *[MLP(lin_dim, torch.device("cpu")) for _ in range(num_mlps)]
+            *(
+                [nn.Linear(lin_dim, lin_dim)]
+                + [MLP(lin_dim, torch.device("cpu")) for _ in range(num_mlps)]
+            )
         )
         ref_model = copy.deepcopy(model).cuda()
         fully_shard_fn = functools.partial(
-            fully_shard, reshard_after_forward=reshard_after_forward
+            fully_shard,
+            reshard_after_forward=reshard_after_forward,
+            offload_policy=offload_policy,
         )
-        for mlp in model:
+        for mlp in model[1:]:
             fully_shard_fn(mlp)
-        fully_shard_fn(model)
+        fully_shard_fn(model)  # root gets the 1st linear
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+
+        orig_all_gather = dist.all_gather_into_tensor
+        all_gather_count = 0
         orig_reduce_scatter = dist.reduce_scatter_tensor
         reduce_scatter_count = 0
+
+        def all_gather_with_count(*args, **kwargs):
+            nonlocal all_gather_count
+            all_gather_count += 1
+            return orig_all_gather(*args, **kwargs)
 
         def reduce_scatter_with_count(*args, **kwargs):
             nonlocal reduce_scatter_count
@@ -664,16 +726,29 @@ class TestFullyShardGradientAccumulation(FSDPTest):
 
         torch.manual_seed(1)  # same on all ranks
         for iter_idx in range(5):
-            with patch_reduce_scatter(reduce_scatter_with_count):
+            with patch_all_gather(all_gather_with_count), patch_reduce_scatter(
+                reduce_scatter_with_count
+            ):
                 for microbatch_idx in range(num_microbatches):
                     is_last_microbatch = microbatch_idx == num_microbatches - 1
-                    if recurse:
+                    if mode == "all":
                         model.set_requires_gradient_sync(is_last_microbatch)
-                    else:
-                        for mlp in model[:num_mlps_to_disable_reduce_scatter]:
-                            mlp.set_requires_gradient_sync(
+                        if not reshard_after_backward:
+                            model.set_reshard_after_backward(is_last_microbatch)
+                    elif mode == "some_mlps":
+                        for mlp in model[1 : 1 + num_mlps_to_disable_reduce_scatter]:
+                            mlp.set_requires_gradient_sync(is_last_microbatch)
+                            if not reshard_after_backward:
+                                mlp.set_reshard_after_backward(is_last_microbatch)
+                    elif mode == "root_only":
+                        model.set_requires_gradient_sync(
+                            is_last_microbatch, recurse=False
+                        )
+                        if not reshard_after_backward:
+                            model.set_reshard_after_backward(
                                 is_last_microbatch, recurse=False
                             )
+
                     global_inp = torch.rand((global_batch_size, lin_dim), device="cuda")
                     local_inp = global_inp[
                         self.rank
@@ -689,15 +764,47 @@ class TestFullyShardGradientAccumulation(FSDPTest):
                         losses[-1].backward()
                     dist.all_reduce(losses[1])  # partial -> replicated
                     self.assertEqual(losses[0], losses[1])
-            # Expect one reduce-scatter per MLP on the last microbatch
-            expected_reduce_scatter_count = num_mlps
-            if not recurse:
-                # Expect additional reduce-scatters for non-disabled MLPs
+
+            # Expect one reduce-scatter per MLP plus one for the root's linear
+            # on the last microbatch
+            expected_reduce_scatter_count = num_mlps + 1
+            if mode == "some_mlps":
+                # Expect additional reduce-scatters for non-disabled MLPs and
+                # the root's linear
                 expected_reduce_scatter_count += (
-                    num_mlps - num_mlps_to_disable_reduce_scatter
+                    num_mlps - num_mlps_to_disable_reduce_scatter + 1
                 ) * (num_microbatches - 1)
+            elif mode == "root_only":
+                # Expect additional reduce-scatters for all MLPs
+                expected_reduce_scatter_count += (num_mlps) * (num_microbatches - 1)
             self.assertEqual(reduce_scatter_count, expected_reduce_scatter_count)
             reduce_scatter_count = 0
+
+            # Expect one all-gather per MLP plus one for the root's linear in
+            # the first microbatch's forward
+            expected_all_gather_count = num_mlps + 1
+            if reshard_after_forward is not False:  # `True` or `2`
+                # Add the number of MLPs without the +1 for the backward
+                # all-gathers since the root does not reshard after forward
+                expected_all_gather_count += num_mlps
+                # Multiply by the number of microbatches since these
+                # all-gathers run every microbatch
+                expected_all_gather_count *= num_microbatches
+            elif reshard_after_backward:  # `reshard_after_forward=False`
+                expected_all_gather_count *= num_microbatches
+            elif mode == "all":  # `reshard_after_forward/backward=False`
+                # Only reshard parameters after the last microbatch's backward,
+                # so there should not be any more all-gathers
+                pass
+            elif mode == "root_only":  # `reshard_after_forward/backward=False`
+                # The MLPs should still contribute all-gathers in each
+                # microbatch forward
+                expected_all_gather_count += num_mlps * (num_microbatches - 1)
+            self.assertEqual(all_gather_count, expected_all_gather_count)
+            all_gather_count = 0
+
+            # Average the ref model's gradients over the world size to match
+            # data parallel semantics
             for param in ref_model.parameters():
                 if param.grad is not None:
                     param.grad.div_(self.world_size)
@@ -711,11 +818,16 @@ class TestFullyShardGradientAccumulation(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_1f1b_microbatching(self):
         self.run_subtests(
-            {"use_explicit_unshard": [False, True]},
+            {
+                "use_explicit_unshard": [False, True],
+                "reshard_after_backward": [False, True],
+            },
             self._test_1f1b_microbatching,
         )
 
-    def _test_1f1b_microbatching(self, use_explicit_unshard: bool):
+    def _test_1f1b_microbatching(
+        self, use_explicit_unshard: bool, reshard_after_backward: bool
+    ):
         torch.manual_seed(42)
         model_args = ModelArgs(dropout_p=0.0)
         model = Transformer(model_args)
@@ -753,6 +865,8 @@ class TestFullyShardGradientAccumulation(FSDPTest):
             is_last_microbatch = inp_idx == num_microbatches - 1
             model.set_requires_gradient_sync(is_last_microbatch)
             model.set_is_last_backward(is_last_microbatch)
+            if not reshard_after_backward:
+                model.set_reshard_after_backward(is_last_microbatch)
             losses.append(model(inp).sum())
             losses[-1].backward()
             ref_losses.append(ref_model(inp).sum())
