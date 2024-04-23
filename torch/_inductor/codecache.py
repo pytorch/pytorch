@@ -50,7 +50,6 @@ from typing import (
 )
 
 import torch
-
 from torch._dynamo.device_interface import get_registered_device_interfaces
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor import config, exc, metrics
@@ -65,6 +64,8 @@ from torch._inductor.runtime.compile_tasks import (
 )
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import clear_on_fresh_inductor_cache, is_linux
+
+from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import (
     extract_tensor_metadata,
     FakeTensor,
@@ -1724,6 +1725,15 @@ class AotCodeCompiler:
             specified_dir=specified_output_path,
         )
         output_code_log.info("Output code written to: %s", input_path)
+        trace_structured(
+            "graph_dump",
+            lambda: {
+                "name": "inductor_aot_code",
+                "type": "cpp",
+                "filename": input_path,
+            },
+            payload_fn=lambda: source_code,
+        )
 
         def _compile_consts_linux(consts: bytes) -> str:
             _, consts_path = write(

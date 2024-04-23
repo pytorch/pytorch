@@ -880,6 +880,10 @@ class ErrorFromChoice(RuntimeError):
         self.choice = choice
 
 
+class NoValidChoicesError(RuntimeError):
+    pass
+
+
 class AlgorithmSelectorCache(PersistentCache):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
