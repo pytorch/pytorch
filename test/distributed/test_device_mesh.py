@@ -150,8 +150,9 @@ class DeviceMeshTest(DTensorTestBase):
         with self.assertRaisesRegex(RuntimeError, "process groups not initialized!"):
             mesh.get_group()
 
-        with self.assertRaisesRegex(AttributeError, "no attribute"):
-            mesh.get_coordinate()
+        # coordinates should always been populated when init_backend is False, as whenever
+        # we call init_backend we should make sure the default pg already created
+        mesh.get_coordinate()
 
     def test_fake_pg_device_mesh(self):
         fake_store = FakeStore()
