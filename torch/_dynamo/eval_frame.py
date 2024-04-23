@@ -364,6 +364,7 @@ class _TorchDynamoContext:
                 not in ["_call_impl", "_wrapped_call_impl", "_lazy_forward"]
             )
             and filename not in DONT_WRAP_FILES
+            and isinstance(fn, types.BuiltinFunctionType)
         ):
             # call to a builtin without a frame for us to capture
             fn = external_utils.wrap_inline(fn)
