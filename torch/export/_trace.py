@@ -1254,6 +1254,11 @@ def _export(
         assert res is not None
         gm = res.graph_module
 
+    if len(range_constraints) > 0:
+        res = _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints)(gm)
+        assert res is not None
+        gm = res.graph_module
+
     assert orig_out_spec is not None
     _verify_nn_module_stack(gm)
     _verify_stack_trace(gm)
@@ -1274,10 +1279,5 @@ def _export(
         constants=constants,
     )
     log.debug("Exported program from AOTAutograd:\n%s", exported_program)
-
-    if len(range_constraints) > 0:
-        exported_program = exported_program._transform_do_not_use(
-            _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints)
-        )
 
     return exported_program
