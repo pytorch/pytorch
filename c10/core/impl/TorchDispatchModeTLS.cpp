@@ -34,7 +34,8 @@ void TorchDispatchModeTLS::push_non_infra_mode_onto_stack(
   torchDispatchModeState.stack_.push_back(std::move(mode));
 }
 
-const std::shared_ptr<PyObject_TorchDispatchMode> TorchDispatchModeTLS::pop_stack() {
+const std::shared_ptr<PyObject_TorchDispatchMode> TorchDispatchModeTLS::
+    pop_stack() {
   std::shared_ptr<PyObject_TorchDispatchMode> out;
   if (!torchDispatchModeState.stack_.empty()) {
     out = torchDispatchModeState.stack_.back();
@@ -60,8 +61,9 @@ const std::shared_ptr<PyObject_TorchDispatchMode> TorchDispatchModeTLS::pop_stac
   }
   return out;
 }
-const std::tuple<std::shared_ptr<PyObject_TorchDispatchMode>, TorchDispatchModeKey>
-TorchDispatchModeTLS::pop_highest_infra_mode() {
+const std::
+    tuple<std::shared_ptr<PyObject_TorchDispatchMode>, TorchDispatchModeKey>
+    TorchDispatchModeTLS::pop_highest_infra_mode() {
   for (int64_t i = static_cast<size_t>(TorchDispatchModeKey::NUM_MODE_KEYS) - 1;
        i >= 0;
        --i) {
@@ -82,8 +84,8 @@ TorchDispatchModeTLS::pop_highest_infra_mode() {
       false, "Called pop_highest_infra_mode, but no infra modes were active.")
 }
 
-const std::shared_ptr<PyObject_TorchDispatchMode>& TorchDispatchModeTLS::get_stack_at(
-    int64_t idx) {
+const std::shared_ptr<PyObject_TorchDispatchMode>& TorchDispatchModeTLS::
+    get_stack_at(int64_t idx) {
   TORCH_CHECK(idx < stack_len(), "Tried to get stack at idx that's too big");
   // Our "logical" stack includes both:
   // - any user modes (the entire torchDispatchModeState.stack_)
@@ -119,8 +121,8 @@ int64_t TorchDispatchModeTLS::stack_len() {
   return stack_len + infra_modes_len;
 }
 
-const c10::optional<std::shared_ptr<PyObject_TorchDispatchMode>> TorchDispatchModeTLS::
-    get_mode(TorchDispatchModeKey mode_key) {
+const c10::optional<std::shared_ptr<PyObject_TorchDispatchMode>>
+TorchDispatchModeTLS::get_mode(TorchDispatchModeKey mode_key) {
   return torchDispatchModeState.infra_modes_[static_cast<size_t>(mode_key)];
 }
 
@@ -143,8 +145,8 @@ void TorchDispatchModeTLS::set_mode(
   torchDispatchModeState.infra_modes_[static_cast<size_t>(mode_key)] = mode;
 }
 
-const c10::optional<std::shared_ptr<PyObject_TorchDispatchMode>> TorchDispatchModeTLS::
-    unset_mode(TorchDispatchModeKey mode_key) {
+const c10::optional<std::shared_ptr<PyObject_TorchDispatchMode>>
+TorchDispatchModeTLS::unset_mode(TorchDispatchModeKey mode_key) {
   auto out = torchDispatchModeState.infra_modes_[static_cast<size_t>(mode_key)];
   torchDispatchModeState.infra_modes_[static_cast<size_t>(mode_key)] =
       c10::nullopt;

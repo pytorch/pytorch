@@ -30,9 +30,6 @@ python3 -m tools.pyi.gen_pyi \
     --tags-path aten/src/ATen/native/tags.yaml \
     --deprecated-functions-path "tools/autograd/deprecated.yaml"
 
-# lintrunner will fail if the tee file exists
-rm -f lint.json
-
 RC=0
 # Run lintrunner on all files
 if ! lintrunner --force-color --all-files --tee-json=lint.json ${ADDITIONAL_LINTRUNNER_ARGS} 2> /dev/null; then
