@@ -9,8 +9,7 @@ from torch._inductor.select_algorithm import realize_inputs
 from torch._inductor.virtualized import V
 
 from .. import config as inductor_config
-from ..runtime.runtime_utils import next_power_of_2
-from ..utils import ceildiv as cdiv
+from ..utils import ceildiv as cdiv, next_power_of_2
 
 log = logging.getLogger(__name__)
 
