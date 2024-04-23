@@ -181,3 +181,19 @@ def _has_potential_branch_input_alias(branch, inputs, pre_dispatch=False):
         return False
 
     return _detect_input_alias(gm)
+
+
+def unique_graph_id(proxy_mode, prefix):
+    """Returns a unique name and id for a graph to be added to a proxy_mode tracer"""
+    # There are probably better ways - I know that create_arg has some self incrementing name
+    # magic to it, but since we explicitly have to get the name for register_module,
+    # I was not sure how to do that. This kinda simulates it.
+    next_name = None
+    i = 0
+    while not next_name:
+        candidate = f"{prefix}_{i}"
+        if hasattr(proxy_mode.tracer.root, candidate):
+            i += 1
+        else:
+            next_name = candidate
+    return i, next_name

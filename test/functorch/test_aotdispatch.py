@@ -3261,6 +3261,7 @@ def forward(self, tangents_1):
 
         return lambda f: aot_function(f, fw_compiler=lambda g, _: partial(wrapper, g))
 
+    @patch("functorch.compile.config.view_replay_for_aliased_outputs", True)
     def test_output_aliases_input_view_meta_replay(self):
         @self._compile_and_erase_bases(0)
         def f(a):
@@ -3274,6 +3275,7 @@ def forward(self, tangents_1):
             str(out.grad_fn.__class__), """<class 'ViewBackward0'>"""
         )
 
+    @patch("functorch.compile.config.view_replay_for_aliased_outputs", True)
     def test_output_aliases_intermediate_view_meta_replay(self):
         @self._compile_and_erase_bases(0, 1)
         def f(a):
@@ -3293,6 +3295,7 @@ def forward(self, tangents_1):
             str(out2.grad_fn.__class__), """<class 'ViewBackward0'>"""
         )
 
+    @patch("functorch.compile.config.view_replay_for_aliased_outputs", True)
     def test_output_aliases_output_view_meta_replay(self):
         @self._compile_and_erase_bases(1)
         def f(a):
