@@ -386,19 +386,21 @@ def sink_prev_reduce_scatter_wait_to_before_next_reduce_scatter(mod):
     for i, n in enumerate(node_list):
         if n.target == torch.ops._c10d_functional.wait_tensor.default and n.args[0].target == torch.ops._c10d_functional.reduce_scatter_tensor.default:
             reduce_scatter_wait_node = n
-            as_strided_nodes = []
+            nodes_to_track_users = [reduce_scatter_wait_node]
+            nodes_to_track_users_set = set(nodes_to_track_users)
             for j in range(i + 1, len(node_list)):
-                if node_list[j].target == torch.ops.aten.as_strided.default and node_list[j].args[0] == reduce_scatter_wait_node:
-                    as_strided_nodes.append(node_list[j])
-                else:
-                    break
+                nj = node_list[j]
+                for arg in _flatten_arg_list(nj.args):
+                    if arg in nodes_to_track_users_set:
+                        nodes_to_track_users.append(nj)
+                        nodes_to_track_users_set.add(nj)
             reduce_scatter_wait_blocks.append({
                 "reduce_scatter_wait_node": reduce_scatter_wait_node,
-                "as_strided_nodes": as_strided_nodes,
+                "downstream_recursive_users_of_rs_wait": nodes_to_track_users[1:],
             })
     for i, block in enumerate(reduce_scatter_wait_blocks):
         reduce_scatter_wait_node = block["reduce_scatter_wait_node"]
-        as_strided_nodes = block["as_strided_nodes"]
+        downstream_recursive_users_of_rs_wait = block["downstream_recursive_users_of_rs_wait"]
         if i < len(reduce_scatter_wait_blocks) - 1:
             next_reduce_scatter_node = reduce_scatter_wait_blocks[i+1]["reduce_scatter_wait_node"].args[0]
             insert_before = next_reduce_scatter_node
@@ -406,8 +408,9 @@ def sink_prev_reduce_scatter_wait_to_before_next_reduce_scatter(mod):
             insert_before = return_op
         with mod.graph.inserting_before(insert_before):
             new_reduce_scatter_wait_node = _create_new_node_and_replace(mod, reduce_scatter_wait_node, propagate_meta=True)
-            for as_strided_node in as_strided_nodes:
-                new_as_strided_node = _create_new_node_and_replace(mod, as_strided_node, propagate_meta=True)
+            for user in downstream_recursive_users_of_rs_wait:
+                if user != return_op:
+                    new_user = _create_new_node_and_replace(mod, user, propagate_meta=True)
     mod.graph.lint()
     mod.recompile()
 
