@@ -2,9 +2,15 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/Copy.h>
+#include <ATen/native/mps/MPSGraphSonomaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/ops/_copy_from_and_resize_native.h>
 #include <ATen/ops/_copy_from_native.h>
+#include <ATen/ops/imag.h>
+#include <ATen/ops/neg.h>
+#include <ATen/ops/real.h>
+#include <ATen/ops/view_as_real.h>
+#include <ATen/ops/zeros_like.h>
 
 namespace at::native {
 namespace mps {
@@ -41,14 +47,22 @@ static void copy_cast_mps(at::Tensor& dst,
   MPSShape* srcShape = getMPSShape(src);
 
   @autoreleasepool {
-    string key = "copy_cast_mps" + getTensorsStringKey({src, dst});
+    const bool needs_conj = src.is_conj() != dst.is_conj();
+    string key = "copy_cast_mps" + getTensorsStringKey({src, dst}, true, /*exclude_shape*/ true) + ":" +
+        std::to_string(needs_conj);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, src);
-      MPSGraphTensor* inputCastTensor = inputTensor;
+      MPSGraphTensor* inputTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, srcDType);
+      auto outputTensor = inputTensor;
       if (isFloatingType(src.scalar_type()) && dstDType == MPSDataTypeUInt8) {
-        inputCastTensor = [mpsGraph castTensor:inputTensor toType:MPSDataTypeInt32 name:@"cast"];
+        outputTensor = [mpsGraph castTensor:inputTensor toType:MPSDataTypeInt32 name:@"cast"];
       }
-      MPSGraphTensor* outputTensor = [mpsGraph castTensor:inputCastTensor toType:dstDType name:@"cast"];
+      if (srcDType != dstDType) {
+        outputTensor = [mpsGraph castTensor:outputTensor toType:dstDType name:@"cast"];
+      }
+      if (needs_conj) {
+        TORCH_CHECK(supportsComplex(), "MPS complex tensors conjugation needs MacOS14+");
+        outputTensor = [mpsGraph conjugateWithTensor:outputTensor name:nil];
+      }
 
       newCachedGraph->inputTensor_ = inputTensor;
       newCachedGraph->outputTensor_ = outputTensor;
@@ -72,12 +86,11 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
 
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* stream = getCurrentMPSStream();
-  Tensor dst;
-  Tensor src;
+  Tensor dst = dst_;
+  Tensor src = src_;
+
   if (!dst_.is_contiguous(MemoryFormat::Contiguous) && !sameMemFormat) {
     dst = at::empty_like(dst_, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  } else {
-    dst = dst_;
   }
 
   auto storage_byte_offset = src_.storage_offset() * src_.itemsize();
@@ -90,9 +103,8 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
       src = src_.expand_as(dst).contiguous();
       storage_byte_offset = src.storage_offset() * src.itemsize();
     }
-  } else {
-    src = src_;
   }
+
   id<MTLBuffer> sourceBuffer = getMTLBufferStorage(src);
   size_t dst_tensor_nbytes = dst.nbytes();
 
@@ -110,28 +122,25 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
                                                          length:alignedLength
                                                         options:options
                                                     deallocator:nil];
-    id<MTLBuffer> tmpBuffer = sourceBuffer;
-    Tensor tmp;
+    id<MTLBuffer> maybeCastedSourceBuffer = sourceBuffer;
+    Tensor maybeCastedSource;
     bool needsBlit = true;
     if (src_.dtype() != dst.dtype()) {
       if (destOffset == 0 && storage_byte_offset == 0) {
         // Return the casted tensor directly if there's no destination offset
         needsBlit = false;
-        tmpBuffer = destBuffer;
+        maybeCastedSourceBuffer = destBuffer;
       } else if (src.element_size() < dst.element_size()) {
-        tmp = at::empty(dst.sizes(), dst.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
-        tmpBuffer = getMTLBufferStorage(tmp);
+        maybeCastedSource = at::empty(dst.sizes(), dst.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+        maybeCastedSourceBuffer = getMTLBufferStorage(maybeCastedSource);
       }
-    }
 
-    size_t size_to_copy = src.nbytes();
-    // In case of dtype change, first convert src inplace
-    if (src_.dtype() != dst.dtype()) {
-      copy_cast_mps(dst, src, tmpBuffer, sourceBuffer, non_blocking);
+      // In case of dtype change, first convert src inplace
+      copy_cast_mps(dst, src, maybeCastedSourceBuffer, sourceBuffer, non_blocking);
     }
 
     if (needsBlit) {
-      size_to_copy = (size_to_copy / src.element_size()) * dst.element_size();
+      const size_t size_to_copy = (src.nbytes() / src.element_size()) * dst.element_size();
 
       // If there's anything wrong with source, we shouldn't return dst_ silently and must error out.
       TORCH_INTERNAL_ASSERT(sourceBuffer && dst_tensor_nbytes > 0);
@@ -139,7 +148,7 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
           getMPSProfiler().beginProfileCopy(sourceBuffer, destBuffer, src, dst, size_to_copy, non_blocking);
 
       stream->copy_and_sync(
-          tmpBuffer, destBuffer, size_to_copy, storage_byte_offset, destOffset, non_blocking, profile_id);
+          maybeCastedSourceBuffer, destBuffer, size_to_copy, storage_byte_offset, destOffset, non_blocking, profile_id);
     }
     [destBuffer release];
   }
@@ -227,7 +236,7 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
   Tensor src;
   auto sameMemFormat =
       src_.is_contiguous(dst_.suggest_memory_format()) && dst_.is_contiguous(dst_.suggest_memory_format());
-  const bool sameDataType = src_.dtype() == dst_.dtype();
+  const bool sameDataType = src_.dtype() == dst_.dtype() && src_.is_conj() == dst_.is_conj();
 
   if ((!src_.is_contiguous(MemoryFormat::Contiguous) && !sameMemFormat) ||
       // the copy_cast path requires storage_offset to be applied before casting
@@ -266,13 +275,32 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
     // for GPU to GPU copies we only encode to stream's command buffer (no flushing)
     stream->copy(sourceBuffer, destBuffer, src.nbytes(), src_byte_offset, dst_byte_offset, profile_id);
   } else {
-    if (dst_byte_offset) {
-      auto tmp = at::empty(dst_.sizes(), dst_.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
-      auto tmpBuffer = getMTLBufferStorage(tmp);
-      copy_cast_mps(tmp, src, tmpBuffer, sourceBuffer);
+    // Simulate cast to Complex on older MacOS by initializing real and imag parts
+    if (dst_.is_complex() && !supportsComplex()) {
+      if (!src.is_complex()) {
+        at::real(dst_).copy_(src);
+        at::imag(dst_).fill_(0);
+      } else if (src.is_conj() || dst_.is_conj()) {
+        // One cannot take view of conjugated tensor, but for some reason real and imag views are fine
+        // Use this to implement a conjugation
+        at::real(dst_).copy_(at::real(src));
+        if (src.is_conj() != dst_.is_conj()) {
+          at::imag(dst_).copy_(at::neg(at::imag(src)));
+        } else {
+          at::imag(dst_).copy_(at::imag(src));
+        }
+      } else {
+        at::view_as_real(dst_).copy_(at::view_as_real(src));
+      }
+    } else if (dst_byte_offset) {
+      auto maybeCastedSource =
+          at::empty(dst_.sizes(), dst_.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+      auto maybeCastedSourceBuffer = getMTLBufferStorage(maybeCastedSource);
+      copy_cast_mps(maybeCastedSource, src, maybeCastedSourceBuffer, sourceBuffer);
 
-      uint64_t profile_id = getMPSProfiler().beginProfileCopy(tmpBuffer, destBuffer, tmp, dst_, dst_.nbytes(), true);
-      stream->copy(tmpBuffer, destBuffer, dst_.nbytes(), 0, dst_byte_offset, profile_id);
+      uint64_t profile_id = getMPSProfiler().beginProfileCopy(
+          maybeCastedSourceBuffer, destBuffer, maybeCastedSource, dst_, dst_.nbytes(), true);
+      stream->copy(maybeCastedSourceBuffer, destBuffer, dst_.nbytes(), 0, dst_byte_offset, profile_id);
     } else {
       copy_cast_mps(dst_, src, destBuffer, sourceBuffer);
     }

@@ -1,12 +1,10 @@
 # Owner(s): ["oncall: distributed"]
 from collections import OrderedDict
+from copy import deepcopy
 
 import torch
 from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
-from torch.distributed.tensor.parallel._utils import _create_1d_device_mesh
-from torch.distributed.tensor.parallel.api import (
-    parallelize_module,
-)
+from torch.distributed.tensor.parallel.api import parallelize_module
 from torch.distributed.tensor.parallel.style import (
     ColwiseParallel,
     PrepareModuleInput,
@@ -17,6 +15,7 @@ from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     MLPModule,
+    MLPStacked,
     with_comms,
 )
 
@@ -34,45 +33,6 @@ class TensorParallelAPITests(DTensorTestBase):
     def world_size(self):
         gpu_num = torch.cuda.device_count()
         return gpu_num if gpu_num % 2 == 0 and gpu_num > 4 else 4
-
-    @with_comms
-    def test_create_1d_device_mesh(self):
-        dim_one_size = 2
-        mesh_shape = (
-            torch.arange(self.world_size)
-            .reshape(
-                self.world_size // dim_one_size,
-                dim_one_size,
-            )
-            .to(torch.int)
-        )
-        mesh = DeviceMesh(self.device_type, mesh_shape)
-        # When 1D dim is 1.
-        one_dimention_mesh_shape = mesh_shape[self.rank // dim_one_size, :]
-        pg = mesh.get_group(mesh_dim=1)
-        new_mesh = _create_1d_device_mesh(mesh, 1)
-        expected_mesh = one_dimention_mesh_shape
-
-        self.assertEqual(new_mesh.mesh, expected_mesh)
-        self.assertEqual(new_mesh.device_type, self.device_type)
-        self.assertEqual(new_mesh.get_group(), pg)
-        # When 1D dim is 0.
-        one_dimention_mesh_shape = mesh_shape[:, self.rank % dim_one_size]
-        pg = mesh.get_group(mesh_dim=0)
-        new_mesh = _create_1d_device_mesh(mesh, 0)
-        expected_mesh = one_dimention_mesh_shape
-        self.assertEqual(new_mesh.mesh, expected_mesh)
-        self.assertEqual(new_mesh.device_type, self.device_type)
-        self.assertEqual(new_mesh.get_group(), pg)
-
-    @with_comms
-    def test_create_1d_device_mesh_error(self):
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
-        with self.assertRaisesRegex(
-            AssertionError,
-            "Expect tp_mesh_dim within range \\[-1, 1\\), but found 3.",
-        ):
-            _create_1d_device_mesh(mesh, 3)
 
     def _compare_params(
         self,
@@ -139,13 +99,7 @@ class TensorParallelAPITests(DTensorTestBase):
     def test_parallelize_mlp_with_module_api(self):
         inp_size = [12, 10]
         model = MLPModule(self.device_type)
-        model_tp = MLPModule(self.device_type)
-
-        # Ensure model are initialized the same way.
-        self.assertEqual(model.net1.weight, model_tp.net1.weight)
-        self.assertEqual(model.net1.bias, model_tp.net1.bias)
-        self.assertEqual(model.net2.weight, model_tp.net2.weight)
-        self.assertEqual(model.net2.bias, model_tp.net2.bias)
+        model_tp = deepcopy(model)
 
         # Parallelize module.
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
@@ -165,23 +119,7 @@ class TensorParallelAPITests(DTensorTestBase):
         model = torch.nn.Sequential(
             OrderedDict([("dummy_encoder", MLPModule(self.device_type))])
         )
-        model_tp = torch.nn.Sequential(
-            OrderedDict([("dummy_encoder", MLPModule(self.device_type))])
-        )
-
-        # Ensure model are initialized the same way.
-        self.assertEqual(
-            model.dummy_encoder.net1.weight, model_tp.dummy_encoder.net1.weight
-        )
-        self.assertEqual(
-            model.dummy_encoder.net1.bias, model_tp.dummy_encoder.net1.bias
-        )
-        self.assertEqual(
-            model.dummy_encoder.net2.weight, model_tp.dummy_encoder.net2.weight
-        )
-        self.assertEqual(
-            model.dummy_encoder.net2.bias, model_tp.dummy_encoder.net2.bias
-        )
+        model_tp = deepcopy(model)
 
         # Parallelize module.
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
@@ -203,8 +141,7 @@ class TensorParallelAPITests(DTensorTestBase):
 
         torch.manual_seed(5)
         model = torch.nn.Linear(16, 10, device=self.device_type)
-        torch.manual_seed(5)
-        model_tp = torch.nn.Linear(16, 10, device=self.device_type)
+        model_tp = deepcopy(model)
 
         # parallelize model_tp
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
@@ -222,8 +159,7 @@ class TensorParallelAPITests(DTensorTestBase):
 
         torch.manual_seed(5)
         model = torch.nn.Linear(10, 16, device=self.device_type)
-        torch.manual_seed(5)
-        model_tp = torch.nn.Linear(10, 16, device=self.device_type)
+        model_tp = deepcopy(model)
 
         # parallelize model_tp
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
@@ -239,9 +175,8 @@ class TensorParallelAPITests(DTensorTestBase):
             module,
             device_mesh,
             PrepareModuleInput(
-                input_layouts=Shard(0),
-                desired_input_layouts=Replicate()
-            )
+                input_layouts=Shard(0), desired_input_layouts=Replicate()
+            ),
         )
         inp = torch.rand(5, 7, device=self.device_type)
         output = module(inp).redistribute(device_mesh, [Shard(0)]).to_local()
@@ -255,9 +190,8 @@ class TensorParallelAPITests(DTensorTestBase):
             module,
             device_mesh,
             PrepareModuleOutput(
-                output_layouts=Replicate(),
-                desired_output_layouts=Shard(0)
-            )
+                output_layouts=Replicate(), desired_output_layouts=Shard(0)
+            ),
         )
         torch.manual_seed(15)
         inp = torch.rand(16, 7, device=self.device_type)
@@ -265,6 +199,71 @@ class TensorParallelAPITests(DTensorTestBase):
         output = module(dtensor)
         inp = dtensor.redistribute(device_mesh, [Shard(0)]).to_local()
         self.assertEqual(inp, output)
+
+    @with_comms
+    def test_parallelize_module_with_star(self):
+        inp_size = [12, 10]
+        model = MLPModule(self.device_type)
+        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        model_tp = deepcopy(model)
+        model_tp = parallelize_module(
+            model_tp,
+            device_mesh,
+            {
+                "net*": ColwiseParallel(output_layouts=Replicate()),
+            },
+        )
+        self._compare_module(model, model_tp, inp_size, rank0_only=False)
+
+    @with_comms
+    def test_parallelize_module_with_question(self):
+        inp_size = [12, 10]
+        model = MLPModule(self.device_type)
+        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        model_tp = deepcopy(model)
+        model_tp = parallelize_module(
+            model_tp,
+            device_mesh,
+            {
+                "net?": ColwiseParallel(output_layouts=Replicate()),
+            },
+        )
+        self._compare_module(model, model_tp, inp_size, rank0_only=False)
+
+    @with_comms
+    def test_parallelize_module_with_digit(self):
+        inp_size = [12, 10]
+        model = MLPModule(self.device_type)
+        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        model_tp = deepcopy(model)
+        model_tp = parallelize_module(
+            model_tp,
+            device_mesh,
+            {
+                "net[1-2]": ColwiseParallel(output_layouts=Replicate()),
+            },
+        )
+        self._compare_module(model, model_tp, inp_size, rank0_only=False)
+
+    @with_comms
+    def test_parallelize_module_multi_wildcard(self):
+        inp_size = [12, 10]
+        model = MLPStacked(self.device_type, n_layers=2)
+        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        model_tp = deepcopy(model)
+        model_tp = parallelize_module(
+            model_tp,
+            device_mesh,
+            {
+                "layers.*.net[1]": ColwiseParallel(),
+                "layers.*.net[2]": RowwiseParallel(),
+            },
+        )
+        self._compare_module(model, model_tp, inp_size, rank0_only=False)
 
 
 if __name__ == "__main__":

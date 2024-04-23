@@ -333,7 +333,7 @@ void take_kernel(
     // Cannot use `OpaqueType`, as Tensor::data_ptr<OpaqueType<N>> is not implemented
     AT_DISPATCH_INDEX_TYPES(cuda::detail::canUse32BitIndexMath(input) ? ScalarType::Int : ScalarType::Long,
       "take_cuda_index", [&] {
-         const auto* __restrict__ indexed_ptr = input.template data_ptr<scalar_t>();
+         const auto* __restrict__ indexed_ptr = input.template const_data_ptr<scalar_t>();
          cuda_take_put_kernel<scalar_t, index_t>(iter, input,
             [indexed_ptr] __device__(scalar_t& iterated, const index_t offset) {
                iterated = indexed_ptr[offset];
@@ -385,7 +385,7 @@ void launch_masked_scatter_kernel(
       .resize_outputs(false)
       .add_output(self)
       .add_input(self)
-      .add_input(mask_cont)
+      .add_const_input(mask_cont)
       .add_input(maskPrefixSum)
       .build();
 

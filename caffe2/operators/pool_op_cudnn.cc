@@ -434,11 +434,7 @@ struct CuDNNMaxPoolFunctor {
         deterministic(op.GetSingleArgument<bool>("deterministic", false)) {}
 
   cudnnPoolingMode_t GetPoolingMode() const {
-#if CUDNN_VERSION_MIN(6, 0, 0)
     return deterministic ? CUDNN_POOLING_MAX_DETERMINISTIC : CUDNN_POOLING_MAX;
-#else
-    return CUDNN_POOLING_MAX;
-#endif
   }
 
   template <typename T, StorageOrder kOrder>

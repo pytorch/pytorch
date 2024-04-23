@@ -1,4 +1,5 @@
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <ATen/cuda/detail/DeviceThreadHandles.h>
 
 #include <c10/cuda/CUDACachingAllocator.h>
@@ -76,7 +77,7 @@ using CuBlasPoolType = DeviceThreadHandlePool<cublasHandle_t, createCublasHandle
 } // namespace
 
 void clearCublasWorkspaces() {
-  #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION < 12200
+  #if !defined(USE_ROCM)
       cublas_handle_stream_to_workspace().clear();
   #endif
 }
@@ -122,8 +123,20 @@ at::DataPtr getNewWorkspace() {
 }
 
 cublasHandle_t getCurrentCUDABlasHandle() {
-  int device;
+  c10::DeviceIndex device = 0;
   AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
+
+#if !defined(USE_ROCM)
+  CUcontext pctx = nullptr;
+  at::globalContext().getNVRTC().cuCtxGetCurrent(&pctx);
+  if (C10_UNLIKELY(!pctx)) {
+    // workaround for corner case where a primary context exists but is not
+    // the current context, seen in multithreaded use-cases
+    TORCH_WARN_ONCE("Attempting to run cuBLAS, but there was no current CUDA context! Attempting to set the primary context...");
+    at::globalContext().getNVRTC().cuDevicePrimaryCtxRetain(&pctx, device);
+    at::globalContext().getNVRTC().cuCtxSetCurrent(pctx);
+  }
+#endif
 
   // Thread local PoolWindows are lazily-initialized
   // to avoid initialization issues that caused hangs on Windows.
@@ -143,10 +156,14 @@ cublasHandle_t getCurrentCUDABlasHandle() {
   auto handle = myPoolWindow->reserve(device);
   auto stream = c10::cuda::getCurrentCUDAStream();
   TORCH_CUDABLAS_CHECK(cublasSetStream(handle, stream));
-#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION < 12200
-  // cuBLAS should not need an explicitly allocated workspace after CUDA 12.2
-  // to avoid increasing memory usage during graph captures
+#if !defined(USE_ROCM)
+  // We explicitly set the cublas workspace even though CUDA 12.2+ fixed the
+  // issue where memory usage increased during graph capture.
   // original issue: https://github.com/pytorch/pytorch/pull/83461
+  // This is because in CUDA 12.2+, the use of cudaMallocAsync in cublas
+  // will allocate memory dynamically (even if they're cheap) outside
+  // PyTorch's CUDA caching allocator. It's possible that CCA used up
+  // all the memory and cublas's cudaMallocAsync will return OOM
   cudaStream_t _stream = stream;
   auto key = std::make_tuple(static_cast<void *>(handle), static_cast<void *>(_stream));
   auto workspace_it = cublas_handle_stream_to_workspace().find(key);
@@ -154,8 +171,6 @@ cublasHandle_t getCurrentCUDABlasHandle() {
     workspace_it = cublas_handle_stream_to_workspace().insert(workspace_it, {key, getNewWorkspace()});
   }
   TORCH_CUDABLAS_CHECK(cublasSetWorkspace(handle, workspace_it->second.get(), getChosenWorkspaceSize()));
-#endif
-#if !defined(USE_ROCM)
   // On CUDA >= 11, and architecture >= Ampere, cuBLAS can use TF32 to speedup
   // FP32 data type calculations based on the value of the allow_tf32 flag.
   // To enable TF32, set the math mode of the handle to CUBLAS_TF32_TENSOR_OP_MATH.
@@ -164,8 +179,7 @@ cublasHandle_t getCurrentCUDABlasHandle() {
   } else {
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
   }
-#endif
-#if defined(USE_ROCM)
+#else
   hipblasAtomicsMode_t hipblas_mode;
   if (at::globalContext().deterministicAlgorithms()) {
     hipblas_mode = HIPBLAS_ATOMICS_NOT_ALLOWED;
@@ -180,7 +194,7 @@ cublasHandle_t getCurrentCUDABlasHandle() {
 #if (!defined(USE_ROCM) && !defined(_MSC_VER)) || (defined(USE_ROCM) && ROCM_VERSION >= 50700)
 cublasLtHandle_t getCurrentCUDABlasLtHandle() {
 #ifdef USE_ROCM
-  int device;
+  c10::DeviceIndex device = 0;
   AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
 
   // Thread local PoolWindows are lazily-initialized

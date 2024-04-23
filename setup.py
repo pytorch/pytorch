@@ -223,6 +223,9 @@
 #   USE_MIMALLOC
 #      Static link mimalloc into C10, and use mimalloc in alloc_cpu & alloc_free.
 #      By default, It is only enabled on Windows.
+#
+#   USE_PRIORITIZED_TEXT_FOR_LD
+#      Uses prioritized text form cmake/prioritized_text.txt for LD
 
 import sys
 
@@ -263,6 +266,7 @@ from tools.build_pytorch_libs import build_caffe2
 from tools.generate_torch_version import get_torch_version
 from tools.setup_helpers.cmake import CMake
 from tools.setup_helpers.env import build_type, IS_DARWIN, IS_LINUX, IS_WINDOWS
+from tools.setup_helpers.generate_linker_script import gen_linker_script
 
 ################################################################################
 # Parameters parsed from environment
@@ -365,7 +369,7 @@ def get_submodule_folders():
     with open(git_modules_path) as f:
         return [
             os.path.join(cwd, line.split("=", 1)[1].strip())
-            for line in f.readlines()
+            for line in f
             if line.strip().startswith("path")
         ]
 
@@ -548,7 +552,9 @@ class build_ext(setuptools.command.build_ext.build_ext):
         omp_lib_name = (
             "libomp.dylib" if os.uname().machine == "arm64" else "libiomp5.dylib"
         )
-        if os.path.join("@rpath", omp_lib_name) not in libs:
+        omp_rpath_lib_path = os.path.join("@rpath", omp_lib_name)
+        omp_loader_lib_path = os.path.join("@loader_path", omp_lib_name)
+        if omp_rpath_lib_path not in libs:
             return
 
         # Copy libomp/libiomp5 from rpath locations
@@ -558,6 +564,20 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 continue
             target_lib = os.path.join(self.build_lib, "torch", "lib", omp_lib_name)
             self.copy_file(source_lib, target_lib)
+            # Change OMP library load path to loader_path and delete old rpath
+            # This should prevent delocate from attempting to package another instance
+            # of OpenMP library in torch wheel
+            subprocess.check_call(
+                [
+                    "install_name_tool",
+                    "-change",
+                    omp_rpath_lib_path,
+                    omp_loader_lib_path,
+                    "-delete_rpath",
+                    rpath,
+                    libtorch_cpu_path,
+                ]
+            )
             break
 
         # Copy omp.h from OpenMP_C_FLAGS and copy it into include folder
@@ -1055,7 +1075,10 @@ def configure_extension_build():
             "convert-caffe2-to-onnx = caffe2.python.onnx.bin.conversion:caffe2_to_onnx",
             "convert-onnx-to-caffe2 = caffe2.python.onnx.bin.conversion:onnx_to_caffe2",
             "torchrun = torch.distributed.run:main",
-        ]
+        ],
+        "torchrun.logs_specs": [
+            "default = torch.distributed.elastic.multiprocessing:DefaultLogsSpecs",
+        ],
     }
 
     return extensions, cmdclass, packages, entry_points, extra_install_requires
@@ -1092,9 +1115,33 @@ def main():
         "networkx",
         "jinja2",
         "fsspec",
+        'mkl>=2021.1.1,<=2021.4.0; platform_system == "Windows"',
     ]
-    if IS_WINDOWS:
-        install_requires.append("mkl>=2021.1.1,<=2021.4.0")
+
+    use_prioritized_text = str(os.getenv("USE_PRIORITIZED_TEXT_FOR_LD", ""))
+    if (
+        use_prioritized_text == ""
+        and platform.system() == "Linux"
+        and platform.processor() == "aarch64"
+    ):
+        print_box(
+            """
+            WARNING: we strongly recommend enabling linker script optimization for ARM + CUDA.
+            To do so please export USE_PRIORITIZED_TEXT_FOR_LD=1
+            """
+        )
+    if use_prioritized_text == "1" or use_prioritized_text == "True":
+        gen_linker_script(
+            filein="cmake/prioritized_text.txt", fout="cmake/linker_script.ld"
+        )
+        linker_script_path = os.path.abspath("cmake/linker_script.ld")
+        os.environ["LDFLAGS"] = os.getenv("LDFLAGS", "") + f" -T{linker_script_path}"
+        os.environ["CFLAGS"] = (
+            os.getenv("CFLAGS", "") + " -ffunction-sections -fdata-sections"
+        )
+        os.environ["CXXFLAGS"] = (
+            os.getenv("CXXFLAGS", "") + " -ffunction-sections -fdata-sections"
+        )
 
     # Parse the command line and check the arguments before we proceed with
     # building deps and setup. We need to set values so `--help` works.
@@ -1122,7 +1169,7 @@ def main():
     install_requires += extra_install_requires
 
     extras_require = {
-        "optree": ["optree>=0.9.1"],
+        "optree": ["optree>=0.11.0"],
         "opt-einsum": ["opt-einsum>=3.3"],
     }
 
@@ -1130,7 +1177,7 @@ def main():
     with open(os.path.join(cwd, "README.md"), encoding="utf-8") as f:
         long_description = f.read()
 
-    version_range_max = max(sys.version_info[1], 10) + 1
+    version_range_max = max(sys.version_info[1], 12) + 1
     torch_package_data = [
         "py.typed",
         "bin/*",
@@ -1166,6 +1213,7 @@ def main():
         "include/ATen/cuda/*.h",
         "include/ATen/cuda/detail/*.cuh",
         "include/ATen/cuda/detail/*.h",
+        "include/ATen/cuda/tunable/*.h",
         "include/ATen/cudnn/*.h",
         "include/ATen/functorch/*.h",
         "include/ATen/ops/*.h",
@@ -1174,6 +1222,7 @@ def main():
         "include/ATen/hip/detail/*.cuh",
         "include/ATen/hip/detail/*.h",
         "include/ATen/hip/impl/*.h",
+        "include/ATen/hip/tunable/*.h",
         "include/ATen/mps/*.h",
         "include/ATen/miopen/*.h",
         "include/ATen/detail/*.h",
@@ -1184,11 +1233,15 @@ def main():
         "include/ATen/native/hip/*.h",
         "include/ATen/native/hip/*.cuh",
         "include/ATen/native/mps/*.h",
+        "include/ATen/native/nested/*.h",
         "include/ATen/native/quantized/*.h",
         "include/ATen/native/quantized/cpu/*.h",
+        "include/ATen/native/transformers/*.h",
         "include/ATen/native/sparse/*.h",
         "include/ATen/native/utils/*.h",
         "include/ATen/quantized/*.h",
+        "include/ATen/xpu/*.h",
+        "include/ATen/xpu/detail/*.h",
         "include/caffe2/serialize/*.h",
         "include/c10/*.h",
         "include/c10/macros/*.h",
@@ -1204,6 +1257,7 @@ def main():
         "include/c10/hip/*.h",
         "include/c10/hip/impl/*.h",
         "include/c10/xpu/*.h",
+        "include/c10/xpu/impl/*.h",
         "include/torch/*.h",
         "include/torch/csrc/*.h",
         "include/torch/csrc/api/include/torch/*.h",
@@ -1242,6 +1296,7 @@ def main():
         "include/torch/csrc/inductor/aoti_runtime/*.h",
         "include/torch/csrc/inductor/aoti_torch/*.h",
         "include/torch/csrc/inductor/aoti_torch/c/*.h",
+        "include/torch/csrc/inductor/aoti_torch/generated/*.h",
         "include/torch/csrc/jit/*.h",
         "include/torch/csrc/jit/backends/*.h",
         "include/torch/csrc/jit/generated/*.h",
@@ -1264,6 +1319,7 @@ def main():
         "include/torch/csrc/profiler/orchestration/*.h",
         "include/torch/csrc/profiler/stubs/*.h",
         "include/torch/csrc/profiler/unwind/*.h",
+        "include/torch/csrc/profiler/python/*.h",
         "include/torch/csrc/utils/*.h",
         "include/torch/csrc/tensor/*.h",
         "include/torch/csrc/lazy/backend/*.h",

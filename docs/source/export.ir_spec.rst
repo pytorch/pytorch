@@ -110,7 +110,7 @@ Example::
        def forward(self, x, y):
          return x + y
 
-   mod = torch._export.export(MyModule())
+   mod = torch.export.export(MyModule())
    print(mod.graph)
 
 The above is the textual representation of a Graph, with each line being a node.

@@ -197,6 +197,9 @@ Method::Method(ModulePtr owner, Function* function)
 Module Method::owner() const {
   return Module(owner_);
 }
+ObjectPtr Method::raw_owner() const {
+  return owner_;
+}
 void Method::run(Stack& stack) {
   stack.insert(stack.begin(), owner()._ivalue()); // self
   RECORD_TORCHSCRIPT_FUNCTION(name(), stack);

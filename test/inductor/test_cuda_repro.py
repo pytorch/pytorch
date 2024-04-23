@@ -14,7 +14,9 @@ from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
 from torch._inductor import config
 from torch._inductor.compile_fx import compile_fx_inner
+from torch._inductor.utils import run_and_get_code
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
@@ -1078,6 +1080,22 @@ class CudaReproTests(TestCase):
 
         self.assertEqual(o1, o2)
 
+    def test_cat_int8_one_kernel(self):
+        @torch.compile()
+        def cat(inps):
+            return torch.cat(inps) + 1
+
+        for dtype in [torch.uint8, torch.int8]:
+            inps = [
+                torch.empty([256, 256], dtype=dtype, device="cuda") for _ in range(4)
+            ]
+
+            out, code = run_and_get_code(cat, inps)
+            self.assertEqual(torch.cat(inps) + 1, out)
+            FileCheck().check_not("aten.cat.default(").check_count(
+                ".run(", 1, exactly=True
+            ).run(code[0])
+
     @config.patch("triton.use_block_ptr", True)
     def test_selecsls42b_misaligned_address(self):
         # https://github.com/openai/triton/issues/2836
@@ -1122,7 +1140,7 @@ class CudaReproTests(TestCase):
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
     from torch.testing._internal.inductor_utils import HAS_CUDA
 
     if HAS_CUDA and not TEST_WITH_ASAN:

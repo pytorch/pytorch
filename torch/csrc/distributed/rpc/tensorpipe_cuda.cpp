@@ -98,7 +98,7 @@ class TensorpipeCudaConverter : public TensorpipeDeviceTypeConverter {
   }
 
   at::DataPtr allocateTensorForReceiving(
-      int deviceIndex,
+      c10::DeviceIndex deviceIndex,
       size_t length,
       const std::vector<c10::Stream>& streams,
       tensorpipe::Allocation& allocation) const override {

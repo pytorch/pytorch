@@ -211,9 +211,15 @@ def _get_module_name_filter(module_name: str):
         # }
         # get_attr nodes doesn't have nn_module_stack?
         nn_module_stack = n.meta.get("nn_module_stack", {})
-        names = [
-            n[len("L__self___") :].replace("_", ".") for n in nn_module_stack.keys()
-        ]
+
+        def _normalize_path(n):
+            prefix = 0
+            # TODO This is non standard behavior and should be removed when we migrate off capture_pre_autograd_graph.
+            if n.startswith("L['self']."):
+                prefix = len("L['self'].")
+            return n[prefix:]
+
+        names = [_normalize_path(n) for n, _ in nn_module_stack.values()]
         return module_name in names
 
     return module_name_filter
@@ -261,6 +267,8 @@ class XNNPACKQuantizer(Quantizer):
     STATIC_QAT_ONLY_OPS = [
         "conv_bn_relu",
         "conv_bn",
+        "conv_transpose_bn_relu",
+        "conv_transpose_bn",
     ]
 
     # static quantization ops (both PTQ and QAT)
@@ -270,6 +278,7 @@ class XNNPACKQuantizer(Quantizer):
         "linear",
         "conv_relu",
         "conv",
+        "conv_transpose_relu",
         "adaptive_avg_pool2d",
         # TODO: move this to BoltNNQuantizer?
         "gru_io_only",

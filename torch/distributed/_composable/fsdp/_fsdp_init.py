@@ -7,6 +7,7 @@ import torch.nn as nn
 
 from torch.distributed._tensor import DeviceMesh, DTensor, init_device_mesh
 from torch.distributed.device_mesh import _get_device_handle
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from ._fsdp_common import _is_composable_with_fsdp, FSDPMeshInfo, HSDPMeshInfo
 from ._fsdp_state import _get_module_fsdp_state
 
@@ -118,7 +119,6 @@ def _move_states_to_device(
     params: List[nn.Parameter],
     buffers: List[torch.Tensor],
     device: torch.device,
-    mesh_info: FSDPMeshInfo,
 ) -> None:
     """
     We have FSDP move states to device for simpler and faster initialization
@@ -126,13 +126,13 @@ def _move_states_to_device(
     rather than modules since modules to support ignoring parameters/buffers in
     the future.
     """
-    # TODO: De-duplicate with `_apply` after `swap_tensors` path lands:
-    # https://github.com/pytorch/pytorch/issues/115792
+    # Follow the logic in `nn.Module._apply`
     for tensor in itertools.chain(params, buffers):
-        if tensor.device == device:
+        if tensor.device == device or tensor.device.type == "meta":
+            # Keep meta-device tensors on meta device for deferred init
             continue
         if isinstance(tensor, DTensor):
-            if (dtensor_mesh_type := tensor._spec.mesh.device_type) != device.type:
+            if (dtensor_mesh_type := tensor.device_mesh.device_type) != device.type:
                 raise ValueError(
                     "Requires DTensor to have mesh of the same type as the FSDP mesh "
                     f"but got {dtensor_mesh_type} for DTensor and {device.type} for FSDP"
@@ -140,4 +140,9 @@ def _move_states_to_device(
             raise AssertionError(
                 f"Expects DTensor to be moved to {dtensor_mesh_type} but got {tensor.device}"
             )
-        tensor.data = tensor.to(device)
+        if is_traceable_wrapper_subclass(tensor):
+            with torch.no_grad():  # avoid autograd increasing C++ refcount by 1
+                tensor_on_device = nn.Parameter(tensor.to(device))
+            torch.utils.swap_tensors(tensor, tensor_on_device)
+        else:
+            tensor.data = tensor.to(device)

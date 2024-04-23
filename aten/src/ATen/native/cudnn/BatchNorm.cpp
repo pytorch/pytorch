@@ -3,6 +3,12 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAConfig.h>
 
+#ifdef __HIP_PLATFORM_AMD__
+#include <ATen/native/cudnn/hip/BatchNorm.h>
+#else
+#include <ATen/native/cudnn/BatchNorm.h>
+#endif
+
 #if !AT_CUDNN_ENABLED()
 
 namespace at {
@@ -35,17 +41,23 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
   AT_ERROR("cudnn_batch_norm_backward: ATen not compiled with cuDNN support");
 }
 
+size_t _get_cudnn_batch_norm_reserve_space_size(
+    const Tensor& input_t,
+    bool training) {
+  AT_ERROR(
+      "_get_cudnn_batch_norm_reserve_space_size: ATen not compiled with cuDNN support");
+}
+
 } // namespace native
 } // namespace at
 
 #else // AT_CUDNN_ENABLED
 
+#include <ATen/TensorUtils.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cudnn/Descriptors.h>
 #include <ATen/cudnn/Types.h>
 #include <ATen/cudnn/Utils.h>
-
-#include <ATen/TensorUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -78,15 +90,8 @@ cudnnBatchNormMode_t getCudnnBatchNormMode(
     return CUDNN_BATCHNORM_PER_ACTIVATION;
   } else if (training && memory_format == at::MemoryFormat::ChannelsLast) {
     return CUDNN_BATCHNORM_SPATIAL_PERSISTENT;
-
   } else if (training && memory_format == at::MemoryFormat::ChannelsLast3d) {
-
-#if CUDNN_VERSION >= 8100
     return CUDNN_BATCHNORM_SPATIAL_PERSISTENT;
-#else
-    return CUDNN_BATCHNORM_SPATIAL;
-#endif // CUDNN_VERSION >= 8100
-
   } else {
     // TODO: The new CUDNN_BATCHNORM_SPATIAL_PERSISTENT mode was
     // introduced in CuDNN 7 for performance optimization, but it results in
@@ -97,6 +102,21 @@ cudnnBatchNormMode_t getCudnnBatchNormMode(
 }
 
 } // namespace
+
+size_t _get_cudnn_batch_norm_reserve_space_size(
+    const Tensor& input_t,
+    bool training) {
+  size_t reserve_size;
+  TensorArg input{input_t, "input", 1};
+  TensorDescriptor idesc{*input, 4};
+  auto handle = getCudnnHandle();
+  cudnnBatchNormMode_t mode = getCudnnBatchNormMode(
+      training, input->suggest_memory_format(), input->dim());
+  auto op = CUDNN_BATCHNORM_OPS_BN;
+  AT_CUDNN_CHECK(cudnnGetBatchNormalizationTrainingExReserveSpaceSize(
+      handle, mode, op, nullptr, idesc.desc(), &reserve_size));
+  return reserve_size;
+}
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
     const Tensor& input_t,
@@ -186,9 +206,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
     Tensor workspace = at::empty(workspace_size, input->options().dtype(kByte));
 
     // get the reserved size and allocate as tensor
-    size_t reserve_size;
-    AT_CUDNN_CHECK(cudnnGetBatchNormalizationTrainingExReserveSpaceSize(
-        handle, mode, op, nullptr, idesc.desc(), &reserve_size));
+    size_t reserve_size =
+        _get_cudnn_batch_norm_reserve_space_size(input_t, true /* training */);
     reserve = at::empty(reserve_size, input->options().dtype(kByte));
 
     AT_CUDNN_CHECK(cudnnBatchNormalizationForwardTrainingEx(
@@ -198,14 +217,14 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
         &one,
         &zero,
         idesc.desc(),
-        input->data_ptr(),
+        input->const_data_ptr(),
         nullptr, // z descriptor for BN-Add-Relu
         nullptr, // z for BN-Add-ReLU
         idesc.desc(),
         output->data_ptr(),
         wdesc.desc(),
-        weight->data_ptr(),
-        bias->data_ptr(),
+        weight->const_data_ptr(),
+        bias->const_data_ptr(),
         exponential_average_factor,
         at::maybe_data_ptr(running_mean),
         at::maybe_data_ptr(running_var),
@@ -228,14 +247,14 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
         &one,
         &zero,
         idesc.desc(),
-        input->data_ptr(),
+        input->const_data_ptr(),
         idesc.desc(),
         output->data_ptr(),
         wdesc.desc(),
-        weight->data_ptr(),
-        bias->data_ptr(),
-        running_mean->data_ptr(),
-        running_var->data_ptr(),
+        weight->const_data_ptr(),
+        bias->const_data_ptr(),
+        running_mean->const_data_ptr(),
+        running_var->const_data_ptr(),
         epsilon));
   }
 
@@ -348,23 +367,23 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
       &one,
       &zero,
       idesc.desc(),
-      input->data_ptr(),
+      input->const_data_ptr(),
       nullptr,
       nullptr,
       odesc.desc(),
-      grad_output->data_ptr(),
+      grad_output->const_data_ptr(),
       nullptr,
       nullptr,
       idesc.desc(),
       grad_input_t.data_ptr(),
       wdesc.desc(),
-      weight->data_ptr(),
+      weight->const_data_ptr(),
       nullptr,
       grad_weight_t.data_ptr(),
       grad_bias_t.data_ptr(),
       epsilon,
-      save_mean->data_ptr(),
-      save_var->data_ptr(),
+      save_mean->const_data_ptr(),
+      save_var->const_data_ptr(),
       nullptr,
       workspace.data_ptr(),
       workspace_size,

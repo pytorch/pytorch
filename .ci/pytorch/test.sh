@@ -6,6 +6,23 @@
 
 set -ex
 
+# shellcheck source=./common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+
+# Workaround for dind-rootless userid mapping (https://github.com/pytorch/ci-infra/issues/96)
+WORKSPACE_ORIGINAL_OWNER_ID=$(stat -c '%u' "/var/lib/jenkins/workspace")
+cleanup_workspace() {
+  echo "sudo may print the following warning message that can be ignored. The chown command will still run."
+  echo "    sudo: setrlimit(RLIMIT_STACK): Operation not permitted"
+  echo "For more details refer to https://github.com/sudo-project/sudo/issues/42"
+  sudo chown -R "$WORKSPACE_ORIGINAL_OWNER_ID" /var/lib/jenkins/workspace
+}
+# Disable shellcheck SC2064 as we want to parse the original owner immediately.
+# shellcheck disable=SC2064
+trap_add cleanup_workspace EXIT
+sudo chown -R jenkins /var/lib/jenkins/workspace
+git config --global --add safe.directory /var/lib/jenkins/workspace
+
 echo "Environment variables:"
 env
 
@@ -90,9 +107,6 @@ if [[ -n $TESTS_TO_INCLUDE ]]; then
   INCLUDE_CLAUSE="--include $TESTS_TO_INCLUDE"
 fi
 
-# shellcheck source=./common.sh
-source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
-
 echo "Environment variables"
 env
 
@@ -139,6 +153,8 @@ if [[ "$TEST_CONFIG" == *crossref* ]]; then
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  # regression in ROCm 6.0 on MI50 CI runners due to hipblaslt; remove in 6.1
+  export VALGRIND=OFF
   # Print GPU info
   rocminfo
   rocminfo | grep -E 'Name:.*\sgfx|Marketing'
@@ -160,6 +176,8 @@ if [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
   # but this script should be runnable by any user, including root
   export PATH="$HOME/.local/bin:$PATH"
 fi
+
+install_tlparse
 
 # DANGER WILL ROBINSON.  The LD_PRELOAD here could cause you problems
 # if you're not careful.  Check this if you made some changes and the
@@ -207,8 +225,6 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     export LD_PRELOAD=/usr/lib/llvm-15/lib/clang/15.0.7/lib/linux/libclang_rt.asan-x86_64.so
     # Disable valgrind for asan
     export VALGRIND=OFF
-    # Increase stack size, because ASAN red zones use more stack
-    ulimit -s 81920
 
     (cd test && python -c "import torch; print(torch.__version__, torch.version.git_version)")
     echo "The next four invocations are expected to crash; if they don't that means ASAN/UBSAN is misconfigured"
@@ -288,10 +304,19 @@ test_inductor_distributed() {
   pytest test/inductor/test_torchinductor.py -k test_multi_gpu
   pytest test/inductor/test_aot_inductor.py -k test_non_default_cuda_device
   pytest test/inductor/test_aot_inductor.py -k test_replicate_on_devices
+  pytest test/distributed/test_c10d_functional_native.py
   pytest test/distributed/_tensor/test_dtensor_compile.py
   pytest test/distributed/tensor/parallel/test_fsdp_2d_parallel.py
   pytest test/distributed/_composable/fsdp/test_fully_shard_comm.py
   pytest test/distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_multi_group
+  pytest test/distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_with_activation_checkpointing
+  pytest test/distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_2d_mlp
+  pytest test/distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_hsdp
+  pytest test/distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_2d_transformer_checkpoint_resume
+  pytest test/distributed/_composable/fsdp/test_fully_shard_frozen.py
+  pytest test/distributed/_composable/fsdp/test_fully_shard_mixed_precision.py -k test_compute_dtype
+  pytest test/distributed/_composable/fsdp/test_fully_shard_mixed_precision.py -k test_reduce_dtype
+  pytest test/distributed/fsdp/test_fsdp_tp_integration.py -k test_fsdp_tp_integration
 
   # this runs on both single-gpu and multi-gpu instance. It should be smart about skipping tests that aren't supported
   # with if required # gpus aren't available
@@ -303,14 +328,22 @@ test_inductor() {
   python tools/dynamo/verify_dynamo.py
   python test/run_test.py --inductor --include test_modules test_ops test_ops_gradients test_torch --verbose
   # Do not add --inductor for the following inductor unit tests, otherwise we will fail because of nested dynamo state
-  python test/run_test.py --include inductor/test_torchinductor inductor/test_torchinductor_opinfo --verbose
+  python test/run_test.py --include inductor/test_torchinductor inductor/test_torchinductor_opinfo inductor/test_aot_inductor --verbose
 
   # docker build uses bdist_wheel which does not work with test_aot_inductor
   # TODO: need a faster way to build
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
       BUILD_AOT_INDUCTOR_TEST=1 python setup.py develop
-      CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aot_inductor
+      CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_aoti_inference
   fi
+}
+
+test_inductor_cpp_wrapper_abi_compatible() {
+  export TORCHINDUCTOR_ABI_COMPATIBLE=1
+  echo "Testing Inductor cpp wrapper mode with TORCHINDUCTOR_ABI_COMPATIBLE=1"
+  # cpu stack allocation causes segfault and needs more investigation
+  TORCHINDUCTOR_STACK_ALLOCATION=0 python test/run_test.py --include inductor/test_cpu_cpp_wrapper
+  python test/run_test.py --include inductor/test_cuda_cpp_wrapper
 }
 
 # "Global" flags for inductor benchmarking controlled by TEST_CONFIG
@@ -413,6 +446,17 @@ test_perf_for_dashboard() {
         TORCHINDUCTOR_MAX_AUTOTUNE=1 python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_max_autotune_${suite}_${dtype}_${mode}_cuda_${target}.csv"
+      fi
+      if [[ "$DASHBOARD_TAG" == *cudagraphs_low_precision-true* ]] && [[ "$mode" == "inference" ]]; then
+        # TODO: This has a new dtype called quant and the benchmarks script needs to be updated to support this.
+        # The tentative command is as follows. It doesn't work now, but it's ok because we only need mock data
+        # to fill the dashboard.
+        python "benchmarks/dynamo/$suite.py" \
+          "${target_flag[@]}" --"$mode" --quant --backend "$backend" "$@" \
+          --output "$TEST_REPORTS_DIR/${backend}_cudagraphs_low_precision_${suite}_quant_${mode}_cuda_${target}.csv" || true
+        # Copy cudagraph results as mock data, easiest choice?
+        cp "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_cuda_${target}.csv" \
+          "$TEST_REPORTS_DIR/${backend}_cudagraphs_low_precision_${suite}_quant_${mode}_cuda_${target}.csv"
       fi
     done
   done
@@ -529,6 +573,56 @@ test_inductor_torchbench_smoketest_perf() {
       "$TEST_REPORTS_DIR/inductor_training_smoketest_$test.csv" \
       --expected benchmarks/dynamo/expected_ci_perf_inductor_torchbench.csv
   done
+}
+
+test_inductor_torchbench_cpu_smoketest_perf(){
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+
+  #set jemalloc
+  JEMALLOC_LIB="/usr/lib/x86_64-linux-gnu/libjemalloc.so.2"
+  IOMP_LIB="$(dirname "$(which python)")/../lib/libiomp5.so"
+  export LD_PRELOAD="$JEMALLOC_LIB":"$IOMP_LIB":"$LD_PRELOAD"
+  export MALLOC_CONF="oversize_threshold:1,background_thread:true,metadata_thp:auto,dirty_decay_ms:-1,muzzy_decay_ms:-1"
+  export KMP_AFFINITY=granularity=fine,compact,1,0
+  export KMP_BLOCKTIME=1
+  CORES=$(lscpu | grep Core | awk '{print $4}')
+  export OMP_NUM_THREADS=$CORES
+  end_core=$(( CORES-1 ))
+
+  MODELS_SPEEDUP_TARGET=benchmarks/dynamo/expected_ci_speedup_inductor_torchbench_cpu.csv
+
+  grep -v '^ *#' < "$MODELS_SPEEDUP_TARGET" | while IFS=',' read -r -a model_cfg
+  do
+    local model_name=${model_cfg[0]}
+    local data_type=${model_cfg[1]}
+    local speedup_target=${model_cfg[4]}
+    if [[ ${model_cfg[3]} == "cpp" ]]; then
+      export TORCHINDUCTOR_CPP_WRAPPER=1
+    else
+      unset TORCHINDUCTOR_CPP_WRAPPER
+    fi
+    local output_name="$TEST_REPORTS_DIR/inductor_inference_${model_cfg[0]}_${model_cfg[1]}_${model_cfg[2]}_${model_cfg[3]}_cpu_smoketest.csv"
+
+    if [[ ${model_cfg[2]} == "dynamic" ]]; then
+      taskset -c 0-"$end_core" python benchmarks/dynamo/torchbench.py \
+        --inference --performance --"$data_type" -dcpu -n50 --only "$model_name" --dynamic-shapes \
+        --dynamic-batch-only --freezing --timeout 9000 --backend=inductor --output "$output_name"
+    else
+      taskset -c 0-"$end_core" python benchmarks/dynamo/torchbench.py \
+        --inference --performance --"$data_type" -dcpu -n50 --only "$model_name" \
+        --freezing --timeout 9000 --backend=inductor --output "$output_name"
+    fi
+    cat "$output_name"
+    # The threshold value needs to be actively maintained to make this check useful.
+    python benchmarks/dynamo/check_perf_csv.py -f "$output_name" -t "$speedup_target"
+  done
+}
+
+test_torchbench_gcp_smoketest(){
+  pushd "${TORCHBENCHPATH}"
+  python test.py -v
+  popd
 }
 
 test_python_gloo_with_tls() {
@@ -930,7 +1024,8 @@ test_bazel() {
 
     tools/bazel test --config=cpu-only --test_timeout=480 --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA :all_tests
   else
-    tools/bazel test --test_output=errors \
+    # Increase the test timeout to 480 like CPU tests because modules_test frequently timeout
+    tools/bazel test --test_timeout=480 --test_output=errors \
       //:any_test \
       //:autograd_test \
       //:dataloader_test \
@@ -1104,6 +1199,14 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   if [[ "${TEST_CONFIG}" == *inductor_torchbench_smoketest_perf* ]]; then
     checkout_install_torchbench hf_Bert hf_Albert nanogpt timm_vision_transformer
     PYTHONPATH=$(pwd)/torchbench test_inductor_torchbench_smoketest_perf
+  elif [[ "${TEST_CONFIG}" == *inductor_torchbench_cpu_smoketest_perf* ]]; then
+    checkout_install_torchbench timm_vision_transformer phlippe_densenet basic_gnn_gcn \
+      llama_v2_7b_16h resnet50 timm_efficientnet mobilenet_v3_large timm_resnest \
+      shufflenet_v2_x1_0 hf_GPT2
+    PYTHONPATH=$(pwd)/torchbench test_inductor_torchbench_cpu_smoketest_perf
+  elif [[ "${TEST_CONFIG}" == *torchbench_gcp_smoketest* ]]; then
+    checkout_install_torchbench
+    TORCHBENCHPATH=$(pwd)/torchbench test_torchbench_gcp_smoketest
   else
     checkout_install_torchbench
     # Do this after checkout_install_torchbench to ensure we clobber any
@@ -1113,6 +1216,9 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
     fi
     PYTHONPATH=$(pwd)/torchbench test_dynamo_benchmark torchbench "$id"
   fi
+elif [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper_abi_compatible* ]]; then
+  install_torchvision
+  test_inductor_cpp_wrapper_abi_compatible
 elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 ]]; then
   install_torchvision
   test_inductor

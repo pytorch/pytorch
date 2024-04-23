@@ -18,11 +18,18 @@ concurrency:
 permissions: read-all
 
 jobs:
-  linux-focal-rocm5_7-py3_8-build:
-    name: linux-focal-rocm5.7-py3.8
-    uses: ./.github/workflows/_linux-build.yml
+  target-determination:
+    name: before-test
+    uses: ./.github/workflows/target_determination.yml
+    permissions:
+      id-token: write
+      contents: read
+
+  linux-focal-rocm6_0-py3_8-build:
+    name: linux-focal-rocm6.0-py3.8
+    uses: ./.github/workflows/_linux-build-label.yml
     with:
-      build-environment: linux-focal-rocm5.7-py3.8
+      build-environment: linux-focal-rocm6.0-py3.8
       docker-image-name: pytorch-linux-focal-rocm-n-py3
       sync-tag: rocm-build
       test-matrix: |
@@ -35,14 +42,16 @@ jobs:
           { config: "default", shard: 6, num_shards: 6, runner: "linux.rocm.gpu.2" },
         ]}
 
-  linux-focal-rocm5_7-py3_8-test:
+  linux-focal-rocm6_0-py3_8-test:
     permissions:
       id-token: write
       contents: read
-    name: linux-focal-rocm5.7-py3.8
+    name: linux-focal-rocm6.0-py3.8
     uses: ./.github/workflows/_rocm-test.yml
-    needs: linux-focal-rocm5_7-py3_8-build
+    needs:
+      - linux-focal-rocm6_0-py3_8-build
+      - target-determination
     with:
-      build-environment: linux-focal-rocm5.7-py3.8
-      docker-image: ${{ needs.linux-focal-rocm5_7-py3_8-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-rocm5_7-py3_8-build.outputs.test-matrix }}
+      build-environment: linux-focal-rocm6.0-py3.8
+      docker-image: ${{ needs.linux-focal-rocm6_0-py3_8-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-rocm6_0-py3_8-build.outputs.test-matrix }}

@@ -96,7 +96,6 @@ from .gen_inplace_or_view_type import (
     WRAPPER_REGISTRATION,
 )
 from .gen_trace_type import (
-    declare_returned_variables,
     get_return_value,
     MANUAL_AUTOGRAD_AND_TRACER,
     MANUAL_BACKEND,
@@ -418,7 +417,8 @@ ENFORCE_SAME_TENSOR_STORAGE = CodeTemplate(
     """\
 if (${tensor_name}_storage_saved.has_value() &&
     !at::impl::dispatch_mode_enabled() &&
-    !at::impl::tensor_has_dispatch(${tensor_name}))
+    !at::impl::tensor_has_dispatch(${tensor_name}) &&
+    !at::impl::tensor_has_dispatch(${out_tensor_name}))
   TORCH_INTERNAL_ASSERT(${tensor_name}_storage_saved.value().is_alias_of(${out_tensor_name}.storage()));
 """
 )
@@ -735,7 +735,7 @@ FW_DERIVATIVE_DEFINED_GRAD_TEMPLATE = CodeTemplate(
 auto ${inp_name}_t_raw = toNonOptFwGrad(${inp});
 auto ${inp_name}_tensor = toNonOptTensor(${inp});
 auto ${inp_name}_t = (${inp_name}_t_raw.defined() || !${inp_name}_tensor.defined())
-  ? ${inp_name}_t_raw : at::${zeros_fn}(${inp_name}_tensor.sizes(), ${inp_name}_tensor.options());
+  ? ${inp_name}_t_raw : at::${zeros_fn}(${inp_name}_tensor.sym_sizes(), ${inp_name}_tensor.options());
 """
 )
 
@@ -1252,7 +1252,7 @@ def emit_body(
                 if a.name == derivative_var_name:
                     break
             else:
-                raise AssertionError()
+                raise AssertionError
             return f"grad_fn->should_compute_output({edge_off})"
 
         if is_inplace_foreach:
@@ -1873,9 +1873,9 @@ def emit_body(
                     if inp.name in refargname2inplace_foreacharg:
                         inp_name = refargname2inplace_foreacharg[inp.name].name
                 zeros_fn = (
-                    "zeros"
+                    "zeros_symint"
                     if inplace and inp.name == "self"
-                    else "_efficientzerotensor"
+                    else "_efficientzerotensor_symint"
                 )
                 if inp.name in derivative.required_inputs_fw_grad:
                     unpacked_arguments += (
@@ -2130,7 +2130,6 @@ def emit_body(
         body.extend(emit_check_inplace())
         body.extend(emit_original_self_definition())
         body.extend(setup_derivative(differentiable_inputs))
-    body.append(declare_returned_variables(f))
 
     body.append(emit_call(f, unpacked_bindings, try_jit_decomposition))
     if requires_derivative:

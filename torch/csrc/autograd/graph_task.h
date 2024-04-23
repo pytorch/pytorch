@@ -127,11 +127,8 @@ struct GraphTask : std::enable_shared_from_this<GraphTask> {
   // These will be synced with leaf_streams in exec_post_processing.
   std::vector<c10::optional<c10::Stream>> caller_current_streams_;
 
-  // Collects caller_current_streams_ for cuda/rocm.
-  void stash_current_cuda_streams();
-
-  // Collects caller_current_streams_ for privateuse1.
-  void stash_current_privateuse1_streams();
+  // Collects caller_current_streams_ for the accelerator device.
+  void stash_current_streams();
 
   void init_to_execute(
       Node& graph_root,
