@@ -5,7 +5,7 @@
 # This source code is licensed under the BSD license found in the
 # LICENSE file in the root directory of this source tree.
 """Tracks the running statistics per mini-batch instead of micro-batch."""
-from typing import TypeVar, cast
+from typing import TypeVar, Optional, cast
 
 import torch
 from torch import Tensor, nn
@@ -33,7 +33,7 @@ class DeferredBatchNorm(_BatchNorm):
         self,
         num_features: int,
         eps: float = 1e-5,
-        momentum: float = 0.1,
+        momentum: Optional[float] = 0.1,
         affine: bool = True,
         chunks: int = 1,
     ) -> None:

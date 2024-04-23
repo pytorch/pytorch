@@ -111,7 +111,7 @@ static c10::optional<c10::ScalarType> PromoteScalarTypes(
 
 // Type promotion between scalars and tensors
 // per logic here
-// https://pytorch.org/docs/master/tensor_attributes.html#tensor-attributes
+// https://pytorch.org/docs/main/tensor_attributes.html#tensor-attributes
 static c10::optional<c10::ScalarType> PromoteScalarTypesWithCategory(
     const std::vector<c10::ScalarType>& typesFromTensors,
     const std::vector<c10::ScalarType>& typesFromScalars) {
@@ -272,7 +272,7 @@ static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
       // are tensors or scalars. (Previously only scalars support implicit
       // casting).
       // Per logic here
-      // https://pytorch.org/docs/master/tensor_attributes.html#tensor-attributes
+      // https://pytorch.org/docs/main/tensor_attributes.html#tensor-attributes
       st = PromoteScalarTypesWithCategory(typesFromTensors, typesFromScalars);
     }
   }

@@ -549,8 +549,8 @@
   structured_delegate: add.out
   variants: function, method
   dispatch:
-    SparseCPU, SparseCUDA: add_sparse
-    SparseCsrCPU, SparseCsrCUDA: add_sparse_csr
+    SparseCPU, SparseCUDA, SparseMeta: add_sparse
+    SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: add_sparse_csr
     MkldnnCPU: mkldnn_add
     ZeroTensor: add_zerotensor
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_add_Tensor
@@ -561,8 +561,8 @@
   variants: method
   structured_delegate: add.out
   dispatch:
-    SparseCPU, SparseCUDA: add_sparse_
-    SparseCsrCPU, SparseCsrCUDA: add_sparse_csr_
+    SparseCPU, SparseCUDA, SparseMeta: add_sparse_
+    SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: add_sparse_csr_
     MkldnnCPU: mkldnn_add_
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_add__Tensor
   tags: pointwise
@@ -575,9 +575,9 @@
     Generic: add (AllAndComplex, BFloat16, Half, ComplexHalf)
     ScalarOnly: add (Bool)
   dispatch:
-    SparseCPU: add_out_sparse_cpu
+    SparseCPU, SparseMeta: add_out_sparse_cpu
     SparseCUDA: add_out_sparse_cuda
-    SparseCsrCPU: add_out_sparse_compressed_cpu
+    SparseCsrCPU, SparseCsrMeta: add_out_sparse_compressed_cpu
     SparseCsrCUDA: add_out_sparse_compressed_cuda
     MkldnnCPU: mkldnn_add_out
     MPS: add_out_mps
@@ -3268,6 +3268,8 @@
   autogen: native_layer_norm_backward.out
   tags: core
 
+- func: rms_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, float? eps=None) -> Tensor
+
 - func: nan_to_num(Tensor self, float? nan=None, float? posinf=None, float? neginf=None) -> Tensor
   variants: function, method
   dispatch:
@@ -3340,9 +3342,30 @@
   dispatch:
     CUDA: _cslt_sparse_mm_search
 
+- func: _sparse_semi_structured_tile(Tensor input, str algorithm="", bool use_cutlass=True) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
+  dispatch:
+    CUDA: _sparse_semi_structured_tile
+
+- func: _sparse_semi_structured_apply(Tensor input, Tensor thread_masks) -> (Tensor, Tensor)
+  dispatch:
+    CUDA: _sparse_semi_structured_apply
+
+- func: _sparse_semi_structured_apply_dense(Tensor input, Tensor thread_masks) -> Tensor
+  dispatch:
+    CUDA: _sparse_semi_structured_apply_dense
+
+# DEPRECATED: Use torch.__sparse_semi_structured_mm/torch._sparse_semi_structured_addmm instead
 - func: _sparse_semi_structured_linear(Tensor input, Tensor weight, Tensor meta, *, Tensor? bias=None, str? activation=None, ScalarType? out_dtype=None) -> Tensor
   dispatch:
     CUDA: _sparse_semi_structured_linear
+
+- func: _sparse_semi_structured_mm(Tensor mat1, Tensor mat1_meta, Tensor mat2, *, ScalarType? out_dtype=None) -> Tensor
+  dispatch:
+    CUDA: _sparse_semi_structured_mm
+
+- func: _sparse_semi_structured_addmm(Tensor input, Tensor mat1, Tensor mat1_meta, Tensor mat2, *, Scalar alpha=1, Scalar beta=1, ScalarType? out_dtype=None) -> Tensor
+  dispatch:
+    CUDA: _sparse_semi_structured_addmm
 
 - func: _mixed_dtypes_linear(Tensor input, Tensor weight, Tensor scale, *, Tensor? bias=None, str? activation=None) -> Tensor
   dispatch:
@@ -4084,10 +4107,12 @@
 
 - func: _int_mm(Tensor self, Tensor mat2) -> Tensor
   dispatch:
+    CPU: _int_mm_cpu
     CUDA: _int_mm_cuda
 
 - func: _int_mm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
+    CPU: _int_mm_out_cpu
     CUDA: _int_mm_out_cuda
 
 - func: _convert_weight_to_int4pack(Tensor self, int innerKTiles) -> Tensor
@@ -5691,8 +5716,8 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: sum
-    SparseCPU, SparseCUDA: sum_coo
-    SparseCsrCPU, SparseCsrCUDA: sum_csr
+    SparseCPU, SparseCUDA, SparseMeta: sum_coo
+    SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: sum_csr
   autogen: sum.out
 
 - func: sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
@@ -6156,6 +6181,58 @@
     CompositeExplicitAutogradNonFunctional: _nested_view_from_buffer_copy
   autogen: _nested_view_from_buffer_copy.out
 
+- func: _nested_view_from_jagged(Tensor(a) self, Tensor offsets, Tensor dummy, Tensor? lengths=None, int ragged_idx=1) -> Tensor(a)
+  variants: function
+  device_check: NoCheck
+  dispatch: {}
+
+- func: _nested_view_from_jagged_copy(Tensor self, Tensor offsets, Tensor dummy, Tensor? lengths=None, int ragged_idx=1) -> Tensor
+  variants: function
+  device_check: NoCheck
+  tags: view_copy
+  dispatch:
+    CompositeExplicitAutogradNonFunctional: _nested_view_from_jagged_copy
+  autogen: _nested_view_from_jagged_copy.out
+
+- func: _nested_get_values(Tensor(a) self) -> Tensor(a)
+  variants: function
+  device_check: NoCheck
+  dispatch: {}
+
+- func: _nested_get_values_copy(Tensor self) -> Tensor
+  variants: function
+  device_check: NoCheck
+  tags: view_copy
+  dispatch:
+    CompositeExplicitAutogradNonFunctional: _nested_get_values_copy
+  autogen: _nested_get_values_copy.out
+
+- func: _nested_get_offsets(Tensor self) -> Tensor
+  variants: function
+  device_check: NoCheck
+  dispatch: {}
+
+# returns undefined Tensor if no lengths present
+- func: _nested_get_lengths(Tensor self) -> Tensor
+  variants: function
+  device_check: NoCheck
+  dispatch: {}
+
+- func: _nested_get_ragged_idx(Tensor self) -> int
+  variants: function
+  device_check: NoCheck
+  dispatch: {}
+
+- func: _nested_get_jagged_dummy(Tensor any) -> Tensor
+  category_override: dummy
+  dispatch: {}
+
+- func: _nested_compute_contiguous_strides_offsets(Tensor nested_size) -> (Tensor, Tensor)
+  variants: function
+  device_check: NoCheck
+  dispatch:
+    CPU, CUDA: _nested_compute_contiguous_strides_offsets
+
 - func: _trilinear(Tensor i1, Tensor i2, Tensor i3, int[] expand1, int[] expand2, int[] expand3, int[] sumdim, int unroll_dim=1) -> Tensor
   dispatch:
     # calls unsqueeze
@@ -6421,7 +6498,7 @@
     CPU: _efficientzerotensor
     CUDA: _efficientzerotensor_cuda
     MPS: _efficientzerotensor_mps
-    Meta: _efficientzerotensor_meta
+    Meta: _efficientzerotensor_meta_symint
   autogen: _efficientzerotensor.out
 
 - func: zeros(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -6497,6 +6574,32 @@
   dispatch:
     SparseCPU, SparseCUDA: norm_sparse
   autogen: native_norm.ScalarOpt_dim_dtype_out
+
+- func: _batch_norm_with_update(Tensor input, Tensor? weight, Tensor? bias, Tensor(a!) running_mean, Tensor(b!) running_var, float momentum, float eps) -> (Tensor, Tensor, Tensor, Tensor)
+  dispatch:
+    CPU: _batch_norm_with_update_cpu
+    CUDA: _batch_norm_with_update_cuda
+    MPS: _batch_norm_with_update_mps
+    MkldnnCPU: _batch_norm_with_update_mkldnn
+  autogen: _batch_norm_with_update_functional
+
+- func: _batch_norm_with_update.out(Tensor input, Tensor? weight, Tensor? bias, Tensor(a!) running_mean, Tensor(b!) running_var, float momentum, float eps, *, Tensor(d!) out, Tensor(e!) save_mean, Tensor(f!) save_invstd, Tensor(g!) reserve) -> (Tensor(d!), Tensor(e!), Tensor(f!), Tensor(g!))
+  dispatch:
+    CPU: _batch_norm_with_update_cpu_out
+    CUDA: _batch_norm_with_update_cuda_out
+    MPS: _batch_norm_with_update_mps_out
+
+- func: _batch_norm_no_update(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, float momentum, float eps) -> (Tensor, Tensor, Tensor, Tensor)
+  dispatch:
+    CompositeExplicitAutograd: _batch_norm_no_update
+  autogen: _batch_norm_no_update.out
+
+- func: batch_norm_backward(Tensor grad_out, Tensor input, Tensor weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_var, bool update, float eps, bool[3] output_mask, Tensor reserve) -> (Tensor, Tensor, Tensor)
+  dispatch:
+    CPU: _new_batch_norm_backward_cpu
+    CUDA: _new_batch_norm_backward_cuda
+    MPS: _new_batch_norm_backward_mps
+    MkldnnCPU: _new_batch_norm_backward_mkldnn
 
 # TODO: reduce signatures down to one when optional args is available
 - func: _sparse_sum(Tensor self) -> Tensor
@@ -6998,6 +7101,10 @@
 # FIXME: would be nicer if TensorOptions was optional based; not adding default arguments for options given
 # the default would never make sense.
 
+- func: _sparse_compressed_tensor_with_dims(int nnz, int dense_dim, int[] size, int[] blocksize, ScalarType index_dtype, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: sparse_compressed_tensor_with_dims
+
 - func: sparse_compressed_tensor.comp_plain_value_size(Tensor compressed_indices, Tensor plain_indices, Tensor values, SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
   dispatch:
     CompositeExplicitAutograd: sparse_compressed_tensor
@@ -7252,7 +7359,7 @@
   device_check: NoCheck  # Allows copy into different device
   variants: function
   dispatch:
-    SparseCPU, SparseCUDA: copy_sparse_
+    SparseCPU, SparseCUDA, SparseMeta: copy_sparse_
   autogen: copy_sparse_to_sparse, copy_sparse_to_sparse.out
 
 # By adding the AutogradNestedTensor this makes this function CompositeImplicit-like for nested tensors
@@ -10178,6 +10285,7 @@
   variants: method, function
   dispatch:
     CompositeExplicitAutograd: alias
+    NestedTensorCPU, NestedTensorCUDA: alias_nested
   tags: core
 
 - func: _amp_foreach_non_finite_check_and_unscale_(Tensor(a!)[] self, Tensor(b!) found_inf, Tensor inv_scale) -> ()
@@ -14610,13 +14718,13 @@
     CUDA: _flash_attention_backward
 
 # Returns output, logsumexp if compute_logsumexp
-- func: _efficient_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? bias, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, int? max_seqlen_q, int? max_seqlen_k, float dropout_p, int custom_mask_type, bool compute_log_sumexp=False, *, float? scale=None, Tensor? causal_diagonal=None, Tensor? seqlen_k=None) -> (Tensor output, Tensor logsumexp, Tensor philox_seed, Tensor philox_offset, SymInt max_seqlen_batch_q, SymInt max_seqlen_batch_k)
+- func: _efficient_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? bias, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, int? max_seqlen_q, int? max_seqlen_k, float dropout_p, int custom_mask_type, bool compute_log_sumexp=False, *, float? scale=None, Tensor? causal_diagonal=None, Tensor? seqlen_k=None, int? window_size=None) -> (Tensor output, Tensor logsumexp, Tensor philox_seed, Tensor philox_offset, SymInt max_seqlen_batch_q, SymInt max_seqlen_batch_k)
   variants: function
   dispatch:
     CUDA: _efficient_attention_forward
   tags: nondeterministic_seeded
 
-- func: _efficient_attention_backward(Tensor grad_out_, Tensor query, Tensor key, Tensor value, Tensor? bias, Tensor out, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, SymInt max_seqlen_q, SymInt max_seqlen_k, Tensor logsumexp, float dropout_p, Tensor philox_seed, Tensor philox_offset, int custom_mask_type, bool bias_requires_grad, *, float? scale=None, int? num_splits_key=None) -> (Tensor, Tensor, Tensor, Tensor)
+- func: _efficient_attention_backward(Tensor grad_out_, Tensor query, Tensor key, Tensor value, Tensor? bias, Tensor out, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, SymInt max_seqlen_q, SymInt max_seqlen_k, Tensor logsumexp, float dropout_p, Tensor philox_seed, Tensor philox_offset, int custom_mask_type, bool bias_requires_grad, *, float? scale=None, int? num_splits_key=None, int? window_size=None) -> (Tensor, Tensor, Tensor, Tensor)
   device_check: NoCheck
   variants: function
   dispatch:
@@ -15421,6 +15529,7 @@
   # Unlike "foreach" functions, lists of tensors should be guaranteed to be on the same device (for now).
   variants: function
   dispatch:
+    CPU: _fused_adam_kernel_cpu_
     CUDA: _fused_adam_kernel_cuda_
   autogen: _fused_adam, _fused_adam.out
 
@@ -15430,6 +15539,7 @@
   device_check: NoCheck
   variants: function
   dispatch:
+    CPU: _fused_adam_kernel_cpu_
     CUDA: _fused_adam_kernel_cuda_
   autogen: _fused_adam.tensor_lr, _fused_adam.tensor_lr_out
 
@@ -15437,6 +15547,7 @@
   # Unlike "foreach" functions, lists of tensors should be guaranteed to be on the same device (for now).
   variants: function
   dispatch:
+    CPU: _fused_adamw_kernel_cpu_
     CUDA: _fused_adamw_kernel_cuda_
   autogen: _fused_adamw, _fused_adamw.out
 
@@ -15446,6 +15557,7 @@
   device_check: NoCheck
   variants: function
   dispatch:
+    CPU: _fused_adamw_kernel_cpu_
     CUDA: _fused_adamw_kernel_cuda_
   autogen: _fused_adamw.tensor_lr, _fused_adamw.tensor_lr_out
 

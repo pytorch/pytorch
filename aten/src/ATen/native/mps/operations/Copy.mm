@@ -48,9 +48,10 @@ static void copy_cast_mps(at::Tensor& dst,
 
   @autoreleasepool {
     const bool needs_conj = src.is_conj() != dst.is_conj();
-    string key = "copy_cast_mps" + getTensorsStringKey({src, dst}) + ":" + std::to_string(needs_conj);
+    string key = "copy_cast_mps" + getTensorsStringKey({src, dst}, true, /*exclude_shape*/ true) + ":" +
+        std::to_string(needs_conj);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      auto inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, src);
+      MPSGraphTensor* inputTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, srcDType);
       auto outputTensor = inputTensor;
       if (isFloatingType(src.scalar_type()) && dstDType == MPSDataTypeUInt8) {
         outputTensor = [mpsGraph castTensor:inputTensor toType:MPSDataTypeInt32 name:@"cast"];
@@ -85,12 +86,11 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
 
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* stream = getCurrentMPSStream();
-  Tensor dst;
-  Tensor src;
+  Tensor dst = dst_;
+  Tensor src = src_;
+
   if (!dst_.is_contiguous(MemoryFormat::Contiguous) && !sameMemFormat) {
     dst = at::empty_like(dst_, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  } else {
-    dst = dst_;
   }
 
   auto storage_byte_offset = src_.storage_offset() * src_.itemsize();
@@ -103,9 +103,8 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
       src = src_.expand_as(dst).contiguous();
       storage_byte_offset = src.storage_offset() * src.itemsize();
     }
-  } else {
-    src = src_;
   }
+
   id<MTLBuffer> sourceBuffer = getMTLBufferStorage(src);
   size_t dst_tensor_nbytes = dst.nbytes();
 
@@ -123,28 +122,25 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
                                                          length:alignedLength
                                                         options:options
                                                     deallocator:nil];
-    id<MTLBuffer> tmpBuffer = sourceBuffer;
-    Tensor tmp;
+    id<MTLBuffer> maybeCastedSourceBuffer = sourceBuffer;
+    Tensor maybeCastedSource;
     bool needsBlit = true;
     if (src_.dtype() != dst.dtype()) {
       if (destOffset == 0 && storage_byte_offset == 0) {
         // Return the casted tensor directly if there's no destination offset
         needsBlit = false;
-        tmpBuffer = destBuffer;
+        maybeCastedSourceBuffer = destBuffer;
       } else if (src.element_size() < dst.element_size()) {
-        tmp = at::empty(dst.sizes(), dst.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
-        tmpBuffer = getMTLBufferStorage(tmp);
+        maybeCastedSource = at::empty(dst.sizes(), dst.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+        maybeCastedSourceBuffer = getMTLBufferStorage(maybeCastedSource);
       }
-    }
 
-    size_t size_to_copy = src.nbytes();
-    // In case of dtype change, first convert src inplace
-    if (src_.dtype() != dst.dtype()) {
-      copy_cast_mps(dst, src, tmpBuffer, sourceBuffer, non_blocking);
+      // In case of dtype change, first convert src inplace
+      copy_cast_mps(dst, src, maybeCastedSourceBuffer, sourceBuffer, non_blocking);
     }
 
     if (needsBlit) {
-      size_to_copy = (size_to_copy / src.element_size()) * dst.element_size();
+      const size_t size_to_copy = (src.nbytes() / src.element_size()) * dst.element_size();
 
       // If there's anything wrong with source, we shouldn't return dst_ silently and must error out.
       TORCH_INTERNAL_ASSERT(sourceBuffer && dst_tensor_nbytes > 0);
@@ -152,7 +148,7 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
           getMPSProfiler().beginProfileCopy(sourceBuffer, destBuffer, src, dst, size_to_copy, non_blocking);
 
       stream->copy_and_sync(
-          tmpBuffer, destBuffer, size_to_copy, storage_byte_offset, destOffset, non_blocking, profile_id);
+          maybeCastedSourceBuffer, destBuffer, size_to_copy, storage_byte_offset, destOffset, non_blocking, profile_id);
     }
     [destBuffer release];
   }
@@ -297,12 +293,14 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
         at::view_as_real(dst_).copy_(at::view_as_real(src));
       }
     } else if (dst_byte_offset) {
-      auto tmp = at::empty(dst_.sizes(), dst_.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
-      auto tmpBuffer = getMTLBufferStorage(tmp);
-      copy_cast_mps(tmp, src, tmpBuffer, sourceBuffer);
+      auto maybeCastedSource =
+          at::empty(dst_.sizes(), dst_.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+      auto maybeCastedSourceBuffer = getMTLBufferStorage(maybeCastedSource);
+      copy_cast_mps(maybeCastedSource, src, maybeCastedSourceBuffer, sourceBuffer);
 
-      uint64_t profile_id = getMPSProfiler().beginProfileCopy(tmpBuffer, destBuffer, tmp, dst_, dst_.nbytes(), true);
-      stream->copy(tmpBuffer, destBuffer, dst_.nbytes(), 0, dst_byte_offset, profile_id);
+      uint64_t profile_id = getMPSProfiler().beginProfileCopy(
+          maybeCastedSourceBuffer, destBuffer, maybeCastedSource, dst_, dst_.nbytes(), true);
+      stream->copy(maybeCastedSourceBuffer, destBuffer, dst_.nbytes(), 0, dst_byte_offset, profile_id);
     } else {
       copy_cast_mps(dst_, src, destBuffer, sourceBuffer);
     }

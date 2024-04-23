@@ -123,6 +123,7 @@ fragment PRCheckSuites on CheckSuiteConnection {
         workflow {
           name
         }
+        databaseId
         url
       }
       checkRuns(first: 50) {
@@ -1412,6 +1413,13 @@ def find_matching_merge_rule(
             else 0,
         )
 
+        # categorize_checks assumes all tests are required if required_checks is empty.
+        # this is a workaround as we want to keep that behavior for categorize_checks
+        # generally.
+        if not required_checks:
+            pending_checks = []
+            failed_checks = []
+
         hud_link = f"https://hud.pytorch.org/{pr.org}/{pr.project}/commit/{pr.last_commit()['oid']}"
         if len(failed_checks) > 0:
             if reject_reason_score < 30000:
@@ -1611,28 +1619,37 @@ def remove_job_name_suffix(name: str, replacement: str = ")") -> str:
 
 
 def is_broken_trunk(
-    name: str,
+    check: JobCheckState,
     drci_classifications: Any,
 ) -> bool:
-    if not name or not drci_classifications:
+    if not check or not drci_classifications:
         return False
+
+    name = check.name
+    job_id = check.job_id
 
     # Consult the list of broken trunk failures from Dr.CI
     return any(
-        name == broken_trunk["name"]
+        (name == broken_trunk["name"]) or (job_id and job_id == broken_trunk["id"])
         for broken_trunk in drci_classifications.get("BROKEN_TRUNK", [])
     )
 
 
 def is_flaky(
-    name: str,
+    check: JobCheckState,
     drci_classifications: Any,
 ) -> bool:
-    if not name or not drci_classifications:
+    if not check or not drci_classifications:
         return False
 
+    name = check.name
+    job_id = check.job_id
+
     # Consult the list of flaky failures from Dr.CI
-    return any(name == flaky["name"] for flaky in drci_classifications.get("FLAKY", []))
+    return any(
+        (name == flaky["name"] or (job_id and job_id == flaky["id"]))
+        for flaky in drci_classifications.get("FLAKY", [])
+    )
 
 
 def is_invalid_cancel(
@@ -1719,7 +1736,7 @@ def get_classifications(
 
         # NB: It's important to note that when it comes to ghstack and broken trunk classification,
         # Dr.CI uses the base of the whole stack
-        if is_broken_trunk(name, drci_classifications):
+        if is_broken_trunk(check, drci_classifications):
             checks_with_classifications[name] = JobCheckState(
                 check.name,
                 check.url,
@@ -1731,7 +1748,7 @@ def get_classifications(
             )
             continue
 
-        elif is_flaky(name, drci_classifications):
+        elif is_flaky(check, drci_classifications):
             checks_with_classifications[name] = JobCheckState(
                 check.name,
                 check.url,

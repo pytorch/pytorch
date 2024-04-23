@@ -910,6 +910,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.nn.functional.prelu: lambda input, weight: -1,
         torch.nn.functional.relu: lambda input, inplace=False: -1,
         torch.nn.functional.relu6: lambda input, inplace=False: -1,
+        torch.nn.functional.rms_norm: lambda input, normalized_shape, weight=None, eps=1e-6: -1,
         torch.nn.functional.rrelu: lambda input, lower=0.125, upper=0.3333333333333333, training=False, inplace=False: -1,
         torch.nn.functional.selu: lambda input, inplace=False: -1,
         torch.nn.functional.silu: lambda input, inplace=False: -1,
@@ -1008,6 +1009,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.renorm: lambda input, p, dim, maxnorm, out=None: -1,
         torch.repeat_interleave: lambda input, dim=None: -1,
         torch.reshape: lambda input, shape: -1,
+        torch.rms_norm: lambda input, normalized_shape, weight=None, eps=1e-6: -1,
         torch.rnn_relu: lambda input, hx, params, has_biases, num_layers, dropout, train, bidirectional, batch_first: -1,
         torch.rnn_relu_cell: lambda input, hx, w_ih, w_hh, b_ih=None, b_hh=None: -1,
         torch.rnn_tanh: lambda input, hx, params, has_biases, num_layers, dropout, train, bidirectional, batch_first: -1,
@@ -1281,7 +1283,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.is_mps.__get__: lambda self: -1,
         Tensor.is_mtia.__get__: lambda self: -1,
         Tensor.is_nested.__get__: lambda self: -1,
-        Tensor.is_ort.__get__: lambda self: -1,
+        Tensor.is_maia.__get__: lambda self: -1,
         Tensor.is_mkldnn.__get__: lambda self: -1,
         Tensor.is_quantized.__get__: lambda self: -1,
         Tensor.is_sparse.__get__: lambda self: -1,
@@ -1429,6 +1431,11 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.__dlpack_device__: lambda self: -1,
         torch.linalg.lstsq: lambda self, b, cond=None, driver=None: -1,
     }
+
+    privateuse1_backend_name = torch.utils.backend_registration._privateuse1_backend_name
+    if hasattr(Tensor, privateuse1_backend_name):
+        ret[getattr(Tensor, privateuse1_backend_name)] = lambda self, device=None, non_blocking=False, **kwargs: -1
+        ret[getattr(Tensor, f'is_{privateuse1_backend_name}').__get__] = lambda self: -1  # noqa: B009
 
     ret2 = {}
     ignored = get_ignored_functions()
@@ -1908,7 +1915,7 @@ class TorchFunctionMode:
         pass
 
     def __torch_function__(self, func, types, args=(), kwargs=None):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def __enter__(self):
         _push_mode(self)

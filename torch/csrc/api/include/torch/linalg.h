@@ -445,7 +445,7 @@ inline Tensor& inv_out(Tensor& result, const Tensor& input) {
 
 /// Cholesky decomposition
 ///
-/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.cholesky
+/// See https://pytorch.org/docs/main/linalg.html#torch.linalg.cholesky
 ///
 /// Example:
 /// ```
@@ -474,7 +474,7 @@ inline Tensor det(const Tensor& self) {
 
 /// Computes the sign and (natural) logarithm of the determinant
 ///
-/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.slogdet
+/// See https://pytorch.org/docs/main/linalg.html#torch.linalg.slogdet
 inline std::tuple<Tensor, Tensor> slogdet(const Tensor& input) {
   return detail::slogdet(input);
 }
@@ -489,7 +489,7 @@ inline std::tuple<Tensor&, Tensor&> slogdet_out(
 /// Computes eigenvalues and eigenvectors of non-symmetric/non-hermitian
 /// matrices
 ///
-/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.eig
+/// See https://pytorch.org/docs/main/linalg.html#torch.linalg.eig
 inline std::tuple<Tensor, Tensor> eig(const Tensor& self) {
   return detail::eig(self);
 }
@@ -503,7 +503,7 @@ inline std::tuple<Tensor&, Tensor&> eig_out(
 
 /// Computes eigenvalues of non-symmetric/non-hermitian matrices
 ///
-/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.eigvals
+/// See https://pytorch.org/docs/main/linalg.html#torch.linalg.eigvals
 inline Tensor eigvals(const Tensor& self) {
   return detail::eigvals(self);
 }
@@ -514,7 +514,7 @@ inline Tensor& eigvals_out(Tensor& result, const Tensor& self) {
 
 /// Computes eigenvalues and eigenvectors
 ///
-/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.eigh
+/// See https://pytorch.org/docs/main/linalg.html#torch.linalg.eigh
 inline std::tuple<Tensor, Tensor> eigh(
     const Tensor& self,
     c10::string_view uplo) {
@@ -531,7 +531,7 @@ inline std::tuple<Tensor&, Tensor&> eigh_out(
 
 /// Computes eigenvalues
 ///
-/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.eigvalsh
+/// See https://pytorch.org/docs/main/linalg.html#torch.linalg.eigvalsh
 inline Tensor eigvalsh(const Tensor& self, c10::string_view uplo) {
   return detail::eigvalsh(self, uplo);
 }
@@ -546,7 +546,7 @@ inline Tensor& eigvalsh_out(
 /// Computes the product of Householder matrices
 ///
 /// See
-/// https://pytorch.org/docs/master/linalg.html#torch.linalg.householder_product
+/// https://pytorch.org/docs/main/linalg.html#torch.linalg.householder_product
 inline Tensor householder_product(const Tensor& input, const Tensor& tau) {
   return detail::householder_product(input, tau);
 }
@@ -568,7 +568,7 @@ inline std::tuple<Tensor, Tensor, Tensor, Tensor> lstsq(
 
 /// Computes the matrix exponential
 ///
-/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.matrix_exp
+/// See https://pytorch.org/docs/main/linalg.html#torch.linalg.matrix_exp
 inline Tensor matrix_exp(const Tensor& input) {
   return detail::matrix_exp(input);
 }
@@ -619,7 +619,7 @@ inline Tensor& linalg_norm_out(
 
 /// Computes the LU factorization with partial pivoting
 ///
-/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.lu_factor
+/// See https://pytorch.org/docs/main/linalg.html#torch.linalg.lu_factor
 inline std::tuple<Tensor, Tensor> lu_factor(
     const Tensor& input,
     const bool pivot = true) {
@@ -636,7 +636,7 @@ inline std::tuple<Tensor&, Tensor&> lu_factor_out(
 
 /// Computes the LU factorization with partial pivoting
 ///
-/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.lu
+/// See https://pytorch.org/docs/main/linalg.html#torch.linalg.lu
 inline std::tuple<Tensor, Tensor, Tensor> lu(
     const Tensor& input,
     const bool pivot = true) {
@@ -690,7 +690,7 @@ inline Tensor& norm_out(
   return detail::norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
 }
 
-/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.vector_norm
+/// See https://pytorch.org/docs/main/linalg.html#torch.linalg.vector_norm
 inline Tensor vector_norm(
     const Tensor& self,
     Scalar ord,
@@ -711,7 +711,7 @@ inline Tensor& vector_norm_out(
       result, self, ord, opt_dim, keepdim, opt_dtype);
 }
 
-/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.matrix_norm
+/// See https://pytorch.org/docs/main/linalg.html#torch.linalg.matrix_norm
 inline Tensor matrix_norm(
     const Tensor& self,
     const Scalar& ord,
@@ -750,7 +750,7 @@ inline Tensor& matrix_norm_out(
   return detail::matrix_norm_out(self, ord, dim, keepdim, dtype, result);
 }
 
-/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.matrix_power
+/// See https://pytorch.org/docs/main/linalg.html#torch.linalg.matrix_power
 inline Tensor matrix_power(const Tensor& self, int64_t n) {
   return detail::matrix_power(self, n);
 }
@@ -759,7 +759,7 @@ inline Tensor& matrix_power_out(const Tensor& self, int64_t n, Tensor& result) {
   return detail::matrix_power_out(self, n, result);
 }
 
-/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.matrix_rank
+/// See https://pytorch.org/docs/main/linalg.html#torch.linalg.matrix_rank
 inline Tensor matrix_rank(const Tensor& input, double tol, bool hermitian) {
   return detail::matrix_rank(input, tol, hermitian);
 }
@@ -821,7 +821,7 @@ inline Tensor& matrix_rank_out(
   return detail::matrix_rank_out(result, input, atol, rtol, hermitian);
 }
 
-/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.multi_dot
+/// See https://pytorch.org/docs/main/linalg.html#torch.linalg.multi_dot
 inline Tensor multi_dot(TensorList tensors) {
   return detail::multi_dot(tensors);
 }
@@ -832,7 +832,7 @@ inline Tensor& multi_dot_out(TensorList tensors, Tensor& result) {
 
 /// Computes the pseudo-inverse
 ///
-/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.pinv
+/// See https://pytorch.org/docs/main/linalg.html#torch.linalg.pinv
 inline Tensor pinv(
     const Tensor& input,
     double rcond = 1e-15,
@@ -850,7 +850,7 @@ inline Tensor& pinv_out(
 
 /// Computes the QR decomposition
 ///
-/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.qr
+/// See https://pytorch.org/docs/main/linalg.html#torch.linalg.qr
 inline std::tuple<Tensor, Tensor> qr(
     const Tensor& input,
     c10::string_view mode = "reduced") {
@@ -869,7 +869,7 @@ inline std::tuple<Tensor&, Tensor&> qr_out(
 
 /// Computes the LDL decomposition
 ///
-/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.ldl_factor_ex
+/// See https://pytorch.org/docs/main/linalg.html#torch.linalg.ldl_factor_ex
 inline std::tuple<Tensor, Tensor, Tensor> ldl_factor_ex(
     const Tensor& input,
     bool hermitian,
@@ -890,7 +890,7 @@ inline std::tuple<Tensor&, Tensor&, Tensor&> ldl_factor_ex_out(
 
 /// Solve a system of linear equations using the LDL decomposition
 ///
-/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.ldl_solve
+/// See https://pytorch.org/docs/main/linalg.html#torch.linalg.ldl_solve
 inline Tensor ldl_solve(
     const Tensor& LD,
     const Tensor& pivots,
@@ -910,7 +910,7 @@ inline Tensor& ldl_solve_out(
 
 /// Solves a system linear system AX = B
 ///
-/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.solve_ex
+/// See https://pytorch.org/docs/main/linalg.html#torch.linalg.solve_ex
 inline std::tuple<Tensor, Tensor> solve_ex(
     const Tensor& input,
     const Tensor& other,
@@ -931,7 +931,7 @@ inline std::tuple<Tensor&, Tensor&> solve_ex_out(
 
 /// Computes a tensor `x` such that `matmul(input, x) = other`.
 ///
-/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.solve
+/// See https://pytorch.org/docs/main/linalg.html#torch.linalg.solve
 inline Tensor solve(const Tensor& input, const Tensor& other, bool left) {
   return detail::solve(input, other, left);
 }
@@ -949,7 +949,7 @@ inline Tensor& solve_out(
 /// the diagonal
 ///
 /// See
-/// https://pytorch.org/docs/master/linalg.html#torch.linalg.solve_triangular
+/// https://pytorch.org/docs/main/linalg.html#torch.linalg.solve_triangular
 inline Tensor solve_triangular(
     const Tensor& input,
     const Tensor& other,
@@ -972,7 +972,7 @@ inline Tensor& solve_triangular_out(
 
 /// Computes the singular values and singular vectors
 ///
-/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.svd
+/// See https://pytorch.org/docs/main/linalg.html#torch.linalg.svd
 inline std::tuple<Tensor, Tensor, Tensor> svd(
     const Tensor& input,
     bool full_matrices,
@@ -992,7 +992,7 @@ inline std::tuple<Tensor&, Tensor&, Tensor&> svd_out(
 
 /// Computes the singular values
 ///
-/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.svdvals
+/// See https://pytorch.org/docs/main/linalg.html#torch.linalg.svdvals
 inline Tensor svdvals(
     const Tensor& input,
     c10::optional<c10::string_view> driver) {
@@ -1008,7 +1008,7 @@ inline Tensor& svdvals_out(
 
 /// Computes the inverse of a tensor
 ///
-/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.tensorinv
+/// See https://pytorch.org/docs/main/linalg.html#torch.linalg.tensorinv
 ///
 /// Example:
 /// ```
@@ -1026,7 +1026,7 @@ inline Tensor& tensorinv_out(Tensor& result, const Tensor& self, int64_t ind) {
 
 /// Computes a tensor `x` such that `tensordot(input, x, dims=x.dim()) = other`.
 ///
-/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.tensorsolve
+/// See https://pytorch.org/docs/main/linalg.html#torch.linalg.tensorsolve
 ///
 /// Example:
 /// ```
@@ -1052,7 +1052,7 @@ inline Tensor& tensorsolve_out(
 /// Computes a tensor `inverse_input` such that `dot(input, inverse_input) =
 /// eye(input.size(0))`.
 ///
-/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.inv
+/// See https://pytorch.org/docs/main/linalg.html#torch.linalg.inv
 inline Tensor inv(const Tensor& input) {
   return detail::inv(input);
 }

@@ -86,7 +86,15 @@ class ScopeContextManager:
         return
 
 
-_COPY_META_FIELDS = ["nn_module_stack", "source_fn_stack", "original_aten", "recompute", "from_node", "quantization_tag"]
+_COPY_META_FIELDS = [
+    "nn_module_stack",
+    "torch_fn",
+    "source_fn_stack",
+    "original_aten",
+    "recompute",
+    "from_node",
+    "quantization_tag",
+]
 
 
 @compatibility(is_backward_compatible=True)
@@ -241,11 +249,6 @@ class TracerBase:
 
         Can be override to support more trace-specific types.
         """
-        from torch.utils._triton import has_triton
-
-        if has_triton():
-            import triton
-
         if not isinstance(a, Proxy) and hasattr(a, '__fx_create_arg__'):
             return a.__fx_create_arg__(self)
         # aggregates
@@ -280,8 +283,6 @@ class TracerBase:
             return range(self.create_arg(a.start), self.create_arg(a.stop), self.create_arg(a.step))
 
         elif isinstance(a, torch._ops.OpOverload):
-            return a
-        elif has_triton() and isinstance(a, triton.language.dtype):
             return a
 
         if isinstance(a, Proxy):
@@ -375,7 +376,7 @@ class Proxy:
             indexed_item = proxied_value[i]
 
     For a more detailed description into the Proxy internals, check out
-    the "Proxy" section in `torch/fx/OVERVIEW.md`
+    the "Proxy" section in `torch/fx/README.md`
     """
 
     @compatibility(is_backward_compatible=True)

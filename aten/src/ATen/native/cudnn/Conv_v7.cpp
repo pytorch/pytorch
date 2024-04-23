@@ -95,9 +95,9 @@ std::ostream& operator<<(std::ostream& out, const ConvolutionArgs& args) {
       << "weight: " << args.wdesc // already has a trailing newline
       << "Pointer addresses: "
       << "\n"
-      << "    input: " << args.input.data_ptr() << "\n"
-      << "    output: " << args.output.data_ptr() << "\n"
-      << "    weight: " << args.weight.data_ptr() << "\n";
+      << "    input: " << args.input.const_data_ptr() << "\n"
+      << "    output: " << args.output.const_data_ptr() << "\n"
+      << "    weight: " << args.weight.const_data_ptr() << "\n";
 
   return out;
 }
@@ -306,9 +306,9 @@ struct algorithm_search<cudnnConvolutionFwdAlgoPerf_t> {
           cudnnFindConvolutionForwardAlgorithmEx(
               args.handle,
               args.idesc.desc(),
-              args.input.data_ptr(),
+              args.input.const_data_ptr(),
               args.wdesc.desc(),
-              args.weight.data_ptr(),
+              args.weight.const_data_ptr(),
               args.cdesc.desc(),
               args.odesc.desc(),
               args.output.data_ptr(),
@@ -390,9 +390,9 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgoPerf_t> {
           cudnnFindConvolutionBackwardDataAlgorithmEx(
               args.handle,
               args.wdesc.desc(),
-              args.weight.data_ptr(),
+              args.weight.const_data_ptr(),
               args.odesc.desc(),
-              args.output.data_ptr(),
+              args.output.const_data_ptr(),
               args.cdesc.desc(),
               args.idesc.desc(),
               args.input.data_ptr(),
@@ -478,9 +478,9 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgoPerf_t> {
           cudnnFindConvolutionBackwardFilterAlgorithmEx(
               args.handle,
               args.idesc.desc(),
-              args.input.data_ptr(),
+              args.input.const_data_ptr(),
               args.odesc.desc(),
-              args.output.data_ptr(),
+              args.output.const_data_ptr(),
               args.cdesc.desc(),
               args.wdesc.desc(),
               args.weight.data_ptr(),
@@ -760,9 +760,9 @@ void raw_cudnn_convolution_forward_out_32bit(
                 args.handle,
                 &one,
                 args.idesc.desc(),
-                input.data_ptr(),
+                input.const_data_ptr(),
                 args.wdesc.desc(),
-                weight.data_ptr(),
+                weight.const_data_ptr(),
                 args.cdesc.desc(),
                 fwdAlgPerf.algo,
                 workspace.data_ptr(),
@@ -871,9 +871,9 @@ void raw_cudnn_convolution_backward_input_out_32bit(
                 args.handle,
                 &one,
                 args.wdesc.desc(),
-                weight.data_ptr(),
+                weight.const_data_ptr(),
                 args.odesc.desc(),
-                grad_output.data_ptr(),
+                grad_output.const_data_ptr(),
                 args.cdesc.desc(),
                 bwdDataAlgPerf.algo,
                 workspace.data_ptr(),
@@ -884,7 +884,7 @@ void raw_cudnn_convolution_backward_input_out_32bit(
             args,
             "Additional pointer addresses: \n",
             "    grad_output: ",
-            grad_output.data_ptr(),
+            grad_output.const_data_ptr(),
             "\n",
             "    grad_input: ",
             grad_input.mutable_data_ptr(),
@@ -990,9 +990,9 @@ void raw_cudnn_convolution_backward_weight_out_32bit(
                     args.handle,
                     &one,
                     args.idesc.desc(),
-                    input.data_ptr(),
+                    input.const_data_ptr(),
                     args.odesc.desc(),
-                    grad_output.data_ptr(),
+                    grad_output.const_data_ptr(),
                     args.cdesc.desc(),
                     bwdFilterAlgPerf.algo,
                     workspace.data_ptr(),
@@ -1003,7 +1003,7 @@ void raw_cudnn_convolution_backward_weight_out_32bit(
                 args,
                 "Additional pointer addresses: \n",
                 "    grad_output: ",
-                grad_output.data_ptr(),
+                grad_output.const_data_ptr(),
                 "\n",
                 "    grad_weight: ",
                 grad_weight.data_ptr(),
@@ -1173,18 +1173,18 @@ void raw_cudnn_convolution_add_relu_out_v7(
                 args.handle,
                 &one,
                 args.idesc.desc(),
-                input.data_ptr(),
+                input.const_data_ptr(),
                 args.wdesc.desc(),
-                weight.data_ptr(),
+                weight.const_data_ptr(),
                 args.cdesc.desc(),
                 fwdAlgPerf.algo,
                 workspace.data_ptr(),
                 fwdAlgPerf.memory,
                 &alpha_,
                 zdesc.desc(),
-                z.data_ptr(),
+                z.const_data_ptr(),
                 bdesc.desc(),
-                bias.data_ptr(),
+                bias.const_data_ptr(),
                 adesc.desc(),
                 args.odesc.desc(),
                 output.data_ptr()),

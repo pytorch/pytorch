@@ -250,7 +250,7 @@ static PyObject* getPythonTensorClass(c10::Device d) {
   return device_to_py_class_[static_cast<size_t>(d.type())];
 }
 
-void activateCUDATrace() {
+void activateGPUTrace() {
   c10::impl::GPUTrace::set_trace(getPyInterpreter());
 }
 
@@ -533,7 +533,25 @@ static std::vector<T> map_py_func(
   std::vector<T> new_items;
   new_items.reserve(items.size());
   for (auto& item : items) {
-    new_items.push_back(py::cast<T>(func(item)));
+    new_items.emplace_back(py::cast<T>(func(item)));
+  }
+  return new_items;
+}
+
+template <>
+std::vector<at::Tensor> map_py_func(
+    const py::function& func,
+    const std::vector<at::Tensor>& items) {
+  std::vector<at::Tensor> new_items;
+  new_items.reserve(items.size());
+  for (auto& item : items) {
+    auto output = func(item);
+    if (output.is(py::none())) {
+      // treat None value as an undefined tensor
+      new_items.emplace_back();
+    } else {
+      new_items.emplace_back(py::cast<at::Tensor>(output));
+    }
   }
   return new_items;
 }
@@ -1433,13 +1451,13 @@ PyObject* THPVariable_is_mps(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPVariable_is_ort(THPVariable* self, void* unused) {
+PyObject* THPVariable_is_maia(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
-    return handle_torch_function_getter(self, "is_ort");
+    return handle_torch_function_getter(self, "is_maia");
   }
   auto& self_ = THPVariable_Unpack(self);
-  return torch::autograd::utils::wrap(self_.is_ort());
+  return torch::autograd::utils::wrap(self_.is_maia());
   END_HANDLE_TH_ERRORS
 }
 
@@ -1656,7 +1674,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
      nullptr},
     {"is_mkldnn", (getter)THPVariable_is_mkldnn, nullptr, nullptr, nullptr},
     {"is_mps", (getter)THPVariable_is_mps, nullptr, nullptr, nullptr},
-    {"is_ort", (getter)THPVariable_is_ort, nullptr, nullptr, nullptr},
+    {"is_maia", (getter)THPVariable_is_maia, nullptr, nullptr, nullptr},
     {"is_vulkan", (getter)THPVariable_is_vulkan, nullptr, nullptr, nullptr},
     {"is_complex", (getter)THPVariable_is_complex, nullptr, nullptr, nullptr},
     {"is_quantized",

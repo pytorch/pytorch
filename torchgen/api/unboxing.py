@@ -43,8 +43,8 @@ from torchgen.model import (
 #       ```
 #    - Dimname[]? names
 #       ```cpp
-#           c10::optional<c10::IValue> names_opt = (std::move(peek(stack, 1, 7))).toOptional<c10::IValue>();
-#           c10::optional<at::ArrayRef<at::Dimname>> names_opt_out;
+#           ::std::optional<c10::IValue> names_opt = (std::move(peek(stack, 1, 7))).toOptional<c10::IValue>();
+#           ::std::optional<at::ArrayRef<at::Dimname>> names_opt_out;
 #           if (names_opt.has_value()) {
 #                         ~~~~~~~~~~~ <-- Unwrapping optional shell
 #               const c10::IValue names_opt_in = names_opt.value();
@@ -58,23 +58,23 @@ from torchgen.model import (
 #               }
 #               at::ArrayRef<at::Dimname> names_list_out(names_vec);
 #
-#               names_opt_out = c10::optional<at::ArrayRef<at::Dimname>>(names_list_out);
+#               names_opt_out = ::std::optional<at::ArrayRef<at::Dimname>>(names_list_out);
 #           } else {
-#               names_opt_out = c10::optional<at::ArrayRef<at::Dimname>>();
+#               names_opt_out = ::std::optional<at::ArrayRef<at::Dimname>>();
 #           }
 #       ```
 #    - ScalarType? dtype (similarly for the rest of the arguments)
 #       ```cpp
-#           c10::optional<c10::IValue> dtype_opt = (std::move(peek(stack, 2, 7))).toOptional<c10::IValue>();
-#           c10::optional<at::ScalarType> dtype_opt_out;
+#           ::std::optional<c10::IValue> dtype_opt = (std::move(peek(stack, 2, 7))).toOptional<c10::IValue>();
+#           ::std::optional<at::ScalarType> dtype_opt_out;
 #           if (dtype_opt.has_value()) {
 #               const c10::IValue dtype_opt_in = dtype_opt.value();
 #               at::ScalarType dtype_base = dtype_opt_in.to<at::ScalarType>();
 #                                                        ~~~~~~~~~~~~~~~~~~~~ <-- For base types, convert ivalue to it
 #                                                                                 directly using ".to<T>()" API.
-#               dtype_opt_out = c10::optional<at::ScalarType>(dtype_base);
+#               dtype_opt_out = ::std::optional<at::ScalarType>(dtype_base);
 #           } else {
-#               dtype_opt_out = c10::optional<at::ScalarType>();
+#               dtype_opt_out = ::std::optional<at::ScalarType>();
 #           }
 #       ```
 #
@@ -117,7 +117,7 @@ def convert_arguments(f: NativeFunction) -> Tuple[List[Binding], List[str]]:
     for arg in args:
         # expecting only Argument
         if not isinstance(arg.argument, Argument):
-            raise Exception(
+            raise Exception(  # noqa: TRY002
                 f"Unexpected argument type, expecting `Argument` but got {arg}"
             )
         argument: Argument = arg.argument
@@ -165,7 +165,7 @@ def argumenttype_ivalue_convert(
             ctype=ctype,
         )
     else:
-        raise Exception(f"Cannot handle type {t}. arg_name: {arg_name}")
+        raise Exception(f"Cannot handle type {t}. arg_name: {arg_name}")  # noqa: TRY002
     return out_name, ctype, code, decl
 
 
@@ -184,7 +184,7 @@ def _gen_code_optional_type(
     res_name, _, res_code, decl = argumenttype_ivalue_convert(t.elem, in_name)
     return (
         f"""
-c10::optional<c10::IValue> {arg_name}_opt = {arg_name}.toOptional<c10::IValue>();
+auto {arg_name}_opt = {arg_name}.toOptional<c10::IValue>();
 {ctype.cpp_type(strip_ref=True)} {out_name};
 if ({arg_name}_opt.has_value()) {{
     const c10::IValue {in_name} = {arg_name}_opt.value();
@@ -216,7 +216,7 @@ def _gen_code_list_type(
                 "\n"
             )
         )
-    # we have to use c10::List for optional element. e.g., Tensor?[] -> c10::List<c10::optional<at::Tensor>>
+    # we have to use c10::List for optional element. e.g., Tensor?[] -> c10::List<::std::optional<at::Tensor>>
     elif isinstance(t.elem, OptionalType):
         code.extend(
             f"""
