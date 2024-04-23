@@ -704,8 +704,6 @@ class WrapperCodeGen(CodeGen):
         """
         Yueming: is it better to move the dependency detection to streamscheduler?
         """
-        if node_name is None:
-            raise AssertionError("node_name is None")
         ssnode = V.graph.stream_graph.name_mapping[node_name]
 
         def update_event_dependency(tmp_ssnode):
@@ -1172,7 +1170,12 @@ class WrapperCodeGen(CodeGen):
         self.writeline(f"{dst}.copy_({src})")
 
     def codegen_multi_output(self, name, value):
-        self.writeline(f"{self.declare}{name} = {value}{self.ending}")
+        if config.multiple_streams:
+            call_strs = []
+            call_strs.append(f"{self.declare}{name} = {value}{self.ending}")
+            self.generate_extern_kernel_w_stream(name, call_strs)
+        else:
+            self.writeline(f"{self.declare}{name} = {value}{self.ending}")
 
     def codegen_dynamic_scalar(self, node):
         (data,) = (t.codegen_reference() for t in node.inputs)
