@@ -16,6 +16,19 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 
+from torch.overrides import TorchFunctionMode
+
+
+class FunctionLog(TorchFunctionMode):
+    def __torch_function__(self, func, types, args, kwargs=None):
+        if func == torch.Tensor.__getitem__:
+            index_args = args[1]
+            if not isinstance(args[1], list):
+                index_args = [index_args]
+            return torch.ops.aten.index(args[0], index_args)
+        # print("redispatching inside")
+        return func(*args, **(kwargs or {}))
+
 
 class TemplatedAttentionHOP(HigherOrderOperator):
     def __init__(self):
@@ -73,7 +86,8 @@ def math_attention(
     score_mod = torch.vmap(score_mod, in_dims=(0, None, 0, None, None) + in_dim_buffers)
     score_mod = torch.vmap(score_mod, in_dims=(0, 0, None, None, None) + in_dim_buffers)
 
-    scores = score_mod(scores, b, h, m, n, *other_buffers).to(torch.float32)
+    with FunctionLog():
+        scores = score_mod(scores, b, h, m, n, *other_buffers).to(torch.float32)
 
     # TODO Unconditionally return logsumexp for backwards
     # if any(t.requires_grad for t in (query, key, value)):
@@ -122,7 +136,8 @@ def trace_templated_attention(
     example_vals = [
         torch.zeros((), dtype=query.dtype, requires_grad=query.requires_grad)
     ] + [torch.zeros((), dtype=torch.int) for _ in range(4)]
-    score_graph = make_fx(score_mod)(*example_vals, *other_buffers)
+    with FunctionLog():
+        score_graph = make_fx(score_mod)(*example_vals, *other_buffers)
     proxy_mode.tracer.root.register_module("sdpa_score", score_graph)
     node_args = (query, key, value, score_graph, *other_buffers)
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)

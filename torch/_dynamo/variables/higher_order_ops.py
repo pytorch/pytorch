@@ -1499,19 +1499,43 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         bhmn = [create_scalar() for _ in range(4)]
         new_args = [score, *bhmn]
-        (
-            (body_output, body_treespec),
-            body_graph,
-            body_lifted_freevars,
-        ) = speculate_subgraph(
-            tx,
-            score_function,
-            new_args,
-            {},  # expect only args no kwargs for now
-            description="templated_attention",
-            source_target=self.value,
-            set_subgraph_inputs="flatten_manual",
-        )
+        from torch.overrides import TorchFunctionMode
+
+        def transform_getitem_args(x, index_args):
+            if not isinstance(index_args, list):
+                return (x, [index_args])
+            return (x, index_args)
+
+        class FunctionLog(TorchFunctionMode):
+            def __torch_function__(self, func, types, args, kwargs=None):
+                if func == torch.Tensor.__getitem__:
+                    index_args = transform_getitem_args(args[0], args[1])
+                    return torch.ops.aten.index(*index_args)
+                return func(*args, **(kwargs or {}))
+
+        x = torch.randn(3)
+        i = torch.tensor(0)
+        with FunctionLog():
+            (
+                (body_output, body_treespec),
+                body_graph,
+                body_lifted_freevars,
+            ) = speculate_subgraph(
+                tx,
+                score_function,
+                new_args,
+                {},  # expect only args no kwargs for now
+                description="templated_attention",
+                source_target=self.value,
+                set_subgraph_inputs="flatten_manual",
+            )
+        import operator
+
+        for node in body_graph.nodes:
+            if node.target == operator.getitem:
+                node.target = torch.ops.aten.index
+                node.args = transform_getitem_args(*node.args)
+        print(body_graph)
 
         body_name = add_subgraph(
             tx,
