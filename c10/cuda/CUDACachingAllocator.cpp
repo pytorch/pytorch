@@ -1111,6 +1111,26 @@ class DeviceCachingAllocator {
               .current;
       auto observers_local = oom_observers_;
 
+      size_t allocated_in_private_pools = 0;
+      auto get_size_block = [](const BlockPool& pool) {
+        size_t res = 0;
+        for (const auto& block : pool.blocks) {
+          res += block->size;
+        }
+        return res;
+      };
+      for (const auto& p : graph_pools) {
+        allocated_in_private_pools += get_size_block(p.second->large_blocks);
+        allocated_in_private_pools += get_size_block(p.second->small_blocks);
+      }
+
+      std::string private_pool_msg;
+
+      if (allocated_in_private_pools > 0) {
+        private_pool_msg = "with " + format_size(allocated_in_private_pools) +
+            " allocated in private pools (eg: CUDAGraphs), ";
+      }
+
       // Make sure we do not have the device lock before calling our
       // observers which might need hold the GIL
       // It is safe to release at this point because will no longer
@@ -1123,19 +1143,6 @@ class DeviceCachingAllocator {
             alloc_size,
             set_fraction ? allowed_memory_maximum : device_total,
             device_free);
-      }
-
-      size_t allocated_in_private_pools = 0;
-      auto get_size_block = [](const BlockPool& pool) {
-        size_t res = 0;
-        for (const auto& block : pool.blocks) {
-          res += block->size;
-        }
-        return res;
-      };
-      for (const auto& p : graph_pools) {
-        allocated_in_private_pools += get_size_block(p.second->large_blocks);
-        allocated_in_private_pools += get_size_block(p.second->small_blocks);
       }
 
       // "total capacity": total global memory on GPU
@@ -1171,9 +1178,9 @@ class DeviceCachingAllocator {
           proc_info,
           "Of the allocated memory ",
           format_size(allocated_bytes + allocated_in_private_pools),
-          " is allocated by PyTorch, with ",
-          format_size(allocated_in_private_pools),
-          " allocated in private pools, and ",
+          " is allocated by PyTorch, ",
+          private_pool_msg,
+          "and ",
           format_size(
               reserved_bytes - allocated_bytes - allocated_in_private_pools),
           " is reserved by PyTorch but unallocated.",
