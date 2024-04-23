@@ -331,12 +331,18 @@ def patch_torch_manual_seed():
 
     def deterministic_torch_manual_seed(*args, **kwargs):
         from torch._C import default_generator
+        from torch._C import _has_cuda as HAS_CUDA, _has_xpu as HAS_XPU
 
         seed = 1337
-        import torch.cuda
+        if HAS_CUDA:
+            import torch.cuda
 
-        if not torch.cuda._is_in_bad_fork():
-            torch.cuda.manual_seed_all(seed)
+            if not torch.cuda._is_in_bad_fork():
+                torch.cuda.manual_seed_all(seed)
+        if HAS_XPU:
+            import torch.xpu
+            if not torch.xpu._is_in_bad_fork():
+                torch.xpu.manual_seed_all(seed)
         return default_generator.manual_seed(seed)
 
     torch.manual_seed = deterministic_torch_manual_seed
