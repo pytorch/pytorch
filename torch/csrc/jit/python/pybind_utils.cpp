@@ -119,7 +119,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
         // NB: We carefully test if the storage is meta, because that is
         // always accurate even if you have a fake tensor (which is the
         // primary case we are trying to detect here)
-        if (var.storage().device_type() == kMeta) {
+        if (var.storage().device_type() == c10::kMeta) {
           throw py::cast_error(
               "cannot extract float from tensor with meta storage");
         }
@@ -157,7 +157,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       }
       if (THPVariable_Check(obj.ptr())) {
         auto var = py::cast<autograd::Variable>(obj);
-        if (var.storage().device_type() == kMeta) {
+        if (var.storage().device_type() == c10::kMeta) {
           throw py::cast_error(
               "cannot extract int from tensor with meta storage");
         }
@@ -214,7 +214,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       }
       if (THPVariable_Check(obj.ptr())) {
         auto var = py::cast<autograd::Variable>(obj);
-        if (var.storage().device_type() == kMeta) {
+        if (var.storage().device_type() == c10::kMeta) {
           throw py::cast_error(
               "cannot extract bool from tensor with meta storage");
         }
