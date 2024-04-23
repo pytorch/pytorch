@@ -1179,7 +1179,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         self.assertIsNot(observers[0], observers[2])
         self.assertIsNot(observers[1], observers[2])
 
-    @parametrize('dtype', (torch.int16, torch.float8_e5m2, torch.float8_e4m3fn))
+    @parametrize("dtype", (torch.int16, torch.float8_e5m2, torch.float8_e4m3fn))
     def test_quantization_dtype(self, dtype):
         class DtypeActQuantizer(Quantizer):
             def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
@@ -2253,5 +2253,6 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             node_occurrence,
             node_list,
         )
+
 
 instantiate_parametrized_tests(TestQuantizePT2E)
