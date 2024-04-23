@@ -60,7 +60,7 @@ def math_attention(
     """
     assert len(other_buffers) == 0, "Other buffers are not yet supported."
 
-    scores = query @ key.transpose(-2, -1)
+    scores = (query @ key.transpose(-2, -1)).to(dtype=torch.float32)
 
     b = torch.arange(0, scores.size(0), device=scores.device)
     h = torch.arange(0, scores.size(1), device=scores.device)
@@ -179,9 +179,11 @@ def templated_attention_functionalize(
     assert isinstance(other_buffers_unwrapped, tuple)
     assert all(isinstance(item, torch.Tensor) for item in other_buffers_unwrapped)
 
-    example_vals = [torch.zeros((), dtype=query.dtype)] + [
-        torch.zeros((), dtype=torch.int) for _ in range(4)
-    ]
+    example_vals = (
+        [torch.zeros((), dtype=query.dtype)]
+        + [torch.zeros((), dtype=torch.int) for _ in range(4)]
+        + list(other_buffers_unwrapped)
+    )
     with ctx.redispatch_to_next() as m:
         functional_score_mod = ctx.functionalize(score_mod)
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
