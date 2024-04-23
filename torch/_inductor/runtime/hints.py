@@ -1,6 +1,8 @@
 import collections
+import typing
 from dataclasses import fields
 from enum import auto, Enum
+from typing import Optional
 
 
 # NOTE: if these fail asserts submit a PR to increase them
@@ -89,3 +91,39 @@ class AutotuneHint(Enum):
     # which isn't valid python.
     # Enum.__str__ will just return "AutotuneHint.ELEMENTS_PER_WARP_32".
     __repr__ = Enum.__str__
+
+
+class DeviceProperties(typing.NamedTuple):
+    """Copy device properties into a data structure not requiring torch to be imported"""
+
+    type: str  # type: ignore[assignment]
+    index: int  # type: ignore[assignment]
+    cc: int
+    major: Optional[int] = None
+    regs_per_multiprocessor: Optional[int] = None
+    max_threads_per_multi_processor: Optional[int] = None
+    multi_processor_count: Optional[int] = None
+
+    @classmethod
+    def create(cls, device):
+        import torch
+        from torch._dynamo.device_interface import get_interface_for_device
+
+        device_type = device.type if torch.version.hip is None else "hip"
+        device_interface = get_interface_for_device(device)
+        if device_type == "cuda":
+            props = device_interface.get_device_properties(device)
+            return cls(
+                type=device_type,
+                index=device.index,
+                cc=device_interface.get_compute_capability(device),
+                major=props.major,
+                regs_per_multiprocessor=props.regs_per_multiprocessor,
+                max_threads_per_multi_processor=props.max_threads_per_multi_processor,
+                multi_processor_count=props.multi_processor_count,
+            )
+        return cls(
+            type=device_type,
+            index=device.index,
+            cc=device_interface.get_compute_capability(device),
+        )
