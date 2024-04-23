@@ -54,7 +54,7 @@ densenet121,pass,0
 
 
 
-detectron2_fcos_r_50_fpn,pass,38
+detectron2_fcos_r_50_fpn,pass,23
 
 
 
@@ -135,10 +135,6 @@ lennard_jones,pass,0
 
 
 llama,pass,0
-
-
-
-llava,fail_accuracy,0
 
 
 

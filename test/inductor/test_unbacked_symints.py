@@ -6,14 +6,15 @@ import torch
 
 from torch._dynamo import config as dynamo_config
 from torch._inductor import config as inductor_config
+from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import is_big_gpu
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import IS_LINUX, TestCase as TorchTestCase
+from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA, skipCUDAIf
 
 
-class TestUnbackedSymints(TorchTestCase):
+class TestUnbackedSymints(InductorTestCase):
     @skipCUDAIf(not HAS_CUDA, "requires cuda")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_expand(self, device):
@@ -141,13 +142,59 @@ class TestUnbackedSymints(TorchTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @skipCUDAIf(not HAS_CUDA, "requires cuda")
+    @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
+    def test_nonzero_in_inference_mode(self, device):
+        def fn(x):
+            return torch.nonzero(x)
+
+        example_inputs = (torch.randint(0, 2, (128,), device=device),)
+
+        with torch.inference_mode():
+            actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+            expected = fn(*example_inputs)
+
+        torch.testing.assert_close(actual, expected)
+
+    @inductor_config.patch({"max_autotune": True})
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_equivalent_backed_unbacked(self, device):
+        # Tests scenario when there are two equivalent backed & unbacked symints,
+        # but when we look-up a size hint on the unbacked symint, we ignorantly
+        # use the default fallback hint.
+
+        def fn(x, w, a, b):
+            # Make tensors where 1st dim is unbacked/backed.
+            u0, s0 = a.item(), b.size(0)
+            unbacked = x.expand(u0, *x.shape)
+            backed = x.expand(s0, *x.shape)
+
+            # The cat unifies u0 and s0 -- i.e. u0 == s0.
+            cat = torch.cat([backed, unbacked, unbacked], dim=1)  # [s0, 30, 16]
+            mat1 = torch.permute(cat, [0, 2, 1])  # [s0, 16, 30]
+            mat2 = w.expand(u0, *w.shape)  # [u0, 30, 32]
+            bmm = torch.ops.aten.bmm(mat1, mat2)
+            return bmm
+
+        example_inputs = (
+            torch.randn((10, 16), dtype=torch.float32, device=device),
+            torch.randn((30, 32), dtype=torch.float32, device=device),
+            torch.tensor(7, device=device),
+            backed := torch.randn((7,), device=device),
+        )
+        torch._dynamo.mark_dynamic(backed, 0)  # create backed symint
+
+        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
 
 instantiate_device_type_tests(
     TestUnbackedSymints, globals(), only_for=(GPU_TYPE, "cpu")
 )
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     if IS_LINUX and HAS_CUDA and is_big_gpu(0):
         run_tests()

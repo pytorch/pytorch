@@ -2,8 +2,10 @@ import json
 import os
 import subprocess
 from collections import defaultdict
+from functools import lru_cache
 from pathlib import Path
 from typing import cast, Dict, List, Set, Union
+from urllib.request import Request, urlopen
 from warnings import warn
 
 from tools.testing.test_run import TestRun
@@ -19,6 +21,7 @@ def python_test_file_to_test_name(tests: Set[str]) -> Set[str]:
     return valid_tests
 
 
+@lru_cache(maxsize=None)
 def query_changed_files() -> List[str]:
     default_branch = f"origin/{os.environ.get('GIT_DEFAULT_BRANCH', 'main')}"
     merge_base = (
@@ -39,13 +42,57 @@ def query_changed_files() -> List[str]:
         capture_output=True,
         check=False,
     )
+    print(f"merge_base: {merge_base}, head: {head}")
 
     if proc.returncode != 0:
         raise RuntimeError("Unable to get changed files")
 
     lines = proc.stdout.decode().strip().split("\n")
     lines = [line.strip() for line in lines]
+    print(f"Changed files: {lines}")
     return lines
+
+
+@lru_cache(maxsize=None)
+def get_git_commit_info() -> str:
+    """Gets the commit info since the last commit on the default branch."""
+    default_branch = f"origin/{os.environ.get('GIT_DEFAULT_BRANCH', 'main')}"
+
+    merge_base = (
+        subprocess.check_output(["git", "merge-base", default_branch, "HEAD"])
+        .decode()
+        .strip()
+    )
+
+    head = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode().strip()
+
+    base_commit = merge_base
+    if base_commit == head:
+        # We are on the default branch, so check for changes since the last commit
+        base_commit = "HEAD^"
+
+    return (
+        subprocess.check_output(
+            ["git", "log", f"{base_commit}..HEAD"],
+        )
+        .decode()
+        .strip()
+    )
+
+
+@lru_cache(maxsize=None)
+def get_issue_or_pr_body(number: int) -> str:
+    """Gets the body of an issue or PR"""
+    github_token = os.environ.get("GITHUB_TOKEN")
+    headers = {
+        "Accept": "application/vnd.github.v3+json",
+        "Authorization": f"token {github_token}",
+    }
+    # Despite the 'issues' in the link, this also works for PRs
+    url = f"https://api.github.com/repos/pytorch/pytorch/issues/{number}"
+    with urlopen(Request(url, headers=headers)) as conn:
+        body: str = json.loads(conn.read().decode())["body"]
+        return body
 
 
 def normalize_ratings(

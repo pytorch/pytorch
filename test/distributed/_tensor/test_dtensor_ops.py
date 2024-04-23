@@ -94,6 +94,7 @@ dtensor_fails = {
     # get full support with varying sharding specs
     xfail("__getitem__"),
     xfail("__rsub__"),
+    xfail("_chunk_cat"),
     xfail("_native_batch_norm_legit"),
     xfail("_upsample_bilinear2d_aa"),
     xfail("addbmm"),
@@ -113,6 +114,7 @@ dtensor_fails = {
     xfail("as_strided", "partial_views"),
     xfail("as_strided_scatter"),
     xfail("bernoulli"),
+    xfail("_batch_norm_with_update"),
     xfail("block_diag"),
     xfail("broadcast_shapes"),
     xfail("cauchy"),
@@ -188,7 +190,10 @@ dtensor_fails = {
     xfail("index_copy"),
     xfail("index_fill"),
     xfail("index_put"),
-    xfail("index_reduce"),
+    xfail("index_reduce", "prod"),
+    xfail("index_reduce", "mean"),
+    xfail("index_reduce", "amax"),
+    xfail("index_reduce", "amin"),
     xfail("index_select"),
     xfail("isin"),
     xfail("isinf"),
@@ -460,7 +465,6 @@ dtensor_fails = {
     xfail("stft"),
     xfail("svd"),
     xfail("svd_lowrank"),
-    xfail("t"),
     xfail("take"),
     xfail("tensor_split"),
     xfail("to_sparse"),
@@ -484,7 +488,6 @@ dtensor_fails = {
     xfail("var_mean", "unbiased"),
     xfail("vdot"),
     xfail("view_copy"),
-    xfail("view_as_complex"),
     xfail("zeros"),
     # ops inside this might even fail without dtensor
     # tests, as we rescale op db common test size factor (i.e. L, M, S)

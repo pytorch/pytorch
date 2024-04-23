@@ -2329,6 +2329,25 @@ def forward(self, x):
             )
         )
 
+    def test_export_fast_binary_broadcast_check(self):
+        # This test looks at the case where we erroneously create a guard
+        # when checking the equality of the operands' shape and the output
+        # shape during FakeTensor's binary op fast path.
+
+        class MyModel(torch.nn.Module):
+            def forward(self, a, b):
+                # final shape is (dim0, 4, 8)
+                # order matters since a & the output have the same shape
+                return b + a
+
+        a = torch.randn(100, 4, 8)
+        b = torch.randn(4, 8)
+        model = MyModel().eval().cuda()
+        batchsize = torch.export.Dim("dim0", min=3, max=1024)
+        dynamic_shape_spec = {"a": [batchsize, None, None], "b": [None, None]}
+
+        torch.export.export(model, (a, b), dynamic_shapes=dynamic_shape_spec)
+
     def test_export_meta(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -2364,9 +2383,9 @@ def forward(self, x):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            "Not all values.*valid.*inferred to be equal to(.*\n)*.*"
-            "The values of.*must always be related to the values of.*"
-            "by dim0 = 2\\*dim1",
+            "Constraints violated .*!(.*\n)*.*"
+            "by dim0 = 2\\*dim1(.*\n)*.*"
+            "Not all values of dim1 .* satisfy the generated guard 2 <= .* and .* <= 5(.*\n)*.*",
         ):
             torch.export.export(foo, (t,), dynamic_shapes=dynamic_shapes)
 
@@ -2436,7 +2455,9 @@ def forward(self, x):
         torch._dynamo.export(my_dyn_fn)(y)
 
         with self.assertRaises(ConstraintViolationError):
-            torch._dynamo.export(my_dyn_fn, constraints=[dynamic_dim(y, 0)])(y)
+            torch._dynamo.export(
+                my_dyn_fn, dynamic_shapes=({0: torch.export.Dim("dimx")},)
+            )(y)
 
     def test_export_module_specify_constraints_signature(self):
         y = torch.randn([3, 3, 3])
@@ -2450,10 +2471,10 @@ def forward(self, x):
         mod = Mod()
         torch._dynamo.export(mod)(y)
 
-        with self.assertRaisesRegex(
-            ConstraintViolationError, "def specify_constraints\\(x\\):"
-        ):
-            torch._dynamo.export(mod, constraints=[dynamic_dim(y, 0)])(y)
+        with self.assertRaisesRegex(ConstraintViolationError, "dimx = None  # 3"):
+            torch._dynamo.export(mod, dynamic_shapes=({0: torch.export.Dim("dimx")},))(
+                y
+            )
 
     def test_export_raise_guard_partial_constraint(self):
         y = torch.randn([3, 3, 3])
@@ -2466,7 +2487,9 @@ def forward(self, x):
         torch._dynamo.export(my_dyn_fn)(y)
 
         with self.assertRaises(ConstraintViolationError):
-            torch._dynamo.export(my_dyn_fn, constraints=[dynamic_dim(y, 0)])(y)
+            torch._dynamo.export(
+                my_dyn_fn, dynamic_shapes=({0: torch.export.Dim("dimx")},)
+            )(y)
 
     def test_export_raise_on_relationship(self):
         y = torch.randn([3, 3, 3])
@@ -2478,14 +2501,12 @@ def forward(self, x):
             return a.cos()
 
         torch._dynamo.export(my_dyn_fn)(y, y, y)
-        constraints = [dynamic_dim(y, 0)]
+        dim = torch.export.Dim("dim")
+        dynamic_shapes = ({0: dim}, {0: dim}, {0: dim})
         with self.assertRaises(ConstraintViolationError):
-            torch._dynamo.export(my_dyn_fn, constraints=constraints)(y, y, y)
-        constraints += [
-            dynamic_dim(y, 1) == dynamic_dim(y, 0),
-            dynamic_dim(y, 2) == dynamic_dim(y, 0),
-        ]
-        torch._dynamo.export(my_dyn_fn, constraints=constraints)(y, y, y)
+            torch._dynamo.export(my_dyn_fn, dynamic_shapes=dynamic_shapes)(y, y, y)
+        dynamic_shapes = ({0: dim}, {1: dim}, {2: dim})
+        torch._dynamo.export(my_dyn_fn, dynamic_shapes=dynamic_shapes)(y, y, y)
 
     def test_export_no_raise(self):
         y = torch.randn([3, 3, 3])
@@ -2496,7 +2517,9 @@ def forward(self, x):
             return a * b * c
 
         torch._dynamo.export(my_dyn_fn)(y, y, y)
-        torch._dynamo.export(my_dyn_fn, constraints=[dynamic_dim(y, 0)])(y, y, y)
+        dim = torch.export.Dim("dim")
+        dynamic_shapes = ({0: dim}, {0: dim}, {0: dim})
+        torch._dynamo.export(my_dyn_fn, dynamic_shapes=dynamic_shapes)(y, y, y)
 
     def test_export_multi_dynamic_dim_unsafe_relationship(self):
         x = torch.randn([3, 3, 3])
@@ -2509,11 +2532,13 @@ def forward(self, x):
             return a * c, b
 
         torch._dynamo.export(my_dyn_fn)(x, y, z)
-        constraints = [dynamic_dim(x, 0), dynamic_dim(y, 0), dynamic_dim(z, 0)]
+        dimx, dimy, dimz = torch.export.dims("dimx", "dimy", "dimz")
+        dynamic_shapes = ({0: dimx}, {0: dimy}, {0: dimz})
         with self.assertRaises(ConstraintViolationError):
-            torch._dynamo.export(my_dyn_fn, constraints=constraints)(x, y, z)
-        constraints.append(dynamic_dim(z, 0) == dynamic_dim(x, 0))
-        torch._dynamo.export(my_dyn_fn, constraints=constraints)(x, y, z)
+            torch._dynamo.export(my_dyn_fn, dynamic_shapes=dynamic_shapes)(x, y, z)
+        dimz = dimx
+        dynamic_shapes = ({0: dimx}, {0: dimy}, {0: dimz})
+        torch._dynamo.export(my_dyn_fn, dynamic_shapes=dynamic_shapes)(x, y, z)
 
     def test_remove_redundant_dynamic_dim_in_error_message(self):
         class Foo(torch.nn.Module):
@@ -2585,14 +2610,17 @@ def forward(self, x):
         x = torch.tensor([3])
         y = torch.randn([8, 8, 6])
         example_inputs = [x, y]
-        constraints = [dynamic_dim(y, 0) >= 6, dynamic_dim(y, 0) <= 10]
+        dynamic_shapes = (None, {0: torch.export.Dim("dimy", min=6, max=10)})
         gm, _ = torch._dynamo.export(
             f,
-            constraints=constraints,
+            dynamic_shapes=dynamic_shapes,
             aten_graph=True,
             tracing_mode="symbolic",
         )(*example_inputs)
 
+        constraints = torch.export.dynamic_shapes._process_dynamic_shapes(
+            f, example_inputs, dynamic_shapes=dynamic_shapes
+        )
         self.assertEqual(
             gm.meta["input_shape_constraints"],
             [c.serializable_spec for c in constraints],
@@ -2610,10 +2638,8 @@ def forward(self, x):
             return b
 
         y = torch.tensor([8, 8, 6])
-        constraints = []
         gm, _ = torch._dynamo.export(
             f,
-            constraints=constraints,
             aten_graph=True,
             tracing_mode="symbolic",
         )(y)
@@ -2632,10 +2658,10 @@ def forward(self, x):
         x = torch.tensor([3])
         y = torch.randn([8, 8, 6])
         example_inputs = [x, y]
-        constraints = [dynamic_dim(y, 0) >= 6, dynamic_dim(y, 0) <= 10]
+        dynamic_shapes = (None, {0: torch.export.Dim("dimy", min=6, max=10)})
         gm, _ = torch._dynamo.export(
             f,
-            constraints=constraints,
+            dynamic_shapes=dynamic_shapes,
             aten_graph=True,
             tracing_mode="symbolic",
         )(*example_inputs)
@@ -2655,7 +2681,9 @@ def forward(self, x):
 
         torch._dynamo.export(my_dyn_fn)(x)
         with self.assertRaises(ConstraintViolationError):
-            torch._dynamo.export(my_dyn_fn, constraints=[dynamic_dim(x, 0)])(x)
+            torch._dynamo.export(
+                my_dyn_fn, dynamic_shapes=({0: torch.export.Dim("dimx")},)
+            )(x)
 
     def test_symbool(self):
         def f(x):
@@ -2676,11 +2704,12 @@ def forward(self, x):
             return a * c, b
 
         torch._dynamo.export(my_dyn_fn)(x, y, z)
-        constraints = [dynamic_dim(x, 0), dynamic_dim(x, 1), dynamic_dim(x, 2)]
+        dimx_0, dimx_1, dimx_2 = torch.export.dims("dimx_0", "dimx_1", "dimx_2")
+        dynamic_shapes = ({0: dimx_0, 1: dimx_1, 2: dimx_2}, None, None)
         with self.assertRaises(ConstraintViolationError):
-            torch._dynamo.export(my_dyn_fn, constraints=constraints)(x, y, z)
-        constraints.append(dynamic_dim(z, 0) == dynamic_dim(x, 0))
-        torch._dynamo.export(my_dyn_fn, constraints=constraints)(x, y, z)
+            torch._dynamo.export(my_dyn_fn, dynamic_shapes=dynamic_shapes)(x, y, z)
+        dynamic_shapes = ({0: dimx_0, 1: dimx_1, 2: dimx_2}, None, {0: dimx_0})
+        torch._dynamo.export(my_dyn_fn, dynamic_shapes=dynamic_shapes)(x, y, z)
 
     def test_export_dynamic_dim_raise_on_compound_range_constraint(self):
         x = torch.ones(6, 4, 4)
@@ -2689,10 +2718,7 @@ def forward(self, x):
 
     def test_export_dynamic_dim_range_constraint(self):
         x = torch.ones(6, 4, 4)
-        constraints = [
-            4 < dynamic_dim(x, 0),
-            dynamic_dim(x, 0) <= 6,
-        ]
+        dynamic_shapes = ({0: torch.export.Dim("dimx", min=5, max=6)},)
 
         def foo(x):
             if x.shape[0] > 3:  # ok
@@ -2701,7 +2727,7 @@ def forward(self, x):
 
         torch._dynamo.export(
             foo,
-            constraints=constraints,
+            dynamic_shapes=dynamic_shapes,
             aten_graph=True,
         )(x)
 
@@ -2713,14 +2739,14 @@ def forward(self, x):
         with self.assertRaises(ConstraintViolationError):
             torch._dynamo.export(
                 bar,
-                constraints=constraints,
+                dynamic_shapes=dynamic_shapes,
                 aten_graph=True,
             )(x)
 
     def test_trivial_constraint(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
-                # non-trivial divisibility condition
+                # complex divisibility condition
                 if (2 * x.shape[0] + 3) % (x.shape[0] - 3) == 0:
                     return x + 1
                 else:
@@ -2738,6 +2764,16 @@ def forward(self, x):
 
         bar = Bar()
 
+        class Qux(torch.nn.Module):
+            def forward(self, x):
+                # simple divisibility condition (not trivially true)
+                if (3 * x.shape[0]) % 2 == 0:
+                    return x + 1
+                else:
+                    return x - 1
+
+        qux = Qux()
+
         x = torch.randn(12)
         dim0 = torch.export.Dim("dim0", max=100)
         dynamic_shapes = {"x": (dim0,)}
@@ -2748,6 +2784,12 @@ def forward(self, x):
             torch.export.export(foo, (x,), dynamic_shapes=dynamic_shapes)
 
         torch.export.export(bar, (x,), dynamic_shapes=dynamic_shapes)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Not all values.*satisfy the generated guard",
+        ):
+            torch.export.export(qux, (x,), dynamic_shapes=dynamic_shapes)
 
     def test_list_contains(self):
         def func(x):
@@ -2894,7 +2936,9 @@ def forward(self, x):
             RuntimeError,
             "Constraints violated",
         ):
-            torch._dynamo.export(my_dyn_fn, constraints=[dynamic_dim(y, 0)])(y)
+            torch._dynamo.export(
+                my_dyn_fn, dynamic_shapes=({0: torch.export.Dim("dim")},)
+            )(y)
 
     def test_export_dynamic_dim_cleanup(self):
         y = torch.randn([3, 3, 3])
@@ -2902,8 +2946,9 @@ def forward(self, x):
         def my_dyn_fn(x):
             return x.cos()
 
-        constraints = [dynamic_dim(y, 0)]
-        torch._dynamo.export(my_dyn_fn, constraints=constraints)(y)
+        torch._dynamo.export(my_dyn_fn, dynamic_shapes=({0: torch.export.Dim("dim")},))(
+            y
+        )
 
     @config.patch(capture_dynamic_output_shape_ops=True)
     def test_export_dynamic_control_flow_error(self):
@@ -3484,15 +3529,12 @@ G['macademia'], accessed at:
         with fake_mode:
             model = DynamicShapeSimpleModel()
             inputs = (torch.randn(2, 4), torch.randn(4, 7), torch.randn(2, 7))
-            constraints = [
-                dynamic_dim(inputs[0], 0),
-                dynamic_dim(inputs[2], 0),
-                dynamic_dim(inputs[2], 0) == dynamic_dim(inputs[0], 0),
-            ]
+            dim = torch.export.Dim("dim")
+            dynamic_shapes = ({0: dim}, None, {0: dim})
             for aten_graph in [True, False]:
                 gm = torch._dynamo.export(
                     model,
-                    constraints=constraints,
+                    dynamic_shapes=dynamic_shapes,
                     aten_graph=aten_graph,
                 )(*inputs).graph_module
 
@@ -3519,13 +3561,11 @@ G['macademia'], accessed at:
         with fake_mode:
             model = Model()
             inputs = (torch.randn(10, 2, 2),)
-            constraints = [
-                dynamic_dim(inputs[0], 0),
-            ]
+            dynamic_shapes = ({0: torch.export.Dim("dim")},)
             for aten_graph in [True, False]:
                 gm = torch._dynamo.export(
                     model,
-                    constraints=constraints,
+                    dynamic_shapes=dynamic_shapes,
                     aten_graph=aten_graph,
                 )(*inputs).graph_module
 
@@ -4174,8 +4214,8 @@ def forward(self, x):
             """\
 def forward(self, x):
     arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
-    l_x__1 = arg0
-    x = torch.cos(l_x__1);  l_x__1 = None
+    l_x_ = arg0
+    x = torch.cos(l_x_);  l_x_ = None
     x_1 = torch.sin(x);  x = None
     x_2 = torch.abs(x_1);  x_1 = None
     return pytree.tree_unflatten([x_2], self._out_spec)""",
@@ -4209,8 +4249,8 @@ def forward(self, x):
             """\
 def forward(self, x):
     arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
-    l_x__1 = arg0
-    sin = torch.sin(l_x__1);  l_x__1 = None
+    l_x_ = arg0
+    sin = torch.sin(l_x_);  l_x_ = None
     return pytree.tree_unflatten([sin], self._out_spec)""",
         )
         self.assertExpectedInline(
@@ -4218,8 +4258,8 @@ def forward(self, x):
             """\
 def forward(self, x):
     arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
-    l_x__1 = arg0
-    sin = torch.sin(l_x__1);  l_x__1 = None
+    l_x_ = arg0
+    sin = torch.sin(l_x_);  l_x_ = None
     return pytree.tree_unflatten([sin], self._out_spec)""",
         )
 
@@ -4241,8 +4281,8 @@ def forward(self, x):
 def forward(self, x):
     arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     l_x_ = arg0
-    l_x__1 = torch.cos(l_x_);  l_x_ = None
-    sin = torch.sin(l_x__1);  l_x__1 = None
+    x = torch.cos(l_x_);  l_x_ = None
+    sin = torch.sin(x);  x = None
     return pytree.tree_unflatten([sin], self._out_spec)""",
         )
 
@@ -4268,8 +4308,8 @@ def forward(self, x):
         gm_edit.recompile()
 
         expected = [
-            "x = torch.sin(l_x__1)",
-            "cos = torch.cos(x_1)",
+            "x = torch.sin(l_x_)",
+            "cos = torch.cos(l_stack0_)",
         ]
 
         def test_backend(gm: torch.fx.GraphModule, example_inputs):

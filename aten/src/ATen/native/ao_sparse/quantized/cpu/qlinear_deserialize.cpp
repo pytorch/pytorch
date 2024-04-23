@@ -11,18 +11,18 @@ namespace ao {
 namespace sparse {
 
 namespace {
-const int64_t serialization_version_index = 0;
-const int64_t bias_index = 1;
-const int64_t out_features_block_size_index = 2;
-const int64_t in_features_block_size_index = 3;
-const int64_t weight_scales_index = 4;
-const int64_t weight_zero_point_index = 5;
-const int64_t quantization_scheme_index = 6;
-const int64_t row_block_indices_index = 7;
-const int64_t col_block_indices_index = 8;
-const int64_t weight_values_index = 9;
-const int64_t num_output_channels_index = 10;
-const int64_t num_input_channels_index = 11;
+constexpr int64_t serialization_version_index = 0;
+constexpr int64_t bias_index = 1;
+constexpr int64_t out_features_block_size_index = 2;
+constexpr int64_t in_features_block_size_index = 3;
+constexpr int64_t weight_scales_index = 4;
+constexpr int64_t weight_zero_point_index = 5;
+constexpr int64_t quantization_scheme_index = 6;
+constexpr int64_t row_block_indices_index = 7;
+constexpr int64_t col_block_indices_index = 8;
+constexpr int64_t weight_values_index = 9;
+constexpr int64_t num_output_channels_index = 10;
+constexpr int64_t num_input_channels_index = 11;
 
 template <typename TENSOR_DTYPE, typename VEC_DTYPE>
 std::vector<VEC_DTYPE> unwrap_vector(at::Tensor tensor) {

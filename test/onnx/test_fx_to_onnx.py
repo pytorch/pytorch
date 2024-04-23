@@ -1,6 +1,8 @@
 # Owner(s): ["module: onnx"]
 from __future__ import annotations
 
+import logging
+
 import tempfile
 
 from typing import Mapping, Tuple
@@ -426,7 +428,20 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             {*model.state_dict().keys()},
         )
 
-    def test_fake_tensor_mode_simple(self):
+    @common_utils.parametrize(
+        "checkpoint_type",
+        [
+            common_utils.subtest(
+                "state_dict",
+                name="state_dict",
+            ),
+            common_utils.subtest(
+                "state_dict",
+                name="checkpoint_file",
+            ),
+        ],
+    )
+    def test_fake_tensor_mode_simple(self, checkpoint_type):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -455,29 +470,44 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             len(onnx_program.model_proto.graph.initializer) == 0
         ), "Initializers cannot exist when fake mode is enabled"
 
-        # Variant 1: Save ONNX proto using Model's state_dict()
-        with tempfile.NamedTemporaryFile(suffix=".onnx") as tmp_onnx_file:
-            model_state_dict = Model().state_dict()  # Create a state_dict for testing
-            onnx_program.save(tmp_onnx_file.name, model_state_dict=model_state_dict)
-            assert (
-                len(onnx.load(tmp_onnx_file.name).graph.initializer) == 2
-            ), "Initializers must be present after loading it from model_state_dict"
-
-        # Variant 2: Save ONNX proto using Model checkpoint file
-        with tempfile.NamedTemporaryFile(
-            suffix=".onnx"
-        ) as tmp_onnx_file, tempfile.NamedTemporaryFile(
-            suffix=".pt"
-        ) as tmp_checkpoint_file:
-            torch.save(
-                Model().state_dict(), tmp_checkpoint_file.name
-            )  # Create checkpoint file for testing
-            onnx_program.save(
-                tmp_onnx_file.name, model_state_dict=tmp_checkpoint_file.name
-            )
-            assert (
-                len(onnx.load(tmp_onnx_file.name).graph.initializer) == 2
-            ), "Initializers must be present after loading it from model_state_dict"
+        if checkpoint_type == "state_dict":
+            # Variant 1: Save ONNX proto using Model's state_dict()
+            with tempfile.NamedTemporaryFile(suffix=".onnx") as tmp_onnx_file:
+                model_state_dict = (
+                    Model().state_dict()
+                )  # Create a state_dict for testing
+                onnx_program.save(tmp_onnx_file.name, model_state=model_state_dict)
+                assert (
+                    len(onnx.load(tmp_onnx_file.name).graph.initializer) == 2
+                ), "Initializers must be present after loading it from model_state_dict"
+                # Let's make sure consecutive `save` calls don't create dupes
+                onnx_program.save(tmp_onnx_file.name, model_state=model_state_dict)
+                assert (
+                    len(onnx.load(tmp_onnx_file.name).graph.initializer) == 2
+                ), "Initializers must be present after loading it from model_state_dict"
+        elif checkpoint_type == "checkpoint_file":
+            # Variant 2: Save ONNX proto using Model checkpoint file
+            with tempfile.NamedTemporaryFile(
+                suffix=".onnx"
+            ) as tmp_onnx_file, tempfile.NamedTemporaryFile(
+                suffix=".pt"
+            ) as tmp_checkpoint_file:
+                torch.save(
+                    Model().state_dict(), tmp_checkpoint_file.name
+                )  # Create checkpoint file for testing
+                onnx_program.save(
+                    tmp_onnx_file.name, model_state=tmp_checkpoint_file.name
+                )
+                assert (
+                    len(onnx.load(tmp_onnx_file.name).graph.initializer) == 2
+                ), "Initializers must be present after loading it from model_state_dict"
+                # Let's make sure consecutive `save` calls don't create dupes
+                onnx_program.save(
+                    tmp_onnx_file.name, model_state=tmp_checkpoint_file.name
+                )
+                assert (
+                    len(onnx.load(tmp_onnx_file.name).graph.initializer) == 2
+                ), "Initializers must be present after loading it from model_state_dict"
 
     def test_fake_tensor_mode_simple_invalid_input(self):
         class Model(torch.nn.Module):
@@ -649,6 +679,98 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         )
 
         self.assertTrue(onnx_program.model_signature, torch.export.ExportGraphSignature)
+
+    @common_utils.parametrize(
+        "float8_type",
+        [
+            common_utils.subtest(
+                torch.float8_e5m2,
+                name="torch_float8_e5m2",
+            ),
+            common_utils.subtest(
+                torch.float8_e5m2fnuz,
+                name="torch_float8_e5m2fnuz",
+            ),
+            common_utils.subtest(
+                torch.float8_e4m3fn,
+                name="torch_float8_e4m3fn",
+            ),
+            common_utils.subtest(
+                torch.float8_e4m3fnuz,
+                name="torch_float8_e4m3fnuz",
+            ),
+        ],
+    )
+    def test_float8_support(self, float8_type):
+        class Float8Module(torch.nn.Module):
+            def forward(self, input: torch.Tensor):
+                input = input.to(float8_type)
+                return input + torch.tensor(1.0, dtype=float8_type)
+
+        _ = torch.onnx.dynamo_export(Float8Module(), torch.randn(1, 2, 3, 4))
+
+    def test_export_with_logging_logger(self):
+        logger = logging.getLogger(__name__)
+
+        class LoggingLoggerModule(torch.nn.Module):
+            def forward(self, x):
+                logger.log("abc")
+                return x + 1
+
+        input = torch.randn(2, 3)
+        model = LoggingLoggerModule()
+        _ = torch.onnx.dynamo_export(model, input)
+
+    def test_export_with_hf_logging_logger(self):
+        logger = transformers.utils.logging.get_logger(__name__)
+
+        class HFLoggingLoggerModule(torch.nn.Module):
+            def forward(self, x):
+                logger.warning_once("abc")
+                return x + 1
+
+        input = torch.randn(2, 3)
+        model = HFLoggingLoggerModule()
+        _ = torch.onnx.dynamo_export(model, input)
+
+    def test_checkpoint_cast(self):
+        model_id = "openai/whisper-large-v3"
+        feature_extractor = transformers.WhisperFeatureExtractor(feature_size=128)
+        batch = 4
+
+        with torch.onnx.enable_fake_mode() as ctx:
+            model = transformers.AutoModelForSpeechSeq2Seq.from_pretrained(
+                model_id, low_cpu_mem_usage=False, use_safetensors=False
+            )
+            input = {
+                "input_features": torch.randn(
+                    (
+                        batch,
+                        feature_extractor.feature_size,
+                        feature_extractor.nb_max_frames,
+                    )
+                ),
+                "decoder_input_ids": torch.tensor([[1, 1]]) * 8001,
+                "return_dict": False,
+            }
+
+        export_options = torch.onnx.ExportOptions(fake_context=ctx)
+        onnx_program = torch.onnx.dynamo_export(
+            model, **input, export_options=export_options
+        )
+        with tempfile.NamedTemporaryFile(suffix=".onnx") as tmp_onnx_file:
+            onnx_program.save(tmp_onnx_file.name)
+            onnx.checker.check_model(tmp_onnx_file.name, full_check=True)
+
+    def test_export_with_print(self):
+        class PrintModule(torch.nn.Module):
+            def forward(self, x):
+                print("abc")
+                return x + 1
+
+        input = torch.randn(2, 3)
+        model = PrintModule()
+        _ = torch.onnx.dynamo_export(model, input)
 
 
 if __name__ == "__main__":

@@ -746,6 +746,7 @@ torch_cpp_srcs = [
     "torch/csrc/api/src/optim/serialize.cpp",
     "torch/csrc/api/src/optim/sgd.cpp",
     "torch/csrc/api/src/optim/schedulers/lr_scheduler.cpp",
+    "torch/csrc/api/src/optim/schedulers/reduce_on_plateau_scheduler.cpp",
     "torch/csrc/api/src/optim/schedulers/step_lr.cpp",
     "torch/csrc/api/src/serialize/input-archive.cpp",
     "torch/csrc/api/src/serialize/output-archive.cpp",
@@ -794,6 +795,7 @@ libtorch_python_core_sources = [
     "torch/csrc/StorageMethods.cpp",
     "torch/csrc/StorageSharing.cpp",
     "torch/csrc/Stream.cpp",
+    "torch/csrc/Event.cpp",
     "torch/csrc/TypeInfo.cpp",
     "torch/csrc/api/src/python/init.cpp",
     "torch/csrc/autograd/functions/init.cpp",
@@ -820,6 +822,7 @@ libtorch_python_core_sources = [
     "torch/csrc/dynamo/init.cpp",
     "torch/csrc/functorch/init.cpp",
     "torch/csrc/mps/Module.cpp",
+    "torch/csrc/mtia/Module.cpp",
     "torch/csrc/inductor/aoti_runner/pybind.cpp",
     "torch/csrc/jit/backends/backend_init.cpp",
     "torch/csrc/jit/python/init.cpp",
@@ -1155,6 +1158,7 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/batch_norm_kernel.cpp",
     "aten/src/ATen/native/cpu/group_norm_kernel.cpp",
     "aten/src/ATen/native/cpu/int4mm_kernel.cpp",
+    "aten/src/ATen/native/cpu/int8mm_kernel.cpp",
     "aten/src/ATen/native/cpu/layer_norm_kernel.cpp",
     "aten/src/ATen/native/cpu/AmpGradScalerKernels.cpp",
     "aten/src/ATen/native/cpu/scaled_modified_bessel_k0.cpp",
@@ -1164,6 +1168,7 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/SpmmReduceKernel.cpp",
     "aten/src/ATen/native/cpu/SparseFactories.cpp",
     "aten/src/ATen/native/quantized/cpu/kernels/QuantizedOpKernels.cpp",
+    "aten/src/ATen/native/cpu/FusedAdamKernel.cpp",
 ]
 
 # This aten native source file list will not go through aten codegen process
@@ -1398,6 +1403,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/xnnpack/OpContext.cpp",
     "aten/src/ATen/native/xnnpack/RegisterOpContextClass.cpp",
     "aten/src/ATen/native/xnnpack/Shim.cpp",
+    "aten/src/ATen/native/FusedAdam.cpp",
     # Files not in native, but depends on native symbols
     # "aten/src/ATen/TensorIndexing.cpp",
     "aten/src/ATen/TensorIterator.cpp",

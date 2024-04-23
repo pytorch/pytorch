@@ -31,7 +31,7 @@ from torch import multiprocessing as mp
 from torch.testing import make_tensor
 
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
-    TEST_WITH_TORCHINDUCTOR, TestCase, TEST_WITH_ROCM, run_tests, IS_JETSON,
+    TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, run_tests, IS_JETSON,
     IS_WINDOWS, IS_FILESYSTEM_UTF8_ENCODING, NO_MULTIPROCESSING_SPAWN,
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, skipIfTorchInductor, load_tests, slowTest, slowTestIf,
     TEST_WITH_CROSSREF, skipIfTorchDynamo, skipRocmIfTorchInductor, set_default_dtype,
@@ -47,8 +47,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA, onlyCPU,
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
-    skipMeta,
-    PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyNativeDeviceTypes,
+    skipMeta, PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyNativeDeviceTypes,
     get_all_device_types, skipXLA)
 from typing import Tuple
 import torch.backends.quantized
@@ -63,6 +62,11 @@ from torch.testing._internal.common_dtype import (
     get_all_qint_dtypes,
 )
 from torch.testing._internal.two_tensor import TwoTensor
+
+if TEST_WITH_TORCHINDUCTOR:
+    from torch._inductor.test_case import TestCase
+else:
+    from torch.testing._internal.common_utils import TestCase  # type: ignore[assignment]
 
 
 # Protects against includes accidentally setting the default dtype
@@ -5927,7 +5931,7 @@ else:
         for optimizer_ctor in (torch.optim.SGD, torch.optim.Adam, torch.optim.AdamW):
             self._grad_scaling_autocast_test(device=device.type, optimizer_ctor=optimizer_ctor, optimizer_kwargs={"foreach": True})
 
-    @onlyCUDA
+    @onlyNativeDeviceTypes
     def test_grad_scaling_autocast_fused(self, device):
         device = torch.device(device)
         for optimizer_ctor in (torch.optim.Adam, torch.optim.AdamW):
@@ -5947,8 +5951,6 @@ else:
                 {"foreach": False, "fused": True},
             ),
         ):
-            if device.type != "cuda":
-                optimizer_kwargs['fused'] = False
             with self.subTest(optimizer=optimizer_ctor, optimizer_kwargs=optimizer_kwargs):
                 self._test_grads_invalidated_between_unscale_and_step(device.type, optimizer_ctor, optimizer_kwargs)
 

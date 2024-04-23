@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import collections
 import contextlib
+import dataclasses
 import enum
 import functools
 import getpass
@@ -45,8 +46,10 @@ from typing_extensions import Concatenate, ParamSpec
 
 import torch
 from torch._dynamo.device_interface import get_interface_for_device
+from torch._dynamo.utils import detect_fake_mode
 from torch.autograd import DeviceType
 from torch.autograd.profiler_util import EventList
+from torch.fx.passes.shape_prop import ShapeProp
 from torch.utils._sympy.functions import CeilDiv, CleanDiv, FloorDiv, ModularIndexing
 from . import config
 
@@ -190,7 +193,7 @@ def decode_device(device: Union[Optional[torch.device], str]) -> torch.device:
         return torch.tensor(0.0).device  # default device
     if isinstance(device, str):
         device = torch.device(device)
-    if device.type != "cpu" and device.index is None:
+    if device.type not in ("cpu", "meta") and device.index is None:
         device_interface = get_interface_for_device(device.type)
         return torch.device(device.type, index=device_interface.Worker.current_device())
     return device
@@ -679,15 +682,22 @@ def has_incompatible_cudagraph_ops(gm):
     return False
 
 
+def output_node(gm: torch.fx.GraphModule):
+    """Get the output node from an FX graph"""
+    last_node = next(iter(reversed(gm.graph.nodes)))
+    assert last_node.op == "output"
+    return last_node
+
+
 # Attempt to import AttrsDescriptor from Triton
 try:
     from triton.compiler.compiler import AttrsDescriptor
 
     attrs_descriptor_available = True
     # Determine if 'ids_of_folded_args' is a valid field for AttrsDescriptor
-    ids_of_folded_args_available = "ids_of_folded_args" in [
-        f.name for f in fields(AttrsDescriptor)
-    ]
+    attr_desc_fields = {f.name for f in fields(AttrsDescriptor)}
+    ids_of_folded_args_available = "ids_of_folded_args" in attr_desc_fields
+    divisible_by_8_available = "divisible_by_8" in attr_desc_fields
 except ImportError:
     attrs_descriptor_available = False
 
@@ -704,12 +714,13 @@ if attrs_descriptor_available:
         kwargs = {
             "divisible_by_16": divisible_by_16,
             "equal_to_1": equal_to_1,
-            "divisible_by_8": divisible_by_8,
         }
 
         # Conditionally add 'ids_of_folded_args' if it's available in AttrsDescriptor
         if ids_of_folded_args_available:
             kwargs["ids_of_folded_args"] = ids_of_folded_args
+        if divisible_by_8_available:
+            kwargs["divisible_by_8"] = divisible_by_8
 
         # Instantiate AttrsDescriptor with the prepared arguments
         return AttrsDescriptor(**kwargs)
@@ -723,6 +734,22 @@ else:
     )
 
 
+_registered_caches: List[Any] = []
+
+
+def clear_on_fresh_inductor_cache(obj: Any):
+    """
+    Use this decorator to register any caches that should be cache_clear'd
+    with fresh_inductor_cache().
+    """
+    if not hasattr(obj, "cache_clear") or not callable(obj.cache_clear):
+        raise AttributeError(f"{obj} does not have a cache_clear method")
+
+    _registered_caches.append(obj)
+    return obj
+
+
+@clear_on_fresh_inductor_cache
 @functools.lru_cache(None)
 def cache_dir() -> str:
     cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
@@ -744,6 +771,9 @@ def fresh_inductor_cache(cache_entries=None):
     Optionally, pass a dict as 'cache_entries' to get a list of filenames and sizes
     generated with this cache instance.
     """
+    for obj in _registered_caches:
+        obj.cache_clear()
+
     with tempfile.TemporaryDirectory() as inductor_cache_dir:
         with mock.patch.dict(
             os.environ, {"TORCHINDUCTOR_CACHE_DIR": inductor_cache_dir}
@@ -893,8 +923,20 @@ class IndentedBuffer:
             for line in other_code.split("\n"):
                 self.writeline(line)
 
+    def map(self, func: Callable[[Any], Any]) -> IndentedBuffer:
+        res = IndentedBuffer(initial_indent=self._indent)
+        res._lines = [func(line) for line in self._lines]
+        return res
+
     def __repr__(self):
         return f"{type(self)}({self.getvalue()})"
+
+    def __add__(self, other):
+        assert self._indent == other._indent
+        res = IndentedBuffer(initial_indent=self._indent)
+        res.writelines(self._lines)
+        res.writelines(other._lines)
+        return res
 
 
 class DeferredLineBase:
@@ -907,11 +949,11 @@ class DeferredLineBase:
 
     def __call__(self) -> Optional[str]:
         """Returns either self.line or None to indicate the line has been 'unwritten'"""
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def _new_line(self, line: str) -> DeferredLineBase:
         """Returns a new deferred line with the same condition"""
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def with_prefix(self, prefix):
         return self._new_line(f"{prefix}{self.line}")
@@ -930,10 +972,14 @@ class DeferredLineBase:
 
 
 @functools.lru_cache(None)
-def is_big_gpu(index):
-    sms = torch.cuda.get_device_properties(index).multi_processor_count
-    if sms < 80:  # V100
-        log.warning("not enough SMs to use max_autotune_gemm mode")
+def is_big_gpu(index) -> bool:
+    min_sms = 68  # 3080
+    avail_sms = torch.cuda.get_device_properties(index).multi_processor_count
+    if avail_sms < min_sms:
+        log.warning(
+            "Not enough SMs to use max_autotune_gemm mode",
+            extra={"min_sms": min_sms, "avail_sms": avail_sms},
+        )
         return False
     return True
 
@@ -968,14 +1014,19 @@ def use_triton_template(layout, *, enable_int32=False):
     )
 
 
-def use_cutlass_template(layout):
+def use_cutlass_template(layout, m, n, k):
+    from .virtualized import V
+
+    gemm_size = V.graph.sizevars.size_hint(m * n * k, fallback=-1)
+    if gemm_size <= 0 or gemm_size < config.cuda.cutlass_backend_min_gemm_size:
+        return False
     from .codegen.cuda.cutlass_utils import try_import_cutlass
 
     # Do not use cutlass template on ROCm
     if torch.version.hip:
         return False
 
-    layout_dtypes = [torch.float16, torch.bfloat16, torch.float32]
+    layout_dtypes = [torch.float16, torch.bfloat16, torch.float32, torch.int32]
     res = _use_template_for_cuda(layout, layout_dtypes) and _use_autotune_backend(
         "CUTLASS"
     )
@@ -1016,7 +1067,7 @@ def run_and_get_code(fn, *args, **kwargs):
     from .graph import GraphLowering
 
     compile_to_module = GraphLowering.compile_to_module
-    source_codes = []
+    source_codes: List[str] = []
 
     def patched_compile_to_module(self):
         mod = compile_to_module(self)
@@ -1024,12 +1075,60 @@ def run_and_get_code(fn, *args, **kwargs):
             source_codes.append(f.read())
         return mod
 
-    with mock.patch.object(
-        GraphLowering, "compile_to_module", patched_compile_to_module
-    ):
-        torch._dynamo.reset()
-        result = fn(*args, **kwargs)
+    # If FX code caching is enabled, a hit prevents getting the code.
+    with config.patch({"fx_graph_cache": False}):
+        with mock.patch.object(
+            GraphLowering, "compile_to_module", patched_compile_to_module
+        ):
+            torch._dynamo.reset()
+            result = fn(*args, **kwargs)
     return result, source_codes
+
+
+def get_code(fn, *args, **kwargs):
+    """Get the inductor-generated code, but skip any actual compilation or running."""
+    from .graph import GraphLowering
+
+    source_codes: List[str] = []
+
+    def patched_compile_to_module(self: GraphLowering):
+        class DummyModule:
+            """This is empty to replace the generated triton module"""
+
+            def __init__(self):
+                pass
+
+            def call(self, *args, **kwargs):
+                # Don't do anything when called
+                pass
+
+        code, _ = (
+            self.codegen_with_cpp_wrapper() if self.cpp_wrapper else self.codegen()
+        )
+        # Skip all the actual compiling.
+
+        source_codes.append(code)
+        return DummyModule()
+
+    # If FX code caching is enabled, a hit prevents getting the code.
+    with config.patch({"fx_graph_cache": False}):
+        with mock.patch.object(
+            GraphLowering, "compile_to_module", patched_compile_to_module
+        ):
+            torch._dynamo.reset()
+            # Note the return here is None
+            _ = fn(*args, **kwargs)
+
+    return source_codes
+
+
+def get_triton_code(fn, *args, **kwargs):
+    source_codes = get_code(fn, *args, **kwargs)
+    # Can have two outputs if backwards was eagerly compiled
+    assert (
+        1 <= len(source_codes) <= 2
+    ), f"expected one or two code outputs got {len(source_codes)}"
+    return source_codes[0]
 
 
 def run_and_get_triton_code(fn, *args, **kwargs):
@@ -1267,6 +1366,10 @@ def reduction_num_outputs(reduction_type):
     return 3 if is_welford_reduction(reduction_type) else 1
 
 
+def get_max_y_grid():
+    return 65535
+
+
 def is_linux() -> bool:
     return platform.system() == "Linux"
 
@@ -1307,7 +1410,7 @@ class Placeholder(enum.Enum):
     DESCRIPTIVE_NAME = "DESCRIPTIVE_NAME"
 
 
-def pass_execution_and_save(func, gm, msg):
+def pass_execution_and_save(func, gm, inp, msg):
     from .pattern_matcher import stable_topological_sort
 
     with tempfile.NamedTemporaryFile(
@@ -1317,6 +1420,7 @@ def pass_execution_and_save(func, gm, msg):
     ) as f:
         before_io = io.StringIO()
         after_io = io.StringIO()
+        ShapeProp(gm=gm, fake_mode=detect_fake_mode(inp)).propagate(*inp)
         print(f"Before:\n{gm.graph}", file=f)
         print(gm.graph, file=before_io)
         start_time = datetime.now()
@@ -1351,6 +1455,53 @@ def is_wait(node):
     return isinstance(node, ir.Wait) or type(node) == ir._WaitKernel
 
 
+def num_fw_fixed_arguments(dynamo_gm_num_inputs: int, aot_fw_gm_num_inputs: int):
+    "Computes the number of inputs to the aot fw graph which have fixed addresses (params and buffers)"
+    num_rng_seed_offset_inputs = (
+        2 if torch._functorch.config.functionalize_rng_ops else 0
+    )
+    return aot_fw_gm_num_inputs - dynamo_gm_num_inputs - num_rng_seed_offset_inputs
+
+
+def count_tangents(fx_g: torch.fx.GraphModule):
+    """
+    Infers which inputs are static for a backwards graph
+    """
+
+    def is_saved_tensor(x):
+        return (
+            "tangents" not in x.name
+            and "bwd_seed" not in x.name
+            and "bwd_base_offset" not in x.name
+        )
+
+    arg_count = 0
+    static_arg_idxs = []
+    for n in fx_g.graph.nodes:
+        if n.op == "placeholder":
+            if is_saved_tensor(n):
+                static_arg_idxs.append(arg_count)
+            arg_count += 1
+
+    assert static_arg_idxs == list(range(len(static_arg_idxs)))
+    return len(static_arg_idxs)
+
+
+@dataclasses.dataclass
+class BoxedBool:
+    value: bool
+
+    def __bool__(self):
+        return self.value
+
+    @staticmethod
+    def disable(obj):
+        if isinstance(obj, BoxedBool):
+            obj.value = False
+            return obj
+        return False
+
+
 @contextlib.contextmanager
 def collect_defined_kernels(kernel_list):
     from .codegen.wrapper import WrapperCodeGen
@@ -1364,3 +1515,46 @@ def collect_defined_kernels(kernel_list):
 
     with unittest.mock.patch.object(WrapperCodeGen, "define_kernel", new_define_kernel):
         yield
+
+
+def get_cloned_parameter_buffer_name(name: str):
+    return name + "__original__"
+
+
+def is_gpu(device: str):
+    return device in ["cuda", "xpu"]
+
+
+def device_need_guard(device: str):
+    assert isinstance(device, str)
+    return is_gpu(device)
+
+
+def needs_fallback_due_to_atomic_add_limitations(dtype):
+    # tl.atomic_add does NOT support the following types
+    return dtype in {torch.int64, torch.bool, torch.bfloat16}
+
+
+def use_scatter_fallback(
+    fn, reduction_type, self_dtype, src_dtype, src_device_type, src_is_tensor
+):
+    reduce_ty = "add" if fn == "aten.scatter_" else "sum"
+
+    return (
+        reduction_type not in {None, reduce_ty}
+        or (
+            src_is_tensor
+            and is_gpu(src_device_type)
+            and needs_fallback_due_to_atomic_add_limitations(src_dtype)
+        )
+        or (
+            fn == "aten.scatter_reduce_"
+            and reduction_type == "sum"
+            and src_is_tensor
+            and src_device_type == "cpu"
+            and config.cpp.fallback_scatter_reduce_sum
+            and (config.cpp.dynamic_threads or parallel_num_threads() != 1)
+        )
+        or (reduction_type == reduce_ty and self_dtype in {torch.bool, torch.int64})
+        or torch.are_deterministic_algorithms_enabled()
+    )
