@@ -114,6 +114,30 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       if (torch::is_symfloat(py::handle(obj))) {
         return py::cast<c10::SymFloat>(obj).guard_float(__FILE__, __LINE__);
       }
+<<<<<<< Updated upstream
+||||||| constructed merge base
+      if (THPVariable_Check(obj.ptr())) {
+        auto var = py::cast<autograd::Variable>(obj);
+        // NB: We carefully test if the storage is meta, because that is
+        // always accurate even if you have a fake tensor (which is the
+        // primary case we are trying to detect here)
+        if (var.storage().device_type() == kMeta) {
+          throw py::cast_error(
+              "cannot extract float from tensor with meta storage");
+        }
+      }
+=======
+      if (THPVariable_Check(obj.ptr())) {
+        auto var = py::cast<autograd::Variable>(obj);
+        // NB: We carefully test if the storage is meta, because that is
+        // always accurate even if you have a fake tensor (which is the
+        // primary case we are trying to detect here)
+        if (var.storage().device_type() == c10::kMeta) {
+          throw py::cast_error(
+              "cannot extract float from tensor with meta storage");
+        }
+      }
+>>>>>>> Stashed changes
       return py::cast<double>(obj);
     case TypeKind::ComplexType: {
       auto c_obj = py::cast<std::complex<double>>(obj.ptr());
@@ -145,6 +169,24 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       if (torch::is_symint(py::handle(obj))) {
         return py::cast<c10::SymInt>(obj).guard_int(__FILE__, __LINE__);
       }
+<<<<<<< Updated upstream
+||||||| constructed merge base
+      if (THPVariable_Check(obj.ptr())) {
+        auto var = py::cast<autograd::Variable>(obj);
+        if (var.storage().device_type() == kMeta) {
+          throw py::cast_error(
+              "cannot extract int from tensor with meta storage");
+        }
+      }
+=======
+      if (THPVariable_Check(obj.ptr())) {
+        auto var = py::cast<autograd::Variable>(obj);
+        if (var.storage().device_type() == c10::kMeta) {
+          throw py::cast_error(
+              "cannot extract int from tensor with meta storage");
+        }
+      }
+>>>>>>> Stashed changes
       return py::cast<int64_t>(obj);
     case TypeKind::LayoutType: {
       if (THPLayout_Check(obj.ptr())) {
@@ -195,6 +237,24 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       if (torch::is_symbool(obj.ptr())) {
         return py::cast<c10::SymBool>(obj).guard_bool(__FILE__, __LINE__);
       }
+<<<<<<< Updated upstream
+||||||| constructed merge base
+      if (THPVariable_Check(obj.ptr())) {
+        auto var = py::cast<autograd::Variable>(obj);
+        if (var.storage().device_type() == kMeta) {
+          throw py::cast_error(
+              "cannot extract bool from tensor with meta storage");
+        }
+      }
+=======
+      if (THPVariable_Check(obj.ptr())) {
+        auto var = py::cast<autograd::Variable>(obj);
+        if (var.storage().device_type() == c10::kMeta) {
+          throw py::cast_error(
+              "cannot extract bool from tensor with meta storage");
+        }
+      }
+>>>>>>> Stashed changes
       return py::cast<bool>(obj);
     case TypeKind::TupleType: {
       py::tuple tuple = py::cast<py::tuple>(obj);
