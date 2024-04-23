@@ -532,8 +532,13 @@ struct TORCH_API IValue final {
     return Tag::Double == tag;
   }
   double toDouble() const {
-    AT_ASSERT(isDouble());
-    return payload.u.as_double;
+    if (isDouble()) {
+      return payload.u.as_double;
+    } else if (isSymFloat()) {
+      return toSymFloat().guard_float(__FILE__, __LINE__);
+    } else {
+      TORCH_INTERNAL_ASSERT(0, "expected double");
+    }
   }
 
   // ComplexDouble
@@ -639,8 +644,13 @@ struct TORCH_API IValue final {
   }
 
   int64_t toInt() const {
-    AT_ASSERT(isInt());
-    return payload.u.as_int;
+    if (isInt()) {
+      return payload.u.as_int;
+    } else if (isSymInt()) {
+      return toSymInt().guard_int(__FILE__, __LINE__);
+    } else {
+      TORCH_INTERNAL_ASSERT(0, "expected int");
+    }
   }
 
   // Bool
@@ -658,8 +668,13 @@ struct TORCH_API IValue final {
     return Tag::Bool == tag;
   }
   bool toBool() const {
-    AT_ASSERT(isBool());
-    return payload.u.as_bool;
+    if (isBool()) {
+      return payload.u.as_bool;
+    } else if (isSymBool()) {
+      return toSymBool().guard_bool(__FILE__, __LINE__);
+    } else {
+      TORCH_INTERNAL_ASSERT(0, "expected bool");
+    }
   }
 
   // IntList
