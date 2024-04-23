@@ -248,7 +248,7 @@ Explicit registration for out-of-place ops
   _(_upsample_nearest_exact3d)        \
   _(upsample_linear1d)                \
   _(upsample_bilinear2d)              \
-  _(_upsample_bilinear2d_aa)          \  
+  _(_upsample_bilinear2d_aa)          \
   _(upsample_trilinear3d)             \
   _(upsample_bicubic2d)               \
   _(_upsample_bicubic2d_aa)
