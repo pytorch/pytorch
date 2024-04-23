@@ -2,7 +2,7 @@ import contextlib
 
 import warnings
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Set, Union, Type
+from typing import Any, Dict, List, Optional, Set, Union
 
 import torch
 import torchgen

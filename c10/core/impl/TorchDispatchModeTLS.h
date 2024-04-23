@@ -27,16 +27,18 @@ struct C10_API TorchDispatchModeTLS {
   static const std::shared_ptr<PyObject_TorchDispatchMode> pop_stack();
   // Returns the highest-priority infra mode on the stack,
   // along with its mode key.
-  static const std::tuple<std::shared_ptr<PyObject_TorchDispatchMode>, TorchDispatchModeKey>
-  pop_highest_infra_mode();
+  static const std::
+      tuple<std::shared_ptr<PyObject_TorchDispatchMode>, TorchDispatchModeKey>
+      pop_highest_infra_mode();
 
-  static const std::shared_ptr<PyObject_TorchDispatchMode>& get_stack_at(int64_t idx);
+  static const std::shared_ptr<PyObject_TorchDispatchMode>& get_stack_at(
+      int64_t idx);
   static int64_t stack_len();
 
-  static const c10::optional<std::shared_ptr<PyObject_TorchDispatchMode>> get_mode(
-      TorchDispatchModeKey mode_key);
-  static const c10::optional<std::shared_ptr<PyObject_TorchDispatchMode>> unset_mode(
-      TorchDispatchModeKey mode_key);
+  static const c10::optional<std::shared_ptr<PyObject_TorchDispatchMode>>
+  get_mode(TorchDispatchModeKey mode_key);
+  static const c10::optional<std::shared_ptr<PyObject_TorchDispatchMode>>
+  unset_mode(TorchDispatchModeKey mode_key);
   static void set_mode(
       const std::shared_ptr<PyObject_TorchDispatchMode>& mode,
       TorchDispatchModeKey mode_key);
