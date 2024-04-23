@@ -1068,9 +1068,9 @@ class LENGTH_CHECK : public LeafGuard {
   Py_ssize_t _length;
 };
 
-class DICT_LENGTH_CHECK : public LeafGuard {
+class DICT_LENGTH : public LeafGuard {
  public:
-  DICT_LENGTH_CHECK(py::object value, py::object verbose_code_parts)
+  DICT_LENGTH(py::object value, py::object verbose_code_parts)
       : LeafGuard(std::move(verbose_code_parts)),
         _length(py::cast<Py_ssize_t>(std::move(value))) {}
 
@@ -3320,10 +3320,10 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "LENGTH_CHECK")
       .def(py::init<py::object, py::list>())
       .def("__call__", &LENGTH_CHECK::check);
-  py::class_<DICT_LENGTH_CHECK, LeafGuard, std::shared_ptr<DICT_LENGTH_CHECK>>(
-      py_m, "DICT_LENGTH_CHECK")
+  py::class_<DICT_LENGTH, LeafGuard, std::shared_ptr<DICT_LENGTH>>(
+      py_m, "DICT_LENGTH")
       .def(py::init<py::object, py::list>())
-      .def("__call__", &DICT_LENGTH_CHECK::check);
+      .def("__call__", &DICT_LENGTH::check);
   py::class_<DEFAULT_DEVICE, LeafGuard, std::shared_ptr<DEFAULT_DEVICE>>(
       py_m, "DEFAULT_DEVICE")
       .def(py::init<py::list>())
@@ -3520,8 +3520,8 @@ PyObject* torch_c_dynamo_guards_init() {
           [](GuardManager& self,
              py::object value,
              py::object verbose_code_parts) -> void {
-            SKIP_IF_GUARD_ALREADY_PRESENT("DICT_LENGTH_CHECK");
-            self.add_leaf_guard(std::make_shared<DICT_LENGTH_CHECK>(
+            SKIP_IF_GUARD_ALREADY_PRESENT("DICT_LENGTH");
+            self.add_leaf_guard(std::make_shared<DICT_LENGTH>(
                 std::move(value), std::move(verbose_code_parts)));
           })
       .def(

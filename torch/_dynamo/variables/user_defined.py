@@ -572,7 +572,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 keys = list(self.value.keys())
                 assert all(map(ConstantVariable.is_literal, keys))
                 install_guard(self.source.make_guard(GuardBuilder.DICT_CONST_KEYS))
-                tx.output.guard_on_key_order[self.source] = True
+                tx.output.guard_on_key_order.add(self.source.name())
                 return TupleVariable([ConstantVariable.create(k) for k in keys])
 
             if (
@@ -604,7 +604,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                             [key, self.odict_getitem(tx, key)],
                         )
                     )
-                tx.output.guard_on_key_order[self.source] = True
+                tx.output.guard_on_key_order.add(self.source.name())
                 return TupleVariable(items)
 
             if method is collections.OrderedDict.__getitem__ and len(args) == 1:

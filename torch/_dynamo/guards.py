@@ -523,7 +523,7 @@ class GuardBuilder(GuardBuilderBase):
 
     def get_guard_manager_type(self, source, example_value):
         guard_manager_enum = GuardManagerType.GUARD_MANAGER
-        if self.check_fn_manager.output_graph.guard_on_key_order.get(source):
+        if source.name() in self.check_fn_manager.output_graph.guard_on_key_order:
             assert isinstance(example_value, dict)
             # If keys method is not overriden, we can use PyDict_Next to get key
             # orderings. Read more in guards.cpp
@@ -1219,27 +1219,16 @@ class GuardBuilder(GuardBuilderBase):
 
         self._set_guard_export_info(guard, code)
         if config.enable_cpp_guard_manager:
-            self.get_guard_manager(guard).add_length_check_guard(
-                len(value), get_verbose_code_parts(code, guard)
-            )
+            if isinstance(value, dict):
+                self.get_guard_manager(guard).add_dict_length_check_guard(
+                    len(value), get_verbose_code_parts(code, guard)
+                )
+            else:
+                self.get_guard_manager(guard).add_length_check_guard(
+                    len(value), get_verbose_code_parts(code, guard)
+                )
         else:
             self._produce_guard_code(guard, code)
-
-    def DICT_LENGTH(self, guard):
-        if config.enable_cpp_guard_manager:
-            # Guard on type - It can be a dict subclass
-            self.TYPE_MATCH(guard)
-
-            # Guard on length
-            ref = self.arg_ref(guard)
-            value = self.get(guard.name)
-            code = list()
-            code.append(f"len({ref}) == {len(value)}")
-            self.get_guard_manager(guard).add_dict_length_check_guard(
-                len(value), get_verbose_code_parts(code, guard)
-            )
-        else:
-            self.SEQUENCE_LENGTH(guard)
 
     def TUPLE_ITERATOR_LEN(self, guard):
         ref = self.arg_ref(guard)
@@ -1307,7 +1296,7 @@ class GuardBuilder(GuardBuilderBase):
         self._set_guard_export_info(guard, code)
         if config.enable_cpp_guard_manager:
             dict_info = self.check_fn_manager.output_graph.guard_on_key_order
-            if dict_info.get(guard.originating_source):
+            if guard.originating_source.name() in dict_info:
                 self.guard_on_dict_keys_and_order(value, guard)
             else:
                 self.guard_on_dict_keys_and_ignore_order(value, guard)
@@ -1365,8 +1354,7 @@ class GuardBuilder(GuardBuilderBase):
 
         if config.enable_cpp_guard_manager:
             dict_info = self.check_fn_manager.output_graph.guard_on_key_order
-
-            if dict_info.get(guard.originating_source):
+            if guard.originating_source.name() in dict_info:
                 self.guard_on_dict_keys_and_order(value, guard)
             else:
                 self.guard_on_dict_keys_and_ignore_order(value, guard)

@@ -449,7 +449,7 @@ class VariableBuilder:
 
             # The keys on the SUPPORTED_NODES can be arbitrary, so save on the
             # key order.
-            self.tx.output.guard_on_key_order[self.source] = True
+            self.tx.output.guard_on_key_order.add(self.source.name())
             result = {
                 ConstantVariable.create(k): UserDefinedObjectVariable(
                     v,
@@ -474,7 +474,7 @@ class VariableBuilder:
                 # but not completely secure job ensuring a property wasn't changed.
                 self.install_guards(GuardBuilder.BOOL_FALSE)
             else:
-                self.install_guards(GuardBuilder.DICT_LENGTH)
+                self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 
             # Optimisation for the common case strings, ints, etc
             all_const = all(ConstantVariable.is_literal(k) for k in value.keys())
@@ -499,7 +499,7 @@ class VariableBuilder:
                 # So, instead we guard on the key order. While guarding on key
                 # order, we just save the indices and use it to access keys and
                 # values. Indices are cheap to save.
-                self.tx.output.guard_on_key_order[self.source] = True
+                self.tx.output.guard_on_key_order.add(self.source.name())
 
             # We need all the keys to be hashable. We do this within the
             # _HashableTracker class in dicts.py

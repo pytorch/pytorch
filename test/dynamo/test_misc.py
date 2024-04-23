@@ -10561,6 +10561,35 @@ fn
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(res, fn(x, d))
 
+    def test_dict_guard_on_keys_order2(self):
+        d = {
+            2: 4,
+            3: 5,
+        }
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(x, d):
+            for key in d:
+                value = d[key]
+                x = x * key + value
+            return x
+
+        opt_fn = torch.compile(fn, backend=cnts)
+        opt_fn(torch.randn(4), d)
+        opt_fn(torch.randn(4), d)
+        # No recompilation
+        self.assertEqual(cnts.frame_count, 1)
+
+        # move 2 to the end
+        d[2] = d.pop(2)
+
+        x = torch.randn(4)
+        res = opt_fn(x, d)
+        # Check recompilation
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(res, fn(x, d))
+
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):
