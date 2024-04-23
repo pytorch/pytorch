@@ -655,6 +655,36 @@ def _get_params_buffers(mod: torch.nn.Module) -> Dict[str, torch.Tensor]:
     return params_buffers
 
 
+def _get_forward_arg_names(
+    mod: torch.nn.Module,
+    args: Tuple[Any, ...],
+    kwargs: Optional[Dict[str, Any]] = None,
+) -> List[str]:
+    """
+    Gets the argument names to forward that are used, for restoring the
+    original signature when unlifting the exported program module.
+    - Positional args: retain the original argument names, and enumerate
+        *args as args_0, args_1, ...
+    - Keyword args: retain the original kwarg names in the order specified
+        by the user. This order seems to matter for the current state of
+        export lifted modules.
+    """
+    sig = inspect.signature(mod.forward)
+    _args = sig.bind_partial(*args).arguments
+
+    names: List[str] = []
+    for name, value in _args.items():  # handle positional args
+        if name == "args" and isinstance(value, tuple):
+            names.extend([f"args_{i}" for i, _ in enumerate(value)])
+        else:
+            names.append(name)
+    # order of kwargs matters for input spec
+    if kwargs:
+        names.extend([kwarg for kwarg, _ in kwargs.items()])
+
+    return names
+
+
 def _rewrite_dynamo_tensor_constants(
     orig_mod_buffers: Set[torch.Tensor],
     traced_mod_buffers: Dict[str, torch.Tensor],
@@ -907,6 +937,7 @@ def _export(
     constant_attrs = _gather_constant_attrs(mod)
 
     flat_args, orig_in_spec = pytree.tree_flatten((args, kwargs))
+    forward_arg_names = _get_forward_arg_names(mod, args, kwargs)
 
     if not strict:
         out_spec = None
@@ -1061,6 +1092,7 @@ def _export(
             module_call_graph=_make_module_call_graph(
                 _EXPORT_MODULE_HIERARCHY, orig_in_spec, out_spec, module_call_signatures
             ),
+            forward_arg_names=forward_arg_names,
             example_inputs=(args, kwargs),
             constants=ep_non_strict.constants,
         )
@@ -1270,6 +1302,7 @@ def _export(
             orig_out_spec,
             module_call_signatures,
         ),
+        forward_arg_names=forward_arg_names,
         example_inputs=(args, kwargs),
         constants=constants,
     )

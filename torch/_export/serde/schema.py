@@ -375,5 +375,6 @@ class ExportedProgram:
     # Key is the opset namespace (ex. aten), and value is the version number
     opset_version: Dict[str, int]
     range_constraints: Dict[str, RangeConstraint]
+    forward_arg_names: List[str]
     schema_version: SchemaVersion
     dialect: str

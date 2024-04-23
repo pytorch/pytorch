@@ -207,6 +207,7 @@ class ExportedProgram:
         state_dict: Dict[str, Union[torch.Tensor, torch.nn.Parameter]],
         range_constraints: "Dict[sympy.Symbol, Any]",
         module_call_graph: List[ModuleCallEntry],
+        forward_arg_names: List[str],
         example_inputs: Optional[Tuple[Tuple[Any, ...], Dict[str, Any]]] = None,
         verifier: Optional[Type[Any]] = None,  # TODO Change typing hint to Verifier.
         tensor_constants: Optional[
@@ -227,6 +228,7 @@ class ExportedProgram:
         self._range_constraints: "Dict[sympy.Symbol, ValueRanges]" = range_constraints
         assert module_call_graph is not None
         self._module_call_graph: List[ModuleCallEntry] = module_call_graph
+        self._forward_arg_names: List[str] = forward_arg_names
         self._example_inputs = example_inputs
 
         self._constants = tensor_constants or constants or {}
@@ -317,12 +319,17 @@ class ExportedProgram:
     @property
     @compatibility(is_backward_compatible=False)
     def call_spec(self):
-        CallSpec = namedtuple("CallSpec", ["in_spec", "out_spec"])
+        CallSpec = namedtuple("CallSpec", ["forward_arg_names", "in_spec", "out_spec"])
 
         if len(self.module_call_graph) == 0:
-            return CallSpec(in_spec=None, out_spec=None)
+            return CallSpec(
+                forward_arg_names=self._forward_arg_names,
+                in_spec=None,
+                out_spec=None,
+            )
         assert self.module_call_graph[0].fqn == ""
         return CallSpec(
+            forward_arg_names=self._forward_arg_names,
             in_spec=self.module_call_graph[0].signature.in_spec,
             out_spec=self.module_call_graph[0].signature.out_spec,
         )
@@ -669,6 +676,7 @@ class ExportedProgram:
             state_dict=self.state_dict,
             range_constraints=new_range_constraints,
             module_call_graph=copy.deepcopy(self.module_call_graph),
+            forward_arg_names=self._forward_arg_names,
             example_inputs=self.example_inputs,
             verifier=self.verifier,
             constants=self.constants,
@@ -766,6 +774,7 @@ class ExportedProgram:
                 _is_executorch=False,
             ),
             module_call_graph=copy.deepcopy(self._module_call_graph),
+            forward_arg_names=self._forward_arg_names,
             example_inputs=self.example_inputs,
             verifier=self.verifier,
             constants=self.constants,
@@ -801,6 +810,7 @@ class ExportedProgram:
             state_dict=state_dict or self.state_dict,
             range_constraints=copy.deepcopy(self.range_constraints),
             module_call_graph=copy.deepcopy(self._module_call_graph),
+            forward_arg_names=self._forward_arg_names,
             example_inputs=self.example_inputs,
             verifier=self.verifier,
             tensor_constants=self.tensor_constants,

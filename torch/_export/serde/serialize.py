@@ -1314,6 +1314,7 @@ class ExportedProgramSerializer(metaclass=Final):
             graph_module=serialized_graph_module,
             opset_version=self.opset_version,
             range_constraints=serialized_range_constraints,
+            forward_arg_names=exported_program._forward_arg_names,
             schema_version=SchemaVersion(
                 major=SCHEMA_VERSION[0],
                 minor=SCHEMA_VERSION[1],
@@ -2201,6 +2202,7 @@ class ExportedProgramDeserializer(metaclass=Final):
             state_dict=res.state_dict,  # type: ignore[arg-type]
             range_constraints=range_constraints,
             module_call_graph=res.module_call_graph,
+            forward_arg_names=exported_program.forward_arg_names,
             example_inputs=res.example_inputs,
             verifier=load_verifier(exported_program.dialect),
             constants=res.constants,
@@ -2815,6 +2817,7 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
         ),
         opset_version=opset_version,
         range_constraints=range_constraints,
+        forward_arg_names=ep.forward_arg_names,
         schema_version=ep.schema_version,
         dialect=ep.dialect
     )

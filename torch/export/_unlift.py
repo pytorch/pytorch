@@ -112,25 +112,14 @@ def _insert_copy_for_mutations(
 
 
 def _get_codegen(
+    forward_arg_names: List[str],
     in_spec: pytree.TreeSpec,
     out_spec: Optional[pytree.TreeSpec],
 ) -> _PyTreeCodeGen:
     """
     Create the codegen for the graph module based on the in/out specs
     """
-    if (
-        in_spec.type == tuple
-        and in_spec.num_children == 2
-        and in_spec.children_specs[0].type == tuple
-        and in_spec.children_specs[1].type == dict
-    ):
-        # if in_spec contains the args (tuple) and kwargs (dict)
-        names = [f"arg_{i}" for i in range(in_spec.children_specs[0].num_children)]
-        # add kwarg names
-        names.extend(in_spec.children_specs[1].context)
-    else:
-        names = [f"arg_{i}" for i in range(in_spec.num_children)]
-
+    names = forward_arg_names
     return _PyTreeCodeGen(
         _PyTreeInfo(
             names,
@@ -144,6 +133,7 @@ def _unlift(
     gm: torch.fx.GraphModule,
     lifted_inputs: List[Optional[str]],
     mutated_outputs: List[Optional[str]],
+    forward_arg_names: List[str],
     in_spec: pytree.TreeSpec,
     out_spec: Optional[pytree.TreeSpec],
     state_dict: Dict[str, Any],
@@ -170,7 +160,7 @@ def _unlift(
     _insert_copy_for_mutations(
         gm, mutated_outputs, unlifted_name_to_node, input_name_to_node
     )
-    gm.graph._codegen = _get_codegen(in_spec, out_spec)
+    gm.graph._codegen = _get_codegen(forward_arg_names, in_spec, out_spec)
     gm.graph.lint()
     gm.graph.eliminate_dead_code()
     gm.recompile()
@@ -302,6 +292,7 @@ def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.nn.Modu
         new_gm,
         lifted_inputs,
         mutated_outputs,
+        ep.call_spec.forward_arg_names,
         ep.call_spec.in_spec,
         ep.call_spec.out_spec,
         ep.state_dict,
