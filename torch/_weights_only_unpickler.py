@@ -138,6 +138,7 @@ def _get_allowed_globals():
         torch._utils._rebuild_meta_tensor_no_storage,
         torch._utils._rebuild_nested_tensor,
         torch._utils._rebuild_wrapper_subclass,
+        torch._utils._rebuild_device_tensor_from_numpy,
     ]:
         rc[f"torch._utils.{f.__name__}"] = f
 
