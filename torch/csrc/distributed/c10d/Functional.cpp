@@ -15,9 +15,9 @@ class WorkRegistry {
   void register_work(
       const at::Tensor& tensor,
       const c10::intrusive_ptr<c10d::Work>& work) {
-    const auto storage = tensor.storage().getWeakStorageImpl();
+    auto storage = tensor.storage().getWeakStorageImpl();
     std::unique_lock lock(lock_);
-    auto [it, inserted] = registry_.emplace(storage, work);
+    auto [it, inserted] = registry_.try_emplace(std::move(storage), work);
     TORCH_CHECK(
         inserted || it->second != work,
         "The tensor storage is already associated with another work.");
@@ -409,7 +409,7 @@ class AllToAllSingle : public torch::autograd::Function<AllToAllSingle> {
     const std::string& group_name = ctx->saved_data["group_name"].toStringRef();
 
     DCHECK(grad_out_list.size() == 1);
-    auto grad_out = grad_out_list[0];
+    auto grad_out = grad_out_list[0].contiguous();
 
     auto out =
         c10::Dispatcher::singleton()
@@ -434,7 +434,7 @@ at::Tensor all_to_all_single_autograd(
     const std::vector<int64_t>& input_split_sizes,
     const std::string& group_name) {
   return AllToAllSingle::apply(
-      input, output_split_sizes, input_split_sizes, group_name)[0];
+      input, output_split_sizes, input_split_sizes, group_name);
 }
 
 class ReduceScatterTensor
