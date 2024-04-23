@@ -25,6 +25,7 @@ from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
     free_unbacked_symbols,
     has_free_symbols,
+    resolve_unbacked_bindings,
     ShapeEnv,
     SymTypes,
 )
@@ -1098,6 +1099,8 @@ class GraphLowering(torch.fx.Interpreter):
         def debug(msg):
             log.debug("lowering %s %s", LazyString(n.format_node), msg)
 
+        buffer_watermark = len(self.buffers)
+
         origins = {n}
         if n.op == "call_function":
             args, kwargs = self.fetch_args_kwargs_from_env(n)
@@ -1301,6 +1304,46 @@ class GraphLowering(torch.fx.Interpreter):
                         result.data.data.inputs[0].origin_node = n
 
         self.register_users_of(result)
+
+        new_unbacked_defs = set()
+        for i in range(buffer_watermark, len(self.buffers)):
+            new_unbacked_defs |= self.buffers[i].get_unbacked_symbol_defs()
+
+        def format_buffers():
+            r = []
+            for b in self.buffers[buffer_watermark:]:
+                r.append(
+                    f"unbacked_symbol_defs={b.get_unbacked_symbol_defs()} in:\n{b}\n"
+                )
+            return "***\n".join(r)
+
+        if n.op != "placeholder":
+            unbacked_bindings = resolve_unbacked_bindings(
+                V.graph.sizevars.shape_env, n.meta.get("unbacked_bindings", {})
+            )
+            # When we do lowering, it is possible we reallocate unbacked SymInts.
+            # So we need to line up the unbacked SymInts when performing the test
+            # here
+            #
+            # In principle, we could permit lowering to introduce MORE unbacked
+            # SymInts: as long as all the old unbacked ones are accounted for,
+            # it's fine for inductor to introduce extra calls to item()/unbacked()
+            # whatever.  This actually happens in practice when an unbacked SymInt
+            # gets memoized away; naively, when Inductor reprocesses a kernel, it
+            # doesn't know that the memo still applies, and ends up allocating a
+            # new symbol.  However, this is generally a bad thing: we may still
+            # end up needing to test equalities on the symbols, and a fresh
+            # symbol is likely to hit lots of GuardOnDataDependent errors that
+            # we already know facts for.
+            renamed_unbacked_bindings = {
+                V.fake_mode.shape_env.unbacked_renamings.get(s, s)
+                for s in unbacked_bindings.keys()
+            }
+            assert new_unbacked_defs >= renamed_unbacked_bindings, (
+                f"failed {new_unbacked_defs} >= {renamed_unbacked_bindings} (inductor >= fx)\n"
+                f"fx node is: {n.format_node()}\n"
+                f"new buffers are:\n\n{format_buffers()}"
+            )
 
         return result
 
