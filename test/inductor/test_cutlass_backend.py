@@ -44,7 +44,21 @@ def _get_path_without_sccache() -> str:
 @instantiate_parametrized_tests
 class TestCutlassBackend(TestCase):
     def setUp(self):
-        super().setUp()
+        # The new inductor cache refresh mechanism
+        # introduced with https://github.com/pytorch/pytorch/pull/122661
+        # interacts badly with persistent subprocesses during
+        # autotuning. So we need to disable automatic cache refresh
+        # before calling setUp() on the parent class.
+        old_disable_fresh_cache_envvar = os.environ.get(
+            "INDUCTOR_TEST_DISABLE_FRESH_CACHE", ""
+        )
+        try:
+            os.environ["INDUCTOR_TEST_DISABLE_FRESH_CACHE"] = "1"
+            super().setUp()
+        finally:
+            os.environ[
+                "INDUCTOR_TEST_DISABLE_FRESH_CACHE"
+            ] = old_disable_fresh_cache_envvar
         torch.random.manual_seed(1234)
 
     @unittest.skipIf(not SM75OrLater, "need sm_75")
