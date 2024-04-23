@@ -421,7 +421,7 @@ void OperatorEntry::updateDispatchTable_(const c10::Dispatcher& dispatcher, Disp
   // In theory, we should only have to check if the given runtime key has "dense" functionality,
   // e.g. DispatchKey::CPU (which is composed of DispatchKey::Dense and BackendComponent::CPUBit).
   // However, there are some backends that should be included in this set that don't have the dense key set.
-  // E.g. DispatchKey::Meta, DispatchKey::ORT.
+  // E.g. DispatchKey::Meta, DispatchKey::MAIA.
   if (c10::isBackendDispatchKey(dispatch_key)) {
     DispatchKey autograd_key = getAutogradKeyFromBackend(toBackendComponent(dispatch_key));
     updateDispatchTableEntry_(dispatcher, autograd_key);
