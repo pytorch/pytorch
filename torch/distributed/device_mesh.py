@@ -212,7 +212,7 @@ else:
             if isinstance(mesh, torch.Tensor) and mesh.device.type != "cpu":
                 raise ValueError(f"`mesh` must be a CPU tensor, got {mesh}")
             self.mesh = (
-                mesh.detach().to(device="cpu", dtype=torch.int)
+                mesh.detach().to(dtype=torch.int)
                 if isinstance(mesh, torch.Tensor)
                 else torch.tensor(mesh, dtype=torch.int)
             )
