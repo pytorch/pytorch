@@ -79,6 +79,7 @@ from torch._inductor.compile_fx import (
 from torch._inductor.cudagraph_utils import (
     check_for_mutation,
     FunctionID,
+    log_cudagraph_skip_and_bump_counter,
     WrappedFunction,
 )
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -109,9 +110,6 @@ log = torch._logging.getArtifactLogger(__name__, "cudagraphs")
 
 
 from . import config
-
-
-perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1816,7 +1814,7 @@ class CUDAGraphTreeManager:
         self, function_id: FunctionID, inputs: List[Tensor]
     ):
         node_id = self._get_node_id()
-        if has_mutation_str := check_for_mutation(
+        if maybe_mutation_str := check_for_mutation(
             self.ids_to_funcs[function_id],
             inputs,
             self._get_cuda_graph_recorded_tensor_checker(),
@@ -1826,7 +1824,7 @@ class CUDAGraphTreeManager:
             if function_id in self.warned_mutation:
                 return
             self.warned_mutation.add(function_id)
-            perf_hint_log.warning(has_mutation_str)
+            log_cudagraph_skip_and_bump_counter(maybe_mutation_str)
         else:
             self.non_cudagraph_managed_mutation_hint[node_id][function_id] = False
 

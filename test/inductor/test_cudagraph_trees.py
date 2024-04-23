@@ -11,6 +11,7 @@ import torch
 
 import torch._dynamo.config as dynamo_config
 import torch.nn as nn
+from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.cudagraph_trees import cudagraphify_impl as tree_cudagraphify_impl
@@ -255,6 +256,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             FileCheck().check(
                 "skipping cudagraphs due to mutated inputs (1 instances). Found from"
             ).check("torch.logical_xor").run(captured_output[0])
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
         @requires_multigpu()
         @parametrize("backend", ("inductor", "cudagraphs"))
@@ -269,6 +271,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             FileCheck().check(
                 "skipping cudagraphs due to cpu device (arg1_1). Found from"
             ).check("y + 2").run(captured_output[0])
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
             with capture_stderr() as captured_output:
                 foo(
@@ -278,6 +281,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             FileCheck().check("skipping cudagraphs due to multiple devices").run(
                 captured_output[0]
             )
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 2)
 
         @torch._inductor.config.patch("triton.cudagraph_skip_dynamic_graphs", True)
         def test_skip_symbolic(self):
@@ -291,6 +295,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             FileCheck().check(
                 "skipping cudagraphs due to graph with symbolic shapes inputs"
             ).check("x + y").run(captured_output[0])
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
         @parametrize("backend", ("inductor", "cudagraphs"))
         @torch._dynamo.config.patch("cudagraph_backend_keep_input_mutation", True)
@@ -310,6 +315,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             FileCheck().check(
                 "skipping cudagraphs due to mutated inputs (1 instances). Found from"
             ).check(".add_(2)").run(captured_output[0])
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
             # mutation on inp doesnt hit cudagraphs
             self.assertEqual(len(self.get_manager().roots), 0)
@@ -366,6 +372,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 0,
                 exactly=True,
             ).run(captured_output[0])
+            self.assertTrue("cudagraph_skips" not in counters["inductor"])
 
             torch.compiler.cudagraph_mark_step_begin()
             inp = torch.rand([4], device="cuda")
@@ -379,6 +386,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 "skipping cudagraphs due to mutated inputs (1 instances). Found from"
             ).check("x.add_(2)").run(captured_output[0])
             self.assertEqual(mut_inp, non_mut(foo(inp)))
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
         @parametrize("backend", ("inductor", "cudagraphs"))
         @torch._dynamo.config.patch("cudagraph_backend_keep_input_mutation", True)
@@ -404,6 +412,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 1,
                 exactly=True,
             ).run(captured_output[0])
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
         @parametrize("backend", ("inductor", "cudagraphs"))
         @torch._dynamo.config.patch("cudagraph_backend_keep_input_mutation", True)
@@ -438,6 +447,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 1,
                 exactly=True,
             ).run(captured_output[0])
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
         def test_function_compiled_multiple_times(self):
             def foo(x):
@@ -1588,6 +1598,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             FileCheck().check(
                 "skipping cudagraphs due to cpu device (_local_scalar_dense)"
             ).run(captured_output[0])
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
         @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
         def test_incompatible_cudagraph_ops_nonzero(self):
@@ -1607,6 +1618,20 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             FileCheck().check("skipping cudagraphs due to ['incompatible ops']").run(
                 captured_output[0]
             )
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+
+        @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
+        def test_incompatible_cudagraph_ops_nonzero_graph_breaks(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                y = x.nonzero()  # skip
+                torch._dynamo.graph_break()
+                return y.nonzero()  # skip 2 times (due to recompile)
+
+            foo(torch.tensor([1, 0, 2], device="cuda"))
+            foo(torch.tensor([1, 0, 0], device="cuda"))
+
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 3)
 
         @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
         def test_incompatible_cudagraph_ops_nonzero_backend(self):
@@ -1626,6 +1651,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             FileCheck().check(
                 "skipping cudagraphs due to incompatible op (nonzero)"
             ).run(captured_output[0])
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
         def test_storage_access_error(self):
             x = torch.rand([4], device="cuda")
