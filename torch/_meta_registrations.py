@@ -6345,12 +6345,8 @@ def meta_channel_shuffle(input, groups):
 
 
 @register_meta(aten._local_scalar_dense)
-def meta_local_scalar_dense(self:Tensor):
-    torch._check(
-        not self.is_meta,
-        lambda: "aten::_local_scalar_dense operator (aka Tensor.item()) cannot be called on meta tensors.",
-    )
-    return torch.empty_like(self)
+def meta_local_scalar_dense(self: Tensor):
+    assert not self.is_meta, "aten::_local_scalar_dense operator (aka Tensor.item()) cannot be called on meta tensors."
 
 
 def _create_unary_float_meta_func(func):
