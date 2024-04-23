@@ -3,10 +3,12 @@ import logging
 import os
 import unittest
 from typing import Callable, List
+from unittest import mock
 
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor import config
+from torch._inductor.ir import ChoiceCaller
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_cuda import SM75OrLater, SM80OrLater, SM90OrLater
 from torch.testing._internal.common_utils import (
@@ -24,6 +26,11 @@ _CUTLASS_DIR = os.path.join(os.path.dirname(__file__), "../../third_party/cutlas
 
 log = logging.getLogger(__name__)
 
+HAS_CUDA = HAS_CUDA and not torch.version.hip
+SM75OrLater = SM75OrLater and not torch.version.hip
+SM80OrLater = SM80OrLater and not torch.version.hip
+SM90OrLater = SM90OrLater and not torch.version.hip
+
 
 def _get_path_without_sccache() -> str:
     """
@@ -39,6 +46,56 @@ class TestCutlassBackend(TestCase):
     def setUp(self):
         super().setUp()
         torch.random.manual_seed(1234)
+
+    @unittest.skipIf(not SM75OrLater, "need sm_75")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_max_autotune_cutlass_threshold(self):
+        """
+        Make sure Cutlass GEMM threshold works as intended.
+        """
+
+        if torch.version.hip:
+            return
+
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+
+        def mm(a, b):
+            return a @ b
+
+        a = torch.randn(100, 10).cuda().half()
+        b = torch.randn(10, 100).cuda().half()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": True,
+                "max_autotune_gemm_backends": "CUTLASS,ATen",
+                "compile_threads": 4,
+                "cuda.cutlass_backend_min_gemm_size": 100000,
+                "cuda.cutlass_dir": _CUTLASS_DIR,
+                "cuda.cutlass_max_profiling_configs": 2,
+            }
+        ):
+            from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
+
+            with mock.patch(
+                "torch._inductor.select_algorithm.autotune_select_algorithm"
+            ) as mocked_select_algorithm:
+                Y_compiled = torch.compile(mm, dynamic=False)(a, b)
+                Y = mm(a, b)
+                passed_choice_callers: List[ChoiceCaller] = mocked_select_algorithm[0][
+                    1
+                ]
+                assert all(
+                    isinstance(cc, ChoiceCaller) for cc in passed_choice_callers
+                ), "Argument 1 to autotune_select_algorithm should be a list of ChoiceCaller instances"
+                # We expect that no Cutlass Kernels are considered, due to the threshold
+                assert all(
+                    not isinstance(cc, CUDATemplateCaller)
+                    for cc in passed_choice_callers
+                ), "Cutlass Kernels should have been filtered, GEMM size is too small"
+            torch.testing.assert_close(Y_compiled, Y)
 
     @unittest.skipIf(not SM75OrLater, "need sm_75")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
@@ -76,7 +133,7 @@ class TestCutlassBackend(TestCase):
     # TODO: Enable dynamic test cases when dynamic support is added.
     @unittest.skipIf(not SM75OrLater, "need sm_75")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
-    @parametrize("dynamic", (False,))
+    @parametrize("dynamic", (False, True))
     @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen,Triton,CUTLASS"))
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_regular_mm(
@@ -331,10 +388,12 @@ class TestCutlassBackend(TestCase):
         with config.patch(
             {
                 "max_autotune": True,
-                "autotune_in_subproc": False,
+                # Some Cutlass Kernels fail with IMA on this example, which leads to unrecoverable CUDA errors
+                # unless we tune in a subproc here.
+                "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_dir": _CUTLASS_DIR,
-                "cuda.cutlass_max_profiling_configs": 2,
+                "cuda.cutlass_max_profiling_configs": 4,
             }
         ):
             # No broadcast
@@ -342,12 +401,7 @@ class TestCutlassBackend(TestCase):
             # Broadcast first dim.
             compare_results(4096, 25728, 2048, 2.0, 0.4, [2048])
             # Broadcast last dim.
-            if not SM90OrLater and max_autotune_gemm_backends == "CUTLASS":
-                with self.assertRaisesRegex(RuntimeError, "No choices to select"):
-                    # CUTLASS2 doesn't support Bias last-dim broadcast.
-                    compare_results(4096, 25728, 2048, 2.0, 0.4, [4096, 1])
-            else:
-                compare_results(4096, 25728, 2048, 2.0, 0.4, [4096, 1])
+            compare_results(4096, 25728, 2048, 2.0, 0.4, [4096, 1])
 
     # TODO: Enable dynamic test cases when dynamic support is added.
     @unittest.skipIf(not SM80OrLater, "need sm_80")

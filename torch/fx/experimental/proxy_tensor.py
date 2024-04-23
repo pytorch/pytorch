@@ -24,7 +24,9 @@ import inspect
 from dataclasses import dataclass
 import weakref
 import operator
+import traceback
 from torch.utils._stats import count
+from torch.utils._traceback import CapturedTraceback
 import logging
 from torch._library.fake_class_registry import FakeScriptObject
 
@@ -597,6 +599,7 @@ class PythonKeyTracer(Tracer):
         else:
             return e
 
+
 @contextmanager
 def _temp_remove_pre_dispatch_torch_function_mode():
     from torch.overrides import _len_torch_function_stack, _pop_mode, _push_mode
@@ -1076,17 +1079,52 @@ class _ModuleStackTracer(PythonKeyTracer):
 
     def create_node(self, *args, **kwargs):
         '''
-        Add nn_module_stack metadata here instead of TracerBase,
-        since calls to make_fx() might not want to record module stack metadata
+        Create node and add on metadata.
+        Add nn_module_stack here instead of TracerBase,
+        since calls to make_fx() might not want to record module stack metadata.
+        Add torch_fn by looking at torch_fn_metadata and torch_fn_counts.
+        Add stack_trace by filtering out forward() stack frames.
         '''
         node = super().create_node(*args, **kwargs)
-        if "nn_module_stack" not in node.meta and node.op not in ["placeholder", "output"]:
-            node.meta["nn_module_stack"] = self.module_stack
+
+        # nn_module_stack
+        if node.op not in ["placeholder", "output"]:
+            if "nn_module_stack" not in node.meta:
+                node.meta["nn_module_stack"] = self.module_stack
+            # convert nn_module_stack from Dict[key, (FQN, class)] -> Dict[str, Tuple[str, str]]
+            for key, (fqn, mod_cls) in node.meta["nn_module_stack"].items():
+                if isinstance(mod_cls, type):
+                    node.meta["nn_module_stack"][key] = (fqn, mod_cls.__module__ + "." + mod_cls.__qualname__)
+
+        # torch_fn
         if node.op == "call_function" and self.torch_fn_metadata is not None and "torch_fn" not in node.meta:
             node.meta["torch_fn"] = (
                 f"{self.torch_fn_metadata.__name__}_{self.torch_fn_counts[self.torch_fn_metadata]}",
                 f"{self.torch_fn_metadata.__class__.__name__}.{self.torch_fn_metadata.__name__}"
             )
+
+        # stack_trace
+        if 'stack_trace' not in node.meta and node.op not in ["placeholder", "output"]:
+            user_frame_summary = CapturedTraceback.extract().summary()
+            if user_frame_summary:
+                # we retain frames from forward() calls, or ops
+                # located in torch/__init__.py (e.g. sym_int, sym_constrain_range, vmap)
+                stack_trace = [frame for frame in user_frame_summary if (
+                    frame.name == 'forward'
+                    or frame.filename.endswith('torch/__init__.py')
+                )]
+                # filter out forward() frames from fx/_symbolic_trace.py, export/_trace.py
+                # this is hardcoded, but leads to a much cleaner stack trace
+                stack_trace = [
+                    frame for frame in stack_trace if not (
+                        frame.filename.endswith('fx/_symbolic_trace.py')
+                        or frame.filename.endswith('export/_trace.py')
+                    )
+                ]
+                if stack_trace:  # empty list for strict mode, dynamo should handle stack_trace
+                    stack_trace = traceback.StackSummary.from_list(stack_trace)
+                    node.meta["stack_trace"] = ''.join(stack_trace.format()).strip()
+
         return node
 
 
@@ -1129,23 +1167,25 @@ def make_fx(f,
             import torch._dynamo
             fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(args)
             if fake_tensor_mode is None:
-                fake_tensor_mode = FakeTensorMode(
-                    allow_fallback_kernels=True,
-                    allow_non_fake_inputs=_allow_non_fake_inputs,
-                    shape_env=ShapeEnv(),
-                    static_shapes=True,
-                    _allow_unsafe_data_ptr_access=False,
-                )
+                import torch._functorch.config as _config
+                with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
+                    fake_tensor_mode = FakeTensorMode(
+                        allow_fallback_kernels=True,
+                        allow_non_fake_inputs=_allow_non_fake_inputs,
+                        shape_env=ShapeEnv(),
+                        static_shapes=True,
+                    )
         elif tracing_mode == "symbolic":
             import torch._dynamo
             fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(args)
             if fake_tensor_mode is None:
                 shape_env = ShapeEnv()
-                fake_tensor_mode = FakeTensorMode(
-                    allow_fallback_kernels=False,
-                    allow_non_fake_inputs=_allow_non_fake_inputs,
-                    shape_env=shape_env,
-                    _allow_unsafe_data_ptr_access=False)
+                import torch._functorch.config as _config
+                with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
+                    fake_tensor_mode = FakeTensorMode(
+                        allow_fallback_kernels=False,
+                        allow_non_fake_inputs=_allow_non_fake_inputs,
+                        shape_env=shape_env)
             else:
                 shape_env = fake_tensor_mode.shape_env
                 assert shape_env is not None, "shape_env should be set if tracing with 'symbolic'"

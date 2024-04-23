@@ -172,11 +172,73 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return v
 
     @make_test
+    def test_obj_eq(a, b):
+        v = a + b
+        if MyCls() == None:  # noqa: E711
+            return -1
+        if MyCls() != None:  # noqa: E711
+            v = v.sin()
+        if MyCls() == MyCls():
+            return -2
+        if MyCls() != MyCls():
+            return v + 1
+        return -3
+
+    @make_test
+    def test_cls_eq(a, b):
+        v = a + b
+        if MyCls == None:  # noqa: E711
+            return -1
+        if MyCls != None:  # noqa: E711
+            v = v.sin()
+        if MyCls != MyCls:
+            return -2
+        if MyCls == MyCls:
+            return v + 1
+        return -3
+
+    @make_test
+    def test_obj_is(a, b):
+        v = a + b
+        if MyCls() is None:  # noqa: E711
+            return -1
+        if MyCls() is not None:  # noqa: E711
+            v = v.sin()
+        if MyCls() is MyCls():
+            return -2
+        if MyCls() is not MyCls():
+            return v + 1
+        return -3
+
+    @make_test
+    def test_cls_is(a, b):
+        v = a + b
+        if MyCls is None:  # noqa: E711
+            return -1
+        if MyCls is not None:  # noqa: E711
+            v = v.sin()
+        if MyCls is not MyCls:
+            return -2
+        if MyCls is MyCls:
+            return v + 1
+        return -3
+
+    @make_test
     def test_itertools_combinations(a, b):
         combs = []
         for size in itertools.combinations((1, 2, 3, 4), 2):
             combs.append(torch.ones(size))
         return combs
+
+    @make_test
+    def test_np_iinfo(a):
+        max_dim = np.iinfo(np.int16).max
+        return a + max_dim
+
+    @make_test
+    def test_np_finfo(a):
+        min_dim = np.finfo(np.float32).min
+        return a + min_dim
 
     @make_test
     def test_constant1(a, b, c):
@@ -1221,6 +1283,22 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_namedtuple_user_methods(a, b):
         mytuple = FunctionTests.MyNamedTuple(a, b)
         return mytuple.add(), mytuple.static_method(), mytuple.class_method()
+
+    @make_test
+    def test_namedtuple_hasattr(a, b):
+        mytuple = FunctionTests.MyNamedTuple(a, b)
+
+        def isinstance_namedtuple(obj) -> bool:
+            return (
+                isinstance(obj, tuple)
+                and hasattr(obj, "_asdict")
+                and hasattr(obj, "_fields")
+            )
+
+        if isinstance_namedtuple(mytuple):
+            return a + b
+        else:
+            return a - b
 
     @make_test
     def test_is_quantized(a, b):
@@ -2555,7 +2633,6 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(fn(z), fn_opt(z))
 
-    @torch._dynamo.config.patch(capture_func_transforms=True)
     def test_is_init_in_compile_vmapped_mutated_tensor_tensor(self):
         def fn(z):
             x = z.clone()
@@ -2569,7 +2646,6 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(fn(z), fn_opt(z))
 
-    @torch._dynamo.config.patch(capture_func_transforms=True)
     def test_is_vmapped_mutated_tensor_tensor(self):
         def fn(x):
             y = torch.vmap(torch.Tensor.acos_)(x)
@@ -2581,7 +2657,6 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(fn(z), fn_opt(z))
 
-    @torch._dynamo.config.patch(capture_func_transforms=True)
     def test_is_init_in_compile_vmapped_mutated_tensor_tensor_multi_arg(self):
         def fn(y, z):
             a = y.clone()

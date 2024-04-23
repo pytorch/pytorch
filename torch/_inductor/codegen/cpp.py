@@ -24,9 +24,11 @@ from .. import codecache, config, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
 from ..optimize_indexing import range_expressable_in_32_bits
 from ..scheduler import (
+    BaseSchedulerNode,
     BaseScheduling,
     ForeachKernelSchedulerNode,
     FusedSchedulerNode,
+    Scheduler,
     SchedulerNode,
 )
 from ..utils import (
@@ -35,6 +37,7 @@ from ..utils import (
     get_fused_kernel_name,
     is_welford_reduction,
     parallel_num_threads,
+    Placeholder,
     sympy_index_symbol,
     sympy_product,
     sympy_subs,
@@ -353,6 +356,177 @@ def stride_at_vec_range(index: sympy.Expr, var: sympy.Symbol, vec_length: int):
     return stride_at(index_vec_simplified, var)
 
 
+class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
+    @classmethod
+    def fuse(  # type: ignore[override]
+        cls, node1: BaseSchedulerNode, node2: BaseSchedulerNode, outer_loop_fusion_depth
+    ):
+        assert node1.scheduler is node2.scheduler
+        assert all(
+            type(node)
+            in (
+                OuterLoopFusedSchedulerNode,
+                SchedulerNode,
+                FusedSchedulerNode,
+            )
+            for node in (node1, node2)
+        )
+        if any(type(node) is OuterLoopFusedSchedulerNode for node in (node1, node2)):
+            return cls(
+                node1.scheduler,
+                (
+                    list(node1.get_outer_nodes())
+                    if type(node1) is OuterLoopFusedSchedulerNode
+                    else [
+                        node1,
+                    ]
+                )
+                + (
+                    list(node2.get_outer_nodes())
+                    if type(node2) is OuterLoopFusedSchedulerNode
+                    else [
+                        node2,
+                    ]
+                ),
+                outer_loop_fusion_depth,
+            )
+        else:
+            return cls(node1.scheduler, [node1, node2], outer_loop_fusion_depth)  # type: ignore[list-item]
+
+    def __init__(
+        self,
+        scheduler: "Scheduler",
+        outer_fused_nodes: List[Union[FusedSchedulerNode, SchedulerNode]],
+        outer_loop_fusion_depth,
+    ):
+        self.outer_fused_nodes: List[
+            Union[FusedSchedulerNode, SchedulerNode]
+        ] = outer_fused_nodes
+        self.outer_loop_fusion_depth = outer_loop_fusion_depth
+        flatten_snodes = []
+        for _node in self.outer_fused_nodes:
+            assert isinstance(_node, (SchedulerNode, FusedSchedulerNode))
+            flatten_snodes.extend(list(_node.get_nodes()))
+        super().__init__(scheduler, flatten_snodes)  # type: ignore[arg-type]
+
+    def get_outer_nodes(self):
+        return self.outer_fused_nodes
+
+    def check_outer_fusion_loop_level_attr(
+        self, cpp_kernel_proxy_list, outer_loop_fusion_depth
+    ):
+        # This function ensures that the same tiling split is applied at each loop level within the outer loop fusion depth.
+        # In the fusion stage, we only examine nodes with same vars and reduce.
+        # However, for nodes with same vars and reduce, the loops may still have different tile splits.
+        # For example (test_expr_vec_non_contiguous in test_cpu_repro.py):
+        #   * buf0 tiling along the 2nd loop level, buf1 tiling along the 3rd loop level.
+        # If the check failed, we should fall back to standard loop codegen.
+        def _inner(
+            left_loop_level: LoopLevel,
+            right_loop_level: LoopLevel,
+            loop_fusion_depth: int,
+        ) -> bool:
+            # Check if same loop level attr
+            outer_loops_attr_compare_list = [
+                "var",
+                "size",
+                "offset",
+                "steps",
+            ]
+            if not (
+                all(
+                    getattr(left_loop_level, attr_compare)
+                    == getattr(right_loop_level, attr_compare)
+                    for attr_compare in outer_loops_attr_compare_list
+                )
+            ):
+                return False
+
+            assert loop_fusion_depth >= 1
+            if (loop_fusion_depth := loop_fusion_depth - 1) > 0:
+                # If the next loop level is expected to undergo outer loop fusion,
+                # there should be no kernel present at the current loop level.
+                assert (
+                    left_loop_level.kernel is None and right_loop_level.kernel is None
+                )
+                # Check next loop level attr
+                if any(
+                    # Assume no main/tail loop split at any outer loop fusion depth
+                    # Given no clear performance benefit for this complex case
+                    len(loop_level.inner) != 1
+                    for loop_level in [left_loop_level, right_loop_level]
+                ) or not _inner(
+                    left_loop_level.inner[0],
+                    right_loop_level.inner[0],
+                    loop_fusion_depth,
+                ):
+                    return False
+
+            return True
+
+        for idx in range(len(cpp_kernel_proxy_list) - 1):
+            left_loop_nest = cpp_kernel_proxy_list[idx].loop_nest
+            right_loop_nest = cpp_kernel_proxy_list[idx + 1].loop_nest
+            if any(
+                # Assume no main/tail loop split at any outer loop fusion depth
+                len(loop_nest.root) != 1
+                for loop_nest in [left_loop_nest, right_loop_nest]
+            ) or not _inner(
+                left_loop_nest.root[0], right_loop_nest.root[0], outer_loop_fusion_depth
+            ):
+                return False
+
+        return True
+
+    def merge_outer_fusion_kernels(
+        self,
+        cpp_kernel_proxy_list,
+    ):
+        loop_nest_list: List[LoopNestWithSplit] = [
+            kernel.loop_nest for kernel in cpp_kernel_proxy_list
+        ]
+        metrics.cpp_outer_loop_fused_inner_counts.append(len(loop_nest_list))
+
+        kernel_group = cpp_kernel_proxy_list[0].kernel_group
+
+        def _merge_outer_fusion_loop_levels(
+            loop_level_nested_list: List[List["LoopLevel"]],
+            outer_loop_fusion_depth,
+        ):
+            assert outer_loop_fusion_depth >= 1
+            # Assume no main/tail loop split at any outer loop fusion depth
+            assert all(
+                len(loop_level_list) == 1 for loop_level_list in loop_level_nested_list
+            )
+            if (outer_loop_fusion_depth := outer_loop_fusion_depth - 1) >= 1:
+                # Further merge the next loop level
+                next_loop_level_nested_list = [
+                    loop_level_list[0].inner
+                    for loop_level_list in loop_level_nested_list
+                ]
+                _merge_outer_fusion_loop_levels(
+                    next_loop_level_nested_list,
+                    outer_loop_fusion_depth,
+                )
+            else:
+                outer_loop_fused_kernel = OuterLoopFusedKernel(kernel_group)
+                loop_level_of_first_kernel = loop_level_nested_list[0][0]
+                for kernel_idx in range(len(loop_level_nested_list)):
+                    outer_loop_fused_kernel.inner.append(
+                        deepcopy(loop_level_nested_list[kernel_idx][0]),
+                    )
+                loop_level_of_first_kernel.inner = []
+                loop_level_of_first_kernel.kernel = outer_loop_fused_kernel
+
+        # Merge the List[LoopNestWithSplit] from cpp_kernel_proxy_list
+        # into cpp_kernel_proxy_list[0].loop_nest
+        _merge_outer_fusion_loop_levels(
+            [_loop_nest.root for _loop_nest in loop_nest_list],  # type: ignore[misc]
+            self.outer_loop_fusion_depth,
+        )
+        return cpp_kernel_proxy_list[0]
+
+
 class CppPrinter(ExprPrinter):
     def _print_Integer(self, expr):
         return f"{int(expr)}L"
@@ -386,6 +560,11 @@ class CppPrinter(ExprPrinter):
     def _print_floor(self, expr):
         assert len(expr.args) == 1
         r = f"std::floor({self._print(expr.args[0])})"
+        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
+
+    def _print_Trunc(self, expr):
+        assert len(expr.args) == 1
+        r = f"std::trunc({self._print(expr.args[0])})"
         return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
 
     def _print_Pow(self, expr):
@@ -1360,7 +1539,14 @@ class CppVecOverrides(CppOverrides):
     @staticmethod
     def where(a, b, c):
         assert isinstance(V.kernel, CppVecKernel)
-        return f"decltype({b})::blendv({c}, {b}, {V.kernel._get_mask_cast(a, b.dtype)})"
+        if b.dtype == torch.bool:
+            assert c.dtype == torch.bool
+            blendv_a = f"{V.kernel._get_mask_cast(a, torch.float)}"
+            blendv_b = f"{V.kernel._get_mask_cast(b, torch.float)}"
+            blendv_c = f"{V.kernel._get_mask_cast(c, torch.float)}"
+            return f"decltype({b})::blendv({blendv_c}, {blendv_b}, {blendv_a})"
+        else:
+            return f"decltype({b})::blendv({c}, {b}, {V.kernel._get_mask_cast(a, b.dtype)})"
 
     @staticmethod
     def sign(x):
@@ -1656,8 +1842,8 @@ class CppKernel(Kernel):
                 if cse_var == var:
                     if is_to_lowp_dtype(expr):
                         m = re.search(r"tmp\d+", expr)
-                        assert m
-                        fp32_cse_var_name = m.group()
+                        if m is not None:
+                            fp32_cse_var_name = m.group()
             if fp32_cse_var_name:
                 for cse_var in cache.values():
                     if cse_var.name == fp32_cse_var_name:
@@ -1843,18 +2029,43 @@ class CppKernel(Kernel):
                 if worksharing.single():
                     stack.enter_context(code.indent())
 
+            def gen_loop_kernel(loop: LoopLevel):
+                def is_parallel_reduction(loop):
+                    root = loop.get_root()
+                    return root.is_reduction and root.parallel
+
+                kernels = loop.get_kernels()
+                assert len(kernels) == 1
+                if not isinstance(
+                    kernels[0], OuterLoopFusedKernel
+                ) and is_parallel_reduction(loop):
+                    kernels[0].update_stores_with_parallel_reduction()
+                gen_kernel(kernels[0])
+
             def gen_kernel(kernel):
-                with contextlib.ExitStack() as stack:
-                    assert kernel
+                if isinstance(kernel, OuterLoopFusedKernel):
+                    for loop in kernel.inner:
+                        if loop.inner:
+                            gen_loops(loop.inner, loop.is_reduction)
+                        else:
+                            with contextlib.ExitStack() as stack:
+                                # If there is any kernel existing at the final outer loop fusion level,
+                                # the kernel code should be placed within its respective indent to prevent
+                                # the duplication of variable definitions.
+                                stack.enter_context(code.indent())
+                                gen_loop_kernel(loop)
+                else:
+                    with contextlib.ExitStack() as stack:
+                        assert kernel
+                        if hasattr(kernel, "codegen_inner_loops"):
+                            code.splice(kernel.preloads)
+                            kernel.codegen_inner_loops(code)
+                            stack.enter_context(code.indent())
+                        code.splice(kernel.loads)
+                        code.splice(kernel.compute)
+                        code.splice(kernel.stores)
                     if hasattr(kernel, "codegen_inner_loops"):
-                        code.splice(kernel.preloads)
-                        kernel.codegen_inner_loops(code)
-                        stack.enter_context(code.indent())
-                    code.splice(kernel.loads)
-                    code.splice(kernel.compute)
-                    code.splice(kernel.stores)
-                if hasattr(kernel, "codegen_inner_loops"):
-                    code.splice(kernel.poststores)
+                        code.splice(kernel.poststores)
 
             def get_reduction_code_buffer(loops, buffer="prefix"):
                 assert buffer in ("prefix", "suffix", "local")
@@ -1909,10 +2120,6 @@ class CppKernel(Kernel):
                             code.splice(get_reduction_code_buffer(loops, "suffix"))
 
             def gen_loop(loop: LoopLevel):
-                def is_parallel_reduction(loop):
-                    root = loop.get_root()
-                    return root.is_reduction and root.parallel
-
                 with contextlib.ExitStack() as stack:
                     loop_lines = loop.lines()
                     if loop_lines is None:
@@ -1923,11 +2130,7 @@ class CppKernel(Kernel):
                     if loop.inner:
                         gen_loops(loop.inner, loop.is_reduction)
                     else:
-                        kernels = loop.get_kernels()
-                        assert len(kernels) == 1
-                        if is_parallel_reduction(loop):
-                            kernels[0].update_stores_with_parallel_reduction()
-                        gen_kernel(kernels[0])
+                        gen_loop_kernel(loop)
 
             stack.enter_context(code.indent())
             if loop_nest.root:
@@ -2463,7 +2666,7 @@ class CppVecKernel(CppKernel):
                 mean, m2, weight = reduction_project(reduction_type, next_value)
             return f"welford_combine({var}, {{{mean}, {m2}, {weight}}})"
         else:
-            raise NotImplementedError()
+            raise NotImplementedError
 
     def indirect_assert(self, var, lower, upper, mask=None):
         assert not mask, "do not support mask in indirect_indexing assertion"
@@ -2673,20 +2876,11 @@ class CppVecKernelChecker(CppVecKernel):
         self.exit_stack = contextlib.ExitStack()
 
         # Cache all the load result
-        self.load_supported_dtypes: List[torch.dtype] = [
+        self.supported_dtypes: List[torch.dtype] = [
             torch.float,
             torch.bfloat16,
             torch.float16,
             torch.bool,
-            torch.uint8,
-            torch.int8,
-            torch.int32,
-            torch.int64,
-        ]
-        self.store_supported_dtypes: List[torch.dtype] = [
-            torch.float,
-            torch.bfloat16,
-            torch.float16,
             torch.uint8,
             torch.int8,
             torch.int32,
@@ -2711,7 +2905,7 @@ class CppVecKernelChecker(CppVecKernel):
                 self.disable_vec("not a loop")
                 return var
 
-            if load_dtype not in self.load_supported_dtypes and (
+            if load_dtype not in self.supported_dtypes and (
                 index.has(self.itervars[self.tiling_idx])
                 or free_symbol_startswith(index, "tmp")
             ):
@@ -2732,7 +2926,7 @@ class CppVecKernelChecker(CppVecKernel):
             assert opt_ctx
             opt_ctx.dtype = store_dtype
 
-            if store_dtype not in self.store_supported_dtypes:
+            if store_dtype not in self.supported_dtypes:
                 self.disable_vec(f"{store_dtype} not supported by store")
                 return self.simd_vec
 
@@ -2836,18 +3030,7 @@ class CppVecKernelChecker(CppVecKernel):
                         ):
                             opt_ctx.dtype = torch.float32
 
-                    supported_dtypes = [
-                        torch.float,
-                        torch.bfloat16,
-                        torch.float16,
-                        torch.bool,
-                        torch.uint8,
-                        torch.int8,
-                        torch.int32,
-                        torch.int64,
-                    ]
-
-                    if opt_ctx.dtype not in supported_dtypes:
+                    if opt_ctx.dtype not in self.supported_dtypes:
                         self.disable_vec(f"constant dtype: {opt_ctx.dtype}")
                     return val
 
@@ -2920,16 +3103,7 @@ class CppVecKernelChecker(CppVecKernel):
 
             @staticmethod
             def to_dtype(x, dtype, src_dtype=None):
-                if dtype not in [
-                    torch.float,
-                    torch.bfloat16,
-                    torch.float16,
-                    torch.bool,
-                    torch.uint8,
-                    torch.int8,
-                    torch.int32,
-                    torch.int64,
-                ]:
+                if dtype not in self.supported_dtypes:
                     self.disable_vec(f"to_dtype: {dtype}")
                 return x
 
@@ -3364,6 +3538,12 @@ class CppKernelProxy(CppKernel):
         self.codegen_loops_impl(self.loop_nest, code, worksharing)
 
 
+class OuterLoopFusedKernel(CppKernel):
+    def __init__(self, kernel_group):
+        super().__init__(kernel_group.args, kernel_group.ws.num_threads)
+        self.inner: List["LoopLevel"] = []
+
+
 class ReasonFusedNodes(Enum):
     SAME_VARS_REDUCE = "same_vars_reduce"
     COMPATIBLE_REDUCTION = "compatible_reduction"
@@ -3378,7 +3558,7 @@ class CppScheduling(BaseScheduling):
 
     def __init__(self, scheduler):
         self.scheduler = scheduler
-        self.get_kernel_group()
+        self.reset_kernel_group()
         self._ready_to_flush = False
 
     def _set_flush_status(self, status: bool):
@@ -3387,7 +3567,7 @@ class CppScheduling(BaseScheduling):
     def group_fn(self, sizes):
         return tuple(tuple(map(V.graph.sizevars.simplify, s)) for s in sizes)
 
-    def get_kernel_group(self):
+    def reset_kernel_group(self):
         from .cpp_wrapper_cpu import CppWrapperCpu
 
         self.kernel_group: Union[CppWrapperKernelGroup, KernelGroup]
@@ -3421,8 +3601,7 @@ class CppScheduling(BaseScheduling):
                             if var_ranges is None:
                                 var_ranges = v
                             assert var_ranges == v, (var_ranges, v, node.snodes)
-                            for expr in exprs:
-                                indexing_exprs.add(expr)
+                            indexing_exprs.update(exprs)
                         return var_ranges, list(indexing_exprs)
                     else:
                         assert isinstance(node, SchedulerNode)
@@ -3445,8 +3624,13 @@ class CppScheduling(BaseScheduling):
                 _, (vars1, _) = node1.group
                 _, (vars2, _) = node2.group
                 assert vars1 == vars2, (vars1, vars2)
-
-            return FusedSchedulerNode.fuse(node1, node2)
+                return FusedSchedulerNode.fuse(node1, node2)
+            elif self.can_fuse_vertical_outer_loop(node1, node2):
+                return OuterLoopFusedSchedulerNode.fuse(
+                    node1, node2, self._get_outer_loop_fusion_depth(node1, node2)
+                )
+            else:
+                return FusedSchedulerNode.fuse(node1, node2)
 
     def _why_fuse_nodes(self, node1, node2) -> Optional[ReasonFusedNodes]:
         _, (vars1, reduce1) = node1.group
@@ -3520,6 +3704,10 @@ class CppScheduling(BaseScheduling):
     def _can_fuse_horizontal_impl(self, node1, node2):
         assert isinstance(node1, (FusedSchedulerNode, SchedulerNode))
         assert isinstance(node2, (FusedSchedulerNode, SchedulerNode))
+        if any(
+            isinstance(node, OuterLoopFusedSchedulerNode) for node in (node1, node2)
+        ):
+            return False
         return self._why_fuse_nodes(node1, node2) is not None
 
     def can_fuse_horizontal(self, node1, node2):
@@ -3531,19 +3719,129 @@ class CppScheduling(BaseScheduling):
 
         return self._can_fuse_horizontal_impl(node1, node2)
 
-    def can_fuse_vertical(self, node1, node2):
-        return self._can_fuse_horizontal_impl(node1, node2) and not node1.is_reduction()
+    def _get_outer_loop_fusion_depth(self, node1, node2):
+        DISABLE_OUTER_LOOP_FUSION = 0
+        if not all(
+            type(node)
+            in (OuterLoopFusedSchedulerNode, FusedSchedulerNode, SchedulerNode)
+            for node in (node1, node2)
+        ):
+            return DISABLE_OUTER_LOOP_FUSION
 
-    def codegen_nodes(self, nodes: List[SchedulerNode]):
+        _node1 = (
+            node1.get_outer_nodes()[-1]
+            if isinstance(node1, OuterLoopFusedSchedulerNode)
+            else node1
+        )
+        assert isinstance(_node1, (FusedSchedulerNode, SchedulerNode))
+        _node2 = (
+            node2.get_outer_nodes()[0]
+            if isinstance(node2, OuterLoopFusedSchedulerNode)
+            else node2
+        )
+        assert isinstance(_node2, (FusedSchedulerNode, SchedulerNode))
+
+        _, (vars1, reduce1) = _node1.group
+        _, (vars2, reduce2) = _node2.group
+        if vars1 == () and vars2 == () and reduce1 != () and reduce2 != ():
+            # Reduction only
+            return DISABLE_OUTER_LOOP_FUSION
+        if all(type(node) is OuterLoopFusedSchedulerNode for node in (node1, node2)):
+            return (
+                node1.outer_loop_fusion_depth
+                if node1.outer_loop_fusion_depth == node2.outer_loop_fusion_depth
+                else DISABLE_OUTER_LOOP_FUSION
+            )
+        outer_loop_fusion_depth = min(len(vars1), len(vars2))
+        if (
+            outer_loop_fusion_depth >= 1
+            and vars1[:outer_loop_fusion_depth] == vars2[:outer_loop_fusion_depth]
+        ):
+            if any(
+                type(node) is OuterLoopFusedSchedulerNode for node in (node1, node2)
+            ):
+                _compare_node = (
+                    node1 if type(node1) is OuterLoopFusedSchedulerNode else node2
+                )
+                if _compare_node.outer_loop_fusion_depth == outer_loop_fusion_depth:
+                    # Same outer loop fusion depth as prev nodes in OuterLoopFusedSchedulerNode
+                    return outer_loop_fusion_depth
+                else:
+                    return DISABLE_OUTER_LOOP_FUSION
+            else:
+                # First 2 nodes to generate OuterLoopFusedSchedulerNode
+                return outer_loop_fusion_depth
+        return DISABLE_OUTER_LOOP_FUSION
+
+    def can_fuse_vertical_outer_loop(self, node1, node2):
+        return (
+            node1.get_names() & node2.ancestors
+            and not (
+                self._can_fuse_horizontal_impl(node1, node2)
+                and not node1.is_reduction()
+            )
+            and self._get_outer_loop_fusion_depth(node1, node2) >= 1
+        )
+
+    def get_fusion_pair_priority(self, node1, node2):
+        if self.can_fuse_vertical_outer_loop(node1, node2):
+            # Outer loop fusion with lower priority
+            return 1
+        else:
+            return 0
+
+    def can_fuse_vertical(self, node1, node2):
+        return (
+            self._can_fuse_horizontal_impl(node1, node2) and not node1.is_reduction()
+        ) or self.can_fuse_vertical_outer_loop(node1, node2)
+
+    def codegen_node(
+        self,
+        node: Union[OuterLoopFusedSchedulerNode, FusedSchedulerNode, SchedulerNode],
+    ):
         """
         Turn an set of pre-fused nodes into a C++ kernel.
         """
         kernel_group = self.kernel_group
 
-        cpp_kernel_proxy = CppKernelProxy(kernel_group)
-        cpp_kernel_proxy.codegen_nodes(nodes)
+        if isinstance(node, OuterLoopFusedSchedulerNode):
+            cpp_kernel_proxy_list: List[CppKernelProxy] = []
+            nodes_list: List[List[SchedulerNode]] = []
 
-        kernel_group.finalize_kernel(cpp_kernel_proxy, nodes)
+            for _node in node.get_outer_nodes():
+                assert isinstance(_node, (FusedSchedulerNode, SchedulerNode))
+                _nodes: List[SchedulerNode] = _node.get_nodes()  # type: ignore[assignment]
+                cpp_kernel_proxy = CppKernelProxy(kernel_group)
+                cpp_kernel_proxy.codegen_nodes(_nodes)
+
+                cpp_kernel_proxy_list.append(cpp_kernel_proxy)
+                nodes_list.append(_nodes)
+
+            # Note that, in the future, when every kernel can be vectorized,
+            # the function select_tiling will be much easier, and we'll be able to lift
+            # check_outer_fusion_loop_level_attr to the fusion phase,
+            # avoiding grouping kernels at fusion time that "look like we'll be able to fuse them"
+            # but then we actually won't.
+            if node.check_outer_fusion_loop_level_attr(
+                cpp_kernel_proxy_list, node.outer_loop_fusion_depth
+            ):
+                # Merge the cpp_kernel_proxy_list into cpp_kernel_proxy
+                outer_fusion_cpp_kernel_proxy = node.merge_outer_fusion_kernels(
+                    cpp_kernel_proxy_list,
+                )
+                kernel_group.finalize_kernel(
+                    outer_fusion_cpp_kernel_proxy,
+                    [_node for _nodes in nodes_list for _node in _nodes],
+                )
+            else:
+                # Fall back to standard loop codegen
+                for _kernel_proxy, _nodes in zip(cpp_kernel_proxy_list, nodes_list):
+                    kernel_group.finalize_kernel(_kernel_proxy, _nodes)
+        else:
+            nodes: List[SchedulerNode] = node.get_nodes()  # type: ignore[assignment]
+            cpp_kernel_proxy = CppKernelProxy(kernel_group)
+            cpp_kernel_proxy.codegen_nodes(nodes)
+            kernel_group.finalize_kernel(cpp_kernel_proxy, nodes)
 
         args_num = self._get_scheduled_num_args()
         if args_num > CppScheduling.MAX_FUSED_KERNEL_ARGS_NUM:
@@ -3558,9 +3856,39 @@ class CppScheduling(BaseScheduling):
     def codegen_sync(self):
         pass
 
+    def define_kernel(self, src_code, nodes):
+        wrapper = V.graph.wrapper_code
+        fused_name = (
+            get_fused_kernel_name(nodes, config.cpp.descriptive_names)
+            if config.cpp.descriptive_names
+            else ""
+        )
+        kernel_name = "_".join(["cpp", fused_name, wrapper.next_kernel_suffix()])
+        kernel_decl_name = kernel_name if V.graph.cpp_wrapper else "kernel"
+        src_code = src_code.replace(str(Placeholder.KERNEL_NAME), kernel_decl_name)
+        src_code = src_code.replace(str(Placeholder.DESCRIPTIVE_NAME), kernel_name)
+        # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
+        # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
+        src_code = src_code.replace("#pragma CMT", "//")
+
+        compile_wrapper = IndentedBuffer()
+        _, _, arg_types = self.kernel_group.args.cpp_argdefs()
+        if not V.graph.cpp_wrapper:
+            compile_wrapper.writeline(f"async_compile.cpp_pybinding({arg_types!r}, '''")
+        compile_wrapper.splice(src_code, strip=True)
+        if not V.graph.cpp_wrapper:
+            compile_wrapper.writeline("''')")
+        wrapper.define_kernel(kernel_name, compile_wrapper.getvalue(), cuda=False)
+        return kernel_name
+
     def flush(self):
-        self.kernel_group.codegen_define_and_call(V.graph.wrapper_code)
-        self.get_kernel_group()
+        src_code = self.kernel_group.codegen_group()
+        if src_code:
+            kernel_name = self.define_kernel(
+                src_code, self.kernel_group.scheduled_nodes
+            )
+            self.kernel_group.call_kernel(V.graph.wrapper_code, kernel_name)
+        self.reset_kernel_group()
         self._set_flush_status(False)
 
 
@@ -3588,30 +3916,28 @@ class KernelGroup:
         args_num = len(arg_defs)
         return args_num
 
-    def codegen_define_and_call(self, wrapper):
+    def codegen_group(self, name=None) -> str:
         self.stack.close()
         if not self.scheduled_nodes:
-            return
-
-        fused_name = (
-            get_fused_kernel_name(self.scheduled_nodes, config.cpp.descriptive_names)
-            if config.cpp.descriptive_names
-            else ""
-        )
-        kernel_name = "_".join(["cpp", fused_name, wrapper.next_kernel_suffix()])
-        arg_defs, call_args, arg_types = self.args.cpp_argdefs()
-        arg_defs = ",\n".ljust(25).join(arg_defs)
+            return ""
         code = BracesBuffer()
+        # 1. Include header files
         # TODO: support kernel profile on other platforms
         enable_kernel_profile = (
             config.cpp.enable_kernel_profile and sys.platform == "linux"
         )
         if enable_kernel_profile:
             code.writelines(["#include <ATen/record_function.h>"])
-        kernel_decl_name = kernel_name if V.graph.cpp_wrapper else "kernel"
         code.writeline(codecache.cpp_prefix())
 
+        # 2. Function definition
+        kernel_decl_name = str(Placeholder.KERNEL_NAME) if name is None else name
+        kernel_name = str(Placeholder.DESCRIPTIVE_NAME) if name is None else name
+        arg_defs, _, _ = self.args.cpp_argdefs()
+        arg_defs = ",\n".ljust(25).join(arg_defs)
         code.writeline(f'extern "C" void {kernel_decl_name}({arg_defs})')
+
+        # 3. Function body
         with code.indent():
             if enable_kernel_profile:
                 graph_id = V.graph.graph_id
@@ -3624,20 +3950,10 @@ class KernelGroup:
             for old, new in self.args.aliases():
                 code.writeline(f"auto {old} = {new};")
             code.splice(self.loops_code)
+        return code.getvalue()
 
-        codecache_def = IndentedBuffer()
-        if not V.graph.cpp_wrapper:
-            codecache_def.writeline(f"async_compile.cpp_pybinding({arg_types!r}, '''")
-        codecache_def.splice(code)
-        if not V.graph.cpp_wrapper:
-            codecache_def.writeline("''')")
-
-        codecache_str = codecache_def.getvalue()
-        # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
-        # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
-        codecache_str = codecache_str.replace("#pragma CMT", "//")
-        wrapper.define_kernel(kernel_name, codecache_str, cuda=False)
-        # generate the code to call this
+    def call_kernel(self, wrapper, kernel_name):
+        _, call_args, arg_types = self.args.cpp_argdefs()
         wrapper.generate_kernel_call(
             kernel_name, call_args, cuda=False, arg_types=arg_types
         )

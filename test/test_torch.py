@@ -47,8 +47,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA, onlyCPU,
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
-    skipMeta,
-    PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyNativeDeviceTypes,
+    skipMeta, PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyNativeDeviceTypes,
     get_all_device_types, skipXLA)
 from typing import Tuple
 import torch.backends.quantized
@@ -5932,7 +5931,7 @@ else:
         for optimizer_ctor in (torch.optim.SGD, torch.optim.Adam, torch.optim.AdamW):
             self._grad_scaling_autocast_test(device=device.type, optimizer_ctor=optimizer_ctor, optimizer_kwargs={"foreach": True})
 
-    @onlyCUDA
+    @onlyNativeDeviceTypes
     def test_grad_scaling_autocast_fused(self, device):
         device = torch.device(device)
         for optimizer_ctor in (torch.optim.Adam, torch.optim.AdamW):
@@ -5952,8 +5951,6 @@ else:
                 {"foreach": False, "fused": True},
             ),
         ):
-            if device.type != "cuda":
-                optimizer_kwargs['fused'] = False
             with self.subTest(optimizer=optimizer_ctor, optimizer_kwargs=optimizer_kwargs):
                 self._test_grads_invalidated_between_unscale_and_step(device.type, optimizer_ctor, optimizer_kwargs)
 
@@ -9129,8 +9126,8 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         for seed, expected_initial_seed in test_cases:
             torch.manual_seed(seed)
             actual_initial_seed = torch.initial_seed()
-            msg = "expected initial_seed() = {:x} after calling manual_seed({:x}), but got {:x} instead".format(
-                expected_initial_seed, seed, actual_initial_seed)
+            msg = (f"expected initial_seed() = {expected_initial_seed:x} "
+                   f"after calling manual_seed({seed:x}), but got {actual_initial_seed:x} instead")
             self.assertEqual(expected_initial_seed, actual_initial_seed, msg=msg)
         for invalid_seed in [min_int64 - 1, max_uint64 + 1]:
             with self.assertRaisesRegex(RuntimeError, r'Overflow when unpacking long'):
@@ -9526,8 +9523,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
         device_set = {'cpu', 'cpu:0', 'cuda', 'cuda:0', 'cuda:1', 'cuda:10', 'cuda:100'}
         device_hash_set = set()
-        for device in device_set:
-            device_hash_set.add(hash(torch.device(device)))
+        device_hash_set.update(hash(torch.device(device)) for device in device_set)
         self.assertEqual(len(device_set), len(device_hash_set))
 
         def get_expected_device_repr(device):

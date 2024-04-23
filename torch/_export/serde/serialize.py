@@ -1,5 +1,6 @@
 import base64
 import copy
+import copyreg
 import dataclasses
 import heapq
 import inspect
@@ -8,8 +9,8 @@ import json
 import logging
 import math
 import operator
+import re
 import typing
-import copyreg
 
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -19,6 +20,7 @@ from typing import (
     Callable,
     cast,
     Dict,
+    final,
     Iterator,
     List,
     Optional,
@@ -42,6 +44,8 @@ from torch.utils._sympy.value_ranges import ValueRanges
 from .schema import (  # type: ignore[attr-defined]
     Argument,
     BufferMutationSpec,
+    ConstantInputSpec,
+    ConstantValue,
     CustomObjArgument,
     Device,
     ExportedProgram,
@@ -54,9 +58,9 @@ from .schema import (  # type: ignore[attr-defined]
     InputSpec,
     InputToBufferSpec,
     InputToCustomObjSpec,
+    InputTokenSpec,
     InputToParameterSpec,
     InputToTensorConstantSpec,
-    InputTokenSpec,
     Layout,
     LossOutputSpec,
     MemoryFormat,
@@ -311,7 +315,7 @@ def deserialize_torch_artifact(serialized: Union[Dict[str, Any], Tuple[Any, ...]
     return artifact
 
 
-def _sympy_int_to_int(val: sympy.Expr):
+def _sympy_int_to_int(val: sympy.Expr, adjust: str):
     # Convert simple sympy Integers into concrete int
     if val == sympy.oo:
         return math.inf
@@ -319,7 +323,20 @@ def _sympy_int_to_int(val: sympy.Expr):
         return -math.inf
     if isinstance(val, sympy.Integer):
         return int(val)
-    raise RuntimeError("Export constraints cannot be non-integer expressions")
+
+    # TODO: Remove this adjustment when Ed gets rid of fractional ranges
+    log.warning(
+        "Export constraints cannot be non-integer expressions. Found "
+        "type %s, and value %s. We will attempt to %s "
+        "this value.", type(val), val, adjust
+    )
+
+    if adjust == "floor":
+        return math.floor(val)
+    elif adjust == "ceil":
+        return math.ceil(val)
+    else:
+        raise RuntimeError(f"Got invalid adjustment {adjust}")
 
 
 def _int_to_sympy_int(val) -> sympy.Expr:
@@ -336,8 +353,8 @@ def serialize_range_constraints(
 ) -> Dict[str, RangeConstraint]:
     return {
         str(k): RangeConstraint(
-            _sympy_int_to_int(v.lower),  # type: ignore[arg-type]
-            _sympy_int_to_int(v.upper),  # type: ignore[arg-type]
+            _sympy_int_to_int(v.lower, "ceil"),  # type: ignore[arg-type]
+            _sympy_int_to_int(v.upper, "floor"),  # type: ignore[arg-type]
         )
         for k, v in range_constraints.items()
     }
@@ -378,7 +395,16 @@ class GraphState:
     custom_obj_values: Dict[str, CustomObjArgument] = field(default_factory=dict)
 
 
-class GraphModuleSerializer:
+class Final(type):
+    def __new__(metacls, name, bases, classdict):
+        for b in bases:
+            if isinstance(b, Final):
+                raise TypeError(f"type '{b.__name__}' is not an acceptable base type")
+        return type.__new__(metacls, name, bases, dict(classdict))
+
+
+@final
+class GraphModuleSerializer(metaclass=Final):
     def __init__(
         self,
         graph_signature: ep.ExportGraphSignature,
@@ -827,9 +853,30 @@ class GraphModuleSerializer:
 
     def serialize_input_spec(self, spec: ep.InputSpec) -> InputSpec:
         if spec.kind == ep.InputKind.USER_INPUT:
-            return InputSpec.create(
-                user_input=UserInputSpec(arg=self.serialize_argument_spec(spec.arg))
-            )
+            if isinstance(spec.arg, ep.ConstantArgument):
+                if isinstance(spec.arg.value, int):
+                    constant_spec = ConstantValue.create(as_int=spec.arg.value)
+                elif isinstance(spec.arg.value, bool):
+                    constant_spec = ConstantValue.create(as_bool=spec.arg.value)
+                elif isinstance(spec.arg.value, str):
+                    constant_spec = ConstantValue.create(as_string=spec.arg.value)
+                elif isinstance(spec.arg.value, float):
+                    constant_spec = ConstantValue.create(as_float=spec.arg.value)
+                elif spec.arg.value is None:
+                    constant_spec = ConstantValue.create(as_none=())
+                else:
+                    raise SerializeError(f"Unhandled constant input {spec.arg.value} to serialize")
+                return InputSpec.create(
+                    constant_input=ConstantInputSpec(
+                        name=spec.arg.name, value=constant_spec
+                    )
+                )
+            else:
+                return InputSpec.create(
+                    user_input=UserInputSpec(
+                        arg=self.serialize_argument_spec(spec.arg)
+                    )
+                )
         elif spec.kind == ep.InputKind.PARAMETER:
             assert spec.target is not None
             assert isinstance(spec.arg, ep.TensorArgument)
@@ -1229,7 +1276,8 @@ class GraphModuleSerializer:
         )
 
 
-class ExportedProgramSerializer:
+@final
+class ExportedProgramSerializer(metaclass=Final):
     def __init__(self, opset_version: Optional[Dict[str, int]] = None):
         self.opset_version: Dict[str, int] = {}
         if opset_version:
@@ -1284,7 +1332,8 @@ class ExportedProgramSerializer:
         )
 
 
-class GraphModuleDeserializer:
+@final
+class GraphModuleDeserializer(metaclass=Final):
     @dataclasses.dataclass
     class Result:
         graph_module: torch.fx.GraphModule
@@ -1440,13 +1489,17 @@ class GraphModuleDeserializer:
             class_fqn=script_obj_meta.class_fqn,
         )
 
-    def deserialize_graph_output(self, output) -> torch.fx.Node:
+    def deserialize_graph_output(self, output) -> Optional[Union[torch.fx.Node, int]]:
         if output.type == "as_tensor":
             return self.serialized_name_to_node[output.as_tensor.name]
         elif output.type == "as_sym_int":
             return self.serialized_name_to_node[output.as_sym_int.as_name]
         elif output.type == "as_sym_bool":
             return self.serialized_name_to_node[output.as_sym_bool.as_name]
+        elif output.type == "as_int":
+            return output.as_int
+        elif output.type == "as_none":
+            return None
         else:
             raise SerializeError(f"Unable to deserialize output node {output}")
 
@@ -1474,6 +1527,9 @@ class GraphModuleDeserializer:
             if input_.type in ("as_tensor", "as_sym_int", "as_custom_obj"):
                 node_name = input_.value.name
                 placeholder_node = self.graph.placeholder(node_name)
+                # FX might declare a name illegal (e.g. some nn.Modules use "input" as forward() arguments)
+                # we will overwrite it
+                placeholder_node.name = node_name
                 self.sync_fx_node(node_name, placeholder_node)
             elif input_.type in (
                 "as_int",
@@ -1482,7 +1538,7 @@ class GraphModuleDeserializer:
                 "as_none",
                 "as_string",
             ):
-                node_name = f"arg{i}"
+                node_name = self.signature.input_specs[i].arg.name
                 placeholder_node = self.graph.placeholder(node_name)
                 placeholder_node.meta["val"] = self.deserialize_input(input_)
             else:
@@ -1516,7 +1572,8 @@ class GraphModuleDeserializer:
             output_node.meta["val"] = output_node.args[0].meta["val"]
         else:
             output_node.meta["val"] = tuple(
-                arg.meta["val"] for arg in output_node.args[0]
+                arg.meta["val"] if isinstance(arg, torch.fx.Node) else arg
+                for arg in output_node.args[0]
             )
 
         return self.graph
@@ -1576,6 +1633,8 @@ class GraphModuleDeserializer:
             )
 
         fx_node.meta.update(self.deserialize_metadata(serialized_node.metadata))
+        if fx_node.op not in ["placeholder", "output"] and "nn_module_stack" not in fx_node.meta:
+            fx_node.meta["nn_module_stack"] = {}  # serialization throws away empty dicts
 
     def deserialize_input_spec(self, i: InputSpec) -> ep.InputSpec:
         if i.type == "user_input":
@@ -1611,11 +1670,20 @@ class GraphModuleDeserializer:
                 ),
                 target=i.custom_obj.custom_obj_name,
             )
-        if i.type == "token":
+        elif i.type == "token":
             return ep.InputSpec(
                 kind=ep.InputKind.TOKEN,
                 arg=ep.TokenArgument(name=i.token.arg.name),
                 target=None
+            )
+        elif i.type == "constant_input":
+            return ep.InputSpec(
+                kind=ep.InputKind.USER_INPUT,
+                arg=ep.ConstantArgument(
+                    name=i.constant_input.name,
+                    value=self.deserialize_constant_input(i.constant_input.value)
+                ),
+                target=None,
             )
         else:
             raise AssertionError(f"Unknown input spec {i}")
@@ -1700,7 +1768,7 @@ class GraphModuleDeserializer:
             if symbol_name_to_range:
                 for k, vr in symbol_name_to_range.items():
                     lower = int(vr.lower)
-                    if vr.upper >= 2:  # no specialization on 0/1
+                    if vr.upper >= 2:  # max is >= 2, not sym bool range
                         lower = max(2, lower)
                     self.symbol_name_to_range[k] = symbolic_shapes.ValueRanges(_int_to_sympy_int(lower), vr.upper)
 
@@ -1845,6 +1913,20 @@ class GraphModuleDeserializer:
         else:
             raise SerializeError(f"Unhandled argument {inp}")
 
+    def deserialize_constant_input(self, inp: ConstantValue) -> Any:
+        if inp.type == "as_int":
+            return int(inp.as_int)
+        elif inp.type == "as_float":
+            return float(inp.as_float)
+        elif inp.type == "as_string":
+            return str(inp.as_string)
+        elif inp.type == "as_bool":
+            return bool(inp.as_bool)
+        elif inp.type == "as_none":
+            return None
+        else:
+            raise SerializeError(f"Unhandled constant argument {inp} to deserialize")
+
     def deserialize_sym_argument(self, sym_arg):
         if isinstance(sym_arg, SymIntArgument):
             if sym_arg.type == "as_int":
@@ -1976,8 +2058,20 @@ class GraphModuleDeserializer:
             def import_nn_module_stack(key, path, ty):
                 return key, (path, ty)
 
+            # Helper function that splits strings by commas except for those
+            # encapsulated by parens, which are valid traces.
+            # TODO: Currently this is needed due to indexing Sequential
+            # layers introducing names in the form "layer.slice(1, None, None)".
+            # If that naming is improved, this fancier splitting can probably be
+            # reverted to a simple split by comma.
+            def metadata_split(metadata):
+                # Remove the parentheses and commas inside them
+                metadata = re.sub(r'\(.*?\)', '', metadata)
+                # Split the string by comma, except for those inside parentheses
+                return re.split(r'(?<!\()\s*,\s*(?!\()', metadata)
+
             nn_module_stack = dict(
-                import_nn_module_stack(*item.split(","))
+                import_nn_module_stack(*metadata_split(item))
                 for item in nn_module_stack_str.split(ST_DELIMITER)
             )
             ret["nn_module_stack"] = nn_module_stack
@@ -1999,8 +2093,10 @@ class GraphModuleDeserializer:
             return ep.TensorArgument(name=x.as_tensor.name)
         elif x.type == "as_sym_int":
             return ep.SymIntArgument(name=x.as_sym_int.as_name)
+        elif x.type == "as_custom_obj":
+            return ep.ConstantArgument(name=x.as_custom_obj.name, value=self.deserialize_input(x))
         else:
-            return ep.ConstantArgument(value=self.deserialize_input(x))
+            return ep.ConstantArgument(name="", value=self.deserialize_input(x))
 
     def deserialize_module_call_signature(
         self, module_call_signature: ModuleCallSignature
@@ -2032,7 +2128,8 @@ class GraphModuleDeserializer:
         ]
 
 
-class ExportedProgramDeserializer:
+@final
+class ExportedProgramDeserializer(metaclass=Final):
     def __init__(self, expected_opset_version: Optional[Dict[str, int]] = None):
         self.expected_opset_version: Dict[str, int] = {}
         if expected_opset_version:
@@ -2575,6 +2672,8 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
             return 4, spec.custom_obj.custom_obj_name, idx
         elif spec.type == "token":
             return 0, None, idx
+        elif spec.type == "constant_input":
+            return 6, spec.constant_input.name, idx
         else:
             raise AssertionError(f"Unknown input type: {spec}")
 
@@ -2652,6 +2751,8 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
         elif spec.type == "token":
             tok = spec.token.arg
             tok.name = replace_table[tok.name]
+        elif spec.type == "constant_input":
+            return
         else:
             raise AssertionError(f"Unknown input type: {spec}")
 
