@@ -44,7 +44,6 @@ from torch._dynamo.testing import (
     same,
     skipIfNotPy311,
     unsupported,
-    xfailIfPy311,
 )
 from torch._dynamo.utils import CompileProfiler, counters, ifdynstaticdefault
 from torch._inductor.utils import run_and_get_code
@@ -3057,6 +3056,91 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertTrue(same(obj1, obj2))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 9)
+
+    def test_object_setattr(self):
+        @dataclasses.dataclass
+        class A:
+            x: torch.Tensor
+
+        def fn1(x) -> None:
+            a = A(x)
+            object.__setattr__(a, "x", x + 2)
+            return a
+
+        x1 = torch.randn(10)
+        obj11 = fn1(x1.clone())
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn1 = torch._dynamo.optimize(cnts, nopython=True)(fn1)
+        obj12 = opt_fn1(x1.clone())
+        self.assertTrue(same(obj11.x, x1 + 2))
+        self.assertTrue(same(obj12.x, x1 + 2))
+        self.assertTrue(same(obj11.x, obj12.x))
+        self.assertEqual(cnts.frame_count, 1)
+
+        @dataclasses.dataclass(frozen=True)
+        class B:
+            x: torch.Tensor
+
+        def fn2(x) -> None:
+            b = B(x)
+            return b
+
+        x2 = torch.randn(10)
+        obj21 = fn2(x2.clone())
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn2 = torch._dynamo.optimize(cnts, nopython=True)(fn2)
+        obj22 = opt_fn2(x2.clone())
+        self.assertTrue(same(obj21.x, x2))
+        self.assertTrue(same(obj22.x, x2))
+        self.assertTrue(same(obj21.x, obj22.x))
+        self.assertEqual(cnts.frame_count, 0)
+
+        @dataclasses.dataclass(frozen=True)
+        class C:
+            x: torch.Tensor
+
+        def fn3(x) -> None:
+            c = C(x)
+            object.__setattr__(c, "x", x + 2)
+            return c
+
+        x3 = torch.randn(10)
+        obj31 = fn3(x3.clone())
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn3 = torch._dynamo.optimize(cnts, nopython=True)(fn3)
+        obj32 = opt_fn3(x3.clone())
+        self.assertTrue(same(obj31.x, x3 + 2))
+        self.assertTrue(same(obj32.x, x3 + 2))
+        self.assertTrue(same(obj31.x, obj32.x))
+        self.assertEqual(cnts.frame_count, 1)
+
+        @dataclasses.dataclass(frozen=True)
+        class D:
+            x: torch.Tensor
+
+            def __post_init__(self):
+                object.__setattr__(self, "y", self.x + 2)
+
+        def fn4(x) -> None:
+            d = D(x)
+            return d
+
+        x4 = torch.randn(10)
+        obj41 = fn4(x4.clone())
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn4 = torch._dynamo.optimize(cnts, nopython=True)(fn4)
+        obj42 = opt_fn4(x4.clone())
+        self.assertTrue(same(obj41.x, x4))
+        self.assertTrue(same(obj42.x, x4))
+        self.assertTrue(same(obj41.x, obj42.x))
+        self.assertTrue(same(obj41.y, x4 + 2))
+        self.assertTrue(same(obj42.y, x4 + 2))
+        self.assertTrue(same(obj41.y, obj42.y))
+        self.assertEqual(cnts.frame_count, 1)
 
     def test_user_defined_class_name(self):
         class MyClassFoo:
@@ -6993,7 +7077,6 @@ def fn():
         except RuntimeError as e:
             self.assertIn("smoge", traceback.format_exc())
 
-    @unittest.skip("Not clear why this test would trigger a segfault.")
     def test_unhandled_exception_in_dynamo2(self):
         # segfaults in python 3.11 if shadow frame is freed improperly
         from torch.testing import make_tensor
@@ -10040,7 +10123,6 @@ fn
             lambda mod: mod.fc,
         )
 
-    @xfailIfPy311
     def test_sequential_module_free(self):
         self._test_compile_model_free(
             lambda: (
@@ -10053,14 +10135,12 @@ fn
             lambda mod: mod[0],
         )
 
-    @xfailIfPy311
     def test_linear_module_free(self):
         self._test_compile_model_free(
             lambda: (torch.nn.Linear(100, 100), torch.randn(100, 100)),
             lambda mod: mod,
         )
 
-    @xfailIfPy311
     def test_outside_linear_module_free(self):
         # Compared to test_linear_module_free, the linear
         # layer is not the code object that is directly compiled.
@@ -10368,6 +10448,78 @@ fn
 
         d = collections.OrderedDict(d)
         d.move_to_end("foo")
+
+        @torch.compile(backend="eager")
+        def fn(x, d):
+            return x * d["foo"] * d["bar"]
+
+        fn(torch.randn(4), d)
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            fn(torch.randn(4), d)
+
+    def test_defaultdict(self):
+        d = collections.defaultdict()
+        d["foo"] = 1
+        d["bar"] = 2
+
+        @torch.compile(backend="eager")
+        def fn(x, d):
+            return x * d["foo"] * d["bar"]
+
+        fn(torch.randn(4), d)
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            fn(torch.randn(4), d)
+
+    def test_custom_dict(self):
+        class MyDict(dict):
+            pass
+
+        d = {
+            "foo": 1,
+            "bar": 2,
+        }
+
+        d = MyDict(d)
+
+        @torch.compile(backend="eager")
+        def fn(x, d):
+            return x * d["foo"] * d["bar"]
+
+        fn(torch.randn(4), d)
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            fn(torch.randn(4), d)
+
+    def test_custom_iter_dict(self):
+        class ReversedDict(dict):
+            def __iter__(self):
+                return reversed(list(self.keys()))
+
+        d = {
+            "foo": 1,
+            "bar": 2,
+        }
+
+        d = ReversedDict(d)
+
+        @torch.compile(backend="eager")
+        def fn(x, d):
+            return x * d["foo"] * d["bar"]
+
+        fn(torch.randn(4), d)
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            fn(torch.randn(4), d)
+
+    def test_custom_keys_iter_dict(self):
+        class ReversedDict(dict):
+            def keys(self):
+                return ["bar", "foo"]
+
+        d = {
+            "foo": 1,
+            "bar": 2,
+        }
+
+        d = ReversedDict(d)
 
         @torch.compile(backend="eager")
         def fn(x, d):

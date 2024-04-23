@@ -117,7 +117,7 @@ def convert_arguments(f: NativeFunction) -> Tuple[List[Binding], List[str]]:
     for arg in args:
         # expecting only Argument
         if not isinstance(arg.argument, Argument):
-            raise Exception(
+            raise Exception(  # noqa: TRY002
                 f"Unexpected argument type, expecting `Argument` but got {arg}"
             )
         argument: Argument = arg.argument
@@ -165,7 +165,7 @@ def argumenttype_ivalue_convert(
             ctype=ctype,
         )
     else:
-        raise Exception(f"Cannot handle type {t}. arg_name: {arg_name}")
+        raise Exception(f"Cannot handle type {t}. arg_name: {arg_name}")  # noqa: TRY002
     return out_name, ctype, code, decl
 
 
