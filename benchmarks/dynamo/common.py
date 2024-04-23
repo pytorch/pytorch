@@ -3673,6 +3673,8 @@ def run(runner, args, original_dir=None):
             synchronize = torch.cuda.synchronize
         elif torch.xpu.is_available():
             synchronize = torch.xpu.synchronize
+        else:
+            log.warning(f"Trying to set synchronize for non CUDA/XPU device. Device is: {args.devices}")
 
     if (
         args.devices == ["cuda"]
