@@ -2528,6 +2528,8 @@ static Tensor slice_impl(
 
   if (strict) {
     TORCH_CHECK(start_val >= 0, "slice start must be non-negative, but got ", start_val);
+    TORCH_CHECK(end_val >= 0, "slice end must be non-negative, but got ", end_val);
+    TORCH_CHECK(start_val <= sizes[dim], "slice start must be less than or equal to size at dimension, but got ", start_val, " > ", sizes[dim]);
     TORCH_CHECK(start_val <= end_val, "slice start must be before slice end, but got ", start_val, " > ", end_val);
     TORCH_CHECK(end_val <= sizes[dim], "slice end must be less than or equal to size at dimension, but got ", end_val, " > ", sizes[dim]);
   } else {
@@ -4046,7 +4048,7 @@ at::Tensor slice_scatter(const at::Tensor& self, const at::Tensor& src, int64_t 
 at::Tensor slice_strict_scatter(const at::Tensor& self, const at::Tensor& src, int64_t dim, c10::optional<int64_t> start, c10::optional<int64_t> end, int64_t step) {
     // See Note [*_scatter ops preserve strides]
     auto output = clone_preserve_strides(self);
-    auto slice = at::slice_strict(self, dim, start, end, step);
+    auto slice = at::slice_strict(output, dim, start, end, step);
     TORCH_CHECK(slice.sizes() == src.sizes(), "expected src to have a size equal to the slice of self. src size = ", src.sizes(), ", slice size = ", slice.sizes());
     slice.copy_(src);
     return output;

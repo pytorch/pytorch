@@ -752,6 +752,14 @@ def slice_forward_impl(
             lambda: f"slice start must be non-negative, but got {start_val}",
         )
         torch._check(
+            end_val >= 0,
+            lambda: f"slice end must be non-negative, but got {end_val}",
+        )
+        torch._check(
+            start_val <= sizes[dim],
+            lambda: f"slice start must be less than or equal to size at dimension, but got {start_val} > {sizes[dim]}",
+        )
+        torch._check(
             start_val <= end_val,
             lambda: f"slice start must be before slice end, but got {start_val} > {end_val}",
         )
@@ -803,7 +811,7 @@ def slice_forward(
 
 
 @register_decomposition(aten.slice_strict)
-def slice_forward(
+def slice_strict(
     self: Tensor,
     dim: int = 0,
     start: Optional[int] = None,

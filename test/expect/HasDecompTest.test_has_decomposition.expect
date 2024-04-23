@@ -1170,6 +1170,11 @@ aten::slice_copy.Tensor_out
 aten::slice_inverse
 aten::slice_scatter
 aten::slice_scatter.out
+aten::slice_strict_copy
+aten::slice_strict_copy.out
+aten::slice_strict_inverse
+aten::slice_strict_scatter
+aten::slice_strict_scatter.out
 aten::slow_conv3d_forward
 aten::slow_conv3d_forward.output
 aten::slow_conv_dilated2d
