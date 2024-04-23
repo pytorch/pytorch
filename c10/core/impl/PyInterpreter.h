@@ -148,7 +148,9 @@ struct C10_API PyInterpreterVTable {
   virtual void python_op_registration_trampoline(
       const c10::OperatorHandle& op,
       c10::DispatchKey,
-      torch::jit::Stack* stack) const = 0;
+      c10::DispatchKeySet keyset,
+      torch::jit::Stack* stack,
+      bool with_keyset) const = 0;
 
   virtual void throw_abstract_impl_not_imported_error(
       std::string opname,
