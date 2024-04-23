@@ -53,6 +53,7 @@ import torch._export
 import torch.distributed
 import torch.multiprocessing as mp
 from scipy.stats import gmean, ttest_ind
+from torch._C import _has_cuda as HAS_CUDA, _has_xpu as HAS_XPU
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import (
     dummy_fx_compile,
@@ -60,7 +61,6 @@ from torch._dynamo.testing import (
     reset_rng_state,
     same,
 )
-from torch._C import _has_cuda as HAS_CUDA, _has_xpu as HAS_XPU
 
 try:
     from torch._dynamo.utils import (
