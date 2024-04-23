@@ -139,7 +139,8 @@ def _replace_batchnorm(m: torch.fx.GraphModule, train_to_eval: bool):
         torch.randn(1),  # bn_running_var
     )
 
-    is_cuda = _assert_and_get_unique_device(m).type == "cuda"
+    device = _assert_and_get_unique_device(m)
+    is_cuda = device is not None and device.type == "cuda"
     bn_train_aten = _get_aten_graph_module_for_pattern(
         _WrapperModule(bn_train),
         example_inputs,

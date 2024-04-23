@@ -258,8 +258,9 @@ def check_consistent(new, old) -> None:
         # simplifies right now)
         for i, j in zip(old.shape, new.shape):
             torch._check(i == j, lambda: f"{old.shape} != {new.shape} (old != new)")
-    elif isinstance(new, scalar_types):
-        assert isinstance(old, scalar_types)
+    # NB: bool is subclass of int
+    elif isinstance(new, scalar_types) and not isinstance(new, bool):
+        assert isinstance(old, scalar_types) and not isinstance(old, bool), f"{old} != {new}"
         torch._check(old == new, lambda: f"{old} != {new} (old != new)")
 
 def canonicalize_bool_expr(expr: SympyBoolean) -> SympyBoolean:
@@ -358,7 +359,7 @@ def _iterate_exprs(val: Union[SymInt, torch.Tensor]) -> Iterable[sympy.Basic]:
     else:
         raise AssertionError(f"cannot extract sympy expressions from {val} {type(val)}")
 
-def free_symbols(val: Union[SymInt, torch.Tensor]) -> Set[sympy.Symbol]:
+def free_symbols(val: Union[SymInt, sympy.Expr, torch.Tensor]) -> Set[sympy.Symbol]:
     if val is None:
         return set()
     itr = _iterate_exprs(val)
@@ -511,13 +512,8 @@ def guard_scalar(a):
         raise AssertionError(f"unrecognized scalar {a}")
 
 
-@record_shapeenv_event()
 def _constrain_symbol_range(shape_env, s: sympy.Symbol, compiler_min: int, compiler_max: int):
-    upd_vr = ValueRanges(compiler_min, compiler_max)
-    old_vr = shape_env.var_to_range.get(s, ValueRanges.unknown())
-    new_vr = shape_env.var_to_range[s] = old_vr & upd_vr
-    if new_vr != old_vr:
-        log.info("_constrain_symbol_range %s [%s, %s]", s, new_vr.lower, new_vr.upper)
+    shape_env.constrain_symbol_range(s, compiler_min, compiler_max)
 
 
 def _advise_is_size(a):
@@ -556,8 +552,8 @@ def _advise_is_size(a):
     if (
         isinstance(a, SymInt)
         and isinstance(a.node, SymNode)
-        and not a.node.has_hint()
         and isinstance(a.node.expr, sympy.Symbol)
+        and a.node.shape_env.is_unbacked_symint(a.node.expr)
     ):
         _constrain_range_for_size(a)
 
@@ -584,8 +580,7 @@ def _constrain_range_for_size(a, min: Optional[int] = None, max: Optional[int] =
             "received min={min} and max={max}"
         )
 
-    _constrain_symbol_range(
-        a.node.shape_env,
+    a.node.shape_env.constrain_symbol_range(
         a.node.expr,
         compiler_min=min,
         compiler_max=max,
@@ -1293,11 +1288,7 @@ class DynamicDimConstraintPrinter(StrPrinter):
         return self.print_source(self.symbol_to_source[expr][0])
 
     def _print_Relational(self, expr):
-        return '{} {} {}'.format(
-            self.parenthesize(expr.lhs, precedence(expr)),
-            expr.rel_op,
-            self.parenthesize(expr.rhs, precedence(expr))
-        )
+        return f'{self.parenthesize(expr.lhs, precedence(expr))} {expr.rel_op} {self.parenthesize(expr.rhs, precedence(expr))}'
 
 
 class DimConstraints:
@@ -3617,12 +3608,28 @@ class ShapeEnv:
         symbols = list(expr.free_symbols)
 
         # Apply known runtime asserts
-        for s in symbols:
-            # Unbacked symints only
-            if s in self.var_to_val:
-                continue
+        guards_exprs = []
+        for g in self.guards:
+            e = self.simplify(g.expr)
+            if compute_hint:
+                e = canonicalize_bool_expr(e.xreplace(self.var_to_val))
+            guards_exprs.append(e)
 
-            subst = {}
+        symbols_unbacked = symbols - self.var_to_val.keys()
+        defra_exprs = {}
+        for s in symbols_unbacked:
+            defras = self.deferred_runtime_asserts.get(s, ())
+            l = []
+            for defra in defras:
+                e = self.simplify(defra.expr)
+                if compute_hint:
+                    e = canonicalize_bool_expr(e.xreplace(self.var_to_val))
+                l.append(e)
+            defra_exprs[s] = l
+
+
+        subst = {}
+        for s in symbols_unbacked:
 
             def add_expr(expr):
                 # Expr and negation
@@ -3634,10 +3641,7 @@ class ShapeEnv:
                     subst[canonicalize_bool_expr(dual)] = sympy.true
                     subst[canonicalize_bool_expr(sympy.Not(dual))] = sympy.false
 
-            for e in itertools.chain(self.guards, self.deferred_runtime_asserts.get(s, ())):
-                e = e.expr
-                if compute_hint:
-                    e = canonicalize_bool_expr(e.xreplace(self.var_to_val))
+            for e in itertools.chain(guards_exprs, defra_exprs[s]):
                 add_expr(e)
                 # Other relational expressions this expression implies
                 if isinstance(e, sympy.Eq):
@@ -3647,8 +3651,8 @@ class ShapeEnv:
                     add_expr(sympy.Le(e.lhs, e.rhs))
                     add_expr(sympy.Ne(e.lhs, e.rhs))
 
-            # NB: this helps us deal with And/Or connectives
-            expr = expr.xreplace(subst)
+        # NB: this helps us deal with And/Or connectives
+        expr = expr.xreplace(subst)
 
         # Simplify making use of value range lower bound
         new_shape_env = {}
@@ -3844,6 +3848,25 @@ class ShapeEnv:
             # problem
         )
 
+    def _update_var_to_range(self, symbol, vr):
+        lower, upper = vr.lower, vr.upper
+
+        # If we have a size-like unbacked SymInt, refuse to refine the range to be
+        # less than two.  This is because when we intersect this range
+        # with [2, inf] for size oblivious tests, the range would be
+        # unsatisfiable.  In other words, once you have a size-like
+        # unbacked SymInt, we can never learn that it is exactly zero or one,
+        # because we would now give inconsistent results for all size
+        # oblivous tests!
+        if upper < 2 and symbol in self.size_like:
+            upper = 2
+
+        # Updates the range and the guards corresponding to each bound of the symbol.
+        if symbol not in self.var_to_range:
+            self.var_to_range[symbol] = ValueRanges(lower, upper)
+        else:
+            self.var_to_range[symbol] &= ValueRanges(lower, upper)
+
     def _set_replacement(self, a: "sympy.Symbol", tgt: "sympy.Expr", msg: str) -> None:
         """
         Adds or updates a replacement for a symbol.
@@ -3876,7 +3899,7 @@ class ShapeEnv:
             # substitution in the end.  This might be a no-op, if a already has
             # a tighter bound
             tgt_bound = self.bound_sympy(tgt)
-            self.var_to_range[a] = src_bound & tgt_bound
+            self._update_var_to_range(a, tgt_bound)
 
             # Next, check if we can update the range of free symbols in tgt
             # based on the range in a. But only do it if:
@@ -4081,9 +4104,9 @@ class ShapeEnv:
                             # Propagate the value ranges.  It doesn't really
                             # matter if we use truediv or floordiv, because we
                             # have established divisibility.
-                            self.var_to_range[i1] = SymPyValueRangeAnalysis.truediv(
+                            self._update_var_to_range(i1, SymPyValueRangeAnalysis.truediv(
                                 self.var_to_range[i0], ValueRanges.wrap(d)
-                            )
+                            ))
                             # Propagate size-like-ness
                             if i0 in self.size_like:
                                 self.size_like.add(i1)
@@ -4510,9 +4533,19 @@ class ShapeEnv:
                 continue
 
             # Updates the range and the guards corresponding to each bound of the symbol.
-            self.var_to_range[symbol] = ValueRanges(lower, upper)
+            self._update_var_to_range(symbol, ValueRanges(lower, upper))
             # Clears the cache, since this update can change the result.
             self._maybe_evaluate_static.cache_clear()
+
+    @lru_cache(maxsize=None)
+    @record_shapeenv_event()
+    def constrain_symbol_range(self, s: sympy.Symbol, compiler_min: int, compiler_max: int):
+        upd_vr = ValueRanges(compiler_min, compiler_max)
+        old_vr = self.var_to_range.get(s, ValueRanges.unknown())
+        self._update_var_to_range(s, upd_vr)
+        if (new_vr := self.var_to_range[s]) != old_vr:
+            log.info("constrain_symbol_range %s [%s, %s]", s, new_vr.lower, new_vr.upper)
+
 
 def _is_int(expr):
     return isinstance(expr, SymInt) and expr.node.expr.is_number
