@@ -222,7 +222,7 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
   hipError_t err; // TODO: Error handling
   using aotriton::v2::flash::attn_fwd;
   using sdp::aotriton_adapter::mk_aotensor;
-  aotriton::TensorView<4> empty_bias(0, {0,0,0,0}, {0,0,0,0}, aotriton::DType::kFloat16);
+  aotriton::TensorView<4> empty_bias(0, {0,0,0,0}, {0,0,0,0}, cast_dtype(q.dtype()));
   err = attn_fwd(mk_aotensor(q_t, "q"),
                  mk_aotensor(k_t, "k"),
                  mk_aotensor(v_t, "v"),
@@ -420,7 +420,7 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
   {
     using aotriton::v2::flash::attn_bwd;
     using sdp::aotriton_adapter::mk_aotensor;
-    aotriton::TensorView<4> empty_bias(0, {0,0,0,0}, {0,0,0,0}, aotriton::DType::kFloat16);
+    aotriton::TensorView<4> empty_bias(0, {0,0,0,0}, {0,0,0,0}, cast_dtype(q.dtype()));
     err = attn_bwd(mk_aotensor(q_t, "q"),
                    mk_aotensor(k_t, "k"),
                    mk_aotensor(v_t, "v"),
