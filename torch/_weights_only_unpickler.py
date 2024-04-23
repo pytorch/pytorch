@@ -179,28 +179,43 @@ class Unpickler:
                 elif full_path in _get_user_allowed_globals():
                     self.append(_get_user_allowed_globals()[full_path])
                 else:
-                    class_type = getattr(modules[module], name)
-                    if issubclass(class_type, torch.Tensor):
-                        # __setstate__ is called by `_rebuild_from_type_v2`
-                        custom_set_state = (
-                            getattr(
-                                class_type, "__setstate__", torch.Tensor.__setstate__
-                            )
-                            is not torch.Tensor.__setstate__
-                        )
-                        # tp_alloc is called by `Tensor._rebuild_wrapper_subclass` and `Tensor.as_subclass`
-                        custom_tp_alloc = not torch._C._check_tp_alloc_is_default(
-                            class_type
-                        )
-                        if custom_set_state or custom_tp_alloc:
-                            raise RuntimeError(
-                                f"Trying to unpickle tensor subclass {full_path} that has defined a custom "
-                                "__setstate__ and/or tp_alloc. Please check whether these methods are safe "
-                                "and allowlist them with torch.serialization.mark_safe_globals if so."
-                            )
-                        self.append(class_type)
-                    else:
+                    # For tensor subclasses.
+                    if module == "__builtin__":
                         raise RuntimeError(f"Unsupported class {full_path}")
+                    elif module not in modules:
+                        raise RuntimeError(
+                            f"Found global `{full_path}` in the checkpoint but `{module}` was "
+                            f"not found in `sys.modules`, please import `{name}` from `{module}` "
+                            f"if `{full_path}` is a tensor subclass and you trust the package "
+                            "that provides it."
+                        )
+                    else:
+                        class_type = getattr(modules[module], name)
+                        if isinstance(class_type, type) and issubclass(
+                            class_type, torch.Tensor
+                        ):
+                            # Tensor.__setstate__ is called by `_rebuild_from_type_v2`
+                            custom_set_state = (
+                                getattr(
+                                    class_type,
+                                    "__setstate__",
+                                    torch.Tensor.__setstate__,
+                                )
+                                is not torch.Tensor.__setstate__
+                            )
+                            # tp_alloc is called by `Tensor._rebuild_wrapper_subclass` and `Tensor.as_subclass`
+                            custom_tp_alloc = not torch._C._check_tp_alloc_is_default(
+                                class_type
+                            )
+                            if custom_set_state or custom_tp_alloc:
+                                raise RuntimeError(
+                                    f"Trying to unpickle tensor subclass `{full_path}` that has defined a custom "
+                                    "`__setstate__` and/or `tp_alloc`. Please check whether these methods are safe "
+                                    "and allowlist them with `torch.serialization.mark_safe_globals` if so."
+                                )
+                            self.append(class_type)
+                        else:
+                            raise RuntimeError(f"Unsupported class {full_path}")
             elif key[0] == NEWOBJ[0]:
                 args = self.stack.pop()
                 cls = self.stack.pop()

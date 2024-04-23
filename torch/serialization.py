@@ -982,7 +982,9 @@ def load(
     UNSAFE_MESSAGE = (
         "Weights only load failed. Re-running `torch.load` with `weights_only` set to `False`"
         " will likely succeed, but it can result in arbitrary code execution."
-        "Do it only if you get the file from a trusted source. WeightsUnpickler error: "
+        " Do it only if you get the file from a trusted source. Alternatively, to load"
+        " with `weights_only` please check the recommended steps in the following error message."
+        " WeightsUnpickler error: "
     )
     # Add ability to force safe only weight loads via environment variable
     if os.getenv("TORCH_FORCE_WEIGHTS_ONLY_LOAD", "0").lower() in ['1', 'y', 'yes', 'true']:
