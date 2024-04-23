@@ -2428,11 +2428,11 @@ class ShapeEnv:
             )
 
         self.constrain_symbol_range(
-            a.node.expr,
+            a,
             compiler_min=min,
             compiler_max=max,
         )
-        self.size_like.add(a.node.expr)
+        self.size_like.add(a)
 
     @record_shapeenv_event()
     def _constrain_range(self, a: sympy.Expr, min: int, max: int):
