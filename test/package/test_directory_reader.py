@@ -111,16 +111,16 @@ class DirectoryReaderTest(PackageTestCase):
         with PackageExporter(filename) as pe:
             # Layout looks like:
             #    package
-            #    ├── one/
-            #    │   ├── a.txt
-            #    │   ├── b.txt
-            #    │   ├── c.txt
-            #    │   └── three/
-            #    │       ├── d.txt
-            #    │       └── e.txt
-            #    └── two/
-            #       ├── f.txt
-            #       └── g.txt
+            #    |-- one/
+            #    |   |-- a.txt
+            #    |   |-- b.txt
+            #    |   |-- c.txt
+            #    |   +-- three/
+            #    |       |-- d.txt
+            #    |       +-- e.txt
+            #    +-- two/
+            #       |-- f.txt
+            #       +-- g.txt
             pe.save_text("one", "a.txt", "hello, a!")
             pe.save_text("one", "b.txt", "hello, b!")
             pe.save_text("one", "c.txt", "hello, c!")

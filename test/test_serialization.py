@@ -924,7 +924,7 @@ class TestSerialization(TestCase, SerializationMixin):
             test(fname)
 
         if IS_FILESYSTEM_UTF8_ENCODING:
-            with TemporaryDirectoryName(suffix='非ASCIIパス') as dname:
+            with TemporaryDirectoryName(suffix='\u975eASCII\u30d1\u30b9') as dname:
                 with TemporaryFileName(dir=dname) as fname:
                     test(fname)
 

@@ -187,7 +187,7 @@ def full(sharding_spec: ShardingSpec,
          process_group=None,
          init_rrefs=False) -> ShardedTensor:
     """
-    Creates a :class:`ShardedTensor` filled with fill_value. The tensor’s dtype
+    Creates a :class:`ShardedTensor` filled with fill_value. The tensor's dtype
         is inferred from fill_value. If dtype is specified, it will override the
         inferred type from fill_value. Needs to be called on all ranks in an SPMD fashion.
     Args:
@@ -195,7 +195,7 @@ def full(sharding_spec: ShardingSpec,
             describing how to shard the Tensor.
         size (int...):  a list, tuple, or `torch.Size` of integers defining the shape of the
             output tensor.
-        fill_value (Scalar) – the value to fill the output tensor with.
+        fill_value (Scalar) - the value to fill the output tensor with.
     Keyword args:
         dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
             Default: if ``None``, uses a global default (see :func:`torch.set_default_dtype`).

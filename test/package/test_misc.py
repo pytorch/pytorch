@@ -38,46 +38,46 @@ class TestMisc(PackageTestCase):
 
         export_plain = dedent(
             """\
-                ├── .data
-                │   ├── extern_modules
-                │   ├── python_version
-                │   ├── serialization_id
-                │   └── version
-                ├── main
-                │   └── main
-                ├── obj
-                │   └── obj.pkl
-                ├── package_a
-                │   ├── __init__.py
-                │   └── subpackage.py
-                ├── byteorder
-                └── module_a.py
+                \u251c\u2500\u2500 .data
+                \u2502   \u251c\u2500\u2500 extern_modules
+                \u2502   \u251c\u2500\u2500 python_version
+                \u2502   \u251c\u2500\u2500 serialization_id
+                \u2502   \u2514\u2500\u2500 version
+                \u251c\u2500\u2500 main
+                \u2502   \u2514\u2500\u2500 main
+                \u251c\u2500\u2500 obj
+                \u2502   \u2514\u2500\u2500 obj.pkl
+                \u251c\u2500\u2500 package_a
+                \u2502   \u251c\u2500\u2500 __init__.py
+                \u2502   \u2514\u2500\u2500 subpackage.py
+                \u251c\u2500\u2500 byteorder
+                \u2514\u2500\u2500 module_a.py
             """
         )
         export_include = dedent(
             """\
-                ├── obj
-                │   └── obj.pkl
-                └── package_a
-                    └── subpackage.py
+                \u251c\u2500\u2500 obj
+                \u2502   \u2514\u2500\u2500 obj.pkl
+                \u2514\u2500\u2500 package_a
+                    \u2514\u2500\u2500 subpackage.py
             """
         )
         import_exclude = dedent(
             """\
-                ├── .data
-                │   ├── extern_modules
-                │   ├── python_version
-                │   ├── serialization_id
-                │   └── version
-                ├── main
-                │   └── main
-                ├── obj
-                │   └── obj.pkl
-                ├── package_a
-                │   ├── __init__.py
-                │   └── subpackage.py
-                ├── byteorder
-                └── module_a.py
+                \u251c\u2500\u2500 .data
+                \u2502   \u251c\u2500\u2500 extern_modules
+                \u2502   \u251c\u2500\u2500 python_version
+                \u2502   \u251c\u2500\u2500 serialization_id
+                \u2502   \u2514\u2500\u2500 version
+                \u251c\u2500\u2500 main
+                \u2502   \u2514\u2500\u2500 main
+                \u251c\u2500\u2500 obj
+                \u2502   \u2514\u2500\u2500 obj.pkl
+                \u251c\u2500\u2500 package_a
+                \u2502   \u251c\u2500\u2500 __init__.py
+                \u2502   \u2514\u2500\u2500 subpackage.py
+                \u251c\u2500\u2500 byteorder
+                \u2514\u2500\u2500 module_a.py
             """
         )
 

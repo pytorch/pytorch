@@ -425,7 +425,7 @@ class TestPublicBindings(TestCase):
     def test_correct_module_names(self):
         '''
         An API is considered public, if  its  `__module__` starts with `torch.`
-        and there is no name in `__module__` or the object itself that starts with “_”.
+        and there is no name in `__module__` or the object itself that starts with "_".
         Each public package should either:
         - (preferred) Define `__all__` and all callables and classes in there must have their
          `__module__` start with the current submodule's path. Things not in `__all__` should

@@ -485,7 +485,7 @@ def _make_alias(fn, name):
     """
     This function defines an alias of another function and sets its __name__ argument.
     It also sets its __module__ argument to the module of the caller.
-    Note that when naïvely doing `alias = fn`, we have that `alias.__name__ == "fn"`, and
+    Note that when naively doing `alias = fn`, we have that `alias.__name__ == "fn"`, and
     `alias.__module__ == fn.__module__`.
     """
 

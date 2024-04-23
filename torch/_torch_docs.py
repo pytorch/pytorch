@@ -2305,8 +2305,8 @@ Keyword Args:
         times each observation should be repeated. Its numel must equal the number of columns of :attr:`input`.
         Must have integral dtype. Ignored if ``None``. Defaults to ``None``.
     aweights (tensor, optional): A Scalar or 1D array of observation vector weights.
-        These relative weights are typically large for observations considered “important” and smaller for
-        observations considered less “important”. Its numel must equal the number of columns of :attr:`input`.
+        These relative weights are typically large for observations considered "important" and smaller for
+        observations considered less "important". Its numel must equal the number of columns of :attr:`input`.
         Must have floating point dtype. Ignored if ``None``. Defaults to ``None``.
 
 Returns:
@@ -4773,7 +4773,7 @@ This is detailed in the "Keyword Arguments" section below.
 The gradient is estimated by estimating each partial derivative of :math:`g` independently. This estimation is
 accurate if :math:`g` is in :math:`C^3` (it has at least 3 continuous derivatives), and the estimation can be
 improved by providing closer samples. Mathematically, the value at each interior point of a partial derivative
-is estimated using `Taylor’s theorem with remainder <https://en.wikipedia.org/wiki/Taylor%27s_theorem>`_.
+is estimated using `Taylor's theorem with remainder <https://en.wikipedia.org/wiki/Taylor%27s_theorem>`_.
 Letting :math:`x` be an interior point with :math:`x-h_l` and :math:`x+h_r` be points neighboring
 it to the left and right respectively, :math:`f(x+h_r)` and :math:`f(x-h_l)` can be estimated using:
 

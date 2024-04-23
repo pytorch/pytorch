@@ -498,7 +498,7 @@ def get_tangents_in_dims(input_dims, tangents):
 # in_dims = 0
 # vmap(Sum.apply, in_dims)(x)
 #
-# Let’s assume for a moment that we didn’t vmap setup_context in VmappedSum:
+# Let's assume for a moment that we didn't vmap setup_context in VmappedSum:
 #
 # class VmappedSum(torch.autograd.Function):
 #    @staticmethod
@@ -519,7 +519,7 @@ def get_tangents_in_dims(input_dims, tangents):
 #        return gx
 #
 # We end up saving [B, 4] as x_shape. In the backward, gy has shape [B],
-# and we’re doing:
+# and we're doing:
 #
 # def backward_no_context(gy):
 #     return gy.expand([B, 4])

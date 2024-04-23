@@ -1450,7 +1450,7 @@ Keyword args:
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
     dtype (:class:`torch.dtype`, optional): type used to perform the accumulation and the return.
         If specified, :attr:`x` is cast to :attr:`dtype` before performing the operation,
-        and the returned tensor’s type will be :attr:`dtype` if real and of its real counterpart if complex.
+        and the returned tensor's type will be :attr:`dtype` if real and of its real counterpart if complex.
         :attr:`dtype` may be complex if :attr:`x` is complex, otherwise it must be real.
         :attr:`x` should be convertible without narrowing to :attr:`dtype`. Default: None
 

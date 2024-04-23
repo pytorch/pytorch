@@ -1950,7 +1950,7 @@ class TestLinalg(TestCase):
 
         # if out tensor with floating dtype is passed for complex output an error is thrown
         if not dtype.is_complex:
-            # The characteristic equation is p(λ) = λ^2 − 2λ + 5 = 0, with roots λ = 1±2i
+            # The characteristic equation is p(lambda) = lambda^2 - 2lambda + 5 = 0, with roots lambda = 1[+-]2i
             a = torch.tensor([[3., -2.], [4., -1.]], dtype=dtype, device=device)
             out0 = torch.empty(0, device=device, dtype=dtype)
             out1 = torch.empty(0, device=device, dtype=dtype)
@@ -2117,7 +2117,7 @@ class TestLinalg(TestCase):
 
         # if out tensor with floating dtype is passed for complex output an error is thrown
         if not dtype.is_complex:
-            # The characteristic equation is p(λ) = λ^2 − 2λ + 5 = 0, with roots λ = 1±2i
+            # The characteristic equation is p(lambda) = lambda^2 - 2lambda + 5 = 0, with roots lambda = 1[+-]2i
             a = torch.tensor([[3., -2.], [4., -1.]], dtype=dtype, device=device)
             out = torch.empty(0, device=device, dtype=dtype)
             with self.assertRaisesRegex(RuntimeError, "Expected eigenvalues to be safely castable"):

@@ -157,30 +157,30 @@ class Pipeline:
         exc_info: Optional[ExcInfo] = None
 
         # With checkpointing, the autograd graph looks like this diagram:
-        # ┌─────┸──────┐
-        # │    Copy    │
-        # └─────┰──────┘   (fence)
-        # ─ ─ ─ ╂ ─ ─ ─ ─ ─ ─ ─ ─ ─
-        #       ┃          (compute)
-        # ┌─────┸──────┐
-        # │    Wait    │ [1] Synchronize the current stream with the copy stream.
-        # └─────┰──────┘
-        # ┌─────┸──────┐
-        # │ Checkpoint │ [2] Compute a partition within checkpointing.
-        # └─────┰──────┘
-        # ┌─────┸──────┐
-        # │    Wait    │ [3] Synchronize the copy stream with the current stream.
-        # └─────┰──────┘
-        #       ┠ ─ ─ ─ ┐
-        #       ┃ ┌─────┴─────┐
-        #       ┃ │ Recompute │ [4] Schedule the recomputation at backpropagation.
-        #       ┃ └─────┬─────┘
-        #       ┠ ─ ─ ─ ┘
-        #       ┃
-        # ─ ─ ─ ╂ ─ ─ ─ ─ ─ ─ ─ ─ ─
-        # ┌─────┸──────┐   (fence)
-        # │    Copy    │
-        # └─────┰──────┘
+        # +-----+------+
+        # |    Copy    |
+        # +-----+------+   (fence)
+        # - - - + - - - - - - - - -
+        #       |          (compute)
+        # +-----+------+
+        # |    Wait    | [1] Synchronize the current stream with the copy stream.
+        # +-----+------+
+        # +-----+------+
+        # | Checkpoint | [2] Compute a partition within checkpointing.
+        # +-----+------+
+        # +-----+------+
+        # |    Wait    | [3] Synchronize the copy stream with the current stream.
+        # +-----+------+
+        #       + - - - +
+        #       | +-----+-----+
+        #       | | Recompute | [4] Schedule the recomputation at backpropagation.
+        #       | +-----+-----+
+        #       + - - - +
+        #       |
+        # - - - + - - - - - - - - -
+        # +-----+------+   (fence)
+        # |    Copy    |
+        # +-----+------+
         for i, j in schedule:
             batch = batches[i]
             partition = partitions[j]

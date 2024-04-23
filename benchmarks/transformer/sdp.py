@@ -81,10 +81,10 @@ class ExperimentResults:
     @classmethod
     def get_entry_names(cls) -> List[str]:
         return [
-            "nn_mha_time (μs)",
-            "compiled_nn_mha_time (μs)",
-            "composite_mha_time (μs)",
-            "compiled_composite_mha_time (μs)",
+            "nn_mha_time (\u00B5s)",
+            "compiled_nn_mha_time (\u00B5s)",
+            "composite_mha_time (\u00B5s)",
+            "compiled_composite_mha_time (\u00B5s)",
         ]
 
 

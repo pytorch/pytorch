@@ -8046,7 +8046,7 @@ class TestTorch(TestCase):
             assert_with_filename(fname)
 
         if IS_FILESYSTEM_UTF8_ENCODING:
-            with TemporaryDirectoryName(suffix='中文') as dname, TemporaryFileName(dir=dname) as fname:
+            with TemporaryDirectoryName(suffix='\u4e2d\u6587') as dname, TemporaryFileName(dir=dname) as fname:
                 assert_with_filename(fname)
 
     def test_torch_from_file(self):
@@ -8077,7 +8077,7 @@ class TestTorch(TestCase):
             assert_with_filename(fname)
 
         if IS_FILESYSTEM_UTF8_ENCODING:
-            with TemporaryDirectoryName(suffix='中文') as dname, TemporaryFileName(dir=dname) as fname:
+            with TemporaryDirectoryName(suffix='\u4e2d\u6587') as dname, TemporaryFileName(dir=dname) as fname:
                 assert_with_filename(fname)
 
     def test_print(self):
