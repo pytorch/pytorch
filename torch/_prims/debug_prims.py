@@ -1,11 +1,10 @@
 import contextlib
-from typing import Sequence
+from typing import Optional
 
 import torch
-from torch._custom_op.impl import custom_op
 from torch.utils._content_store import ContentStoreReader
 
-LOAD_TENSOR_READER = None
+LOAD_TENSOR_READER: Optional[ContentStoreReader] = None
 
 
 @contextlib.contextmanager
@@ -26,18 +25,12 @@ def load_tensor_reader(loc):
 
 
 def register_debug_prims():
-    @custom_op("debugprims::load_tensor")
-    def load_tensor(  # type: ignore[empty-body]
-        name: str,
-        size: Sequence[int],
-        stride: Sequence[int],
-        *,
-        dtype: torch.dtype,
-        device: torch.device,
-    ) -> torch.Tensor:
-        ...
+    torch.library.define(
+        "debugprims::load_tensor",
+        "(str name, int[] size, int[] stride, *, ScalarType dtype, Device device) -> Tensor",
+    )
 
-    @load_tensor.impl_factory()
+    @torch.library.impl("debugprims::load_tensor", "BackendSelect")
     def load_tensor_factory(name, size, stride, dtype, device):
         if LOAD_TENSOR_READER is None:
             from torch._dynamo.testing import rand_strided

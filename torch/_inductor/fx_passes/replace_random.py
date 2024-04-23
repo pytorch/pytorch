@@ -112,7 +112,9 @@ def replace_random(
     mode = {
         aten.rand: "rand",
         aten.randn: "randn",
-    }[match.output_node().target.overloadpacket]
+    }[
+        match.output_node().target.overloadpacket  # type: ignore[union-attr]
+    ]  # type: ignore[union-attr]
     device = get_device(device)
     match.replace_by_example(replacement, [size])
 
@@ -129,9 +131,9 @@ def replace_randint(
     layout=None,
     pin_memory=None,
 ):
-    def replacement(size):
+    def replacement(low, high, size):
         result = inductor_prims.randint(low, high, size, inductor_prims.seed(device))
         return result.to(dtype)
 
     device = get_device(device)
-    match.replace_by_example(replacement, [size])
+    match.replace_by_example(replacement, [low, high, size])

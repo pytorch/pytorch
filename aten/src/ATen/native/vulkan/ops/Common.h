@@ -10,11 +10,6 @@
 #include <ATen/native/vulkan/impl/Common.h>
 #include <ATen/native/vulkan/ops/Convert.h>
 
-#define VK_KERNEL(shader_name) \
-  ::at::native::vulkan::get_shader_info(#shader_name)
-#define VK_LOOKUP_KERNEL(op_name) \
-  ::at::native::vulkan::look_up_shader_info(#op_name)
-
 namespace at {
 namespace native {
 namespace vulkan {
@@ -93,6 +88,10 @@ inline c10::optional<Scalar> get_optional_scalar(
     const uint32_t idx) {
   return gen_list.get(idx).isScalar() ? gen_list.get(idx).toScalar()
                                       : c10::optional<Scalar>();
+}
+
+inline float roundevenf(float v) {
+  return (float)nearbyint(v);
 }
 
 } // namespace ops

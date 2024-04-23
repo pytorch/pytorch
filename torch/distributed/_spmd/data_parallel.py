@@ -541,7 +541,7 @@ def mark_data_parallel_shardings(
                 # mark activation as sharded on batch dim
                 node_sharding = node_strategies[0]
 
-            node.meta["sharding"] = node_sharding
+            node.meta["sharding"] = node_sharding  # type: ignore[possibly-undefined]
 
             placeholder_idx += 1
         elif node.op == "call_function":

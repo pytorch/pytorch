@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import os
 
 import torch
@@ -52,13 +54,9 @@ def train(log_interval, model, device, train_loader, optimizer, epoch):
 
         if batch_idx % log_interval == 0:
             print(
-                "Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}".format(
-                    epoch,
-                    batch_idx * len(data),
-                    len(train_loader.dataset),
-                    100.0 * batch_idx / len(train_loader),
-                    loss.item(),
-                )
+                f"Train Epoch: {epoch} "
+                f"[{batch_idx * len(data)}/{len(train_loader.dataset)} ({100.0 * batch_idx / len(train_loader):.0f}%)]"
+                f"\tLoss: {loss.item():.6f}"
             )
 
 

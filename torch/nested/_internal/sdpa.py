@@ -1,5 +1,4 @@
 import logging
-import math
 from typing import Optional, Tuple
 
 import torch
@@ -12,9 +11,9 @@ from torch.backends.cuda import (
     math_sdp_enabled,
     mem_efficient_sdp_enabled,
     SDPAParams,
-    SDPBackend,
 )
 
+from torch.nn.attention import SDPBackend
 from .nested_tensor import buffer_from_jagged, NestedTensor, ViewNestedFromBuffer
 
 log = logging.getLogger(__name__)
@@ -341,7 +340,7 @@ def _is_safe_to_get_storage_as_tensor(tensor: torch.Tensor):
     # Returns a boolean indicating if contiguous needs to be called for input
     assert isinstance(tensor, NestedTensor)
     offsets = tensor.offsets()
-    strides = tensor._stride
+    strides = tensor._strides
 
     n_tensors = offsets.size(0) - 1
     if n_tensors <= 1:
@@ -603,7 +602,8 @@ def _pad_last_dim(
 
 # TODO: coalesce with torch/nn/utils/attention.py
 def _calculate_scale(query, scale):
-    softmax_scale = scale if scale is not None else math.sqrt(1.0 / query.size(-1))
+    # TODO: Investigate why math.sqrt() isn't properly handled by Dynamo?
+    softmax_scale = scale if scale is not None else torch.sym_sqrt(1.0 / query.size(-1))
     return softmax_scale
 
 

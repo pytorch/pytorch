@@ -83,7 +83,7 @@ DEFAULT_CACHE_DIR = '~/.cache'
 VAR_DEPENDENCY = 'dependencies'
 MODULE_HUBCONF = 'hubconf.py'
 READ_DATA_CHUNK = 128 * 1024
-_hub_dir = None
+_hub_dir: Optional[str] = None
 
 
 @contextlib.contextmanager
@@ -307,7 +307,7 @@ def _check_repo_is_trusted(repo_owner, repo_name, owner_name_branch, trust_repo,
             if is_trusted:
                 print("The repository is already trusted.")
         elif response.lower() in ("n", "no", ""):
-            raise Exception("Untrusted repository.")
+            raise Exception("Untrusted repository.")  # noqa: TRY002
         else:
             raise ValueError(f"Unrecognized response {response}.")
 
@@ -379,7 +379,7 @@ def set_dir(d):
     _hub_dir = os.path.expanduser(d)
 
 
-def list(github, force_reload=False, skip_validation=False, trust_repo=None):
+def list(github, force_reload=False, skip_validation=False, trust_repo=None, verbose=True):
     r"""
     List all callable entrypoints available in the repo specified by ``github``.
 
@@ -411,6 +411,9 @@ def list(github, force_reload=False, skip_validation=False, trust_repo=None):
               v2.0.
 
             Default is ``None`` and will eventually change to ``"check"`` in v2.0.
+        verbose (bool, optional): If ``False``, mute messages about hitting
+            local caches. Note that the message about first download cannot be
+            muted. Default is ``True``.
 
     Returns:
         list: The available callables entrypoint
@@ -419,7 +422,7 @@ def list(github, force_reload=False, skip_validation=False, trust_repo=None):
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_HUB)
         >>> entrypoints = torch.hub.list('pytorch/vision', force_reload=True)
     """
-    repo_dir = _get_cache_or_reload(github, force_reload, trust_repo, "list", verbose=True,
+    repo_dir = _get_cache_or_reload(github, force_reload, trust_repo, "list", verbose=verbose,
                                     skip_validation=skip_validation)
 
     with _add_to_sys_path(repo_dir):
@@ -650,14 +653,14 @@ def download_url_to_file(url: str, dst: str, hash_prefix: Optional[str] = None,
                 buffer = u.read(READ_DATA_CHUNK)
                 if len(buffer) == 0:
                     break
-                f.write(buffer)
+                f.write(buffer)  # type: ignore[possibly-undefined]
                 if hash_prefix is not None:
-                    sha256.update(buffer)
+                    sha256.update(buffer)  # type: ignore[possibly-undefined]
                 pbar.update(len(buffer))
 
         f.close()
         if hash_prefix is not None:
-            digest = sha256.hexdigest()
+            digest = sha256.hexdigest()  # type: ignore[possibly-undefined]
             if digest[:len(hash_prefix)] != hash_prefix:
                 raise RuntimeError(f'invalid hash value (expected "{hash_prefix}", got "{digest}")')
         shutil.move(f.name, dst)

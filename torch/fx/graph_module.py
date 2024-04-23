@@ -112,9 +112,7 @@ def _format_import_statement(name: str, obj: Any, importer: Importer) -> str:
 
 
 def _format_import_block(globals: Dict[str, Any], importer: Importer):
-    import_strs: Set[str] = set()
-    for name, obj in globals.items():
-        import_strs.add(_format_import_statement(name, obj, importer))
+    import_strs: Set[str] = {_format_import_statement(name, obj, importer) for name, obj in globals.items()}
     # Sort the imports so we have a stable import block that allows us to
     # hash the graph module and get a consistent key for use in a cache.
     return "\n".join(sorted(import_strs))
@@ -195,9 +193,8 @@ def _deserialize_graph_module(forward, body: Dict[Any, Any], graph_module_cls=No
     # Manually set Tracer class on the reconstructed Graph, to avoid
     # referencing the private local subclass KeepModules.
     graph._tracer_cls = tracer_cls
-    if graph_module_cls is None:
-        graph_module_cls = GraphModule
-    gm = graph_module_cls(com, graph, class_name=graphmodule_cls_name)
+    from ._lazy_graph_module import _make_graph_module
+    gm = _make_graph_module(com, graph, class_name=graphmodule_cls_name, graph_module_cls=graph_module_cls)
 
     # The GraphModule constructor only retains attributes referenced by the graph.
     # In this case, our goal is return a GraphModule as close to identical as the one
@@ -284,7 +281,7 @@ class _WrappedCall:
         all_src_lines = linecache.getlines(frame_summary.filename)
 
         # constituent substrings of the error message
-        tb_repr = traceback.format_exc()
+        tb_repr = torch._dynamo.disable(traceback.format_exc)()
         custom_msg = (
             "Call using an FX-traced Module, "
             f"line {err_lineno} of the traced Module's "
@@ -316,7 +313,6 @@ class _WrappedCall:
                 raise e.with_traceback(None)  # noqa: TRY200
             else:
                 raise e
-
 
 @compatibility(is_backward_compatible=True)
 class GraphModule(torch.nn.Module):
@@ -777,6 +773,7 @@ class {module_name}(torch.nn.Module):
         code to regenerate the underlying ``Graph``
         """
         dict_without_graph = self.__dict__.copy()
+
         python_code = self.recompile()
         import_block = _format_import_block(python_code.globals, sys_importer)
         del dict_without_graph["_graph"]
@@ -813,16 +810,19 @@ class {module_name}(torch.nn.Module):
         return res
 
     def __copy__(self):
-        res = GraphModule(self, self.graph)
+        from ._lazy_graph_module import _make_graph_module
+        res = _make_graph_module(self, self.graph)
         res.meta = getattr(self, "meta", {})
         return res
 
     @compatibility(is_backward_compatible=False)
-    def print_readable(self, print_output=True):
+    def print_readable(self, print_output=True, include_stride=False, include_device=False):
         """
         Return the Python code generated for current GraphModule and its children GraphModules
         """
-        verbose_python_code = self._graph.python_code(root_module="self", verbose=True)
+        verbose_python_code = self._graph.python_code(
+            root_module="self", verbose=True, include_stride=include_stride, include_device=include_device
+        )
         module_code = verbose_python_code.src
         module_code = module_code.lstrip("\n")
         module_code = f"class {self._get_name()}(torch.nn.Module):\n" + module_code

@@ -12,6 +12,7 @@ import torch
 
 from torch import nn
 from torch._inductor import config
+from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import override_lowering, run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater
@@ -25,7 +26,6 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
-    TestCase as TorchTestCase,
 )
 
 if IS_WINDOWS and IS_CI:
@@ -45,10 +45,10 @@ from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 aten = torch.ops.aten
 prims = torch.ops.prims
-requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 
 
-class TestCase(TorchTestCase):
+class TestCase(InductorTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -285,7 +285,7 @@ class OptimizeForInferenceTemplate(TestCase):
             torch._dynamo.mark_dynamic(inp2, 1)
             self.assertEqual(fn(inp2), fn_opt(inp2))
 
-    @requires_cuda()
+    @requires_cuda
     def test_conv_multiple_uses(self):
         from torch import nn
 
@@ -565,6 +565,41 @@ class OptimizeForInferenceTemplate(TestCase):
         if self.device == "cuda":
             self.assertTrue(nconv == 1)
 
+    def test_unequal_bias_horizontal_addmm_fusion(self):
+        device = self.device
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w1 = torch.tensor(
+                    [[1.0, 1.0, 1.0], [1.0, 1.0, 1.0], [1.0, 1.0, 1.0]], device=device
+                )
+                self.b1 = torch.zeros(3, device=device)
+                self.w2 = torch.tensor(
+                    [[0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0]], device=device
+                )
+                self.b2 = torch.tensor([[-1.0, -1.0, -1.0]], device=device)
+                self.w3 = torch.tensor(
+                    [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], device=device
+                )
+                self.b3 = torch.tensor([1.0, 2.0, 3.0], device=device)
+
+            def forward(self, x):
+                out1 = torch.nn.functional.linear(x, self.w1, self.b1)
+                out2 = torch.nn.functional.linear(x, self.w2, self.b2)
+                out3 = torch.nn.functional.linear(x, self.w3, self.b3)
+                return (out1, out2, out3)
+
+        func = Model().to(device).eval()
+        x = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], device=device)
+
+        with torch.no_grad():
+            out_eager = func(x.clone())
+
+            func1 = torch.compile(func)
+            out_compiled = func1(x.clone())
+            self.assertEqual(out_eager, out_compiled)
+
     def test_redundant_clone_for_layout_convert(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -661,7 +696,7 @@ del OptimizeForInferenceTemplate
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     if HAS_CPU or HAS_CUDA:
         run_tests(needs="filelock")

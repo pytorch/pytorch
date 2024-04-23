@@ -930,8 +930,9 @@ class MemoryProfile:
                 self._is_gradient(*i) or i in used_for_gradient
                 for i in node.outputs.items()
             ):
-                for key, (_, version) in node.inputs.items():
-                    used_for_gradient.add((key, version))
+                used_for_gradient.update(
+                    (key, version) for key, (_, version) in node.inputs.items()
+                )
         candidate_parameters.intersection_update(used_for_gradient)
 
         # and depends on a gradient.
@@ -1053,11 +1054,11 @@ class MemoryProfileTimeline:
         times = [t_min if t < 0 else t for t in times]
         return times, sizes
 
-    def export_memory_timeline(self, path, device) -> None:
+    def export_memory_timeline(self, path, device_str) -> None:
         """Saves the memory timeline as [times, sizes by category]
         as a JSON formatted file to the given path for the given
         device."""
-        times, sizes = self._coalesce_timeline(device)
+        times, sizes = self._coalesce_timeline(device_str)
         # TODO: Write a faster serialize (orjson not available in CI)
         import json
 
@@ -1131,7 +1132,7 @@ class MemoryProfileTimeline:
             json.dump(raw_events, f)
 
     def export_memory_timeline_html(
-        self, path, device, figsize=(20, 12), title=None
+        self, path, device_str, figsize=(20, 12), title=None
     ) -> None:
         """Exports the memory timeline as an HTML file which contains
         the memory timeline plot embedded as a PNG file."""
@@ -1152,14 +1153,15 @@ class MemoryProfileTimeline:
         import matplotlib.pyplot as plt
         import numpy as np
 
-        mt = self._coalesce_timeline(device)
+        mt = self._coalesce_timeline(device_str)
         times, sizes = np.array(mt[0]), np.array(mt[1])
         # For this timeline, start at 0 to match Chrome traces.
         t_min = min(times)
         times -= t_min
         stacked = np.cumsum(sizes, axis=1) / 1024**3
-        max_memory_allocated = torch.cuda.max_memory_allocated()
-        max_memory_reserved = torch.cuda.max_memory_reserved()
+        device = torch.device(device_str)
+        max_memory_allocated = torch.cuda.max_memory_allocated(device)
+        max_memory_reserved = torch.cuda.max_memory_reserved(device)
 
         # Plot memory timeline as stacked data
         fig = plt.figure(figsize=figsize, dpi=80)
@@ -1176,8 +1178,8 @@ class MemoryProfileTimeline:
         title = "\n\n".join(
             ([title] if title else [])
             + [
-                f"Max memory allocated: {max_memory_allocated/(10**9):.2f} GB \n"
-                f"Max memory reserved: {max_memory_reserved/(10**9):.2f} GB"
+                f"Max memory allocated: {max_memory_allocated/(1024**3):.2f} GiB \n"
+                f"Max memory reserved: {max_memory_reserved/(1024**3):.2f} GiB"
             ]
         )
         axes.set_title(title)

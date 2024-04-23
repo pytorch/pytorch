@@ -62,7 +62,7 @@ struct FusedSgdMathFunctor {
       depth == 2 || depth == 3,
       "depth of 2 for SGD w/ momentum == 0, 3 for SGD w/ momentum != 0");
   C10_DEVICE __forceinline__ void operator()(
-      int chunk_size,
+      const int chunk_size,
       TensorListMetadata<depth>& tl,
       const double weight_decay,
       const double momentum,
@@ -77,15 +77,14 @@ struct FusedSgdMathFunctor {
     if (found_inf_ptr && *found_inf_ptr == 1) {
       return;
     }
-    auto tensor_loc = tl.block_to_tensor[blockIdx.x];
-    auto chunk_idx = tl.block_to_chunk[blockIdx.x];
-    auto n = tl.numel_for_tensor[tensor_loc];
+    const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
+    const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
 
     scalar_t* args[depth];
     scalar_t r_args[depth][kILP];
     const auto all_aligned{
         init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc)};
-    n -= chunk_idx * chunk_size;
+    const auto n = tl.numel_for_tensor[tensor_loc] - chunk_idx * chunk_size;
 
 #ifndef USE_ROCM
     const auto use_faster_load_store =

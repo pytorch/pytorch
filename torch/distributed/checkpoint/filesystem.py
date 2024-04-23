@@ -6,12 +6,14 @@ import pickle
 import queue
 import threading
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import (
     Callable,
     cast,
     Dict,
+    Generator,
     IO,
     Iterable,
     Iterator,
@@ -22,11 +24,9 @@ from typing import (
 )
 
 import torch
-import torch.distributed as dist
 from torch import Tensor
-from torch._utils import _get_device_module
+from torch._utils import _get_available_device_type, _get_device_module
 from torch.distributed._shard._utils import narrow_tensor_by_index
-from torch.distributed.checkpoint._checkpointer import _Checkpointer
 from torch.futures import Future
 
 from .metadata import Metadata, MetadataIndex
@@ -114,7 +114,9 @@ class _OverlappingCpuLoader(_TensorLoader):
         self.current_items: collections.deque = collections.deque()
         self.idx = 0
         self.started = False
-        self.device_type = stream.device_type if stream else torch.device("cuda").type
+        self.device_type = (
+            stream.device_type if stream else _get_available_device_type()
+        )
         self.device_module = _get_device_module(self.device_type)
         self.stream = cast(
             torch.cuda.Stream, stream or self.device_module.current_stream()
@@ -145,7 +147,10 @@ class _OverlappingCpuLoader(_TensorLoader):
                 if tensor.device.type == self.device_type:
                     tensor = tensor.to(device="cpu", non_blocking=True)
                 elif tensor.device == torch.device("cpu"):
-                    if tensor.storage().size() != tensor.numel():
+                    if (
+                        tensor.untyped_storage().size()
+                        != tensor.numel() * tensor.itemsize
+                    ):
                         # this forces the tensor to be both contiguous and with minimal storage
                         tensor = tensor.clone()
 
@@ -245,18 +250,33 @@ def _write_item(
 
 
 def _write_files_from_queue(
+    create_stream: Callable,
     file_queue: queue.Queue,
     result_queue: queue.Queue,
     planner: SavePlanner,
     inflight_threshhold: int,
     use_fsync: bool,
+    thread_count: int,
 ) -> None:
     try:
         while True:
             file_name, storage_key, write_items = file_queue.get_nowait()
             loader: _TensorLoader
 
-            if torch.cuda.is_available() and inflight_threshhold > 0:
+            custom_backend_name = torch._C._get_privateuse1_backend_name()
+            custom_device_mod = getattr(torch, custom_backend_name, None)
+
+            # TODO: Using the OverlappingCpuLoader with multiple threads creates significant
+            # performance degredation, observed as being related to cuda stream syncs. We
+            # should try to fix this and use _OverlappingCpuLoader for all threaded cases
+            if (
+                thread_count == 1
+                and (
+                    torch.cuda.is_available()
+                    or (custom_device_mod and custom_device_mod.is_available())
+                )
+                and inflight_threshhold > 0
+            ):
                 loader = _OverlappingCpuLoader(
                     planner.resolve_data,
                     inflight_threshhold=inflight_threshhold,
@@ -274,7 +294,7 @@ def _write_files_from_queue(
             bytes_w = [wi for wi in write_items if wi.type == WriteItemType.BYTE_IO]
             write_results = []
 
-            with file_name.open("wb") as stream:
+            with create_stream(file_name, "wb") as stream:
                 for write_item in bytes_w:
                     data = planner.resolve_data(write_item)
                     write_results.append(
@@ -288,10 +308,88 @@ def _write_files_from_queue(
                     )
 
                 if use_fsync:
-                    os.fsync(stream.fileno())
+                    try:
+                        os.fsync(stream.fileno())
+                    except AttributeError:
+                        os.sync()
             result_queue.put(write_results)
     except queue.Empty:
         pass
+
+
+class FileSystemBase(ABC):
+    @contextmanager
+    @abstractmethod
+    def create_stream(
+        self, path: Union[str, os.PathLike], mode: str
+    ) -> Generator[io.IOBase, None, None]:
+        ...
+
+    @abstractmethod
+    def concat_path(
+        self, path: Union[str, os.PathLike], suffix: str
+    ) -> Union[str, os.PathLike]:
+        ...
+
+    @abstractmethod
+    def rename(
+        self, path: Union[str, os.PathLike], new_path: Union[str, os.PathLike]
+    ) -> None:
+        ...
+
+    @abstractmethod
+    def init_path(self, path: Union[str, os.PathLike]) -> Union[str, os.PathLike]:
+        ...
+
+    @abstractmethod
+    def mkdir(self, path: Union[str, os.PathLike]) -> None:
+        ...
+
+    @classmethod
+    @abstractmethod
+    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
+        ...
+
+
+class FileSystem(FileSystemBase):
+    @contextmanager
+    def create_stream(
+        self, path: Union[str, os.PathLike], mode: str
+    ) -> Generator[io.IOBase, None, None]:
+        with cast(Path, path).open(mode) as stream:
+            yield cast(io.IOBase, stream)
+
+    def concat_path(
+        self, path: Union[str, os.PathLike], suffix: str
+    ) -> Union[str, os.PathLike]:
+        return cast(Path, path) / suffix
+
+    def init_path(self, path: Union[str, os.PathLike]) -> Union[str, os.PathLike]:
+        if not isinstance(path, Path):
+            path = Path(path)
+        return path
+
+    def rename(
+        self, path: Union[str, os.PathLike], new_path: Union[str, os.PathLike]
+    ) -> None:
+        cast(Path, path).rename(cast(Path, new_path))
+
+    def mkdir(self, path: Union[str, os.PathLike]) -> None:
+        cast(Path, path).mkdir(parents=True, exist_ok=True)
+
+    @classmethod
+    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
+        if isinstance(checkpoint_id, Path):
+            return True
+
+        if "://" in str(checkpoint_id):
+            return False
+
+        for p in Path(checkpoint_id).parents:
+            if p.exists() and os.access(str(p), os.W_OK):
+                return True
+
+        return False
 
 
 class FileSystemWriter(StorageWriter):
@@ -329,19 +427,22 @@ class FileSystemWriter(StorageWriter):
         N. B. If sync_files is disabled, there's no guarantee that the checkpoint will be consistent in the case of a failure.
         """
         super().__init__()
-        if not isinstance(path, Path):
-            path = Path(path)
-        self.path = path
+        self.fs = FileSystem()
+        self.path = self.fs.init_path(path)
         self.single_file_per_rank = single_file_per_rank
         self.sync_files = sync_files
         self.thread_count = thread_count
         self.per_thread_copy_ahead = per_thread_copy_ahead
 
+    def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
+        if checkpoint_id:
+            self.path = self.fs.init_path(checkpoint_id)
+
     def set_up_storage_writer(self, is_coordinator: bool) -> None:
         pass
 
     def prepare_local_plan(self, plan: SavePlan) -> SavePlan:
-        self.path.mkdir(parents=True, exist_ok=True)
+        self.fs.mkdir(self.path)
         return plan
 
     def prepare_global_plan(self, global_plan: List[SavePlan]) -> List[SavePlan]:
@@ -369,11 +470,13 @@ class FileSystemWriter(StorageWriter):
         if self.single_file_per_rank:
             for bucket in _split_by_size_and_type(self.thread_count, plan.items):
                 file_name = gen_file()
-                file_queue.put((self.path / file_name, file_name, bucket))
+                path = self.fs.concat_path(self.path, file_name)
+                file_queue.put((path, file_name, bucket))
         else:
             for item in plan.items:
                 file_name = gen_file()
-                file_queue.put((self.path / file_name, file_name, [item]))
+                path = self.fs.concat_path(self.path, file_name)
+                file_queue.put((path, file_name, [item]))
 
         result_queue: queue.Queue = queue.Queue()
 
@@ -382,22 +485,26 @@ class FileSystemWriter(StorageWriter):
             t = threading.Thread(
                 target=_write_files_from_queue,
                 args=(
+                    self.fs.create_stream,
                     file_queue,
                     result_queue,
                     planner,
                     self.per_thread_copy_ahead,
                     self.sync_files,
+                    self.thread_count,
                 ),
             )
             t.start()
             threads.append(t)
 
         _write_files_from_queue(
+            create_stream=self.fs.create_stream,
             file_queue=file_queue,
             result_queue=result_queue,
             planner=planner,
             inflight_threshhold=self.per_thread_copy_ahead,
             use_fsync=self.sync_files,
+            thread_count=self.thread_count,
         )
 
         for t in threads:
@@ -419,24 +526,44 @@ class FileSystemWriter(StorageWriter):
         for wr_list in results:
             storage_md.update({wr.index: wr.storage_data for wr in wr_list})
         metadata.storage_data = storage_md
-        with (self.path / ".metadata.tmp").open("wb") as metadata_file:
+        tmp_path = cast(Path, self.fs.concat_path(self.path, ".metadata.tmp"))
+        meta_path = cast(Path, self.fs.concat_path(self.path, ".metadata"))
+        with self.fs.create_stream(tmp_path, "wb") as metadata_file:
             pickle.dump(metadata, metadata_file)
             if self.sync_files:
-                os.fsync(metadata_file.fileno())
+                try:
+                    os.fsync(metadata_file.fileno())
+                except AttributeError:
+                    os.sync()
 
-        (self.path / ".metadata.tmp").rename(self.path / ".metadata")
+        self.fs.rename(tmp_path, meta_path)
+
+    @property
+    def checkpoint_id(self) -> Union[str, os.PathLike]:
+        """
+        return the checkpoint_id that will be used to save the checkpoint.
+        """
+        return self.path
+
+    @classmethod
+    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
+        return FileSystem.validate_checkpoint_id(checkpoint_id)
 
 
 class FileSystemReader(StorageReader):
     def __init__(self, path: Union[str, os.PathLike]) -> None:
         super().__init__()
-        if not isinstance(path, Path):
-            path = Path(path)
-        self.path = path
+        self.fs = FileSystem()
+        self.path = self.fs.init_path(path)
         self.storage_data: Dict[MetadataIndex, _StorageInfo] = dict()
 
     def _slice_file(self, file, sinfo: _StorageInfo) -> io.IOBase:
         return _create_file_view(file, sinfo.offset, sinfo.length)
+
+    def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
+        self.storage_data = dict()
+        if checkpoint_id:
+            self.path = self.fs.init_path(checkpoint_id)
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
         # group requests by file
@@ -447,11 +574,12 @@ class FileSystemReader(StorageReader):
             per_file.setdefault(path, []).append(read_item)
 
         for relative_path, reqs in per_file.items():
-            with (self.path / relative_path).open("rb") as file:
+            new_path = self.fs.concat_path(self.path, relative_path)
+            with self.fs.create_stream(new_path, "rb") as stream:
                 # TODO sort by offset and cache the reading
                 for req in reqs:
                     item_md = self.storage_data[req.storage_index]
-                    file_slice = self._slice_file(file, item_md)
+                    file_slice = self._slice_file(stream, item_md)
                     if req.type == LoadItemType.BYTE_IO:
                         read_bytes = io.BytesIO(file_slice.read(item_md.length))
                         read_bytes.seek(0)
@@ -478,7 +606,8 @@ class FileSystemReader(StorageReader):
 
     # Implementing the abstract function in StorageReader
     def read_metadata(self) -> Metadata:
-        with (self.path / ".metadata").open("rb") as metadata_file:
+        path = self.fs.concat_path(self.path, ".metadata")
+        with self.fs.create_stream(path, "rb") as metadata_file:
             return pickle.load(metadata_file)
 
     def set_up_storage_reader(self, metadata: Metadata, is_coordinator: bool) -> None:
@@ -491,56 +620,13 @@ class FileSystemReader(StorageReader):
     def prepare_global_plan(self, global_plan: List[LoadPlan]) -> List[LoadPlan]:
         return global_plan
 
-
-class _FileSystemCheckpointer(_Checkpointer):
-    """An implementation of :py:class:`torch.distributed.checkpoint.checkpointer.Checkpointer`
-    for the file system. Wraps the creation and usage of ``FileSystemWriter`` and ``FileSystemReader``.
-
-    .. warning::
-        This feature is experimental and subject to removal/change.
-
-    """
-
-    def __init__(
-        self,
-        path: Union[str, os.PathLike],
-        *,
-        single_file_per_rank: bool = True,
-        sync_files: bool = True,
-        thread_count: int = 1,
-        per_thread_copy_ahead: int = 10_000_000,
-        process_group: Optional[dist.ProcessGroup] = None,
-        coordinator_rank: int = 0,
-        no_dist: bool = False,
-        load_planner: Optional[LoadPlanner] = None,
-        save_planner: Optional[SavePlanner] = None,
-    ) -> None:
-        """Initializes Checkpointing defualts, including ``FileSystemWriter`` and ``FileSystemReader``
-
-        Args:
-            path: The directory to store/load checkpoints.
-            single_file_per_rank: Produce one file per rank instead of one file per tensor/blob. Default to True.
-            sync_files: force files to be synced to permanent storage. Default to True.
-            thread_count: Number of IO threads to use to write. Default to 1.
-            per_thread_copy_ahead: How many bytes to copy from the GPU ahead of saving then. Default 10Mb.
-            process_group: ProcessGroup to be used for cross-rank synchronization.
-            coordinator_rank: Rank to use to coordinate the checkpoint. rank0 is used by default.
-            no_dist: If ``True``, distributed checkpoint will not load in SPMD style. (Default: ``False``)
-            loader_planner: Instance of LoadPlanner to use when loading.
-            save_planner: Instance of SavePlanner to use when saving.
+    @property
+    def checkpoint_id(self) -> Union[str, os.PathLike]:
         """
+        return the checkpoint_id that will be used to save the checkpoint.
+        """
+        return self.path
 
-        storage_writer = FileSystemWriter(
-            path, single_file_per_rank, sync_files, thread_count, per_thread_copy_ahead
-        )
-        storage_reader = FileSystemReader(path)
-
-        super().__init__(
-            storage_writer,
-            storage_reader,
-            process_group=process_group,
-            coordinator_rank=coordinator_rank,
-            no_dist=no_dist,
-            load_planner=load_planner,
-            save_planner=save_planner,
-        )
+    @classmethod
+    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
+        return FileSystem.validate_checkpoint_id(checkpoint_id)

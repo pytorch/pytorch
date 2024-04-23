@@ -24,6 +24,7 @@ from .post_grad import register_lowering_pattern
 from .quantization import (
     _register_quantization_lowerings,
     _register_quantization_weight_pack_pass,
+    _register_woq_lowerings,
 )
 
 if torch._C._has_mkldnn:
@@ -283,7 +284,7 @@ if torch._C._has_mkldnn:
                     L[aten.mul](out, negative_slope),
                 )
                 if lowp_dtype:
-                    out = L[prims.convert_element_type.default](out, dtype=dtype2)
+                    out = L[prims.convert_element_type.default](out, dtype=dtype2)  # type: ignore[possibly-undefined]
                 return out
 
         return fn
@@ -324,7 +325,7 @@ if torch._C._has_mkldnn:
                     out = L[prims.convert_element_type.default](out, dtype=torch.float)
                 out = L[aten.clamp_max](L[aten.clamp_min](out, min_value), max_value)
                 if lowp_dtype:
-                    out = L[prims.convert_element_type.default](out, dtype=dtype2)
+                    out = L[prims.convert_element_type.default](out, dtype=dtype2)  # type: ignore[possibly-undefined]
                 return out
 
         return fn
@@ -340,15 +341,16 @@ if torch._C._has_mkldnn:
         binary_nodes = filter_nodes(match.nodes, fn)
         if len(binary_nodes) < 1:
             return False
+
+        def get_meta_value(argument: torch.fx.node.Argument):
+            # Only torch.fx.Node is expected to have meta.
+            if isinstance(argument, torch.fx.Node):
+                return argument.meta.get("val", None)
+            return None
+
         if any(
-            not (
-                hasattr(n.args[0], "meta")
-                and isinstance(n.args[0].meta.get("val", None), torch.Tensor)
-            )
-            or not (
-                hasattr(n.args[1], "meta")
-                and isinstance(n.args[1].meta.get("val", None), torch.Tensor)
-            )
+            not isinstance(get_meta_value(n.args[0]), torch.Tensor)
+            or not isinstance(get_meta_value(n.args[1]), torch.Tensor)
             for n in binary_nodes
         ):
             return False
@@ -360,9 +362,9 @@ if torch._C._has_mkldnn:
         ):
             return False
         if any(
-            n.args[0].meta["val"].size() != n.args[1].meta["val"].size()
-            or n.args[0].meta["val"].device != n.args[1].meta["val"].device
-            or n.args[0].meta["val"].dtype != n.args[1].meta["val"].dtype
+            get_meta_value(n.args[0]).size() != get_meta_value(n.args[1]).size()
+            or get_meta_value(n.args[0]).device != get_meta_value(n.args[1]).device
+            or get_meta_value(n.args[0]).dtype != get_meta_value(n.args[1]).dtype
             for n in binary_nodes
         ):
             return False
@@ -494,9 +496,7 @@ if torch._C._has_mkldnn:
         else:
             return not (
                 isinstance(_other.data, ir.ReinterpretView)
-                or isinstance(
-                    _other.get_layout(), (ir.MutationLayout, ir.AliasedLayout)
-                )
+                or len(_other.get_inputs_that_alias_output()) > 0
             )
 
     def _register_binary_unary_maybe_inplace_fusion_lowering(
@@ -743,30 +743,30 @@ if torch._C._has_mkldnn:
             pass_number=1,
         )
         def reshape_linear_reshape_pattern(match, *args, **kwargs):
+            def get_val(val):
+                return val if isinstance(val, int) else val.meta.get("val")
+
             reshape_1 = kwargs.get("reshape_1")
             reshape_2 = kwargs.get("reshape_2")
             assert isinstance(reshape_1, list)
             assert isinstance(reshape_2, list)
             assert len(reshape_1) == 2
-            dynamic_shapes = not all(
-                isinstance(x, int) for x in ([reshape_1[0]] + reshape_2[:-1])
-            )
 
             graph = match.graph
             reshape_2_node = match.output_node()
             linear_input_node = reshape_2_node.args[0].args[0].args[0]
             # check linear's input's shape[:-1] == reshape_2[:-1]
             # and check product(reshape_2[:-1]) == reshape_1[0]
-            if dynamic_shapes:
-                # TODO: Haozhe investigate how add guard here
-                return
-            else:
-                can_remove_reshape = linear_input_node.meta.get("val").shape[
-                    :-1
-                ] == torch.Size(reshape_2[:-1])
-                can_remove_reshape = can_remove_reshape and (
-                    reduce(operator.mul, reshape_2[:-1]) == reshape_1[0]
+            can_remove_reshape = linear_input_node.meta.get("val").shape[
+                :-1
+            ] == torch.Size([get_val(val) for val in reshape_2[:-1]])
+            can_remove_reshape = can_remove_reshape and (
+                reduce(
+                    operator.mul,
+                    [get_val(val) for val in reshape_2[:-1]],
                 )
+                == get_val(reshape_1[0])
+            )
 
             if can_remove_reshape:
                 repl = graph.call_function(mkldnn._linear_pointwise.default, args)
@@ -909,6 +909,12 @@ if torch._C._has_mkldnn:
         Check if the node is supported for MKLDNN linear.
         """
         linear_node = match.output_node()
+        # mkldnn linear only supports beta=1or0 and alpha=1
+        if linear_node.target == aten.addmm.default:
+            alpha = linear_node.kwargs.get("alpha", 1.0)
+            beta = linear_node.kwargs.get("beta", 1.0)
+            if (beta != 0.0 and beta != 1.0) or alpha != 1.0:
+                return False
         # weight_idx is 1 for aten.mm and is 2 for aten.addmm
         weight_idx = 2 if linear_node.target == aten.addmm.default else 1
         if linear_node.args[weight_idx].op != "get_attr":
@@ -918,6 +924,11 @@ if torch._C._has_mkldnn:
         if input_meta_value is None or weight_meta_value is None:
             return False
         batch_size = input_meta_value.shape[0]
+        if (
+            input_meta_value.dtype == torch.float64
+            or weight_meta_value.dtype == torch.float64
+        ):
+            return False
         is_lp_weight = weight_meta_value.dtype in (
             torch.bfloat16,
             torch.float16,
@@ -1086,7 +1097,14 @@ if torch._C._has_mkldnn:
                 graph.erase_node(lstm_node)
 
         @register_freezing_graph_pattern(
-            CallFunction(aten.addmm.default, Arg(), Arg(), Arg()),
+            CallFunction(
+                aten.addmm.default,
+                Arg(),
+                Arg(),
+                Arg(),
+                beta=KeywordArg("beta"),
+                alpha=KeywordArg("alpha"),
+            ),
             extra_check=_is_packable_linear,
         )
         @register_freezing_graph_pattern(
@@ -1097,7 +1115,15 @@ if torch._C._has_mkldnn:
             graph = match.graph
             linear_node = match.output_node()
             input = args[0] if linear_node.target == aten.mm.default else args[1]
-            bias = None if linear_node.target == aten.mm.default else args[0]
+            bias = (
+                None
+                if linear_node.target == aten.mm.default
+                or (
+                    linear_node.target == aten.addmm.default
+                    and linear_node.kwargs.get("beta", 1.0) == 0.0
+                )
+                else args[0]
+            )
             weight = args[1] if linear_node.target == aten.mm.default else args[2]
             with graph.inserting_before(linear_node):
                 transpose_weight_node = graph.create_node(
@@ -1194,6 +1220,7 @@ if torch._C._has_mkldnn:
             _register_binary_unary_fusion()
             _register_binary_fusion()
             _register_quantization_lowerings()
+            _register_woq_lowerings()
 
     @functools.lru_cache(None)
     def _mkldnn_weight_pack_init():

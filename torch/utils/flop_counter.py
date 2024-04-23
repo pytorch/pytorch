@@ -24,8 +24,8 @@ flop_registry: Dict[Any, Any] = {}
 
 def shape_wrapper(f):
     @wraps(f)
-    def nf(*args, out=None, **kwargs):
-        args, kwargs, out_shape = tree_map(get_shape, (args, kwargs, out))
+    def nf(*args, out_val=None, **kwargs):
+        args, kwargs, out_shape = tree_map(get_shape, (args, kwargs, out_val))
         return f(*args, out_shape=out_shape, **kwargs)
     return nf
 
@@ -95,13 +95,23 @@ def conv_flop_count(
     Returns:
         int: the number of flops
     """
+
     batch_size = x_shape[0]
     conv_shape = (x_shape if transposed else out_shape)[2:]
-    c_out, c_in, *dims = w_shape
+    c_out, c_in, *filter_size = w_shape
 
+    """
+    General idea here is that for a regular conv, for each point in the output
+    spatial dimension we convolve the filter with something (hence
+    `prod(conv_shape) * prod(filter_size)` ops). Then, this gets multiplied by
+    1. batch_size, 2. the cross product of input and weight channels.
+
+    For the transpose, it's not each point in the *output* spatial dimension but
+    each point in the *input* spatial dimension.
+    """
     # NB(chilli): I don't think this properly accounts for padding :think:
     # NB(chilli): Should be 2 * c_in - 1 technically for FLOPs.
-    flop = batch_size * prod(conv_shape) * c_out * prod(dims) * 2 * c_in
+    flop = prod(conv_shape) * prod(filter_size) * batch_size * c_out * c_in * 2
     return flop
 
 @register_flop_formula([aten.convolution, aten._convolution])
@@ -109,8 +119,6 @@ def conv_flop(x_shape, w_shape, _bias, _stride, _padding, _dilation, transposed,
     """Count flops for convolution."""
     return conv_flop_count(x_shape, w_shape, out_shape, transposed=transposed)
 
-def transpose_shape(shape):
-    return [shape[1], shape[0]] + list(shape[2:])
 
 @register_flop_formula(aten.convolution_backward)
 def conv_backward_flop(
@@ -126,14 +134,93 @@ def conv_backward_flop(
         _groups,
         output_mask,
         out_shape) -> int:
+
+    def t(shape):
+        return [shape[1], shape[0]] + list(shape[2:])
     flop_count = 0
 
+    """
+    Let's say we have a regular 1D conv
+    {A, B, C} [inp]
+    {i, j} [weight]
+    => (conv)
+    {Ai + Bj, Bi + Cj} [out]
+
+    And as a reminder, the transposed conv of the above is
+    => {Ai, Aj + Bi, Bj + Ci, Cj} [transposed conv out]
+
+    For the backwards of conv, we now have
+    {D, E} [grad_out]
+    {A, B, C} [inp]
+    {i, j} [weight]
+
+    # grad_inp as conv_transpose(grad_out, weight)
+    Let's first compute grad_inp. To do so, we can simply look at all the
+    multiplications that each element of inp is involved in. For example, A is
+    only involved in the first element of the output (and thus only depends upon
+    D in grad_out), and C is only involved in the last element of the output
+    (and thus only depends upon E in grad_out)
+
+    {Di, Dj + Ei, Ej} [grad_inp]
+
+    Note that this corresponds to the below conv_transpose. This gives us the
+    output_mask[0] branch, which is grad_inp.
+
+    {D, E} [inp (grad_out)]
+    {i, j} [weight]
+    => (conv_transpose)
+    {Di, Dj + Ei, Ej} [out (grad_inp)]
+
+    I leave the fact that grad_inp for a transposed conv is just conv(grad_out,
+    weight) as an exercise for the reader.
+
+    # grad_weight as conv(inp, grad_out)
+    To compute grad_weight, we again look at the terms in the output, which as
+    a reminder is:
+    => {Ai + Bj, Bi + Cj} [out]
+    => {D, E} [grad_out]
+    If we manually compute the gradient for the weights, we see it's
+    {AD + BE, BD + CE} [grad_weight]
+
+    This corresponds to the below conv
+    {A, B, C} [inp]
+    {D, E} [weight (grad_out)]
+    => (conv)
+    {AD + BE, BD + CE} [out (grad_weight)]
+
+    # grad_weight of transposed conv as conv(grad_out, inp)
+    As a reminder, the terms of the output of a transposed conv are:
+    => {Ai, Aj + Bi, Bj + Ci, Cj} [transposed conv out]
+    => {D, E, F, G} [grad_out]
+
+    Manually computing the gradient for the weights, we see it's
+    {AD + BE + CF, AE + BF + CG} [grad_weight]
+
+    This corresponds to the below conv
+    {D, E, F, G} [inp (grad_out)]
+    {A, B, C} [weight (inp)]
+    => (conv)
+    {AD + BE + CF, AE + BF + CG} [out (grad_weight)]
+
+    For the full backwards formula, there are also some details involving
+    transpose of the batch/channel dimensions and groups, but I skip those for
+    the sake of brevity (and they're pretty similar to matmul backwards)
+
+    Check [conv backwards decomposition as conv forwards]
+    """
+    # grad_inp as conv_transpose(grad_out, weight)
     if output_mask[0]:
         grad_input_shape = get_shape(out_shape[0])
         flop_count += conv_flop_count(grad_out_shape, w_shape, grad_input_shape, not transposed)
+
     if output_mask[1]:
         grad_weight_shape = get_shape(out_shape[1])
-        flop_count += conv_flop_count(transpose_shape(x_shape), grad_out_shape, grad_weight_shape, transposed)
+        if transposed:
+            # grad_weight of transposed conv as conv(grad_out, inp)
+            flop_count += conv_flop_count(t(grad_out_shape), t(x_shape), t(grad_weight_shape), transposed=False)
+        else:
+            # grad_weight as conv(inp, grad_out)
+            flop_count += conv_flop_count(t(x_shape), t(grad_out_shape), t(grad_weight_shape), transposed=False)
 
     return flop_count
 
@@ -221,7 +308,7 @@ def get_suffix_str(number):
     # Find the index of the appropriate suffix based on the number of digits
     # with some additional overflow.
     # i.e. 1.01B should be displayed as 1001M, not 1.001B
-    index = max(0, min(len(suffixes) - 1, (len(str(number)) - 3) // 3))
+    index = max(0, min(len(suffixes) - 1, (len(str(number)) - 2) // 3))
     return suffixes[index]
 
 def convert_num_with_suffix(number, suffix):
@@ -276,6 +363,7 @@ class FlopCounterMode(TorchDispatchMode):
         self.flop_counts: Dict[str, Dict[Any, int]] = defaultdict(lambda: defaultdict(int))
         self.depth = depth
         self.parents = ["Global"]
+        self.in_backward = False
         self.display = display
         if custom_mapping is None:
             custom_mapping = {}
@@ -329,13 +417,14 @@ class FlopCounterMode(TorchDispatchMode):
         class PushState(torch.autograd.Function):
             @staticmethod
             def forward(ctx, *args):
-                assert self.parents[-1] == name
+                assert self.parents[-1] == name, f"{self.parents[-1]} is not {name}"
                 self.parents.pop()
                 args = tree_map(lambda x: x.clone() if isinstance(x, torch.Tensor) else x, args)
                 return args
 
             @staticmethod
             def backward(ctx, *grad_outs):
+                self.in_backward = True
                 self.parents.append(name)
                 return grad_outs
 
@@ -345,6 +434,9 @@ class FlopCounterMode(TorchDispatchMode):
         class PopState(torch.autograd.Function):
             @staticmethod
             def forward(ctx, *args):
+                if self.in_backward:
+                    self.parents = ["Global"]
+                    self.in_backward = True
                 self.parents.append(name)
                 args = tree_map(lambda x: x.clone() if isinstance(x, torch.Tensor) else x, args)
                 return args
@@ -370,7 +462,7 @@ class FlopCounterMode(TorchDispatchMode):
         Returns:
             Dict[str, Dict[Any, int]]: The flop counts as a dictionary.
         """
-        return dict(self.flop_counts)
+        return {k: dict(v) for k, v in self.flop_counts.items()}
 
     def get_table(self, depth=None):
         if depth is None:
@@ -450,8 +542,14 @@ class FlopCounterMode(TorchDispatchMode):
         func_packet = func._overloadpacket
         if func_packet in self.flop_registry:
             flop_count_func = self.flop_registry[func_packet]
-            flop_count = flop_count_func(*args, **kwargs, out=out)  # type: ignore[operator]
-            for par in self.parents:
+            flop_count = flop_count_func(*args, **kwargs, out_val=out)  # type: ignore[operator]
+            if len(set(self.parents)) != len(self.parents):
+                print(
+                    "The module hierarchy tracking seems to be messed up."
+                    "Please file a bug or just run the flop counter without"
+                    "tracking the module hierarchy (i.e. `with FlopCounterMode():`)"
+                )
+            for par in set(self.parents):
                 self.flop_counts[par][func_packet] += flop_count
 
         return out

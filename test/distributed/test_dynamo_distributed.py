@@ -1,51 +1,61 @@
 # Owner(s): ["module: dynamo"]
+import contextlib
 import copy
 import functools
-from io import StringIO
-from typing import List
 import random
 import unittest
+from contextlib import contextmanager
+from io import StringIO
+from typing import List
 from unittest.mock import patch
+
 import numpy as np
 import torch
-from torch._C import FileCheck
 import torch._dynamo
-from torch._dynamo.backends.distributed import DDPOptimizer
-import torch._dynamo.test_case
-from contextlib import contextmanager
-from torch import nn
-from torch._dynamo import config
-from torch._dynamo.utils import same
-from torch._dynamo.testing import collect_results
-from torch.utils._triton import has_triton
-from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy, lambda_auto_wrap_policy
-from torch._higher_order_ops.wrap import tag_activation_checkpoint
-from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.testing._internal.common_distributed import (
-    DynamoDistributedSingleProcTestCase,
-    DynamoDistributedMultiProcTestCase,
-    import_transformers_or_skip,
-    skip_if_lt_x_gpu,
-    requires_nccl,
-    _dynamo_dist_per_rank_init,
-)
 import torch._dynamo.logging
-from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_MEM_EFF_ATTENTION
-)
+import torch._dynamo.test_case
+from torch import nn
+from torch._C import FileCheck
+from torch._dynamo import config
+from torch._dynamo.backends.distributed import DDPOptimizer
 from torch._dynamo.comptime import comptime
+from torch._dynamo.testing import collect_results
+from torch._dynamo.utils import same
+from torch._higher_order_ops.wrap import tag_activation_checkpoint
 from torch.distributed._functional_collectives import _maybe_wrap_tensor
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp.wrap import (
+    lambda_auto_wrap_policy,
+    transformer_auto_wrap_policy,
+)
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+)
+from torch.testing._internal.common_distributed import (
+    _dynamo_dist_per_rank_init,
+    DynamoDistributedMultiProcTestCase,
+    DynamoDistributedSingleProcTestCase,
+    import_transformers_or_skip,
+    requires_nccl,
+    skip_if_lt_x_gpu,
+)
+from torch.testing._internal.common_utils import requires_cuda
+from torch.utils._triton import has_triton
+
 
 def reset_rng_state():
     torch.manual_seed(1337)
     random.seed(1337)
     np.random.seed(1337)
 
+
 def init_weights(m):
     if isinstance(m, nn.Linear):
         nn.init.xavier_uniform_(m.weight)
         m.bias.data.fill_(0.01)
+
 
 class ToyModel(nn.Module):
     def __init__(self, in_feat=10, hidden_feat=5000, out_feat=5, ctx_manager=None):
@@ -65,13 +75,20 @@ class ToyModel(nn.Module):
         else:
             return self.net(inputs)
 
-def get_model(device, bsz=20, in_feat=10, hidden_feat=5000, out_feat=5, ctx_manager=None):
-    m = ToyModel(in_feat=in_feat, hidden_feat=hidden_feat, out_feat=out_feat, ctx_manager=ctx_manager).to(device)
+
+def get_model(
+    device, bsz=20, in_feat=10, hidden_feat=5000, out_feat=5, ctx_manager=None
+):
+    m = ToyModel(
+        in_feat=in_feat,
+        hidden_feat=hidden_feat,
+        out_feat=out_feat,
+        ctx_manager=ctx_manager,
+    ).to(device)
     m.apply(init_weights)
     inputs = torch.rand(bsz, in_feat).to(device)
     outputs = m(inputs)
     return m, inputs, outputs
-
 
 
 class ToyInnerModel(nn.Module):
@@ -83,11 +100,14 @@ class ToyInnerModel(nn.Module):
     def forward(self, inputs):
         return self.layers(inputs)
 
+
 class ToyOuterModel(nn.Module):
     def __init__(self, device):
         super().__init__()
         self.layers = [ToyInnerModel().to(device) for _ in range(2)]
-        self.layers = nn.Sequential(self.layers[0], nn.ReLU(), self.layers[1], nn.ReLU())
+        self.layers = nn.Sequential(
+            self.layers[0], nn.ReLU(), self.layers[1], nn.ReLU()
+        )
 
     def forward(self, inputs):
         return self.layers(inputs)
@@ -107,16 +127,17 @@ def find_first_node(gm, func):
     return None
 
 
-def apply_fsdp_with_checkpointing(model, wrap_policy, checkpoint_policy, use_activation_checkpointing=True):
+def apply_fsdp_with_checkpointing(
+    model, wrap_policy, checkpoint_policy, use_activation_checkpointing=True
+):
     from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
         apply_activation_checkpointing,
         checkpoint_wrapper,
         CheckpointImpl,
     )
+
     model = FSDP(
-        copy.deepcopy(model),
-        auto_wrap_policy=wrap_policy,
-        use_orig_params=True
+        copy.deepcopy(model), auto_wrap_policy=wrap_policy, use_orig_params=True
     )
     if use_activation_checkpointing:
         checkpoint_wrapper_fn = functools.partial(
@@ -124,10 +145,11 @@ def apply_fsdp_with_checkpointing(model, wrap_policy, checkpoint_policy, use_act
             checkpoint_impl=CheckpointImpl.NO_REENTRANT,
         )
         apply_activation_checkpointing(
-            model, checkpoint_wrapper_fn=checkpoint_wrapper_fn, check_fn=checkpoint_policy,
+            model,
+            checkpoint_wrapper_fn=checkpoint_wrapper_fn,
+            check_fn=checkpoint_policy,
         )
     return model
-
 
 
 def get_custom_model(device):
@@ -175,21 +197,25 @@ def get_custom_model(device):
     correct_outputs = m(*inputs)
     return m, inputs, correct_outputs
 
+
 def get_hf_bert(rank):
     # Note: use @import_transformers_or_skip on your test case if you use this
     # in a multiprocessing test
     try:
-        from transformers import BertConfig, AutoModelForMaskedLM
+        from transformers import AutoModelForMaskedLM, BertConfig
     except ImportError as e:
         raise unittest.SkipTest("Unable to import transformers") from e
 
     batch_size, max_length, config, device = 4, 512, BertConfig(), f"cuda:{rank}"
     model = AutoModelForMaskedLM.from_config(config).to(device)
     input_ids = torch.randint(0, config.vocab_size, (batch_size, max_length)).to(device)
-    decoder_ids = torch.randint(0, config.vocab_size, (batch_size, max_length)).to(device)
-    inputs = {'input_ids': input_ids, 'labels': decoder_ids}
+    decoder_ids = torch.randint(0, config.vocab_size, (batch_size, max_length)).to(
+        device
+    )
+    inputs = {"input_ids": input_ids, "labels": decoder_ids}
     model.train()
     return model, inputs
+
 
 class CheckSplitsCompiler:
     def __init__(self):
@@ -224,6 +250,7 @@ class FakeDDP(nn.Module):
         with self._inside_ddp_forward():
             return self.module.forward(*inputs, **kwargs)
 
+
 def run_hf_bert_ddp(self, model, inputs, backend):
     reset_rng_state()
     correct_outputs = model(**inputs)
@@ -237,9 +264,12 @@ def run_hf_bert_ddp(self, model, inputs, backend):
     opt_loss.backward()
 
     inputs_flat = [inputs[k] for k in inputs]
-    correct_results = collect_results(model, correct_outputs.logits, correct_loss, inputs_flat)
+    correct_results = collect_results(
+        model, correct_outputs.logits, correct_loss, inputs_flat
+    )
     opt_results = collect_results(opt_model, opt_outputs.logits, opt_loss, inputs_flat)
     self.assertTrue(same(correct_results, opt_results))
+
 
 class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
@@ -268,7 +298,6 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
         opt_model = torch._dynamo.optimize("aot_eager")(model)
         opt_model()
 
-
     @patch.object(config, "optimize_ddp", True)
     def test_symbol_splitting(self):
         class Model(nn.Module):
@@ -289,6 +318,41 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
         opt_model = torch.compile(dynamic=True)(model)
         opt_model(torch.randn(20, 512))
 
+    @patch.object(config, "optimize_ddp", True)
+    def test_call_method_forward(self):
+        class Model(nn.Module):
+            def __init__(
+                self,
+            ):
+                super().__init__()
+                layers = []
+                for l in range(2):
+                    layer = nn.ModuleList(
+                        [
+                            nn.LayerNorm(96),
+                            nn.MultiheadAttention(
+                                embed_dim=96, num_heads=4, batch_first=True
+                            ),
+                        ]
+                    )
+                    layers.append(layer)
+                self.layers = nn.ModuleList(layers)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                # x: [Batch, Freq, Time, Feature]
+                B, F, T, H = x.shape
+                for m in self.layers:
+                    x = x.reshape(B * F, T, H)
+                    x = m[0](x)
+                    x, attn = m[1].forward(x, x, x)
+                    x = x.reshape(B, F, T, H)
+                return x
+
+        model = Model()
+        model = FakeDDP(model)
+        opt_model = torch.compile(model)
+        opt_model(torch.randn(2, 129, 100, 96))
+
 
 # Are these tests failing?  Check and see if TestFakeDistributedSingleProc has a
 # single process version; if it's just a problem in the Dynamo distributed
@@ -300,6 +364,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     Prefer MultiThreadedTestCase for most tests. Perhaps use this one
     sparingly for integration tests.
     """
+
     @skip_if_lt_x_gpu(2)
     @patch.object(config, "optimize_ddp", False)
     def test_ddp_baseline_aot_eager_multiprocess(self):
@@ -355,11 +420,10 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(config, "optimize_ddp", False)
     def test_ddp_activation_checkpointing(self):
-
         from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-            CheckpointImpl,
             apply_activation_checkpointing,
             checkpoint_wrapper,
+            CheckpointImpl,
         )
 
         class MyModel(torch.nn.Module):
@@ -381,8 +445,12 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 checkpoint_wrapper,
                 checkpoint_impl=CheckpointImpl.NO_REENTRANT,
             )
-            check_fn = lambda submodule: isinstance(submodule, torch.nn.Linear)  # noqa: E731
-            apply_activation_checkpointing(model, checkpoint_wrapper_fn=non_reentrant_wrapper, check_fn=check_fn)
+            check_fn = lambda submodule: isinstance(  # noqa: E731
+                submodule, torch.nn.Linear
+            )
+            apply_activation_checkpointing(
+                model, checkpoint_wrapper_fn=non_reentrant_wrapper, check_fn=check_fn
+            )
 
             model = DDP(model)
             x = torch.randn(10, 64).cuda()
@@ -407,9 +475,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             fsdp_m = FSDP(
                 m,
                 auto_wrap_policy=functools.partial(
-                    transformer_auto_wrap_policy, transformer_layer_cls=(nn.Linear, )
+                    transformer_auto_wrap_policy, transformer_layer_cls=(nn.Linear,)
                 ),
-                use_orig_params=True
+                use_orig_params=True,
             )
             fsdp_m = torch._dynamo.optimize("aot_eager")(fsdp_m)
             outputs = fsdp_m(inputs)
@@ -431,20 +499,21 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             fsdp_m = FSDP(
                 m,
                 auto_wrap_policy=functools.partial(
-                    transformer_auto_wrap_policy, transformer_layer_cls=(nn.Linear, )
+                    transformer_auto_wrap_policy, transformer_layer_cls=(nn.Linear,)
                 ),
-                use_orig_params=True
+                use_orig_params=True,
             )
             fsdp_m = torch._dynamo.optimize("inductor")(fsdp_m)
             outputs = fsdp_m(inputs)
             self.assertTrue(same(correct_outputs, outputs))
 
-
     @skip_if_lt_x_gpu(1)
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_fsdp_activation_checkpointing(self):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
-            model, inputs = get_toy_model_for_activation_checkpointing(f"cuda:{self.rank}")
+            model, inputs = get_toy_model_for_activation_checkpointing(
+                f"cuda:{self.rank}"
+            )
             is_inner = lambda module: isinstance(module, ToyInnerModel)  # noqa: E731
             wrap_policy = functools.partial(lambda_auto_wrap_policy, lambda_fn=is_inner)
             model = apply_fsdp_with_checkpointing(model, wrap_policy, is_inner)
@@ -455,9 +524,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             self.assertTrue(same(correct_outputs, outputs))
             # Each FSDP module is a separate graph
             self.assertEqual(cnt.frame_count, 2)
-            self.assertTrue(find_first_node(cnt.graphs[0], tag_activation_checkpoint) is not None)
-
-
+            self.assertTrue(
+                find_first_node(cnt.graphs[0], tag_activation_checkpoint) is not None
+            )
 
     @import_transformers_or_skip()
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
@@ -466,24 +535,18 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     @patch.object(torch._inductor.config, "fallback_random", True)
     @unittest.skipIf(
         PLATFORM_SUPPORTS_FLASH_ATTENTION or PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-        "Inaccurate results with fused SDPA kernels"
+        "Inaccurate results with fused SDPA kernels",
     )
     def test_hf_bert_fsdp(self):
-
         def apply_fsdp(model, wrap_policy):
             model = FSDP(
-                copy.deepcopy(model),
-                auto_wrap_policy=wrap_policy,
-                use_orig_params=True
+                copy.deepcopy(model), auto_wrap_policy=wrap_policy, use_orig_params=True
             )
             return model
 
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
-            for (wrap_policy, test_instance) in (
-                (
-                    None,
-                    "FSDP without recursive wrapping"
-                ),
+            for wrap_policy, test_instance in (
+                (None, "FSDP without recursive wrapping"),
             ):
                 print(f"Running hf_bert test for {test_instance}")
                 model, inputs = get_hf_bert(self.rank)
@@ -501,11 +564,13 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 opt_loss.backward()
 
                 inputs_flat = [inputs[k] for k in inputs]
-                correct_results = collect_results(eager_model, correct_outputs.logits, correct_loss, inputs_flat)
-                opt_results = collect_results(opt_model, opt_outputs.logits, opt_loss, inputs_flat)
+                correct_results = collect_results(
+                    eager_model, correct_outputs.logits, correct_loss, inputs_flat
+                )
+                opt_results = collect_results(
+                    opt_model, opt_outputs.logits, opt_loss, inputs_flat
+                )
                 self.assertTrue(same(correct_results, opt_results))
-
-
 
     @import_transformers_or_skip()
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
@@ -514,20 +579,27 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     @patch.object(torch._inductor.config, "fallback_random", True)
     def test_hf_bert_fsdp_activation_checkpointing(self):
         from transformers.models.bert.modeling_bert import BertLayer
+
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
-            for (wrap_policy, test_instance) in (
+            for wrap_policy, test_instance in (
                 (
                     functools.partial(
-                        transformer_auto_wrap_policy, transformer_layer_cls=(BertLayer, )
+                        transformer_auto_wrap_policy, transformer_layer_cls=(BertLayer,)
                     ),
-                    "FSDP with recursive wrapping BertLayer instances"
+                    "FSDP with recursive wrapping BertLayer instances",
                 ),
             ):
-                print(f"Running hf_bert_activation_checkpointing test for {test_instance}")
+                print(
+                    f"Running hf_bert_activation_checkpointing test for {test_instance}"
+                )
                 model, inputs = get_hf_bert(self.rank)
-                check_fn = lambda submodule: isinstance(submodule, BertLayer)  # noqa: E731
+                check_fn = lambda submodule: isinstance(  # noqa: E731
+                    submodule, BertLayer
+                )
                 reset_rng_state()
-                eager_model = apply_fsdp_with_checkpointing(model, wrap_policy, check_fn)
+                eager_model = apply_fsdp_with_checkpointing(
+                    model, wrap_policy, check_fn
+                )
                 correct_outputs = eager_model(**inputs)
                 correct_loss = correct_outputs.loss
                 correct_loss.backward()
@@ -540,12 +612,17 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 opt_loss.backward()
 
                 inputs_flat = [inputs[k] for k in inputs]
-                correct_results = collect_results(eager_model, correct_outputs.logits, correct_loss, inputs_flat)
-                opt_results = collect_results(opt_model, opt_outputs.logits, opt_loss, inputs_flat)
+                correct_results = collect_results(
+                    eager_model, correct_outputs.logits, correct_loss, inputs_flat
+                )
+                opt_results = collect_results(
+                    opt_model, opt_outputs.logits, opt_loss, inputs_flat
+                )
                 self.assertTrue(same(correct_results, opt_results))
 
 
 @requires_nccl()
+@requires_cuda
 class TestSingleProc(DynamoDistributedSingleProcTestCase):
     """
     Test harness initializes dist process group.
@@ -554,8 +631,15 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
     Use TestMultiProc for things that really need to run on multiple nodes
     """
 
-    def get_model(self, bsz=20, in_feat=10, hidden_feat=5000, out_feat=5, ctx_manager=None):
-        m = ToyModel(in_feat=in_feat, hidden_feat=hidden_feat, out_feat=out_feat, ctx_manager=ctx_manager).to(self.device)
+    def get_model(
+        self, bsz=20, in_feat=10, hidden_feat=5000, out_feat=5, ctx_manager=None
+    ):
+        m = ToyModel(
+            in_feat=in_feat,
+            hidden_feat=hidden_feat,
+            out_feat=out_feat,
+            ctx_manager=ctx_manager,
+        ).to(self.device)
         m.apply(init_weights)
         inputs = torch.rand(bsz, in_feat).to(self.device)
         outputs = m(inputs)
@@ -625,19 +709,20 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         ]:
             for ctx_manager, output_test in [
                 (
-                    lambda: torch.autocast(torch.device(self.device).type, torch.float16),
+                    lambda: torch.autocast(
+                        torch.device(self.device).type, torch.float16
+                    ),
                     lambda out: self.assertEqual(out.dtype, torch.float16),
                 ),
-                (
-                    torch.enable_grad,
-                    lambda out: self.assertTrue(out.requires_grad)
-                ),
-                (
-                    torch.no_grad,
-                    lambda out: self.assertTrue(not out.requires_grad)
-                ),
+                (torch.enable_grad, lambda out: self.assertTrue(out.requires_grad)),
+                (torch.no_grad, lambda out: self.assertTrue(not out.requires_grad)),
             ]:
-                m, inputs, correct_outputs = self.get_model(out_feat=1000, hidden_feat=1000, in_feat=1000, ctx_manager=ctx_manager)
+                m, inputs, correct_outputs = self.get_model(
+                    out_feat=1000,
+                    hidden_feat=1000,
+                    in_feat=1000,
+                    ctx_manager=ctx_manager,
+                )
                 # inp - 1000 * 1000 matrix of float32 (4 bytes) = 4MB
                 # hidden - 1000 * 1000 matrix of float32 (4 bytes) = 4MB
                 bucket_cap_mb = 3.5  # 4MB
@@ -645,7 +730,9 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
                 compiler = get_compiler()
 
-                @torch._dynamo.optimize(compiler.compile_fn if compiler else "aot_eager")
+                @torch._dynamo.optimize(
+                    compiler.compile_fn if compiler else "aot_eager"
+                )
                 def opt_fn(inputs):
                     return ddp_m(inputs)
 
@@ -681,11 +768,11 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         opt_outputs = opt_fn(inputs)
         self.assertTrue(same(correct_outputs, opt_outputs))
 
-    @torch._inductor.config.patch({"layout_optimization": True, "keep_output_stride": False})
+    @torch._inductor.config.patch(
+        {"layout_optimization": True, "keep_output_stride": False}
+    )
     @patch.object(config, "optimize_ddp", True)
-    @patch.object(config, "optimize_ddp_lazy_compile", True)
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
-    def test_graph_split_inductor_layout_optimizations(self):
+    def _test_graph_split_inductor_layout_optimizations_impl(self, context):
         assert config.optimize_ddp
         channel_dim = 512
         # channel dim must be > 64 for inductor to do layout optimization and use NHWC
@@ -694,10 +781,22 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
             def __init__(self):
                 super().__init__()
                 self.net = nn.Sequential(
-                    *[nn.Conv2d(channel_dim, channel_dim, 1, stride=1, bias=False), nn.ReLU()]
-                    + [nn.Conv2d(channel_dim, channel_dim, 1, stride=1, bias=False), nn.ReLU()]
-                    + [nn.Conv2d(channel_dim, channel_dim, 1, stride=1, bias=False), nn.ReLU()]
-                    + [nn.Conv2d(channel_dim, channel_dim, 1, stride=1, bias=False), nn.ReLU()]
+                    *[
+                        nn.Conv2d(channel_dim, channel_dim, 1, stride=1, bias=False),
+                        nn.ReLU(),
+                    ]
+                    + [
+                        nn.Conv2d(channel_dim, channel_dim, 1, stride=1, bias=False),
+                        nn.ReLU(),
+                    ]
+                    + [
+                        nn.Conv2d(channel_dim, channel_dim, 1, stride=1, bias=False),
+                        nn.ReLU(),
+                    ]
+                    + [
+                        nn.Conv2d(channel_dim, channel_dim, 1, stride=1, bias=False),
+                        nn.ReLU(),
+                    ]
                 )
 
             def forward(self, inputs):
@@ -710,16 +809,26 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
             outputs = m(inputs)
             return m, inputs, outputs
 
-        m, inputs, correct_outputs = get_model()
-        ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=25)
+        with context():
+            m, inputs, correct_outputs = get_model()
+            ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=25)
 
-        @torch._dynamo.optimize("inductor")
-        def opt_fn(inputs):
-            return ddp_m(inputs)
+            @torch._dynamo.optimize("inductor")
+            def opt_fn(inputs):
+                return ddp_m(inputs)
 
-        opt_outputs = opt_fn(inputs)
-        self.assertTrue(same(correct_outputs, opt_outputs))
+            opt_outputs = opt_fn(inputs)
+            self.assertTrue(same(correct_outputs, opt_outputs))
 
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    def test_graph_split_inductor_layout_optimizations_training(self):
+        self._test_graph_split_inductor_layout_optimizations_impl(
+            contextlib.nullcontext
+        )
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    def test_graph_split_inductor_layout_optimizations_inference(self):
+        self._test_graph_split_inductor_layout_optimizations_impl(torch.no_grad)
 
     @patch.object(config, "optimize_ddp", True)
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
@@ -838,14 +947,13 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         DDP._set_params_and_buffers_to_ignore_for_model(m, parameters_to_ignore)
         ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=25)
         parameter_ids_to_ignore = [
-            id(ddp_m.module.get_parameter(p))
-            for p in ddp_m.parameters_to_ignore
+            id(ddp_m.module.get_parameter(p)) for p in ddp_m.parameters_to_ignore
         ]
 
         check_splits_compiler = CheckSplitsCompiler()
         ddp_optimizer = DDPOptimizer(
             bucket_bytes_cap=ddp_m.bucket_bytes_cap,
-            backend_compile_fn=check_splits_compiler.compile_fn
+            backend_compile_fn=check_splits_compiler.compile_fn,
         )
 
         @torch._dynamo.optimize(ddp_optimizer.compile_fn)
@@ -899,17 +1007,21 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.BackendCompilerFailed,
-            "DDPOptimizer backend: Found a higher order op in the graph"
+            "DDPOptimizer backend: Found a higher order op in the graph",
         ):
             torch.compile(mod, backend=cnt)(*args)
-
 
     def test_fsdp_orig_params_assert(self):
         # Test with basic FSDP wrapping (outer wrap around whole model)
         m, inputs, correct_outputs = get_model(f"cuda:{self.rank}")
         fsdp_m = FSDP(m, use_orig_params=False)
         fsdp_m = torch._dynamo.optimize()(fsdp_m)
-        self.assertRaisesRegex(AssertionError, "Dynamo only supports FSDP with use_orig_params=True", fsdp_m, inputs)
+        self.assertRaisesRegex(
+            AssertionError,
+            "Dynamo only supports FSDP with use_orig_params=True",
+            fsdp_m,
+            inputs,
+        )
 
     def test_fsdp_skip_guards(self):
         """
@@ -929,7 +1041,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
         for skip_guards, expected_guard_source in (
             (True, "local_fsdp_module"),
-            (False, "local")
+            (False, "local"),
         ):
             torch._dynamo.reset()
 
@@ -951,8 +1063,13 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
                         ctx.print_guards(file=GUARDS_FILE)
 
                     return out
+
             device = f"cuda:{self.rank}"
-            m = ToyModel(in_feat=10, hidden_feat=5000, out_feat=5,).to(device)
+            m = ToyModel(
+                in_feat=10,
+                hidden_feat=5000,
+                out_feat=5,
+            ).to(device)
             inputs = torch.rand(20, 10).to(device)
             m.apply(init_weights)
             correct_outputs = m(inputs)
@@ -963,14 +1080,17 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
                 outputs = opt_m(inputs)
 
             # far from an exhaustive check of all the expected guards, just check a couple of them.
-            FileCheck() \
-                .check("""local "L['self']" TYPE_MATCH""") \
-                .check("""local "L['self']" ID_MATCH""") \
-                .check(f"""{expected_guard_source} "L['self'].net" TYPE_MATCH""") \
-                .check(f"""{expected_guard_source} "L['self'].net" ID_MATCH""") \
-                .check(f"""{expected_guard_source} "L['self'].net[0]" TYPE_MATCH""") \
-                .check(f"""{expected_guard_source} "L['self'].net[0]" ID_MATCH""") \
-                .run(GUARDS_FILE.getvalue())
+            FileCheck().check("""local "L['self']" TYPE_MATCH""").check(
+                """local "L['self']" ID_MATCH"""
+            ).check(f"""{expected_guard_source} "L['self'].net" TYPE_MATCH""").check(
+                f"""{expected_guard_source} "L['self'].net" ID_MATCH"""
+            ).check(
+                f"""{expected_guard_source} "L['self'].net[0]" TYPE_MATCH"""
+            ).check(
+                f"""{expected_guard_source} "L['self'].net[0]" ID_MATCH"""
+            ).run(
+                GUARDS_FILE.getvalue()
+            )
             self.assertTrue(same(correct_outputs, outputs))
 
     def test_fsdp_skip_register_attr_or_module(self):
@@ -981,6 +1101,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         before calling `register_attr_or_module`
         in variables/builder.py
         """
+
         class ToyModel(nn.Module):
             def __init__(self, in_feat=10, hidden_feat=5000, out_feat=5):
                 super().__init__()
@@ -996,7 +1117,11 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         torch._dynamo.reset()
 
         device = f"cuda:{self.rank}"
-        m = ToyModel(in_feat=10, hidden_feat=5000, out_feat=5,).to(device)
+        m = ToyModel(
+            in_feat=10,
+            hidden_feat=5000,
+            out_feat=5,
+        ).to(device)
         inputs = torch.rand(20, 10).to(device)
         m.apply(init_weights)
         correct_outputs = m(inputs)
@@ -1009,9 +1134,12 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
                         "l__self___net_0_weight",
                         "l__self___net_0_bias",
                         "l__self___net_2_weight",
-                        "l__self___net_2_bias"
+                        "l__self___net_2_bias",
                     ]:
-                        self.assertFalse(name in node.name, f"FSDP module {name} should not be registered as attributes")
+                        self.assertFalse(
+                            name in node.name,
+                            f"FSDP module {name} should not be registered as attributes",
+                        )
             return gm
 
         opt_m = torch._dynamo.optimize(backend=debug_compiler)(fsdp_m)
@@ -1025,6 +1153,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         source are de-duplicated, meaning that they are each only passed once
         as a graph input.
         """
+
         class DuplicateModule(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -1055,6 +1184,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         ``a is b``, where ``a`` and ``b`` are certainly not the same. We check
         this by checking for per-invocation recompiles.
         """
+
         class BufModule(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -1098,6 +1228,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         correctly both when the staticmethod is invoked from the class and from
         the object itself.
         """
+
         class ModuleWithStaticMethod(nn.Module):
             def __init__(self, use_self: bool):
                 super().__init__()
@@ -1151,4 +1282,5 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
+
     run_tests()

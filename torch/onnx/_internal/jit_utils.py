@@ -107,7 +107,7 @@ class GraphContext:
     @_beartype.beartype
     def onnxscript_op(
         self,
-        onnx_fn,  # TODO(titaiwang): annotate this when onnx-script becomes dependency
+        onnx_fn,
         *raw_args: Union[torch.Tensor, _C.Value],
         outputs: int = 1,
         **kwargs,
@@ -293,8 +293,8 @@ def _create_node(
             for _ in range(1, n_outputs):
                 node.addOutput()
 
-    node_ouputs = tuple(node.outputs())
-    assert len(node_ouputs) == n_outputs
+    node_outputs = tuple(node.outputs())  # type: ignore[possibly-undefined]
+    assert len(node_outputs) == n_outputs
 
     aten = domain_op.startswith("aten::")
 

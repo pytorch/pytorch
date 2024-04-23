@@ -35,7 +35,7 @@ from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, IS_JETSON,
                                                   IS_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
                                                   load_tests, TEST_WITH_ASAN, TEST_WITH_TSAN, IS_SANDCASTLE,
-                                                  IS_MACOS, TEST_CUDA, parametrize)
+                                                  IS_MACOS, TEST_CUDA, parametrize, skipIfNoDill)
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 import functools
 import operator
@@ -52,18 +52,6 @@ except ImportError:
         raise ImportError(err_msg) from None
     else:
         warnings.warn(err_msg)
-
-try:
-    import dill
-    # XXX: By default, dill writes the Pickler dispatch table to inject its
-    # own logic there. This globally affects the behavior of the standard library
-    # pickler for any user who transitively depends on this module!
-    # Undo this extension to avoid altering the behavior of the pickler globally.
-    dill.extend(use_dill=False)
-    HAS_DILL = True
-except ImportError:
-    HAS_DILL = False
-skipIfNoDill = unittest.skipIf(not HAS_DILL, "no dill")
 
 
 try:
@@ -1095,8 +1083,8 @@ class TestDataLoader(TestCase):
             self.assertEqual(i, math.floor((len(self.dataset) - 1) / batch_size))
 
     def _test_shuffle(self, loader):
-        found_data = {i: 0 for i in range(self.data.size(0))}
-        found_labels = {i: 0 for i in range(self.labels.size(0))}
+        found_data = dict.fromkeys(range(self.data.size(0)), 0)
+        found_labels = dict.fromkeys(range(self.labels.size(0)), 0)
         batch_size = loader.batch_size
         if batch_size is None:
             for i, (batch_samples, batch_targets) in enumerate(loader):
@@ -1588,9 +1576,7 @@ except RuntimeError as e:
                 self.assertEqual(
                     reference, list(self._get_data_loader(ds_cls(counting_ds_n), multiprocessing_context=ctx, **dl_common_args)))
 
-    @skipIfNoNumpy
-    @unittest.skipIf(IS_JETSON, "Not working on Jetson")
-    def test_multiprocessing_iterdatapipe(self):
+    def _test_multiprocessing_iterdatapipe(self, with_dill):
         # Testing to make sure that function from global scope (e.g. imported from library) can be serialized
         # and used with multiprocess DataLoader
 
@@ -1598,7 +1584,7 @@ except RuntimeError as e:
                      torch.as_tensor([[2, 3, 4, 5]], dtype=torch.int64)]
         datapipe: IterDataPipe = IterableWrapper([[1, 2, 3, 4], [1, 2, 3, 4, 5, 6]])
         datapipe = datapipe.map(row_processor)
-        datapipe = datapipe.filter(lambda row: len(row) == 4) if HAS_DILL else datapipe.filter(filter_len)
+        datapipe = datapipe.filter(lambda row: len(row) == 4) if with_dill else datapipe.filter(filter_len)
 
         dl_common_args = dict(num_workers=2, batch_size=2, shuffle=True, pin_memory=(not TEST_CUDA))
         for ctx in supported_multiprocessing_contexts:
@@ -1613,14 +1599,25 @@ except RuntimeError as e:
                                   for t in
                                   self._get_data_loader(datapipe, multiprocessing_context=ctx, **dl_common_args)])
 
+    @skipIfNoNumpy
+    @unittest.skipIf(IS_JETSON, "Not working on Jetson")
+    def test_multiprocessing_iterdatapipe(self):
+        self._test_multiprocessing_iterdatapipe(with_dill=False)
+
+    @unittest.expectedFailure
+    @skipIfNoNumpy
+    @unittest.skipIf(IS_JETSON, "Not working on Jetson")
+    @skipIfNoDill
+    def test_multiprocessing_iterdatapipe_with_dill(self):
+        self._test_multiprocessing_iterdatapipe(with_dill=True)
+
     def test_worker_seed(self):
         num_workers = 6
         batch_size = 1
         dataset = SynchronizedSeedDataset(num_workers, batch_size, num_workers)
         dataloader = self._get_data_loader(dataset, batch_size=batch_size, num_workers=num_workers)
         seeds = set()
-        for batch in dataloader:
-            seeds.add(batch[0])
+        seeds.update(batch[0] for batch in dataloader)
         self.assertEqual(len(seeds), num_workers)
 
     def test_worker_seed_reproducibility(self):
@@ -2137,8 +2134,7 @@ except RuntimeError as e:
                         elif exit_method == 'worker_kill':
                             if isinstance(loader_p.exception, RuntimeError):
                                 if 'DataLoader worker (pid' not in str(loader_p.exception):
-                                    fail('loader process did not raise expected exception, but had {}'.format(
-                                        loader_p.exception))
+                                    fail(f'loader process did not raise expected exception, but had {loader_p.exception}')
                             elif isinstance(loader_p.exception, ConnectionRefusedError):
                                 # Sometimes, when the worker is being killed and is freeing its
                                 # resources, the unpickling in loader process will be met an

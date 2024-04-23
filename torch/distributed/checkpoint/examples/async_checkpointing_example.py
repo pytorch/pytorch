@@ -6,11 +6,11 @@ import traceback
 
 import torch
 import torch.distributed as dist
+import torch.distributed.checkpoint as dcp
 import torch.multiprocessing as mp
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed._tensor.device_mesh import init_device_mesh
-from torch.distributed.checkpoint.filesystem import _FileSystemCheckpointer
 from torch.distributed.checkpoint.state_dict import (
     _patch_model_state_dict,
     _patch_optimizer_state_dict,
@@ -87,7 +87,6 @@ def run(rank, world_size):
 
     model, optim = _init_model(rank, world_size)
     state_dict = {"model": model, "optim": optim}
-    checkpointer = _FileSystemCheckpointer(CHECKPOINT_DIR)
     loss_calc = torch.nn.BCELoss()
 
     f = None
@@ -107,7 +106,9 @@ def run(rank, world_size):
             if epoch % SAVE_PERIOD == 0:
                 if f is not None:
                     f.result()
-                f = checkpointer.async_save(state_dict)
+                f = dcp.state_dict_saver.async_save(
+                    state_dict, checkpoint_id=CHECKPOINT_DIR
+                )
 
             if FAULT_PERIOD > 0 and epoch % FAULT_PERIOD == 0:
                 raise InjectedException("Fault injection!")
@@ -121,7 +122,7 @@ def run(rank, world_size):
             _print("Reloading model from last checkpoint!")
             if f is not None:
                 f.result()
-            checkpointer.load(state_dict)
+            dcp.load(state_dict)
 
 
 if __name__ == "__main__":

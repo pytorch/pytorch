@@ -35,6 +35,7 @@
 #include <ATen/ops/_efficientzerotensor_native.h>
 #include <ATen/ops/_empty_affine_quantized.h>
 #include <ATen/ops/_empty_per_channel_affine_quantized.h>
+#include <ATen/ops/_sparse_compressed_tensor_with_dims_native.h>
 #include <ATen/ops/arange.h>
 #include <ATen/ops/arange_native.h>
 #include <ATen/ops/bartlett_window_native.h>
@@ -214,8 +215,8 @@ Tensor& complex_out(const Tensor& real, const Tensor& imag, Tensor& result) {
   complex_check_dtype(result, real, imag);
   auto iter = TensorIteratorConfig()
       .add_output(result)
-      .add_input(real)
-      .add_input(imag)
+      .add_const_input(real)
+      .add_const_input(imag)
       .check_all_same_dtype(false)
       .build();
   complex_stub(iter.device_type(), iter);
@@ -234,8 +235,8 @@ Tensor& polar_out(const Tensor& abs, const Tensor& angle, Tensor& result) {
   complex_check_dtype(result, abs, angle);
   auto iter = TensorIteratorConfig()
       .add_output(result)
-      .add_input(abs)
-      .add_input(angle)
+      .add_const_input(abs)
+      .add_const_input(angle)
       .check_all_same_dtype(false)
       .build();
   polar_stub(iter.device_type(), iter);
@@ -277,8 +278,8 @@ Tensor empty_names(
   }
   TORCH_CHECK(options.layout() == Layout::Strided,
       "NYI: named tensors only support strided layout");
-  TORCH_CHECK(options.device().is_cpu() || options.device().is_cuda() || options.device().is_privateuseone(),
-      "NYI: named tensors only support CPU, CUDA or ", c10::get_privateuse1_backend(), " tensors.");
+  TORCH_CHECK(options.device().is_cpu() || options.device().is_cuda() || options.device().is_xpu() || options.device().is_privateuseone(),
+      "NYI: named tensors only support CPU, CUDA, XPU or ", c10::get_privateuse1_backend(), " tensors.");
   auto result = at::empty(size, options, optional_memory_format);
   internal_set_names_inplace(result, names);
   return result;
@@ -368,10 +369,9 @@ Tensor& empty_out(IntArrayRef size,
 
 // Some scalar types in CAST_OP have no declarations, they may be unused in Pytorch.
 // But we keep them and ignore the warning here until verified in the future.
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wmissing-prototypes"
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wmissing-prototypes")
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, DEFINE_CAST_OP)
-#pragma clang diagnostic pop
+C10_DIAGNOSTIC_POP()
 
 #undef DEFINE_CAST_OP
 
@@ -1339,16 +1339,16 @@ Tensor _efficientzerotensor(IntArrayRef size,
     return out;
 }
 
-Tensor _efficientzerotensor_meta(IntArrayRef size,
-                                 c10::optional<ScalarType> dtype,
-                                 c10::optional<Layout> layout,
-                                 c10::optional<Device> device,
-                                 c10::optional<bool> pin_memory) {
+Tensor _efficientzerotensor_meta_symint(SymIntArrayRef size,
+                                        c10::optional<ScalarType> dtype,
+                                        c10::optional<Layout> layout,
+                                        c10::optional<Device> device,
+                                        c10::optional<bool> pin_memory) {
   auto device_ = device_or_default(device);
   auto allocator = at::native::ZeroTensorAllocator(device_);
   auto dtype_ = dtype_or_default(dtype);
   auto zero_ks = at::DispatchKeySet(c10::DispatchKey::Meta) | at::DispatchKeySet(c10::DispatchKey::ZeroTensor);
-  auto out = at::detail::empty_generic(size, &allocator, zero_ks, dtype_, c10::nullopt);
+  auto out = at::detail::empty_generic_symint(size, &allocator, zero_ks, dtype_, c10::nullopt);
   return out;
 }
 
@@ -1391,11 +1391,29 @@ Tensor zeros_like(
     if (self.is_sparse()) {
       res.sparse_resize_and_clear_(
           self.sizes(), self.sparse_dim(), self.dense_dim());
+    } else if (at::sparse_csr::is_sparse_compressed(self)) {
+      res.sparse_resize_and_clear_(
+          self.sizes(), self.sizes().size() - self.dense_dim(), self.dense_dim());
     } else {
       res.sparse_resize_and_clear_(self.sizes(), self.sizes().size(), 0);
     }
     res._coalesced_(true);
 
+    return res;
+  } else if (at::sparse_csr::is_sparse_compressed(options.layout())) {
+    int64_t nnz = 0;
+    int64_t dense_dim = (self.layout() == kStrided ? self.dim() - 2: self.dense_dim());
+    DimVector blocksize{};
+    if (self.layout() == kSparseBsr || self.layout() == kSparseBsc) {
+      blocksize.append(at::sparse_csr::getBlockSize(self));
+    }
+    ScalarType index_dtype = at::sparse_csr::getIndexDtype(self);
+    auto res = at::native::sparse_compressed_tensor_with_dims(
+      nnz, dense_dim, self.sizes(), blocksize, index_dtype,
+      typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
+    Tensor compressed_indices, plain_indices;
+    std::tie(compressed_indices, plain_indices) = at::sparse_csr::getCompressedPlainIndices(res);
+    compressed_indices.zero_();
     return res;
   }
   auto result = at::empty_like(self, options, optional_memory_format);

@@ -412,7 +412,6 @@ template <typename Stub, typename ...Args>
 static inline Tensor& unary_op_impl_float_out(Tensor& result, const Tensor& self, Stub& stub, Args... args) {
   auto iter = TensorIterator::unary_float_op(result, self);
   stub(iter.device_type(), iter, args...);
-  iter.cast_outputs();
   return result;
 }
 
@@ -868,7 +867,7 @@ Tensor& logical_not_out(const Tensor& self, Tensor& result) {
   TensorIterator iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
     .add_output(result)
-    .add_input(self)
+    .add_const_input(self)
     .build();
   logical_not_stub(iter.device_type(), iter);
   return result;
@@ -964,7 +963,7 @@ std::tuple<Tensor&, Tensor&> frexp_out(const Tensor& self,
   auto iter = TensorIteratorConfig()
     .add_output(mantissa)
     .add_output(exponent)
-    .add_input(self)
+    .add_const_input(self)
     .check_all_same_dtype(false)
     .set_check_mem_overlap(true)
     .build();
@@ -973,7 +972,7 @@ std::tuple<Tensor&, Tensor&> frexp_out(const Tensor& self,
   return std::tuple<Tensor&, Tensor&>(mantissa, exponent);
 }
 
-// alias for lgamma, implements special.gammanln equivalent to
+// alias for lgamma, implements special.gammaln equivalent to
 // scipy.special.gammaln
 Tensor special_gammaln(const Tensor& self) { return self.lgamma(); }
 Tensor& special_gammaln_out(const Tensor& self, Tensor& result) { return at::lgamma_out(result, self); }

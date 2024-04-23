@@ -20,6 +20,10 @@
 #include <ATen/ops/upsample_bilinear2d_backward.h>
 #include <ATen/ops/upsample_bilinear2d_backward_native.h>
 #include <ATen/ops/upsample_bilinear2d_native.h>
+#include <ATen/ops/upsample_linear1d.h>
+#include <ATen/ops/upsample_linear1d_backward.h>
+#include <ATen/ops/upsample_linear1d_backward_native.h>
+#include <ATen/ops/upsample_linear1d_native.h>
 #include <ATen/ops/upsample_nearest1d.h>
 #include <ATen/ops/upsample_nearest1d_backward.h>
 #include <ATen/ops/upsample_nearest1d_backward_native.h>
@@ -36,9 +40,9 @@ namespace mps {
 // supported resize_mode: 'nearest' | 'bilinear' | 'nearest-exact'
 static void upsample_out_template(const Tensor& input,
                                   IntArrayRef output_size,
-                                  c10::optional<IntArrayRef> input_size_opt, // only used for backward pass
-                                  c10::optional<double> scale_h_opt,
-                                  c10::optional<double> scale_w_opt,
+                                  std::optional<IntArrayRef> input_size_opt, // only used for backward pass
+                                  std::optional<double> scale_h_opt,
+                                  std::optional<double> scale_w_opt,
                                   const Tensor& output,
                                   bool align_corners,
                                   const c10::string_view resize_mode_str) {
@@ -225,9 +229,7 @@ static void upsample_out_template(const Tensor& input,
       inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
       cachedGraph->outputSizeTensor : sizeTensorData,
     };
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
 
     if (out.has_storage()) {
       output.copy_(out);
@@ -237,7 +239,7 @@ static void upsample_out_template(const Tensor& input,
 
 } // namespace mps
 
-static bool check_mps_compatibility(const c10::string_view resize_mode_str, c10::optional<double> scale) {
+static bool check_mps_compatibility(const c10::string_view resize_mode_str, std::optional<double> scale) {
   static const bool is_macOS_13_0_or_newer = is_macos_13_or_newer();
   if (!is_macOS_13_0_or_newer) {
     // passing scale factors to MPS's resize APIs is not supported on macOS < 13
@@ -260,7 +262,7 @@ static bool check_mps_compatibility(const c10::string_view resize_mode_str, c10:
 }
 
 TORCH_IMPL_FUNC(upsample_nearest1d_out_mps)
-(const Tensor& input, IntArrayRef output_size, c10::optional<double> scale, const Tensor& output) {
+(const Tensor& input, IntArrayRef output_size, std::optional<double> scale, const Tensor& output) {
   if (check_mps_compatibility("nearest", scale)) {
     mps::upsample_out_template(input, output_size, c10::nullopt, c10::nullopt, scale, output, false, "nearest");
   } else {
@@ -272,7 +274,7 @@ TORCH_IMPL_FUNC(upsample_nearest1d_backward_out_mps)
 (const Tensor& grad_output,
  IntArrayRef output_size,
  IntArrayRef input_size,
- c10::optional<double> scale,
+ std::optional<double> scale,
  const Tensor& grad_input) {
   if (check_mps_compatibility("nearest", scale)) {
     mps::upsample_out_template(grad_output, output_size, input_size, c10::nullopt, scale, grad_input, false, "nearest");
@@ -282,7 +284,7 @@ TORCH_IMPL_FUNC(upsample_nearest1d_backward_out_mps)
 }
 
 TORCH_IMPL_FUNC(_upsample_nearest_exact1d_out_mps)
-(const Tensor& input, IntArrayRef output_size, c10::optional<double> scale, const Tensor& output) {
+(const Tensor& input, IntArrayRef output_size, std::optional<double> scale, const Tensor& output) {
   if (check_mps_compatibility("nearest-exact", scale)) {
     mps::upsample_out_template(input, output_size, c10::nullopt, c10::nullopt, scale, output, false, "nearest-exact");
   } else {
@@ -294,7 +296,7 @@ TORCH_IMPL_FUNC(_upsample_nearest_exact1d_backward_out_mps)
 (const Tensor& grad_output,
  IntArrayRef output_size,
  IntArrayRef input_size,
- c10::optional<double> scale,
+ std::optional<double> scale,
  const Tensor& grad_input) {
   if (check_mps_compatibility("nearest-exact", scale)) {
     mps::upsample_out_template(
@@ -307,8 +309,8 @@ TORCH_IMPL_FUNC(_upsample_nearest_exact1d_backward_out_mps)
 TORCH_IMPL_FUNC(upsample_nearest2d_out_mps)
 (const Tensor& input,
  IntArrayRef output_size,
- c10::optional<double> scales_h,
- c10::optional<double> scales_w,
+ std::optional<double> scales_h,
+ std::optional<double> scales_w,
  const Tensor& output) {
   if (check_mps_compatibility("nearest", scales_w)) {
     mps::upsample_out_template(input, output_size, c10::nullopt, scales_h, scales_w, output, false, "nearest");
@@ -321,8 +323,8 @@ TORCH_IMPL_FUNC(upsample_nearest2d_backward_out_mps)
 (const Tensor& grad_output,
  IntArrayRef output_size,
  IntArrayRef input_size,
- c10::optional<double> scales_h,
- c10::optional<double> scales_w,
+ std::optional<double> scales_h,
+ std::optional<double> scales_w,
  const Tensor& grad_input) {
   if (check_mps_compatibility("nearest", scales_w)) {
     mps::upsample_out_template(grad_output, output_size, input_size, scales_h, scales_w, grad_input, false, "nearest");
@@ -335,8 +337,8 @@ TORCH_IMPL_FUNC(upsample_nearest2d_backward_out_mps)
 TORCH_IMPL_FUNC(_upsample_nearest_exact2d_out_mps)
 (const Tensor& input,
  IntArrayRef output_size,
- c10::optional<double> scales_h,
- c10::optional<double> scales_w,
+ std::optional<double> scales_h,
+ std::optional<double> scales_w,
  const Tensor& output) {
   if (check_mps_compatibility("nearest-exact", scales_w)) {
     mps::upsample_out_template(input, output_size, c10::nullopt, scales_h, scales_w, output, false, "nearest-exact");
@@ -349,8 +351,8 @@ TORCH_IMPL_FUNC(_upsample_nearest_exact2d_backward_out_mps)
 (const Tensor& grad_output,
  IntArrayRef output_size,
  IntArrayRef input_size,
- c10::optional<double> scales_h,
- c10::optional<double> scales_w,
+ std::optional<double> scales_h,
+ std::optional<double> scales_w,
  const Tensor& grad_input) {
   if (check_mps_compatibility("nearest-exact", scales_w)) {
     mps::upsample_out_template(
@@ -361,12 +363,38 @@ TORCH_IMPL_FUNC(_upsample_nearest_exact2d_backward_out_mps)
   }
 }
 
+TORCH_IMPL_FUNC(upsample_linear1d_out_mps)
+(const Tensor& input, IntArrayRef output_size, bool align_corners, std::optional<double> scale, const Tensor& output) {
+  if (check_mps_compatibility("bilinear", scale)) {
+    mps::upsample_out_template(
+        input, output_size, c10::nullopt, c10::nullopt, scale, output, align_corners, "bilinear");
+  } else {
+    output.copy_(at::upsample_linear1d(input.to("cpu"), output_size, align_corners, scale));
+  }
+}
+
+TORCH_IMPL_FUNC(upsample_linear1d_backward_out_mps)
+(const Tensor& grad_output,
+ IntArrayRef output_size,
+ IntArrayRef input_size,
+ bool align_corners,
+ std::optional<double> scale,
+ const Tensor& grad_input) {
+  if (check_mps_compatibility("bilinear", scale)) {
+    mps::upsample_out_template(
+        grad_output, output_size, input_size, c10::nullopt, scale, grad_input, align_corners, "bilinear");
+  } else {
+    grad_input.copy_(
+        at::upsample_linear1d_backward(grad_output.to("cpu"), output_size, input_size, align_corners, scale));
+  }
+}
+
 TORCH_IMPL_FUNC(upsample_bilinear2d_out_mps)
 (const Tensor& input,
  IntArrayRef output_size,
  bool align_corners,
- c10::optional<double> scales_h,
- c10::optional<double> scales_w,
+ std::optional<double> scales_h,
+ std::optional<double> scales_w,
  const Tensor& output) {
   if (check_mps_compatibility("bilinear", scales_w)) {
     mps::upsample_out_template(input, output_size, c10::nullopt, scales_h, scales_w, output, align_corners, "bilinear");
@@ -380,8 +408,8 @@ TORCH_IMPL_FUNC(upsample_bilinear2d_backward_out_mps)
  IntArrayRef output_size,
  IntArrayRef input_size,
  bool align_corners,
- c10::optional<double> scales_h,
- c10::optional<double> scales_w,
+ std::optional<double> scales_h,
+ std::optional<double> scales_w,
  const Tensor& grad_input) {
   if (check_mps_compatibility("bilinear", scales_w)) {
     mps::upsample_out_template(

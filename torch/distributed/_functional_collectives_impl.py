@@ -1,7 +1,7 @@
 import logging
 import warnings
 import weakref
-from typing import cast, List, Optional
+from typing import cast, Dict, List, Optional
 
 import torch
 import torch.distributed as dist
@@ -25,7 +25,10 @@ _wait_all
 
 logger = logging.getLogger(__name__)
 
-data_ptr_to_work = dict()
+_use_native_funcol: Optional[bool] = None
+
+
+data_ptr_to_work: Dict[int, "_WaitRegistration"] = dict()
 work_version = 0
 
 
@@ -93,7 +96,19 @@ def _wait_reg_dec(ptr, wait_reg):
 
 def _register_tensor_wrapper(tensor) -> None:
     global data_ptr_to_work
-    data_ptr = tensor.elem.data_ptr()
+
+    # FIXME: This is almost definitely a bug.
+    if isinstance(
+        tensor.elem,
+        (
+            torch._subclasses.fake_tensor.FakeTensor,
+            torch._subclasses.functional_tensor.FunctionalTensor,
+        ),
+    ):
+        data_ptr = 0
+    else:
+        data_ptr = tensor.elem.data_ptr()
+
     # Note: we should NEVER try to trace this, bc it registers runtime stuff during trace.
     # Instead, backends must call this themselves when implementing traced collectives.
     wait_reg = data_ptr_to_work.get(data_ptr, None)

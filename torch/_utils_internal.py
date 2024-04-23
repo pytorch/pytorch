@@ -1,3 +1,4 @@
+import functools
 import logging
 import os
 import sys
@@ -51,14 +52,26 @@ def resolve_library_path(path: str) -> str:
 def throw_abstract_impl_not_imported_error(opname, module, context):
     if module in sys.modules:
         raise NotImplementedError(
-            f"{opname}: We could not find the abstract impl for this operator. "
+            f"{opname}: We could not find the fake impl for this operator. "
         )
     else:
         raise NotImplementedError(
-            f"{opname}: We could not find the abstract impl for this operator. "
+            f"{opname}: We could not find the fake impl for this operator. "
             f"The operator specified that you may need to import the '{module}' "
-            f"Python module to load the abstract impl. {context}"
+            f"Python module to load the fake impl. {context}"
         )
+
+
+# Meta only, act as nop otherwise.
+def compiletime_strobelight_meta(phase_name):
+    def compiletime_strobelight_meta_inner(function):
+        @functools.wraps(function)
+        def wrapper_function(*args, **kwargs):
+            return function(*args, **kwargs)
+
+        return wrapper_function
+
+    return compiletime_strobelight_meta_inner
 
 
 # Meta only, see
@@ -82,8 +95,65 @@ def log_compilation_event(metrics):
     log.info("%s", metrics)
 
 
-def print_graph(graph, msg: str):
+def upload_graph(graph):
     pass
+
+
+def set_pytorch_distributed_envs_from_justknobs():
+    pass
+
+
+def log_export_usage(**kwargs):
+    pass
+
+
+def log_torchscript_usage(api: str):
+    _ = api
+    return
+
+
+def export_api_rollout_check() -> bool:
+    return False
+
+
+def justknobs_check(name: str) -> bool:
+    """
+    This function can be used to killswitch functionality in FB prod,
+    where you can toggle this value to False in JK without having to
+    do a code push.  In OSS, we always have everything turned on all
+    the time, because downstream users can simply choose to not update
+    PyTorch.  (If more fine-grained enable/disable is needed, we could
+    potentially have a map we lookup name in to toggle behavior.  But
+    the point is that it's all tied to source code in OSS, since there's
+    no live server to query.)
+
+    This is the bare minimum functionality I needed to do some killswitches.
+    We have a more detailed plan at
+    https://docs.google.com/document/d/1Ukerh9_42SeGh89J-tGtecpHBPwGlkQ043pddkKb3PU/edit
+    In particular, in some circumstances it may be necessary to read in
+    a knob once at process start, and then use it consistently for the
+    rest of the process.  Future functionality will codify these patterns
+    into a better high level API.
+
+    WARNING: Do NOT call this function at module import time, JK is not
+    fork safe and you will break anyone who forks the process and then
+    hits JK again.
+    """
+    return True
+
+
+def justknobs_getval_int(name: str) -> int:
+    """
+    Read warning on justknobs_check
+    """
+    return 0
+
+
+@functools.lru_cache(None)
+def max_clock_rate():
+    from triton.testing import nvsmi
+
+    return nvsmi(["clocks.max.sm"])[0]
 
 
 TEST_MASTER_ADDR = "127.0.0.1"
@@ -94,3 +164,8 @@ USE_GLOBAL_DEPS = True
 # USE_RTLD_GLOBAL_WITH_LIBTORCH controls whether __init__.py tries to load
 # _C.so with RTLD_GLOBAL during the call to dlopen.
 USE_RTLD_GLOBAL_WITH_LIBTORCH = False
+# If an op was defined in C++ and extended from Python using the
+# torch.library.register_fake, returns if we require that there be a
+# m.set_python_module("mylib.ops") call from C++ that associates
+# the C++ op with a python module.
+REQUIRES_SET_PYTHON_MODULE = False

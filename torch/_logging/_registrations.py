@@ -11,7 +11,13 @@ DISTRIBUTED = [
 register_log("dynamo", ["torch._dynamo", *DYNAMIC])
 register_log("aot", ["torch._functorch.aot_autograd", "torch._functorch._aot_autograd"])
 register_log("autograd", "torch.autograd")
-register_log("inductor", "torch._inductor")
+register_log("inductor", ["torch._inductor", "torch._inductor.cudagraph_trees"])
+
+register_artifact(
+    "cudagraphs",
+    "Logs information from wrapping inductor generated code with cudagraphs.",
+)
+
 register_log("dynamic", DYNAMIC)
 register_log("torch", "torch")
 register_log("distributed", DISTRIBUTED)
@@ -117,6 +123,11 @@ register_artifact(
 register_artifact(
     "overlap",
     "Detailed Inductor compute/comm overlap decisions",
+    off_by_default=True,
+)
+register_artifact(
+    "sym_node",
+    "Logs extra info for various SymNode operations",
     off_by_default=True,
 )
 

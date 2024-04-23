@@ -1,10 +1,14 @@
+#include <cmath>
+#include <limits>
 #include <vector>
 
 #include <c10/util/Half.h>
+#include <c10/util/floating_point_utils.h>
+#include <c10/util/irange.h>
 #include <gtest/gtest.h>
 
 namespace {
-namespace half_legacy_impl {
+
 float halfbits2float(unsigned short h) {
   unsigned sign = ((h >> 15) & 1);
   unsigned exponent = ((h >> 10) & 0x1f);
@@ -31,18 +35,11 @@ float halfbits2float(unsigned short h) {
 
   unsigned result_bit = (sign << 31) | (exponent << 23) | mantissa;
 
-  // Reinterpret the result bit pattern as a float
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  float result_float;
-  std::memcpy(&result_float, &result_bit, sizeof(result_float));
-  return result_float;
-};
+  return c10::detail::fp32_from_bits(result_bit);
+}
 
 unsigned short float2halfbits(float src) {
-  // Reinterpret the float as a bit pattern
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  unsigned x;
-  std::memcpy(&x, &src, sizeof(x));
+  unsigned x = c10::detail::fp32_to_bits(src);
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables,cppcoreguidelines-avoid-magic-numbers)
   unsigned u = (x & 0x7fffffff), remainder, shift, lsb, lsb_s1, lsb_m1;
@@ -91,9 +88,8 @@ unsigned short float2halfbits(float src) {
   }
 
   return (sign | (exponent << 10) | mantissa);
-};
-} // namespace half_legacy_impl
-TEST(HalfDoubleConversionTest, Half2Double) {
+}
+TEST(HalfConversionTest, TestPorableConversion) {
   std::vector<uint16_t> inputs = {
       0,
       0xfbff, // 1111 1011 1111 1111
@@ -102,12 +98,47 @@ TEST(HalfDoubleConversionTest, Half2Double) {
   };
   for (auto x : inputs) {
     auto target = c10::detail::fp16_ieee_to_fp32_value(x);
-    EXPECT_EQ(half_legacy_impl::halfbits2float(x), target)
+    EXPECT_EQ(halfbits2float(x), target)
         << "Test failed for uint16 to float " << x << "\n";
     EXPECT_EQ(
-        half_legacy_impl::float2halfbits(target),
-        c10::detail::fp16_ieee_from_fp32_value(target))
+        float2halfbits(target), c10::detail::fp16_ieee_from_fp32_value(target))
         << "Test failed for float to uint16" << target << "\n";
   }
 }
+
+TEST(HalfConversion, TestNativeConversionToFloat) {
+  // There are only 2**16 possible values, so test them all
+  for (auto x : c10::irange(std::numeric_limits<uint16_t>::max() + 1)) {
+    auto h = c10::Half(x, c10::Half::from_bits());
+    auto f = halfbits2float(x);
+    // NaNs are not equal to each other
+    if (std::isnan(f) && std::isnan(static_cast<float>(h))) {
+      continue;
+    }
+    EXPECT_EQ(f, static_cast<float>(h)) << "Conversion error using " << x;
+  }
+}
+
+TEST(HalfConversion, TestNativeConversionToHalf) {
+  auto check_conversion = [](float f) {
+    auto h = c10::Half(f);
+    auto h_bits = float2halfbits(f);
+    // NaNs are not equal to each other, just check that half is NaN
+    if (std::isnan(f)) {
+      EXPECT_TRUE(std::isnan(static_cast<float>(h)));
+    } else {
+      EXPECT_EQ(h.x, h_bits) << "Conversion error using " << f;
+    }
+  };
+
+  for (auto x : c10::irange(std::numeric_limits<uint16_t>::max() + 1)) {
+    check_conversion(halfbits2float(x));
+  }
+  // Check a few values outside of Half range
+  check_conversion(std::numeric_limits<float>::max());
+  check_conversion(std::numeric_limits<float>::min());
+  check_conversion(std::numeric_limits<float>::epsilon());
+  check_conversion(std::numeric_limits<float>::lowest());
+}
+
 } // namespace

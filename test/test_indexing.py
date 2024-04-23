@@ -12,7 +12,7 @@ import numpy as np
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, skipIfTorchDynamo, DeterministicGuard)
+    TestCase, run_tests, skipIfTorchDynamo, DeterministicGuard, serialTest, TEST_CUDA)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, dtypes, dtypesIfCPU, dtypesIfCUDA,
     onlyNativeDeviceTypes, skipXLA)
@@ -535,7 +535,7 @@ class TestIndexing(TestCase):
             [[[2]], [[0, 3], [4, 1]], slice(None)],
             # non-contiguous indexing subspace
             [[0, 2, 3], slice(None), [1, 3, 4]],
-
+            # [...]
             # less dim, ellipsis
             [[0, 2], ],
             [[0, 2], slice(None)],
@@ -740,6 +740,7 @@ class TestIndexing(TestCase):
             self.assertEqual(len(w), 2)
 
     @skipIfTorchDynamo("This test causes SIGKILL when running with dynamo, https://github.com/pytorch/pytorch/issues/88472")
+    @serialTest(TEST_CUDA)
     def test_index_put_accumulate_large_tensor(self, device):
         # This test is for tensors with number of elements >= INT_MAX (2^31 - 1).
         N = (1 << 31) + 5

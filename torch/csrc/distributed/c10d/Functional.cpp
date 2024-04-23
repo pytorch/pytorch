@@ -1,14 +1,12 @@
-#include <torch/csrc/distributed/c10d/Functional.hpp>
-
-#include <shared_mutex>
-
 #include <ATen/ATen.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <c10/core/DispatchKey.h>
+#include <torch/csrc/autograd/custom_function.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/RankLocal.hpp>
+#include <utility>
 
 namespace {
 
@@ -16,10 +14,10 @@ class WorkRegistry {
  public:
   void register_work(
       const at::Tensor& tensor,
-      c10::intrusive_ptr<c10d::Work> work) {
-    const auto storage = tensor.storage().getWeakStorageImpl();
+      const c10::intrusive_ptr<c10d::Work>& work) {
+    auto storage = tensor.storage().getWeakStorageImpl();
     std::unique_lock lock(lock_);
-    auto [it, inserted] = registry_.emplace(storage, work);
+    auto [it, inserted] = registry_.try_emplace(std::move(storage), work);
     TORCH_CHECK(
         inserted || it->second != work,
         "The tensor storage is already associated with another work.");
@@ -29,14 +27,32 @@ class WorkRegistry {
     const auto storage = tensor.storage().getWeakStorageImpl();
     std::unique_lock lock(lock_);
     auto it = registry_.find(storage);
-    TORCH_CHECK(
-        it != registry_.end(),
-        "No pending collective is associated with the tensor storage. "
-        "This typically means that the tensor is not a collective output, "
-        "or the tensor has already been waited on.");
+    if (it == registry_.end()) {
+      return nullptr;
+    }
     auto work = it->second;
     registry_.erase(it);
     return work;
+  }
+
+  ~WorkRegistry() {
+    // If there are still unwaited work objects, their corresponding process
+    // groups should have already been destroyed at this stage. Any attempts to
+    // wait for these work objects or to destroy them will only result in
+    // confusing errors. Therefore, we simply issue a warning and intentionally
+    // allow the unwaited work objects to leak.
+    if (!registry_.empty()) {
+      TORCH_WARN(
+          "At the time of process termination, there are still ",
+          registry_.size(),
+          " unwaited c10d_functional collective calls. "
+          "Please review your program to ensure c10d_functional.wait_tensor() "
+          "is invoked on all tensors returned from c10d_functional collective "
+          "ops before they are used.");
+    }
+    for (auto& it : registry_) {
+      it.second.release();
+    }
   }
 
  private:
@@ -46,6 +62,26 @@ class WorkRegistry {
       registry_;
   std::mutex lock_;
 };
+
+static WorkRegistry process_registry;
+
+void register_work(
+    const at::Tensor& tensor,
+    const c10::intrusive_ptr<c10d::Work>& work) {
+  if (c10d::get_thread_isolation_mode()) {
+    c10d::RankLocal<WorkRegistry>::get().register_work(tensor, work);
+  } else {
+    process_registry.register_work(tensor, work);
+  }
+}
+
+c10::intrusive_ptr<c10d::Work> pop_work(const at::Tensor& tensor) {
+  if (c10d::get_thread_isolation_mode()) {
+    return c10d::RankLocal<WorkRegistry>::get().pop_work(tensor);
+  } else {
+    return process_registry.pop_work(tensor);
+  }
+}
 
 const std::unordered_map<std::string, c10d::ReduceOp> str_to_reduce_op = {
     {"sum", c10d::ReduceOp(c10d::ReduceOp::RedOpType::SUM)},
@@ -69,8 +105,9 @@ c10d::ReduceOp to_reduce_op(const std::string& reduce_op) {
 
 at::Tensor& all_reduce_(
     at::Tensor& input,
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
     std::string reduce_op,
-    // c10::string_view group_name,
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
     std::string group_name) {
   c10d::AllreduceOptions opts;
   opts.reduceOp = to_reduce_op(reduce_op);
@@ -86,13 +123,15 @@ at::Tensor all_reduce(
     const at::Tensor& input,
     std::string reduce_op,
     std::string group_name) {
-  auto output = input.clone();
-  return all_reduce_(output, reduce_op, group_name);
+  auto output = input.clone(at::MemoryFormat::Contiguous);
+  return all_reduce_(output, std::move(reduce_op), std::move(group_name));
 }
 
 std::vector<at::Tensor> all_reduce_coalesced_(
     std::vector<at::Tensor> inputs,
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
     std::string reduce_op,
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
     std::string group_name) {
   c10d::AllreduceCoalescedOptions opts;
   opts.reduceOp = to_reduce_op(reduce_op);
@@ -106,14 +145,17 @@ std::vector<at::Tensor> all_reduce_coalesced_(
 }
 
 std::vector<at::Tensor> all_reduce_coalesced(
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
     std::vector<at::Tensor> inputs,
     std::string reduce_op,
     std::string group_name) {
   std::vector<at::Tensor> outputs;
+  outputs.reserve(inputs.size());
   for (const auto& tensor : inputs) {
-    outputs.push_back(tensor.clone());
+    outputs.push_back(tensor.clone(at::MemoryFormat::Contiguous));
   }
-  return all_reduce_coalesced_(outputs, reduce_op, group_name);
+  return all_reduce_coalesced_(
+      outputs, std::move(reduce_op), std::move(group_name));
 }
 
 at::Tensor allocate_all_gather_output(
@@ -129,15 +171,16 @@ at::Tensor allocate_all_gather_output(
 std::vector<at::Tensor> all_gather_into_tensor_coalesced(
     std::vector<at::Tensor> inputs,
     int64_t group_size,
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
     std::string group_name) {
   std::vector<at::Tensor> outputs;
+  outputs.reserve(inputs.size());
   for (const auto& tensor : inputs) {
     outputs.push_back(allocate_all_gather_output(tensor, group_size));
   }
 
   auto group = c10d::resolve_process_group(group_name);
-  auto work = group->allgather_into_tensor_coalesced(
-      outputs, const_cast<std::vector<at::Tensor>&>(inputs));
+  auto work = group->allgather_into_tensor_coalesced(outputs, inputs);
   for (const auto& tensor : outputs) {
     c10d::RankLocal<WorkRegistry>::get().register_work(tensor, work);
   }
@@ -149,7 +192,8 @@ at::Tensor all_gather_into_tensor(
     int64_t group_size,
     std::string group_name) {
   std::vector<at::Tensor> inputs{input};
-  return all_gather_into_tensor_coalesced(inputs, group_size, group_name)[0];
+  return all_gather_into_tensor_coalesced(
+      inputs, group_size, std::move(group_name))[0];
 }
 
 at::Tensor allocate_reduce_scatter_output(
@@ -169,19 +213,21 @@ at::Tensor allocate_reduce_scatter_output(
 
 std::vector<at::Tensor> reduce_scatter_tensor_coalesced(
     std::vector<at::Tensor> inputs,
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
     std::string reduce_op,
     int64_t group_size,
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
     std::string group_name) {
   c10d::ReduceScatterOptions opts;
   opts.reduceOp = to_reduce_op(reduce_op);
   std::vector<at::Tensor> outputs;
+  outputs.reserve(inputs.size());
   for (const auto& tensor : inputs) {
     outputs.push_back(allocate_reduce_scatter_output(tensor, group_size));
   }
 
   auto group = c10d::resolve_process_group(group_name);
-  auto work = group->reduce_scatter_tensor_coalesced(
-      outputs, const_cast<std::vector<at::Tensor>&>(inputs), opts);
+  auto work = group->reduce_scatter_tensor_coalesced(outputs, inputs, opts);
   for (const auto& tensor : outputs) {
     c10d::RankLocal<WorkRegistry>::get().register_work(tensor, work);
   }
@@ -195,22 +241,24 @@ at::Tensor reduce_scatter_tensor(
     std::string group_name) {
   std::vector<at::Tensor> inputs{input};
   return reduce_scatter_tensor_coalesced(
-      inputs, reduce_op, group_size, group_name)[0];
+      inputs, std::move(reduce_op), group_size, std::move(group_name))[0];
 }
 
 at::Tensor all_to_all_single(
     const at::Tensor& input,
     std::vector<int64_t> output_split_sizes,
     std::vector<int64_t> input_split_sizes,
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
     std::string group_name) {
   std::vector<int64_t> output_sizes = input.sizes().vec();
-  output_sizes[0] =
-      std::accumulate(output_split_sizes.begin(), output_split_sizes.end(), 0);
+  output_sizes[0] = std::accumulate(
+      output_split_sizes.begin(), output_split_sizes.end(), int64_t(0));
   auto output = input.new_empty(output_sizes);
 
   auto group = c10d::resolve_process_group(group_name);
   auto work = group->alltoall_base(
       output,
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       const_cast<at::Tensor&>(input),
       output_split_sizes,
       input_split_sizes);
@@ -218,9 +266,31 @@ at::Tensor all_to_all_single(
   return output;
 }
 
+// NOLINTNEXTLINE(performance-unnecessary-value-param)
+at::Tensor& broadcast_(at::Tensor& input, int64_t src, std::string group_name) {
+  c10d::BroadcastOptions opts;
+  opts.rootRank = src;
+  std::vector<at::Tensor> inputs{input};
+
+  auto group = c10d::resolve_process_group(group_name);
+  auto work = group->broadcast(inputs, opts);
+  c10d::RankLocal<WorkRegistry>::get().register_work(input, work);
+  return input;
+}
+
+at::Tensor broadcast(
+    const at::Tensor& input,
+    int64_t src,
+    std::string group_name) {
+  auto output = input.clone(at::MemoryFormat::Contiguous);
+  return broadcast_(output, src, std::move(group_name));
+}
+
 at::Tensor wait_tensor(const at::Tensor& tensor) {
   auto work = c10d::RankLocal<WorkRegistry>::get().pop_work(tensor);
-  work->wait();
+  if (work != nullptr) {
+    work->wait();
+  }
   return tensor;
 }
 
@@ -289,8 +359,223 @@ TORCH_LIBRARY(_c10d_functional, m) {
       {at::Tag::pt2_compliant_tag});
 
   m.def(
+      "broadcast(Tensor input, int src, str group_name) -> Tensor",
+      torch::dispatch(c10::DispatchKey::CompositeExplicitAutograd, ::broadcast),
+      {at::Tag::pt2_compliant_tag});
+
+  m.def(
+      "broadcast_(Tensor(a!) input, int src, str group_name) -> Tensor(a!)",
+      torch::dispatch(
+          c10::DispatchKey::CompositeExplicitAutograd, ::broadcast_),
+      {at::Tag::pt2_compliant_tag});
+
+  m.def(
       "wait_tensor(Tensor tensor) -> Tensor",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd, ::wait_tensor),
+      {at::Tag::pt2_compliant_tag});
+}
+
+namespace {
+class AllToAllSingle : public torch::autograd::Function<AllToAllSingle> {
+ public:
+  static torch::autograd::Variable forward(
+      torch::autograd::AutogradContext* ctx,
+      const at::Tensor& input,
+      // NOLINTNEXTLINE(performance-unnecessary-value-param)
+      std::vector<int64_t> output_split_sizes,
+      // NOLINTNEXTLINE(performance-unnecessary-value-param)
+      std::vector<int64_t> input_split_sizes,
+      // NOLINTNEXTLINE(performance-unnecessary-value-param)
+      std::string group_name) {
+    // swap sizes for backwards pass
+    ctx->saved_data["output_split_sizes"] = input_split_sizes;
+    ctx->saved_data["input_split_sizes"] = output_split_sizes;
+    ctx->saved_data["group_name"] = group_name;
+
+    return c10::Dispatcher::singleton()
+        .findSchemaOrThrow("_c10d_functional::all_to_all_single", "")
+        .typed<decltype(all_to_all_single)>()
+        .call(input, output_split_sizes, input_split_sizes, group_name);
+  }
+
+  static torch::autograd::variable_list backward(
+      torch::autograd::AutogradContext* ctx,
+      torch::autograd::variable_list grad_out_list) {
+    const std::vector<int64_t>& output_split_sizes =
+        ctx->saved_data["output_split_sizes"].toIntVector();
+    const std::vector<int64_t>& input_split_sizes =
+        ctx->saved_data["input_split_sizes"].toIntVector();
+    const std::string& group_name = ctx->saved_data["group_name"].toStringRef();
+
+    DCHECK(grad_out_list.size() == 1);
+    auto grad_out = grad_out_list[0].contiguous();
+
+    auto out =
+        c10::Dispatcher::singleton()
+            .findSchemaOrThrow("_c10d_functional::all_to_all_single", "")
+            .typed<decltype(all_to_all_single)>()
+            .call(grad_out, output_split_sizes, input_split_sizes, group_name);
+
+    // do an explicit wait to avoid cuda stream issues
+    // TODO: track active cuda stream in wait
+    out = c10::Dispatcher::singleton()
+              .findSchemaOrThrow("_c10d_functional::wait_tensor", "")
+              .typed<decltype(wait_tensor)>()
+              .call(out);
+
+    return {out, at::Tensor(), at::Tensor(), at::Tensor()};
+  }
+};
+
+at::Tensor all_to_all_single_autograd(
+    const at::Tensor& input,
+    const std::vector<int64_t>& output_split_sizes,
+    const std::vector<int64_t>& input_split_sizes,
+    const std::string& group_name) {
+  return AllToAllSingle::apply(
+      input, output_split_sizes, input_split_sizes, group_name);
+}
+
+class ReduceScatterTensor
+    : public torch::autograd::Function<ReduceScatterTensor> {
+ public:
+  static torch::autograd::Variable forward(
+      torch::autograd::AutogradContext* ctx,
+      const at::Tensor& input,
+      std::string reduce_op,
+      int64_t group_size,
+      std::string group_name) {
+    TORCH_CHECK(reduce_op == "sum", "Only sum reduce op is supported");
+
+    ctx->saved_data["group_size"] = group_size;
+    ctx->saved_data["group_name"] = group_name;
+
+    return c10::Dispatcher::singleton()
+        .findSchemaOrThrow("_c10d_functional::reduce_scatter_tensor", "")
+        .typed<decltype(reduce_scatter_tensor)>()
+        .call(input, reduce_op, group_size, group_name);
+  }
+
+  static torch::autograd::variable_list backward(
+      torch::autograd::AutogradContext* ctx,
+      torch::autograd::variable_list grad_out_list) {
+    const int64_t group_size = ctx->saved_data["group_size"].toInt();
+    const std::string& group_name = ctx->saved_data["group_name"].toStringRef();
+
+    DCHECK(grad_out_list.size() == 1);
+    auto grad_out = grad_out_list[0];
+
+    auto out =
+        c10::Dispatcher::singleton()
+            .findSchemaOrThrow("_c10d_functional::all_gather_into_tensor", "")
+            .typed<decltype(all_gather_into_tensor)>()
+            .call(grad_out, group_size, group_name);
+
+    // do an explicit wait to avoid cuda stream issues
+    // TODO: track active cuda stream in wait
+    out = c10::Dispatcher::singleton()
+              .findSchemaOrThrow("_c10d_functional::wait_tensor", "")
+              .typed<decltype(wait_tensor)>()
+              .call(out);
+
+    return {
+        out,
+        at::Tensor(),
+        at::Tensor(),
+        at::Tensor(),
+    };
+  }
+};
+
+at::Tensor reduce_scatter_tensor_autograd(
+    const at::Tensor& input,
+    std::string reduce_op,
+    int64_t group_size,
+    std::string group_name) {
+  return ReduceScatterTensor::apply(input, reduce_op, group_size, group_name);
+}
+
+class AllGatherIntoTensor
+    : public torch::autograd::Function<AllGatherIntoTensor> {
+ public:
+  static torch::autograd::Variable forward(
+      torch::autograd::AutogradContext* ctx,
+      const at::Tensor& input,
+      int64_t group_size,
+      std::string group_name) {
+    ctx->saved_data["group_size"] = group_size;
+    ctx->saved_data["group_name"] = group_name;
+
+    return c10::Dispatcher::singleton()
+        .findSchemaOrThrow("_c10d_functional::all_gather_into_tensor", "")
+        .typed<decltype(all_gather_into_tensor)>()
+        .call(input, group_size, group_name);
+  }
+
+  static torch::autograd::variable_list backward(
+      torch::autograd::AutogradContext* ctx,
+      torch::autograd::variable_list grad_out_list) {
+    const int64_t group_size = ctx->saved_data["group_size"].toInt();
+    const std::string& group_name = ctx->saved_data["group_name"].toStringRef();
+
+    DCHECK(grad_out_list.size() == 1);
+    auto grad_out = grad_out_list[0];
+
+    auto out =
+        c10::Dispatcher::singleton()
+            .findSchemaOrThrow("_c10d_functional::reduce_scatter_tensor", "")
+            .typed<decltype(reduce_scatter_tensor)>()
+            .call(grad_out, "sum", group_size, group_name);
+
+    // do an explicit wait to avoid cuda stream issues
+    // TODO: track active cuda stream in wait
+    out = c10::Dispatcher::singleton()
+              .findSchemaOrThrow("_c10d_functional::wait_tensor", "")
+              .typed<decltype(wait_tensor)>()
+              .call(out);
+
+    return {
+        out,
+        at::Tensor(),
+        at::Tensor(),
+    };
+  }
+};
+
+at::Tensor all_gather_into_tensor_autograd(
+    const at::Tensor& input,
+    int64_t group_size,
+    std::string group_name) {
+  return AllGatherIntoTensor::apply(input, group_size, group_name);
+}
+
+} // namespace
+
+TORCH_LIBRARY(_c10d_functional_autograd, m) {
+  m.def(
+      "all_to_all_single("
+      "Tensor input, "
+      "SymInt[] output_split_sizes, "
+      "SymInt[] input_split_sizes, "
+      "str group_name) -> Tensor",
+      torch::dispatch(c10::DispatchKey::Autograd, ::all_to_all_single_autograd),
+      {at::Tag::pt2_compliant_tag});
+  m.def(
+      "reduce_scatter_tensor("
+      "Tensor input, "
+      "str reduce_op, "
+      "int group_size, "
+      "str group_name) -> Tensor",
+      torch::dispatch(
+          c10::DispatchKey::Autograd, ::reduce_scatter_tensor_autograd),
+      {at::Tag::pt2_compliant_tag});
+  m.def(
+      "all_gather_into_tensor("
+      "Tensor input, "
+      "int group_size, "
+      "str group_name) -> Tensor",
+      torch::dispatch(
+          c10::DispatchKey::Autograd, ::all_gather_into_tensor_autograd),
       {at::Tag::pt2_compliant_tag});
 }

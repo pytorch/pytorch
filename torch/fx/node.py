@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 # Nodes represent a definition of a value in our graph of operators.
 from typing import TYPE_CHECKING, Union, Callable, Any, Tuple, List, Optional, Dict, Set
 from ._compatibility import compatibility
@@ -37,18 +39,23 @@ _side_effectful_need_to_be_preserved_pre_dispatch: Set[Callable] = {
     torch.amp._exit_autocast,
 }
 
+# TODO: Either refactor this into 2 functions 1 dce for functional graphs and 1 dce for all graphs,
+# or add logic to correctly mark all inplace ops as side effectful.
 _side_effectful_functions: Set[Callable] = {
     torch._assert,
     torch._assert_async,
     _ops.aten._assert_async.msg,
     _ops.aten._assert_scalar.default,
     _ops.aten.copy_.default,
+    _ops.aten.set_.source_Tensor,
+    _ops.aten.index_put_.default,
     _ops.aten.sym_constrain_range.default,
     _ops.aten.sym_constrain_range_for_size.default,
     _ops.profiler._record_function_enter,
     _ops.profiler._record_function_enter_new,
     _ops.profiler._record_function_exit,
     _ops.inductor.accumulate_grad_.default,
+    _ops.inductor.resize_storage_bytes_.default,
 } | _side_effectful_need_to_be_preserved_pre_dispatch
 
 
@@ -231,6 +238,7 @@ class Node:
         self._prev = self
         self._next = self
         self._erased = False
+        self._sort_key = ()
 
         # If set, use this fn to print this node
         self._repr_fn : Optional[Callable[[Node], str]] = None
@@ -282,6 +290,30 @@ class Node:
         p = self._prev
         p._next, x._prev = x, p
         x._next, self._prev = self, x
+
+        # compute x._sort_key
+        psk = x._prev._sort_key
+        nsk = x._next._sort_key
+        if len(psk) > len(nsk):
+            *prefix, idx = psk[:len(nsk) + 1]
+            x._sort_key = (*prefix, idx + 1)
+        elif len(psk) < len(nsk):
+            *prefix, idx = nsk[:len(psk) + 1]
+            x._sort_key = (*prefix, idx - 1)
+        else:  # same length, increase length by 1
+            x._sort_key = (*psk, 0)
+
+    def __gt__(self, other: 'Node'):
+        return self._sort_key > other._sort_key
+
+    def __lt__(self, other: 'Node'):
+        return self._sort_key < other._sort_key
+
+    def __ge__(self, other: 'Node'):
+        return self > other or self == other
+
+    def __le__(self, other: 'Node'):
+        return self < other or self == other
 
     @compatibility(is_backward_compatible=True)
     def append(self, x: 'Node') -> None:
@@ -690,8 +722,17 @@ class Node:
                 assert isinstance(value, str)
                 for user in self.users:
                     m._replace_hook(old=self, new=value, user=user)
+        update = False
+        if (
+                hasattr(self, name) and
+                hasattr(self.graph, "_find_nodes_lookup_table") and
+                self in self.graph._find_nodes_lookup_table
+        ):
+            update = True
+            self.graph._find_nodes_lookup_table.remove(self)
         object.__setattr__(self, name, value)
-
+        if update:
+            self.graph._find_nodes_lookup_table.insert(self)
 
 @compatibility(is_backward_compatible=True)
 def map_arg(a: Argument, fn: Callable[[Node], Argument]) -> Argument:

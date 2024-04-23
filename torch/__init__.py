@@ -57,7 +57,7 @@ __all__ = [
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
     'SymBool', 'sym_not', 'unravel_index',
     'sym_int', 'sym_float', 'sym_max', 'sym_min', 'sym_ite', 'compile', 'vmap',
-    'export', 'autocast', 'cond',
+    'export', 'autocast', 'cond', 'GradScaler',
 ]
 
 ################################################################################
@@ -279,6 +279,12 @@ class SymInt:
     def __ge__(self, other) -> builtins.bool:
         raise AssertionError("type stub not overridden")
 
+    def __add__(self, other) -> "SymInt":
+        raise AssertionError("type stub not overridden")
+
+    def __mul__(self, other) -> "SymInt":
+        raise AssertionError("type stub not overridden")
+
     def __sym_max__(self, other):
         raise AssertionError("type stub not overridden")
 
@@ -295,12 +301,11 @@ class SymInt:
         return str(self.node)
 
     def __hash__(self) -> builtins.int:
-        ret = self.node.singleton_int()
-        if ret is not None:
-            return hash(ret)
+        if self.node.is_nested_int():
+            return hash(self.node.nested_int())
         else:
             # We could support constant SymInts as well, but not doing it for now
-            raise TypeError("unhashable type: non-singleton SymInt")
+            raise TypeError("unhashable type: non-nested SymInt")
 
 class SymFloat:
     """
@@ -332,6 +337,9 @@ class SymFloat:
         raise AssertionError("type stub not overridden")
 
     def __ge__(self, other) -> builtins.bool:
+        raise AssertionError("type stub not overridden")
+
+    def __trunc__(self):
         raise AssertionError("type stub not overridden")
 
     def __sym_max__(self, other):
@@ -460,7 +468,7 @@ def sym_int(a):
     if isinstance(a, SymInt):
         return a
     elif isinstance(a, SymFloat):
-        return math.floor(a) if a >= 0 else math.ceil(a)  # type: ignore[arg-type, call-overload]
+        return math.trunc(a)
     return py_int(a)  # type: ignore[operator]
 
 def sym_max(a, b):
@@ -515,7 +523,7 @@ for name in ("sqrt", "cos", "cosh", "sin", "sinh", "tan", "tanh", "asin", "acos"
 sym_sqrt = current_module._sym_sqrt
 __all__.append("sym_sqrt")
 
-del fn, name, sym_name, current_module
+del fn, name, sym_name, current_module  # type: ignore[possibly-undefined]
 
 
 def sym_ite(b, t, f):
@@ -745,17 +753,17 @@ def set_default_tensor_type(t):
 def set_default_dtype(d):
     r"""
 
-    Sets the default floating point dtype to :attr:`d`. Supports torch.float32
-    and torch.float64 as inputs. Other dtypes may be accepted without complaint
-    but are not supported and are unlikely to work as expected.
+    Sets the default floating point dtype to :attr:`d`. Supports floating point dtype
+    as inputs. Other dtypes will cause torch to raise an exception.
 
     When PyTorch is initialized its default floating point dtype is torch.float32,
     and the intent of set_default_dtype(torch.float64) is to facilitate NumPy-like
     type inference. The default floating point dtype is used to:
 
-    1. Implicitly determine the default complex dtype. When the default floating point
-       type is float32 the default complex dtype is complex64, and when the default
-       floating point type is float64 the default complex type is complex128.
+    1. Implicitly determine the default complex dtype. When the default floating type is float16,
+       the default complex dtype is complex32. For float32, the default complex dtype is complex64.
+       For float64, it is complex128. For bfloat16, an exception will be raised because
+       there is no corresponding complex type for bfloat16.
     2. Infer the dtype for tensors constructed using Python floats or complex Python
        numbers. See examples below.
     3. Determine the result of type promotion between bool and integer tensors and
@@ -777,13 +785,20 @@ def set_default_dtype(d):
         torch.complex64
 
         >>> torch.set_default_dtype(torch.float64)
-
         >>> # Python floats are now interpreted as float64
         >>> torch.tensor([1.2, 3]).dtype    # a new floating point tensor
         torch.float64
         >>> # Complex Python numbers are now interpreted as complex128
         >>> torch.tensor([1.2, 3j]).dtype   # a new complex tensor
         torch.complex128
+
+        >>> torch.set_default_dtype(torch.float16)
+        >>> # Python floats are now interpreted as float16
+        >>> torch.tensor([1.2, 3]).dtype    # a new floating point tensor
+        torch.float16
+        >>> # Complex Python numbers are now interpreted as complex128
+        >>> torch.tensor([1.2, 3j]).dtype   # a new complex tensor
+        torch.complex32
 
     """
     _C._set_default_dtype(d)
@@ -879,7 +894,7 @@ def use_deterministic_algorithms(mode: builtins.bool, *, warn_only: builtins.boo
     A handful of CUDA operations are nondeterministic if the CUDA version is
     10.2 or greater, unless the environment variable ``CUBLAS_WORKSPACE_CONFIG=:4096:8``
     or ``CUBLAS_WORKSPACE_CONFIG=:16:8`` is set. See the CUDA documentation for more
-    details: `<https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility>`_
+    details: `<https://docs.nvidia.com/cuda/cublas/index.html#results-reproducibility>`_
     If one of these environment variable configurations is not set, a :class:`RuntimeError`
     will be raised from these operations when called with CUDA tensors:
 
@@ -1009,24 +1024,24 @@ def set_float32_matmul_precision(precision: str) -> None:
     Supports three settings:
 
         * "highest", float32 matrix multiplications use the float32 datatype (24 mantissa
-          bits) for internal computations.
+          bits with 23 bits explicitly stored) for internal computations.
         * "high", float32 matrix multiplications either use the TensorFloat32 datatype (10
-          mantissa bits) or treat each float32 number as the sum of two bfloat16 numbers
-          (approximately 16 mantissa bits), if the appropriate fast matrix multiplication
+          mantissa bits explicitly stored) or treat each float32 number as the sum of two bfloat16 numbers
+          (approximately 16 mantissa bits with 14 bits explicitly stored), if the appropriate fast matrix multiplication
           algorithms are available.  Otherwise float32 matrix multiplications are computed
           as if the precision is "highest".  See below for more information on the bfloat16
           approach.
         * "medium", float32 matrix multiplications use the bfloat16 datatype (8 mantissa
-          bits) for internal computations, if a fast matrix multiplication algorithm
+          bits with 7 bits explicitly stored) for internal computations, if a fast matrix multiplication algorithm
           using that datatype internally is available. Otherwise float32
           matrix multiplications are computed as if the precision is "high".
 
     When using "high" precision, float32 multiplications may use a bfloat16-based algorithm
     that is more complicated than simply truncating to some smaller number mantissa bits
-    (e.g. 10 for TensorFloat32, 8 for bfloat16).  Refer to [Henry2019]_ for a complete
+    (e.g. 10 for TensorFloat32, 7 for bfloat16 explicitly stored).  Refer to [Henry2019]_ for a complete
     description of this algorithm.  To briefly explain here, the first step is to realize
     that we can perfectly encode a single float32 number as the sum of three bfloat16
-    numbers (because float32 has 24 mantissa bits while bfloat16 has 8, and both have the
+    numbers (because float32 has 23 mantissa bits while bfloat16 has 7 explicitly stored, and both have the
     same number of exponent bits).  This means that the product of two float32 numbers can
     be exactly given by the sum of nine products of bfloat16 numbers.  We can then trade
     accuracy for speed by dropping some of these products.  The "high" precision algorithm
@@ -1441,7 +1456,7 @@ _storage_classes = {
     TypedStorage
 }
 
-# The _tensor_classes set is initialized by the call to _C._initialize_tensor_type_bindings()
+# The _tensor_classes set is initialized by the call to initialize_python_bindings.
 _tensor_classes: Set[Type] = set()
 
 # If you edit these imports, please update torch/__init__.py.in as well
@@ -1462,7 +1477,7 @@ def manager_path():
         raise RuntimeError("Unable to find torch_shm_manager at " + path)
     return path.encode('utf-8')
 
-from torch.amp import autocast
+from torch.amp import autocast, GradScaler
 
 # Initializing the extension shadows the built-in python float / int classes;
 # store them for later use by SymInt / SymFloat.
@@ -1507,6 +1522,15 @@ for name in dir(_C._VariableFunctions):
         __all__.append(name)
 
 
+################################################################################
+# Add torch.dtype instances to the public API
+################################################################################
+
+import torch
+
+for attribute in dir(torch):
+    if isinstance(getattr(torch, attribute), torch.dtype):
+        __all__.append(attribute)
 
 ################################################################################
 # Import TorchDynamo's lazy APIs to avoid circular dependenices
@@ -1554,6 +1578,7 @@ def _assert(condition, message):
 from torch import cuda as cuda
 from torch import cpu as cpu
 from torch import mps as mps
+from torch import xpu as xpu
 from torch import autograd as autograd
 from torch.autograd import (
     no_grad as no_grad,
@@ -1597,8 +1622,8 @@ import torch.nn.intrinsic
 _C._init_names(list(torch._storage_classes))
 
 # attach docstrings to torch and tensor functions
-from . import _torch_docs, _tensor_docs, _storage_docs
-del _torch_docs, _tensor_docs, _storage_docs
+from . import _torch_docs, _tensor_docs, _storage_docs, _size_docs
+del _torch_docs, _tensor_docs, _storage_docs, _size_docs
 
 
 def compiled_with_cxx11_abi() -> builtins.bool:
@@ -1663,6 +1688,9 @@ class _TorchCompileInductorWrapper:
         self.apply_mode(mode)
         self.apply_options(options)
 
+        # Stash the compiler_fn to be used for backend match guard.
+        from torch._inductor.compile_fx import compile_fx
+        self.compiler_fn = compile_fx
         if self.config.get("triton.cudagraphs", False):
             os.environ["DISABLE_CUPTI_LAZY_REINIT"] = "1"
             # FIXME: CUDA Graph does not work well with CUPTI teardown.
@@ -1752,6 +1780,10 @@ class _TorchCompileWrapper:
     def __call__(self, model_, inputs_):
         return self.compiler_fn(model_, inputs_, **self.kwargs)
 
+    def reset(self):
+        if hasattr(self.compiler_fn, "reset"):
+            self.compiler_fn.reset()
+
 
 def compile(model: Optional[Callable] = None, *,
             fullgraph: builtins.bool = False,
@@ -1762,6 +1794,8 @@ def compile(model: Optional[Callable] = None, *,
             disable: builtins.bool = False) -> Callable:
     """
     Optimizes given model/function using TorchDynamo and specified backend.
+    If you are compiling an :class:`torch.nn.Module`, you can also use :meth:`torch.nn.Module.compile`
+    to compile the module inplace without changing its structure.
 
     Concretely, for every frame executed within the compiled region, we will attempt
     to compile it and cache the compiled result on the code object for future
@@ -1795,7 +1829,7 @@ def compile(model: Optional[Callable] = None, *,
 
         - Experimental or debug in-tree backends can be seen with `torch._dynamo.list_backends(None)`
 
-        - To register an out-of-tree custom backend: https://pytorch.org/docs/main/compile/custom-backends.html
+        - To register an out-of-tree custom backend: https://pytorch.org/docs/main/torch.compiler_custom_backends.html
        mode (str): Can be either "default", "reduce-overhead", "max-autotune" or "max-autotune-no-cudagraphs"
 
         - "default" is the default mode, which is a good balance between performance and overhead
@@ -1842,9 +1876,8 @@ def compile(model: Optional[Callable] = None, *,
 
     """
     _C._log_api_usage_once("torch.compile")
-    # Temporary until we get proper support for python 3.12
-    if sys.version_info >= (3, 12):
-        raise RuntimeError("Dynamo is not supported on Python 3.12+")
+    if sys.version_info >= (3, 13):
+        raise RuntimeError("Dynamo is not supported on Python 3.13+")
 
     # Decorator mode
     if model is None:
@@ -1999,39 +2032,17 @@ def _constrain_as_size(symbol, min: Optional[builtins.int] = None, max: Optional
     which then need to be used as tensor constructors. Providing these assertions to PyTorch can help resolve
       GuardOnDataDependentSymNode errors upon export, since we cannot guard on unbacked SymInts.
 
-    This function has unusual semantics which distinguish it from constrain_as_value.
-    Specifically, at compile-time, we will unsoundly assume that the resulting int is always >= 2.
-    As a result, max value you pass in should always be greater than 2.
-    This makes it easier to use the unbacked int in size contexts, as we will often attempt to guard on a size being zero/one
-    (e.g., when computing the contiguity of a tensor, or testing if broadcasting can occur),
-    which will not work on unbacked SymInts. Assuming that the int is >= 2 allows us to
-    report False to these tests. Although this is technically unsound,
-    in practice we observe that if your program works for all sizes >= 2,
-    it probably works for zero and one too. The reason specifically assume size is >= 2 is because
-    lot of PyTorch code is specialized for 0 and 1 which could result in not general graphs.
-    At runtime, we only assert that the user provided min/max values are respected.
+    This function has unusual semantics which distinguish it from
+    constrain_as_value.  Specifically, in some circumstances in framework
+    code, we will treat this int as >= 2 (when we do a size-oblivious guard).
+    This makes it easier to This makes it easier to use the unbacked int in
+    size contexts, as we will often attempt to guard on a size being zero/one
+    (e.g., when computing the contiguity of a tensor, or testing if
+    broadcasting can occur), which will not work on unbacked SymInts.
+    However, if we conservatively assume that the size is not zero/one, we will
+    end up with a graph that will still work even if the size is zero/one.
 
-    To demonstrate in a scenario, suppose you do
-    ```
-    # Case 1
-    # This will assume symbol is between [2, inf) at compile time, but [0, inf) at runtime
-    constrain_as_size(symbol, min=0)
-
-    # Case 2
-    # This will assume symbol is between [2, N] at compile time, but [0, N] at runtime
-    constrain_as_size(symbol, min=0, max=N)
-
-    # Case 3
-    # This is not valid case as max is <= 2
-    constrain_as_size(symbol, min=0, max=1)
-
-    # Case 4
-    # This will assume symbol is between [2, inf) at compile time, AND [2, inf) at runtime
-    constrain_as_size(symbol, min=2)
-
-    # Case 5
-    # This will assume symbol is between [2, inf) at compile time, but [1, inf) at runtime
-    constrain_as_size(symbol, min=1)
+    For more details, see https://docs.google.com/document/d/1HSuTTVvYH1pTew89Rtpeu84Ht3nQEFTYhAX3Ypa_xJs/edit
     ```
     """
     torch.sym_constrain_range_for_size(symbol, min=min, max=max)

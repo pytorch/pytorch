@@ -1,3 +1,4 @@
+# mypy: disable-error-code="possibly-undefined"
 # flake8: noqa
 import torch
 from torch.testing._internal.common_utils import TEST_NUMPY

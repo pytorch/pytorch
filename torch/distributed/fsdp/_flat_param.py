@@ -58,7 +58,7 @@ __all__ = [
     "HandleShardingStrategy",
 ]
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 """
@@ -511,21 +511,21 @@ class FlatParamHandle:
         self._use_fake_reduce = os.environ.get(_FSDP_USE_FAKE_REDUCE, "") == "1"
         if self._skip_writeback_check:
             _warn_skip_writeback_check(
-                log,
+                logger,
                 f"Since {_FSDP_SKIP_WRITEBACK_CHECK}=1, FSDP will not check "
                 "for parameter or gradient writeback. Changing parameter or "
                 "gradient storages may lead to silent correctness errors.",
             )
         if self._use_fake_all_gather:
             _warn_use_fake_all_gather(
-                log,
+                logger,
                 f"Since {_FSDP_USE_FAKE_ALL_GATHER}=1, FSDP will not execute "
                 "all-gather ops. Your training will be incorrect, but "
                 "can reveal how much time spent on all-gather ops.",
             )
         if self._use_fake_reduce:
             _warn_use_fake_reduce(
-                log,
+                logger,
                 f"Since {_FSDP_USE_FAKE_REDUCE}=1, FSDP will not execute "
                 "reduce-scatter ops. Your training will be incorrect, but "
                 "can reveal how much time spent on reduce-scatter ops.",
@@ -708,7 +708,7 @@ class FlatParamHandle:
             and aligned_numel > 0
             and total_numel != total_numel_without_padding
         ):
-            log.info(
+            logger.debug(
                 "FSDP FlatParameter address alignment created "
                 "%s numel of padding (%s vs. %s)",
                 total_numel - total_numel_without_padding,
@@ -721,7 +721,7 @@ class FlatParamHandle:
             numel_to_pad = self.world_size - (total_numel % self.world_size)
             if numel_to_pad > 0 and numel_to_pad < self.world_size:
                 if self.rank == 0:
-                    log.info(
+                    logger.info(
                         "FSDP FlatParameter world size divisibility created "
                         "%s numel of padding",
                         numel_to_pad,
@@ -1729,7 +1729,8 @@ class FlatParamHandle:
 
     def _free_unsharded_flat_param(self):
         """
-        Free the padded unsharded flat parameter.
+        Free the padded unsharded flat parameter. We allow this
+        function to be called even when storage is not allocated
 
         The tensor to free depends
         on the calling context since the unshard may have forced full
@@ -1737,7 +1738,6 @@ class FlatParamHandle:
         """
         self._check_sharded_strategy()
         unsharded_flat_param = self._get_padded_unsharded_flat_param()
-        self._check_storage_allocated(unsharded_flat_param)
         self._check_on_compute_device(unsharded_flat_param)
         # Do not free the memory until all ops in the current stream finish
         _no_dispatch_record_stream(
@@ -1767,8 +1767,8 @@ class FlatParamHandle:
             )
         flat_param.data = flat_param._local_shard  # type: ignore[attr-defined]
         if self._use_orig_params:
-            if skip_use_sharded_views:
-                self._unsharded_flat_param_for_skipped_views = unsharded_flat_param
+            if skip_use_sharded_views:  # type: ignore[possibly-undefined]
+                self._unsharded_flat_param_for_skipped_views = unsharded_flat_param  # type: ignore[possibly-undefined]
             else:
                 self._use_sharded_views()
             # For the post-forward reshard, we may try to use sharded gradient
@@ -1776,7 +1776,7 @@ class FlatParamHandle:
             # in `no_sync()`), but for the post-backward reshard, we delay the
             # call to after the reduce-scatter.
             if (
-                in_forward
+                in_forward  # type: ignore[possibly-undefined]
                 # Skip using gradient views if skipped using sharded views
                 # since exposing unsharded parameters with sharded gradients
                 # may be confusing to the user
@@ -2695,22 +2695,30 @@ def _construct_padding_tensor(
 # messasge is passed in)
 @functools.lru_cache(1)
 def _warn_skip_writeback_check(log: logging.Logger, warning: str):
-    log.warning(warning)
+    logger.warning(warning)
 
 
 # Use `lru_cache(1)` to only log the warning once
 @functools.lru_cache(1)
 def _warn_use_fake_all_gather(log: logging.Logger, warning: str):
-    log.warning(warning)
+    logger.warning(warning)
 
 
 # Use `lru_cache(1)` to only log the warning once
 @functools.lru_cache(1)
 def _warn_use_fake_reduce(log: logging.Logger, warning: str):
-    log.warning(warning)
+    logger.warning(warning)
 
 
 def _same_storage(a, b):
+    # Params are DTensors in backward
+    # with SHARD_GRAD_OP + TP
+    from torch.distributed._tensor import DTensor
+
+    if isinstance(a, DTensor):
+        a = a._local_tensor
+    if isinstance(b, DTensor):
+        b = b._local_tensor
     return a.untyped_storage().data_ptr() == b.untyped_storage().data_ptr()
 
 

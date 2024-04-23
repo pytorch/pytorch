@@ -121,9 +121,7 @@ Tensor& arange_mps_out(const Scalar& start, const Scalar& end, const Scalar& ste
       MPSScalar stepScalar = getMPSScalar(step, result.scalar_type());
       feeds[cachedGraph->multiplyTensor] = getMPSGraphTensorFromScalar(stream, stepScalar);
 
-      NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-          @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-      runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+      runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
     }
 
     if (!is_contiguous) {
@@ -190,9 +188,7 @@ Tensor& range_mps_out(const Scalar& start, const Scalar& end, const Scalar& step
       MPSScalar stepScalar = getMPSScalar(step, result.scalar_type());
       feeds[cachedGraph->multiplyTensor] = getMPSGraphTensorFromScalar(stream, stepScalar);
 
-      NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-          @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-      runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+      runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
     }
 
     if (!is_contiguous) {
@@ -259,9 +255,7 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
       MPSScalar multiplyScalar = getMPSScalar(multiply, ScalarType::Float);
       feeds[cachedGraph->multiplyTensor] = getMPSGraphTensorFromScalar(stream, multiplyScalar);
 
-      NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-          @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-      runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+      runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
     }
 
     if (!result.is_contiguous()) {

@@ -5,6 +5,7 @@ import itertools
 from typing import cast, List, Optional
 
 import torch
+import torch.nn.functional as F
 from torch.distributed._tensor import DeviceMesh, distribute_tensor
 from torch.distributed._tensor.api import DTensor
 from torch.distributed._tensor.placement_types import (
@@ -54,13 +55,7 @@ class DistMatrixOpsTest(DTensorTestBase):
 
         dist_res = torch.addmm(inp, mat1, mat2)
         local_res = torch.addmm(input_tensor, tensor_to_shard, tensor_to_replicate)
-        # The behavior of torch.ops.aten.addmm.default is different on CPU and GPU.
-        # For more info see: https://github.com/pytorch/pytorch/issues/118131
-        # TODO: these two tensors should be equal on GPU. fix this.
-        if self.device_type == "cuda":
-            self.assertNotEqual(dist_res.full_tensor(), local_res)
-        else:
-            self.assertEqual(dist_res.full_tensor(), local_res)
+        self.assertEqual(dist_res.full_tensor(), local_res)
 
     @with_comms
     def test_addmm_auto_redistribute(self):
@@ -269,6 +264,66 @@ class DistMatrixOpsTest(DTensorTestBase):
         # tests that currently pass
         for spec in shard_specs_comb:
             test_placement_comb([spec[0]], [spec[1]])
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_scaled_dot_product_attention(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        # bsz, n_heads, slen, head_dim
+        query = torch.rand(
+            (4, 8, 8, 8),
+            device=self.device_type,
+            dtype=torch.bfloat16,
+            requires_grad=True,
+        )
+        key = torch.rand(
+            (4, 8, 8, 8),
+            device=self.device_type,
+            dtype=torch.bfloat16,
+            requires_grad=True,
+        )
+        value = torch.rand(
+            (4, 8, 8, 8),
+            device=self.device_type,
+            dtype=torch.bfloat16,
+            requires_grad=True,
+        )
+
+        dist_query = distribute_tensor(query, device_mesh, [Shard(1)])
+        dist_key = distribute_tensor(key, device_mesh, [Shard(1)])
+        dist_value = distribute_tensor(value, device_mesh, [Shard(1)])
+
+        from torch.nn.attention import sdpa_kernel, SDPBackend
+
+        with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
+            dropout_p = 0.0
+            is_causal = True
+            params = torch.backends.cuda.SDPAParams(
+                query, key, value, None, dropout_p, is_causal
+            )
+            if not torch.backends.cuda.can_use_flash_attention(params, debug=False):
+                self.skipTest("Flash attention is not available")
+
+            out = F.scaled_dot_product_attention(
+                query, key, value, dropout_p=dropout_p, is_causal=is_causal
+            )
+            dist_out = F.scaled_dot_product_attention(
+                dist_query,
+                dist_key,
+                dist_value,
+                dropout_p=dropout_p,
+                is_causal=is_causal,
+            )
+            self.assertEqual(dist_out.full_tensor(), out)
+
+            out.sum().backward()
+            dist_out.sum().backward()
+            self.assertTrue(dist_query.grad.placements[0].is_shard(dim=1))
+            self.assertEqual(dist_query.grad.full_tensor(), query.grad)
+            self.assertTrue(dist_key.grad.placements[0].is_shard(dim=1))
+            self.assertEqual(dist_key.grad.full_tensor(), key.grad)
+            self.assertTrue(dist_value.grad.placements[0].is_shard(dim=1))
+            self.assertEqual(dist_value.grad.full_tensor(), value.grad)
 
 
 if __name__ == "__main__":

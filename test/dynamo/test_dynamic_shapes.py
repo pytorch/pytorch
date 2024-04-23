@@ -49,7 +49,7 @@ def make_dynamic_cls(cls):
         (config, "specialize_int", False),
         (fx_config, "translation_validation", TEST_Z3),
         (fx_config, "check_shape_env_recorded_events", True),
-        (fx_config, "validate_shape_env_verison_key", True),
+        (fx_config, "validate_shape_env_version_key", True),
         xfail_prop="_expected_failure_dynamic",
     )
 
@@ -83,6 +83,11 @@ if TEST_Z3:
         # SymPy is incorrectly transforming 's0 / 6 == 0.5' into 'False'.
         # Ref: https://github.com/sympy/sympy/issues/25146
         DynamicShapesReproTests.test_dynamic_shapes_float_guard_dynamic_shapes  # noqa: F821
+    )
+
+    # TODO model is somehow not being freed when z3 is available
+    unittest.expectedFailure(
+        DynamicShapesMiscTests.test_parameter_free_dynamic_shapes  # noqa: F821
     )
 
 unittest.expectedFailure(

@@ -91,9 +91,6 @@ templates_path = ["_templates"]
 coverage_ignore_functions = [
     # torch
     "typename",
-    # torch.autograd
-    "register_py_tensor_class_for_device",
-    "variable",
     # torch.cuda
     "check_error",
     "cudart",
@@ -312,7 +309,6 @@ coverage_ignore_functions = [
     "reference_representation_rewrite",
     # torch.ao.quantization.pt2e.utils
     "fold_bn_weights_into_conv_node",
-    "get_aten_graph_module",
     "remove_tensor_overload_for_qdq_ops",
     # torch.ao.quantization.qconfig
     "get_default_qat_qconfig",
@@ -390,20 +386,6 @@ coverage_ignore_functions = [
     "weight_dtype",
     "weight_is_quantized",
     "weight_is_statically_quantized",
-    # torch.autograd.forward_ad
-    "enter_dual_level",
-    "exit_dual_level",
-    # torch.autograd.function
-    "once_differentiable",
-    "traceable",
-    # torch.autograd.gradcheck
-    "get_analytical_jacobian",
-    "get_numerical_jacobian",
-    "get_numerical_jacobian_wrt_specific_input",
-    # torch.autograd.graph
-    "increment_version",
-    # torch.autograd.profiler
-    "parse_nvprof_trace",
     # torch.backends.cudnn.rnn
     "get_cudnn_mode",
     "init_dropout_state",
@@ -685,6 +667,8 @@ coverage_ignore_functions = [
     "parallelize_module",
     # torch.distributed.tensor.parallel.input_reshard
     "input_reshard",
+    # torch.distributed.tensor.parallel.loss
+    "loss_parallel",
     # torch.distributed.tensor.parallel.style
     "make_sharded_output_tensor",
     # torch.distributions.utils
@@ -939,11 +923,7 @@ coverage_ignore_functions = [
     # torch.fx.experimental.symbolic_shapes
     "bind_symbols",
     "cast_symbool_to_symint_guardless",
-    "constrain_range",
-    "constrain_unify",
     "create_contiguous",
-    "definitely_false",
-    "definitely_true",
     "error",
     "eval_guards",
     "eval_is_non_overlapping_and_dense",
@@ -959,24 +939,15 @@ coverage_ignore_functions = [
     "guard_scalar",
     "has_hint",
     "has_symbolic_sizes_strides",
-    "has_free_symbols",
-    "hint_int",
     "is_channels_last_contiguous_2d",
     "is_channels_last_contiguous_3d",
     "is_channels_last_strides_2d",
     "is_channels_last_strides_3d",
-    "is_concrete_bool",
-    "is_concrete_int",
     "is_contiguous",
     "is_non_overlapping_and_dense_indicator",
-    "is_singleton",
+    "is_nested_int",
     "is_symbol_binding_fx_node",
     "is_symbolic",
-    "parallel_and",
-    "parallel_or",
-    "statically_known_true",
-    "sym_eq",
-    "canonicalize_bool_expr",
     # torch.fx.experimental.unification.core
     "reify",
     # torch.fx.experimental.unification.match
@@ -2530,43 +2501,9 @@ coverage_ignore_classes = [
     "QuantWrapper",
     # torch.ao.quantization.utils
     "MatchAllNode",
-    # torch.autograd.forward_ad
-    "UnpackedDualTensor",
-    # torch.autograd.function
-    "BackwardCFunction",
-    "Function",
-    "FunctionCtx",
-    "FunctionMeta",
-    "InplaceFunction",
-    "NestedIOFunction",
-    # torch.autograd.grad_mode
-    "inference_mode",
-    "set_grad_enabled",
-    "set_multithreading_enabled",
-    # torch.autograd.gradcheck
-    "GradcheckError",
-    # torch.autograd.profiler
-    "EnforceUnique",
-    "KinetoStepTracker",
-    "profile",
-    "record_function",
-    # torch.autograd.profiler_legacy
-    "profile",
-    # torch.autograd.profiler_util
-    "EventList",
-    "FormattedTimesMixin",
-    "FunctionEvent",
-    "FunctionEventAvg",
-    "Interval",
-    "Kernel",
-    "MemRecordsAcc",
-    "StringTable",
-    # torch.autograd.variable
-    "Variable",
-    "VariableMeta",
     # torch.backends.cudnn.rnn
     "Unserializable",
-    # torch.cuda.amp.grad_scaler
+    # torch.amp.grad_scaler
     "GradScaler",
     "OptState",
     # torch.cuda.graphs
@@ -2856,22 +2793,14 @@ coverage_ignore_classes = [
     # torch.fx.experimental.symbolic_shapes
     "Constraint",
     "ConstraintViolationError",
-    "DimConstraints",
-    "DimDynamic",
     "DynamicDimConstraintPrinter",
-    "EqualityConstraint",
     "GuardOnDataDependentSymNode",
     "LoggingShapeGuardPrinter",
     "RelaxedUnspecConstraint",
     "RuntimeAssert",
-    "ShapeEnv",
     "ShapeGuardPrinter",
-    "StrictMinMaxConstraint",
     "SymDispatchMode",
     "SymbolicContext",
-    "StatelessSymbolicContext",
-    "StatefulSymbolicContext",
-    "SubclassSymbolicContext",
     # torch.fx.experimental.unification.match
     "Dispatcher",
     "VarDispatcher",
@@ -3628,6 +3557,15 @@ html_css_files = [
 
 from sphinx.ext.coverage import CoverageBuilder
 
+# NB: Due to some duplications of the following modules/functions, we keep
+# them as expected failures for the time being instead of return 1
+ignore_duplicated_modules = {
+    "torch.nn.utils.weight_norm",
+    "torch.nn.utils.spectral_norm",
+    "torch.nn.parallel.data_parallel",
+    "torch.ao.quantization.quantize",
+}
+
 
 def coverage_post_process(app, exception):
     if exception is not None:
@@ -3668,7 +3606,7 @@ def coverage_post_process(app, exception):
         path=torch.__path__, prefix=torch.__name__ + "."
     ):
         if is_not_internal(modname):
-            if modname not in modules:
+            if modname not in modules and modname not in ignore_duplicated_modules:
                 missing.add(modname)
 
     output = []

@@ -635,6 +635,15 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
     # Disable I8MM For CI since clang 9 does not support neon i8mm.
     set(XNNPACK_ENABLE_ARM_I8MM OFF CACHE BOOL "")
 
+    # Conditionally disable AVX512AMX, as it requires Clang 11 or later. Note that
+    # XNNPACK does conditionally compile this based on GCC version. Once it also does
+    # so based on Clang version, this logic can be removed.
+    IF(CMAKE_C_COMPILER_ID STREQUAL "Clang")
+      IF(CMAKE_C_COMPILER_VERSION VERSION_LESS "11")
+        set(XNNPACK_ENABLE_AVX512AMX OFF CACHE BOOL "")
+      ENDIF()
+    ENDIF()
+
     # Setting this global PIC flag for all XNNPACK targets.
     # This is needed for Object libraries within XNNPACK which must
     # be PIC to successfully link this static libXNNPACK with pytorch
@@ -1147,6 +1156,16 @@ if(APPLE)
   target_link_options(pybind::pybind11 INTERFACE -undefined dynamic_lookup)
 endif()
 
+# ---[ OpenTelemetry API headers
+find_package(OpenTelemetryApi)
+if(NOT OpenTelemetryApi_FOUND)
+  message(STATUS "Using third_party/opentelemetry-cpp.")
+  set(OpenTelemetryApi_INCLUDE_DIRS ${CMAKE_CURRENT_LIST_DIR}/../third_party/opentelemetry-cpp/api/include)
+endif()
+message(STATUS "opentelemetry api include dirs: " "${OpenTelemetryApi_INCLUDE_DIRS}")
+add_library(opentelemetry::api INTERFACE IMPORTED)
+target_include_directories(opentelemetry::api SYSTEM INTERFACE ${OpenTelemetryApi_INCLUDE_DIRS})
+
 # ---[ MPI
 if(USE_MPI)
   find_package(MPI)
@@ -1222,6 +1241,9 @@ endif(USE_LLVM)
 
 # ---[ cuDNN
 if(USE_CUDNN)
+  if(CUDNN_VERSION VERSION_LESS 8.5)
+    message(FATAL_ERROR "PyTorch needs CuDNN-8.5 or above, but found ${CUDNN_VERSION}. Builds are still possible with `USE_CUDNN=0`")
+  endif()
   set(CUDNN_FRONTEND_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/cudnn_frontend/include)
   target_include_directories(torch::cudnn INTERFACE ${CUDNN_FRONTEND_INCLUDE_DIR})
 endif()
@@ -1276,6 +1298,12 @@ if(USE_ROCM)
     if(HIPBLASLT_CUSTOM_COMPUTE_TYPE)
       list(APPEND HIP_CXX_FLAGS -DHIPBLASLT_CUSTOM_COMPUTE_TYPE)
     endif()
+    if(HIPBLASLT_HAS_GETINDEXFROMALGO)
+      list(APPEND HIP_CXX_FLAGS -DHIPBLASLT_HAS_GETINDEXFROMALGO)
+    endif()
+    if(HIP_NEW_TYPE_ENUMS)
+      list(APPEND HIP_CXX_FLAGS -DHIP_NEW_TYPE_ENUMS)
+    endif()
     add_definitions(-DROCM_VERSION=${ROCM_VERSION_DEV_INT})
     add_definitions(-DTORCH_HIP_VERSION=${TORCH_HIP_VERSION})
     message("TORCH_HIP_VERSION=${TORCH_HIP_VERSION} is added as a compiler defines")
@@ -1317,9 +1345,7 @@ if(USE_ROCM)
       message(STATUS "Disabling Kernel Assert for ROCm")
     endif()
 
-    if(USE_FLASH_ATTENTION)
-      include(${CMAKE_CURRENT_LIST_DIR}/External/oort.cmake)
-    endif()
+    include(${CMAKE_CURRENT_LIST_DIR}/External/aotriton.cmake)
     if(USE_CUDA)
       caffe2_update_option(USE_MEM_EFF_ATTENTION OFF)
     endif()
@@ -1951,7 +1977,7 @@ if(USE_KINETO)
   endif()
 
   if(NOT LIBKINETO_NOROCTRACER)
-    if(NOT ENV{ROCM_SOURCE_DIR})
+    if("$ENV{ROCM_SOURCE_DIR}" STREQUAL "")
       set(ENV{ROCM_SOURCE_DIR} "/opt/rocm")
     endif()
   endif()
@@ -1961,7 +1987,7 @@ if(USE_KINETO)
     set_property(TARGET kineto PROPERTY POSITION_INDEPENDENT_CODE ON)
   endif()
   list(APPEND Caffe2_DEPENDENCY_LIBS kineto)
-  string(APPEND CMAKE_CXX_FLAGS " -DUSE_KINETO")
+  string(APPEND CMAKE_CXX_FLAGS " -DUSE_KINETO" " -DTMP_LIBKINETO_NANOSECOND")
   if(LIBKINETO_NOCUPTI)
     string(APPEND CMAKE_CXX_FLAGS " -DLIBKINETO_NOCUPTI")
   endif()

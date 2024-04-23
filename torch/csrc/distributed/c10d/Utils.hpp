@@ -21,14 +21,10 @@ typedef SSIZE_T ssize_t;
 
 #include <sys/types.h>
 
-#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <functional>
-#include <limits>
 #include <string>
-#include <system_error>
-#include <tuple>
 #include <vector>
 
 namespace c10d {
@@ -139,7 +135,7 @@ inline int getCvarInt(const std::vector<std::string>& env, int def) {
 
     try {
       ret = std::stoi(val);
-    } catch (std::exception& e) {
+    } catch (std::exception&) {
       TORCH_CHECK(false, "Invalid value for environment variable: " + env[i]);
     }
   }

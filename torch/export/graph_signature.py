@@ -14,12 +14,16 @@ __all__ = [
     "OutputSpec",
     "SymIntArgument",
     "TensorArgument",
-    "CustomObjArgument",
 ]
 
 
 @dataclasses.dataclass
 class TensorArgument:
+    name: str
+
+
+@dataclasses.dataclass
+class TokenArgument:
     name: str
 
 
@@ -31,15 +35,21 @@ class SymIntArgument:
 @dataclasses.dataclass
 class CustomObjArgument:
     name: str
+    class_fqn: str
 
 
 @dataclasses.dataclass
 class ConstantArgument:
+    name: str
     value: Union[int, float, bool, None]
 
 
 ArgumentSpec = Union[
-    TensorArgument, SymIntArgument, ConstantArgument, CustomObjArgument
+    TensorArgument,
+    SymIntArgument,
+    ConstantArgument,
+    CustomObjArgument,
+    TokenArgument,
 ]
 
 
@@ -49,6 +59,7 @@ class InputKind(Enum):
     BUFFER = auto()
     CONSTANT_TENSOR = auto()
     CUSTOM_OBJ = auto()
+    TOKEN = auto()
 
 
 @dataclasses.dataclass
@@ -56,12 +67,23 @@ class InputSpec:
     kind: InputKind
     arg: ArgumentSpec
     target: Optional[str]
+    persistent: Optional[bool] = None
 
     def __post_init__(self):
+        if self.kind == InputKind.BUFFER:
+            assert (
+                self.persistent is not None
+            ), "Failed to specify persistent flag on BUFFER."
         assert isinstance(
             self.arg,
-            (TensorArgument, SymIntArgument, ConstantArgument, CustomObjArgument),
-        )
+            (
+                TensorArgument,
+                SymIntArgument,
+                ConstantArgument,
+                CustomObjArgument,
+                TokenArgument,
+            ),
+        ), f"got {type(self.arg)}"
 
 
 class OutputKind(Enum):
@@ -71,6 +93,7 @@ class OutputKind(Enum):
     GRADIENT_TO_PARAMETER = auto()
     GRADIENT_TO_USER_INPUT = auto()
     USER_INPUT_MUTATION = auto()
+    TOKEN = auto()
 
 
 @dataclasses.dataclass
@@ -80,7 +103,9 @@ class OutputSpec:
     target: Optional[str]
 
     def __post_init__(self):
-        assert isinstance(self.arg, (TensorArgument, SymIntArgument, ConstantArgument))
+        assert isinstance(
+            self.arg, (TensorArgument, SymIntArgument, ConstantArgument, TokenArgument)
+        )
 
 
 def _sig_to_specs(
@@ -96,31 +121,46 @@ def _sig_to_specs(
     loss_output: Optional[str],
     inputs: List[ArgumentSpec],
     outputs: List[ArgumentSpec],
+    input_tokens: List[str],
+    output_tokens: List[str],
 ) -> Tuple[List[InputSpec], List[OutputSpec]]:
-    def to_input_spec(i: ArgumentSpec) -> InputSpec:
-        if not isinstance(i, TensorArgument):
-            return InputSpec(kind=InputKind.USER_INPUT, arg=i, target=None)
-        name = i.name
+    def to_input_spec(inp: ArgumentSpec) -> InputSpec:
+        if isinstance(inp, TokenArgument):
+            return InputSpec(kind=InputKind.TOKEN, arg=inp, target=None)
+
+        if not isinstance(inp, TensorArgument):
+            return InputSpec(kind=InputKind.USER_INPUT, arg=inp, target=None)
+        name = inp.name
         if name in user_inputs:
-            return InputSpec(kind=InputKind.USER_INPUT, arg=i, target=None)
+            return InputSpec(kind=InputKind.USER_INPUT, arg=inp, target=None)
         elif name in inputs_to_parameters:
             return InputSpec(
                 kind=InputKind.PARAMETER,
-                arg=i,
+                arg=inp,
                 target=inputs_to_parameters[name],
             )
         elif name in inputs_to_buffers:
             return InputSpec(
-                kind=InputKind.BUFFER, arg=i, target=inputs_to_buffers[name]
+                kind=InputKind.BUFFER,
+                arg=inp,
+                target=inputs_to_buffers[name],
+                # Mark as True for now; we will fix this up to distinguish
+                # persistent from non-persistent later in tracing.
+                # See: rewrite_non_persistent_buffers()
+                # TODO(suo): this is horrible.
+                persistent=True,
             )
         else:
             raise AssertionError(f"Unknown tensor input kind: {name}")
 
     def to_output_spec(idx: int, o: ArgumentSpec) -> OutputSpec:
+        if isinstance(o, TokenArgument):
+            return OutputSpec(kind=OutputKind.TOKEN, arg=o, target=None)
+
         if not isinstance(o, TensorArgument):
             return OutputSpec(kind=OutputKind.USER_OUTPUT, arg=o, target=None)
         name = o.name
-        if idx < len(buffer_mutations) + len(user_input_mutations):
+        if idx < len(buffer_mutations) + len(user_input_mutations) + len(output_tokens):
             if name in buffer_mutations:
                 return OutputSpec(
                     kind=OutputKind.BUFFER_MUTATION,
@@ -157,7 +197,7 @@ def _sig_to_specs(
             else:
                 raise AssertionError(f"Unknown tensor output kind: {name}")
 
-    input_specs = [to_input_spec(i) for i in inputs]
+    input_specs = [to_input_spec(inp) for inp in inputs]
     output_specs = [to_output_spec(idx, o) for idx, o in enumerate(outputs)]
     return input_specs, output_specs
 
@@ -266,6 +306,16 @@ class ExportGraphSignature:
             if isinstance(s.target, str)
         ]
 
+    @property
+    def non_persistent_buffers(self) -> Collection[str]:
+        return [
+            s.target
+            for s in self.input_specs
+            if s.kind == InputKind.BUFFER
+            if s.persistent is False
+            if isinstance(s.target, str)
+        ]
+
     # A list of lifted constant tensors
     @property
     def lifted_tensor_constants(self) -> Collection[str]:
@@ -289,21 +339,35 @@ class ExportGraphSignature:
 
     # Graph node names of pytree-flattened inputs of original program
     @property
-    def user_inputs(self) -> Collection[str]:
-        return tuple(
-            s.arg.name
-            for s in self.input_specs
-            if s.kind == InputKind.USER_INPUT and isinstance(s.arg, TensorArgument)
-        )
+    def user_inputs(self) -> Collection[Union[int, float, bool, None, str]]:
+        user_inputs: List[Union[int, float, bool, None, str]] = []
+        for s in self.input_specs:
+            if s.kind != InputKind.USER_INPUT:
+                continue
+
+            if isinstance(s.arg, (TensorArgument, SymIntArgument, CustomObjArgument)):
+                user_inputs.append(s.arg.name)
+            elif isinstance(s.arg, ConstantArgument):
+                user_inputs.append(s.arg.value)
+            else:
+                raise RuntimeError(f"{s.arg} is not a valid user inputs")
+        return tuple(user_inputs)
 
     # Graph node names of pytree-flattened outputs of original program
     @property
-    def user_outputs(self) -> Collection[str]:
-        return tuple(
-            s.arg.name
-            for s in self.output_specs
-            if s.kind == OutputKind.USER_OUTPUT and isinstance(s.arg, TensorArgument)
-        )
+    def user_outputs(self) -> Collection[Union[int, float, bool, None, str]]:
+        user_outputs: List[Union[int, float, bool, None, str]] = []
+        for s in self.output_specs:
+            if s.kind != OutputKind.USER_OUTPUT:
+                continue
+
+            if isinstance(s.arg, (TensorArgument, SymIntArgument)):
+                user_outputs.append(s.arg.name)
+            elif isinstance(s.arg, ConstantArgument):
+                user_outputs.append(s.arg.value)
+            else:
+                raise RuntimeError(f"{s.arg} is not a valid user output")
+        return tuple(user_outputs)
 
     # A dictionary mapping graph input node names to parameters. If a graph input
     # name is found in this dictionary, it is guranteed to be a lifted parameter.
@@ -322,7 +386,7 @@ class ExportGraphSignature:
     @property
     def inputs_to_buffers(self) -> Mapping[str, str]:
         return {
-            s.arg.name: s.target
+            s.arg.name: s.target  # type: ignore[union-attr, misc]
             for s in self.input_specs
             if s.kind == InputKind.BUFFER
             and isinstance(s.arg, TensorArgument)
@@ -406,6 +470,24 @@ class ExportGraphSignature:
     @property
     def assertion_dep_token(self) -> Optional[Mapping[int, str]]:
         return None
+
+    @property
+    def input_tokens(self) -> List[str]:
+        input_tokens = []
+        for s in self.input_specs:
+            if s.kind == InputKind.TOKEN:
+                assert isinstance(s.arg, TokenArgument)
+                input_tokens.append(s.arg.name)
+        return input_tokens
+
+    @property
+    def output_tokens(self) -> List[str]:
+        output_tokens = []
+        for s in self.output_specs:
+            if s.kind == OutputKind.TOKEN:
+                assert isinstance(s.arg, TokenArgument)
+                output_tokens.append(s.arg.name)
+        return output_tokens
 
     def __post_init__(self) -> None:
         assertion_dep_token = self.assertion_dep_token

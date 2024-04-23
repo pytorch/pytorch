@@ -39,6 +39,7 @@ from github_utils import (
     gh_fetch_json_list,
     gh_fetch_merge_base,
     gh_fetch_url,
+    gh_graphql,
     gh_post_commit_comment,
     gh_post_pr_comment,
     gh_update_pr_state,
@@ -122,6 +123,7 @@ fragment PRCheckSuites on CheckSuiteConnection {
         workflow {
           name
         }
+        databaseId
         url
       }
       checkRuns(first: 50) {
@@ -152,12 +154,14 @@ GH_COMMIT_AUTHORS_FRAGMENT = """
 fragment CommitAuthors on PullRequestCommitConnection {
   nodes {
     commit {
-      author {
-        user {
-          login
+      authors(first: 2) {
+        nodes {
+          user {
+            login
+          }
+          email
+          name
         }
-        email
-        name
       }
       oid
     }
@@ -458,19 +462,6 @@ HAS_NO_CONNECTED_DIFF_TITLE = (
 IGNORABLE_FAILED_CHECKS_THESHOLD = 10
 
 
-def gh_graphql(query: str, **kwargs: Any) -> Dict[str, Any]:
-    rc = gh_fetch_url(
-        "https://api.github.com/graphql",
-        data={"query": query, "variables": kwargs},
-        reader=json.load,
-    )
-    if "errors" in rc:
-        raise RuntimeError(
-            f"GraphQL query {query}, args {kwargs} failed: {rc['errors']}"
-        )
-    return cast(Dict[str, Any], rc)
-
-
 def gh_get_pr_info(org: str, proj: str, pr_no: int) -> Any:
     rc = gh_graphql(GH_GET_PR_INFO_QUERY, name=proj, owner=org, number=pr_no)
     return rc["data"]["repository"]["pullRequest"]
@@ -608,6 +599,7 @@ def parse_args() -> Any:
     parser.add_argument("--revert", action="store_true")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--ignore-current", action="store_true")
+    parser.add_argument("--check-mergeability", action="store_true")
     parser.add_argument("--comment-id", type=int)
     parser.add_argument("--reason", type=str)
     parser.add_argument("pr_num", type=int)
@@ -745,7 +737,7 @@ class GitHubPR:
         # work for ghstack where the base is the custom branch, i.e. gh/USER/ID/base,
         # so let's just use main instead
         self.merge_base = gh_fetch_merge_base(
-            self.org, self.project, last_commit_oid, "main"
+            self.org, self.project, last_commit_oid, self.default_branch()
         )
 
         # Fallback to baseRefOid if the API call fails, i.e. rate limit. Note that baseRefOid
@@ -845,14 +837,14 @@ class GitHubPR:
 
         def add_authors(info: Dict[str, Any]) -> None:
             for node in info["commits_with_authors"]["nodes"]:
-                author_node = node["commit"]["author"]
-                user_node = author_node["user"]
-                author = f"{author_node['name']} <{author_node['email']}>"
-                if user_node is None:
-                    # If author is not github user, user node will be null
-                    authors.append(("", author))
-                else:
-                    authors.append((cast(str, user_node["login"]), author))
+                for author_node in node["commit"]["authors"]["nodes"]:
+                    user_node = author_node["user"]
+                    author = f"{author_node['name']} <{author_node['email']}>"
+                    if user_node is None:
+                        # If author is not github user, user node will be null
+                        authors.append(("", author))
+                    else:
+                        authors.append((cast(str, user_node["login"]), author))
 
         info = self.info
         for _ in range(100):
@@ -948,11 +940,6 @@ class GitHubPR:
 
     def get_authors(self) -> Dict[str, str]:
         rc = {}
-        # TODO: replace with  `self.get_commit_count()` when GraphQL pagination can be used
-        # to fetch all commits, see https://gist.github.com/malfet/4f35321b0c9315bcd7116c7b54d83372
-        # and https://support.github.com/ticket/enterprise/1642/1659119
-        if self.get_commit_count() <= 250:
-            assert len(self._fetch_authors()) == self.get_commit_count()
         for idx in range(len(self._fetch_authors())):
             rc[self.get_committer_login(idx)] = self.get_committer_author(idx)
 
@@ -1068,6 +1055,7 @@ class GitHubPR:
         repo: GitRepo,
         skip_mandatory_checks: bool,
         comment_id: Optional[int] = None,
+        skip_all_rule_checks: bool = False,
     ) -> List["GitHubPR"]:
         assert self.is_ghstack_pr()
         ghstack_prs = get_ghstack_prs(
@@ -1082,7 +1070,7 @@ class GitHubPR:
             commit_msg = pr.gen_commit_message(
                 filter_ghstack=True, ghstack_deps=pr_dependencies
             )
-            if pr.pr_num != self.pr_num:
+            if pr.pr_num != self.pr_num and not skip_all_rule_checks:
                 # Raises exception if matching rule is not found
                 find_matching_merge_rule(
                     pr,
@@ -1113,13 +1101,19 @@ class GitHubPR:
             msg_body = re.sub(RE_GHSTACK_DESC, "", msg_body)
         msg = self.get_title() + f" (#{self.pr_num})\n\n"
         msg += msg_body
+
+        # Mention PR co-authors
+        for author_login, author_name in self.get_authors().items():
+            if author_login != self.get_pr_creator_login():
+                msg += f"\nCo-authored-by: {author_name}"
+
         msg += f"\nPull Request resolved: {self.get_pr_url()}\n"
         msg += f"Approved by: {approved_by_urls}\n"
         if ghstack_deps:
             msg += f"ghstack dependencies: {', '.join([f'#{pr.pr_num}' for pr in ghstack_deps])}\n"
         return msg
 
-    def add_numbered_label(self, label_base: str) -> None:
+    def add_numbered_label(self, label_base: str, dry_run: bool) -> None:
         labels = self.get_labels() if self.labels is not None else []
         full_label = label_base
         count = 0
@@ -1127,7 +1121,7 @@ class GitHubPR:
             if label_base in label:
                 count += 1
                 full_label = f"{label_base}X{count}"
-        gh_add_labels(self.org, self.project, self.pr_num, [full_label])
+        gh_add_labels(self.org, self.project, self.pr_num, [full_label], dry_run)
 
     def merge_into(
         self,
@@ -1157,9 +1151,9 @@ class GitHubPR:
 
         repo.push(self.default_branch(), dry_run)
         if not dry_run:
-            self.add_numbered_label(MERGE_COMPLETE_LABEL)
+            self.add_numbered_label(MERGE_COMPLETE_LABEL, dry_run)
             for pr in additional_merged_prs:
-                pr.add_numbered_label(MERGE_COMPLETE_LABEL)
+                pr.add_numbered_label(MERGE_COMPLETE_LABEL, dry_run)
 
         if comment_id and self.pr_num:
             # When the merge process reaches this part, we can assume that the commit
@@ -1199,7 +1193,11 @@ class GitHubPR:
         skip_mandatory_checks: bool = False,
         comment_id: Optional[int] = None,
         branch: Optional[str] = None,
+        skip_all_rule_checks: bool = False,
     ) -> List["GitHubPR"]:
+        """
+        :param skip_all_rule_checks: If true, skips all rule checks, useful for dry-running merge locally
+        """
         branch_to_merge_into = self.default_branch() if branch is None else branch
         if repo.current_branch() != branch_to_merge_into:
             repo.checkout(branch_to_merge_into)
@@ -1215,6 +1213,7 @@ class GitHubPR:
                 repo,
                 skip_mandatory_checks,
                 comment_id=comment_id,
+                skip_all_rule_checks=skip_all_rule_checks,
             )
 
 
@@ -1400,7 +1399,10 @@ def find_matching_merge_rule(
         )
         required_checks = list(
             filter(
-                lambda x: "EasyCLA" in x or not skip_mandatory_checks, mandatory_checks
+                lambda x: ("EasyCLA" in x)
+                or ("Facebook CLA Check" in x)
+                or not skip_mandatory_checks,
+                mandatory_checks,
             )
         )
         pending_checks, failed_checks, _ = categorize_checks(
@@ -1410,6 +1412,13 @@ def find_matching_merge_rule(
             if rule.ignore_flaky_failures
             else 0,
         )
+
+        # categorize_checks assumes all tests are required if required_checks is empty.
+        # this is a workaround as we want to keep that behavior for categorize_checks
+        # generally.
+        if not required_checks:
+            pending_checks = []
+            failed_checks = []
 
         hud_link = f"https://hud.pytorch.org/{pr.org}/{pr.project}/commit/{pr.last_commit()['oid']}"
         if len(failed_checks) > 0:
@@ -1610,28 +1619,37 @@ def remove_job_name_suffix(name: str, replacement: str = ")") -> str:
 
 
 def is_broken_trunk(
-    name: str,
+    check: JobCheckState,
     drci_classifications: Any,
 ) -> bool:
-    if not name or not drci_classifications:
+    if not check or not drci_classifications:
         return False
+
+    name = check.name
+    job_id = check.job_id
 
     # Consult the list of broken trunk failures from Dr.CI
     return any(
-        name == broken_trunk["name"]
+        (name == broken_trunk["name"]) or (job_id and job_id == broken_trunk["id"])
         for broken_trunk in drci_classifications.get("BROKEN_TRUNK", [])
     )
 
 
 def is_flaky(
-    name: str,
+    check: JobCheckState,
     drci_classifications: Any,
 ) -> bool:
-    if not name or not drci_classifications:
+    if not check or not drci_classifications:
         return False
 
+    name = check.name
+    job_id = check.job_id
+
     # Consult the list of flaky failures from Dr.CI
-    return any(name == flaky["name"] for flaky in drci_classifications.get("FLAKY", []))
+    return any(
+        (name == flaky["name"] or (job_id and job_id == flaky["id"]))
+        for flaky in drci_classifications.get("FLAKY", [])
+    )
 
 
 def is_invalid_cancel(
@@ -1669,7 +1687,19 @@ def get_classifications(
     # going forward. It's preferable to try calling Dr.CI API directly first
     # to get the latest results as well as update Dr.CI PR comment
     drci_classifications = get_drci_classifications(pr_num=pr_num, project=project)
-    print(f"From Dr.CI API: {json.dumps(drci_classifications)}")
+
+    def get_readable_drci_results(drci_classifications: Any) -> str:
+        try:
+            s = f"From Dr.CI API ({pr_num}):\n"
+            for classification, jobs in drci_classifications.items():
+                s += f"  {classification}: \n"
+                for job in jobs:
+                    s += f"    {job['id']} {job['name']}\n"
+            return s
+        except Exception:
+            return f"From Dr.CI API: {json.dumps(drci_classifications)}"
+
+    print(get_readable_drci_results(drci_classifications))
 
     # NB: if the latest results from Dr.CI is not available, i.e. when calling from
     # SandCastle, we fallback to any results we can find on Dr.CI check run summary
@@ -1706,7 +1736,7 @@ def get_classifications(
 
         # NB: It's important to note that when it comes to ghstack and broken trunk classification,
         # Dr.CI uses the base of the whole stack
-        if is_broken_trunk(name, drci_classifications):
+        if is_broken_trunk(check, drci_classifications):
             checks_with_classifications[name] = JobCheckState(
                 check.name,
                 check.url,
@@ -1718,7 +1748,7 @@ def get_classifications(
             )
             continue
 
-        elif is_flaky(name, drci_classifications):
+        elif is_flaky(check, drci_classifications):
             checks_with_classifications[name] = JobCheckState(
                 check.name,
                 check.url,
@@ -1882,8 +1912,8 @@ def do_revert_prs(
             pr.org, pr.project, pr.pr_num, revert_message, dry_run=dry_run
         )
 
+        pr.add_numbered_label("reverted", dry_run)
         if not dry_run:
-            pr.add_numbered_label("reverted")
             gh_post_commit_comment(pr.org, pr.project, commit_sha, revert_msg)
             gh_update_pr_state(pr.org, pr.project, pr.pr_num)
 
@@ -2053,7 +2083,7 @@ def merge(
     print(f"Attempting merge of {initial_commit_sha} ({pr_link})")
 
     if MERGE_IN_PROGRESS_LABEL not in pr.get_labels():
-        gh_add_labels(pr.org, pr.project, pr.pr_num, [MERGE_IN_PROGRESS_LABEL])
+        gh_add_labels(pr.org, pr.project, pr.pr_num, [MERGE_IN_PROGRESS_LABEL], dry_run)
 
     explainer = TryMergeExplainer(
         skip_mandatory_checks,
@@ -2073,8 +2103,7 @@ def merge(
 
     check_for_sev(pr.org, pr.project, skip_mandatory_checks)
 
-    if skip_mandatory_checks or can_skip_internal_checks(pr, comment_id):
-        # do not wait for any pending signals if PR is closed as part of co-development process
+    if skip_mandatory_checks:
         gh_post_pr_comment(
             pr.org,
             pr.project,
@@ -2201,8 +2230,7 @@ def merge(
     # Finally report timeout back
     msg = f"Merged timed out after {timeout_minutes} minutes. Please contact the pytorch_dev_infra team."
     msg += f"The last exception was: {last_exception}"
-    if not dry_run:
-        gh_add_labels(pr.org, pr.project, pr.pr_num, ["land-failed"])
+    gh_add_labels(pr.org, pr.project, pr.pr_num, ["land-failed"], dry_run)
     raise RuntimeError(msg)
 
 
@@ -2281,6 +2309,16 @@ def main() -> None:
         )
         return
 
+    if args.check_mergeability:
+        if pr.is_ghstack_pr():
+            get_ghstack_prs(repo, pr)  # raises error if out of sync
+        pr.merge_changes(
+            repo,
+            skip_mandatory_checks=True,
+            skip_all_rule_checks=True,
+        )
+        return
+
     if not args.force and pr.has_invalid_submodule_updates():
         message = (
             f"This PR updates submodules {', '.join(pr.get_changed_submodules())}\n"
@@ -2329,7 +2367,10 @@ def main() -> None:
         else:
             print("Missing comment ID or PR number, couldn't upload to Rockset")
     finally:
-        gh_remove_label(org, project, args.pr_num, MERGE_IN_PROGRESS_LABEL)
+        if not args.check_mergeability:
+            gh_remove_label(
+                org, project, args.pr_num, MERGE_IN_PROGRESS_LABEL, args.dry_run
+            )
 
 
 if __name__ == "__main__":

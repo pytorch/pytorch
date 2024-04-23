@@ -147,15 +147,15 @@ class BasicEvaluation:
 
         cuda_launch_events = sorted(
             (e for e in cuda_event_list if is_cuda_launch_kernel(e)),
-            key=lambda x: x.start_us(),
+            key=lambda x: x.start_ns(),
         )
         cuda_kernel_events = sorted(
             (e for e in cuda_event_list if is_cuda_kernel(e)),
-            key=lambda x: x.start_us(),
+            key=lambda x: x.start_ns(),
         )
 
         self.cuda_events = sorted(
-            cuda_launch_events + cuda_kernel_events, key=lambda x: x.start_us()
+            cuda_launch_events + cuda_kernel_events, key=lambda x: x.start_ns()
         )
 
         kernel_mapping: Dict[_KinetoEvent, int] = {}
@@ -178,9 +178,11 @@ class BasicEvaluation:
         def new_old_event_comparator(event):
             if hasattr(event, "start_us"):
                 return event.start_us() * 1000
+            if hasattr(event, "start_ns"):
+                return event.start_ns()
             if hasattr(event, "start_time_ns"):
                 return event.start_time_ns
-            raise Exception("Unknown Event Type")
+            raise Exception("Unknown Event Type")  # noqa: TRY002
 
         queue_depth_list: List[Interval] = []
         all_events.sort(key=new_old_event_comparator)
@@ -192,22 +194,28 @@ class BasicEvaluation:
                 # Find current spawned cuda kernel event
                 if event in kernel_mapping and kernel_mapping[event] is not None:
                     spawned_kernel_index = kernel_mapping[event]
+            if hasattr(event, "start_ns"):
+                start_time = event.start_ns()
+                end_time = event.start_ns() + event.duration_ns()
+                # Find current spawned cuda kernel event
+                if event in kernel_mapping and kernel_mapping[event] is not None:
+                    spawned_kernel_index = kernel_mapping[event]
             elif hasattr(event, "start_time_ns"):
                 start_time = event.start_time_ns  # type: ignore[attr-defined]
                 end_time = event.end_time_ns  # type: ignore[attr-defined]
 
             while (
                 current_kernel_index < len(cuda_kernel_events)
-                and (cuda_kernel_events[current_kernel_index].start_us()) * 1000
-                <= start_time
+                and (cuda_kernel_events[current_kernel_index].start_ns())
+                <= start_time  # type: ignore[possibly-undefined]
             ):
                 current_kernel_index += 1
             current_queue_depth = spawned_kernel_index - current_kernel_index + 1
             current_queue_depth = max(current_queue_depth, 0)
 
-            if hasattr(event, "start_us"):
+            if hasattr(event, "start_us") or hasattr(event, "start_ns"):
                 queue_depth_list.append(
-                    Interval(start_time, end_time, current_queue_depth)
+                    Interval(start_time, end_time, current_queue_depth)  # type: ignore[possibly-undefined]
                 )
             elif hasattr(event, "start_time_ns"):
                 self.metrics[EventKey(event)].queue_depth = current_queue_depth

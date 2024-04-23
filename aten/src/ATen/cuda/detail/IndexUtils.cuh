@@ -21,8 +21,16 @@ getTensorInfo(const at::TensorBase &t) {
     st[i] = t.stride(i);
   }
 
+  scalar* data_ptr = nullptr;
+
+  if constexpr (std::is_const<scalar>::value) {
+    data_ptr = t.const_data_ptr<scalar>();
+  } else {
+    data_ptr = t.mutable_data_ptr<scalar>();
+  }
+
   return TensorInfo<scalar, IndexType>(
-    t.data_ptr<scalar>(), dims, sz, st);
+    data_ptr, dims, sz, st);
 }
 
 } // namespace at::cuda::detail

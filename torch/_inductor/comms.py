@@ -6,7 +6,7 @@ import torch
 
 from . import config, ir, scheduler
 from .dependencies import WeakDep
-from .utils import tuple_sorted
+from .utils import is_collective, is_wait, tuple_sorted
 
 overlap_log = torch._logging.getArtifactLogger(__name__, "overlap")
 
@@ -21,7 +21,7 @@ def sink_waits(
     new_order = []
     cur_waits = set()
     for snode in snodes:
-        if isinstance(snode.node, ir.Wait):
+        if is_wait(snode.node):
             cur_waits.add(snode)
         else:
             for wait in tuple_sorted(cur_waits):
@@ -48,7 +48,7 @@ def raise_comms(
     new_order_reversed: List["scheduler.BaseSchedulerNode"] = []
     cur_comms: List["scheduler.BaseSchedulerNode"] = []
     for snode in reversed(snodes):
-        if isinstance(snode.node, ir.CollectiveKernel):
+        if is_collective(snode.node):
             cur_comms.append(snode)
         else:
             for comm in cur_comms:
@@ -98,14 +98,14 @@ def decide_global_ordering_of_comms(nodes: List["scheduler.BaseSchedulerNode"]):
     (might not be the same ordering as the eager mode program).
     TODO: Come up with a better approach
     """
-    comm_nodes = [n for n in nodes if isinstance(n.node, ir.CollectiveKernel)]
+    comm_nodes = [n for n in nodes if is_collective(n.node)]
     for i in range(1, len(comm_nodes)):
         # Enforce ordering by making previous comm a `WeakDep` dependency of the next comm
         comm_nodes[i].add_fake_dep(WeakDep(comm_nodes[i - 1].get_name()))
 
 
 def assert_no_comm_nodes(snodes: List["scheduler.BaseSchedulerNode"]) -> None:
-    assert not any(isinstance(snode.node, ir.CollectiveKernel) for snode in snodes)
+    assert not any(is_collective(snode.node) for snode in snodes)
 
 
 def estimate_op_runtime(snode: "scheduler.BaseSchedulerNode") -> float:
@@ -141,7 +141,7 @@ def reorder_compute_for_overlap(
 
     comm_nodes = []
     for snode in snodes:
-        if isinstance(snode.node, ir.CollectiveKernel):
+        if is_collective(snode.node):
             comm_nodes.append(snode)
     if len(comm_nodes) == 0:
         # if there is no comm nodes, return the current order
@@ -150,7 +150,7 @@ def reorder_compute_for_overlap(
     comm_ancestors = {node: get_ancestors(node) for node in comm_nodes}
     comm_descendants = {node: get_descendants(node) for node in comm_nodes}
 
-    indeg = {k: 0 for k in snodes}
+    indeg = dict.fromkeys(snodes, 0)
     for snode in snodes:
         for user in snode.node_users:
             if user in indeg:
@@ -192,7 +192,7 @@ def reorder_compute_for_overlap(
                     all_nodes.remove(node)
                     progress = True
             if not progress:
-                raise Exception(
+                raise Exception(  # noqa: TRY002
                     "Unable to find a free node (indeg == 0). This is an impossible state to reach. "
                     "Please report a bug to PyTorch."
                 )
@@ -215,10 +215,8 @@ def reorder_compute_for_overlap(
         assert_no_comm_nodes(needed_by_next_comm_and_ready_compute_nodes)
 
         total_compute_runtime_cost = rolled_over_compute_cost + sum(
-            [
-                estimate_op_runtime(node)
-                for node in needed_by_next_comm_and_ready_compute_nodes
-            ]
+            estimate_op_runtime(node)
+            for node in needed_by_next_comm_and_ready_compute_nodes
         )
         prev_comm_runtime_cost = estimate_op_runtime(comm_nodes[idx - 1])
         schedule_nodes(tuple_sorted(needed_by_next_comm_and_ready_compute_nodes))
@@ -310,23 +308,23 @@ def visualize_overlap(order):
     cur_comm_node = None
     for snode in order:
         if cur_comm_node is None:
-            if isinstance(snode.node, ir.CollectiveKernel):
+            if is_collective(snode.node):
                 total_est_runtime += estimate_op_runtime(snode)
                 cur_comm_node = snode.node
-            elif isinstance(snode.node, ir.Wait):
-                raise Exception(
+            elif is_wait(snode.node):
+                raise Exception(  # noqa: TRY002
                     "Wait is not expected when there is no collective running"
                 )
             else:  # exposed compute op
                 total_est_runtime += estimate_op_runtime(snode)
             overlap_log.debug(f"{node_summary(snode)}")  # noqa: G004
         else:  # cur_comm_node is not None
-            if isinstance(snode.node, ir.CollectiveKernel):
-                raise Exception(
+            if is_collective(snode.node):
+                raise Exception(  # noqa: TRY002
                     "Found two collectives running at the same time. "
                     "`visualize_overlap` needs to be updated to handle this case"
                 )
-            elif isinstance(snode.node, ir.Wait):  # end of this comm op
+            elif is_wait(snode.node):  # end of this comm op
                 overlap_log.debug(f"{node_summary(snode)}")  # noqa: G004
                 cur_comm_node = None
             else:  # overlapped compute op

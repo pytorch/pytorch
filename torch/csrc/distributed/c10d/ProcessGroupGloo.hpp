@@ -6,7 +6,6 @@
 #include <deque>
 #include <mutex>
 #include <thread>
-#include <unordered_map>
 #include <vector>
 
 #include <gloo/algorithm.h>
@@ -147,7 +146,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
         const std::vector<std::string>& keys) override {
       std::vector<std::vector<char>> res;
       for (auto& value : store_->multiGet(keys)) {
-        res.emplace_back(std::vector<char>(value.begin(), value.end()));
+        res.emplace_back(value.begin(), value.end());
       }
       return res;
     }
@@ -156,8 +155,9 @@ class TORCH_API ProcessGroupGloo : public Backend {
         const std::vector<std::string>& keys,
         const std::vector<std::vector<char>>& values) override {
       std::vector<std::vector<uint8_t>> u_values;
+      u_values.reserve(values.size());
       for (auto& value : values) {
-        u_values.emplace_back(std::vector<uint8_t>(value.begin(), value.end()));
+        u_values.emplace_back(value.begin(), value.end());
       }
       store_->multiSet(keys, u_values);
     }
@@ -322,6 +322,11 @@ class TORCH_API ProcessGroupGloo : public Backend {
       std::vector<at::Tensor>& input_list,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
+  c10::intrusive_ptr<Work> allgather_into_tensor_coalesced(
+      std::vector<at::Tensor>& outputs,
+      std::vector<at::Tensor>& inputs,
+      const AllgatherOptions& opts = AllgatherOptions()) override;
+
   c10::intrusive_ptr<Work> gather(
       std::vector<std::vector<at::Tensor>>& outputs,
       std::vector<at::Tensor>& inputs,
@@ -335,6 +340,11 @@ class TORCH_API ProcessGroupGloo : public Backend {
   c10::intrusive_ptr<Work> reduce_scatter(
       std::vector<at::Tensor>& outputs,
       std::vector<std::vector<at::Tensor>>& inputs,
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
+
+  c10::intrusive_ptr<Work> reduce_scatter_tensor_coalesced(
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
 
   c10::intrusive_ptr<Work> alltoall_base(

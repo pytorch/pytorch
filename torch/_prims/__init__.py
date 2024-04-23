@@ -113,6 +113,7 @@ __all__ = [
     "fmax",
     "fmin",
     "fmod",
+    "frexp",
     "gcd",
     "ge",
     "gt",
@@ -211,6 +212,11 @@ __all__ = [
     "fft_r2c",
     "fft_c2c",
     "fft_c2r",
+    #
+    # prims for making/sinking tokens
+    #
+    "_make_token",
+    "_sink_tokens",
 ]
 
 
@@ -246,10 +252,10 @@ def TensorMeta(
         assert dtype is not None
         assert device is not None
 
-    shape = inferred_shape if shape is None else tuple(shape)
-    strides = inferred_strides if strides is None else tuple(strides)
-    dtype = inferred_dtype if dtype is None else dtype
-    device = inferred_device if device is None else device
+    shape = inferred_shape if shape is None else tuple(shape)  # type: ignore[possibly-undefined]
+    strides = inferred_strides if strides is None else tuple(strides)  # type: ignore[possibly-undefined]
+    dtype = inferred_dtype if dtype is None else dtype  # type: ignore[possibly-undefined]
+    device = inferred_device if device is None else device  # type: ignore[possibly-undefined]
 
     if isinstance(device, str):
         device = torch.device(device)
@@ -1210,6 +1216,8 @@ as_strided = _make_prim(
 def _broadcast_in_dim_meta(
     a: TensorLikeType, shape: ShapeType, broadcast_dimensions: Sequence[int]
 ):
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     # Type checks
     assert isinstance(a, TensorLike)
     assert isinstance(shape, Sequence)
@@ -1235,7 +1243,11 @@ def _broadcast_in_dim_meta(
 
     # shape must be broadcastable to
     for idx, new_idx in enumerate(broadcast_dimensions):
-        assert a.shape[idx] == 1 or a.shape[idx] == shape[new_idx]
+        if not guard_size_oblivious(a.shape[idx] == 1):
+            torch._check(
+                a.shape[idx] == shape[new_idx],
+                lambda: f"{a.shape[idx]} must be broadcastable to {shape[new_idx]}",
+            )
 
     new_strides = []
     original_idx = 0
@@ -1243,13 +1255,13 @@ def _broadcast_in_dim_meta(
         if idx in broadcast_dimensions:
             # Assigns a stride of zero to dimensions
             # which were actually broadcast
-            if a.shape[original_idx] != shape[idx]:
+            if guard_size_oblivious(a.shape[original_idx] != shape[idx]):
                 new_strides.append(0)
             else:
                 new_strides.append(a.stride()[original_idx])
             original_idx = original_idx + 1
         else:
-            if shape[idx] != 1:
+            if guard_size_oblivious(shape[idx] != 1):
                 new_strides.append(0)
             elif original_idx == a.ndim:
                 new_strides.append(1)
@@ -1325,6 +1337,8 @@ def _collapse_view_helper(
 ) -> Tuple[Optional[ShapeType], Optional[StrideType]]:
     assert isinstance(a, TensorLike)
 
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     _validate_collapse_args(a, start, end)
 
     # Special-case for zero dimensional tensors
@@ -1341,21 +1355,25 @@ def _collapse_view_helper(
     length = shape[end]
     stride = strides[end]
     for idx in range(end - 1, start - 1, -1):
-        if shape[idx] == 0 or shape[idx + 1] == 0:
+        if guard_size_oblivious(shape[idx] == 0) or guard_size_oblivious(
+            shape[idx + 1] == 0
+        ):
             length = 0
             stride = 0
             break
 
-        if shape[idx] == 1:
+        if guard_size_oblivious(shape[idx] == 1):
             continue
 
         length = length * shape[idx]
         stride = min(stride, strides[idx])
 
         if (
-            a.numel() > 0
-            and shape[idx + 1] != 1
-            and not (strides[idx] == strides[idx + 1] * shape[idx + 1])
+            guard_size_oblivious(a.numel() > 0)
+            and guard_size_oblivious(shape[idx + 1] != 1)
+            and not guard_size_oblivious(
+                strides[idx] == strides[idx + 1] * shape[idx + 1]
+            )
         ):
             return None, None
 
@@ -1363,7 +1381,7 @@ def _collapse_view_helper(
     new_strides = strides[:start] + (stride,) + strides[end + 1 :]
 
     # NOTE: when the input has no elements it's restrided as if it were contiguous
-    if a.numel() == 0:
+    if guard_size_oblivious(a.numel() == 0):
         new_strides = utils.make_contiguous_strides_for(new_shape)
 
     return new_shape, new_strides
@@ -1647,8 +1665,9 @@ def _split_dim_meta(a: TensorLikeType, dim: int, outer_length: int) -> TensorLik
     inner_length = a.shape[dim] // outer_length
 
     if (a.shape[dim] % outer_length) != 0:
-        msg = "Attempting to split dimension of length {}, but outer length of {} divides it with a remainder!".format(
-            a.shape[dim], outer_length
+        msg = (
+            f"Attempting to split dimension of length {a.shape[dim]}, "
+            f"but outer length of {outer_length} divides it with a remainder!"
         )
         raise ValueError(msg)
 
@@ -1726,9 +1745,7 @@ squeeze = _make_prim(
 
 def _transpose_meta(a: TensorLikeType, permutation: DimsSequenceType) -> TensorLikeType:
     if a.ndim != len(permutation):
-        msg = "Attempting to permute a tensor of rank {}, but received a permutation of length {}!".format(
-            a.ndim, len(permutation)
-        )
+        msg = f"Attempting to permute a tensor of rank {a.ndim}, but received a permutation of length {len(permutation)}!"
         raise ValueError(msg)
 
     if not utils.is_valid_permutation(a.ndim, permutation):
@@ -1888,11 +1905,15 @@ collapse = _make_prim(
 
 
 # TODO: review stride logic
+# NB: unlike torch.cat, this is more strict about empty tensors and dim is
+# never negative
 def _cat_meta(tensors: Sequence[TensorLikeType], dim: int) -> TensorLikeType:
     # Verifies same shape (except in the concat dimension)
+    assert dim >= 0
     shape = tensors[0].shape
     concat_length = 0
     for tensor_idx, tensor in enumerate(tensors):
+        assert len(shape) == len(tensor.shape)
         for idx, (common_length, length) in enumerate(zip(shape, tensor.shape)):
             if idx == dim:
                 concat_length = concat_length + length
@@ -2992,6 +3013,50 @@ fft_c2r = _make_prim(
     return_type=RETURN_TYPE.NEW,
     doc=_fft_c2r_doc,
 )
+
+
+def _frexp_meta(self: TensorLikeType) -> Tuple[TensorLikeType, TensorLikeType]:
+    torch._check(
+        self.dtype.is_floating_point,
+        lambda: "torch.frexp() only supports floating-point dtypes",
+    )
+    return torch.empty_like(self), torch.empty_like(self, dtype=torch.int32)
+
+
+frexp = _make_prim(
+    schema="frexp(Tensor self) -> (Tensor mantissa, Tensor exponent)",
+    meta=_frexp_meta,
+    return_type=(RETURN_TYPE.NEW, RETURN_TYPE.NEW),
+    impl_aten=torch.frexp,
+    doc="",
+)
+
+
+def _make_token_aten() -> TensorLikeType:
+    return torch.empty(0)
+
+
+_make_token = _make_prim(
+    schema="_make_token() -> Tensor",
+    meta=_make_token_aten,
+    return_type=RETURN_TYPE.NEW,
+    impl_aten=_make_token_aten,
+    doc="Creates a token used for keeping track of side effects.",
+)
+
+
+def _sink_tokens_aten(tokens) -> None:
+    pass
+
+
+_sink_tokens = _make_prim(
+    schema="_sink_tokens(Tensor[] tokens) -> ()",
+    meta=_sink_tokens_aten,
+    return_type=RETURN_TYPE.NONE,
+    impl_aten=_sink_tokens_aten,
+    doc="Sink all of the tokens which were previously used for keeping track of side effects.",
+)
+
 
 register_rng_prims()
 register_debug_prims()

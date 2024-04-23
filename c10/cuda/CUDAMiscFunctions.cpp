@@ -1,8 +1,7 @@
 #include <c10/cuda/CUDAMiscFunctions.h>
-#include <stdlib.h>
+#include <cstdlib>
 
-namespace c10 {
-namespace cuda {
+namespace c10::cuda {
 
 const char* get_cuda_check_suffix() noexcept {
   static char* device_blocking_flag = getenv("CUDA_LAUNCH_BLOCKING");
@@ -21,5 +20,4 @@ std::mutex* getFreeMutex() {
   return &cuda_free_mutex;
 }
 
-} // namespace cuda
-} // namespace c10
+} // namespace c10::cuda

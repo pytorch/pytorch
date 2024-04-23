@@ -70,14 +70,26 @@ bool SimpleValue::hasAttr(
     const SourceRange& loc,
     GraphFunction& m,
     const std::string& field) {
-  auto class_type = value_->type()->cast<ClassType>();
-  if (!class_type) {
-    throw ErrorReport(loc) << "hasattr's first argument must be an object, got "
-                           << value_->type()->repr_str() << " instead";
+  if (auto class_type = value_->type()->cast<ClassType>()) {
+    return class_type->hasMethod(field) || class_type->hasAttribute(field) ||
+        class_type->hasConstant(field);
+  } else if (auto tuple_type = value_->type()->cast<TupleType>()) {
+    if (tuple_type->schema()) {
+      for (const auto& arg : tuple_type->schema()->arguments()) {
+        if (arg.name() == field) {
+          return true;
+        }
+      }
+      return false;
+    } else {
+      throw ErrorReport(loc) << "hasattr's first argument must be a object "
+                             << "or NamedTuple, but got a normal Tuple "
+                             << value_->type()->repr_str() << " instead";
+    }
   }
-
-  return class_type->hasMethod(field) || class_type->hasAttribute(field) ||
-      class_type->hasConstant(field);
+  throw ErrorReport(loc) << "hasattr's first argument must be an object or "
+                         << "NamedTuple, got " << value_->type()->repr_str()
+                         << " instead";
 }
 
 // support syntax sugar for x.foo(y, z) by allowing x.foo to return a
@@ -133,7 +145,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
            {"H", "prim"},
            {"mT", "aten"},
            {"mH", "aten"},
-           {"is_ort", "prim"},
+           {"is_maia", "prim"},
            {"itemsize", "prim"},
            {"nbytes", "prim"},
            {"ndim", "prim"},

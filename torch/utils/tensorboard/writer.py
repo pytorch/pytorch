@@ -907,7 +907,7 @@ class SummaryWriter:
             else:
                 # Handles cnn.CNNModelHelper, model_helper.ModelHelper
                 current_graph = model_to_graph_def(model)
-            event = event_pb2.Event(graph_def=current_graph.SerializeToString())
+            event = event_pb2.Event(graph_def=current_graph.SerializeToString())  # type: ignore[possibly-undefined]
             self._get_file_writer().add_event(event)
 
     @staticmethod
@@ -932,10 +932,12 @@ class SummaryWriter:
 
         Args:
             mat (torch.Tensor or numpy.ndarray): A matrix which each row is the feature vector of the data point
-            metadata (list): A list of labels, each element will be convert to string
+            metadata (list): A list of labels, each element will be converted to string
             label_img (torch.Tensor): Images correspond to each data point
             global_step (int): Global step value to record
             tag (str): Name for the embedding
+            metadata_header (list): A list of headers for multi-column metadata. If given, each metadata must be
+                a list with values corresponding to headers.
         Shape:
             mat: :math:`(N, D)`, where N is number of data and D is feature dimension
 
@@ -960,6 +962,11 @@ class SummaryWriter:
             writer.add_embedding(torch.randn(100, 5), metadata=meta, label_img=label_img)
             writer.add_embedding(torch.randn(100, 5), label_img=label_img)
             writer.add_embedding(torch.randn(100, 5), metadata=meta)
+
+        .. note::
+            Categorical (i.e. non-numeric) metadata cannot have more than 50 unique values if they are to be used for
+            coloring in the embedding projector.
+
         """
         torch._C._log_api_usage_once("tensorboard.logging.add_embedding")
         mat = make_np(mat)
@@ -979,7 +986,7 @@ class SummaryWriter:
                     "warning: Embedding dir exists, did you set global_step for add_embedding()?"
                 )
             else:
-                raise Exception(
+                raise Exception(  # noqa: TRY002
                     f"Path: `{save_path}` exists, but is a file. Cannot proceed."
                 )
         else:

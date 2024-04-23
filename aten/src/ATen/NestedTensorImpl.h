@@ -14,6 +14,8 @@ namespace at::native {
 struct NestedTensorImpl;
 inline bool nested_tensor_impl_is_contiguous(const NestedTensorImpl* nt);
 int64_t get_numel_from_nested_size_tensor(const at::Tensor& tensor);
+at::Tensor construct_nested_strides(const at::Tensor& nested_size);
+at::Tensor construct_offsets(const at::Tensor& nested_size);
 
 struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   explicit NestedTensorImpl(
@@ -25,13 +27,15 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
       at::Tensor storage_offsets);
 
   explicit NestedTensorImpl(
-      at::Tensor buffer,
+      const at::Tensor& buffer,
       at::Tensor nested_sizes,
       at::Tensor nested_strides,
       at::Tensor storage_offsets);
   // assume contiguous, `nested_strides` and `offsets`
   // can be infered from `nested_sizes`
-  explicit NestedTensorImpl(at::Tensor buffer, at::Tensor nested_sizes);
+  explicit NestedTensorImpl(
+      const at::Tensor& buffer,
+      const at::Tensor& nested_sizes);
 
   // This constructor is used creating view tensors from nested tensors
   explicit NestedTensorImpl(

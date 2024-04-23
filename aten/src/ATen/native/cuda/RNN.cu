@@ -55,7 +55,7 @@ bool allContiguous(at::TensorList tensors) {
 }
 
 void getLaunchConfig(dim3* block, dim3* grid, int64_t numel) {
-  int curDevice = -1;
+  c10::DeviceIndex curDevice = -1;
   c10::cuda::GetDevice(&curDevice);
   *block = cuda::getApplyBlock();
   TORCH_INTERNAL_ASSERT(cuda::getApplyGrid(numel, *grid, curDevice),

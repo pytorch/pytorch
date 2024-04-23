@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import functools
 import importlib
 import logging

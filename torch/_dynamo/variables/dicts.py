@@ -1,13 +1,11 @@
+# mypy: ignore-errors
+
 import collections
 import dataclasses
-import enum
 import functools
 import inspect
 import sys
-from types import MethodWrapperType
 from typing import Dict, List, Optional
-
-import torch
 
 from torch._subclasses.fake_tensor import is_fake
 
@@ -16,6 +14,7 @@ from ..bytecode_transformation import (
     create_call_function,
     create_call_method,
     create_instruction,
+    create_load_method,
 )
 from ..eval_frame import skip_code
 
@@ -26,32 +25,12 @@ from ..utils import dict_keys, dict_values, istype, specialize_symnode
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 
-# Note: [Adding a new supported class the keys of ConstDictVarialble]
-# You'll need to add it to:
-# - `is_hashable_python_var` in this file
-# - `is_hashable` in this file
-# - `const_repr` in util.py, and perhaps modify DICT_KEYS in guards.py
-
-
-def is_hashable_python_var(x):
-    # IMPORTANT: Keep me in sync with is_hashable!
-    # Even better, we should have a map of functions connecting the two
-    from torch import Tensor
-    from ..trace_rules import is_builtin_callable, is_numpy
-
-    return (
-        ConstantVariable.is_literal(x)
-        or isinstance(x, (Tensor, enum.Enum, type, torch.nn.Module, MethodWrapperType))
-        or is_builtin_callable(x)
-        or (isinstance(x, tuple) and all(is_hashable_python_var(e) for e in x))
-        or is_numpy(x)
-    )
+# [Adding a new supported class within the keys of ConstDictVarialble]
+# - Add its tracker type to is_hashable
+# - (perhaps) Define how it is compared in _HashableTracker._eq_impl
 
 
 def is_hashable(x):
-    # IMPORTANT: Keep me in sync with is_hashable_python_var!
-    # Even better, we should have a map of functions connecting the two
-
     if isinstance(x, variables.TensorVariable):
         # Tensors are hashable if they have an example_value (a fake tensor)
         # Most VT's should have one.
@@ -68,16 +47,25 @@ def is_hashable(x):
                 variables.ConstantVariable,
                 variables.EnumVariable,
                 variables.user_defined.UserDefinedClassVariable,
-                variables.misc.SkipFilesVariable,
+                variables.UserFunctionVariable,
+                variables.SkipFunctionVariable,
                 variables.misc.NumpyVariable,
                 variables.NNModuleVariable,
+                variables.UnspecializedNNModuleVariable,
                 variables.MethodWrapperVariable,
                 variables.TorchInGraphFunctionVariable,
+                variables.TypingVariable,
+                variables.FunctoolsPartialVariable,
             ),
         )
 
 
 class ConstDictVariable(VariableTracker):
+    _nonvar_fields = {
+        "user_cls",
+        *VariableTracker._nonvar_fields,
+    }
+
     class _HashableTracker:
         """
         Auxiliary opaque internal class that wraps a VariableTracker and makes it hashable
@@ -103,6 +91,10 @@ class ConstDictVariable(VariableTracker):
                 x = tuple(Hashable(e).underlying_value for e in self.vt.items)
             elif isinstance(self.vt, variables.NNModuleVariable):
                 return self.vt.module
+            elif isinstance(self.vt, variables.UnspecializedNNModuleVariable):
+                return self.vt.value
+            elif isinstance(self.vt, variables.UserFunctionVariable):
+                return self.vt.get_function()
             else:
                 x = self.vt.as_python_constant()
             return x
@@ -191,26 +183,20 @@ class ConstDictVariable(VariableTracker):
             codegen(value)
         # BUILD_MAP and calling collections.OrderedDict if necessary
         if self.user_cls is collections.OrderedDict:
-            return [
-                create_instruction("BUILD_MAP", arg=len(self.items)),
-                *create_call_function(1, False),
-            ]
+            codegen.extend_output(
+                [
+                    create_instruction("BUILD_MAP", arg=len(self.items)),
+                    *create_call_function(1, False),
+                ]
+            )
         # BUILD_MAP only if user_cls is dict
         else:
-            return [create_instruction("BUILD_MAP", arg=len(self.items))]
-
-    @staticmethod
-    def _wrap_keys_python_var(d):
-        """Wrap the keys of a dictionary with python objs as keys into Hashable objects"""
-        assert all(is_hashable_python_var(k) for k in d.keys())
-        Hashable = ConstDictVariable._HashableTracker
-        from .builder import SourcelessBuilder
-
-        build = SourcelessBuilder()
-        return {Hashable(build(k)): v for k, v in d.items()}
+            codegen.append_output(create_instruction("BUILD_MAP", arg=len(self.items)))
 
     def getitem_const(self, arg: VariableTracker):
         key = ConstDictVariable._HashableTracker(arg)
+        if key not in self.items:
+            raise KeyError(arg.value)
         return self.items[key]
 
     def call_method(
@@ -266,6 +252,10 @@ class ConstDictVariable(VariableTracker):
         elif name == "pop" and arg_hashable and self.mutable_local:
             tx.output.side_effects.mutation(self)
             return self.items.pop(Hashable(args[0]))
+        elif name == "clear":
+            tx.output.side_effects.mutation(self)
+            self.items.clear()
+            return ConstantVariable.create(None)
         elif (
             name == "update"
             and len(args) == 1
@@ -286,8 +276,10 @@ class ConstDictVariable(VariableTracker):
             else:
                 dict_vt = BuiltinVariable.call_custom_dict(tx, dict, args[0])
             self.items.update(dict_vt.items)
-            # all keys in kwargs are valid (`str`s)
-            kwargs = ConstDictVariable._wrap_keys_python_var(kwargs)
+            # Wrap strings
+            kwargs = {
+                Hashable(ConstantVariable.create(k)): v for k, v in kwargs.items()
+            }
             self.items.update(kwargs)
             return ConstantVariable.create(None)
         elif name in ("get", "__getattr__") and args[0] in self:
@@ -377,7 +369,7 @@ class SetVariable(ConstDictVariable):
 
     def reconstruct(self, codegen):
         codegen.foreach([x.vt for x in self.set_items])
-        return [create_instruction("BUILD_SET", arg=len(self.set_items))]
+        codegen.append_output(create_instruction("BUILD_SET", arg=len(self.set_items)))
 
     def call_method(
         self,
@@ -428,7 +420,7 @@ class DictView(VariableTracker):
     def view_items_vt(self):
         # Returns an iterable of the unpacked items
         # Implement in the subclasses
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def unpack_var_sequence(self, tx):
         def unwrap(x):
@@ -438,10 +430,12 @@ class DictView(VariableTracker):
 
     def reconstruct(self, codegen):
         codegen(self.dv_dict)
-        return [
-            create_instruction("LOAD_METHOD", argval=self.kv),
-            *create_call_method(0),
-        ]
+        codegen.extend_output(
+            [
+                create_load_method(self.kv),
+                *create_call_method(0),
+            ]
+        )
 
     def call_method(
         self,
@@ -621,7 +615,7 @@ class DataClassVariable(ConstDictVariable):
         assert self.is_matching_cls(user_cls)
 
     def as_proxy(self):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def reconstruct(self, codegen):
         codegen.extend_output([codegen._create_load_const(self.user_cls)])
@@ -629,7 +623,7 @@ class DataClassVariable(ConstDictVariable):
         d = self.keys_as_python_constant()
         codegen.foreach(d.values())
         keys = tuple(d.keys())
-        return codegen.create_call_function_kw(len(keys), keys, True)
+        codegen.extend_output(codegen.create_call_function_kw(len(keys), keys, True))
 
     def call_method(
         self,
@@ -714,9 +708,20 @@ class CustomizedDictVariable(ConstDictVariable):
                         "expect VariableTracker or ConstantVariable.is_literal"
                     )
 
+            bound_args = {}
+            if _is_matching_transformers_cls(user_cls) or _is_matching_diffusers_cls(
+                user_cls
+            ):
+                # Skip none
+                for k, v in bound.arguments.items():
+                    if isinstance(v, ConstantVariable) and v.value is None or v is None:
+                        continue
+                    bound_args[k] = v
+            else:
+                bound_args = bound.arguments
+
             items = {
-                ConstantVariable.create(k): make_var(v)
-                for k, v in bound.arguments.items()
+                ConstantVariable.create(k): make_var(v) for k, v in bound_args.items()
             }
         elif not args:
             # CustomDict(a=1, b=2) in the general (non-dataclass) case.
@@ -732,24 +737,45 @@ class CustomizedDictVariable(ConstDictVariable):
     # called from builder.py
     @classmethod
     def wrap(cls, builder, obj):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def __init__(self, items, user_cls, **options):
         super().__init__(items, user_cls, **options)
         assert self.is_matching_cls(user_cls)
 
     def as_proxy(self):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     # 'RETURN_VALUE triggered compile'
     # called from torch/_dynamo/codegen.py
     def reconstruct(self, codegen):
+        is_hf_model_output = _is_matching_transformers_cls(
+            self.user_cls
+        ) or _is_matching_diffusers_cls(self.user_cls)
+
+        # If the user class is a ModelOutput, then wrap the instance creation in
+        # torch._dynamo.disable(). Even though we mark the __post_init__ as skip
+        # in `create` function, this is not enough. TorchDynamo can still get
+        # triggered on the child functions of __post_init__. This upsets export.
+        # Since, we know that ModelOutput __post_init__ is not worth optimizing,
+        # we just wrap the instance creation in torch._dynamo.disable(),
+        # regardless whether its export or not.
+        if is_hf_model_output:
+            # load torch._dynamo.disable
+            codegen.append_output(codegen.create_load_global("torch", True, add=True))
+            codegen.append_output(codegen.create_load_attr("_dynamo"))
+            codegen.append_output(codegen.create_load_attr("disable"))
         codegen.extend_output([codegen._create_load_const(self.user_cls)])
+
+        if is_hf_model_output:
+            # Wrap user_cls with disable
+            codegen.extend_output(create_call_function(1, False))
+
         # All the keys are just wrapped strings
         d = self.keys_as_python_constant()
         codegen.foreach(d.values())
         keys = tuple(d.keys())
-        return codegen.create_call_function_kw(len(keys), keys, True)
+        codegen.extend_output(codegen.create_call_function_kw(len(keys), keys, True))
 
     def call_method(
         self,
@@ -846,7 +872,6 @@ class PythonSysModulesVariable(VariableTracker):
     def python_type(self):
         return dict
 
-    @staticmethod
     def reconstruct(self, codegen):
         codegen.extend_output(
             [

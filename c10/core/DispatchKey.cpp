@@ -66,8 +66,8 @@ const char* toString(DispatchKey t) {
       return "Dense";
     case DispatchKey::FPGA:
       return "FPGA";
-    case DispatchKey::ORT:
-      return "ORT";
+    case DispatchKey::MAIA:
+      return "MAIA";
     case DispatchKey::Vulkan:
       return "Vulkan";
     case DispatchKey::Metal:
@@ -91,10 +91,9 @@ const char* toString(DispatchKey t) {
 
     case DispatchKey::Sparse:
       return "Sparse";
-    case DispatchKey::SparseCsrCPU:
-      return "SparseCsrCPU";
-    case DispatchKey::SparseCsrCUDA:
-      return "SparseCsrCUDA";
+
+    case DispatchKey::SparseCsr:
+      return "SparseCsr";
 
     case DispatchKey::NestedTensor:
       return "NestedTensor";
@@ -264,7 +263,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"Undefined", c10::DispatchKey::Undefined},
       {"Dense", c10::DispatchKey::Dense},
       {"FPGA", c10::DispatchKey::FPGA},
-      {"ORT", c10::DispatchKey::ORT},
+      {"MAIA", c10::DispatchKey::MAIA},
       {"MPS", c10::DispatchKey::MPS},
       {"Vulkan", c10::DispatchKey::Vulkan},
       {"Metal", c10::DispatchKey::Metal},
@@ -274,8 +273,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"CustomRNGKeyId", c10::DispatchKey::CustomRNGKeyId},
       {"MkldnnCPU", c10::DispatchKey::MkldnnCPU},
       {"Sparse", c10::DispatchKey::Sparse},
-      {"SparseCsrCPU", c10::DispatchKey::SparseCsrCPU},
-      {"SparseCsrCUDA", c10::DispatchKey::SparseCsrCUDA},
+      {"SparseCsr", c10::DispatchKey::SparseCsr},
       {"BackendSelect", c10::DispatchKey::BackendSelect},
       {"Python", c10::DispatchKey::Python},
       {"PythonTLSSnapshot", c10::DispatchKey::PythonTLSSnapshot},
@@ -345,6 +343,14 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"SparseVE", c10::DispatchKey::SparseVE},
       {"SparseMeta", c10::DispatchKey::SparseMeta},
       {"SparsePrivateUse1", c10::DispatchKey::SparsePrivateUse1},
+
+      {"SparseCsrCPU", c10::DispatchKey::SparseCsrCPU},
+      {"SparseCsrCUDA", c10::DispatchKey::SparseCsrCUDA},
+      {"SparseCsrHIP", c10::DispatchKey::SparseCsrHIP},
+      {"SparseCsrXPU", c10::DispatchKey::SparseCsrXPU},
+      {"SparseCsrVE", c10::DispatchKey::SparseCsrVE},
+      {"SparseCsrMeta", c10::DispatchKey::SparseCsrMeta},
+      {"SparseCsrPrivateUse1", c10::DispatchKey::SparseCsrPrivateUse1},
 
       {"AutogradCPU", c10::DispatchKey::AutogradCPU},
       {"AutogradCUDA", c10::DispatchKey::AutogradCUDA},

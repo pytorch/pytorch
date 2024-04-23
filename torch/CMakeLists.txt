@@ -79,6 +79,7 @@ list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${LIBSHM_SRCDIR})
 set(TORCH_PYTHON_LINK_LIBRARIES
     python::python
     pybind::pybind11
+    opentelemetry::api
     shm
     fmt::fmt-header-only
     ATEN_CPU_FILES_GEN_LIB)
@@ -143,6 +144,13 @@ if(USE_ROCM)
       __HIP_PLATFORM_AMD__
       )
     list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${ROCM_ROCTX_LIB})
+endif()
+
+if(USE_XPU)
+    include(${TORCH_ROOT}/cmake/public/xpu.cmake)
+    append_filelist("libtorch_python_xpu_sources" TORCH_PYTHON_SRCS)
+
+    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_XPU)
 endif()
 
 if(USE_CUDNN OR USE_ROCM)

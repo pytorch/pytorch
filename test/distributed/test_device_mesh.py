@@ -14,6 +14,7 @@ from torch.distributed._tensor.placement_types import _Partial, Shard
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh, init_device_mesh
 
 from torch.distributed.distributed_c10d import (
+    _world,
     get_global_rank,
     get_world_size,
     init_process_group,
@@ -24,6 +25,7 @@ from torch.distributed.distributed_c10d import (
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
+    skip_unless_torch_gpu,
     with_comms,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -61,6 +63,13 @@ class DeviceMeshTest(DTensorTestBase):
         DeviceMesh(device_type, mesh_tensor)
         self.assertTrue(is_initialized())
         self.destroy_pg()
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_assert_invalid_mesh_tensor(self):
+        mesh = torch.arange(self.world_size).to(self.rank)
+        with self.assertRaises(ValueError):
+            device_mesh = DeviceMesh(self.device_type, mesh)
 
     @with_comms
     def test_get_group(self):
@@ -134,13 +143,6 @@ class DeviceMeshTest(DTensorTestBase):
             )
             self.assertEqual(global_ranks, current_rank_expected_group_ranks)
 
-    @with_comms
-    def test_lazy_init_device_mesh(self):
-        mesh = DeviceMesh(self.device_type, [1], _init_process_groups=False)
-
-        with self.assertRaisesRegex(RuntimeError, "process groups not initialized!"):
-            mesh.get_group()
-
     def test_fake_pg_device_mesh(self):
         fake_store = FakeStore()
         init_process_group("fake", store=fake_store, rank=0, world_size=self.world_size)
@@ -192,6 +194,44 @@ class DeviceMeshTestNDim(DTensorTestBase):
         mesh3 = DeviceMesh(self.device_type, mesh_tensor_3d)
         self.assertNotEqual(hash(mesh), hash(mesh3))
         self.assertNotEqual(hash(mesh2), hash(mesh3))
+
+    @with_comms
+    def test_get_local_rank_3d(self):
+        """
+        If we have a 3D mesh and we want to apply dp, pp, tp to it,
+        mesh_dim_names = ["dp", "pp", "tp"], and the mesh tensor would be:
+        mesh_3d_tensor = [
+            [
+                [0, 1],
+                [2, 3],
+            ],
+            [
+                [4, 5],
+                [6, 7],
+            ]
+
+        ]
+        """
+        mesh_shape = (2, 2, 2)
+        mesh_3d = init_device_mesh(
+            self.device_type, mesh_shape, mesh_dim_names=("dp", "pp", "tp")
+        )
+
+        # tp_rank_0: [0, 2, 4, 6], tp_rank_1: [1, 3, 5, 7]
+        tp_rank = mesh_3d.get_local_rank("tp")
+        print(f"{self.rank=}, {tp_rank=}")
+        expected_tp_rank = self.rank % 2
+        self.assertEqual(tp_rank, expected_tp_rank)
+
+        # pp_rank_0: [0, 1, 4, 5], pp_rank_1: [2, 3, 6, 7]
+        pp_rank = mesh_3d.get_local_rank("pp")
+        expected_pp_rank = 0 if self.rank % 4 <= 1 else 1
+        self.assertEqual(pp_rank, expected_pp_rank)
+
+        # dp_rank_0: [0, 1, 2, 3], dp_rank_1: [4, 5, 6, 7]
+        dp_rank = mesh_3d.get_local_rank("dp")
+        expected_dp_rank = self.rank // 4
+        self.assertEqual(dp_rank, expected_dp_rank)
 
 
 class InitDeviceMeshTest(DTensorTestBase):
@@ -247,12 +287,6 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         return 8
 
     @with_comms
-    def test_raises_mesh_dim_less_than_2(self):
-        with self.assertRaisesRegex(RuntimeError, "Cannot slice a DeviceMesh"):
-            mesh = init_device_mesh(self.device_type, (8,))
-            child_mesh = mesh["DP"]
-
-    @with_comms
     def test_raises_no_mesh_dim_found(self):
         with self.assertRaisesRegex(KeyError, "No `mesh_dim_names` found."):
             mesh = init_device_mesh(self.device_type, (2, 4))
@@ -292,6 +326,34 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         dp_mesh = mesh_2d["DP"]
         dp_group_idx = self.rank % 4
         self.assertEqual(mesh_2d["DP"].mesh, pg_ranks_by_dim_name["DP"][dp_group_idx])
+
+    @with_comms
+    def test_get_item_1d(self):
+        mesh = init_device_mesh(self.device_type, (8,), mesh_dim_names=("dp",))
+        # Make sure slicing out 1D mesh from a 1D mesh works.
+        # We are just dummy return without the parent mesh here.
+        dp_mesh = mesh["dp"]
+        self.assertEqual(dp_mesh, mesh)
+
+        with self.assertRaisesRegex(RuntimeError, "Invalid mesh_dim_name"):
+            dp_mesh = mesh["dim0"]
+
+    @with_comms
+    def test_cache_and_reuse_submesh_slice_result(self):
+        mesh = init_device_mesh(self.device_type, (2, 4), mesh_dim_names=("dp", "tp"))
+
+        dp_mesh = mesh["dp"]
+        ref_pg_count = _world.group_count
+
+        # When we call the "dp" slice second time, it should not create any new pg.
+        # As we are just using the cached result so the pg count should be the same.
+        dp_mesh_2 = mesh["dp"]
+        self.assertEqual(ref_pg_count, _world.group_count)
+
+        # When we call the "tp" slice, it should create a new pg, as the "tp" slice is called
+        # for the first time.
+        tp_mesh = mesh["tp"]
+        self.assertTrue(_world.group_count > ref_pg_count)
 
 
 class TestMeshEnv(DTensorTestBase):
@@ -445,9 +507,11 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
                 torch.chunk(big_tensor, device_mesh.size(), dim=shard_dim)
             )
             unpadded_list = [
-                shard_placement._unpad_tensor(big_tensor_chunks[i], pad_sizes[i])
-                if pad_sizes[i] > 0
-                else big_tensor_chunks[i]
+                (
+                    shard_placement._unpad_tensor(big_tensor_chunks[i], pad_sizes[i])
+                    if pad_sizes[i] > 0
+                    else big_tensor_chunks[i]
+                )
                 for i, big_tensor in enumerate(big_tensor_chunks)
             ]
             all_gathered_tensor = torch.cat(unpadded_list, dim=shard_dim)

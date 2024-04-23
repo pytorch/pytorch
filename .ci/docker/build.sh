@@ -204,7 +204,7 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    ROCM_VERSION=5.6
+    ROCM_VERSION=5.7
     NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
     TRITON=yes
@@ -215,7 +215,7 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    ROCM_VERSION=5.7
+    ROCM_VERSION=6.0
     NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
     TRITON=yes
@@ -229,6 +229,7 @@ case "$image" in
     BASEKIT_VERSION=2024.0.0-49522
     NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
+    TRITON=yes
     ;;
     pytorch-linux-jammy-py3.8-gcc11-inductor-benchmarks)
     ANACONDA_PYTHON_VERSION=3.8
@@ -277,6 +278,7 @@ case "$image" in
     CONDA_CMAKE=yes
     TRITON=yes
     DOCS=yes
+    UNINSTALL_DILL=yes
     ;;
   pytorch-linux-jammy-py3-clang12-executorch)
     ANACONDA_PYTHON_VERSION=3.10
@@ -294,6 +296,15 @@ case "$image" in
   pytorch-linux-jammy-cuda11.8-cudnn8-py3.9-linter)
     ANACONDA_PYTHON_VERSION=3.9
     CUDA_VERSION=11.8
+    CONDA_CMAKE=yes
+    ;;
+  pytorch-linux-jammy-aarch64-py3.10-gcc11)
+    ANACONDA_PYTHON_VERSION=3.10
+    GCC_VERSION=11
+    ACL=yes
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
     CONDA_CMAKE=yes
     ;;
   *)
@@ -349,7 +360,7 @@ if [[ "$image" == *cuda*  && ${OS} == "ubuntu" ]]; then
 fi
 
 # Build image
-docker build \
+DOCKER_BUILDKIT=1 docker build \
        --no-cache \
        --progress=plain \
        --build-arg "BUILD_ENVIRONMENT=${image}" \
@@ -387,6 +398,7 @@ docker build \
        --build-arg "INDUCTOR_BENCHMARKS=${INDUCTOR_BENCHMARKS}" \
        --build-arg "EXECUTORCH=${EXECUTORCH}" \
        --build-arg "BASEKIT_VERSION=${BASEKIT_VERSION}" \
+       --build-arg "ACL=${ACL:-}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        -t "$tmp_tag" \
        "$@" \

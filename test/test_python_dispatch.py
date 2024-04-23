@@ -1,34 +1,47 @@
 # Owner(s): ["module: __torch_dispatch__"]
 
 import tempfile
-import torch
+import unittest
 from copy import deepcopy
-from torch.library import Library, impl, fallthrough_kernel
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+import torch
 from torch import SymInt
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.cuda.jiterator import _create_jit_fn
-import unittest
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.library import _scoped_library, fallthrough_kernel, impl, Library
 from torch.testing._internal.common_utils import *  # noqa: F403
-from torch.utils._mode_utils import no_dispatch, all_same_mode
-from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorReentrant, LoggingTensorMode, \
-    log_input, capture_logs, capture_logs_with_logging_tensor_mode
-from torch.testing._internal.two_tensor import TwoTensor
-from torch.utils._pytree import tree_map, tree_map_only
-from torch.utils import _pytree as pytree
-from torch.utils._python_dispatch import TorchDispatchMode, _get_current_dispatch_mode, _get_current_dispatch_mode_stack
-from torch._custom_op.functional import register_functional_op
-from torch._C import DispatchKeySet, DispatchKey
-from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_device_type import ops
-from torch.testing._internal.common_methods_invocations import op_db
-from torch.testing._internal.custom_op_db import custom_op_db
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.multiprocessing.reductions import StorageWeakRef
-
 import logging
 import sys
+
 import torch._dynamo
+from torch._C import DispatchKey, DispatchKeySet
+from torch._custom_op.functional import register_functional_op
+from torch.fx.experimental.proxy_tensor import make_fx
+from torch.multiprocessing.reductions import StorageWeakRef
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    ops,
+)
+from torch.testing._internal.common_methods_invocations import op_db
+from torch.testing._internal.custom_op_db import custom_op_db
+from torch.testing._internal.logging_tensor import (
+    capture_logs,
+    capture_logs_with_logging_tensor_mode,
+    log_input,
+    LoggingTensor,
+    LoggingTensorMode,
+    LoggingTensorReentrant,
+)
+from torch.testing._internal.two_tensor import TwoTensor
+from torch.utils import _pytree as pytree
+from torch.utils._mode_utils import all_same_mode, no_dispatch
+from torch.utils._python_dispatch import (
+    _get_current_dispatch_mode,
+    _get_current_dispatch_mode_stack,
+    TorchDispatchMode,
+)
+from torch.utils._pytree import tree_map, tree_map_only
 
 
 class TestDispatcherPythonBindings(TestCase):
@@ -40,7 +53,7 @@ class TestDispatcherPythonBindings(TestCase):
 
 
 class TestPythonRegistration(TestCase):
-    test_ns = '_test_python_registration'
+    test_ns = "_test_python_registration"
 
     def tearDown(self):
         if hasattr(torch.ops, self.test_ns):
@@ -48,61 +61,61 @@ class TestPythonRegistration(TestCase):
 
     def test_override_aten_ops_with_multiple_libraries(self) -> None:
         x = torch.tensor([1, 2])
-        my_lib1 = Library("aten", "IMPL")
-        my_lib2 = Library("aten", "IMPL")
+        with _scoped_library("aten", "IMPL") as my_lib2:
+            with _scoped_library("aten", "IMPL") as my_lib1:
+                # Example 1
+                def my_neg(*args, **kwargs):
+                    return args[0]._neg_view()
 
-        # Example 1
-        def my_neg(*args, **kwargs):
-            return args[0]._neg_view()
+                # Now we are secretly making the operator a view op so autograd needs to know how
+                # to handle it
+                my_lib1.impl("neg", my_neg, "AutogradCPU")
 
-        # Now we are secretly making the operator a view op so autograd needs to know how
-        # to handle it
-        my_lib1.impl('neg', my_neg, "AutogradCPU")
+                self.assertTrue(torch.neg(x).is_neg())
 
-        self.assertTrue(torch.neg(x).is_neg())
+                # RuntimeError: impl("aten::neg", ...):
+                # Explicitly provided namespace (aten) in operator name does not match ...
+                with self.assertRaisesRegex(
+                    RuntimeError, "operator name does not match namespace"
+                ):
+                    with _scoped_library("foo", "DEF") as my_lib3:
+                        my_lib3.define("neg(Tensor self) -> Tensor")
+                        my_lib3.impl(torch.ops.aten.neg.default, my_neg, "AutogradCPU")
 
-        # RuntimeError: impl("aten::neg", ...):
-        # Explicitly provided namespace (aten) in operator name does not match ...
-        with self.assertRaisesRegex(RuntimeError, "operator name does not match namespace"):
-            my_lib3 = Library("foo", "DEF")
-            my_lib3.define("neg(Tensor self) -> Tensor")
-            my_lib3.impl(torch.ops.aten.neg.default, my_neg, "AutogradCPU")
-            del my_lib3
+                # Example 2
+                def my_mul(*args, **kwargs):
+                    return torch.zeros_like(args[0])
 
-        # Example 2
-        def my_mul(*args, **kwargs):
-            return torch.zeros_like(args[0])
+                # torch.ops.aten.mul.Tensor
+                my_lib2.impl("aten::mul.Tensor", my_mul, "ZeroTensor")
 
-        # torch.ops.aten.mul.Tensor
-        my_lib2.impl("aten::mul.Tensor", my_mul, "ZeroTensor")
+                y = torch._efficientzerotensor(2)
+                self.assertFalse(torch.mul(x, y)._is_zerotensor())
 
-        y = torch._efficientzerotensor(2)
-        self.assertFalse(torch.mul(x, y)._is_zerotensor())
+                # Assert that a user can't override the behavior of a (ns, op, dispatch_key)
+                # combination if someone overrided the behavior for the same before them
+                with self.assertRaisesRegex(
+                    RuntimeError, "already a kernel registered from python"
+                ):
+                    my_lib2.impl(torch.ops.aten.mul.Tensor, my_mul, "ZeroTensor")
 
-        # Assert that a user can't override the behavior of a (ns, op, dispatch_key)
-        # combination if someone overrided the behavior for the same before them
-        with self.assertRaisesRegex(RuntimeError, 'already a kernel registered from python'):
-            my_lib2.impl(torch.ops.aten.mul.Tensor, my_mul, "ZeroTensor")
-
-        del my_lib1
-
-        # Validate that lib2 is not affected by removing lib1
-        self.assertFalse(torch.mul(x, y)._is_zerotensor())
-
-        del my_lib2
+            # Validate that lib2 is not affected by removing lib1
+            self.assertFalse(torch.mul(x, y)._is_zerotensor())
 
         # Validate that the old behavior is restored for neg and mul
         self.assertFalse(torch.neg(x).is_neg())
         self.assertTrue(torch.mul(x, y)._is_zerotensor())
 
     def test_error_if_fn_not_callable(self):
-        with self.assertRaisesRegex(TypeError, "Input function is required to be a callable"):
-            my_lib = Library("aten", "IMPL")
-            my_lib.impl(torch.ops.aten.neg.default, [], "AutogradCPU")
+        with self.assertRaisesRegex(
+            TypeError, "Input function is required to be a callable"
+        ):
+            with _scoped_library("aten", "IMPL") as my_lib:
+                my_lib.impl(torch.ops.aten.neg.default, [], "AutogradCPU")
 
     def test_finalizer(self):
         impls_refcnt = sys.getrefcount(torch.library._impls)
-        lib = Library(self.test_ns, "FRAGMENT")
+        lib = Library(self.test_ns, "FRAGMENT")  # noqa: TOR901
         lib.define("foo123(Tensor x) -> Tensor")
 
         # 1 for `lib`, 1 for sys.getrefcount
@@ -118,7 +131,7 @@ class TestPythonRegistration(TestCase):
             pass
 
         lib.impl(f"{self.test_ns}::foo123", foo123, "CPU")
-        key = f'{self.test_ns}/foo123/CPU'
+        key = f"{self.test_ns}/foo123/CPU"
         self.assertTrue(key in torch.library._impls)
 
         saved_op_impls = lib._op_impls
@@ -147,23 +160,22 @@ class TestPythonRegistration(TestCase):
             run[0] = True
             return args[0].clone()
 
-        my_lib1 = Library("aten", "IMPL")
-        my_lib1.impl('aten::sum', my_sum, "CPU")
-        x = torch.tensor([1, 2])
-        self.assertEqual(torch.sum(x), x)
-        self.assertTrue(run[0])
-        del my_lib1
+        with _scoped_library("aten", "IMPL") as my_lib1:
+            my_lib1.impl("aten::sum", my_sum, "CPU")
+            x = torch.tensor([1, 2])
+            self.assertEqual(torch.sum(x), x)
+            self.assertTrue(run[0])
         # Validate that the old behavior is restored for sum
         self.assertEqual(torch.sum(x), torch.tensor(3))
 
     def test_override_cuda_with_jiterator(self) -> None:
         def override_where_cuda() -> None:
             # Example 1: Invert the behavior of where's condition input
-            not_where_code_string = '''
+            not_where_code_string = """
             template <typename T> T inverted_where(bool cond, T a, T b){
                 return !cond ? a : b;
             }
-            '''
+            """
             jitted_where = _create_jit_fn(not_where_code_string)
 
             CALLED = [False]
@@ -173,28 +185,29 @@ class TestPythonRegistration(TestCase):
                 return jitted_where(*args, **kwargs)
 
             # overriding where's cuda kernel with Jiterator generated kernel
-            my_lib = Library("aten", "IMPL")
-            my_lib.impl('aten::where.self', inverted_where, "CUDA")
+            with _scoped_library("aten", "IMPL") as my_lib:
+                my_lib.impl("aten::where.self", inverted_where, "CUDA")
 
-            device = 'cuda'
-            cond = torch.tensor([True, True, False], device=device, dtype=torch.bool)
-            x = torch.tensor([1, 2, 3], device=device)
-            y = torch.tensor([-1, -2, -3], device=device)
+                device = "cuda"
+                cond = torch.tensor(
+                    [True, True, False], device=device, dtype=torch.bool
+                )
+                x = torch.tensor([1, 2, 3], device=device)
+                y = torch.tensor([-1, -2, -3], device=device)
 
-            self.assertEqual(torch.where(cond, x, y), torch.tensor([-1, -2, 3]))
-            self.assertTrue(CALLED[0])
-            del my_lib
+                self.assertEqual(torch.where(cond, x, y), torch.tensor([-1, -2, 3]))
+                self.assertTrue(CALLED[0])
 
             # behavior restored after deregistration
             self.assertEqual(torch.where(cond, x, y), torch.tensor([1, 2, -3]))
 
         def override_gelu_cuda() -> None:
             # Example 2: Use relu to approximate gelu for faster compute
-            fastest_gelu_code_string = '''
+            fastest_gelu_code_string = """
             template <typename T> T fast_gelu(T a){
                 return a > 0 ? a : 0;
             }
-            '''
+            """
             jitted_gelu = _create_jit_fn(fastest_gelu_code_string)
 
             CALLED = [False]
@@ -204,24 +217,27 @@ class TestPythonRegistration(TestCase):
                 return jitted_gelu(*args, **kwargs)
 
             # overriding gelu's cuda kernel with Jiterator generated relu kernel
-            my_lib = Library("aten", "IMPL")
-            my_lib.impl('aten::gelu', fast_gelu, "CUDA")
+            with _scoped_library("aten", "IMPL") as my_lib:
+                my_lib.impl("aten::gelu", fast_gelu, "CUDA")
 
-            x = torch.rand([3, 3], device='cuda', dtype=torch.float)
-            self.assertEqual(torch.nn.functional.gelu(x), torch.nn.functional.relu(x))
-            self.assertTrue(CALLED[0])
-            del my_lib
+                x = torch.rand([3, 3], device="cuda", dtype=torch.float)
+                self.assertEqual(
+                    torch.nn.functional.gelu(x), torch.nn.functional.relu(x)
+                )
+                self.assertTrue(CALLED[0])
 
             # behavior restored after deregistration
-            self.assertNotEqual(torch.nn.functional.gelu(x), torch.nn.functional.relu(x))
+            self.assertNotEqual(
+                torch.nn.functional.gelu(x), torch.nn.functional.relu(x)
+            )
 
         def override_exp_cuda() -> None:
             # Example 3: Preventing exp from exploding for float16
-            clipped_exp_code_string = '''
+            clipped_exp_code_string = """
             template <typename T> T clipped_exp(T a){
                 return a > T(10.0) ? T(22026.4657948) : exp(a);
             }
-            '''
+            """
             jitted_exp = _create_jit_fn(clipped_exp_code_string)
 
             CALLED = [False]
@@ -231,24 +247,28 @@ class TestPythonRegistration(TestCase):
                 return jitted_exp(*args, **kwargs)
 
             # overriding exp's cuda kernel with clipped_exp kernel
-            my_lib = Library("aten", "IMPL")
-            my_lib.impl('aten::exp', clipped_exp, "CUDA")
+            with _scoped_library("aten", "IMPL") as my_lib:
+                my_lib.impl("aten::exp", clipped_exp, "CUDA")
 
-            x = torch.tensor([0.0, 100.0], device='cuda', dtype=torch.float16)
-            self.assertEqual(torch.exp(x), torch.tensor([1.0, 22026.4657948], dtype=torch.float16))
-            self.assertTrue(CALLED[0])
-            del my_lib
+                x = torch.tensor([0.0, 100.0], device="cuda", dtype=torch.float16)
+                self.assertEqual(
+                    torch.exp(x),
+                    torch.tensor([1.0, 22026.4657948], dtype=torch.float16),
+                )
+                self.assertTrue(CALLED[0])
 
             # behavior restored after deregistration
-            self.assertEqual(torch.exp(x), torch.tensor([1.0, torch.inf], dtype=torch.float16))
+            self.assertEqual(
+                torch.exp(x), torch.tensor([1.0, torch.inf], dtype=torch.float16)
+            )
 
         def override_add_cuda() -> None:
             # Example 4: simulate a hardware bug, where the adder is always off by 1
-            buggy_add_code_string = '''
+            buggy_add_code_string = """
             template <typename T> T buggy_add(T a, T b){
                 return a + b + T(1);
             }
-            '''
+            """
             jitted_add = _create_jit_fn(buggy_add_code_string)
 
             CALLED = [False]
@@ -257,18 +277,17 @@ class TestPythonRegistration(TestCase):
                 CALLED[0] = True
                 return jitted_add(*args, **kwargs)
 
-            my_lib = Library("aten", "IMPL")
-            my_lib.impl('aten::add.Tensor', buggy_add, "CUDA")
+            with _scoped_library("aten", "IMPL") as my_lib:
+                my_lib.impl("aten::add.Tensor", buggy_add, "CUDA")
 
-            x_cpu = torch.rand([3, 3], device='cpu')
-            y_cpu = torch.rand([3], device='cpu')
+                x_cpu = torch.rand([3, 3], device="cpu")
+                y_cpu = torch.rand([3], device="cpu")
 
-            x_cuda = x_cpu.cuda()
-            y_cuda = y_cpu.cuda()
+                x_cuda = x_cpu.cuda()
+                y_cuda = y_cpu.cuda()
 
-            self.assertEqual(x_cuda + y_cuda, x_cpu + y_cpu + 1)
-            self.assertTrue(CALLED[0])
-            del my_lib
+                self.assertEqual(x_cuda + y_cuda, x_cpu + y_cpu + 1)
+                self.assertTrue(CALLED[0])
 
             # behavior restored after deregistration
             self.assertEqual(x_cuda + y_cuda, x_cpu + y_cpu)
@@ -282,101 +301,89 @@ class TestPythonRegistration(TestCase):
     def test_extend_library_with_dispatch_key_arg(self):
         def my_sum(*args, **kwargs):
             return args[0].clone()
-        my_lib1 = Library("aten", "IMPL", dispatch_key="CPU")
 
-        # RuntimeError: Explicitly provided dispatch key (Conjugate) is
-        # inconsistent with the dispatch key of the enclosing TORCH_LIBRARY_IMPL block
-        with self.assertRaisesRegex(RuntimeError, "inconsistent with the dispatch key"):
-            my_lib1.impl('sum', my_sum, "Conjugate")
-        my_lib1.impl('aten::sum', my_sum)
-        x = torch.tensor([1, 2])
-        self.assertEqual(torch.sum(x), x)
-        del my_lib1
+        with _scoped_library("aten", "IMPL", dispatch_key="CPU") as my_lib1:
+            # RuntimeError: Explicitly provided dispatch key (Conjugate) is
+            # inconsistent with the dispatch key of the enclosing TORCH_LIBRARY_IMPL block
+            with self.assertRaisesRegex(
+                RuntimeError, "inconsistent with the dispatch key"
+            ):
+                my_lib1.impl("sum", my_sum, "Conjugate")
+            my_lib1.impl("aten::sum", my_sum)
+            x = torch.tensor([1, 2])
+            self.assertEqual(torch.sum(x), x)
 
     def test_create_new_library(self) -> None:
-        my_lib1 = Library(self.test_ns, "DEF")
+        with _scoped_library(self.test_ns, "DEF") as my_lib1:
+            my_lib1.define("sum(Tensor self) -> Tensor")
 
-        my_lib1.define("sum(Tensor self) -> Tensor")
-
-        # Example 1
-        @torch.library.impl(my_lib1, "sum", "CPU")
-        def my_sum(*args, **kwargs):
-            return args[0].clone()
-
-        x = torch.tensor([1, 2])
-        op = getattr(torch.ops, self.test_ns).sum
-        self.assertEqual(op(x), x)
-
-        my_lib2 = Library(self.test_ns, "IMPL")
-
-        # Example 2
-        @torch.library.impl(my_lib2, op.default, "ZeroTensor")
-        def my_sum_zt(*args, **kwargs):
-            if args[0]._is_zerotensor():
-                return torch._efficientzerotensor(args[0].shape)
-            else:
+            # Example 1
+            @torch.library.impl(my_lib1, "sum", "CPU")
+            def my_sum(*args, **kwargs):
                 return args[0].clone()
 
-        y = torch._efficientzerotensor(3)
-        self.assertTrue(op(y)._is_zerotensor())
-        self.assertEqual(op(x), x)
+            x = torch.tensor([1, 2])
+            op = getattr(torch.ops, self.test_ns).sum
+            self.assertEqual(op(x), x)
 
-        del my_lib2
-        del my_lib1
+            with _scoped_library(self.test_ns, "IMPL") as my_lib2:
+                # Example 2
+                @torch.library.impl(my_lib2, op.default, "ZeroTensor")
+                def my_sum_zt(*args, **kwargs):
+                    if args[0]._is_zerotensor():
+                        return torch._efficientzerotensor(args[0].shape)
+                    else:
+                        return args[0].clone()
+
+                y = torch._efficientzerotensor(3)
+                self.assertTrue(op(y)._is_zerotensor())
+                self.assertEqual(op(x), x)
 
     def test_create_new_library_fragment_no_existing(self):
-        my_lib = Library(self.test_ns, "FRAGMENT")
+        with _scoped_library(self.test_ns, "FRAGMENT") as my_lib:
+            my_lib.define("sum2(Tensor self) -> Tensor")
 
-        my_lib.define("sum2(Tensor self) -> Tensor")
+            @torch.library.impl(my_lib, "sum2", "CPU")
+            def my_sum(*args, **kwargs):
+                return args[0]
 
-        @torch.library.impl(my_lib, "sum2", "CPU")
-        def my_sum(*args, **kwargs):
-            return args[0]
-
-        x = torch.tensor([1, 2])
-        self.assertEqual(getattr(torch.ops, self.test_ns).sum2(x), x)
-
-        del my_lib
+            x = torch.tensor([1, 2])
+            self.assertEqual(getattr(torch.ops, self.test_ns).sum2(x), x)
 
     def test_create_new_library_fragment_with_existing(self):
-        my_lib1 = Library(self.test_ns, "DEF")
+        with _scoped_library(self.test_ns, "DEF") as my_lib1:
+            # Create a fragment
+            with _scoped_library(self.test_ns, "FRAGMENT") as my_lib2:
+                my_lib2.define("sum4(Tensor self) -> Tensor")
 
-        # Create a fragment
-        my_lib2 = Library(self.test_ns, "FRAGMENT")
+                @torch.library.impl(my_lib2, "sum4", "CPU")
+                def my_sum4(*args, **kwargs):
+                    return args[0]
 
-        my_lib2.define("sum4(Tensor self) -> Tensor")
+                x = torch.tensor([1, 2])
+                self.assertEqual(getattr(torch.ops, self.test_ns).sum4(x), x)
 
-        @torch.library.impl(my_lib2, "sum4", "CPU")
-        def my_sum4(*args, **kwargs):
-            return args[0]
+                # Create another fragment
+                with _scoped_library(self.test_ns, "FRAGMENT") as my_lib3:
+                    my_lib3.define("sum3(Tensor self) -> Tensor")
 
-        x = torch.tensor([1, 2])
-        self.assertEqual(getattr(torch.ops, self.test_ns).sum4(x), x)
+                    @torch.library.impl(my_lib3, "sum3", "CPU")
+                    def my_sum3(*args, **kwargs):
+                        return args[0]
 
-        # Create another fragment
-        my_lib3 = Library(self.test_ns, "FRAGMENT")
-
-        my_lib3.define("sum3(Tensor self) -> Tensor")
-
-        @torch.library.impl(my_lib3, "sum3", "CPU")
-        def my_sum3(*args, **kwargs):
-            return args[0]
-
-        x = torch.tensor([1, 2])
-        self.assertEqual(getattr(torch.ops, self.test_ns).sum3(x), x)
-
-        del my_lib1
-        del my_lib2
-        del my_lib3
+                    x = torch.tensor([1, 2])
+                    self.assertEqual(getattr(torch.ops, self.test_ns).sum3(x), x)
 
     @unittest.skipIf(IS_WINDOWS, "Skipped under Windows")
     def test_alias_analysis(self):
         def test_helper(alias_analysis=""):
-            my_lib1 = Library(self.test_ns, "DEF")
+            my_lib1 = Library(self.test_ns, "DEF")  # noqa: TOR901
 
             called = [0]
 
-            @torch.library.define(my_lib1, "_op() -> None", alias_analysis=alias_analysis)
+            @torch.library.define(
+                my_lib1, "_op() -> None", alias_analysis=alias_analysis
+            )
             def _op(*args, **kwargs):
                 called[0] += 1
 
@@ -393,11 +400,11 @@ class TestPythonRegistration(TestCase):
 
     def test_error_for_unsupported_ns_or_kind(self) -> None:
         with self.assertRaisesRegex(ValueError, "Unsupported kind"):
-            my_lib1 = Library("myns", "BLA")
+            my_lib1 = Library("myns", "BLA")  # noqa: TOR901
 
-        for kind in ('DEF', 'FRAGMENT'):
+        for kind in ("DEF", "FRAGMENT"):
             with self.assertRaisesRegex(ValueError, "reserved namespace"):
-                my_lib1 = Library("prim", kind)
+                my_lib1 = Library("prim", kind)  # noqa: TOR901
 
     def test_returning_symint(self) -> None:
         shape_env = ShapeEnv()
@@ -407,45 +414,41 @@ class TestPythonRegistration(TestCase):
 
         s0, s1 = ft.shape
 
-        tlib = Library(self.test_ns, "DEF")
-        tlib.define("sqsum(SymInt a, SymInt b) -> SymInt")
+        with _scoped_library(self.test_ns, "DEF") as tlib:
+            tlib.define("sqsum(SymInt a, SymInt b) -> SymInt")
 
-        @impl(tlib, "sqsum", "CompositeExplicitAutograd")
-        def sqsum(a: SymInt, b: SymInt):
-            return a * a + b * b
+            @impl(tlib, "sqsum", "CompositeExplicitAutograd")
+            def sqsum(a: SymInt, b: SymInt):
+                return a * a + b * b
 
-        out = getattr(torch.ops, self.test_ns).sqsum.default(s0, s1)
-        out_val = shape_env.evaluate_expr(out.node.expr)
+            out = getattr(torch.ops, self.test_ns).sqsum.default(s0, s1)
+            out_val = shape_env.evaluate_expr(out.node.expr)
         self.assertEqual(out_val, 13)
 
     def test_register_functional_op_error_cases(self):
-        lib = Library(self.test_ns, "FRAGMENT")
-        with self.assertRaisesRegex(TypeError, "instance of OpOverload"):
-            register_functional_op(lib, "abs", torch.ops.aten.abs_)
-        with self.assertRaisesRegex(RuntimeError, "Expected op to be mutable"):
-            register_functional_op(lib, "abs", torch.ops.aten.abs_.default)
-        with self.assertRaisesRegex(RuntimeError, "Expected op to be mutable"):
-            register_functional_op(lib, "abs", torch.ops.aten.abs.out)
+        with _scoped_library(self.test_ns, "FRAGMENT") as lib:
+            with self.assertRaisesRegex(TypeError, "instance of OpOverload"):
+                register_functional_op(lib, "abs", torch.ops.aten.abs_)
+            with self.assertRaisesRegex(RuntimeError, "Expected op to be mutable"):
+                register_functional_op(lib, "abs", torch.ops.aten.abs_.default)
+            with self.assertRaisesRegex(RuntimeError, "Expected op to be mutable"):
+                register_functional_op(lib, "abs", torch.ops.aten.abs.out)
 
-        schemas = [
-            'foo(Tensor x, Tensor(a!)[] y) -> ()',
-            'foo(Tensor x, Tensor(a!) y, Tensor(b) z) -> Tensor(b)',
-            'foo(Tensor x, Tensor(a!) y) -> (Tensor, Tensor(a))',
-        ]
-        del lib
+            schemas = [
+                "foo(Tensor x, Tensor(a!)[] y) -> ()",
+                "foo(Tensor x, Tensor(a!) y, Tensor(b) z) -> Tensor(b)",
+                "foo(Tensor x, Tensor(a!) y) -> (Tensor, Tensor(a))",
+            ]
 
         for schema in schemas:
-            lib = Library(self.test_ns, "FRAGMENT")
-            try:
+            with _scoped_library(self.test_ns, "FRAGMENT") as lib:
                 lib.define(schema)
                 with self.assertRaisesRegex(RuntimeError, "NYI"):
                     register_functional_op(
                         lib,
                         "foo_functional",
-                        getattr(torch.ops, self.test_ns).foo.default)
-            finally:
-                del lib
-                delattr(torch.ops, self.test_ns)
+                        getattr(torch.ops, self.test_ns).foo.default,
+                    )
 
     def _check_is_functional_variant(self, mutable_op, functional_op, args):
         # functional op should not mutate
@@ -461,12 +464,23 @@ class TestPythonRegistration(TestCase):
             flat_mutable_result = pytree.tree_leaves(mutable_result)
         flat_functional_result = pytree.tree_leaves(functional_result)
         assert len(flat_functional_result) > len(flat_mutable_result)
-        self.assertEqual(flat_functional_result[:len(flat_mutable_result)], flat_mutable_result)
+        self.assertEqual(
+            flat_functional_result[: len(flat_mutable_result)], flat_mutable_result
+        )
 
         # check rest of functional_result is the mutated args
-        mutated_args = [maybe_mutated_arg for maybe_mutated_arg, arg in zip(cloned_args, args)
-                        if not (maybe_mutated_arg is not None and arg is not None and torch.allclose(maybe_mutated_arg, arg))]
-        self.assertEqual(flat_functional_result[len(flat_mutable_result):], mutated_args)
+        mutated_args = [
+            maybe_mutated_arg
+            for maybe_mutated_arg, arg in zip(cloned_args, args)
+            if not (
+                maybe_mutated_arg is not None
+                and arg is not None
+                and torch.allclose(maybe_mutated_arg, arg)
+            )
+        ]
+        self.assertEqual(
+            flat_functional_result[len(flat_mutable_result) :], mutated_args
+        )
 
         # check that functionalization kernel was indeed registered
         def fn(*args):
@@ -483,117 +497,126 @@ class TestPythonRegistration(TestCase):
         self.assertTrue(has_functional_op)
 
     def test_register_functional_op_no_returns(self):
-        lib = Library(self.test_ns, 'FRAGMENT')
-        lib.define('foo(Tensor x, Tensor(a!) y, Tensor z, Tensor(b!) w) -> ()')
+        with _scoped_library(self.test_ns, "FRAGMENT") as lib:
+            lib.define("foo(Tensor x, Tensor(a!) y, Tensor z, Tensor(b!) w) -> ()")
 
-        def foo_impl(x, y, z, w):
-            y.fill_(3.14)
-            w.fill_(2.71)
+            def foo_impl(x, y, z, w):
+                y.fill_(3.14)
+                w.fill_(2.71)
 
-        lib.impl('foo', foo_impl, 'CPU')
-        register_functional_op(
-            lib,
-            'foo_functional',
-            getattr(torch.ops, self.test_ns).foo.default)
-        x = torch.randn([])
-        y = torch.randn([])
-        z = torch.randn([])
-        w = torch.randn([])
-        self._check_is_functional_variant(
-            getattr(torch.ops, self.test_ns).foo.default,
-            getattr(torch.ops, self.test_ns).foo_functional.default, (x, y, z, w))
+            lib.impl("foo", foo_impl, "CPU")
+            register_functional_op(
+                lib, "foo_functional", getattr(torch.ops, self.test_ns).foo.default
+            )
+            x = torch.randn([])
+            y = torch.randn([])
+            z = torch.randn([])
+            w = torch.randn([])
+            self._check_is_functional_variant(
+                getattr(torch.ops, self.test_ns).foo.default,
+                getattr(torch.ops, self.test_ns).foo_functional.default,
+                (x, y, z, w),
+            )
 
     def test_register_functional_op_with_optional(self):
-        lib = Library(self.test_ns, 'FRAGMENT')
-        lib.define('foo(Tensor x, Tensor(a!) y, Tensor (b!) z, Tensor(c!)? w) -> ()')
+        with _scoped_library(self.test_ns, "FRAGMENT") as lib:
+            lib.define(
+                "foo(Tensor x, Tensor(a!) y, Tensor (b!) z, Tensor(c!)? w) -> ()"
+            )
 
-        def foo_impl(x, y, z, w):
-            y.fill_(3.14)
-            z.fill_(2.71)
-            if w is not None:
-                w.fill_(1.618)
+            def foo_impl(x, y, z, w):
+                y.fill_(3.14)
+                z.fill_(2.71)
+                if w is not None:
+                    w.fill_(1.618)
 
-        lib.impl('foo', foo_impl, 'CPU')
-        register_functional_op(
-            lib,
-            'foo_functional',
-            getattr(torch.ops, self.test_ns).foo.default)
-        x = torch.randn([])
-        y = torch.randn([])
-        z = torch.randn([])
-        w = torch.randn([])
-        self._check_is_functional_variant(
-            getattr(torch.ops, self.test_ns).foo.default,
-            getattr(torch.ops, self.test_ns).foo_functional.default, (x, y, z, w))
-        self._check_is_functional_variant(
-            getattr(torch.ops, self.test_ns).foo.default,
-            getattr(torch.ops, self.test_ns).foo_functional.default, (x, y, z, None))
-
+            lib.impl("foo", foo_impl, "CPU")
+            register_functional_op(
+                lib, "foo_functional", getattr(torch.ops, self.test_ns).foo.default
+            )
+            x = torch.randn([])
+            y = torch.randn([])
+            z = torch.randn([])
+            w = torch.randn([])
+            self._check_is_functional_variant(
+                getattr(torch.ops, self.test_ns).foo.default,
+                getattr(torch.ops, self.test_ns).foo_functional.default,
+                (x, y, z, w),
+            )
+            self._check_is_functional_variant(
+                getattr(torch.ops, self.test_ns).foo.default,
+                getattr(torch.ops, self.test_ns).foo_functional.default,
+                (x, y, z, None),
+            )
 
     def test_register_functional_op_one_return(self):
-        lib = Library(self.test_ns, 'FRAGMENT')
-        lib.define('foo(Tensor x, Tensor(a!) y, Tensor(c!) z, Tensor(b!) w) -> Tensor')
+        with _scoped_library(self.test_ns, "FRAGMENT") as lib:
+            lib.define(
+                "foo(Tensor x, Tensor(a!) y, Tensor(c!) z, Tensor(b!) w) -> Tensor"
+            )
 
-        def foo_impl(x, y, z, w):
-            y.fill_(3.14)
-            w.fill_(2.71)
-            z.fill_(0.99)
-            return x.clone()
+            def foo_impl(x, y, z, w):
+                y.fill_(3.14)
+                w.fill_(2.71)
+                z.fill_(0.99)
+                return x.clone()
 
-        lib.impl('foo', foo_impl, 'CPU')
-        register_functional_op(
-            lib,
-            "foo_functional",
-            getattr(torch.ops, self.test_ns).foo.default)
-        x = torch.randn([])
-        y = torch.randn([])
-        z = torch.randn([])
-        w = torch.randn([])
-        self._check_is_functional_variant(
-            getattr(torch.ops, self.test_ns).foo.default,
-            getattr(torch.ops, self.test_ns).foo_functional.default, (x, y, z, w))
+            lib.impl("foo", foo_impl, "CPU")
+            register_functional_op(
+                lib, "foo_functional", getattr(torch.ops, self.test_ns).foo.default
+            )
+            x = torch.randn([])
+            y = torch.randn([])
+            z = torch.randn([])
+            w = torch.randn([])
+            self._check_is_functional_variant(
+                getattr(torch.ops, self.test_ns).foo.default,
+                getattr(torch.ops, self.test_ns).foo_functional.default,
+                (x, y, z, w),
+            )
 
     def test_register_functional_op_multiple_returns(self):
-        lib = Library(self.test_ns, 'FRAGMENT')
-        lib.define('foo(Tensor x, Tensor(a!) y, Tensor z, Tensor(b!) w) -> (Tensor, Tensor)')
+        with _scoped_library(self.test_ns, "FRAGMENT") as lib:
+            lib.define(
+                "foo(Tensor x, Tensor(a!) y, Tensor z, Tensor(b!) w) -> (Tensor, Tensor)"
+            )
 
-        def foo_impl(x, y, z, w):
-            y.fill_(3.14)
-            w.fill_(2.71)
-            return x.clone(), z.clone()
+            def foo_impl(x, y, z, w):
+                y.fill_(3.14)
+                w.fill_(2.71)
+                return x.clone(), z.clone()
 
-        lib.impl('foo', foo_impl, 'CPU')
-        register_functional_op(
-            lib,
-            'foo_functional',
-            getattr(torch.ops, self.test_ns).foo.default)
+            lib.impl("foo", foo_impl, "CPU")
+            register_functional_op(
+                lib, "foo_functional", getattr(torch.ops, self.test_ns).foo.default
+            )
 
-        x = torch.randn([])
-        y = torch.randn([])
-        z = torch.randn([])
-        w = torch.randn([])
-        self._check_is_functional_variant(
-            getattr(torch.ops, self.test_ns).foo.default,
-            getattr(torch.ops, self.test_ns).foo_functional.default, (x, y, z, w))
+            x = torch.randn([])
+            y = torch.randn([])
+            z = torch.randn([])
+            w = torch.randn([])
+            self._check_is_functional_variant(
+                getattr(torch.ops, self.test_ns).foo.default,
+                getattr(torch.ops, self.test_ns).foo_functional.default,
+                (x, y, z, w),
+            )
 
     def test_register_fallthrough(self):
-        try:
-            my_lib = Library('aten', 'IMPL')
+        with _scoped_library("aten", "IMPL") as my_lib:
             my_lib.impl("mm", fallthrough_kernel, "AutocastCPU")
 
-            a = torch.randn(2, 3, device='cpu', dtype=torch.float32)
-            b = torch.randn(3, 2, device='cpu', dtype=torch.float32)
+            a = torch.randn(2, 3, device="cpu", dtype=torch.float32)
+            b = torch.randn(3, 2, device="cpu", dtype=torch.float32)
             with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
                 # dtype for mm should be float32 since we registered a fallthrough
                 self.assertEqual(torch.mm(a, b).dtype, torch.float32)
                 # ops that don't have a fallthrough registered should not be affected
                 self.assertEqual(torch.matmul(a, b).dtype, torch.bfloat16)
-        finally:
-            del my_lib
 
         with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
             # default behavior should have been restored
             self.assertEqual(torch.mm(a, b).dtype, torch.bfloat16)
+
 
 class TestPythonDispatch(TestCase):
     def test_basic(self) -> None:
@@ -604,7 +627,7 @@ class TestPythonDispatch(TestCase):
             saved_x = y.grad_fn._saved_self
             grad_y = LoggingTensor(torch.tensor([1.0]))
             log_input("grad_y", grad_y)
-            g, = torch.autograd.grad((y,), (x,), (grad_y,))
+            (g,) = torch.autograd.grad((y,), (x,), (grad_y,))
 
         self.assertEqual(g.elem, torch.tensor([6.0]))
         with torch.no_grad():
@@ -614,13 +637,16 @@ class TestPythonDispatch(TestCase):
             self.assertEqual(saved_x, x)
             # TODO: figure out why broken
             # self.assertEqual(saved_x._version, x._version)
-        self.assertExpectedInline('\n'.join(logs), '''\
+        self.assertExpectedInline(
+            "\n".join(logs),
+            """\
 $0: f32[1] = input('x')
 $1: f32[1] = torch._ops.aten.mul.Tensor($0, $0)
 $2: f32[1] = input('grad_y')
 $3: f32[1] = torch._ops.aten.mul.Tensor($2, $0)
 $4: f32[1] = torch._ops.aten.mul.Tensor($2, $0)
-$5: f32[1] = torch._ops.aten.add.Tensor($4, $3)''')
+$5: f32[1] = torch._ops.aten.add.Tensor($4, $3)""",
+        )
 
     def test_out(self) -> None:
         with capture_logs() as logs:
@@ -633,10 +659,13 @@ $5: f32[1] = torch._ops.aten.add.Tensor($4, $3)''')
         self.assertEqual(y.elem, torch.ones(1))
         # TODO: arguably this shouldn't pass and we should complain
         # that out isn't a kwarg
-        self.assertExpectedInline('\n'.join(logs), '''\
+        self.assertExpectedInline(
+            "\n".join(logs),
+            """\
 $0: f32[1] = input('x')
 $1: f32[1] = input('y')
-$2: f32[1] = torch._ops.aten.abs.out($0, out=$1)''')
+$2: f32[1] = torch._ops.aten.abs.out($0, out=$1)""",
+        )
 
     def test_kwarg_only(self) -> None:
         with capture_logs() as logs:
@@ -654,7 +683,9 @@ $2: f32[1] = torch._ops.aten.abs.out($0, out=$1)''')
 
         # The expectation is that beta/alpha don't show up when they're
         # defaulted.  This is even if the user explicitly specified it.
-        self.assertExpectedInline('\n'.join(logs), '''\
+        self.assertExpectedInline(
+            "\n".join(logs),
+            """\
 $0: f32[1] = input('x')
 $1: f32[1, 1] = input('y')
 $2: f32[1] = input('z')
@@ -662,7 +693,8 @@ $3: f32[1] = torch._ops.aten.addmv.default($0, $1, $2)
 $4: f32[1] = torch._ops.aten.addmv.default($0, $1, $2)
 $5: f32[1] = torch._ops.aten.addmv.default($0, $1, $2, beta=2)
 $6: f32[1] = torch._ops.aten.addmv.default($0, $1, $2, alpha=2)
-$7: f32[1] = torch._ops.aten.addmv.default($0, $1, $2, beta=2, alpha=2)''')
+$7: f32[1] = torch._ops.aten.addmv.default($0, $1, $2, beta=2, alpha=2)""",
+        )
 
     def test_kwarg_only_and_positional_default(self) -> None:
         with capture_logs() as logs:
@@ -675,12 +707,15 @@ $7: f32[1] = torch._ops.aten.addmv.default($0, $1, $2, beta=2, alpha=2)''')
 
         # What we are testing here is that we omit arg2
         # if it is defaulted, even if a kwarg is set
-        self.assertExpectedInline('\n'.join(logs), '''\
+        self.assertExpectedInline(
+            "\n".join(logs),
+            """\
 $0: f32[1] = input('x')
 $1: f32[1] = torch._ops.aten._foobar.default($0)
 $2: f32[1] = torch._ops.aten._foobar.default($0, False)
 $3: f32[1] = torch._ops.aten._foobar.default($0, arg3=False)
-$4: f32[1] = torch._ops.aten._foobar.default($0, False, arg3=False)''')
+$4: f32[1] = torch._ops.aten._foobar.default($0, False, arg3=False)""",
+        )
 
     def test_produce_real_type(self) -> None:
         with capture_logs() as logs:
@@ -688,38 +723,47 @@ $4: f32[1] = torch._ops.aten._foobar.default($0, False, arg3=False)''')
             log_input("x", x)
             x.to(dtype=torch.double)  # non-optional dtype
             torch.cumprod(x, 0, dtype=torch.double)  # optional dtype
-            x[:, 1].contiguous(memory_format=torch.contiguous_format)  # optional memory format
+            x[:, 1].contiguous(
+                memory_format=torch.contiguous_format
+            )  # optional memory format
             # There doesn't appear to be any layout signatures which are
             # triggerable using tensor subclasses (need to use a mode)
 
-        self.assertExpectedInline('\n'.join(logs), '''\
+        self.assertExpectedInline(
+            "\n".join(logs),
+            """\
 $0: f32[2, 2] = input('x')
 $1: f64[2, 2] = torch._ops.aten._to_copy.default($0, dtype=torch.float64)
 $2: f64[2, 2] = torch._ops.aten.cumprod.default($0, 0, dtype=torch.float64)
 $3: f32[2, 2] = torch._ops.aten.slice.Tensor($0, 0, 0, 9223372036854775807)
 $4: f32[2] = torch._ops.aten.select.int($3, 1, 1)
-$5: f32[2] = torch._ops.aten.clone.default($4, memory_format=torch.contiguous_format)''')
+$5: f32[2] = torch._ops.aten.clone.default($4, memory_format=torch.contiguous_format)""",
+        )
 
     def test_optional_tensor_list(self) -> None:
         def weird(xs):
             print("woof")
             return torch.empty(())
 
-        my_lib = Library("my_lib", "DEF")
-        my_lib.define("weird(Tensor?[] self) -> Tensor")
-        my_lib.impl("weird", weird, "CPU")
-        with capture_logs() as logs:
-            x = LoggingTensor(torch.ones(2, 2))
-            log_input("x", x)
-            torch.ops.my_lib.weird.default([None, x])
+        with _scoped_library("my_lib", "DEF") as my_lib:
+            my_lib.define("weird(Tensor?[] self) -> Tensor")
+            my_lib.impl("weird", weird, "CPU")
+            with capture_logs() as logs:
+                x = LoggingTensor(torch.ones(2, 2))
+                log_input("x", x)
+                torch.ops.my_lib.weird.default([None, x])
 
-        self.assertExpectedInline('\n'.join(logs), '''\
+        self.assertExpectedInline(
+            "\n".join(logs),
+            """\
 $0: f32[2, 2] = input('x')
-$1: f32[] = torch._ops.my_lib.weird.default(['None', '$0'])''')
+$1: f32[] = torch._ops.my_lib.weird.default(['None', '$0'])""",
+        )
 
     def test_list_ret(self) -> None:
         # test all sequence types are permissible returns
         for list_type in (list, tuple):
+
             class A(torch._C.TensorBase):
                 @staticmethod
                 def __new__(cls, elem):
@@ -735,7 +779,7 @@ $1: f32[] = torch._ops.my_lib.weird.default(['None', '$0'])''')
 
             self.assertEqual(
                 torch.split(A(torch.tensor([0, 1])), 2),
-                torch.split(torch.tensor([0, 1]), 2)
+                torch.split(torch.tensor([0, 1]), 2),
             )
 
     def test_invalid_ret(self) -> None:
@@ -751,10 +795,14 @@ $1: f32[] = torch._ops.my_lib.weird.default(['None', '$0'])''')
 
         # Wobbles depending on NDEBUG mode of pybind11
         self.assertRaisesRegex(
-            RuntimeError, "Unable to cast", lambda: A(torch.zeros(1)).neg(),
+            RuntimeError,
+            "Unable to cast",
+            lambda: A(torch.zeros(1)).neg(),
         )
         self.assertRaisesRegex(
-            RuntimeError, "Unable to cast", lambda: A(torch.zeros(1)).detach(),
+            RuntimeError,
+            "Unable to cast",
+            lambda: A(torch.zeros(1)).detach(),
         )
 
     def test_detach_appears_twice_when_called_once(self) -> None:
@@ -766,10 +814,13 @@ $1: f32[] = torch._ops.my_lib.weird.default(['None', '$0'])''')
         # it currently emits two, for reasons unclear to us. Leaving
         # this test here to make sure we don't regress even further (it
         # would be bad if calling .detach() once emits 3+ detaches).
-        self.assertExpectedInline('\n'.join(logs), '''\
+        self.assertExpectedInline(
+            "\n".join(logs),
+            """\
 $0: f32[1] = input('x')
 $1: f32[1] = torch._ops.aten.detach.default($0)
-$2: f32[1] = torch._ops.aten.detach.default($1)''')
+$2: f32[1] = torch._ops.aten.detach.default($1)""",
+        )
 
     def test_storage(self) -> None:
         # For now, just make sure it doesn't crash.  Ideally, we should
@@ -820,10 +871,18 @@ $2: f32[1] = torch._ops.aten.detach.default($1)''')
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
                 raise ErrorB
 
-        self.assertRaises(ErrorA, lambda: torch.add(A(torch.empty(1)), A(torch.empty(1))))
-        self.assertRaises(ErrorB, lambda: torch.add(A(torch.empty(1)), B(torch.empty(1))))
-        self.assertRaises(ErrorB, lambda: torch.add(B(torch.empty(1)), A(torch.empty(1))))
-        self.assertRaises(ErrorB, lambda: torch.add(B(torch.empty(1)), B(torch.empty(1))))
+        self.assertRaises(
+            ErrorA, lambda: torch.add(A(torch.empty(1)), A(torch.empty(1)))
+        )
+        self.assertRaises(
+            ErrorB, lambda: torch.add(A(torch.empty(1)), B(torch.empty(1)))
+        )
+        self.assertRaises(
+            ErrorB, lambda: torch.add(B(torch.empty(1)), A(torch.empty(1)))
+        )
+        self.assertRaises(
+            ErrorB, lambda: torch.add(B(torch.empty(1)), B(torch.empty(1)))
+        )
 
     def test_format(self) -> None:
         x = LoggingTensor(torch.ones(1))
@@ -840,14 +899,14 @@ $2: f32[1] = torch._ops.aten.detach.default($1)''')
         class Square(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x):
-                y = x ** 2
+                y = x**2
                 ctx.save_for_backward(x)
                 return y
 
             @staticmethod
             def backward(ctx, grad_output):
                 assert isinstance(grad_output, LoggingTensor)
-                x, = ctx.saved_tensors
+                (x,) = ctx.saved_tensors
                 assert isinstance(x, LoggingTensor)
                 escape[0] = x
                 return grad_output * 2 * x
@@ -872,14 +931,17 @@ $2: f32[1] = torch._ops.aten.detach.default($1)''')
             # TODO: figure out why this is broken
             # self.assertEqual(escape[0]._version, x._version)
 
-        self.assertExpectedInline('\n'.join(logs), '''\
+        self.assertExpectedInline(
+            "\n".join(logs),
+            """\
 $0: f32[1] = input('x')
 $1: f32[1] = input('x.grad')
 $2: f32[1] = torch._ops.aten.pow.Tensor_Scalar($0, 2)
 $3: f32[1] = input('grad_output')
 $4: f32[1] = torch._ops.aten.mul.Tensor($3, 2)
 $5: f32[1] = torch._ops.aten.mul.Tensor($4, $0)
-$6: f32[1] = torch._ops.aten.add_.Tensor($1, $5)''')
+$6: f32[1] = torch._ops.aten.add_.Tensor($1, $5)""",
+        )
 
     def test_subclass_creation(self):
         # Make sure these statements runs without error
@@ -901,8 +963,6 @@ $6: f32[1] = torch._ops.aten.add_.Tensor($1, $5)''')
 
     def test_new_ones(self) -> None:
         class MyTensor(torch.Tensor):
-            __torch_function__ = torch._C._disabled_torch_function_impl
-
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
                 return MyTensor(3)
@@ -911,8 +971,6 @@ $6: f32[1] = torch._ops.aten.add_.Tensor($1, $5)''')
 
     def test_like(self) -> None:
         class MyTensor(torch.Tensor):
-            __torch_function__ = torch._C._disabled_torch_function_impl
-
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
                 return MyTensor(3)
@@ -921,13 +979,14 @@ $6: f32[1] = torch._ops.aten.add_.Tensor($1, $5)''')
             f_name = f + "_like"
             self.assertEqual(type(getattr(torch, f_name)(MyTensor(2))), MyTensor)
 
-        self.assertEqual(type(torch.full_like(MyTensor(2), 1.)), MyTensor)
+        self.assertEqual(type(torch.full_like(MyTensor(2), 1.0)), MyTensor)
         self.assertEqual(type(torch.randint_like(MyTensor(2), high=3)), MyTensor)
 
     def test_make_fx_with_subclass(self) -> None:
         def f(x, y):
             # Returns (TwoTensor, Tensor)
             return x * y, y + y
+
         x_a = torch.zeros(4)
         x_b = torch.zeros(4)
         y = torch.ones(4)
@@ -942,8 +1001,11 @@ $6: f32[1] = torch._ops.aten.add_.Tensor($1, $5)''')
             out1, out2 = f(x, y)
             out1_unwrapped_attrs, _ = out1.__tensor_flatten__()
             return (*[getattr(out1, attr) for attr in out1_unwrapped_attrs], out2)
-        fx_g = make_fx(f_to_trace, tracing_mode='fake')(x_a, x_b, y)
-        self.assertExpectedInline(fx_g.code, """\
+
+        fx_g = make_fx(f_to_trace, tracing_mode="fake")(x_a, x_b, y)
+        self.assertExpectedInline(
+            fx_g.code,
+            """\
 
 
 
@@ -952,21 +1014,34 @@ def forward(self, x_a_1, x_b_1, y_1):
     mul_1 = torch.ops.aten.mul.Tensor(x_b_1, y_1);  x_b_1 = None
     add = torch.ops.aten.add.Tensor(y_1, y_1);  y_1 = None
     return (mul, mul_1, add)
-    """)
+    """,
+        )
+
+    # See https://github.com/pytorch/pytorch/issues/117794
+    def test_return_and_correct_aliasing_gives_correct_stride(self):
+        t = TwoTensor(torch.randn(2, 2), torch.randn(2, 2))
+        x = torch.randn(2, 2)
+        # slicing should result in the same stride for TwoTensor as a dense tensor would give
+        self.assertEqual(t[:, 0].stride(), x[:, 0].stride())
 
     def test_make_wrapper_subclass_propagates_metadata(self) -> None:
         class WrapperTensor(torch.Tensor):
             elem: torch.Tensor
 
-            __slots__ = ['elem']
+            __slots__ = ["elem"]
 
             @staticmethod
             def __new__(cls, elem, *args, **kwargs):
                 r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
-                    cls, elem.size(),
-                    dtype=elem.dtype, layout=elem.layout,
-                    device=elem.device, requires_grad=elem.requires_grad,
-                    strides=elem.stride(), storage_offset=elem.storage_offset())
+                    cls,
+                    elem.size(),
+                    dtype=elem.dtype,
+                    layout=elem.layout,
+                    device=elem.device,
+                    requires_grad=elem.requires_grad,
+                    strides=elem.stride(),
+                    storage_offset=elem.storage_offset(),
+                )
                 r.elem = elem
                 return r
 
@@ -998,20 +1073,26 @@ def forward(self, x_a_1, x_b_1, y_1):
         self.assertEqual(x.elem, x_copy.elem)
         self.assertFalse(x is x_copy)
 
-    def test_deepcopy_wrapper_subclass_with_clone_returning_different_type(self) -> None:
-
+    def test_deepcopy_wrapper_subclass_with_clone_returning_different_type(
+        self,
+    ) -> None:
         class MyWrapperTensor(torch.Tensor):
             elem: torch.Tensor
 
-            __slots__ = ['elem']
+            __slots__ = ["elem"]
 
             @staticmethod
             def __new__(cls, elem, *args, **kwargs):
                 r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
-                    cls, elem.size(),
-                    dtype=elem.dtype, layout=elem.layout,
-                    device=elem.device, requires_grad=elem.requires_grad,
-                    strides=elem.stride(), storage_offset=elem.storage_offset())
+                    cls,
+                    elem.size(),
+                    dtype=elem.dtype,
+                    layout=elem.layout,
+                    device=elem.device,
+                    requires_grad=elem.requires_grad,
+                    strides=elem.stride(),
+                    storage_offset=elem.storage_offset(),
+                )
                 r.elem = elem
                 return r
 
@@ -1027,12 +1108,13 @@ def forward(self, x_a_1, x_b_1, y_1):
             # explicitly disable __torch_function__ for this subclass.
 
         x = MyWrapperTensor(torch.randn(3))
-        with self.assertRaisesRegex(RuntimeError,
-                                    "for which cloning returns another instance of the same subclass"):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "for which cloning returns another instance of the same subclass",
+        ):
             x_copy = deepcopy(x)
 
     def test_deepcopy_non_wrapper_subclass(self) -> None:
-
         # Ensure correct error is thrown for common error cases.
         class SubTensorError1(torch.Tensor):
             # Default implementation of new_empty() returns a plain tensor.
@@ -1045,8 +1127,10 @@ def forward(self, x_a_1, x_b_1, y_1):
 
         for error_cls in [SubTensorError1, SubTensorError2]:
             x = error_cls(3)
-            with self.assertRaisesRegex(RuntimeError,
-                                        "for which that function returns another instance of the same subclass"):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "for which that function returns another instance of the same subclass",
+            ):
                 x_copy = deepcopy(x)
 
         # Ensure a correctly implemented new_empty() causes deepcopy() to work.
@@ -1066,11 +1150,21 @@ def forward(self, x_a_1, x_b_1, y_1):
                 #     extra dispatch keys. We probably want to unify the two APIs
                 #     in the future.
                 r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
-                    cls, elem.size(), elem.stride(), elem.storage_offset(),
+                    cls,
+                    elem.size(),
+                    elem.stride(),
+                    elem.storage_offset(),
                     torch.contiguous_format,
-                    elem.dtype, elem.layout,
-                    elem.device, False, False, None, False, False,
-                    DispatchKeySet(DispatchKey.NestedTensor))
+                    elem.dtype,
+                    elem.layout,
+                    elem.device,
+                    False,
+                    False,
+                    None,
+                    False,
+                    False,
+                    DispatchKeySet(DispatchKey.NestedTensor),
+                )
                 return r
 
             @classmethod
@@ -1079,22 +1173,26 @@ def forward(self, x_a_1, x_b_1, y_1):
 
         x = ExtraKeysTensor(torch.randn(3))
         self.assertTrue(torch._C._dispatch_keys(x).has(DispatchKey.NestedTensor))
-        self.assertFalse(torch._C._dispatch_keys(x).has(DispatchKey.AutogradNestedTensor))
+        self.assertFalse(
+            torch._C._dispatch_keys(x).has(DispatchKey.AutogradNestedTensor)
+        )
 
     def test_index_put_where_only_index_is_subclass(self) -> None:
         called_funcs = []
 
         class MyTensor(torch.Tensor):
-            __torch_function__ = torch._C._disabled_torch_function_impl
             elem: torch.Tensor
-            __slots__ = ['elem']
+            __slots__ = ["elem"]
 
             @staticmethod
             def __new__(cls, elem, *args, **kwargs):
                 r = torch.Tensor._make_wrapper_subclass(
-                    cls, elem.size(),
-                    dtype=elem.dtype, layout=elem.layout,
-                    device=elem.device, requires_grad=elem.requires_grad
+                    cls,
+                    elem.size(),
+                    dtype=elem.dtype,
+                    layout=elem.layout,
+                    device=elem.device,
+                    requires_grad=elem.requires_grad,
                 )
                 r.elem = elem
                 return r
@@ -1114,8 +1212,11 @@ def forward(self, x_a_1, x_b_1, y_1):
         with capture_logs(is_mode=True) as logs:
             with LoggingTensorMode():
                 torch.empty([])
-        self.assertExpectedInline('\n'.join(logs), """\
-$0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)""")
+        self.assertExpectedInline(
+            "\n".join(logs),
+            """\
+$0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)""",
+        )
 
     def test_torch_dispatch_mode_unrelated_tensors(self) -> None:
         x = torch.randn([])
@@ -1123,7 +1224,9 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
         with capture_logs(is_mode=True) as logs:
             with LoggingTensorMode():
                 x + y
-        self.assertExpectedInline('\n'.join(logs), """$2: f32[] = torch._ops.aten.add.Tensor($0, $1)""")
+        self.assertExpectedInline(
+            "\n".join(logs), """$2: f32[] = torch._ops.aten.add.Tensor($0, $1)"""
+        )
 
     def test_nested_push_logging_tensor_mode(self):
         x = torch.randn([])
@@ -1134,11 +1237,14 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
                     torch.empty([])
                     x + y
 
-        self.assertExpectedInline('\n'.join(logs), """\
+        self.assertExpectedInline(
+            "\n".join(logs),
+            """\
 $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)
 $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)
 $3: f32[] = torch._ops.aten.add.Tensor($1, $2)
-$3: f32[] = torch._ops.aten.add.Tensor($1, $2)""")
+$3: f32[] = torch._ops.aten.add.Tensor($1, $2)""",
+        )
 
     def test_capture_logs_with_torch_dispatch_mode(self):
         x = torch.randn([])
@@ -1146,9 +1252,12 @@ $3: f32[] = torch._ops.aten.add.Tensor($1, $2)""")
         with capture_logs_with_logging_tensor_mode() as logs:
             torch.empty([])
             x + y
-        self.assertExpectedInline('\n'.join(logs), """\
+        self.assertExpectedInline(
+            "\n".join(logs),
+            """\
 $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)
-$3: f32[] = torch._ops.aten.add.Tensor($1, $2)""")
+$3: f32[] = torch._ops.aten.add.Tensor($1, $2)""",
+        )
 
         x = torch.randn([])
         y = torch.randn([])
@@ -1158,11 +1267,14 @@ $3: f32[] = torch._ops.aten.add.Tensor($1, $2)""")
                 torch.empty([])
                 x + y
 
-        self.assertExpectedInline('\n'.join(logs2), """\
+        self.assertExpectedInline(
+            "\n".join(logs2),
+            """\
 $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)
 $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)
 $3: f32[] = torch._ops.aten.add.Tensor($1, $2)
-$3: f32[] = torch._ops.aten.add.Tensor($1, $2)""")
+$3: f32[] = torch._ops.aten.add.Tensor($1, $2)""",
+        )
 
         self.assertEqual(logs1, logs2)
 
@@ -1252,7 +1364,9 @@ $3: f32[] = torch._ops.aten.add.Tensor($1, $2)""")
 
         class TestMode(TorchDispatchMode):
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-                tree_map_only(torch.Tensor, lambda t: test_case.assertIn(t, seen), (args, kwargs))
+                tree_map_only(
+                    torch.Tensor, lambda t: test_case.assertIn(t, seen), (args, kwargs)
+                )
                 if kwargs is None:
                     kwargs = {}
                 r = func(*args, **kwargs)
@@ -1272,8 +1386,8 @@ $3: f32[] = torch._ops.aten.add.Tensor($1, $2)""")
 
         class AMode(TorchDispatchMode):
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-                if func.__name__ == 'randn.default':
-                    raise RuntimeError()
+                if func.__name__ == "randn.default":
+                    raise RuntimeError
                 return A(torch.zeros(()))
 
         with AMode():
@@ -1289,7 +1403,7 @@ $3: f32[] = torch._ops.aten.add.Tensor($1, $2)""")
 
         class A(TorchDispatchMode):
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-                raise ErrorA()
+                raise ErrorA
 
         x = A()
         with self.assertRaises(ErrorA):
@@ -1345,7 +1459,7 @@ $3: f32[] = torch._ops.aten.add.Tensor($1, $2)""")
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                 return func(*args, **kwargs)
 
-        x = torch.tensor(4.)
+        x = torch.tensor(4.0)
         with Mode():
             y = x + x
             z = y + y
@@ -1359,7 +1473,10 @@ $3: f32[] = torch._ops.aten.add.Tensor($1, $2)""")
         self.assertIsInstance(y, ModeTensor)
         self.assertIsInstance(z, ModeTensor)
 
-        assert self.assertRaisesRegex(RuntimeError, "subclass Mode but.* associated to a python object of type Mode")
+        assert self.assertRaisesRegex(
+            RuntimeError,
+            "subclass Mode but.* associated to a python object of type Mode",
+        )
 
     def test_notimplemented_mode(self):
         sub_count = 0
@@ -1395,8 +1512,6 @@ $3: f32[] = torch._ops.aten.add.Tensor($1, $2)""")
 
                 return func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs))
 
-            __torch_function__ = torch._C._disabled_torch_function_impl
-
         a = SubTensor(torch.randn(2))
         with PoliteMode() as mode:
             a.abs()
@@ -1417,10 +1532,12 @@ $3: f32[] = torch._ops.aten.add.Tensor($1, $2)""")
             with LoggingTensorMode() as reenabled:
                 with reenabled:
                     torch.empty([])
-            self.assertExpectedInline('\n'.join(logs), """\
+            self.assertExpectedInline(
+                "\n".join(logs),
+                """\
 $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)
-$0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)""")
-
+$0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)""",
+            )
 
     def test_error_using_class_method_on_mode(self):
         class A(TorchDispatchMode):
@@ -1428,8 +1545,10 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
                 return func(args, kwargs)
 
-        x = torch.tensor(5.)
-        with self.assertRaisesRegex(RuntimeError, "classmethod is not supported, please make it a plain method"):
+        x = torch.tensor(5.0)
+        with self.assertRaisesRegex(
+            RuntimeError, "classmethod is not supported, please make it a plain method"
+        ):
             with A():
                 x + x
 
@@ -1470,9 +1589,13 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
 
     def test_tolist_numpy_with_torch_dispatch_mode(self) -> None:
         x = LoggingTensor(torch.tensor([2.0, 3.0]))
-        with self.assertRaisesRegex(RuntimeError, "is not supported for tensor subclasses."):
+        with self.assertRaisesRegex(
+            RuntimeError, "is not supported for tensor subclasses."
+        ):
             x.tolist()
-        with self.assertRaisesRegex(RuntimeError, "is not supported for tensor subclasses."):
+        with self.assertRaisesRegex(
+            RuntimeError, "is not supported for tensor subclasses."
+        ):
             x.numpy()
         with self.assertRaises(AssertionError):
             self.assertEqual(x, None)
@@ -1490,45 +1613,50 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
                 self.testcase.assertEqual(args[1].device_index, 2)
                 self.testcase.assertEqual(args[1].device_type, 3)
 
-        t = torch.tensor(5.)
+        t = torch.tensor(5.0)
         s = torch.Stream(stream_id=1, device_index=2, device_type=3)
         with TestMode(self):
             t.record_stream(s)
 
     def test_return_stream(self) -> None:
-        l_def = torch.library.Library("test_return_stream", "DEF")
-        l_def.define("return_stream(Tensor self) -> Stream")
-        l_impl = torch.library.Library("test_return_stream", "IMPL", "CPU")
-        l_impl.impl("return_stream", lambda _: torch.Stream(stream_id=0, device_index=1, device_type=2))
+        with _scoped_library("test_return_stream", "DEF") as l_def:
+            l_def.define("return_stream(Tensor self) -> Stream")
+            with _scoped_library("test_return_stream", "IMPL", "CPU") as l_impl:
+                l_impl.impl(
+                    "return_stream",
+                    lambda _: torch.Stream(stream_id=0, device_index=1, device_type=2),
+                )
 
-        class TestMode(TorchDispatchMode):
-            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-                return torch.Stream(stream_id=1, device_index=2, device_type=3)
+                class TestMode(TorchDispatchMode):
+                    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                        return torch.Stream(stream_id=1, device_index=2, device_type=3)
 
-        t = torch.tensor(5.)
-        s = torch.ops.test_return_stream.return_stream(t)
-        self.assertIsInstance(s, torch.Stream)
-        self.assertEqual(s.stream_id, 0)
-        self.assertEqual(s.device_index, 1)
-        self.assertEqual(s.device_type, 2)
+                t = torch.tensor(5.0)
+                s = torch.ops.test_return_stream.return_stream(t)
+                self.assertIsInstance(s, torch.Stream)
+                self.assertEqual(s.stream_id, 0)
+                self.assertEqual(s.device_index, 1)
+                self.assertEqual(s.device_type, 2)
 
-        with TestMode():
-            s = torch.ops.test_return_stream.return_stream(t)
-        self.assertIsInstance(s, torch.Stream)
-        self.assertEqual(s.stream_id, 1)
-        self.assertEqual(s.device_index, 2)
-        self.assertEqual(s.device_type, 3)
+                with TestMode():
+                    s = torch.ops.test_return_stream.return_stream(t)
+                self.assertIsInstance(s, torch.Stream)
+                self.assertEqual(s.stream_id, 1)
+                self.assertEqual(s.device_index, 2)
+                self.assertEqual(s.device_type, 3)
 
     def test_subclass_autograd_device_check(self) -> None:
         class NonWrapperSubclass(torch.Tensor):
             elem: torch.Tensor
 
-            __slots__ = ['elem']
+            __slots__ = ["elem"]
 
             @staticmethod
             def __new__(cls, elem, *args, **kwargs):
                 # Wrong device here!
-                r = torch.Tensor._make_subclass(cls, elem.to("meta"), elem.requires_grad)
+                r = torch.Tensor._make_subclass(
+                    cls, elem.to("meta"), elem.requires_grad
+                )
                 # ...the real tensor is held as an element on the tensor.
                 r.elem = elem
                 return r
@@ -1541,8 +1669,12 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
                 def wrap(e):
                     return NonWrapperSubclass(e) if isinstance(e, torch.Tensor) else e
 
-                rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
-                logging.getLogger("NonWrapperSubclass").info(f"{func.__module__}.{func.__name__}", args, kwargs, rs)
+                rs = tree_map(
+                    wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs))
+                )
+                logging.getLogger("NonWrapperSubclass").info(
+                    f"{func.__module__}.{func.__name__}", args, kwargs, rs
+                )
                 return rs
 
         x = NonWrapperSubclass(torch.tensor([3.0, 4.0], requires_grad=True))
@@ -1560,9 +1692,12 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
             @staticmethod
             def __new__(cls, elem, *args, **kwargs):
                 r = torch.Tensor._make_wrapper_subclass(
-                    cls, elem.size(),
-                    dtype=elem.dtype, layout=elem.layout,
-                    device=elem.device, requires_grad=elem.requires_grad
+                    cls,
+                    elem.size(),
+                    dtype=elem.dtype,
+                    layout=elem.layout,
+                    device=elem.device,
+                    requires_grad=elem.requires_grad,
                 )
                 r.elem = elem
                 return r
@@ -1575,7 +1710,9 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
                 def wrap(e):
                     return SubclassWithNone(e) if isinstance(e, torch.Tensor) else e
 
-                rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
+                rs = tree_map(
+                    wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs))
+                )
                 if func.overloadpacket.__name__ == "add":
                     return None
                 else:
@@ -1630,8 +1767,6 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
             def __new__(cls, elem):
                 return torch.Tensor._make_subclass(cls, elem)
 
-            __torch_function__ = torch._C._disabled_torch_function_impl
-
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
                 called.append(func)
@@ -1650,8 +1785,6 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
             def __new__(cls, elem):
                 return torch.Tensor._make_subclass(cls, elem)
 
-            __torch_function__ = torch._C._disabled_torch_function_impl
-
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
                 called.append(func)
@@ -1668,8 +1801,6 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
             @staticmethod
             def __new__(cls, elem):
                 return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
-
-            __torch_function__ = torch._C._disabled_torch_function_impl
 
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
@@ -1691,8 +1822,6 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
         called = 0
 
         class SubTensor(torch.Tensor):
-            __torch_function__ = torch._C._disabled_torch_function_impl
-
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
                 nonlocal called
@@ -1716,6 +1845,7 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
     def test_construct_int_tensor(self):
         class SubTensor(torch.Tensor):
             pass
+
         # should not fail
         SubTensor(torch.zeros(2, dtype=torch.int))
 
@@ -1726,8 +1856,6 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
             def __new__(cls, elem):
                 r = torch.Tensor._make_subclass(cls, elem)
                 return r
-
-            __torch_function__ = torch._C._disabled_torch_function_impl
 
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
@@ -1775,10 +1903,13 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
         not_contiguous_data = torch.as_strided(data.clone(), (2, 2), (1, 2))
 
         for use_wrapper_subclass in [True, False]:
+
             class ExampleTensor1(torch.Tensor):
                 @staticmethod
                 def __new__(cls, data, wrapper):
-                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_sizes_strides_policy="strides")
+                    return TestPythonDispatch.subclass_helper(
+                        cls, data, wrapper, dispatch_sizes_strides_policy="strides"
+                    )
 
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args, kwargs):
@@ -1787,7 +1918,9 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
             class ExampleTensor2(torch.Tensor):
                 @staticmethod
                 def __new__(cls, data, wrapper):
-                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_sizes_strides_policy="strides")
+                    return TestPythonDispatch.subclass_helper(
+                        cls, data, wrapper, dispatch_sizes_strides_policy="strides"
+                    )
 
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args, kwargs):
@@ -1798,7 +1931,9 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
             class ExampleTensor3(torch.Tensor):
                 @staticmethod
                 def __new__(cls, data, wrapper):
-                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_sizes_strides_policy="strides")
+                    return TestPythonDispatch.subclass_helper(
+                        cls, data, wrapper, dispatch_sizes_strides_policy="strides"
+                    )
 
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args, kwargs):
@@ -1829,7 +1964,9 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
         class ExampleTensor(torch.Tensor):
             @staticmethod
             def __new__(cls, data):
-                return TestPythonDispatch.subclass_helper(cls, data, False, dispatch_sizes_strides_policy="strides")
+                return TestPythonDispatch.subclass_helper(
+                    cls, data, False, dispatch_sizes_strides_policy="strides"
+                )
 
             @classmethod
             def __torch_dispatch__(cls, func, types, args, kwargs):
@@ -1838,7 +1975,7 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
                     torch.ops.aten.is_contiguous.memory_format,
                     torch.ops.aten.is_strides_like_format.default,
                     torch.ops.aten.is_non_overlapping_and_dense.default,
-                    torch.ops.aten.stride.default
+                    torch.ops.aten.stride.default,
                 ]:
                     calls.append((func, list(args)[1:]))
                     return None
@@ -1847,20 +1984,32 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
 
         e = ExampleTensor(torch.randn(2, 2))
         self.assertFalse(e.is_contiguous(memory_format=torch.channels_last))
-        self.assertEqual(calls, [(torch.ops.aten.is_contiguous.memory_format, [torch.channels_last])])
+        self.assertEqual(
+            calls, [(torch.ops.aten.is_contiguous.memory_format, [torch.channels_last])]
+        )
         calls.clear()
-        self.assertFalse(torch.ops.aten.is_strides_like_format.default(e, torch.channels_last))
-        self.assertEqual(calls, [(torch.ops.aten.is_strides_like_format.default, [torch.channels_last])])
+        self.assertFalse(
+            torch.ops.aten.is_strides_like_format.default(e, torch.channels_last)
+        )
+        self.assertEqual(
+            calls,
+            [(torch.ops.aten.is_strides_like_format.default, [torch.channels_last])],
+        )
         calls.clear()
         self.assertTrue(torch.ops.aten.is_non_overlapping_and_dense.default(e))
-        self.assertEqual(calls, [(torch.ops.aten.is_non_overlapping_and_dense.default, [])])
+        self.assertEqual(
+            calls, [(torch.ops.aten.is_non_overlapping_and_dense.default, [])]
+        )
 
     def test_device_slowpath(self):
         for use_wrapper_subclass in [True]:
+
             class ExampleTensor1(torch.Tensor):
                 @staticmethod
                 def __new__(cls, data, wrapper):
-                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_device=True)
+                    return TestPythonDispatch.subclass_helper(
+                        cls, data, wrapper, dispatch_device=True
+                    )
 
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args, kwargs):
@@ -1869,23 +2018,27 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
             class ExampleTensor2(torch.Tensor):
                 @staticmethod
                 def __new__(cls, data, wrapper):
-                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_device=True)
+                    return TestPythonDispatch.subclass_helper(
+                        cls, data, wrapper, dispatch_device=True
+                    )
 
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args, kwargs):
                     if func.overloadpacket == torch.ops.prim.device:
-                        return torch.device('meta')
+                        return torch.device("meta")
                     return NotImplemented
 
             class ExampleTensor3(torch.Tensor):
                 @staticmethod
                 def __new__(cls, data, wrapper):
-                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_device=True)
+                    return TestPythonDispatch.subclass_helper(
+                        cls, data, wrapper, dispatch_device=True
+                    )
 
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args, kwargs):
                     if func.overloadpacket == torch.ops.prim.device:
-                        return torch.device('meta')
+                        return torch.device("meta")
                     return NotImplemented
 
             err_msg = "Multiple dispatch failed for 'torch.ops.prim.device'"
@@ -1894,22 +2047,25 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
                 e.device()
 
             ten = torch.rand([1])
-            e = ExampleTensor2(torch.randn(3, 3, device='cpu'), use_wrapper_subclass)
-            self.assertEqual(e.device.type, 'meta')
-            self.assertEqual(ten.type_as(e).device.type, 'meta')
+            e = ExampleTensor2(torch.randn(3, 3, device="cpu"), use_wrapper_subclass)
+            self.assertEqual(e.device.type, "meta")
+            self.assertEqual(ten.type_as(e).device.type, "meta")
 
-            e = ExampleTensor3(torch.randn(3, 3, device='cpu'), use_wrapper_subclass)
-            self.assertEqual(e.device.type, 'meta')
-            self.assertEqual(ten.type_as(e).device.type, 'meta')
+            e = ExampleTensor3(torch.randn(3, 3, device="cpu"), use_wrapper_subclass)
+            self.assertEqual(e.device.type, "meta")
+            self.assertEqual(ten.type_as(e).device.type, "meta")
 
     def test_dim_slowpath(self):
         data = torch.randn(3, 3)
 
         for use_wrapper_subclass in [True, False]:
+
             class DimNotImplementedTensor(torch.Tensor):
                 @staticmethod
                 def __new__(cls, data, wrapper):
-                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_sizes_strides_policy="sizes")
+                    return TestPythonDispatch.subclass_helper(
+                        cls, data, wrapper, dispatch_sizes_strides_policy="sizes"
+                    )
 
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args, kwargs):
@@ -1918,7 +2074,9 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
             class DimImplementedTensor(torch.Tensor):
                 @staticmethod
                 def __new__(cls, data, wrapper):
-                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_sizes_strides_policy="sizes")
+                    return TestPythonDispatch.subclass_helper(
+                        cls, data, wrapper, dispatch_sizes_strides_policy="sizes"
+                    )
 
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args, kwargs):
@@ -1939,6 +2097,7 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
             @classmethod
             def __torch_function__(cls, *args, **kwargs):
                 pass
+
         a = torch.rand(3)
 
         a[[T(), T()]]
@@ -1952,17 +2111,22 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
             @staticmethod
             def __new__(cls, *args, **kwargs):
                 r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
-                    cls, (0,), dispatch_sizes_strides_policy="sizes")
+                    cls, (0,), dispatch_sizes_strides_policy="sizes"
+                )
                 return r
 
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
                 if func in (
                     torch.ops.aten.sym_size.default,
-                    torch.ops.aten.sym_stride.default
+                    torch.ops.aten.sym_stride.default,
                 ):
                     from torch._dynamo.source import ConstantSource
-                    from torch.fx.experimental.symbolic_shapes import ShapeEnv, DimDynamic
+                    from torch.fx.experimental.symbolic_shapes import (
+                        DimDynamic,
+                        ShapeEnv,
+                    )
+
                     shape_env = ShapeEnv()
                     si = shape_env.create_symintnode(
                         shape_env.create_symbol(
@@ -1971,7 +2135,7 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
                             dynamic_dim=DimDynamic.DUCK,
                             constraint_dim=None,
                         ),
-                        hint=123
+                        hint=123,
                     )
                     return (si,)
 
@@ -1983,10 +2147,13 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
 
     def test_strides_slow_path(self):
         for use_wrapper_subclass in [True, False]:
+
             class StridesNotImplemented(torch.Tensor):
                 @staticmethod
                 def __new__(cls, data, wrapper):
-                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_sizes_strides_policy="strides")
+                    return TestPythonDispatch.subclass_helper(
+                        cls, data, wrapper, dispatch_sizes_strides_policy="strides"
+                    )
 
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args, kwargs):
@@ -1995,7 +2162,9 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
             class StridesCustomReturn(torch.Tensor):
                 @staticmethod
                 def __new__(cls, data, wrapper):
-                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_sizes_strides_policy="strides")
+                    return TestPythonDispatch.subclass_helper(
+                        cls, data, wrapper, dispatch_sizes_strides_policy="strides"
+                    )
 
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args, kwargs):
@@ -2006,7 +2175,9 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
             class StridesDefaultReturn(torch.Tensor):
                 @staticmethod
                 def __new__(cls, data, wrapper):
-                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_sizes_strides_policy="strides")
+                    return TestPythonDispatch.subclass_helper(
+                        cls, data, wrapper, dispatch_sizes_strides_policy="strides"
+                    )
 
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args, kwargs):
@@ -2032,7 +2203,9 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
             class SizesNotImplemented(torch.Tensor):
                 @staticmethod
                 def __new__(cls, data, wrapper):
-                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_sizes_strides_policy="sizes")
+                    return TestPythonDispatch.subclass_helper(
+                        cls, data, wrapper, dispatch_sizes_strides_policy="sizes"
+                    )
 
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args, kwargs):
@@ -2043,7 +2216,9 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
             class SizesCustomReturn(torch.Tensor):
                 @staticmethod
                 def __new__(cls, data, wrapper):
-                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_sizes_strides_policy="sizes")
+                    return TestPythonDispatch.subclass_helper(
+                        cls, data, wrapper, dispatch_sizes_strides_policy="sizes"
+                    )
 
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args, kwargs):
@@ -2056,7 +2231,9 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
             class SizesDefaultReturn(torch.Tensor):
                 @staticmethod
                 def __new__(cls, data, wrapper):
-                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_sizes_strides_policy="sizes")
+                    return TestPythonDispatch.subclass_helper(
+                        cls, data, wrapper, dispatch_sizes_strides_policy="sizes"
+                    )
 
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args, kwargs):
@@ -2117,12 +2294,16 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
         def trace_fn(x):
             x_wrapper = CustomSizeDynamicShapesTensor(x)
             return x_wrapper.size(), x_wrapper.stride()
+
         fx_g = make_fx(trace_fn, tracing_mode="symbolic")(x)
-        self.assertExpectedInline(fx_g.code.strip(), """\
+        self.assertExpectedInline(
+            fx_g.code.strip(),
+            """\
 def forward(self, x_1):
     sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
     sym_size_int_1 = torch.ops.aten.sym_size.int(x_1, 1);  x_1 = None
-    return ((sym_size_int, sym_size_int_1), (sym_size_int, sym_size_int_1))""")
+    return ((sym_size_int, sym_size_int_1), (sym_size_int, sym_size_int_1))""",
+        )
 
     def test_data_ptr_respects_numel_slow_path(self):
         data = torch.randn(6, 2)
@@ -2130,7 +2311,9 @@ def forward(self, x_1):
         class NumelDefaultReturn(torch.Tensor):
             @staticmethod
             def __new__(cls, data, wrapper):
-                return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_sizes_strides_policy="sizes")
+                return TestPythonDispatch.subclass_helper(
+                    cls, data, wrapper, dispatch_sizes_strides_policy="sizes"
+                )
 
             @classmethod
             def __torch_dispatch__(cls, func, types, args, kwargs):
@@ -2154,7 +2337,9 @@ def forward(self, x_1):
             class LayoutNotImplemented(torch.Tensor):
                 @staticmethod
                 def __new__(cls, data, wrapper):
-                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_layout=True)
+                    return TestPythonDispatch.subclass_helper(
+                        cls, data, wrapper, dispatch_layout=True
+                    )
 
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args, kwargs):
@@ -2163,7 +2348,9 @@ def forward(self, x_1):
             class LayoutCustomReturn(torch.Tensor):
                 @staticmethod
                 def __new__(cls, data, wrapper):
-                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_layout=True)
+                    return TestPythonDispatch.subclass_helper(
+                        cls, data, wrapper, dispatch_layout=True
+                    )
 
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args, kwargs):
@@ -2174,7 +2361,9 @@ def forward(self, x_1):
             class LayoutDefaultReturn(torch.Tensor):
                 @staticmethod
                 def __new__(cls, data, wrapper):
-                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_layout=True)
+                    return TestPythonDispatch.subclass_helper(
+                        cls, data, wrapper, dispatch_layout=True
+                    )
 
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args, kwargs):
@@ -2193,6 +2382,7 @@ def forward(self, x_1):
             e = LayoutDefaultReturn(torch.randn(4, 2), use_wrapper_subclass)
             self.assertEqual(e.layout, torch.strided)
 
+
 class TestPythonDispatcher(TestCase):
     def test_basic(self):
         x = torch.randn(2, requires_grad=True)
@@ -2207,8 +2397,8 @@ class TestPythonDispatcher(TestCase):
         python_disp_shape = torch.linalg.lstsq(a, b).solution.shape
         self.assertEqual(expected_shape, python_disp_shape)
 
-class TestWrapperSubclassAliasing(TestCase):
 
+class TestWrapperSubclassAliasing(TestCase):
     def _test_wrapper_subclass_aliasing(self, op, args, kwargs):
         def to_subclass(t: torch.Tensor):
             return TwoTensor(t, t.clone())
@@ -2221,16 +2411,24 @@ class TestWrapperSubclassAliasing(TestCase):
         result_test = op(*args_subclass, **kwargs_subclass)
 
         args_ref_flat = pytree.arg_tree_leaves(*args, **kwargs)
-        args_ref_flat_tensors = [x for x in args_ref_flat if isinstance(x, torch.Tensor)]
+        args_ref_flat_tensors = [
+            x for x in args_ref_flat if isinstance(x, torch.Tensor)
+        ]
 
         args_test_flat = pytree.tree_leaves((args_subclass, kwargs_subclass))
-        args_test_flat_tensors = [x for x in args_test_flat if isinstance(x, torch.Tensor)]
+        args_test_flat_tensors = [
+            x for x in args_test_flat if isinstance(x, torch.Tensor)
+        ]
 
         result_ref_flat = pytree.tree_leaves(result_ref)
-        result_ref_flat_tensors = [x for x in result_ref_flat if isinstance(x, torch.Tensor)]
+        result_ref_flat_tensors = [
+            x for x in result_ref_flat if isinstance(x, torch.Tensor)
+        ]
 
         result_test_flat = pytree.tree_leaves(result_test)
-        result_test_flat_tensors = [x for x in result_test_flat if isinstance(x, torch.Tensor)]
+        result_test_flat_tensors = [
+            x for x in result_test_flat if isinstance(x, torch.Tensor)
+        ]
 
         for o_ref, o_test in zip(result_ref_flat_tensors, result_test_flat_tensors):
             for a_ref, a_test in zip(args_ref_flat_tensors, args_test_flat_tensors):
@@ -2238,26 +2436,42 @@ class TestWrapperSubclassAliasing(TestCase):
                 if out_is_inpt:
                     self.assertTrue(o_test is a_test)
 
-                out_aliases_inpt = StorageWeakRef(o_ref.untyped_storage()) == StorageWeakRef(a_ref.untyped_storage())
+                out_aliases_inpt = StorageWeakRef(
+                    o_ref.untyped_storage()
+                ) == StorageWeakRef(a_ref.untyped_storage())
                 if out_aliases_inpt:
-                    self.assertTrue(StorageWeakRef(o_test.untyped_storage()) == StorageWeakRef(a_test.untyped_storage()))
+                    self.assertTrue(
+                        StorageWeakRef(o_test.untyped_storage())
+                        == StorageWeakRef(a_test.untyped_storage())
+                    )
                 else:
-                    self.assertFalse(StorageWeakRef(o_test.untyped_storage()) == StorageWeakRef(a_test.untyped_storage()))
+                    self.assertFalse(
+                        StorageWeakRef(o_test.untyped_storage())
+                        == StorageWeakRef(a_test.untyped_storage())
+                    )
 
     # This tests the correctness of `torch.utils._python_dispatch.return_and_correct_aliasing`,
     # a util for wrapper subclasses to promise correct aliasing behavior.
     # It's probably overkill to test every OpInfo,
     # so I picked a sampling of ops with representative schemas.
-    @ops([op for op in op_db if op.name in [
-        'mul',  # out-of-place
-        'cat',  # out-of-place (TensorList input)
-        'index',  # out-of-place (Optional TensorList input)
-        'mul_',  # inplace
-        'view',  # view
-        't_',  # inplace-view
-        'split',  # view (multi-return)
-        'native_batch_norm',  # mutable op (returns outputs and mutates some inputs)
-    ]], allowed_dtypes=(torch.float,))
+    @ops(
+        [
+            op
+            for op in op_db
+            if op.name
+            in [
+                "mul",  # out-of-place
+                "cat",  # out-of-place (TensorList input)
+                "index",  # out-of-place (Optional TensorList input)
+                "mul_",  # inplace
+                "view",  # view
+                "t_",  # inplace-view
+                "split",  # view (multi-return)
+                "native_batch_norm",  # mutable op (returns outputs and mutates some inputs)
+            ]
+        ],
+        allowed_dtypes=(torch.float,),
+    )
     def test_wrapper_subclass_aliasing(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype)
         sample = first_sample(self, samples)
@@ -2281,15 +2495,18 @@ class TestWrapperSubclassAliasing(TestCase):
         # Make sure that _return_and_correct_aliasing can handle this case
         # (I'm using inference_mode to make sure conv2d doesn't decompose and goes to torch_dispatch)
         with torch.inference_mode():
-            self._test_wrapper_subclass_aliasing(torch.ops.aten.conv2d.default, args, kwargs)
+            self._test_wrapper_subclass_aliasing(
+                torch.ops.aten.conv2d.default, args, kwargs
+            )
 
     def test_wrapper_subclass_aliasing_out_op(self, device):
         # Make sure that _return_and_correct_aliasing can handle kwargs w mutable tensors
         args = (torch.ones(4), torch.ones(4))
-        kwargs = {'out': torch.empty(4)}
+        kwargs = {"out": torch.empty(4)}
         self._test_wrapper_subclass_aliasing(torch.ops.aten.add.out, args, kwargs)
+
 
 instantiate_device_type_tests(TestWrapperSubclassAliasing, globals())
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_tests()

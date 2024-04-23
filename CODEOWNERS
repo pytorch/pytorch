@@ -43,12 +43,12 @@ nn/qat/ @jerryzh168
 /torch/csrc/distributed/rpc/tensorpipe_agent.h @jiayisuse @osalpekar @lw
 
 # ONNX Export
-/torch/_dynamo/backends/onnxrt.py @bowenbao @abock @thiagocrepaldi @wschin
-/torch/csrc/jit/passes/onnx.h @bowenbao @abock @thiagocrepaldi
-/torch/csrc/jit/passes/onnx.cpp @bowenbao @abock @thiagocrepaldi
-/torch/csrc/jit/passes/onnx/ @bowenbao @abock @thiagocrepaldi
-/torch/onnx/ @bowenbao @abock @thiagocrepaldi @wschin
-/test/onnx/ @bowenbao @abock @thiagocrepaldi @wschin
+/torch/_dynamo/backends/onnxrt.py @bowenbao @thiagocrepaldi @wschin
+/torch/csrc/jit/passes/onnx.h @bowenbao @thiagocrepaldi
+/torch/csrc/jit/passes/onnx.cpp @bowenbao @thiagocrepaldi
+/torch/csrc/jit/passes/onnx/ @bowenbao @thiagocrepaldi
+/torch/onnx/ @bowenbao @thiagocrepaldi @wschin
+/test/onnx/ @bowenbao @thiagocrepaldi @wschin
 
 # CI
 /.ci  @pytorch/pytorch-dev-infra
@@ -67,6 +67,7 @@ nn/qat/ @jerryzh168
 /test/run_test.py @pytorch/pytorch-dev-infra
 /torch/testing/_internal/common_device_type.py @mruberry
 /torch/testing/_internal/common_utils.py @pytorch/pytorch-dev-infra
+/torch/testing/_internal/hop_db.py @tugsbayasgalan @zou3519 @ydwu4
 
 # Parametrizations
 /torch/nn/utils/parametriz*.py @lezcano
@@ -97,9 +98,13 @@ test/functorch/test_ops.py @zou3519 @chillee @kshitij12345
 test/functorch/test_vmap.py @zou3519 @chillee @kshitij12345
 
 # torch MPS
-test/test_mps.py @kulinseth
-aten/src/ATen/mps/ @kulinseth
-aten/src/ATen/native/mps/ @kulinseth
+test/test_mps.py @kulinseth @malfet
+aten/src/ATen/mps/ @kulinseth @malfet
+aten/src/ATen/native/mps/ @kulinseth @malfet
+
+# MTIA
+aten/src/ATen/detail/MTIAHooksInterface.h @egienvalue
+torch/csrc/mtia/ @egienvalue
 
 # Profiler
 torch/csrc/autograd/profiler* @aaronenyeshi
@@ -130,3 +135,12 @@ caffe2/utils/hip @jeffdaily @jithunnair-amd
 # torch.export
 /torch/export/ @avikchaudhuri @gmagogsfm @tugsbayasgalan @zhxchen17
 /torch/_export/ @avikchaudhuri @gmagogsfm @tugsbayasgalan @zhxchen17
+
+# serialization-related files
+/aten/src/ATen/MapAllocator* @mikaylagawarecki
+/caffe2/serialize/ @mikaylagawarecki
+/torch/serialization.py @mikaylagawarecki
+/torch/storage.py @mikaylagawarecki
+/torch/csrc/Storage* @mikaylagawarecki
+# subscribing for PyTorchFileWriter/PyTorchFileReader changes
+/torch/csrc/jit/python/init.cpp @mikaylagawarecki

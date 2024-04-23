@@ -10,17 +10,10 @@ from torch.utils.data.datapipes.utils.common import (
     _map_deprecated_functional_names,
 )
 from torch.utils.data.dataset import Dataset, IterableDataset
+from torch.utils._import_utils import import_dill
 
-try:
-    import dill
-    # XXX: By default, dill writes the Pickler dispatch table to inject its
-    # own logic there. This globally affects the behavior of the standard library
-    # pickler for any user who transitively depends on this module!
-    # Undo this extension to avoid altering the behavior of the pickler globally.
-    dill.extend(use_dill=False)
-    HAS_DILL = True
-except ImportError:
-    HAS_DILL = False
+dill = import_dill()
+HAS_DILL = dill is not None
 
 __all__ = [
     "DataChunk",
@@ -139,7 +132,7 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
     @classmethod
     def register_datapipe_as_function(cls, function_name, cls_to_register, enable_df_api_tracing=False):
         if function_name in cls.functions:
-            raise Exception(f"Unable to add DataPipe function name {function_name} as it is already taken")
+            raise Exception(f"Unable to add DataPipe function name {function_name} as it is already taken")  # noqa: TRY002
 
         def class_function(cls, enable_df_api_tracing, source_dp, *args, **kwargs):
             result_pipe = cls(source_dp, *args, **kwargs)
@@ -181,13 +174,13 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
     @classmethod
     def set_getstate_hook(cls, hook_fn):
         if IterDataPipe.getstate_hook is not None and hook_fn is not None:
-            raise Exception("Attempt to override existing getstate_hook")
+            raise Exception("Attempt to override existing getstate_hook")  # noqa: TRY002
         IterDataPipe.getstate_hook = hook_fn
 
     @classmethod
     def set_reduce_ex_hook(cls, hook_fn):
         if IterDataPipe.reduce_ex_hook is not None and hook_fn is not None:
-            raise Exception("Attempt to override existing reduce_ex_hook")
+            raise Exception("Attempt to override existing reduce_ex_hook")  # noqa: TRY002
         IterDataPipe.reduce_ex_hook = hook_fn
 
     def __repr__(self):
@@ -282,7 +275,7 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
     @classmethod
     def register_datapipe_as_function(cls, function_name, cls_to_register):
         if function_name in cls.functions:
-            raise Exception(f"Unable to add DataPipe function name {function_name} as it is already taken")
+            raise Exception(f"Unable to add DataPipe function name {function_name} as it is already taken")  # noqa: TRY002
 
         def class_function(cls, source_dp, *args, **kwargs):
             result_pipe = cls(source_dp, *args, **kwargs)
@@ -317,13 +310,13 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
     @classmethod
     def set_getstate_hook(cls, hook_fn):
         if MapDataPipe.getstate_hook is not None and hook_fn is not None:
-            raise Exception("Attempt to override existing getstate_hook")
+            raise Exception("Attempt to override existing getstate_hook")  # noqa: TRY002
         MapDataPipe.getstate_hook = hook_fn
 
     @classmethod
     def set_reduce_ex_hook(cls, hook_fn):
         if MapDataPipe.reduce_ex_hook is not None and hook_fn is not None:
-            raise Exception("Attempt to override existing reduce_ex_hook")
+            raise Exception("Attempt to override existing reduce_ex_hook")  # noqa: TRY002
         MapDataPipe.reduce_ex_hook = hook_fn
 
     def __repr__(self):

@@ -183,9 +183,10 @@ class RNNBase(Module):
         first_fw = self._flat_weights[0]
         dtype = first_fw.dtype
         for fw in self._flat_weights:
-            if (not isinstance(fw.data, Tensor) or not (fw.data.dtype == dtype) or
-                    not fw.data.is_cuda or
-                    not torch.backends.cudnn.is_acceptable(fw.data)):
+            if (
+                not isinstance(fw, Tensor) or not (fw.dtype == dtype) or
+                not fw.is_cuda or not torch.backends.cudnn.is_acceptable(fw)
+            ):
                 return
 
         # If any parameters alias, we fall back to the slower, copying code path. This is
@@ -213,6 +214,7 @@ class RNNBase(Module):
                         self.batch_first, bool(self.bidirectional))
 
     def _apply(self, fn, recurse=True):
+        self._flat_weight_refs = []
         ret = super()._apply(fn, recurse)
 
         # Resets _flat_weights
@@ -379,6 +381,33 @@ class RNN(RNNBase):
     previous layer at time `t-1` or the initial hidden state at time `0`.
     If :attr:`nonlinearity` is ``'relu'``, then :math:`\text{ReLU}` is used instead of :math:`\tanh`.
 
+    .. code-block:: python
+
+        # Efficient implementation equivalent to the following with bidirectional=False
+        def forward(x, h_0=None):
+            if batch_first:
+                x = x.transpose(0, 1)
+            seq_len, batch_size, _ = x.size()
+            if h_0 is None:
+                h_0 = torch.zeros(num_layers, batch_size, hidden_size)
+            h_t_minus_1 = h_0
+            h_t = h_0
+            output = []
+            for t in range(seq_len):
+                for layer in range(num_layers):
+                    h_t[layer] = torch.tanh(
+                        x[t] @ weight_ih[layer].T
+                        + bias_ih[layer]
+                        + h_t_minus_1[layer] @ weight_hh[layer].T
+                        + bias_hh[layer]
+                    )
+                output.append(h_t[-1])
+                h_t_minus_1 = h_t
+            output = torch.stack(output)
+            if batch_first:
+                output = output.transpose(0, 1)
+            return output, h_t
+
     Args:
         input_size: The number of expected features in the input `x`
         hidden_size: The number of features in the hidden state `h`
@@ -480,7 +509,11 @@ class RNN(RNNBase):
     def __init__(self, *args, **kwargs):
         if 'proj_size' in kwargs:
             raise ValueError("proj_size argument is only supported for LSTM, not RNN or GRU")
-        self.nonlinearity = kwargs.pop('nonlinearity', 'tanh')
+        if len(args) > 3:
+            self.nonlinearity = args[3]
+            args = args[:3] + args[4:]
+        else:
+            self.nonlinearity = kwargs.pop('nonlinearity', 'tanh')
         if self.nonlinearity == 'tanh':
             mode = 'RNN_TANH'
         elif self.nonlinearity == 'relu':
@@ -575,8 +608,8 @@ class RNN(RNNBase):
             output_packed = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
             return output_packed, self.permute_hidden(hidden, unsorted_indices)
 
-        if not is_batched:
-            output = output.squeeze(batch_dim)
+        if not is_batched:  # type: ignore[possibly-undefined]
+            output = output.squeeze(batch_dim)  # type: ignore[possibly-undefined]
             hidden = hidden.squeeze(1)
 
         return output, self.permute_hidden(hidden, unsorted_indices)
@@ -888,8 +921,8 @@ class LSTM(RNNBase):
             output_packed = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
             return output_packed, self.permute_hidden(hidden, unsorted_indices)
         else:
-            if not is_batched:
-                output = output.squeeze(batch_dim)
+            if not is_batched:  # type: ignore[possibly-undefined]
+                output = output.squeeze(batch_dim)  # type: ignore[possibly-undefined]
                 hidden = (hidden[0].squeeze(1), hidden[1].squeeze(1))
             return output, self.permute_hidden(hidden, unsorted_indices)
 
@@ -1111,8 +1144,8 @@ class GRU(RNNBase):
             output_packed = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
             return output_packed, self.permute_hidden(hidden, unsorted_indices)
         else:
-            if not is_batched:
-                output = output.squeeze(batch_dim)
+            if not is_batched:  # type: ignore[possibly-undefined]
+                output = output.squeeze(batch_dim)  # type: ignore[possibly-undefined]
                 hidden = hidden.squeeze(1)
 
             return output, self.permute_hidden(hidden, unsorted_indices)
