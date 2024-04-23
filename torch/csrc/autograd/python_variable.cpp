@@ -774,9 +774,9 @@ static PyObject* THPVariable_make_wrapper_subclass(
       "SymInt? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, "
       "Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False, "
       "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False, "
-      "DispatchKeySet _extra_dispatch_keys=None)",
+      "DispatchKeySet _extra_dispatch_keys=None, bool _allocate_storage=True)",
   });
-  ParsedArgs<14> parsed_args{};
+  ParsedArgs<15> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
 
@@ -826,7 +826,11 @@ static PyObject* THPVariable_make_wrapper_subclass(
 
     c10::SymInt size_bytes;
     auto dtype_itemsize = static_cast<int64_t>(options.dtype().itemsize());
-    if (sym_strides.has_value()) {
+    bool allocate_storage = r.toBool(14);
+
+    if (!allocate_storage) {
+      size_bytes = 0;
+    } else if (sym_strides.has_value()) {
       size_bytes = at::detail::computeStorageNbytes(
           sym_sizes,
           sym_strides.value(),
