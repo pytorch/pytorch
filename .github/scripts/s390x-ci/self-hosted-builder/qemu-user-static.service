@@ -1,0 +1,11 @@
+[Unit]
+Description=Support for transparent execution of non-native binaries with QEMU user emulation
+
+[Service]
+Type=oneshot
+# The source code for iiilinuxibmcom/qemu-user-static is at https://github.com/iii-i/qemu-user-static/tree/v6.1.0-1
+# TODO: replace it with multiarch/qemu-user-static once version >6.1 is available
+ExecStart=/usr/bin/docker run --rm --interactive --privileged docker.io/iiilinuxibmcom/qemu-user-static:6.1.0-1 --reset -p yes
+
+[Install]
+WantedBy=multi-user.target

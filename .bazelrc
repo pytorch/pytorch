@@ -1,0 +1,114 @@
+build --cxxopt=--std=c++17
+build --copt=-I.
+# Bazel does not support including its cc_library targets as system
+# headers. We work around this for generated code
+# (e.g. c10/macros/cmake_macros.h) by making the generated directory a
+# system include path.
+build --copt=-isystem --copt bazel-out/k8-fastbuild/bin
+build --copt=-isystem --copt bazel-out/darwin-fastbuild/bin
+build --experimental_ui_max_stdouterr_bytes=2048576
+
+# Configuration to disable tty features for environments like CI
+build:no-tty --curses no
+build:no-tty --progress_report_interval 10
+build:no-tty --show_progress_rate_limit 10
+
+# Build with GPU support by default.
+build --define=cuda=true
+# rules_cuda configuration
+build --@rules_cuda//cuda:enable_cuda
+build --@rules_cuda//cuda:cuda_targets=sm_52
+build --@rules_cuda//cuda:compiler=nvcc
+build --repo_env=CUDA_PATH=/usr/local/cuda
+
+# Configuration to build without GPU support
+build:cpu-only --define=cuda=false
+# define a separate build folder for faster switching between configs
+build:cpu-only --platform_suffix=-cpu-only
+# See the note on the config-less build for details about why we are
+# doing this. We must also do it for the "-cpu-only" platform suffix.
+build --copt=-isystem --copt=bazel-out/k8-fastbuild-cpu-only/bin
+# rules_cuda configuration
+build:cpu-only --@rules_cuda//cuda:enable_cuda=False
+
+# Definition of --config=shell
+# interactive shell immediately before execution
+build:shell --run_under="//tools/bazel_tools:shellwrap"
+
+# Disable all warnings for external repositories. We don't care about
+# their warnings.
+build --per_file_copt=^external/@-w
+
+# Set additional warnings to error level.
+#
+# Implementation notes:
+#  * we use file extensions to determine if we are using the C++
+#    compiler or the cuda compiler
+#  * we use ^// at the start of the regex to only permit matching
+#    PyTorch files. This excludes external repos.
+#
+# Note that because this is logically a command-line flag, it is
+# considered the word on what warnings are enabled. This has the
+# unfortunate consequence of preventing us from disabling an error at
+# the target level because those flags will come before these flags in
+# the action invocation. Instead we provide per-file exceptions after
+# this.
+#
+# On the bright side, this means we don't have to more broadly apply
+# the exceptions to an entire target.
+#
+# Looking for CUDA flags? We have a cu_library macro that we can edit
+# directly. Look in //tools/rules:cu.bzl for details. Editing the
+# macro over this has the following advantages:
+#  * making changes does not require discarding the Bazel analysis
+#    cache
+#  * it allows for selective overrides on individual targets since the
+#    macro-level opts will come earlier than target level overrides
+
+build --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=all
+# The following warnings come from -Wall. We downgrade them from error
+# to warnings here.
+#
+# We intentionally use #pragma unroll, which is compiler specific.
+build --per_file_copt='^//.*\.(cpp|cc)$'@-Wno-error=unknown-pragmas
+
+build --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=extra
+# The following warnings come from -Wextra. We downgrade them from error
+# to warnings here.
+#
+# unused-parameter-compare has a tremendous amount of violations in the
+# codebase. It will be a lot of work to fix them, just disable it for
+# now.
+build --per_file_copt='^//.*\.(cpp|cc)$'@-Wno-unused-parameter
+# missing-field-parameters has both a large number of violations in
+# the codebase, but it also is used pervasively in the Python C
+# API. There are a couple of catches though:
+# * we use multiple versions of the Python API and hence have
+#   potentially multiple different versions of each relevant
+#   struct. They may have different numbers of fields. It will be
+#   unwieldy to support multiple versions in the same source file.
+# * Python itself for many of these structs recommends only
+#   initializing a subset of the fields. We should respect the API
+#   usage conventions of our dependencies.
+#
+# Hence, we just disable this warning altogether. We may want to clean
+# up some of the clear-cut cases that could be risky, but we still
+# likely want to have this disabled for the most part.
+build --per_file_copt='^//.*\.(cpp|cc)$'@-Wno-missing-field-initializers
+
+build --per_file_copt='^//.*\.(cpp|cc)$'@-Wno-unused-function
+build --per_file_copt='^//.*\.(cpp|cc)$'@-Wno-unused-variable
+
+build --per_file_copt='//:aten/src/ATen/RegisterCompositeExplicitAutograd\.cpp$'@-Wno-error=unused-function
+build --per_file_copt='//:aten/src/ATen/RegisterCompositeImplicitAutograd\.cpp$'@-Wno-error=unused-function
+build --per_file_copt='//:aten/src/ATen/RegisterMkldnnCPU\.cpp$'@-Wno-error=unused-function
+build --per_file_copt='//:aten/src/ATen/RegisterNestedTensorCPU\.cpp$'@-Wno-error=unused-function
+build --per_file_copt='//:aten/src/ATen/RegisterQuantizedCPU\.cpp$'@-Wno-error=unused-function
+build --per_file_copt='//:aten/src/ATen/RegisterSparseCPU\.cpp$'@-Wno-error=unused-function
+build --per_file_copt='//:aten/src/ATen/RegisterSparseCsrCPU\.cpp$'@-Wno-error=unused-function
+build --per_file_copt='//:aten/src/ATen/RegisterNestedTensorMeta\.cpp$'@-Wno-error=unused-function
+build --per_file_copt='//:aten/src/ATen/RegisterSparseMeta\.cpp$'@-Wno-error=unused-function
+build --per_file_copt='//:aten/src/ATen/RegisterQuantizedMeta\.cpp$'@-Wno-error=unused-function
+build --per_file_copt='//:aten/src/ATen/RegisterZeroTensor\.cpp$'@-Wno-error=unused-function
+build --per_file_copt='//:torch/csrc/lazy/generated/RegisterAutogradLazy\.cpp$'@-Wno-error=unused-function
+build --per_file_copt='//:torch/csrc/lazy/generated/RegisterLazy\.cpp$'@-Wno-error=unused-function
