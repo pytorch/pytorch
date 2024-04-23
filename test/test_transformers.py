@@ -2578,14 +2578,13 @@ class TestSDPACudaOnly(NNTestCase):
     @parametrize("is_causal", [False, True])
     @parametrize("dropout_p", [0.0, 0.22])
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32] if
-                 SM80OrLater and not TEST_WITH_ROCM else [torch.float16, torch.float32] if not TEST_WITH_ROCM
-                 else [torch.float16, torch.bfloat16])
+                 SM80OrLater else [torch.float16, torch.float32])
     @parametrize("scale", [None, "l1"])
     def test_mem_efficient_attention_vs_math_ref_grads(self, device, batch_size: int, seq_len_q: int, seq_len_k: int,
                                                        head_dim: int, is_causal: bool, dropout_p: float, dtype: torch.dtype,
                                                        scale: str):
-        if TEST_WITH_ROCM and dropout_p != 0.0:
-            self.skipTest("dropout_p cannot be tested due to missing _fill_mem_eff_dropout_mask in ROCM, for now")
+        if TEST_WITH_ROCM and dtype == torch.float32:
+            self.skipTest("ROCM does not support float32 efficient attention, for now")
         def _get_mem_eff_drop_mask(batch_size, n_heads, q_len, kv_len, p, seed, offset, device=device):
             mask = torch.empty((batch_size, n_heads, q_len, kv_len), device=device, dtype=torch.float32)
             rand_uniform = torch._fill_mem_eff_dropout_mask_(mask, p, seed, offset)
@@ -2689,10 +2688,8 @@ class TestSDPACudaOnly(NNTestCase):
                                                                  seq_len_k: int, head_dim: int, is_causal: bool,
                                                                  dropout_p: float, dtype: torch.dtype,
                                                                  scale: str):
-        if TEST_WITH_ROCM and dropout_p != 0.0:
-            self.skipTest("dropout_p cannot be tested due to missing _fill_mem_eff_dropout_mask in ROCM, for now")
-        if TEST_WITH_ROCM:
-            self.skipTest("attn_mask cannot be tested due to missing attn_mask gradients in ROCM, for now")
+        if TEST_WITH_ROCM and dtype == torch.float32:
+            self.skipTest("ROCM does not support float32 efficient attention, for now")
         def _get_mem_eff_drop_mask(batch_size, n_heads, q_len, kv_len, p, seed, offset, device=device):
             mask = torch.empty((batch_size, n_heads, q_len, kv_len), device=device, dtype=torch.float32)
             rand_uniform = torch._fill_mem_eff_dropout_mask_(mask, p, seed, offset)
