@@ -7,6 +7,7 @@ import sys
 import torch
 import inspect
 import operator
+import traceback
 import collections
 
 from dataclasses import is_dataclass, fields
@@ -172,6 +173,28 @@ class TracerBase:
 
         elif self.module_stack:
             node.meta['nn_module_stack'] = copy.copy(self.module_stack)
+
+        if 'stack_trace' not in node.meta and node.op not in ["placeholder", "output"]:
+            user_frame_summary = CapturedTraceback.extract().summary()
+            if user_frame_summary:
+                # we retain frames from forward() calls, or ops
+                # located in torch/__init__.py (e.g. sym_int, sym_constrain_range, vmap)
+                stack_trace = [frame for frame in user_frame_summary if (
+                    frame.name == 'forward'
+                    or frame.name == 'f'
+                    or frame.filename.endswith('torch/__init__.py')
+                )]
+                # filter out forward() frames from fx/_symbolic_trace.py, export/_trace.py
+                # this is hardcoded, but leads to a much cleaner stack trace
+                stack_trace = [
+                    frame for frame in stack_trace if not (
+                        frame.filename.endswith('fx/_symbolic_trace.py')
+                        or frame.filename.endswith('export/_trace.py')
+                    )
+                ]
+                if stack_trace:  # empty list for strict mode, dynamo should handle stack_trace
+                    stack_trace = traceback.StackSummary.from_list(stack_trace)
+                    node.meta["stack_trace"] = ''.join(stack_trace.format()).strip()
         return node
 
     @compatibility(is_backward_compatible=True)
