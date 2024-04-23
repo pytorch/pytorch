@@ -256,6 +256,8 @@ def get_ignored_functions() -> Set[Callable]:
         handle_torch_function,
         torch.set_autocast_enabled,
         torch.is_autocast_enabled,
+        torch.set_autocast_dtype,
+        torch.get_autocast_dtype,
         torch.clear_autocast_cache,
         torch.set_autocast_cpu_enabled,
         torch.is_autocast_cpu_enabled,
