@@ -223,6 +223,7 @@ def replicate(
                 _localize_dtensor,
                 _reconstruct_dtensor,
             )
+
             module.register_forward_pre_hook(_reconstruct_dtensor)
             module.register_forward_hook(_localize_dtensor)
 
