@@ -1391,7 +1391,7 @@ at::Tensor& _fill_mem_eff_dropout_mask_(
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   hipError_t err; // TODO: Error handling
 
-  err = debug_fill_dropout_rng(mk_aotensor(self, "r")
+  err = debug_fill_dropout_rng(mk_aotensor(self, "r"),
                                static_cast<uint64_t>(seed),
                                static_cast<uint64_t>(offset),
                                stream);
