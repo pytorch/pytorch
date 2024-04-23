@@ -1132,6 +1132,7 @@ class CKGemmTemplate(CKTemplate):
         # chosen_instances = filtered_instances[:config.rocm.n_max_profiling_configs]
         # NB: when using a fixed list order, most likely we will pick the subset of instances
         # which are very similar to each other. Randomizing the choice seems to solve this.
+        random.seed(-11)
         chosen_instances = random.sample(filtered_instances, config.rocm.n_max_profiling_configs)
         log.debug(f"generated {len(chosen_instances)} ck instances: {chosen_instances}")
 

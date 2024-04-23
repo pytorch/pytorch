@@ -155,8 +155,8 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": "CK,Triton,ATen",
-                "compile_threads": 64,
-                "rocm.n_max_profiling_configs": 4,
+                "compile_threads": 2,
+                "rocm.n_max_profiling_configs": 2,
             }
         ):
             Y_compiled = torch.compile(mm, dynamic=False)(a, b)
