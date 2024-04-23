@@ -2633,59 +2633,6 @@ exit(2)
         y = model(x)
 
     @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
-    def test_graph_grad_scaling(self):
-        for foreach, fused in ((False, False), (True, False), (False, True)):
-            self._test_graph_grad_scaling(foreach, fused)
-
-    def _test_graph_grad_scaling(self, foreach, fused):
-        torch.cuda.empty_cache()
-
-        scaler = torch.cuda.amp.GradScaler(init_scale=4.)
-        g = torch.cuda.CUDAGraph()
-        s = torch.cuda.Stream()
-
-        weight = torch.ones((100,), device="cuda", requires_grad=True)
-        opt = torch.optim.SGD([weight], lr=0.1, foreach=foreach, fused=fused)
-        static_input = torch.ones_like(weight)
-        static_grad = torch.ones_like(weight)
-
-        # warmup
-        s = torch.cuda.Stream()
-        s.wait_stream(torch.cuda.current_stream())
-        with torch.cuda.stream(s):
-            loss = (weight.half() * static_input).sum()
-            scaler.scale(loss).backward()
-        torch.cuda.current_stream().wait_stream(s)
-
-        opt.zero_grad(set_to_none=True)
-
-        # capture
-        with torch.cuda.stream(s):
-            g.capture_begin()
-            loss = (weight.half() * static_input).sum()
-            scaler.scale(loss).backward()
-            g.capture_end()
-
-        input_vals = [5, 20000, 5, 40000]
-        # If the scale gets updated properly, these are the scale, growth tracker,
-        # and grad values we expect.
-        expected_scales = [4, 2, 2, 1]
-        expected_growth_trackers = [1, 0, 1, 0]
-        expected_grad_vals = [5 * 4, float("inf"), 5 * 2, float("inf")]
-
-        for data, scale, growth_tracker, grad_val in zip(input_vals,
-                                                         expected_scales,
-                                                         expected_growth_trackers,
-                                                         expected_grad_vals):
-            static_input.fill_(data)
-            g.replay()
-            self.assertEqual(weight.grad, torch.full_like(weight.grad, grad_val))
-            scaler.step(opt)
-            scaler.update()
-            self.assertEqual(scaler._scale, scale)
-            self.assertEqual(scaler._growth_tracker, growth_tracker)
-
-    @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
     @parametrize(
         "with_amp,cache_enabled,allow_unused_input",
         [
@@ -4150,7 +4097,7 @@ class TestBlockStateAbsorption(TestCase):
         self.assertEqual(rc, "False", "Triton was imported when importing torch!")
 
 class TestCudaOptims(TestCase):
-    # These tests will be instantiate with instantiate_device_type_tests 
+    # These tests will be instantiate with instantiate_device_type_tests
     # to apply the new OptimizerInfo structure.
 
     @onlyCUDA
