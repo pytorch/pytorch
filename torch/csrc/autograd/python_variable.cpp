@@ -647,7 +647,8 @@ static PyObject* THPVariable_set_sizes_and_strides(
   auto sym_strides = r.symintlist(1);
   auto sym_storage_offset = r.toSymIntOptional(2);
 
-  self.unsafeGetTensorImpl()->set_sizes_and_strides(sym_sizes, sym_strides);
+  self.unsafeGetTensorImpl()->set_sizes_and_strides(
+      sym_sizes, sym_strides, sym_storage_offset);
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
