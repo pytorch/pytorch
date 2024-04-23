@@ -65,13 +65,13 @@ from typing import Any, Dict, List
 import torch
 
 try:
-    import _codecs
-
     import numpy as np
-
     HAS_NUMPY = True
 except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
+
+if HAS_NUMPY:
+    import _codecs
 
 
 # Unpickling machinery
