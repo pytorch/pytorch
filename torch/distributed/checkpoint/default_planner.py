@@ -25,6 +25,7 @@ from torch.distributed.checkpoint.metadata import (
     MetadataIndex,
     STATE_DICT_TYPE,
     STORAGE_TYPES,
+    StorageMeta,
     TensorStorageMetadata,
 )
 from torch.distributed.checkpoint.planner import (
@@ -78,7 +79,12 @@ class DefaultSavePlanner(SavePlanner):
                 "from your call."
             )
 
-    def set_up_planner(self, state_dict: STATE_DICT_TYPE, is_coordinator: bool) -> None:
+    def set_up_planner(
+        self,
+        state_dict: STATE_DICT_TYPE,
+        storage_meta: Optional[StorageMeta] = None,
+        is_coordinator: bool = False,
+    ) -> None:
         if self.flatten_state_dict:
             state_dict, self.mappings = flatten_state_dict(state_dict)
         if self.flatten_sharded_tensors:

@@ -5,6 +5,7 @@ import os
 import pickle
 import queue
 import threading
+import uuid
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -27,10 +28,9 @@ import torch
 from torch import Tensor
 from torch._utils import _get_available_device_type, _get_device_module
 from torch.distributed._shard._utils import narrow_tensor_by_index
-from torch.futures import Future
 
-from .metadata import Metadata, MetadataIndex
-from .planner import (
+from torch.distributed.checkpoint.metadata import Metadata, MetadataIndex, StorageMeta
+from torch.distributed.checkpoint.planner import (
     LoadItemType,
     LoadPlan,
     LoadPlanner,
@@ -40,8 +40,13 @@ from .planner import (
     WriteItem,
     WriteItemType,
 )
-from .storage import StorageReader, StorageWriter, WriteResult
-from .utils import _create_file_view
+from torch.distributed.checkpoint.storage import (
+    StorageReader,
+    StorageWriter,
+    WriteResult,
+)
+from torch.distributed.checkpoint.utils import _create_file_view
+from torch.futures import Future
 
 __all__ = ["FileSystemWriter", "FileSystemReader"]
 
@@ -61,6 +66,10 @@ class _StoragePrefix:
 
 
 DEFAULT_SUFFIX = ".distcp"
+
+
+def _generate_uuid() -> str:
+    return str(uuid.uuid4())
 
 
 class _TensorLoader(ABC):
@@ -433,10 +442,12 @@ class FileSystemWriter(StorageWriter):
         self.sync_files = sync_files
         self.thread_count = thread_count
         self.per_thread_copy_ahead = per_thread_copy_ahead
+        self.save_id = _generate_uuid()
 
     def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
         if checkpoint_id:
             self.path = self.fs.init_path(checkpoint_id)
+        self.save_id = _generate_uuid()
 
     def set_up_storage_writer(self, is_coordinator: bool) -> None:
         pass
@@ -538,6 +549,9 @@ class FileSystemWriter(StorageWriter):
 
         self.fs.rename(tmp_path, meta_path)
 
+    def storage_metadata(self) -> StorageMeta:
+        return StorageMeta(checkpoint_id=self.checkpoint_id, save_id=self.save_id)
+
     @property
     def checkpoint_id(self) -> Union[str, os.PathLike]:
         """
@@ -556,6 +570,7 @@ class FileSystemReader(StorageReader):
         self.fs = FileSystem()
         self.path = self.fs.init_path(path)
         self.storage_data: Dict[MetadataIndex, _StorageInfo] = dict()
+        self.load_id = _generate_uuid()
 
     def _slice_file(self, file, sinfo: _StorageInfo) -> io.IOBase:
         return _create_file_view(file, sinfo.offset, sinfo.length)
@@ -564,6 +579,7 @@ class FileSystemReader(StorageReader):
         self.storage_data = dict()
         if checkpoint_id:
             self.path = self.fs.init_path(checkpoint_id)
+        self.load_id = _generate_uuid()
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
         # group requests by file
@@ -608,7 +624,13 @@ class FileSystemReader(StorageReader):
     def read_metadata(self) -> Metadata:
         path = self.fs.concat_path(self.path, ".metadata")
         with self.fs.create_stream(path, "rb") as metadata_file:
-            return pickle.load(metadata_file)
+            metadata = pickle.load(metadata_file)
+
+        if getattr(metadata, "storage_meta", None) is None:
+            metadata.storage_meta = StorageMeta()
+        metadata.storage_meta.load_id = self.load_id
+
+        return metadata
 
     def set_up_storage_reader(self, metadata: Metadata, is_coordinator: bool) -> None:
         self.storage_data = metadata.storage_data

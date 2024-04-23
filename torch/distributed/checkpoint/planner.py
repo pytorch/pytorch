@@ -7,11 +7,12 @@ from typing import Any, List, Optional, Tuple, Union
 
 import torch
 
-from .metadata import (
+from torch.distributed.checkpoint.metadata import (
     ChunkStorageMetadata,
     Metadata,
     MetadataIndex,
     STATE_DICT_TYPE,
+    StorageMeta,
     TensorProperties,
 )
 
@@ -141,9 +142,14 @@ class SavePlanner(abc.ABC):
 
     >>> # xdoctest: +SKIP("undefined vars")
     >>> class RenamePlanner(DefaultSavePlanner):
-    >>>     def set_up_planner(self, state_dict, is_coordinator):
+    >>>     def set_up_planner(
+    >>>         self,
+    >>>         state_dict: STATE_DICT_TYPE,
+    >>>         storage_meta,: StorageMeta,
+    >>>         is_coordinator: bool,
+    >>>     ) -> None:
     >>>         # prefix all keys with `foo_``
-    >>>         super().set_up_planner({"foo_" + k: v for k, v in state_dict.items()}, is_coordinator)
+    >>>         super().set_up_planner({"foo_" + k: v for k, v in state_dict.items()}, storage_meta, is_coordinator)
 
     Modifying local plan and lookup in tandem. This is useful when fine control of how data is persisted
 
@@ -196,7 +202,12 @@ class SavePlanner(abc.ABC):
     """
 
     @abc.abstractmethod
-    def set_up_planner(self, state_dict: STATE_DICT_TYPE, is_coordinator: bool) -> None:
+    def set_up_planner(
+        self,
+        state_dict: STATE_DICT_TYPE,
+        storage_meta: Optional[StorageMeta],
+        is_coordinator: bool,
+    ) -> None:
         """
         Initialize this planner to save ``state_dict``.
 
@@ -298,7 +309,12 @@ class LoadPlanner:
 
     >>> # xdoctest: +SKIP("undefined vars")
     >>> class RenamePlanner(DefaultLoadPlanner):
-    >>>     def set_up_planner(self, state_dict, metadata, is_coordinator):
+    >>>     def set_up_planner(
+    >>>         self,
+    >>>         state_dict: STATE_DICT_TYPE,
+    >>>         metadata: Metadata,
+    >>>         is_coordinator: bool,
+    >>>     ) -> None:
     >>>         self.original_state_dict = state_dict
     >>>         state_dict = {"foo_" + k: v for k, v in state_dict.items()}
     >>>
