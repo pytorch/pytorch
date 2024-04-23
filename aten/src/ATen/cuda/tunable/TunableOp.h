@@ -123,14 +123,6 @@ class TunableOp {
       auto min_duration_ms = std::numeric_limits<double>::infinity();
       std::string id_name = "Default";
 
-      int flush_iters = ctx->IsICacheFlushEnabled();
-      if (flush_iters > 0) {
-        TUNABLE_LOG("instruction cache flush is enabled");
-      }
-      for (int i = 0; i < flush_iters; i++) {
-        at::cuda::flush_icache();
-      }
-
       // calcaulte a reference answer for numerical check
       ParamsT* reference_params = params->DeepCopy(false);
       TORCH_CHECK(ops_[ResultEntry::Default()]->Call(reference_params) == OK);
