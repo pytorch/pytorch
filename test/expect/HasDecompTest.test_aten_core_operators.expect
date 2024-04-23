@@ -454,6 +454,7 @@ aten::sinh
 aten::sinh.out
 aten::sinh_
 aten::slice.Tensor
+aten::slice_strict
 aten::special_bessel_j0
 aten::special_bessel_j0.out
 aten::special_bessel_j1

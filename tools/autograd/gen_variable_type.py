@@ -228,6 +228,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "as_strided",
     "as_strided_scatter",
     "slice",
+    "slice_strict",
     "constant_pad_nd",
     "unbind",
     "split",

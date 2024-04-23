@@ -74,6 +74,8 @@ VIEW_FUNCTIONS = {
     "select": "self",
     "slice": "self",
     "slice_inverse": "self",
+    "slice_strict": "self",
+    "slice_strict_inverse": "self",
     "split": "self",
     "split_with_sizes": "self",
     "squeeze": "self",
