@@ -332,7 +332,6 @@ def patch_torch_manual_seed():
 
     def deterministic_torch_manual_seed(*args, **kwargs):
         from torch._C import default_generator
-        from torch._C import _has_cuda as HAS_CUDA, _has_xpu as HAS_XPU
 
         seed = 1337
         if HAS_CUDA:
