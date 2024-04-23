@@ -266,7 +266,7 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
 
   TORCH_CHECK(self.numel() < std::numeric_limits<int>::max(),
               "nonzero is not supported for tensors with more than INT_MAX elements, \
-  file a support request");
+  See https://github.com/pytorch/pytorch/issues/51871");
   TORCH_CHECK(
       out_.dtype() == at::kLong, "Expected object of scalar type ", at::kLong, " as out, but got ", out_.dtype());
   TORCH_CHECK(self.device() == out_.device(),

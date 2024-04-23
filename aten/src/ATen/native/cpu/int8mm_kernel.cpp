@@ -182,6 +182,51 @@ inline void tinygemm_kernel(
 
 #endif
 
+#if !defined(C10_MOBILE) && defined(__aarch64__)
+#include <arm_neon.h>
+
+static inline float reduce(float32x4_t x) {
+        auto sum = vpaddq_f32(x, x);
+        return vgetq_lane_f32(vpaddq_f32(sum, sum), 0);
+}
+
+template <int BLOCK_M, int BLOCK_N>
+inline void tinygemm_kernel(
+    const Half* RESTRICT A,
+    const int8_t* RESTRICT B,
+    const Half* RESTRICT scales,
+    Half* RESTRICT C,
+    int lda,
+    int ldb,
+    int ldc,
+    int K) {
+
+  for (const auto m : c10::irange(BLOCK_M)) {
+    float32x4_t c_val[BLOCK_N];
+    c10::ForcedUnroll<BLOCK_N>{}([&](auto i) {
+        c_val[i] = vdupq_n_f32(0.0);
+    });
+    for (int k = 0; k < K; k += 8) {
+      float16x8_t a_val = vld1q_f16(reinterpret_cast<const float16_t *>(A) + m * lda + k);
+      auto a_val_low = vcvt_f32_f16(vget_low_f16(a_val));
+      auto a_val_high = vcvt_f32_f16(vget_high_f16(a_val));
+      c10::ForcedUnroll<BLOCK_N>{}([&](auto i) {
+        int16x8_t b_val = vmovl_s8(vld1_s8(B + i * ldb + k));
+        auto b_val_low = vcvtq_f32_s32(vmovl_s16(vget_low_s16(b_val)));
+        auto b_val_high = vcvtq_f32_s32(vmovl_s16(vget_high_s16(b_val)));
+        c_val[i] = vfmaq_f32(c_val[i], a_val_high, b_val_high);
+        c_val[i] = vfmaq_f32(c_val[i], a_val_low, b_val_low);
+      });
+    }
+
+    float32x4_t scale_val = vcvt_f32_f16(vld1_f16(reinterpret_cast<const float16_t *>(scales)));
+    c10::ForcedUnroll<BLOCK_N>{}([&](auto i) {
+      C[m * ldc + i] = reduce(c_val[i]) * vgetq_lane_f32(scale_val, i);
+    });
+  }
+}
+#endif
+
 // non-vectorized version
 template <int BLOCK_M, int BLOCK_N, typename T>
 inline void tinygemm_kernel(
@@ -300,9 +345,11 @@ void int8pack_mm_kernel(
     const Tensor& B,
     const Tensor& scales) {
   if (C.dtype() == kHalf) {
-     int8pack_mm_kernel_<Half>(C, A, B, scales);
+    int8pack_mm_kernel_<Half>(C, A, B, scales);
+  } else if (C.dtype() == kBFloat16) {
+    int8pack_mm_kernel_<BFloat16>(C, A, B, scales);
   } else {
-     int8pack_mm_kernel_<BFloat16>(C, A, B, scales);
+    int8pack_mm_kernel_<float>(C, A, B, scales);
   }
 }
 

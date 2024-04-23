@@ -18,12 +18,14 @@ from torch._decomp import get_decompositions
 from torch._dynamo.utils import defake, dynamo_timed
 from torch._higher_order_ops.effects import _EffectType
 from torch._logging import LazyString, trace_structured
+from torch._prims_common import make_channels_last_strides_for
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
     free_unbacked_symbols,
     has_free_symbols,
+    resolve_unbacked_bindings,
     ShapeEnv,
     SymTypes,
 )
@@ -78,6 +80,7 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
+aten = torch.ops.aten
 
 
 if config.is_fbcode():
@@ -146,6 +149,61 @@ def getattr_recursive(obj, target):
             )
         attr_itr = getattr(attr_itr, atom)
     return attr_itr
+
+
+def mark_nodes_dislike_padding(g):
+    """
+    Nodes like convolution/convolution_backward want its input to be dense.
+    If we pad their inputs, we result in extra calls to copy kernels!  On the other hand, padding usually helps reduction.
+
+    The pass finds nodes that dislike padding. These are nodes that can be reached
+    from a convolution/convolution_backward in the backward direction without
+    going thru a reduction.
+    """
+    if not config.comprehensive_padding:
+        return
+    ops_dislike_padding = {
+        aten.convolution,
+        aten.convolution_backward,
+    }
+    # what's a better way to collect the reduction ops?
+    ops_like_padding = {
+        aten.var_mean,
+        aten.sum,
+        aten.mean,
+        aten.prod,
+        aten.any,
+        aten.amin,
+        aten.amax,
+        aten.min,
+        aten.max,
+        aten.argmin,
+        aten.argmax,
+        aten.scatter_reduce,
+    }
+
+    def _get_overload_packet(node):
+        return (
+            node.target._overloadpacket
+            if node.op == "call_function" and hasattr(node.target, "_overloadpacket")
+            else None
+        )
+
+    for cur in reversed(g.nodes):
+        op = _get_overload_packet(cur)
+        if not op:
+            continue
+        if op in ops_dislike_padding:
+            cur.meta["dislike_padding"] = True
+
+        if cur.meta.get("dislike_padding", False):
+            # propagate
+            for prior in cur.all_input_nodes:
+                prior_op = _get_overload_packet(prior)
+                if not prior_op:
+                    continue
+                if prior_op not in ops_like_padding:
+                    prior.meta["dislike_padding"] = True
 
 
 class GraphLowering(torch.fx.Interpreter):
@@ -224,7 +282,7 @@ class GraphLowering(torch.fx.Interpreter):
         graph_id=None,
         cpp_wrapper=False,
         aot_mode=False,
-        user_visible_outputs=frozenset(),
+        user_visible_outputs=None,
         layout_opt=None,
         extern_node_serializer=None,
         is_inference=False,
@@ -311,8 +369,11 @@ class GraphLowering(torch.fx.Interpreter):
         self.nodes_prefer_channels_last = (
             self.find_nodes_prefer_channels_last() if self.layout_opt else set()
         )
+        mark_nodes_dislike_padding(gm.graph)
         self._warned_fallback = {"aten.convolution_backward"}
-        self.user_visible_outputs = user_visible_outputs
+        self.user_visible_outputs = (
+            user_visible_outputs if user_visible_outputs is not None else {}
+        )
         self.cache_key: str = ""  # This is the cache key for the compiled artifact
         self.cache_path: str = ""  # This is the path in the filesystem where the compiled artifact is stored
         self.cache_linemap: List[
@@ -575,8 +636,7 @@ class GraphLowering(torch.fx.Interpreter):
         # - sebotnet33ts_256
         for n in self.module.graph.nodes:
             if n in output_set:
-                for child in n.users:
-                    output_set.add(child)
+                output_set.update(n.users)
 
         return output_set
 
@@ -601,6 +661,14 @@ class GraphLowering(torch.fx.Interpreter):
             return self.name_to_buffer[buffer_name]
         if buffer_name in self.graph_inputs:
             return self.graph_inputs[buffer_name]
+        if buffer_name in self.constants:
+            data = V.graph.constants[buffer_name]
+            return ir.ConstantBuffer(
+                buffer_name,
+                ir.FixedLayout(
+                    data.device, data.dtype, *V.graph.static_sizes_strides(data)
+                ),
+            )
         return None
 
     def get_dtype(self, buffer_name: str):
@@ -895,10 +963,10 @@ class GraphLowering(torch.fx.Interpreter):
         return self.add_tensor_constant(value, target)
 
     def call_module(self, target, args, kwargs):
-        raise AssertionError()
+        raise AssertionError
 
     def call_method(self, target, args, kwargs):
-        raise AssertionError()
+        raise AssertionError
 
     def output(self, target, args, kwargs):
         result = super().output(target, args, kwargs)
@@ -1039,6 +1107,8 @@ class GraphLowering(torch.fx.Interpreter):
         def debug(msg):
             log.debug("lowering %s %s", LazyString(n.format_node), msg)
 
+        buffer_watermark = len(self.buffers)
+
         origins = {n}
         if n.op == "call_function":
             args, kwargs = self.fetch_args_kwargs_from_env(n)
@@ -1089,6 +1159,20 @@ class GraphLowering(torch.fx.Interpreter):
             is_input_for_as_strided = any(
                 user.target in as_strided_ops for user in n.users
             )
+
+            if n.meta.get("inductor_realize_to_strides", False) and isinstance(
+                result, TensorBox
+            ):
+                result.realize()
+                strides = n.meta["val"].stride()
+                sym_strides = torch._inductor.utils.any_is_symbolic(*strides)
+                if (
+                    not hasattr(result, "get_stride")
+                    or result.get_stride() != strides
+                    and not sym_strides
+                ):
+                    stride_order = ir.get_stride_order(strides)
+                    result = ir.ExternKernel.require_stride_order(result, stride_order)
             if (
                 is_output
                 and isinstance(result, TensorBox)
@@ -1114,7 +1198,14 @@ class GraphLowering(torch.fx.Interpreter):
                         and not is_input_for_as_strided
                     ):
                         stride_order = ir.NHWC_STRIDE_ORDER
-                    result = ir.ExternKernel.require_stride_order(result, stride_order)
+
+                    allow_padding = (
+                        n.name not in self.user_visible_outputs
+                        and not is_input_for_as_strided
+                    )
+                    result = ir.ExternKernel.require_stride_order(
+                        result, stride_order, allow_padding=allow_padding
+                    )
 
             # Realize if (1) any user need inputs realized, or (2) there is
             # already too many reads and rematerializing can be bad.
@@ -1138,27 +1229,39 @@ class GraphLowering(torch.fx.Interpreter):
                             torch.ops.aten.mm.default,
                             torch.ops.aten._int_mm.default,
                         ]
+                        need_fixed_channels_last_layout = []
                         if not self.layout_opt:
                             need_fixed_layout.append(torch.ops.aten.convolution.default)
                         if torch._C._has_mkldnn:
                             need_fixed_layout += [
+                                torch.ops.mkldnn._linear_pointwise.default,
+                                torch.ops.mkldnn._linear_pointwise.binary,
+                                torch.ops.aten.mkldnn_rnn_layer.default,
+                                torch.ops.onednn.qlinear_pointwise.default,
+                                torch.ops.onednn.qlinear_pointwise.tensor,
+                            ]
+                            need_fixed_channels_last_layout += [
                                 torch.ops.mkldnn._convolution_pointwise.default,
                                 torch.ops.mkldnn._convolution_pointwise.binary,
                                 torch.ops.mkldnn._convolution_pointwise_.binary,
                                 torch.ops.mkldnn._convolution_transpose_pointwise.default,
-                                torch.ops.mkldnn._linear_pointwise.default,
-                                torch.ops.mkldnn._linear_pointwise.binary,
-                                torch.ops.aten.mkldnn_rnn_layer.default,
                                 torch.ops.onednn.qconv2d_pointwise.default,
                                 torch.ops.onednn.qconv2d_pointwise.binary,
-                                torch.ops.onednn.qlinear_pointwise.default,
-                                torch.ops.onednn.qlinear_pointwise.tensor,
                             ]
                             if torch._C.has_mkl:
                                 need_fixed_layout += [torch.ops.mkl._mkl_linear.default]
                         if user.target in need_fixed_layout:
                             result = ir.ExternKernel.require_stride_order(
-                                result, ir.get_stride_order(n.meta["val"].stride())
+                                result,
+                                ir.get_stride_order(n.meta["val"].stride()),
+                                allow_padding=True,
+                            )
+                        if user.target in need_fixed_channels_last_layout:
+                            result = ir.ExternKernel.require_stride_order(
+                                result,
+                                ir.get_stride_order(
+                                    make_channels_last_strides_for(n.meta["val"].shape)
+                                ),
                             )
                     if user.op == "output":
                         if isinstance(result.data.data, (Pointwise, Reduction)):
@@ -1209,6 +1312,46 @@ class GraphLowering(torch.fx.Interpreter):
                         result.data.data.inputs[0].origin_node = n
 
         self.register_users_of(result)
+
+        new_unbacked_defs = set()
+        for i in range(buffer_watermark, len(self.buffers)):
+            new_unbacked_defs |= self.buffers[i].get_unbacked_symbol_defs()
+
+        def format_buffers():
+            r = []
+            for b in self.buffers[buffer_watermark:]:
+                r.append(
+                    f"unbacked_symbol_defs={b.get_unbacked_symbol_defs()} in:\n{b}\n"
+                )
+            return "***\n".join(r)
+
+        if n.op != "placeholder":
+            unbacked_bindings = resolve_unbacked_bindings(
+                V.graph.sizevars.shape_env, n.meta.get("unbacked_bindings", {})
+            )
+            # When we do lowering, it is possible we reallocate unbacked SymInts.
+            # So we need to line up the unbacked SymInts when performing the test
+            # here
+            #
+            # In principle, we could permit lowering to introduce MORE unbacked
+            # SymInts: as long as all the old unbacked ones are accounted for,
+            # it's fine for inductor to introduce extra calls to item()/unbacked()
+            # whatever.  This actually happens in practice when an unbacked SymInt
+            # gets memoized away; naively, when Inductor reprocesses a kernel, it
+            # doesn't know that the memo still applies, and ends up allocating a
+            # new symbol.  However, this is generally a bad thing: we may still
+            # end up needing to test equalities on the symbols, and a fresh
+            # symbol is likely to hit lots of GuardOnDataDependent errors that
+            # we already know facts for.
+            renamed_unbacked_bindings = {
+                V.fake_mode.shape_env.unbacked_renamings.get(s, s)
+                for s in unbacked_bindings.keys()
+            }
+            assert new_unbacked_defs >= renamed_unbacked_bindings, (
+                f"failed {new_unbacked_defs} >= {renamed_unbacked_bindings} (inductor >= fx)\n"
+                f"fx node is: {n.format_node()}\n"
+                f"new buffers are:\n\n{format_buffers()}"
+            )
 
         return result
 
