@@ -1433,10 +1433,12 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ) -> "VariableTracker":
         from .builder import wrap_fx_proxy
 
-        query, key, value, score_mod = self.normalize_to_args(args, kwargs)
+        query, key, value, score_mod, *other_buffers = self.normalize_to_args(
+            args, kwargs
+        )
 
         p_args, p_kwargs = self.create_wrapped_node(tx, query, score_mod)
-        proxied_args = [query, key, value]
+        proxied_args = [query, key, value, *other_buffers]
 
         # Store the invocation as a call
         # Norm_kwargs contains the score_function and we dont want to proxy this because
