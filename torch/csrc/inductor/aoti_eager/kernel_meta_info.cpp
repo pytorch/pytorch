@@ -3,7 +3,7 @@
 
 namespace torch::inductor {
 
-TensorMetaInfo::TensorMetaInfo(const at::Tensor& src_tensor)
+TensorMetadata::TensorMetadata(const at::Tensor& src_tensor)
     : is_symbolic_(false),
       device_(src_tensor.device()),
       sizes_(src_tensor.sym_sizes().vec()),
@@ -29,7 +29,7 @@ TensorMetaInfo::TensorMetaInfo(const at::Tensor& src_tensor)
       "Eager through torch.compile does not support symbolic shape now.");
 }
 
-TensorMetaInfo::TensorMetaInfo(
+TensorMetadata::TensorMetadata(
     bool is_symbolic,
     c10::ScalarType dtype,
     c10::Device device,
@@ -44,7 +44,7 @@ TensorMetaInfo::TensorMetaInfo(
       !is_symbolic_, "Not support symbolic shape now");
 }
 
-bool TensorMetaInfo::operator==(const TensorMetaInfo& other) const {
+bool TensorMetadata::operator==(const TensorMetadata& other) const {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       !is_symbolic_, "Not support symbolic shape now");
   return this->is_symbolic_ == other.is_symbolic_ &&
@@ -53,21 +53,21 @@ bool TensorMetaInfo::operator==(const TensorMetaInfo& other) const {
       this->sizes_ == other.sizes_ && this->strides_ == other.strides_;
 }
 
-size_t TensorMetaInfoHash::operator()(
-    const TensorMetaInfo& tensor_meta_info) const {
-  auto hash = std::hash<bool>()(tensor_meta_info.is_symbolic_);
+size_t TensorMetadataHash::operator()(
+    const TensorMetadata& tensor_metadata) const {
+  auto hash = std::hash<bool>()(tensor_metadata.is_symbolic_);
   hash = c10::hash_combine(
-      hash, std::hash<c10::ScalarType>()(tensor_meta_info.dtype_));
+      hash, std::hash<c10::ScalarType>()(tensor_metadata.dtype_));
   hash = c10::hash_combine(
-      hash, std::hash<c10::DeviceType>()(tensor_meta_info.device_.type()));
+      hash, std::hash<c10::DeviceType>()(tensor_metadata.device_.type()));
 
-  for (auto& e : tensor_meta_info.sizes_) {
+  for (auto& e : tensor_metadata.sizes_) {
     if (!e.is_symbolic()) {
       hash = c10::hash_combine(hash, std::hash<int64_t>()(e.expect_int()));
     }
   }
 
-  for (auto& e : tensor_meta_info.strides_) {
+  for (auto& e : tensor_metadata.strides_) {
     if (!e.is_symbolic()) {
       hash = c10::hash_combine(hash, std::hash<int64_t>()(e.expect_int()));
     }
@@ -75,11 +75,11 @@ size_t TensorMetaInfoHash::operator()(
   return hash;
 }
 
-size_t AOTIKernelMetaInfoHash::operator()(
-    const AOTIKernelMetaInfo& aoti_kernel_meta_info) const {
+size_t AOTIKernelMetadataHash::operator()(
+    const AOTIKernelMetadata& aoti_kernel_metadata) const {
   size_t hash = 0;
-  for (auto& e : aoti_kernel_meta_info) {
-    hash = c10::hash_combine(hash, TensorMetaInfoHash()(e));
+  for (auto& e : aoti_kernel_metadata) {
+    hash = c10::hash_combine(hash, TensorMetadataHash()(e));
   }
   return hash;
 }

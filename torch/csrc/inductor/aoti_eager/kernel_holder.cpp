@@ -4,6 +4,7 @@
 #include <ATen/ATen.h>
 
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <torch/csrc/Dtype.h>
 #include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
@@ -20,44 +21,6 @@
 namespace torch::inductor {
 
 namespace {
-
-c10::ScalarType parse_dtype(const std::string& dtype_str) {
-  // The dtype format is torch.float32, float32, torch.int32, int32, etc.
-  std::string to_remove = "torch.";
-  std::string canonicalized_dtype_str = dtype_str;
-  size_t start_pos = dtype_str.find(to_remove);
-  if (start_pos != std::string::npos) {
-    canonicalized_dtype_str = dtype_str.substr(start_pos + to_remove.length());
-  }
-
-  if (canonicalized_dtype_str == "float32") {
-    return c10::ScalarType::Float;
-  } else if (canonicalized_dtype_str == "int32") {
-    return c10::ScalarType::Int;
-  } else if (canonicalized_dtype_str == "int64") {
-    return c10::ScalarType::Long;
-  } else if (canonicalized_dtype_str == "bool") {
-    return c10::ScalarType::Bool;
-  } else if (canonicalized_dtype_str == "bfloat16") {
-    return c10::ScalarType::BFloat16;
-  } else if (canonicalized_dtype_str == "float16") {
-    return c10::ScalarType::Half;
-  } else if (canonicalized_dtype_str == "float64") {
-    return c10::ScalarType::Double;
-  } else if (canonicalized_dtype_str == "uint8") {
-    return c10::ScalarType::Byte;
-  } else if (canonicalized_dtype_str == "int8") {
-    return c10::ScalarType::Char;
-  } else if (canonicalized_dtype_str == "complex64") {
-    return c10::ScalarType::ComplexFloat;
-  } else if (canonicalized_dtype_str == "complex128") {
-    return c10::ScalarType::ComplexDouble;
-  } else {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        false, "Unsupported dtype: ", canonicalized_dtype_str);
-    return c10::ScalarType::Undefined;
-  }
-}
 
 inline void unpack_tensor_ivalue(
     const c10::IValue& ivalue,
@@ -186,27 +149,23 @@ bool AOTIPythonKernelHolder::cache_lookup(
     const c10::DispatchKeySet& keyset,
     const torch::jit::Stack* stack,
     AOTIKernelState& kernel_state) {
-  auto return_arguments = op.schema().returns();
-  // Only support single return value now and will extend to multiple return
-  if (return_arguments.size() != 1) {
-    return false;
-  }
-
-  auto arg = return_arguments[0];
-  // Only support return single tensor.
-  // TODO: Extend scope to support tensor vector
-  if (!arg.type()->isSubtypeOf(c10::TensorType::get())) {
-    return false;
-  }
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      op.schema().returns().size() == 1,
+      "Not implemented for operations that return either multiple values or no value.");
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      op.schema().returns()[0].type()->isSubtypeOf(c10::TensorType::get()),
+      "Not implemented for operations that return a non-Tensor value.");
 
   std::vector<at::Tensor> inputs;
   auto res = unpack_tensors(op.schema().arguments(), *stack, device_, inputs);
-  if (!res || inputs.empty()) {
-    return false;
-  }
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      res && inputs.size() > 0,
+      "Not implemented for operations that contain a parameter which is ",
+      "not one of the following types: at::Tensor, at::TensorList, ",
+      "std::optional<at::Tensor>, std::vector<std::optional<at::Tensor>>.");
 
-  auto inputs_meta_info = get_inputs_meta_info(inputs);
-  auto aoti_kernel_state = aoti_kernel_cache_.find(inputs_meta_info);
+  auto inputs_metadata = get_inputs_metadata(inputs);
+  auto aoti_kernel_state = aoti_kernel_cache_.find(inputs_metadata);
   if (aoti_kernel_state == aoti_kernel_cache_.end()) {
     return false;
   }
@@ -245,9 +204,9 @@ void AOTIPythonKernelHolder::cache_hit(
   }
 }
 
-AOTIKernelMetaInfo AOTIPythonKernelHolder::get_inputs_meta_info(
+AOTIKernelMetadata AOTIPythonKernelHolder::get_inputs_metadata(
     const std::vector<at::Tensor>& inputs) {
-  AOTIKernelMetaInfo inputs_meta_info;
+  AOTIKernelMetadata inputs_metadata;
   for (const auto& input : inputs) {
     auto device = input.device();
     if (device.is_cpu()) {
@@ -255,14 +214,14 @@ AOTIKernelMetaInfo AOTIPythonKernelHolder::get_inputs_meta_info(
       device = c10::Device(device.type(), -1);
     }
 
-    inputs_meta_info.emplace_back(
+    inputs_metadata.emplace_back(
         false, // is symbloic
         input.scalar_type(),
         device,
         input.sym_sizes().vec(),
         input.sym_strides().vec());
   }
-  return inputs_meta_info;
+  return inputs_metadata;
 }
 
 void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
@@ -274,20 +233,23 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
 
   py::handle load_aoti_eager_cache_function =
       py::module::import("torch._inductor.utils").attr("load_aoti_eager_cache");
-  if (load_aoti_eager_cache_function.ptr() == nullptr) {
-    return;
-  }
+  TORCH_INTERNAL_ASSERT(
+      load_aoti_eager_cache_function.ptr() != nullptr,
+      "Failed to import - torch._inductor.utils.load_aoti_eager_cache");
 
   auto result = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(
       load_aoti_eager_cache_function.ptr(),
       py::str(ns_).ptr(),
       py::str(op_name_).ptr(),
       py::str(op_overload_name_).ptr(),
-      py::str(c10::DeviceTypeName(device_.type())).ptr(),
+      py::str(c10::DeviceTypeName(device_.type(), true)).ptr(),
       nullptr));
-  if (result.ptr() == nullptr || result.ptr() == Py_None) {
-    return;
-  }
+  TORCH_INTERNAL_ASSERT(
+      result.ptr() != nullptr && result.ptr() != Py_None,
+      "Failed to load AOTI kernel. Operator Name is ",
+      op_name_,
+      ", Overload Name is ",
+      op_overload_name_);
 
   auto kernel_info_list = result.cast<py::list>();
   for (auto kernel_info : kernel_info_list) {
@@ -297,24 +259,27 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
     auto kernel_path = item_dict["kernel_path"].cast<std::string>();
 
     // Access the meta_info list
-    auto meta_info_list = item_dict["meta_info"].cast<py::list>();
+    auto inputs_metadata = item_dict["meta_info"].cast<py::list>();
 
     std::vector<TensorCheck> tensor_checks;
-    std::vector<TensorMetaInfo> tensor_meta_info_list;
+    std::vector<TensorMetadata> tensor_metadata_list;
 
     LocalState state;
     // Loop over the meta_info list
-    for (auto meta_info : meta_info_list) {
+    for (auto item : inputs_metadata) {
       // Convert the handle to a dict
-      auto meta_info_dict = meta_info.cast<py::dict>();
+      auto metadata = item.cast<py::dict>();
 
-      // Access the fields of each meta_info dict
-      auto is_dynamic = meta_info_dict["is_dynamic"].cast<bool>();
-      auto device_type = meta_info_dict["device_type"].cast<std::string>();
-      auto device_index = meta_info_dict["device_index"].cast<int8_t>();
-      auto dtype = meta_info_dict["dtype"].cast<std::string>();
-      auto sizes = meta_info_dict["sizes"].cast<std::vector<int64_t>>();
-      auto strides = meta_info_dict["strides"].cast<std::vector<int64_t>>();
+      // Access the fields of each metadata dict
+      auto is_dynamic = metadata["is_dynamic"].cast<bool>();
+      auto device_type = metadata["device_type"].cast<std::string>();
+      auto device_index = metadata["device_index"].cast<int8_t>();
+      auto data_type_obj = metadata["dtype"].cast<py::object>();
+      TORCH_INTERNAL_ASSERT(THPDtype_Check(data_type_obj.ptr()));
+      auto data_type =
+          reinterpret_cast<THPDtype*>(data_type_obj.ptr())->scalar_type;
+      auto sizes = metadata["sizes"].cast<std::vector<int64_t>>();
+      auto strides = metadata["strides"].cast<std::vector<int64_t>>();
 
       std::vector<c10::SymInt> sym_sizes;
       std::vector<c10::SymInt> sym_strides;
@@ -330,9 +295,9 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
       }
 
       // Now you can use these variables in your code
-      tensor_meta_info_list.emplace_back(
+      tensor_metadata_list.emplace_back(
           is_dynamic,
-          parse_dtype(dtype),
+          data_type,
           c10::Device(c10::Device(device_type).type(), device_index),
           sym_sizes,
           sym_strides);
@@ -340,7 +305,7 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
           state,
           nullptr,
           uint64_t(c10::DispatchKeySet(dispatch_key_).raw_repr()),
-          parse_dtype(dtype),
+          data_type,
           c10::DeviceIndex(device_index),
           sym_optional_sizes,
           sym_optional_strides);
@@ -349,7 +314,7 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
     AOTIKernelState aoti_kernel_state;
     aoti_kernel_state.kernel_runner_ = load_aoti_model_runner(kernel_path);
     aoti_kernel_state.tensor_checks_ = tensor_checks;
-    aoti_kernel_cache_[tensor_meta_info_list] = aoti_kernel_state;
+    aoti_kernel_cache_[tensor_metadata_list] = aoti_kernel_state;
   }
 }
 
@@ -473,27 +438,25 @@ std::string AOTIPythonKernelHolder::produce_aoti_kernel_lib(
       py::str(ns_str).ptr(),
       py::str(func_name).ptr(),
       py::str(overload_name).ptr(),
-      py::str(c10::DeviceTypeName(device_.type())).ptr(),
+      py::str(c10::DeviceTypeName(device_.type(), true)).ptr(),
       py::bool_(false).ptr(),
       op_py_func.ptr(),
       args_kwargs.first.ptr(),
       args_kwargs.second.ptr(),
       nullptr));
-  if (result.ptr() != nullptr && result.ptr() != Py_None) {
-    kernel_lib_path = py::cast<std::string>(result);
-    if (kernel_lib_path.empty()) {
-      TORCH_WARN(
-          "Kernel library is not generated by AOTI for ",
-          c10::DeviceTypeName(device_.type()),
-          ". Operator Name is ",
-          op.operator_name().name,
-          ", Overload Name is ",
-          overload_name);
-    }
-  } else {
+  TORCH_INTERNAL_ASSERT(
+      result.ptr() != nullptr && result.ptr() != Py_None,
+      "AOTI kernel library is not generated for ",
+      c10::DeviceTypeName(device_.type(), true),
+      ". Operator Name is ",
+      op.operator_name().name,
+      ", Overload Name is ",
+      overload_name);
+  kernel_lib_path = py::cast<std::string>(result);
+  if (kernel_lib_path.empty()) {
     TORCH_WARN(
-        "AOTI kernel library is not generated for ",
-        c10::DeviceTypeName(device_.type()),
+        "Kernel library is not generated by AOTI for ",
+        c10::DeviceTypeName(device_.type(), true),
         ". Operator Name is ",
         op.operator_name().name,
         ", Overload Name is ",

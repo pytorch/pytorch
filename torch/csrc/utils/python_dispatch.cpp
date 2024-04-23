@@ -246,7 +246,7 @@ void initDispatchBindings(PyObject* module) {
       .def("debug", &c10::OperatorHandle::debug)
       .def(
           "redispatch_boxed",
-          [](py::object self,
+          [](const py::object& self,
              c10::DispatchKeySet keyset,
              py::args args,
              const py::kwargs& kwargs) {
