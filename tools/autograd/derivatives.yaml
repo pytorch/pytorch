@@ -1513,6 +1513,11 @@
   self: slice_backward_wrapper(grad, self.sym_sizes(), dim, start, end, step)
   result: auto_linear
 
+- name: slice_strict(Tensor(a) self, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1) -> Tensor(a)
+  # TODO: Can probably have a strict slice_backward_wrapper too
+  self: slice_backward_wrapper(grad, self.sym_sizes(), dim, start, end, step)
+  result: auto_linear
+
 - name: slice_backward(Tensor grad_output, SymInt[] input_sizes, int dim, SymInt start, SymInt end, SymInt step) -> Tensor
   grad_output: grad.slice_symint(dim, start, end, step)
   result: auto_linear

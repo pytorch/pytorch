@@ -151,11 +151,17 @@
 #include <ATen/ops/select_scatter_native.h>
 #include <ATen/ops/set_native.h>
 #include <ATen/ops/slice.h>
+#include <ATen/ops/slice_strict.h>
+#include <ATen/ops/slice_strict_inverse.h>
 #include <ATen/ops/slice_backward_native.h>
 #include <ATen/ops/slice_copy_native.h>
+#include <ATen/ops/slice_strict_copy_native.h>
 #include <ATen/ops/slice_inverse_native.h>
+#include <ATen/ops/slice_strict_inverse_native.h>
 #include <ATen/ops/slice_native.h>
+#include <ATen/ops/slice_strict_native.h>
 #include <ATen/ops/slice_scatter_native.h>
+#include <ATen/ops/slice_strict_scatter_native.h>
 #include <ATen/ops/sparse_coo_tensor.h>
 #include <ATen/ops/sparse_coo_tensor_native.h>
 #include <ATen/ops/sparse_dim_native.h>
@@ -1401,6 +1407,7 @@ Tensor narrow_symint(const Tensor& self, int64_t dim, SymInt start, SymInt lengt
   }
   TORCH_SYM_CHECK(start.sym_le(cur_size - length),
            "start (", start, ") + length (", length, ") exceeds dimension size (", cur_size, ").");
+  // TODO: Make this call slice_strict_symint
   return at::slice_symint(self, dim, start, start + length, 1);
 }
 
@@ -2498,12 +2505,13 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
   }
 }
 
-Tensor slice(
+Tensor slice_impl(
     const Tensor& self,
     int64_t dim,
     c10::optional<int64_t> start,
     c10::optional<int64_t> end,
-    int64_t step) {
+    int64_t step,
+    bool strict) {
   int64_t ndim = self.dim();
   if (ndim == 0) {
     TORCH_CHECK_INDEX(false, "slice() cannot be applied to a 0-dim tensor.");
@@ -2513,27 +2521,34 @@ Tensor slice(
   DimVector strides(self.strides().begin(), self.strides().end());
   // handle optional parameters
   int64_t start_val = start.has_value() ? start.value() : 0;
-  int64_t end_val = end.has_value() ? end.value() : INT64_MAX;
+  int64_t end_val = end.has_value() ? end.value() : sizes[dim];
 
   // TODO: support negative strides
   TORCH_CHECK(step > 0, "slice step must be positive");
 
-  if (start_val < 0) {
-    start_val += sizes[dim];
+  if (strict) {
+    TORCH_CHECK(start_val >= 0, "slice start must be non-negative, but got ", start_val);
+    TORCH_CHECK(start_val <= end_val, "slice start must be before slice end, but got ", start_val, " > ", end_val);
+    TORCH_CHECK(end_val <= sizes[dim], "slice end must be less than or equal to size at dimension, but got ", end_val, " > ", sizes[dim]);
+  } else {
+    if (start_val < 0) {
+      start_val += sizes[dim];
+    }
+    if (end_val < 0) {
+      end_val += sizes[dim];
+    }
+    if (start_val < 0) {
+      start_val = 0;
+    } else if (start_val >= sizes[dim]) {
+      start_val = sizes[dim];
+    }
+    if (end_val < start_val) {
+      end_val = start_val;
+    } else if (end_val >= sizes[dim]) {
+      end_val = sizes[dim];
+    }
   }
-  if (end_val < 0) {
-    end_val += sizes[dim];
-  }
-  if (start_val < 0) {
-    start_val = 0;
-  } else if (start_val >= sizes[dim]) {
-    start_val = sizes[dim];
-  }
-  if (end_val < start_val) {
-    end_val = start_val;
-  } else if (end_val >= sizes[dim]) {
-    end_val = sizes[dim];
-  }
+
   auto storage_offset = self.storage_offset() + start_val * strides[dim];
   auto len = end_val - start_val;
   sizes[dim] = (len + step - 1) / step; // round-up
@@ -2554,7 +2569,36 @@ Tensor slice(
   return result;
 }
 
+Tensor slice(
+    const Tensor& self,
+    int64_t dim,
+    c10::optional<int64_t> start,
+    c10::optional<int64_t> end,
+    int64_t step) {
+  return slice_impl(self, dim, start, end, step, /*strict*/false);
+}
+
+Tensor slice_strict(
+    const Tensor& self,
+    int64_t dim,
+    c10::optional<int64_t> start,
+    c10::optional<int64_t> end,
+    int64_t step) {
+  return slice_impl(self, dim, start, end, step, /*strict*/true);
+}
+
 Tensor slice_inverse_symint(
+    const Tensor& self,
+    const Tensor& base,
+    int64_t /* dim */,
+    c10::optional<SymInt> /* start */,
+    c10::optional<SymInt> /* end */,
+    SymInt /* step */) {
+  // assume self has enough to storage to be viewed with base's metadata
+  return self.as_strided_symint(base.sym_sizes(), base.sym_strides(), base.sym_storage_offset());
+}
+
+Tensor slice_strict_inverse_symint(
     const Tensor& self,
     const Tensor& base,
     int64_t /* dim */,
@@ -3995,6 +4039,14 @@ at::Tensor slice_scatter(const at::Tensor& self, const at::Tensor& src, int64_t 
     // See Note [*_scatter ops preserve strides]
     auto output = clone_preserve_strides(self);
     auto slice = output.slice(dim, start, end, step);
+    TORCH_CHECK(slice.sizes() == src.sizes(), "expected src to have a size equal to the slice of self. src size = ", src.sizes(), ", slice size = ", slice.sizes());
+    slice.copy_(src);
+    return output;
+}
+at::Tensor slice_strict_scatter(const at::Tensor& self, const at::Tensor& src, int64_t dim, c10::optional<int64_t> start, c10::optional<int64_t> end, int64_t step) {
+    // See Note [*_scatter ops preserve strides]
+    auto output = clone_preserve_strides(self);
+    auto slice = at::slice_strict(self, dim, start, end, step);
     TORCH_CHECK(slice.sizes() == src.sizes(), "expected src to have a size equal to the slice of self. src size = ", src.sizes(), ", slice size = ", slice.sizes());
     slice.copy_(src);
     return output;

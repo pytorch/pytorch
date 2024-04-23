@@ -1219,6 +1219,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("index_put", index_put_plumbing);
   m.impl("_index_put_impl_", _index_put_impl__plumbing);
   m.impl("slice_scatter", slice_scatter_decomp);
+  m.impl("slice_strict_scatter", slice_scatter_decomp);  // TODO: separate slice_strict_scatter_decomp
   m.impl("select_scatter", select_scatter_decomp);
   m.impl("index_copy", index_copy_decomp);
   m.impl("index_select", index_select_decomp);

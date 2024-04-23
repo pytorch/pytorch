@@ -5410,6 +5410,15 @@
     CompositeExplicitAutograd: slice
   tags: core
 
+# TODO: do I need slice_strict_inverse?
+- func: slice_strict(Tensor(a) self, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1) -> Tensor(a)
+  variants: function
+  device_check: NoCheck
+  device_guard: False
+  dispatch:
+    CompositeExplicitAutograd: slice_strict
+  tags: core
+
 # NOTE: The implementation of split_with_sizes bypasses the dispatcher to call this; undo
 # that if adding specific implementations here!
 
@@ -5436,6 +5445,13 @@
   dispatch:
     CompositeExplicitAutograd: slice_inverse_symint
 
+- func: slice_strict_inverse(Tensor(a) self, Tensor src, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1) -> Tensor(a)
+  variants: function
+  device_check: NoCheck
+  device_guard: False
+  dispatch:
+    CompositeExplicitAutograd: slice_strict_inverse_symint
+
 - func: slice_scatter(Tensor self, Tensor src, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1) -> Tensor
   variants: function, method
   device_check: NoCheck
@@ -5443,6 +5459,15 @@
   dispatch:
     CompositeExplicitAutogradNonFunctional: slice_scatter
   autogen: slice_scatter.out
+  tags: [core, view_copy]
+
+- func: slice_strict_scatter(Tensor self, Tensor src, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1) -> Tensor
+  variants: function
+  device_check: NoCheck
+  device_guard: False
+  dispatch:
+    CompositeExplicitAutogradNonFunctional: slice_strict_scatter
+  autogen: slice_strict_scatter.out
   tags: [core, view_copy]
 
 - func: select_scatter(Tensor self, Tensor src, int dim, SymInt index) -> Tensor
@@ -14457,6 +14482,13 @@
     CompositeExplicitAutogradNonFunctional: slice_copy_Tensor_symint
   tags: view_copy
   autogen: slice_copy.Tensor_out
+
+- func: slice_strict_copy(Tensor self, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1) -> Tensor
+  variants: function
+  dispatch:
+    CompositeExplicitAutogradNonFunctional: slice_strict_copy_symint
+  tags: view_copy
+  autogen: slice_strict_copy.out
 
 - func: split_copy.Tensor(Tensor self, SymInt split_size, int dim=0) -> Tensor[]
   variants: function
