@@ -321,11 +321,13 @@ class FakeTensorConverter:
 
 
 @functools.lru_cache(None)
-def init_cuda_context():
+def init_cuda_context(device_index=0):
     # Backward will error with cuda Fake Tensors if no cuda tensors have been initialized first
     if torch.cuda.is_available():
-        torch.empty(1, device="cuda") if torch.version.hip is None else torch.zeros(
-            1, device="cuda"
+        torch.empty(
+            1, device=f"cuda:{device_index}"
+        ) if torch.version.hip is None else torch.zeros(
+            1, device=f"cuda:{device_index}"
         )
 
 
@@ -478,7 +480,9 @@ class FakeTensor(torch.Tensor):
             assert device.type != "meta"
         # normalize device.
         if device.type == "cuda":
-            init_cuda_context()
+            init_cuda_context(
+                device_index=device.index if device.index is not None else 0
+            )
 
         if (
             device.type

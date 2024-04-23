@@ -437,14 +437,17 @@ def pad_bmm(
 
 
 @functools.lru_cache(None)
-def _pad_mm_init():
+def _pad_mm_init(input_device: Optional[torch.device] = None):
     from .joint_graph import patterns
 
-    if torch.cuda.is_available():
-        # workaround https://github.com/pytorch/pytorch/issues/97894
-        device = "cuda"
+    if input_device is None:
+        if torch.cuda.is_available():
+            # workaround https://github.com/pytorch/pytorch/issues/97894
+            device = "cuda"
+        else:
+            device = "cpu"
     else:
-        device = "cpu"
+        device = str(input_device)
 
     # sizes/values dont actually matter for initial trace
     # once we get a possible match we re-trace with the actual values and verify the match still holds

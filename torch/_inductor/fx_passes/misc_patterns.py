@@ -1,6 +1,6 @@
 import functools
 
-from typing import Dict, Set, Tuple
+from typing import Dict, Optional, Set, Tuple
 
 import torch
 from torch._dynamo.utils import counters
@@ -12,17 +12,20 @@ aten = torch.ops.aten
 
 
 @functools.lru_cache(None)
-def _misc_patterns_init():
+def _misc_patterns_init(input_device: Optional[torch.device] = None):
     from .joint_graph import patterns as joint_graph_patterns
     from .post_grad import pass_patterns as post_grad_patterns_all
 
     post_grad_patterns = post_grad_patterns_all[1]  # medium priority
 
-    if torch.cuda.is_available():
-        # workaround https://github.com/pytorch/pytorch/issues/97894
-        device = "cuda"
+    if input_device is None:
+        if torch.cuda.is_available():
+            # workaround https://github.com/pytorch/pytorch/issues/97894
+            device = "cuda"
+        else:
+            device = "cpu"
     else:
-        device = "cpu"
+        device = str(input_device)
 
     # These patterns do 2 things
     # 1. Since we know that index is completely unique, we can codegen it using

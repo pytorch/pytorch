@@ -222,11 +222,11 @@ def _recursive_pre_grad_passes(gm, example_inputs):
     return pre_grad_passes(gm, example_inputs)
 
 
-def _recursive_joint_graph_passes(gm):
+def _recursive_joint_graph_passes(gm, input_device=None):
     for subgraph_name in _get_subgraph_names(gm):
         subgraph = getattr(gm, subgraph_name)
-        _recursive_joint_graph_passes(subgraph)
-    joint_graph_passes(gm)
+        _recursive_joint_graph_passes(subgraph, input_device=input_device)
+    joint_graph_passes(gm, input_device=input_device)
 
 
 def _recursive_post_grad_passes(gm, is_inference: bool = False):
@@ -1094,7 +1094,13 @@ def fw_compiler_freezing(
     from torch._inductor.freezing import convert_conv_weights_to_channels_last, freeze
 
     # partition_fn won't be called
-    _recursive_joint_graph_passes(aot_autograd_model)
+    inputs_devices = list(
+        {i.device for i in pytree.tree_flatten(aot_example_inputs)[0]}
+    ) + [None]
+    assert len(inputs_devices) > 0
+    _recursive_joint_graph_passes(
+        aot_autograd_model, input_device=next(iter(inputs_devices))
+    )
 
     layout_opt = GraphLowering.decide_layout_opt(aot_autograd_model, is_inference=True)
     if layout_opt:
@@ -1259,7 +1265,13 @@ def compile_fx(
     ):
         if is_inference:
             # partition_fn won't be called
-            _recursive_joint_graph_passes(model)
+            inputs_devices = list(
+                {i.device for i in pytree.tree_flatten(example_inputs)[0]}
+            ) + [None]
+            assert len(inputs_devices) > 0
+            _recursive_joint_graph_passes(
+                model, input_device=next(iter(inputs_devices))
+            )
 
         fixed = torch._inductor.utils.num_fw_fixed_arguments(
             num_example_inputs, len(example_inputs)
@@ -1343,7 +1355,11 @@ def compile_fx(
         inference_compiler = functools.partial(fw_compiler_base, is_inference=True)
 
     def partition_fn(graph, joint_inputs, **kwargs):
-        _recursive_joint_graph_passes(graph)
+        inputs_devices = list(
+            {i.device for i in pytree.tree_flatten(joint_inputs)[0]}
+        ) + [None]
+        assert len(inputs_devices) > 0
+        _recursive_joint_graph_passes(graph, input_device=next(iter(inputs_devices)))
         return min_cut_rematerialization_partition(
             graph, joint_inputs, **kwargs, compiler="inductor"
         )
