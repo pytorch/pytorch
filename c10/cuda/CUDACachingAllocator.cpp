@@ -1125,9 +1125,9 @@ class DeviceCachingAllocator {
             device_free);
       }
 
-      int64_t allocated_in_private_pools = 0;
+      size_t allocated_in_private_pools = 0;
       auto get_size_block = [](const BlockPool& pool) {
-        int64_t res = 0;
+        size_t res = 0;
         for (const auto& block : pool.blocks) {
           res += block->size;
         }
