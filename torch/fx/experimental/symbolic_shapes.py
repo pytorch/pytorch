@@ -513,13 +513,8 @@ def guard_scalar(a):
         raise AssertionError(f"unrecognized scalar {a}")
 
 
-@record_shapeenv_event()
 def _constrain_symbol_range(shape_env, s: sympy.Symbol, compiler_min: int, compiler_max: int):
-    upd_vr = ValueRanges(compiler_min, compiler_max)
-    old_vr = shape_env.var_to_range.get(s, ValueRanges.unknown())
-    shape_env._update_var_to_range(s, upd_vr)
-    if (new_vr := shape_env.var_to_range[s]) != old_vr:
-        log.info("_constrain_symbol_range %s [%s, %s]", s, new_vr.lower, new_vr.upper)
+    shape_env.constrain_symbol_range(s, compiler_min, compiler_max)
 
 
 def _advise_is_size(a):
@@ -586,8 +581,7 @@ def _constrain_range_for_size(a, min: Optional[int] = None, max: Optional[int] =
             "received min={min} and max={max}"
         )
 
-    _constrain_symbol_range(
-        a.node.shape_env,
+    a.node.shape_env.constrain_symbol_range(
         a.node.expr,
         compiler_min=min,
         compiler_max=max,
@@ -4543,6 +4537,16 @@ class ShapeEnv:
             self._update_var_to_range(symbol, ValueRanges(lower, upper))
             # Clears the cache, since this update can change the result.
             self._maybe_evaluate_static.cache_clear()
+
+    @lru_cache(maxsize=None)
+    @record_shapeenv_event()
+    def constrain_symbol_range(self, s: sympy.Symbol, compiler_min: int, compiler_max: int):
+        upd_vr = ValueRanges(compiler_min, compiler_max)
+        old_vr = self.var_to_range.get(s, ValueRanges.unknown())
+        self._update_var_to_range(s, upd_vr)
+        if (new_vr := self.var_to_range[s]) != old_vr:
+            log.info("constrain_symbol_range %s [%s, %s]", s, new_vr.lower, new_vr.upper)
+
 
 def _is_int(expr):
     return isinstance(expr, SymInt) and expr.node.expr.is_number
