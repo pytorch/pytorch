@@ -5170,7 +5170,7 @@ class GraphModule(torch.nn.Module):
             self.assertEqual(
                 {
                     "torch.func.linearize capture is disabled, it can be "
-                    "turned on by setting `torch._dynamo.config.capture_func_transforms=True`": 2,
+                    "turned on by setting `torch._dynamo.config.capture_func_transforms=True`": 1,
                 },
                 dict(counters["graph_break"]),
             )
