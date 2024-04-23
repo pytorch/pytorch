@@ -2,6 +2,7 @@ import copy
 import dataclasses
 import logging
 import os
+import random
 import re
 import subprocess
 from dataclasses import dataclass, fields
@@ -1128,7 +1129,10 @@ class CKGemmTemplate(CKTemplate):
                     )
 
         filtered_instances = list(filter(lambda op: self.filter_op(op), op_instances))
-        chosen_instances = filtered_instances[:config.rocm.n_max_profiling_configs]
+        # chosen_instances = filtered_instances[:config.rocm.n_max_profiling_configs]
+        # NB: when using a fixed list order, most likely we will pick the subset of instances
+        # which are very similar to each other. Randomizing the choice seems to solve this.
+        chosen_instances = random.sample(filtered_instances, config.rocm.n_max_profiling_configs)
         log.debug(f"generated {len(chosen_instances)} ck instances: {chosen_instances}")
 
         return chosen_instances
