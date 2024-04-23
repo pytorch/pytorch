@@ -744,8 +744,7 @@ def min_cut_rematerialization_partition(
             if node.op == "placeholder" and "tangents" in node.target:
                 required_bw_nodes.add(node)
             if node in required_bw_nodes:
-                for user in node.users:
-                    required_bw_nodes.add(user)
+                required_bw_nodes.update(node.users)
 
         primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
         fwd_seed_offset_inputs = list(
