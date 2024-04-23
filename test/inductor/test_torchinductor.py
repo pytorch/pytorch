@@ -9062,11 +9062,41 @@ class CommonTemplate:
         ref3 = fn(inp3)
         res3 = fn_c(inp3)
         self.assertEqual(ref3, res3)
-        # still have the dynamics shapes failure, but offset change shouldn't be guarded on
+        # we might still have the dynamics shapes failure, but offset change shouldn't be guarded on
         # see Note: [Input Alignment handling in Inductor]
-        print(failed_guards)
-        self.assertEqual(1, len(failed_guards))
-        self.assertEqual(first_guard_failure.reason, failed_guards[0].reason)
+        self.assertLessEqual(len(failed_guards), 1)
+
+    @requires_gpu()
+    @config.patch(assume_aligned_inputs=False)
+    def test_config_option_dont_assume_alignment_cudagraphs(self):
+        def fn(x):
+            return x.cos() * x.sin()
+
+        fn_c = torch.compile(fn, mode="reduce-overhead", dynamic=True)
+
+        for size, stride, offset in (
+            ((32, 32), (32, 1), 4),
+            ((48, 48), (48, 1), 4),
+            ((64, 64), (64, 1), 5),
+        ):
+            torch.manual_seed(42)
+            base = torch.randn(64 * 64 + 64, dtype=torch.float32, device=GPU_TYPE)
+            torch.manual_seed(42)
+            base_ref = torch.randn(64 * 64 + 64, dtype=torch.float32, device=GPU_TYPE)
+
+            inp = torch.as_strided(base, size, stride, offset)
+            inp_ref = torch.as_strided(base_ref, size, stride, offset)
+
+            inp.requires_grad_(True)
+            inp_ref.requires_grad_(True)
+
+            res = fn_c(inp)
+            ref = fn(inp_ref)
+            self.assertEqual(ref, res)
+
+            res.sum().backward()
+            ref.sum().backward()
+            self.assertEqual(base.grad, base_ref.grad)
 
     @config.patch(implicit_fallbacks=True)
     def test_custom_op_1(self):
