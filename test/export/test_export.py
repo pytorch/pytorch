@@ -45,6 +45,7 @@ from torch.testing._internal.common_utils import (
     IS_SANDCASTLE,
     IS_WINDOWS,
     run_tests,
+    TEST_TRANSFORMERS,
     TestCase as TorchTestCase,
 )
 from torch.utils._pytree import (
@@ -124,10 +125,15 @@ def foo_functional(x):
 
 
 NON_STRICT_SUFFIX = "_non_strict"
+RETRACEABILITY_SUFFIX = "_retraceability"
 
 
 def is_non_strict_test(test_name):
     return test_name.endswith(NON_STRICT_SUFFIX)
+
+
+def is_retracebility_test(test_name):
+    return test_name.endswith(RETRACEABILITY_SUFFIX)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
@@ -423,7 +429,7 @@ class TestExport(TestCase):
                 foo, bad_example_inp, dynamic_shapes=dynamic_shapes, strict=False
             )
 
-    def test_state(self):
+    def test_state_tensors(self):
         class M(torch.nn.Module):  # simple with register buffer
             def __init__(self):
                 super().__init__()
@@ -464,7 +470,7 @@ class TestExport(TestCase):
 
         with self.assertRaisesRegex(
             ValueError,
-            "The attribute self.buf was assigned during export",
+            "The tensor attribute self.buf was assigned during export",
         ):
             torch.export.export(M(), (torch.randn(2, 3),), strict=False)
 
@@ -522,9 +528,28 @@ class TestExport(TestCase):
 
         with self.assertRaisesRegex(
             ValueError,
-            "The attributes self.tensors\\[0\\], self.tensors\\[1\\] were assigned during export",
+            "The tensor attributes self.tensors\\[0\\], self.tensors\\[1\\] were assigned during export",
         ):
             torch.export.export(M(), (torch.randn(2, 3),), strict=False)
+
+    def test_state_primitives(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = 1
+                self.y = {"k": 2}
+                self.z = (3,)
+
+            def forward(self, x):
+                self.x = self.x + 4
+                self.y["k"] = self.y["k"] + 5
+                self.z = (self.z[0] + 6,)
+                return x + self.x + self.y["k"] + self.z[0]
+
+        ep = torch.export.export(M(), (torch.randn(2, 3),), strict=False)
+        self.assertTrue(
+            torch.allclose(ep.module()(torch.zeros(2, 3)), torch.ones(2, 3) * 21)
+        )
 
     # Predispatch has different expected results
     @testing.expectedFailureSerDerPreDispatch
@@ -670,7 +695,6 @@ class TestExport(TestCase):
 
         self.assertEqual(ep.module()(torch.randn(4), torch.randn(5)).size()[0], 4)
 
-    @testing.expectedFailurePreDispatchRunDecomp  # T183703359
     def test_derived_dim_nested(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
@@ -736,7 +760,6 @@ class TestExport(TestCase):
 
         self.assertEqual(ep.module()(torch.randn(5), torch.randn(9)).size()[0], 4)
 
-    @testing.expectedFailurePreDispatchRunDecomp  # T183703359
     def test_derived_dim_integer(self):
         class Foo(torch.nn.Module):
             def forward(self, w):
@@ -983,7 +1006,6 @@ class TestExport(TestCase):
             6,
         )
 
-    @testing.expectedFailurePreDispatchRunDecomp  # T183704046
     def test_static_dim_constraints(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -1034,7 +1056,6 @@ class TestExport(TestCase):
         ):
             _ = export(foo, inputs, dynamic_shapes=((dx, 9), (dy, 4), (3, 3)))
 
-    @testing.expectedFailurePreDispatchRunDecomp  # T183703911
     def test_dim_1_2(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -1052,7 +1073,6 @@ class TestExport(TestCase):
         self.assertEqual(vr.lower, 1)
         self.assertEqual(vr.upper, 2)
 
-    @testing.expectedFailurePreDispatchRunDecomp  # T183703359
     def test_derived_dim_1_2(self):
         class Bar(torch.nn.Module):
             def forward(self, x, y):
@@ -1242,10 +1262,6 @@ class TestExport(TestCase):
         }
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
-    # TODO(pianpwk): resolve in immediate follow-up PR
-    # add name to ConstantArgument schema for SerDer
-    @testing.expectedFailureSerDer
-    @testing.expectedFailureSerDerPreDispatch
     def test_export_func_with_default_kwargs(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, a, b=1):
@@ -2237,7 +2253,6 @@ def forward(self, arg_0):
             )
         )
 
-    @testing.expectedFailureNonStrict  # non-strict does not add deferred runtime assertions
     @testing.expectedFailureSerDerPreDispatch  # .item call becomes aten.item in predispatch IR
     @testing.expectedFailurePreDispatchRunDecomp  # assert name is still referring to item
     def test_automatic_constrain_size(self):
@@ -2248,10 +2263,13 @@ def forward(self, arg_0):
 
         ep = export(M(), (torch.tensor(1), torch.ones(4, 5)))
 
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"_local_scalar_dense is outside of inline constraint \[0, 9223372036854775806\]",
-        ):
+        if is_non_strict_test(self._testMethodName):
+            error_msg = r"Runtime assertion failed for _local_scalar_dense >= 0"
+        elif is_retracebility_test(self._testMethodName):
+            error_msg = r"Runtime assertion failed for _local_scalar_dense_default >= 0"
+        else:
+            error_msg = "_local_scalar_dense is outside of inline constraint \[0, 9223372036854775806\]."
+        with self.assertRaisesRegex(RuntimeError, error_msg):
             _ = ep.module()(torch.tensor(-1), torch.randn(4, 5))
 
         self.assertTrue(
@@ -2605,6 +2623,17 @@ def forward(self, arg_0):
         self.assertTrue(
             torch.allclose(ep.module()(torch.ones(6, 4)), Foo()(torch.ones(6, 4)))
         )
+
+    def test_aten_lift_fresh_copy(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aten.lift_fresh_copy(x)
+
+        ep = export(M(), (torch.ones(6, 4),))
+        found = False
+
+        op = "torch.ops.aten.clone.default"
+        FileCheck().check_count(op, 1, exactly=True).run(ep.graph_module.code)
 
     def test_cond_buffers(self):
         class M(torch.nn.Module):
@@ -3851,23 +3880,6 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
 
     def test_predispatch_cond(self):
         class Model(torch.nn.Module):
-            def forward(self, x, y):
-                with torch.enable_grad():
-                    x = x - y
-                return x + y
-
-        model = Model()
-        with torch.no_grad():
-            exported_program = torch.export._trace._export(
-                model,
-                (torch.tensor(10), torch.tensor(12)),
-                {},
-                dynamic_shapes=None,
-                pre_dispatch=True,
-                strict=False,
-            )
-
-        class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.register_buffer("pred", torch.tensor(False))
@@ -3910,21 +3922,71 @@ def forward(self, b_pred, b_t, x, y):
         self.assertExpectedInline(
             str(exported_program.graph_module.true_graph_0.code.strip()),
             """\
-def forward(self, arg1_1, arg0_1, arg2_1):
+def forward(self, b_t, x, y):
     submod_3 = self.submod_1
-    add_1 = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(True, submod_3, arg1_1, arg0_1, arg2_1);  submod_3 = arg1_1 = arg0_1 = arg2_1 = None
+    add_1 = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(True, submod_3, b_t, x, y);  submod_3 = b_t = x = y = None
     return (add_1,)""",
         )
 
         self.assertExpectedInline(
             str(exported_program.graph_module.true_graph_0.submod_1.code.strip()),
             """\
-def forward(self, arg1_1, arg0_1, arg2_1):
-    sub = torch.ops.aten.sub.Tensor(arg1_1, 1);  arg1_1 = None
-    add = torch.ops.aten.add.Tensor(sub, arg0_1);  sub = arg0_1 = None
-    add_1 = torch.ops.aten.add.Tensor(add, arg2_1);  add = arg2_1 = None
+def forward(self, b_t, x, y):
+    sub = torch.ops.aten.sub.Tensor(b_t, 1);  b_t = None
+    add = torch.ops.aten.add.Tensor(sub, x);  sub = x = None
+    add_1 = torch.ops.aten.add.Tensor(add, y);  add = y = None
     return add_1""",
         )
+
+    def test_predispatch_grad_wrappers(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                with torch.enable_grad():
+                    x = x - y
+                with torch.no_grad():
+                    x = x + y
+                return x
+
+        # no grad
+        model = Model()
+        with torch.no_grad():
+            ep_nograd = torch.export._trace._export(
+                model,
+                (torch.tensor(10), torch.tensor(12)),
+                {},
+                dynamic_shapes=None,
+                pre_dispatch=True,
+                strict=False,
+            )
+        # check that only sub op is wrapped with grad_enabled
+        getattr_nodes = [
+            node for node in ep_nograd.graph.nodes if node.op == "get_attr"
+        ]
+        self.assertEqual(len(getattr_nodes), 1)
+        grad_subgraph = getattr(ep_nograd.graph_module, getattr_nodes[0].target)
+        op_node = [
+            node for node in grad_subgraph.graph.nodes if node.op == "call_function"
+        ][0]
+        self.assertEqual(op_node.target._name, "aten::sub.Tensor")
+
+        # enable grad
+        model = Model()
+        ep_grad = torch.export._trace._export(
+            model,
+            (torch.tensor(10), torch.tensor(12)),
+            {},
+            dynamic_shapes=None,
+            pre_dispatch=True,
+            strict=False,
+        )
+        # check that only add op is wrapped with grad_enabled
+        getattr_nodes = [node for node in ep_grad.graph.nodes if node.op == "get_attr"]
+        self.assertEqual(len(getattr_nodes), 1)
+        grad_subgraph = getattr(ep_grad.graph_module, getattr_nodes[0].target)
+        op_node = [
+            node for node in grad_subgraph.graph.nodes if node.op == "call_function"
+        ][0]
+        self.assertEqual(op_node.target._name, "aten::add.Tensor")
 
     def test_non_persistent_buffer(self):
         class MyModule(torch.nn.Module):
@@ -4256,6 +4318,98 @@ def forward(self, x):
         real_names_and_ops = [(node.name, node.op) for node in ep.graph.nodes]
         self.assertEqual(expected_names_and_ops, real_names_and_ops)
 
+    @testing.expectedFailureRetraceability
+    def test_placeholder_naming_collisions_hoo_subgraphs(self):
+        # test collisions between user inputs, top-level nodes, and HOO subgraph nodes
+        class Foo(torch.nn.Module):
+            def forward(self, x, mul, mul_1):
+                _mul = x * x
+                y = cond(
+                    _mul.sum() > 0,
+                    lambda x, y, z: x * y * z,
+                    lambda x, y, z: x + y + z,
+                    [_mul, mul, mul_1],
+                )
+                with torch.enable_grad():
+                    y = y * y
+                return y
+
+        with torch.no_grad():
+            ep = torch.export._trace._export(
+                Foo(),
+                (torch.randn(4), torch.randn(4), torch.randn(4)),
+                pre_dispatch=True,
+            )
+        # test cond subgraph
+        expected_names_and_ops = [
+            ("mul_2", "placeholder"),
+            ("mul", "placeholder"),
+            ("mul_1", "placeholder"),
+            ("mul_3", "call_function"),
+            ("mul_4", "call_function"),
+            ("output", "output"),
+        ]
+        real_names_and_ops = [
+            (node.name, node.op) for node in ep.graph_module.true_graph_0.graph.nodes
+        ]
+        self.assertEqual(expected_names_and_ops, real_names_and_ops)
+        # test set_grad_enabled subgraph
+        expected_names_and_ops = [
+            ("getitem", "placeholder"),
+            ("mul_1", "call_function"),
+            ("output", "output"),
+        ]
+        real_names_and_ops = [
+            (node.name, node.op) for node in ep.graph_module.submod_1.graph.nodes
+        ]
+        self.assertEqual(expected_names_and_ops, real_names_and_ops)
+
+        # test collisions between user inputs & higher order op subgraphs
+        # (please never do this)
+        class Foo(torch.nn.Module):
+            def forward(self, input, true_graph, body_graph):
+                def map_body(x, y):
+                    return x + y
+
+                x = map(map_body, input, body_graph[0])
+                x = x + true_graph[0] + true_graph[1]
+                x = cond(x.sum() > 0, lambda x: x * 2.0, lambda x: x + 2.0, [x])
+                x = cond(x.sum() > 0, lambda x: x * 2.0, lambda x: x + 2.0, [x])
+                return x
+
+        inputs = (
+            torch.randn(10, 4),
+            (torch.randn(4), torch.randn(4)),
+            (torch.randn(4),),
+        )
+        ep = export(Foo(), inputs)
+        expected_getattr_names = [
+            "body_graph_1",
+            "true_graph_2",
+            "false_graph_0",
+            "true_graph_3",
+            "false_graph_1",
+        ]
+        real_getattr_names = [
+            node.name for node in ep.graph.nodes if node.op == "get_attr"
+        ]
+        self.assertEqual(expected_getattr_names, real_getattr_names)
+
+    # original input names aren't retraceable:
+    # compilation will succeed, but names won't match forward() signature.
+    @testing.expectedFailureRetraceability
+    def test_constant_input_naming(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y, div="floor"):
+                return torch.div(x, y, rounding_mode=div)
+
+        f = Foo()
+        inputs = (torch.randn(4), torch.randn(4), "floor")
+        ep = export(f, inputs)
+        div_spec = ep.graph_signature.input_specs[2]
+        self.assertEqual(div_spec.arg.name, "div")
+        self.assertEqual(div_spec.arg.value, "floor")
+
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):
@@ -4480,6 +4634,31 @@ def forward(self, x):
                 logger.debug(x1)
                 x2 = x1 * x1
                 logger.info(1, 2, 3)
+                x3 = x2 + x2
+                return (x1, x3)
+
+        gm = export(M(), (torch.randn(3, 3),)).graph_module
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, x):
+    add = torch.ops.aten.add.Tensor(x, x);  x = None
+    mul = torch.ops.aten.mul.Tensor(add, add)
+    add_1 = torch.ops.aten.add.Tensor(mul, mul);  mul = None
+    return (add, add_1)""",
+        )
+
+    @unittest.skipIf(not TEST_TRANSFORMERS, "No transformers")
+    def test_hf_logging_logger(self):
+        import transformers
+
+        logger = transformers.utils.logging.get_logger(__name__)
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                logger.warning_once("start")
+                x1 = x + x
+                x2 = x1 * x1
                 x3 = x2 + x2
                 return (x1, x3)
 
