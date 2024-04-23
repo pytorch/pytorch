@@ -2582,7 +2582,7 @@ def _hipcc_device_compiler_options() -> List[str]:
         "-x", 
         "hip",
         "-std=c++17",
-        f"--offload-arch={';'.join(config.rocm.arch) if config.rocm.arch else 'native'}",
+        f"--offload-arch={';'.join(config.rocm.arch) or 'native'}",
         "-fno-gpu-rdc",
         "-fPIC",
         "-mllvm",

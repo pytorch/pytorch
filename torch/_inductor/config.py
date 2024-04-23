@@ -786,10 +786,10 @@ class rocm:
     save_temps = False
 
     # Flag to add `-ffast-math`` to compile flags
-    use_fast_math = False
+    use_fast_math = True
 
     # Flag to add `-fgpu-flush-denormals-to-zero` to compile flags
-    flush_denormals = False
+    flush_denormals = True
 
     # Flag to print register and LDS usage during compilation
     print_kernel_resource_usage = False
