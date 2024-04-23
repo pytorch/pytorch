@@ -5405,12 +5405,6 @@ symbolic_aot_autograd_failures = {
         "nn.functional.embedding_bag", ""
     ),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail(
-        "nn.functional.fractional_max_pool2d", ""
-    ),  # rand() received an invalid combination of arguments - g...
-    xfail(
-        "nn.functional.fractional_max_pool3d", ""
-    ),  # rand() received an invalid combination of arguments - g...
-    xfail(
         "nn.functional.group_norm", ""
     ),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail(
