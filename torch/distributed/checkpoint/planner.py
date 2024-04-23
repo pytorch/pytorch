@@ -145,7 +145,7 @@ class SavePlanner(abc.ABC):
     >>>     def set_up_planner(
     >>>         self,
     >>>         state_dict: STATE_DICT_TYPE,
-    >>>         storage_meta,: StorageMeta,
+    >>>         storage_meta: Optional[StorageMeta],
     >>>         is_coordinator: bool,
     >>>     ) -> None:
     >>>         # prefix all keys with `foo_``

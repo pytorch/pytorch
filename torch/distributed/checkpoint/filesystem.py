@@ -537,6 +537,9 @@ class FileSystemWriter(StorageWriter):
         for wr_list in results:
             storage_md.update({wr.index: wr.storage_data for wr in wr_list})
         metadata.storage_data = storage_md
+
+        metadata.storage_meta = self.storage_meta()
+
         tmp_path = cast(Path, self.fs.concat_path(self.path, ".metadata.tmp"))
         meta_path = cast(Path, self.fs.concat_path(self.path, ".metadata"))
         with self.fs.create_stream(tmp_path, "wb") as metadata_file:
