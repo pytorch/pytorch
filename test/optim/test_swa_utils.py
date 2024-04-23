@@ -4,12 +4,17 @@ import itertools
 import pickle
 
 import torch
-from torch.optim.swa_utils import AveragedModel, update_bn, get_swa_multi_avg_fn, get_ema_multi_avg_fn
+from torch.optim.swa_utils import (
+    AveragedModel,
+    get_ema_multi_avg_fn,
+    get_swa_multi_avg_fn,
+    update_bn,
+)
 from torch.testing._internal.common_utils import (
-    TestCase,
+    instantiate_parametrized_tests,
     load_tests,
     parametrize,
-    instantiate_parametrized_tests,
+    TestCase,
 )
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -75,9 +80,13 @@ class TestSWAUtils(TestCase):
     def _run_averaged_steps(self, dnn, swa_device, ema):
         ema_decay = 0.999
         if ema:
-            averaged_dnn = AveragedModel(dnn, device=swa_device, multi_avg_fn=get_ema_multi_avg_fn(ema_decay))
+            averaged_dnn = AveragedModel(
+                dnn, device=swa_device, multi_avg_fn=get_ema_multi_avg_fn(ema_decay)
+            )
         else:
-            averaged_dnn = AveragedModel(dnn, device=swa_device, multi_avg_fn=get_swa_multi_avg_fn())
+            averaged_dnn = AveragedModel(
+                dnn, device=swa_device, multi_avg_fn=get_swa_multi_avg_fn()
+            )
 
         averaged_params = [torch.zeros_like(param) for param in dnn.parameters()]
 
@@ -86,7 +95,11 @@ class TestSWAUtils(TestCase):
             for p, p_avg in zip(dnn.parameters(), averaged_params):
                 p.detach().add_(torch.randn_like(p))
                 if ema:
-                    p_avg += p.detach() * ema_decay ** (n_updates - i - 1) * ((1 - ema_decay) if i > 0 else 1.0)
+                    p_avg += (
+                        p.detach()
+                        * ema_decay ** (n_updates - i - 1)
+                        * ((1 - ema_decay) if i > 0 else 1.0)
+                    )
                 else:
                     p_avg += p.detach() / n_updates
             averaged_dnn.update_parameters(dnn)
@@ -157,8 +170,11 @@ class TestSWAUtils(TestCase):
         decay = 0.9
 
         if use_multi_avg_fn:
-            averaged_dnn = AveragedModel(dnn, multi_avg_fn=get_ema_multi_avg_fn(decay), use_buffers=use_buffers)
+            averaged_dnn = AveragedModel(
+                dnn, multi_avg_fn=get_ema_multi_avg_fn(decay), use_buffers=use_buffers
+            )
         else:
+
             def avg_fn(p_avg, p, n_avg):
                 return decay * p_avg + (1 - decay) * p
 
@@ -206,7 +222,6 @@ class TestSWAUtils(TestCase):
                 self.assertEqual(b_avg, b_swa)
 
     def _test_update_bn(self, dnn, dl_x, dl_xy, cuda):
-
         preactivation_sum = torch.zeros(dnn.n_features)
         preactivation_squared_sum = torch.zeros(dnn.n_features)
         if cuda:

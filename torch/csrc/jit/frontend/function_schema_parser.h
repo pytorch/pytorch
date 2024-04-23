@@ -8,9 +8,15 @@
 namespace torch {
 namespace jit {
 
+// allow_typevars: If true, we assume that lowercase types that we don't
+// understand are type variables. This is only needed for TorchScript (and not
+// not needed for custom ops).
 TORCH_API std::variant<c10::OperatorName, c10::FunctionSchema> parseSchemaOrName(
-    const std::string& schemaOrName);
-TORCH_API c10::FunctionSchema parseSchema(const std::string& schema);
+    const std::string& schemaOrName,
+    bool allow_typevars = true);
+TORCH_API c10::FunctionSchema parseSchema(
+    const std::string& schema,
+    bool allow_typevars = true);
 TORCH_API c10::OperatorName parseName(const std::string& name);
 
 } // namespace jit

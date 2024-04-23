@@ -28,7 +28,7 @@ import torch
 import torch._logging
 from torch._guards import compile_context, CompileContext, CompileId, tracing
 from torch._logging import structured
-from torch._utils_internal import compiletime_sl_profile_meta, signpost_event
+from torch._utils_internal import compile_time_strobelight_meta, signpost_event
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     GuardOnDataDependentSymNode,
@@ -452,7 +452,7 @@ def register_bytecode_hook(hook: BytecodeHook) -> RemovableHandle:
     return handle
 
 
-@compiletime_sl_profile_meta(phase_name="_compile")
+@compile_time_strobelight_meta(phase_name="_compile")
 @_use_lazy_graph_module(config.use_lazy_graph_module)
 @maybe_cprofile
 def _compile(
@@ -944,13 +944,12 @@ def catch_errors_wrapper(callback, hooks: Hooks):
                         else "dynamo tracing is disabled"
                     )
                 )
-                if not is_skipfile or config.verbose:
-                    log.debug(
-                        "skipping: %s (reason: %s, file: %s)",
-                        frame.f_code.co_name,
-                        skip_reason,
-                        frame.f_code.co_filename,
-                    )
+                log.debug(
+                    "skipping: %s (reason: %s, file: %s)",
+                    frame.f_code.co_name,
+                    skip_reason,
+                    frame.f_code.co_filename,
+                )
             return None
         if frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__":
             # nametuple constructor
