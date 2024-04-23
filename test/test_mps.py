@@ -9306,6 +9306,13 @@ class TestViewOpsMPS(TestCaseMPS):
         nv[0, 0] = 0
         self.assertNotEqual(t[0, 0], nv[0, 0])
 
+    def test_reshape_add(self, device="mps"):
+        t_mps = torch.ones(2, 6, device=device)[1].reshape(2, 3)
+        t_mps = t_mps + 1
+        t_cpu = torch.ones(2, 6)[1].reshape(2, 3)
+        t_cpu = t_cpu + 1
+        self.assertEqual(t_mps, t_cpu)
+
     def test_reshape_view(self, device="mps"):
         t = torch.ones(5, 5, device=device)
         v = torch.reshape(t, (25,))
