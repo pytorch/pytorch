@@ -10,7 +10,7 @@ namespace torch::inductor {
 
 class TensorChecker;
 
-struct TensorMetaInfo {
+struct TensorMetadata {
   bool is_symbolic_;
   c10::ScalarType dtype_;
   c10::IValue scalar_value_;
@@ -18,14 +18,14 @@ struct TensorMetaInfo {
   std::vector<c10::SymInt> sizes_;
   std::vector<c10::SymInt> strides_;
 
-  TensorMetaInfo(const at::Tensor& src_tensor);
-  TensorMetaInfo(
+  TensorMetadata(const at::Tensor& src_tensor);
+  TensorMetadata(
       bool is_symbolic,
       c10::ScalarType dtype,
       c10::Device device,
       std::vector<c10::SymInt> sizes,
       std::vector<c10::SymInt> strides);
-  TensorMetaInfo(
+  TensorMetadata(
       bool is_symbolic,
       c10::ScalarType dtype,
       c10::IValue scalar_value,
@@ -33,17 +33,17 @@ struct TensorMetaInfo {
       std::vector<c10::SymInt> sizes,
       std::vector<c10::SymInt> strides);
 
-  bool operator==(const TensorMetaInfo& other) const;
+  bool operator==(const TensorMetadata& other) const;
 };
 
-struct TensorMetaInfoHash {
-  size_t operator()(const TensorMetaInfo&) const;
+struct TensorMetadataHash {
+  size_t operator()(const TensorMetadata&) const;
 };
 
-using AOTIKernelMetaInfo = std::vector<TensorMetaInfo>;
+using AOTIKernelMetadata = std::vector<TensorMetadata>;
 
-struct AOTIKernelMetaInfoHash {
-  size_t operator()(const AOTIKernelMetaInfo&) const;
+struct AOTIKernelMetadataHash {
+  size_t operator()(const AOTIKernelMetadata&) const;
 };
 
 } // namespace torch::inductor

@@ -11,13 +11,13 @@ import operator
 import os
 import random
 import re
-import shutil
 import subprocess
 import sys
 import threading
 import time
 import typing
 import unittest
+import unittest.mock
 import weakref
 from pathlib import Path
 from typing import Tuple
@@ -701,12 +701,6 @@ def assertGeneratedKernelCountEqual(self: TestCase, expected: int):
     self.assertEqual(torch._inductor.metrics.generated_kernel_count, expected)
 
 
-def clear_aoti_eager_cache(ns: str, device_type: str):
-    device_cache = aoti_eager_cache_dir() / ns / device_type
-    if device_cache.exists():
-        shutil.rmtree(device_cache)
-
-
 class SweepInputs2:
     input_gen_types1 = [
         "dense",
@@ -783,10 +777,6 @@ class CommonTemplate:
             device = "cuda"
 
         input_tensor = torch.randn(128, dtype=torch.float, device=device)
-
-        # Produce kernel for the first time
-        clear_aoti_eager_cache(ns, device)
-
         kernel_lib_path = aoti_compile_with_persistent_cache(
             ns,
             op_name,
@@ -840,8 +830,6 @@ class CommonTemplate:
             device = "cuda"
 
         input_tensor = torch.randn(128, dtype=torch.float, device=device)
-
-        clear_aoti_eager_cache(ns, device)
         kernel_lib_path = aoti_compile_with_persistent_cache(
             ns,
             op_name,
@@ -854,10 +842,7 @@ class CommonTemplate:
         )
         self.assertTrue(len(kernel_lib_path) > 0)
 
-        aoti_eager_cache_path = aoti_eager_cache_dir()
-        self.assertTrue(aoti_eager_cache_path.exists())
-
-        device_kernel_cache = aoti_eager_cache_path / ns / device
+        device_kernel_cache = aoti_eager_cache_dir(ns, device)
         kernel_conf = device_kernel_cache / f"{op_name}.{op_overload_name}.json"
         self.assertTrue(kernel_conf.exists())
 
@@ -894,8 +879,6 @@ class CommonTemplate:
         a = torch.scalar_tensor(1.0, device=device)
         b = torch.scalar_tensor(2.0, device=device)
 
-        clear_aoti_eager_cache(namespace_name, device.type)
-
         kernel_lib_path = aoti_compile_with_persistent_cache(
             namespace_name,
             op_name,
@@ -907,7 +890,7 @@ class CommonTemplate:
             kwargs={"alpha": 3.0},
         )
         self.assertTrue(Path(kernel_lib_path).exists())
-        device_kernel_cache = aoti_eager_cache_dir() / namespace_name / device.type
+        device_kernel_cache = aoti_eager_cache_dir(namespace_name, device.type)
         kernel_conf = device_kernel_cache / f"{op_name}.{op_overload_name}.json"
         self.assertTrue(kernel_conf.exists())
         json_data = load_aoti_eager_cache(
