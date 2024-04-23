@@ -3997,6 +3997,21 @@ class TestNestedTensorSubclass(TestCase):
         nt1_t, nt2_t, nt3_t, nt4_t = (x.transpose(1, 2) for x in (nt1, nt2, nt3, nt4))
         check_size(nt1_t, nt2_t, nt3_t, nt4_t)
 
+    def test_return_nt_constructed_in_graph(self, device):
+        def fn(values, offsets):
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+            nt = nt.cos()
+            return nt
+
+        values = torch.rand((10, 8), device=device)
+        offsets = torch.tensor([0, 1, 3, 6, 10], device=device)
+
+        fn_c = torch.compile(fn, fullgraph=True)
+
+        ref = fn(values, offsets)
+        res = fn_c(values, offsets)
+        self.assertEqual(ref, res)
+
     # Doesn't work until we have real views
     @xfailIfTorchDynamo
     # Note 1: Math fallback doesn't work with bfloat16 on CUDA
