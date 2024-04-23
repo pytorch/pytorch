@@ -86,7 +86,7 @@ class TestException(TestCase):
         @torch.jit.script
         def foo_decl_always_throws():
             # type: () -> Tensor
-            raise Exception("Hi")
+            raise Exception("Hi")  # noqa: TRY002
 
         output_type = next(foo_decl_always_throws.graph.outputs()).type()
         self.assertTrue(str(output_type) == "Tensor")
@@ -104,9 +104,9 @@ class TestException(TestCase):
                 a = 1
             else:
                 if 1 == 1:
-                    raise Exception("Hi")
+                    raise Exception("Hi")  # noqa: TRY002
                 else:
-                    raise Exception("Hi")
+                    raise Exception("Hi")  # noqa: TRY002
             return a
 
         self.assertEqual(foo(), 1)
@@ -150,7 +150,7 @@ class TestException(TestCase):
     def test_python_op_exception(self):
         @torch.jit.ignore
         def python_op(x):
-            raise Exception("bad!")
+            raise Exception("bad!")  # noqa: TRY002
 
         @torch.jit.script
         def fn(x):
