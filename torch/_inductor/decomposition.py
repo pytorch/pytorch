@@ -276,7 +276,7 @@ def cat(tensors, dim=0):
         # runtime assert forcing u0 to be zero.  So if this hasn't happened,
         # we know that the unbacked SymInt has appropriate size and there are
         # no problems.
-        return len(x.shape) != 1 or guard_size_oblivious(x.shape[0] > 0)
+        return len(x.shape) != 1 or x.shape[0] > 0
 
     filtered_tensors = list(filter(non_empty_tensor, tensors))
 

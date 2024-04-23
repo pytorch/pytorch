@@ -4809,6 +4809,9 @@ def _is_dim_dynamic(t, d):
 
 class PropagateUnbackedSymInts(torch.fx.Interpreter):
     def run_node(self, n: torch.fx.Node):
+        """
+        Run an FX node, propagating unbacked Symbol bindings to the new fake tensor
+        """
         from torch._guards import detect_fake_mode
 
         result = super().run_node(n)
