@@ -336,10 +336,12 @@ def patch_torch_manual_seed():
         seed = 1337
         if HAS_CUDA:
             import torch.cuda
+
             if not torch.cuda._is_in_bad_fork():
                 torch.cuda.manual_seed_all(seed)
         if HAS_XPU:
             import torch.xpu
+
             if not torch.xpu._is_in_bad_fork():
                 torch.xpu.manual_seed_all(seed)
         return default_generator.manual_seed(seed)
