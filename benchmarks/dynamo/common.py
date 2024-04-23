@@ -3667,9 +3667,12 @@ def run(runner, args, original_dir=None):
             log.warning("torch.cuda.is_available() == False, using CPU")
             args.devices = ["cpu"]
 
-    if args.devices != ["cpu"] and (torch.cuda.is_available() or torch.xpu.is_available()):
+    if args.devices != ["cpu"]:
         global synchronize
-        synchronize = torch.cuda.synchronize if (torch.cuda.is_available()) else torch.xpu.synchronize
+        if torch.cuda.is_available():
+            synchronize = torch.cuda.synchronize
+        elif torch.xpu.is_available():
+            synchronize = torch.xpu.synchronize
 
     if (
         args.devices == ["cuda"]
