@@ -598,7 +598,7 @@ CUDA_INCLUDE_MAP = collections.OrderedDict(
         ("curand_precalc.h", ("hiprand/hiprand_kernel.h", CONV_INCLUDE, API_RAND)),
         ("curand_uniform.h", ("hiprand/hiprand_kernel.h", CONV_INCLUDE, API_RAND)),
         ("cusparse.h", ("hipsparse/hipsparse.h", CONV_INCLUDE, API_RAND)),
-        ("cusparseLt.h", ("hipsparseLt/hipsparseLt.h", CONV_INCLUDE, API_RAND)),
+        ("cusparseLt.h", ("hipsparselt/hipsparselt.h", CONV_INCLUDE, API_RAND)),
         ("cufft.h", ("hipfft/hipfft.h", CONV_INCLUDE, API_BLAS)),
         ("cufftXt.h", ("hipfft/hipfftXt.h", CONV_INCLUDE, API_BLAS)),
         # PyTorch also has a source file named "nccl.h", so we need to "<"">" to differentiate
@@ -8207,7 +8207,6 @@ CUDA_SPECIAL_MAP = collections.OrderedDict(
             ("HIPSPARSE_MATRIX_TYPE_GENERAL", CONV_NUMERIC_LITERAL, API_SPECIAL),
         ),
         # SparseLt
-        ("cusparseLt.h", ("hipsparselt.h", CONV_INCLUDE, API_SPECIAL)),
         ("cuSPARSELt", ("hipSPARSELt", CONV_TYPE, API_SPECIAL)),
         ("AT_CUSPARSELT_ENABLED", ("AT_HIPSPARSELT_ENABLED", CONV_TYPE, API_SPECIAL)),
         ("CUSPARSE_ORDER_ROW", ("HIPSPARSE_ORDER_ROW", CONV_NUMERIC_LITERAL, API_SPECIAL)),
