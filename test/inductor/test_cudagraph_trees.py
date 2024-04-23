@@ -308,7 +308,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 foo(inp())
 
             FileCheck().check(
-                "skipping cudagraphs due to mutated inputs (1 instances)"
+                "skipping cudagraphs due to mutated inputs (1 instances). Found from"
             ).check(".add_(2)").run(captured_output[0])
 
             # mutation on inp doesnt hit cudagraphs
@@ -362,7 +362,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     mut_out = mut(tmp)
                     self.assertEqual(mut_out, non_mut(foo(inp)))
             FileCheck().check_count(
-                "skipping cudagraphs due to mutated inputs (1 instances)",
+                "skipping cudagraphs due to mutated inputs (1 instances). Found from",
                 0,
                 exactly=True,
             ).run(captured_output[0])
@@ -376,7 +376,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             with capture_stderr() as captured_output:
                 mut(mut_inp)
             FileCheck().check(
-                "skipping cudagraphs due to mutated inputs (1 instances)."
+                "skipping cudagraphs due to mutated inputs (1 instances). Found from"
             ).check("x.add_(2)").run(captured_output[0])
             self.assertEqual(mut_inp, non_mut(foo(inp)))
 
@@ -400,7 +400,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     torch.compiler.cudagraph_mark_step_begin()
                     fee(inp(), foo(inp()))
             FileCheck().check_count(
-                "skipping cudagraphs due to mutated inputs (1 instances).",
+                "skipping cudagraphs due to mutated inputs (1 instances). Found from",
                 1,
                 exactly=True,
             ).run(captured_output[0])
@@ -434,7 +434,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 mut(mut_inp)  # should not warn since mut has warned
 
             FileCheck().check_count(
-                "skipping cudagraphs due to mutated inputs (1 instances).",
+                "skipping cudagraphs due to mutated inputs (1 instances). Found from",
                 1,
                 exactly=True,
             ).run(captured_output[0])

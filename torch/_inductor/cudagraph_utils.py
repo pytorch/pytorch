@@ -82,21 +82,14 @@ def check_for_mutation(
                 or is_cuda_graph_recorded_tensor(inputs[idx])
             )
         ]
-        has_mutation = len(mutation_indices) != 0
-        if not has_mutation:
-            return None
-
-        return get_mutation_stack_trace(func.placeholders, mutation_indices)
-
     else:
-        has_mutation = len(func.mutated_input_idxs) != 0
-        return (
-            None
-            if not has_mutation
-            else format_default_skip_message(
-                f"mutated inputs ({len(func.mutated_input_idxs)} instances)"
-            )
-        )
+        mutation_indices = func.mutated_input_idxs
+
+    return (
+        get_mutation_stack_trace(func.placeholders, mutation_indices)
+        if mutation_indices
+        else None
+    )
 
 
 def get_use_stack_trace(node) -> Optional[str]:
