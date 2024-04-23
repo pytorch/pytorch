@@ -1406,6 +1406,14 @@ def forward(self, x_1, y_1):
     add = torch.ops.aten.add.Tensor(zeros, y_1);  zeros = y_1 = None
     return add""")  # noqa: B950
 
+    def test_reshape_divisibility_unbacked(self):
+        def f(x):
+            i0 = x.item()
+            r = torch.zeros(i0, 4, 20)
+            r = r.transpose(2, 1)
+            return r.reshape(-1, 80)
+        make_fx(f, tracing_mode="symbolic")(torch.tensor(24))
+
     def test_view_divisibility_unbacked(self):
         def f(x):
             i0 = x.item()
@@ -1441,6 +1449,12 @@ def forward(self, x_1, y_1):
     add = torch.ops.aten.add.Tensor(y_1, 2);  y_1 = None
     return add""")  # noqa: B950
 
+    # This is due to https://github.com/pytorch/pytorch/pull/124316 which bans
+    # i0 = i1 refinement.  To work around it, you should assert i1 = s0 by
+    # hand.  This particular example the refinement is OK because i0 is always
+    # available when i1 and vice versa, but it is difficult to tell if it
+    # is safe in general.
+    @unittest.expectedFailure
     def test_unbacked_unify_guard_transitivity(self):
         def f(x1, x2, y):
             z1 = torch.zeros(x1.item())
@@ -1452,15 +1466,7 @@ def forward(self, x_1, y_1):
             else:
                 return y + 2
 
-        r = str(make_fx(f, tracing_mode="symbolic")(torch.tensor(10), torch.tensor(10), torch.randn(10)).code).strip()
-        self.assertExpectedInline(r, """\
-def forward(self, x1_1, x2_1, y_1):
-    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x1_1);  x1_1 = None
-    zeros = torch.ops.aten.zeros.default([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
-    _local_scalar_dense_1 = torch.ops.aten._local_scalar_dense.default(x2_1);  x2_1 = None
-    zeros_1 = torch.ops.aten.zeros.default([_local_scalar_dense_1], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense_1 = None
-    add = torch.ops.aten.add.Tensor(y_1, 2);  y_1 = None
-    return add""")  # noqa: B950
+        make_fx(f, tracing_mode="symbolic")(torch.tensor(10), torch.tensor(10), torch.randn(10))
 
     def test_split_unbacked_sizes(self):
         def f(lengths, values):
@@ -1889,7 +1895,6 @@ fake_tensor_failures = {
 symbolic_tensor_failures = {
     xfail('combinations', ''),
     xfail('geqrf', ''),  # aten.geqrf.default - couldn't find symbolic meta function/decomposition
-    xfail('histc', ''),  # Could not run 'aten::histc' with arguments from the 'Meta' backend. This could be because...
     xfail('histogram', ''),  # Could not run 'aten::histogram.bin_ct' with arguments from the 'Meta' backend. This c...
     xfail('histogramdd', ''),  # aten._histogramdd_bin_edges.default - couldn't find symbolic meta function/decomposition
     xfail('kthvalue', ''),  # aten.kthvalue.default - couldn't find symbolic meta function/decomposition
@@ -1981,6 +1986,12 @@ out_symbolic_tensor_failures = {
     xfail('ones', ''),
     xfail('randn', ''),
     xfail('zeros', ''),
+
+    # RuntimeError: Cannot call numel() on tensor with symbolic sizes/strides
+    xfail('index_reduce', 'prod'),
+    xfail('index_reduce', 'mean'),
+    xfail('index_reduce', 'amax'),
+    xfail('index_reduce', 'amin'),
 }
 
 out_symbolic_tensor_segfaults = {
