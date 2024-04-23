@@ -18,13 +18,10 @@ __all__ = ["MemoryTrackingMode"]
 
 class _RefType(str, Enum):
     parameter = "parameter"
-    unsharded_parameter = "unsharded_parameter"
     buffer = "buffer"
     gradient = "gradient"
-    unsharded_gradient = "unsharded_gradient"
     activation = "activation"
     optstate = "optstate"
-
 
 @dataclass
 class _WeakRefInfo:
@@ -34,9 +31,9 @@ class _WeakRefInfo:
         self.reftype = reftype
         self.mem_consumed = self._calculate_mem_consumed()
 
-    def _calculate_mem_consumed(self)->int:
+    def _calculate_mem_consumed(self) -> int:
         return (math.ceil((self.size * self.element_size) / _PYTORCH_MIN_ALLOCATE)
-            * _PYTORCH_MIN_ALLOCATE)
+                * _PYTORCH_MIN_ALLOCATE)
 
     def get_mem_consumed(self, st: torch.UntypedStorage) -> int:
         if st.size() != self.size:
@@ -96,9 +93,7 @@ class MemoryTrackingMode(TorchDispatchMode):
     def _get_current_memory_allocated(self) -> Dict[str, int]:
         mem_stats = defaultdict(int)
         mem_stats[_RefType.parameter.name] = 0
-        mem_stats[_RefType.unsharded_parameter.name] = 0
         mem_stats[_RefType.gradient.name] = 0
-        mem_stats[_RefType.unsharded_gradient.name] = 0
         mem_stats[_RefType.optstate.name] = 0
         mem_stats[_RefType.activation.name] = 0
         mem_stats[_RefType.buffer.name] = 0
@@ -112,14 +107,19 @@ class MemoryTrackingMode(TorchDispatchMode):
     def print_mem_stats(self, stats: Optional[Dict[str, int]] = None):
         if stats is None:
             stats = self._get_current_memory_allocated()
-        rounding_fn = lambda x, y, z: round(x / y, z)
-        if self.units == "MB":
+
+        def rounding_fn(value, divisor, precision) -> Union[float, int]:
+            if divisor == 1:
+                return value
+            return round(value / divisor, precision)
+        divisor = 1
+        if self.units == "GB":
+            divisor = 2**30
+        elif self.units == "MB":
             divisor = 2**20
         elif self.units == "KB":
             divisor = 2**10
-        else:
-            divisor = 1
-            rounding_fn = lambda x, y, z: x
+
         for mem_type, mem_val in stats.items():
             print(f"\t{mem_type}: {rounding_fn(mem_val, divisor, 2)} {self.units}")
 
@@ -133,7 +133,7 @@ class MemoryTrackingMode(TorchDispatchMode):
             mod_depth = mod.count(".") + 1
             if mod_depth > depth:
                 continue
-            print(f"Module: ", mod)
+            print(f"Module:  {mod}")
             for state, stats in self.memory_tracking[mod].items():
                 print(f"{state}")
                 self.print_mem_stats(stats)
@@ -283,20 +283,20 @@ def test():
     mem_tracker = MemoryTrackingMode(model, optim, display_modulewise_stats=True)
     with mem_tracker as mt:
         input_batch = torch.randn(batch_size, dim)
-        print(f"After Model and mini-batch init:")
+        print("After Model and mini-batch init:")
         mt.print_mem_stats()
         output = model(input_batch)
-        print(f"After Forward:")
+        print("After Forward:")
         mt.print_mem_stats()
         output.sum().backward()
         output = None
-        print(f"After Backward:")
+        print("After Backward:")
         mt.print_mem_stats()
         optim.step()
-        print(f"After Opt Step:")
+        print("After Opt Step:")
         mt.print_mem_stats()
         optim.zero_grad()
-        print(f"After Zero Grad:")
+        print("After Zero Grad:")
         mt.print_mem_stats()
         MAX_MEMORY = mt.get_max_memory()
 
