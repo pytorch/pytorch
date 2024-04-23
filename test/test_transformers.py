@@ -2492,7 +2492,7 @@ class TestSDPACudaOnly(NNTestCase):
 
         assert torch._fused_sdp_choice(query, key, value) == SDPBackend.EFFICIENT_ATTENTION.value
 
-    @skipIfRocm  # Missing triton.float32 ("triton" prefix is to locate skipped UTs)
+    @skipIfRocm  # Missing triton.float32 ("triton" prefix is to locate skipped UTs), and deterministic algo
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Platform does not support fused SDPA")
     @parametrize("warn_only", [True, False])
     def test_sdp_choice_with_determinism(self, device, warn_only):
@@ -2505,6 +2505,7 @@ class TestSDPACudaOnly(NNTestCase):
             with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION, SDPBackend.MATH]):
                 assert torch._fused_sdp_choice(query, key, value) == SDPBackend.EFFICIENT_ATTENTION.value
 
+    @skipIfRocm  # Missing deterministic algo
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("fused_kernel", PLATFORM_SPECIFIC_SDPA)
     @parametrize("warn_only", [True, False])
@@ -2827,7 +2828,7 @@ class TestSDPACudaOnly(NNTestCase):
             self.skipTest("Flash attention on sm86, sm87, and sm89 for headdim > 192 currently disabled")
         if is_causal and seq_len_q != seq_len_k:
             self.skipTest("Flash V2 does not accept is_casual when seq_len_q != seq_len_k")
-        if TEST_WITH_ROCM and seq_len_q > 1024 and seq_len_k > 1024 and head_dim > 128 and batch_size > 1:
+        if TEST_WITH_ROCM and seq_len_q >= 1024 and seq_len_k >= 1024 and head_dim > 128 and batch_size > 1:
             torch.cuda.empty_cache()  # Prevent memory fragmentation
 
         scale = scale if scale is None else (1 / head_dim)
