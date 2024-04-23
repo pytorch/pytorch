@@ -202,6 +202,8 @@ class TestFullyShardStateDictMultiThread(FSDPTestMultiThread):
             full_param = sharded_param.full_tensor()
             if self.rank == 0:
                 full_sd[param_name] = full_param.cpu()
+            else:
+                del full_param
 
         # Check that we have a CPU full state dict only on rank 0
         if self.rank == 0:
