@@ -377,6 +377,21 @@ class TestPySymInt(TestCase):
         self.assertEqual(guard_int(a0), 2)
         self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(s0, 2)""")
 
+    def test_prefer_deferred_runtime_assertions_over_guards(self):
+        shape_env = ShapeEnv(prefer_deferred_runtime_asserts_over_guards=True)
+        s0 = create_symint(shape_env, 2)
+        self.assertEqual(guard_int(s0), 2)
+        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(s0, 2)""")
+
+        shape_env = ShapeEnv(prefer_deferred_runtime_asserts_over_guards=True)
+        s0 = create_symint(shape_env, 2)
+        self.assertTrue(expect_true(s0 == 2))
+        self.assertEqual(len(shape_env.guards), 0)
+        self.assertExpectedInline(
+            str([ra.expr for ra in shape_env.deferred_runtime_asserts[None]]),
+            """[Eq(s0, 2)]"""
+        )
+
     def test_sym_int(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 5)
@@ -389,13 +404,13 @@ class TestPySymInt(TestCase):
         r = sym_int(a1 / 2)
         self.assertEqual(guard_int(r), 3)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
-        self.assertExpectedInline(str(shape_env.guards[1][0]), """Eq(floor(s1/2), 3)""")
+        self.assertExpectedInline(str(shape_env.guards[1][0]), """Eq(Trunc(s1/2), 3)""")
 
         a3 = create_symint(shape_env, 3)
         r = sym_int(2.0 * torch.sym_float(a3))
         self.assertEqual(guard_int(r), 6)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
-        self.assertExpectedInline(str(shape_env.guards[2][0]), """Eq(2*s2, 6)""")
+        self.assertExpectedInline(str(shape_env.guards[2][0]), """Eq(Trunc(2.0*s2), 6)""")
 
     def test_sym_sqrt(self):
         shape_env = ShapeEnv()
@@ -403,7 +418,7 @@ class TestPySymInt(TestCase):
         r = torch._sym_sqrt(a0)
         self.assertEqual(r, 2)
         self.assertIsInstance(r, torch.SymFloat, msg=type(r))
-        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(sqrt(s0), 2)""")
+        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(OpaqueUnaryFn_sqrt(s0), 2)""")
 
     def test_sym_floor(self):
         shape_env = ShapeEnv()
@@ -416,6 +431,18 @@ class TestPySymInt(TestCase):
         self.assertEqual(r, 15)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
         self.assertExpectedInline(str(shape_env.guards[1][0]), """Eq(3*s0, 15)""")
+
+    def test_sym_trunc(self):
+        shape_env = ShapeEnv()
+        a0 = create_symint(shape_env, 5)
+        r = math.trunc(a0 / 2)
+        self.assertEqual(r, 2)
+        self.assertIsInstance(r, torch.SymInt, msg=type(r))
+        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(Trunc(s0/2), 2)""")
+        r = torch.sym_int(torch.sym_sqrt(a0))
+        self.assertEqual(r, 2)
+        self.assertIsInstance(r, torch.SymInt, msg=type(r))
+        self.assertExpectedInline(str(shape_env.guards[1][0]), """Eq(Trunc(OpaqueUnaryFn_sqrt(s0)), 2)""")
 
     def test_sym_ceil(self):
         shape_env = ShapeEnv()
@@ -500,13 +527,15 @@ def forward(self, x_1):
         shape_env = ShapeEnv()
         s0 = create_symint(shape_env, 5)
         i0 = shape_env.create_unbacked_symint()
-        self.assertTrue(expect_true(i0 <= s0))
+        self.assertTrue(expect_true(i0 < s0))
         self.assertExpectedInline(
             str([ra.expr for ra in shape_env.deferred_runtime_asserts[i0.node.expr]]),
-            """[-s0 + u0 <= 0]"""
+            """[-s0 + u0 < 0]"""
         )
-        self.assertTrue(i0 <= s0)
+        self.assertTrue(i0 < s0)
+        self.assertTrue(i0 != s0)
         self.assertFalse(i0 > s0)
+        self.assertFalse(i0 >= s0)
 
     def test_expect_true_prefer_later(self):
         shape_env = ShapeEnv()
@@ -1026,15 +1055,10 @@ class TestSymNumberMagicMethods(TestCase):
         hash(n)
         hash(m)
 
-    def test_symnode_deepcopy(self):
+    def test_symint_deepcopy(self):
         shape_env = ShapeEnv()
 
-        symnodes = (
-            create_symint(shape_env, 3),
-            create_symbool(shape_env, True),
-            create_symfloat(shape_env, 3.0),
-            torch._C._get_nested_int(1, 1),
-        )
+        symnodes = (torch._C._get_nested_int(1, 1),)
         deepcopied_symnodes = copy.deepcopy(symnodes)
         self.assertEqual(symnodes, deepcopied_symnodes)
 

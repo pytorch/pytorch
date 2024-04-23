@@ -289,18 +289,17 @@ DLManagedTensor* toDLPack(const Tensor& src) {
   return &(atDLMTensor->tensor);
 }
 
-Tensor fromDLPack(const DLManagedTensor* src) {
+Tensor fromDLPack(DLManagedTensor* src) {
   auto deleter = [src](void* self) {
     if (src->deleter) {
-      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-      src->deleter(const_cast<DLManagedTensor*>(src));
+      src->deleter(src);
     }
   };
   return fromDLPack(src, std::move(deleter));
 }
 
 Tensor fromDLPack(
-    const DLManagedTensor* src,
+    DLManagedTensor* src,
     std::function<void(void*)> deleter) {
   Device device = getATenDevice(src->dl_tensor.device, src->dl_tensor.data);
   ScalarType stype = toScalarType(src->dl_tensor.dtype);

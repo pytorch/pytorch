@@ -2,6 +2,7 @@
 #include <ATen/native/layer_norm.h>
 
 #include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/cpu/mixed_data_type.h>
 #include <c10/util/irange.h>
@@ -18,6 +19,9 @@
 #include <ATen/ops/native_layer_norm.h>
 #include <ATen/ops/native_layer_norm_backward_native.h>
 #include <ATen/ops/native_layer_norm_native.h>
+#include <ATen/ops/pow.h>
+#include <ATen/ops/rsqrt.h>
+#include <ATen/ops/rms_norm.h>
 #include <ATen/ops/zeros_like_native.h>
 #endif
 
@@ -257,5 +261,50 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
   mean = mean.view(stat_shape);
   rstd = rstd.view(stat_shape);
   return std::make_tuple(out, mean, rstd);
+}
+
+Tensor rms_norm(
+    const Tensor& input,
+    IntArrayRef normalized_shape,
+    const c10::optional<Tensor>& weight_opt /* optional */,
+    c10::optional<double> eps) {
+
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
+  auto bias_opt = at::optional<Tensor>();
+  const Tensor& bias = *at::borrow_from_optional_tensor(bias_opt);
+  (void) _check_layer_norm_inputs(input, normalized_shape, weight, bias);
+
+  std::vector<int64_t> dims_to_reduce;
+  for (const auto i : c10::irange(normalized_shape.size())) {
+    dims_to_reduce.push_back(input.dim() - i - 1);
+  }
+  IntArrayRef dims_to_reduce_ref = IntArrayRef(dims_to_reduce);
+
+  auto result = AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+        at::ScalarType::Half,
+        at::ScalarType::BFloat16,
+        input.scalar_type(),
+        "rms_norm",
+        [&] {
+    scalar_t eps_val;
+    if (!eps.has_value()) {
+      eps_val = std::numeric_limits<at::scalar_value_type<scalar_t>::type>::epsilon();
+    } else {
+      eps_val = eps.value();
+    }
+
+    auto result = input.mul(at::rsqrt(at::pow(input, 2).mean(dims_to_reduce_ref, /*keep_dim=*/true).add_(eps_val)));
+
+    if (weight_opt.has_value()) {
+      result = result.mul(weight_opt.value());
+    }
+
+    return result;
+  });
+
+  return result;
+
 }
 } // namespace at::native

@@ -39,8 +39,11 @@ ir_nodes_pre_fusion = 0
 # counters for tracking to_dtype inserted
 cpp_to_dtype_count = 0
 
-# counters for tracking cpp_wrapper disabled
-disable_cpp_wrapper = 0
+# The length counts the number of outer loop fusions.
+# Each element counts the number of inner kernels in each outer loop fusion.
+cpp_outer_loop_fused_inner_counts: List[int] = []
+
+num_comprehensive_padding = 0
 
 
 # reset all counters
@@ -50,7 +53,8 @@ def reset():
     global num_bytes_accessed, nodes_num_elem
     global ir_nodes_pre_fusion
     global cpp_to_dtype_count
-    global disable_cpp_wrapper
+    global cpp_outer_loop_fused_inner_counts
+    global num_comprehensive_padding
 
     generated_kernel_count = 0
     generated_cpp_vec_kernel_count = 0
@@ -59,7 +63,65 @@ def reset():
     node_runtimes.clear()
     ir_nodes_pre_fusion = 0
     cpp_to_dtype_count = 0
-    disable_cpp_wrapper = 0
+    cpp_outer_loop_fused_inner_counts.clear()
+    num_comprehensive_padding = 0
+
+
+@dataclass
+class CachedMetricsDeltas:
+    """
+    The subset of metrics we want update across cache hits, e.g., the
+    FxGraphCache.
+    """
+
+    generated_kernel_count: int
+    generated_cpp_vec_kernel_count: int
+    ir_nodes_pre_fusion: int
+    cpp_to_dtype_count: int
+
+
+class CachedMetricsHelper:
+    """
+    A helper class to help calculate and apply counter deltas for those
+    metrics we want to save with cache entries (e.g., FxGraphCache) and
+    apply on a cache hit.
+    """
+
+    def __init__(self):
+        global generated_kernel_count
+        global generated_cpp_vec_kernel_count
+        global ir_nodes_pre_fusion
+        global cpp_to_dtype_count
+
+        self.generated_kernel_count = generated_kernel_count
+        self.generated_cpp_vec_kernel_count = generated_cpp_vec_kernel_count
+        self.ir_nodes_pre_fusion = ir_nodes_pre_fusion
+        self.cpp_to_dtype_count = cpp_to_dtype_count
+
+    def get_deltas(self) -> CachedMetricsDeltas:
+        global generated_kernel_count
+        global generated_cpp_vec_kernel_count
+        global ir_nodes_pre_fusion
+        global cpp_to_dtype_count
+
+        return CachedMetricsDeltas(
+            generated_kernel_count - self.generated_kernel_count,
+            generated_cpp_vec_kernel_count - self.generated_cpp_vec_kernel_count,
+            ir_nodes_pre_fusion - self.ir_nodes_pre_fusion,
+            cpp_to_dtype_count - self.cpp_to_dtype_count,
+        )
+
+    @staticmethod
+    def apply_deltas(delta: CachedMetricsDeltas):
+        global generated_kernel_count
+        global generated_cpp_vec_kernel_count
+        global ir_nodes_pre_fusion
+        global cpp_to_dtype_count
+
+        generated_kernel_count += delta.generated_kernel_count
+        generated_cpp_vec_kernel_count += delta.generated_cpp_vec_kernel_count
+        ir_nodes_pre_fusion += delta.ir_nodes_pre_fusion
+        cpp_to_dtype_count += delta.cpp_to_dtype_count
 
 
 REGISTERED_METRIC_TABLES: Dict[str, MetricTable] = {}

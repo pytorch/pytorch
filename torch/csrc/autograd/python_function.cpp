@@ -312,7 +312,7 @@ void PyNode::compiled_args(CompiledNodeArgs& args) {
     throw_python_error();
   }
   args.collect_size(static_cast<size_t>(key));
-  args.collect_size(size);
+  args.collect_size(static_cast<size_t>(size));
 
   auto f = (THPFunction*)obj;
   f->compiled_autograd_symints.clear();

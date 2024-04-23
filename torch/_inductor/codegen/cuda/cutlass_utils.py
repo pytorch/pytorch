@@ -196,6 +196,12 @@ def dtype_match(
         return cutlass_dtype == cutlass_library.library.DataType.f16
     elif torch_dtype == torch.bfloat16:
         return cutlass_dtype == cutlass_library.library.DataType.bf16
+    elif torch_dtype == torch.int8:
+        return cutlass_dtype == cutlass_library.library.DataType.s8
+    elif torch_dtype == torch.uint8:
+        return cutlass_dtype == cutlass_library.library.DataType.u8
+    elif torch_dtype == torch.int32:
+        return cutlass_dtype == cutlass_library.library.DataType.s32
     else:
         return False
 
@@ -204,15 +210,28 @@ def get_accumulator_dtype(
     input_torch_dtypes: List[torch.dtype],
 ) -> Optional[torch.dtype]:
     """
-    Given a list of input torch dtypes, returns the inferred accumulator torch dtype.
+    Given a pair of input torch dtypes, returns the inferred accumulator torch dtype.
     """
 
-    if len(input_torch_dtypes) == 0:
+    if len(input_torch_dtypes) != 2:
         return None
-    torch_dtype = input_torch_dtypes[0]
-    for dtype in input_torch_dtypes[1:]:
-        if torch_dtype != dtype:
-            raise RuntimeError(f"Unmatched input dtypes: {torch_dtype=}, {dtype=}")
+
+    torch_dtype = None
+    if input_torch_dtypes[0] == input_torch_dtypes[1]:
+        torch_dtype = input_torch_dtypes[0]
+    else:
+        size0 = torch.tensor([], dtype=input_torch_dtypes[0]).element_size()
+        size1 = torch.tensor([], dtype=input_torch_dtypes[1]).element_size()
+        if size0 > size1:
+            dtype0, dtype1 = input_torch_dtypes
+        else:
+            dtype1, dtype0 = input_torch_dtypes
+        if dtype0 in [torch.half, torch.bfloat16] and dtype1 in [
+            torch.int8,
+            torch.uint8,
+        ]:
+            torch_dtype = dtype0
+
     if torch_dtype == torch.half:
         if torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction:
             return torch_dtype
@@ -220,7 +239,9 @@ def get_accumulator_dtype(
             return torch.float
     if torch_dtype in {torch.bfloat16, torch.float}:
         return torch.float
-    raise NotImplementedError(f"Unsupported data type: {input_torch_dtypes=}")
+    if torch_dtype == torch.int8:
+        return torch.int32
+    raise NotImplementedError(f"Unsupported data types: {input_torch_dtypes=}")
 
 
 def get_alignments(torch_dtype: torch.dtype) -> List[int]:
@@ -232,6 +253,10 @@ def get_alignments(torch_dtype: torch.dtype) -> List[int]:
     if torch_dtype in (torch.half, torch.bfloat16):
         return [8, 4, 2, 1]
     elif torch_dtype == torch.float:
+        return [4, 2, 1]
+    elif torch_dtype in (torch.uint8, torch.int8):
+        return [16, 8, 4, 2]
+    elif torch_dtype == torch.int32:
         return [4, 2, 1]
     else:
         raise NotImplementedError(f"unsupported {torch_dtype=} for alignments")

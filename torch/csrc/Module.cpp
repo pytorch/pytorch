@@ -1,3 +1,4 @@
+#include <ATen/DeviceAccelerator.h>
 #include <c10/util/Optional.h>
 #include <fmt/core.h>
 #include <sys/types.h>
@@ -15,9 +16,12 @@
 #include <ATen/Parallel.h>
 #include <ATen/Utils.h>
 #include <ATen/core/Vitals.h>
+#include <ATen/detail/AcceleratorHooksInterface.h>
 #include <ATen/dlpack.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/ForeachUtils.h>
+#include <ATen/native/Normalization.h>
+#include <c10/core/Device.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/util/AbortHandler.h>
 #include <c10/util/Backtrace.h>
@@ -38,6 +42,7 @@
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/DynamicTypes.h>
+#include <torch/csrc/Event.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/MemoryFormat.h>
@@ -69,6 +74,7 @@
 #include <torch/csrc/lazy/python/init.h>
 #include <torch/csrc/monitor/python_init.h>
 #include <torch/csrc/mps/Module.h>
+#include <torch/csrc/mtia/Module.h>
 #include <torch/csrc/multiprocessing/init.h>
 #include <torch/csrc/onnx/init.h>
 #include <torch/csrc/profiler/python/init.h>
@@ -91,8 +97,15 @@
 #include <ATen/native/transformers/sdp_utils_cpp.h>
 #include <torch/csrc/profiler/combined_traceback.h>
 #include <sstream>
+
 #ifdef USE_CUDA
+#include <ATen/cuda/CUDAConfig.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
+#ifdef __HIP_PLATFORM_AMD__
+#include <ATen/native/cudnn/hip/BatchNorm.h>
+#else
+#include <ATen/native/cudnn/BatchNorm.h>
+#endif
 #endif
 
 #ifdef USE_DISTRIBUTED
@@ -998,6 +1011,25 @@ PyObject* THPModule_allowBF16ReductionCuBLAS(
   Py_RETURN_FALSE;
 }
 
+PyObject* THPModule_setAllowFP16ReductionCPU(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      PyBool_Check(arg),
+      "set_allow_fp16_reduction_cpu expects a bool, "
+      "but got ",
+      THPUtils_typename(arg));
+  at::globalContext().setAllowFP16ReductionCPU(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPModule_allowFP16ReductionCPU(PyObject* _unused, PyObject* noargs) {
+  if (at::globalContext().allowFP16ReductionCPU()) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+}
+
 PyObject* THPModule_setFlushDenormal(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
@@ -1373,6 +1405,14 @@ static PyMethodDef TorchMethods[] = { // NOLINT
      THPModule_setAllowBF16ReductionCuBLAS,
      METH_O,
      nullptr},
+    {"_get_cpu_allow_fp16_reduced_precision_reduction",
+     THPModule_allowFP16ReductionCPU,
+     METH_NOARGS,
+     nullptr},
+    {"_set_cpu_allow_fp16_reduced_precision_reduction",
+     THPModule_setAllowFP16ReductionCPU,
+     METH_O,
+     nullptr},
     {"_vmapmode_increment_nesting",
      THPModule_vmapmode_increment_nesting,
      METH_NOARGS,
@@ -1568,6 +1608,7 @@ PyObject* initModule() {
   THPQScheme_init(module);
   THPDevice_init(module);
   THPStream_init(module);
+  THPEvent_init(module);
   ASSERT_TRUE(THPVariable_initModule(module));
   ASSERT_TRUE(THPFunction_initModule(module));
   ASSERT_TRUE(THPEngine_initModule(module));
@@ -1603,6 +1644,7 @@ PyObject* initModule() {
 #ifdef USE_XPU
   torch::xpu::initModule(module);
 #endif
+  torch::mtia::initModule(module);
   torch::cpu::initModule(module);
   torch::initVerboseBindings(module);
   ASSERT_TRUE(THPStorage_init(module));
@@ -1898,6 +1940,70 @@ Call this whenever a new thread is created in order to propagate values from
     return at::globalContext().linalgPreferredBackend();
   });
 
+  py_module.def("_accelerator_hooks_device_count", []() {
+    auto device_type = at::getAccelerator();
+    if (device_type.has_value()) {
+      return at::globalContext()
+          .getAcceleratorHooksInterface(device_type.value())
+          .deviceCount();
+    }
+    return c10::DeviceIndex(-1);
+  });
+
+  py_module.def(
+      "_accelerator_hooks_set_current_device",
+      [](c10::DeviceIndex device_index) {
+        auto device_type = at::getAccelerator();
+        if (device_type.has_value()) {
+          at::globalContext()
+              .getAcceleratorHooksInterface(device_type.value())
+              .setCurrentDevice(device_index);
+        }
+      });
+
+  py_module.def("_accelerator_hooks_get_current_device", []() {
+    auto device_type = at::getAccelerator();
+    if (device_type.has_value()) {
+      return at::globalContext()
+          .getAcceleratorHooksInterface(device_type.value())
+          .getCurrentDevice();
+    }
+    return c10::DeviceIndex(-1);
+  });
+
+  py_module.def(
+      "_accelerator_hooks_exchange_device", [](c10::DeviceIndex device_index) {
+        auto device_type = at::getAccelerator();
+        if (device_type.has_value()) {
+          return at::globalContext()
+              .getAcceleratorHooksInterface(device_type.value())
+              .exchangeDevice(device_index);
+        }
+        return c10::DeviceIndex(-1);
+      });
+
+  py_module.def(
+      "_accelerator_hooks_maybe_exchange_device",
+      [](c10::DeviceIndex device_index) {
+        auto device_type = at::getAccelerator();
+        if (device_type.has_value()) {
+          return at::globalContext()
+              .getAcceleratorHooksInterface(device_type.value())
+              .maybeExchangeDevice(device_index);
+        }
+        return c10::DeviceIndex(-1);
+      });
+
+  py_module.def(
+      "_get_accelerator",
+      [](c10::optional<bool> check = c10::nullopt) {
+        return c10::Device(
+            at::getAccelerator(check.value_or(false))
+                .value_or(c10::DeviceType::CPU),
+            -1);
+      },
+      py::arg("check") = nullptr);
+
   py_module.def(
       "_construct_storage_from_data_pointer",
       [](int64_t data_ptr, c10::Device device, size_t size_bytes) {
@@ -2094,6 +2200,44 @@ Call this whenever a new thread is created in order to propagate values from
         return c10::impl::cow::is_cow_data_ptr(tensor.storage().data_ptr());
       },
       "Checks if a tensor's data pointer is COW");
+
+  py_module.def(
+      "_get_cudnn_batch_norm_reserve_space_size",
+      [](const at::Tensor& input, bool training) {
+#ifdef USE_CUDA
+        return at::native::_get_cudnn_batch_norm_reserve_space_size(
+            input, training);
+#else
+        TORCH_CHECK(false, "PyTorch was not built with cuda");
+#endif
+      },
+      py::arg("input"),
+      py::arg("training"));
+
+  py::enum_<at::native::BatchNormBackend>(py_module, "_BatchNormBackend")
+      .value("Native", at::native::BatchNormBackend::Native)
+      .value("Cudnn", at::native::BatchNormBackend::Cudnn)
+      .value("Miopen", at::native::BatchNormBackend::Miopen);
+
+  py_module.def(
+      "_select_batch_norm_backend",
+      [](const at::Tensor& input,
+         const at::Tensor& weight,
+         const at::Tensor& bias,
+         const at::Tensor& running_mean,
+         const at::Tensor& running_var,
+         bool training,
+         double eps) {
+        return at::native::_select_batch_norm_backend(
+            input, weight, bias, running_mean, running_var, training, eps);
+      },
+      py::arg("input"),
+      py::arg("weight"),
+      py::arg("bias"),
+      py::arg("running_mean"),
+      py::arg("running_var"),
+      py::arg("training"),
+      py::arg("eps"));
 
   const auto& defaultGenerator = at::detail::getDefaultCPUGenerator();
   THPDefaultCPUGenerator =

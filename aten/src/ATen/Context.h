@@ -68,6 +68,8 @@ class TORCH_API Context {
       return at::detail::getMPSHooks();
     } else if (device_type == at::kPrivateUse1) {
       return at::detail::getPrivateUse1Hooks();
+    } else if (device_type == at::kMTIA) {
+      return at::detail::getMTIAHooks();
     } else {
       AT_ERROR(
           c10::DeviceTypeName(device_type), " device type not an accelerator.");
@@ -151,6 +153,9 @@ class TORCH_API Context {
   }
   void lazyInitXPU() {
     c10::call_once(thx_init, [&] { detail::getXPUHooks().initXPU(); });
+  }
+  void lazyInitMTIA() {
+    c10::call_once(th_mtia_init, [&] { detail::getMTIAHooks().initMTIA(); });
   }
   void lazyInitPrivateUse1() {
     c10::call_once(thp_init, [&] {
@@ -288,7 +293,7 @@ class TORCH_API Context {
   // Throws an error if `Context::deterministicAlgorithms()` is true, CUDA
   // >= 10.2, and CUBLAS_WORKSPACE_CONFIG is not set to either ":16:8" or
   // ":4096:8". For more details:
-  // https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility
+  // https://docs.nvidia.com/cuda/cublas/index.html#results-reproducibility
   void alertCuBLASConfigNotDeterministic() const;
 
   void setFloat32MatmulPrecision(const std::string& s);
@@ -319,6 +324,8 @@ class TORCH_API Context {
 
   void setDefaultMobileCPUAllocator();
   void unsetDefaultMobileCPUAllocator();
+  bool allowFP16ReductionCPU() const;
+  void setAllowFP16ReductionCPU(bool);
 
  private:
   void initCUDAIfNeeded(c10::DeviceType p) {
@@ -340,6 +347,7 @@ class TORCH_API Context {
   c10::once_flag thc_init;
   c10::once_flag thh_init;
   c10::once_flag thx_init;
+  c10::once_flag th_mtia_init;
   c10::once_flag thp_init;
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
@@ -377,6 +385,7 @@ class TORCH_API Context {
   bool display_vmap_fallback_warnings_ = false;
   c10::optional<at::QEngine> quantized_engine = c10::nullopt;
   bool enable_sparse_tensor_invariant_checks = false;
+  bool allow_fp16_reduction_cpu = false;
 
   Allocator* prev_allocator_ptr_{nullptr};
 };
@@ -548,15 +557,10 @@ struct TORCH_API NoTF32Guard {
   bool changed = false;
 };
 
-#ifdef USE_ROCM
 struct TORCH_API ROCmBackwardPassGuard {
   ROCmBackwardPassGuard();
   ~ROCmBackwardPassGuard();
   static bool is_backward_pass();
-
- private:
-  static thread_local bool is_backward_pass_;
 };
-#endif
 
 } // namespace at
