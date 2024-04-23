@@ -28,8 +28,8 @@ ext_modules = [
         "torch_test_cpp_extension.cpp", ["extension.cpp"], extra_compile_args=CXX_FLAGS
     ),
     CppExtension(
-        "torch_test_cpp_extension.ort",
-        ["ort_extension.cpp"],
+        "torch_test_cpp_extension.maia",
+        ["maia_extension.cpp"],
         extra_compile_args=CXX_FLAGS,
     ),
     CppExtension(

@@ -6,7 +6,6 @@
 #include <deque>
 #include <mutex>
 #include <thread>
-#include <unordered_map>
 #include <vector>
 
 #include <gloo/algorithm.h>
