@@ -17,7 +17,7 @@ from torch._inductor.cudagraph_utils import (
 from torch._inductor.utils import (
     BoxedBool,
     count_tangents,
-    get_first_incompatible_cudagraph_ops,
+    get_first_incompatible_cudagraph_node,
     num_fw_fixed_arguments,
     output_node,
 )
