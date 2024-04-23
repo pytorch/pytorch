@@ -930,11 +930,11 @@ class CKGemmTemplate(CKTemplate):
             if K % op.k_per_block != 0:
                 return None
 
-        if K % op.a_block_transfer_src_scalar_per_vector != 0:
+        if (K if op.a_layout == "Row" else M) % op.a_block_transfer_src_scalar_per_vector != 0:
             return None
-        if N % op.b_block_transfer_src_scalar_per_vector != 0:
+        if (N if op.b_layout == "Row" else K) % op.b_block_transfer_src_scalar_per_vector != 0:
             return None
-        if N % op.c_shuffle_block_transfer_scalar_per_vector_n_per_block != 0:
+        if (N if op.c_layout == "Row" else M) % op.c_shuffle_block_transfer_scalar_per_vector_n_per_block != 0:
             return None
 
         return op
