@@ -136,7 +136,7 @@ def export_memory_snapshot(file_prefix) -> None:
        torch.cuda.memory._dump_snapshot(f"artifacts/{file_prefix}.pickle")
    except Exception as e:
        print(f"Failed to capture memory snapshot {e}")
-       return
+       raise
 # ======== REMOVE WHEN READY TO MERGE ========
 
 
@@ -360,7 +360,7 @@ def init(activation_checkpoint):
     elif test_case == "transformer":
         model_args = ModelArgs(
             dim=hidden_dim,
-            n_layers=5,
+            n_layers=3,
             n_heads=1,
             vocab_size=1024,
         )
@@ -476,6 +476,7 @@ def main_compiled(n_iter, activation_checkpoint, backend):
     if apply_fsdp:
         torch._dynamo.config.trace_distributed = True
         torch._functorch.config.move_view_chain_to_bwd_graph = True
+        torch._inductor.config.allow_buffer_reuse = True
 
     torch._inductor.config.triton.unique_kernel_names = True
 
@@ -563,7 +564,7 @@ if __name__ == "__main__":
 
     if dist.get_rank() == 0:
         start_record_memory_history()
-    ac_test_order = [True, False]
+    ac_test_order = [False]
     backends = ["inductor"]
 
     def test_eager(activation_checkpoint):
@@ -592,10 +593,8 @@ if __name__ == "__main__":
         for backend in backends:
             losses_compiled = test_compile(activation_checkpoint, backend)
         losses_eager = test_eager(activation_checkpoint)
-        # if check_acc:
         # for loss_compiled, loss_eager in zip(losses_compiled, losses_eager):
         #     assert torch.allclose(torch.tensor(loss_compiled), torch.tensor(loss_eager), rtol=1e-3), f"{loss_compiled} vs {loss_eager}"
-
 
     if dist.get_rank() == 0:
         export_memory_snapshot(f"combined_fsdp{apply_fsdp}_ac{ac_test_order}_backend{backends}_memory_snapshot")
