@@ -223,13 +223,19 @@ class ConstDictVariable(VariableTracker):
             return self.getitem_const(args[0])
         elif name == "items":
             assert not (args or kwargs)
+            if self.source:
+                tx.output.guard_on_key_order[self.source] = True
             return TupleVariable(
                 [TupleVariable([k.vt, v]) for k, v in self.items.items()]
             )
         elif name == "keys":
+            if self.source:
+                tx.output.guard_on_key_order[self.source] = True
             assert not (args or kwargs)
             return DictKeys(self)
         elif name == "values":
+            if self.source:
+                tx.output.guard_on_key_order[self.source] = True
             assert not (args or kwargs)
             return DictValues(self)
         elif name == "copy":

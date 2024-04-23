@@ -400,6 +400,8 @@ class OutputGraph:
             self.install_builtins_dict_in_fglobals()
         )
 
+        self.guard_on_key_order: Dict[Source, bool] = {}
+
     def install_builtins_dict_in_fglobals(self):
         # f_globals["__builtins__"] can be a dict or a module. This is an
         # implemenation detail -
