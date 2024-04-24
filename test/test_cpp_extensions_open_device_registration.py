@@ -57,6 +57,7 @@ def generate_faked_module():
     foo.is_available = is_available
     foo.current_device = current_device
     foo._lazy_init = lambda: None
+    foo.is_initialized = lambda: True
 
     return foo
 
