@@ -62,6 +62,51 @@ from .variables.base import VariableTracker
 
 
 """
+A note on skip/inline rules:
+
+Dynamo consults this file to determine whether function should be inlined or skipped.
+
+A skip applies at the frame boundary, meaning dynamo either triggers a graph break
+at the beginning of the frame or attempts to trace/inline the whole frame. When skipping
+a frame, recursively called frames are still traced by dynamo unless also skipped.
+
+Skipfiles (skipped at the file level instead of function level) still apply on a
+frame-by-frame boundary as dynamo traces, but apply to all functions in that file.
+
+@skip is a helper decorator that can be applied to your function to cause it to be
+included here.
+
+Dynamo skip/inline rules & priorities are defined as follows:
+* Inline is the default behavior and will be used unless explicitly skipped.
+* Dynamo has two SKIPLIST: BUILTIN_SKIPLIST and THIRDPARTY_SKIPLIST.
+    * BUILTIN_SKIPLIST contains builtin python modules, such as abc, collections, etc.
+    * THIRDPARTY_SKIPLIST contains common third party libraries, such as numpy, pandas, etc.
+* Functions in these two SKIPLISTs are always skipped, except:
+    * They have explicitly defined rule in `manual_torch_name_rule_map`;
+    * The corresponding python module has been put into MOD_INLINELIST.
+* PyTorch(torch) is in the BUILTIN_SKIPLIST by default, but there are many cases
+    where we want inline the functions under torch namespace.
+    We should specify inline for the functions in `manual_torch_name_rule_map` or
+    put the corresponding python module into MOD_INLINELIST to make dynamo inline them.
+* If you call functions under skipped modules/files, Dynamo will wrap these functions
+    as SkipFunctionVariable. There are a few functions(e.g, collections.OrderedDict) that
+    we have special handling at SkipFunctionVariable.call_function.
+
+Overall: *_INLINELIST has precedence over *_SKIPLIST has precedence over DEFAULT (inline)
+
+To figure out what the behavior is, check the following list in order:
+* `manual_torch_name_rule_map` (Inline if YES)
+* MOD_INLINELIST (Inline if YES)
+* BUILTIN_SKIPLIST & THIRDPARTY_SKIPLIST (Skip if YES)
+* Inline by default
+
+In general, if you want to force inline a function or module, please consider adding
+the function's python module to MOD_INLINELIST first.
+Use the `manual_torch_name_rule_map` only when there are other functions under the same module that
+you don't want to inline them.
+"""
+
+"""
 Map of function objects to their tracing rules (Dynamo variables).
 * TorchInGraphFunctionVariable: The functions should be put into the FX graph or can be constant folded. E.g.,
   - torch.add: should be put into the FX graph.
@@ -128,6 +173,7 @@ manual_torch_name_rule_map = {
     "torch.nn.Parameter": TorchInGraphFunctionVariable,
     "torch._nested_tensor_from_mask": SkipFunctionVariable,
     "torch._nested_from_padded": SkipFunctionVariable,
+    "torch.nested.nested_tensor_from_jagged": UserFunctionVariable,
     # symbol operators implemented in Python
     "torch.sym_not": TorchInGraphFunctionVariable,
     "torch.sym_float": TorchInGraphFunctionVariable,
@@ -216,6 +262,8 @@ manual_torch_name_rule_map = {
     "torch.autograd.forward_ad.exit_dual_level": UserFunctionVariable,
     "torch.autograd.forward_ad.make_dual": UserFunctionVariable,
     "torch.autograd.forward_ad.unpack_dual": UserFunctionVariable,
+    # functorch/linearize
+    "torch._functorch.eager_transforms.linearize": FunctorchHigherOrderVariable,
     # functorch/jacfwd
     "torch._functorch.eager_transforms.jacfwd": FunctorchHigherOrderVariable,
     "torch._functorch.eager_transforms._construct_standard_basis_for": UserFunctionVariable,
@@ -518,6 +566,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._get_autograd_fallback_mode",
         "torch._C._get_backcompat_broadcast_warn",
         "torch._C._get_backcompat_keepdim_warn",
+        "torch._C._get_blas_preferred_backend",
         "torch._C._get_caught_jit_exception_class_name",
         "torch._C._get_caught_jit_exception_original_msg",
         "torch._C._get_constant_bool_symnode",
@@ -1046,6 +1095,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._set_autograd_fallback_mode",
         "torch._C._set_backcompat_broadcast_warn",
         "torch._C._set_backcompat_keepdim_warn",
+        "torch._C._set_blas_preferred_backend",
         "torch._C._set_cached_tensors_enabled",
         "torch._C._set_check_sparse_tensor_invariants",
         "torch._C._set_conj",
@@ -1497,7 +1547,9 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._sparse_csr_prod",
         "torch._sparse_csr_sum",
         "torch._sparse_log_softmax_backward_data",
+        "torch._sparse_semi_structured_addmm",
         "torch._sparse_semi_structured_linear",
+        "torch._sparse_semi_structured_mm",
         "torch._sparse_softmax_backward_data",
         "torch._sparse_sparse_matmul",
         "torch._sparse_sum",
@@ -2190,6 +2242,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._functorch.eager_transforms._vjp_treespec_compare",
         "torch._functorch.eager_transforms._set_tensor_requires_grad",
         "torch._functorch.eager_transforms._jvp_treespec_compare",
+        "torch._functorch.eager_transforms._linearize_treespec_compare",
         "torch._functorch.eager_transforms._is_differentiable",
         "torch._functorch.eager_transforms._maybe_unwrap_functional_tensor",
         "torch._functorch.eager_transforms._maybe_wrap_functional_tensor",
@@ -2198,7 +2251,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._functorch.eager_transforms.assert_flat_tuple_of_tensors",
         "torch._functorch.eager_transforms.functionalize",
         "torch._functorch.eager_transforms.lazy_dynamo_disable",
-        "torch._functorch.eager_transforms.linearize",
         "torch._functorch.eager_transforms.noop",
         "torch._functorch.functional_call.construct_stacked_leaf",
         "torch._functorch.functional_call.functional_call",
@@ -2337,6 +2389,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.backends.cuda.mem_efficient_sdp_enabled",
         "torch.backends.cuda.cudnn_sdp_enabled",
         "torch.backends.cuda.enable_cudnn_sdp",
+        "torch.backends.cuda.preferred_blas_library",
         "torch.backends.cuda.preferred_linalg_library",
         "torch.backends.cuda.sdp_kernel",
         "torch.backends.cudnn._init",
@@ -2536,6 +2589,8 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.functional.unravel_index",
         "torch.futures.collect_all",
         "torch.futures.wait_all",
+        "torch.fx.experimental.const_fold.split_const_subgraphs",
+        "torch.fx.experimental.proxy_tensor.make_fx",
         "torch.get_deterministic_debug_mode",
         "torch.get_float32_matmul_precision",
         "torch.is_deterministic_algorithms_warn_only_enabled",
@@ -2988,10 +3043,6 @@ def add_module_init_func(name: str, init_func: Callable[[], None]) -> None:
     """Register a module without eagerly importing it"""
     # If the module is already imported, eagerly run init
     assert "." not in name, f"Expected a root module name, but got {name}"
-    if name in sys.modules:
-        init_func()
-
-    # Module is not yet imported, delay processing until needed
     assert name not in _lazy_module_init
     _lazy_module_init[name].append(init_func)
 
@@ -3020,7 +3071,7 @@ def is_callable_disallowed(obj) -> bool:
 
 def is_forbidden(obj) -> bool:
     _maybe_init_lazy_module(obj)
-    return getattr(obj, "_dynamo_forbidden", False)
+    return inspect.getattr_static(obj, "_dynamo_forbidden", False)
 
 
 def is_builtin_callable(obj) -> bool:
@@ -3035,52 +3086,6 @@ def is_numpy(obj) -> bool:
     if np is None:
         return False
     return isinstance(obj, (np.ndarray, np.generic)) or id(obj) in _numpy_function_ids
-
-
-"""
-A note on skip/inline rules:
-
-Dynamo consults this file to determine whether function should be inlined or skipped.
-
-A skip applies at the frame boundary, meaning dynamo either triggers a graph break
-at the beginning of the frame or attempts to trace/inline the whole frame. When skipping
-a frame, recursively called frames are still traced by dynamo unless also skipped.
-
-Skipfiles (skipped at the file level instead of function level) still apply on a
-frame-by-frame boundary as dynamo traces, but apply to all functions in that file.
-
-@skip is a helper decorator that can be applied to your function to cause it to be
-included here.
-
-Dynamo skip/inline rules & priorities are defined as follows:
-* Inline is the default behavior and will be used unless explicitly skipped.
-* Dynamo has two SKIPLIST: BUILTIN_SKIPLIST and THIRDPARTY_SKIPLIST.
-    * BUILTIN_SKIPLIST contains builtin python modules, such as abc, collections, etc.
-    * THIRDPARTY_SKIPLIST contains common third party libraries, such as numpy, pandas, etc.
-* Functions in these two SKIPLISTs are always skipped, except:
-    * They have explicitly defined rule in `manual_torch_name_rule_map`;
-    * The corresponding python module has been put into MOD_INLINELIST.
-* PyTorch(torch) is in the BUILTIN_SKIPLIST by default, but there are many cases
-    where we want inline the functions under torch namespace.
-    We should specify inline for the functions in `manual_torch_name_rule_map` or
-    put the corresponding python module into MOD_INLINELIST to make dynamo inline them.
-* If you call functions under skipped modules/files, Dynamo will wrap these functions
-    as SkipFunctionVariable. There are a few functions(e.g, collections.OrderedDict) that
-    we have special handling at SkipFunctionVariable.call_function.
-
-Overall: *_INLINELIST has precedence over *_SKIPLIST has precedence over DEFAULT (inline)
-
-To figure out what the behavior is, check the following list in order:
-* `manual_torch_name_rule_map` (Inline if YES)
-* MOD_INLINELIST (Inline if YES)
-* BUILTIN_SKIPLIST & THIRDPARTY_SKIPLIST (Skip if YES)
-* Inline by default
-
-In general, if you want to force inline a function or module, please consider adding
-the function's python module to MOD_INLINELIST first.
-Use the `manual_torch_name_rule_map` only when there are other functions under the same module that
-you don't want to inline them.
-"""
 
 
 BUILTIN_SKIPLIST = (
@@ -3224,6 +3229,7 @@ MOD_INLINELIST = {
     "torch._tensor",
     "torch._higher_order_ops.strict_mode",
     "torch._higher_order_ops.while_loop",
+    "torch._higher_order_ops.associative_scan",
 }
 
 
@@ -3235,17 +3241,19 @@ if torch.distributed.is_available():
 
 @functools.lru_cache(None)
 def get_legacy_mod_inlinelist():
-    inlinelist = set()
-    for m in LEGACY_MOD_INLINELIST:
-        inlinelist.add(_module_dir(torch) + m[len("torch.") :].replace(".", "/"))
+    inlinelist = {
+        _module_dir(torch) + m[len("torch.") :].replace(".", "/")
+        for m in LEGACY_MOD_INLINELIST
+    }
     return inlinelist
 
 
 @functools.lru_cache(None)
 def get_mod_inlinelist():
-    inlinelist = set()
-    for m in MOD_INLINELIST:
-        inlinelist.add(_module_dir(torch) + m[len("torch.") :].replace(".", "/"))
+    inlinelist = {
+        _module_dir(torch) + m[len("torch.") :].replace(".", "/")
+        for m in MOD_INLINELIST
+    }
     return inlinelist
 
 

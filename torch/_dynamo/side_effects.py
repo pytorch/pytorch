@@ -365,7 +365,7 @@ class SideEffects:
 
         for ctx, args in self.save_for_backward:
             cg(ctx.source)
-            cg.extend_output([create_load_method("save_for_backward")])
+            cg.load_method("save_for_backward")
             for arg in args:
                 cg(arg)
             cg.extend_output(

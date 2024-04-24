@@ -6,8 +6,10 @@ This file contains utilities related to functionalization in AOTAutograd:
 4. checking if a graph is functional i.e. whether it contains any mutation ops
 """
 
+
 import torch
 from torch import Tensor
+from torch._logging import getArtifactLogger
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental.symbolic_shapes import definitely_true, sym_eq
@@ -16,6 +18,8 @@ from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     transform_subclass,
 )
+
+aot_joint_log = getArtifactLogger(__name__, "aot_joint_graph")
 
 
 def to_fun(t):
@@ -191,7 +195,65 @@ def has_metadata_mutation(f_arg, arg, *, check_only_storage_mutation: bool):
         return has_metadata_mutation_
 
 
-def gen_alias_from_base(aliased_base_tensor, target_meta_tensor, target_requires_grad):
+def gen_alias_from_base(
+    aliased_base_tensor,
+    target_meta_tensor,
+    target_requires_grad,
+    # Actual type: Optional[FunctionalTensorMetadataEq]
+    # Can't use it here because it lives inside schemas.py. Importing that class would lead
+    # to an error due to an import cycle.
+    target_functional_tensor=None,
+):
+    # Patch the correct requires_grad field of the output tensor, depending on whether:
+    # (i) the reconstructed output (out) was came from a tensor that requires grad or not;
+    # and (ii) the concrete returned output does require grad or not.
+    def patch_requires_grad(out):
+        if aliased_base_tensor.requires_grad and not target_requires_grad:
+            out = out.detach()
+        elif not aliased_base_tensor.requires_grad and target_requires_grad:
+            out.requires_grad_(True)
+        return out
+
+    # If provided, use the target functional tensor for replaying the views.
+    #
+    # In summary, we use the fact that FunctionalTensorWrapper saves the view
+    # functions applied to itself (collected during functionalization) so as
+    # to replay them (view functions) on the aliased_base_tensor.
+    if target_functional_tensor is not None:
+        from .schemas import FunctionalTensorMetadataEq
+
+        assert isinstance(target_functional_tensor, FunctionalTensorMetadataEq)
+        functional_tensor = target_functional_tensor.tensor
+
+        try:
+            out = torch._functionalize_apply_view_metas(
+                functional_tensor, aliased_base_tensor
+            )
+        except RuntimeError as e:
+            # NYI for dynamic shapes.
+            #
+            # On functionalization, the ViewMeta lambdas will have symbolic shapes.
+            # When trying to apply those lambdas on concrete tensors, it will fail.
+            #
+            # In order for this to work, we should have a way to replace those
+            # symbolic shapes with concrete numbers.
+            aot_joint_log.warning(
+                "could not reconstruct view by re-applying a ViewMeta sequence. "
+                "This error is possibly caused by dynamic shapes. "
+                "Fallbacking to reconstruction using as_strided. "
+                "Error message: %s",
+                str(e),
+            )
+        else:
+            # If re-applying the ViewMeta sequence succeeded, there should be no more
+            # problems going forward. We just check we got to the target shape and
+            # patch requires_grad flag.
+            assert out.shape == target_meta_tensor.shape, (
+                "incorrect out shape after application of ViewMeta sequence: "
+                f"{tuple(out.shape)} (actual) vs {tuple(target_meta_tensor.shape)} (expected)"
+            )
+            return patch_requires_grad(out)
+
     # Try to do view-replay if possible.
     # fall back to .as_strided() if we can't.
     if target_meta_tensor._base is not None:
@@ -218,11 +280,8 @@ def gen_alias_from_base(aliased_base_tensor, target_meta_tensor, target_requires
         #
         # As a stopgap, we'll fall back to as_strided.
         if out is not None and out.shape == target_meta_tensor.shape:
-            if aliased_base_tensor.requires_grad and not target_requires_grad:
-                out = out.detach()
-            elif not aliased_base_tensor.requires_grad and target_requires_grad:
-                out.requires_grad_(True)
-            return out
+            return patch_requires_grad(out)
+
     size = target_meta_tensor.size()
     stride = target_meta_tensor.stride()
     storage_offset = target_meta_tensor.storage_offset()
@@ -237,10 +296,7 @@ def gen_alias_from_base(aliased_base_tensor, target_meta_tensor, target_requires
     else:
         aliased_out = aliased_base_tensor.as_strided(size, stride, storage_offset)
     # For outputs aliasing inputs, we need to check if the requires-gradness has changed.
-    if aliased_base_tensor.requires_grad and not target_requires_grad:
-        aliased_out = aliased_out.detach()
-    elif not aliased_base_tensor.requires_grad and target_requires_grad:
-        aliased_out.requires_grad_(True)
+    aliased_out = patch_requires_grad(aliased_out)
     # For outputs aliasing inputs, we need to check if the dtype has changed.
     # as_strided() is the "most generic" view, but it does not cover cross-dtype views
     if aliased_out.dtype != target_meta_tensor.dtype:

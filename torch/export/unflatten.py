@@ -237,6 +237,12 @@ class UnflattenedModule(torch.nn.Module):
             fqn_order.keys()
         )
 
+    def _print_graph(self):
+        for fqn, mod in self.named_modules():
+            print(fqn + ":")
+            if hasattr(mod, "graph") and isinstance(mod.graph, torch.fx.Graph):
+                print(mod.graph)
+
     def forward(self, *args, **kwargs):
         signature = self.module_call_graph[0].signature
 
@@ -613,6 +619,7 @@ class _ModuleFrame:
             self.parent_call_module.kwargs = kwarg_nodes
 
     def add_placeholder(self, x):
+        assert self.fqn != "", f"Cannot add placeholder {x} to root module"
         assert x.graph is self.flat_graph
         # x is not in subgraph, create a new placeholder for subgraph
         with self.graph.inserting_before(None):

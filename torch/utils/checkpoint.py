@@ -194,25 +194,18 @@ def set_device_states(devices, states) -> None:
 
 
 def _get_autocast_kwargs(device="cuda"):
-    if device == "cuda":
+    if _supports_autocast(device):
         device_autocast_kwargs = {
-            "enabled": torch.is_autocast_enabled(),
-            "dtype": torch.get_autocast_gpu_dtype(),
-            "cache_enabled": torch.is_autocast_cache_enabled(),
-        }
-    elif _supports_autocast(device):
-        device_module = _get_device_module(device)
-        device_autocast_kwargs = {
-            "enabled": device_module.is_autocast_enabled(),
-            "dtype": device_module.get_autocast_dtype(),
+            "enabled": torch.is_autocast_enabled(device),
+            "dtype": torch.get_autocast_dtype(device),
             "cache_enabled": torch.is_autocast_cache_enabled(),
         }
     else:
         device_autocast_kwargs = None
 
     cpu_autocast_kwargs = {
-        "enabled": torch.is_autocast_cpu_enabled(),
-        "dtype": torch.get_autocast_cpu_dtype(),
+        "enabled": torch.is_autocast_enabled('cpu'),
+        "dtype": torch.get_autocast_dtype('cpu'),
         "cache_enabled": torch.is_autocast_cache_enabled(),
     }
 
@@ -1085,7 +1078,7 @@ class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
             if target_frame.early_stop and target_frame.recomp_counter[gid] == len(
                 target_frame.weak_holders
             ):
-                raise _StopRecomputationError()
+                raise _StopRecomputationError
             # See Rule 6: [ retain_graph is True ] above
             return x.detach()
 
