@@ -128,30 +128,102 @@ struct VecConvert<int32_t, 1, uint8_t, 1> {
 
 template <typename dst_t>
 struct VecConvert<
-  dst_t,
-  1,
-  float,
-  1,
-  typename std::enable_if_t<
-    std::is_same_v<dst_t, unsigned char> || std::is_same_v<dst_t, signed char>,
-    void>> {
+    dst_t,
+    1,
+    BFloat16,
+    1,
+    typename std::enable_if_t<
+        std::is_same_v<dst_t, unsigned char> ||
+            std::is_same_v<dst_t, signed char>,
+        void>> {
   static inline VectorizedN<dst_t, 1> apply(
-      const VectorizedN<float, 1>& src) {
+      const VectorizedN<BFloat16, 1>& src) {
+    __m256 value;
+    cvtbf16_fp32(_mm256_castsi256_si128(src[0]), value);
+    return convert_float_to_int8<dst_t>(value);
+  }
+};
+
+template <typename src_t>
+struct VecConvert<
+    BFloat16,
+    1,
+    src_t,
+    1,
+    typename std::enable_if_t<
+        std::is_same_v<src_t, unsigned char> ||
+            std::is_same_v<src_t, signed char>,
+        void>> {
+  static inline VectorizedN<BFloat16, 1> apply(
+      const VectorizedN<src_t, 1>& src) {
+    VectorizedN<float, 1> value = convert_int8_to_float<src_t>(src[0]);
+    VectorizedN<BFloat16, 1> result;
+    result[0] = _mm256_castsi128_si256(cvtfp32_bf16(value[0]));
+    return result;
+  }
+};
+
+template <typename dst_t>
+struct VecConvert<
+    dst_t,
+    1,
+    Half,
+    1,
+    typename std::enable_if_t<
+        std::is_same_v<dst_t, unsigned char> ||
+            std::is_same_v<dst_t, signed char>,
+        void>> {
+  static inline VectorizedN<dst_t, 1> apply(const VectorizedN<Half, 1>& src) {
+    __m256 value;
+    cvtfp16_fp32(_mm256_castsi256_si128(src[0]), value);
+    return convert_float_to_int8<dst_t>(value);
+  }
+};
+
+template <typename src_t>
+struct VecConvert<
+    Half,
+    1,
+    src_t,
+    1,
+    typename std::enable_if_t<
+        std::is_same_v<src_t, unsigned char> ||
+            std::is_same_v<src_t, signed char>,
+        void>> {
+  static inline VectorizedN<Half, 1> apply(const VectorizedN<src_t, 1>& src) {
+    VectorizedN<float, 1> value = convert_int8_to_float<src_t>(src[0]);
+    VectorizedN<Half, 1> result;
+    result[0] = _mm256_castsi128_si256(cvtfp32_fp16(value[0]));
+    return result;
+  }
+};
+
+template <typename dst_t>
+struct VecConvert<
+    dst_t,
+    1,
+    float,
+    1,
+    typename std::enable_if_t<
+        std::is_same_v<dst_t, unsigned char> ||
+            std::is_same_v<dst_t, signed char>,
+        void>> {
+  static inline VectorizedN<dst_t, 1> apply(const VectorizedN<float, 1>& src) {
     return convert_float_to_int8<dst_t>(src[0]);
   }
 };
 
 template <typename src_t>
 struct VecConvert<
-  float,
-  1,
-  src_t,
-  1,
-  typename std::enable_if_t<
-    std::is_same_v<src_t, unsigned char> || std::is_same_v<src_t, signed char>,
-    void>> {
-  static inline VectorizedN<float, 1> apply(
-      const VectorizedN<src_t, 1>& src) {
+    float,
+    1,
+    src_t,
+    1,
+    typename std::enable_if_t<
+        std::is_same_v<src_t, unsigned char> ||
+            std::is_same_v<src_t, signed char>,
+        void>> {
+  static inline VectorizedN<float, 1> apply(const VectorizedN<src_t, 1>& src) {
     return convert_int8_to_float<src_t>(src[0]);
   }
 };
