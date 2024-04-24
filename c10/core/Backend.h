@@ -46,7 +46,7 @@ enum class Backend {
   SparseCsrVE,
   SparseCsrXPU,
   SparseCsrPrivateUse1,
-  ORT,
+  MAIA,
   XLA,
   Vulkan,
   Metal,
@@ -76,8 +76,8 @@ static inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::VE;
   } else if (t == DispatchKey::FPGA) {
     return Backend::FPGA;
-  } else if (t == DispatchKey::ORT) {
-    return Backend::ORT;
+  } else if (t == DispatchKey::MAIA) {
+    return Backend::MAIA;
   } else if (t == DispatchKey::XLA || t == DispatchKey::AutogradXLA) {
     return Backend::XLA;
   } else if (t == DispatchKey::Lazy || t == DispatchKey::AutogradLazy) {
@@ -154,8 +154,8 @@ static inline DispatchKey backendToDispatchKey(Backend b) {
       return DispatchKey::VE;
     case Backend::FPGA:
       return DispatchKey::FPGA;
-    case Backend::ORT:
-      return DispatchKey::ORT;
+    case Backend::MAIA:
+      return DispatchKey::MAIA;
     case Backend::XLA:
       return DispatchKey::XLA;
     case Backend::Lazy:
@@ -236,8 +236,8 @@ static inline DeviceType backendToDeviceType(Backend b) {
       return DeviceType::VE;
     case Backend::FPGA:
       return DeviceType::FPGA;
-    case Backend::ORT:
-      return DeviceType::ORT;
+    case Backend::MAIA:
+      return DeviceType::MAIA;
     case Backend::XLA:
       return DeviceType::XLA;
     case Backend::Lazy:
@@ -298,8 +298,8 @@ static inline const char* toString(Backend b) {
       return "XPU";
     case Backend::IPU:
       return "IPU";
-    case Backend::ORT:
-      return "ORT";
+    case Backend::MAIA:
+      return "MAIA";
     case Backend::XLA:
       return "XLA";
     case Backend::Lazy:
