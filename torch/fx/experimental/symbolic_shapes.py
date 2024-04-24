@@ -2446,7 +2446,7 @@ class ShapeEnv:
         # semantics that this is an "unchecked" assert (but it this actually
         # something useful?  Might be better to restrict only for unbacked
         # SymInt).
-        self._constrain_symbol_range(
+        self.constrain_symbol_range(
             a,
             compiler_min=min,
             compiler_max=max,
