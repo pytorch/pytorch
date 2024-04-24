@@ -650,6 +650,7 @@ class ListIteratorVariable(VariableTracker):
         return f"{self.__class__.__name__}(length={len(self.items)}, index={repr(self.index)})"
 
     def next_variable(self, tx):
+        assert self.mutable_local
         old_index = self.index
         if old_index >= len(self.items):
             raise StopIteration
@@ -706,6 +707,7 @@ class RangeIteratorVariable(ListIteratorVariable):
         super().__init__(*args, **kwargs)
         assert isinstance(range_object, range)
         self.range_object = range_object
+        self.mutable_local = MutableLocal()
 
     def next_variables(self, tx) -> "Tuple[VariableTracker, ListIteratorVariable]":
         """
