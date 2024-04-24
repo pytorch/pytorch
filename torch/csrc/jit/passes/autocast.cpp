@@ -521,10 +521,10 @@ void Autocast(const std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("\nBefore Autocast: ", graph);
   if (autocastEnabled()) {
     AutocastContext init = {
-        at::autocast::is_enabled(),
-        at::autocast::is_cpu_enabled(),
-        at::autocast::get_autocast_gpu_dtype(),
-        at::autocast::get_autocast_cpu_dtype()};
+        at::autocast::is_autocast_enabled(at::kCUDA),
+        at::autocast::is_autocast_enabled(at::kCPU),
+        at::autocast::get_autocast_dtype(at::kCUDA),
+        at::autocast::get_autocast_dtype(at::kCPU)};
     handleBlock(graph->block(), init);
   }
   GRAPH_DUMP("\nAfter Autocast: ", graph);
