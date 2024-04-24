@@ -1294,7 +1294,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
 
         run()
 
-    @patch.object(torch._dynamo.config, "raise_on_ctx_manager_usage", False)
     def test_nn_moduledict_contains(self):
         class M(torch.nn.Module):
             def __init__(self, module_dict):
@@ -1317,33 +1316,37 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.op_count, 2)
         self.assertTrue(torch._dynamo.testing.same(out1, out2))
 
+        torch._dynamo.reset()
         module_dict = torch.nn.ModuleDict({"bar": torch.nn.Conv2d(1, 1, 1)})
         m = M(module_dict)
         data = torch.randn(1)
         out1 = m(data)
         cnt = torch._dynamo.testing.CompileCounter()
-        torch._dynamo.reset()
         opt_m = torch._dynamo.optimize(cnt, nopython=True)(m)
         out2 = opt_m(data)
-
         self.assertEqual(cnt.op_count, 1)
         self.assertTrue(torch._dynamo.testing.same(out1, out2))
 
-        module_dict = torch.nn.ModuleDict({"cat": torch.nn.Conv2d(1, 1, 1)})
-        pre = m(data)
-        cnt.clear()
+        torch._dynamo.reset()
+        cnt = torch._dynamo.testing.CompileCounter()
+        data = torch.randn(1)
+        module_dict1 = torch.nn.ModuleDict({"cat": torch.nn.Conv2d(1, 1, 1)})
+        module_dict2 = torch.nn.ModuleDict({"foo": torch.nn.Conv2d(1, 1, 1)})
 
-        with torch._dynamo.optimize(cnt, nopython=False):
-            opt_pre = m(data)
-            m = M(module_dict)
-            data = torch.randn(1)
-            out1 = m(data)
+        m1 = M(module_dict1)
+        m2 = M(module_dict2)
 
-        out_post = m(data)
+        def fn():
+            out1 = m1(data)
+            out2 = m2(data)
+            return out1
+
+        opt_fn = torch.compile(fn, backend=cnt)
+        opt_fn()
+
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 1)
-        self.assertTrue(torch._dynamo.testing.same(pre, opt_pre))
-        self.assertTrue(torch._dynamo.testing.same(out1, out_post))
+        self.assertEqual(cnt.op_count, 3)
+        self.assertTrue(torch._dynamo.testing.same(fn(), opt_fn()))
 
     # RuntimeError: SymIntArrayRef expected to contain only concrete integers
     @expectedFailureDynamic

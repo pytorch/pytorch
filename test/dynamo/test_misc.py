@@ -10144,6 +10144,9 @@ fn
     def test_outside_linear_module_free(self):
         # Compared to test_linear_module_free, the linear
         # layer is not the code object that is directly compiled.
+
+        # functools.lru_cache causes the static test to fail. Removing it passes.
+        # Dynamic still fails.
         def model_inp_ctr():
             fc = torch.nn.Linear(100, 100)
 
