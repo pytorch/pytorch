@@ -713,7 +713,7 @@ class RangeIteratorVariable(ListIteratorVariable):
         just return the original list iterator.
         """
         if self.index >= len(self.items):
-            raise StopIteration()
+            raise StopIteration
         items = [ConstantVariable.create(num) for num in self.range_object]
         next_iter = ListIteratorVariable(
             items, self.index + 1, mutable_local=MutableLocal()

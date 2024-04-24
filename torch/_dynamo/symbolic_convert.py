@@ -1224,9 +1224,8 @@ class InstructionTranslatorBase(
 
     def FOR_ITER(self, inst: Instruction):
         it = self.pop().realize()
-        if (
-            isinstance(it, variables.RangeIteratorVariable)
-        ):
+        skip_rest = False
+        if (config.convert_for_loops_to_functions and isinstance(it, variables.RangeIteratorVariable)):
             try:
                 # Converts a loop to a function body, to benefit
                 # from function compilation caching.
@@ -1252,9 +1251,7 @@ class InstructionTranslatorBase(
                 ]
                 for name, v in zip(self.f_code.co_varnames, args):
                     if (
-                        isinstance(v, ConstantVariable)
-                        and v.as_python_constant()
-                        is RangeHigherOrderVariable.NOT_SET_SENTINEL
+                        isinstance(v, RangeHigherOrderVariable.UnitializedVariable)
                     ):
                         continue
                     self.symbolic_locals[name] = v
@@ -1262,6 +1259,7 @@ class InstructionTranslatorBase(
                 # Skip the rest of the loop completely, now that we transformed it.
                 # Also pop off the iterator.
                 self.jump(inst)
+                skip_rest = True
                 # leave iterator upon exhaustion in 3.12
                 if sys.version_info >= (3, 12):
                     # CPython 3.12 actually jumps to the instruction after the END_FOR
@@ -1269,23 +1267,27 @@ class InstructionTranslatorBase(
                     # to the END_FOR and run it, so we need to make sure 2 values are
                     # on the stack for it to pop.
                     self.push(it)
-                    self.push(ConstantVariable.create(None))                
+                    self.push(ConstantVariable.create(None))
             except CannotConvertRangeToHigherOrder:
+                # Cannot convert - fall through to standard
+                # loop iteration.
                 pass
-        try:
-            val = it.next_variable(self)
-            self.push(it)
-            self.push(val)
-        except (StopIteration, exc.UserStopIteration):
-            # leave iterator upon exhaustion in 3.12
-            if sys.version_info >= (3, 12):
-                # CPython 3.12 actually jumps to the instruction after the END_FOR
-                # and performs the action of END_FOR as part of FOR_ITER. We jump
-                # to the END_FOR and run it, so we need to make sure 2 values are
-                # on the stack for it to pop.
+
+        if not skip_rest:
+            try:
+                val = it.next_variable(self)
                 self.push(it)
-                self.push(ConstantVariable.create(None))
-            self.jump(inst)
+                self.push(val)
+            except (StopIteration, exc.UserStopIteration):
+                # leave iterator upon exhaustion in 3.12
+                if sys.version_info >= (3, 12):
+                    # CPython 3.12 actually jumps to the instruction after the END_FOR
+                    # and performs the action of END_FOR as part of FOR_ITER. We jump
+                    # to the END_FOR and run it, so we need to make sure 2 values are
+                    # on the stack for it to pop.
+                    self.push(it)
+                    self.push(ConstantVariable.create(None))
+                self.jump(inst)
 
     def RAISE_VARARGS(self, inst):
         if inst.arg == 0:

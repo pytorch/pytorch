@@ -408,6 +408,10 @@ reorderable_logging_functions: Set[Callable[[Any], None]] = set()
 # used for testing
 inject_BUILD_SET_unimplemented_TESTING_ONLY = False
 
+# Whether to automatically convert a for loop to a function for compilation speedups
+# (and potentially future perf speedups too).
+convert_for_loops_to_functions = False
+
 # How many iterations a for loop has to be before we decide to automatically
 # convert it to a function body.
 for_loop_medium_size_boundary = 100

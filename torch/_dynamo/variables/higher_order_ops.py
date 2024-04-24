@@ -11,7 +11,8 @@ from typing import Dict, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from torch._dynamo.variables.lists import RangeIteratorVariable
-    from ..bytecode_transformation import Instruction
+
+from ..bytecode_transformation import Instruction, assemble, transform_code_object
 
 import torch._C
 import torch.fx
@@ -1152,6 +1153,13 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
     better than what we currently have.
     """
 
+    class UnitializedVariable(ConstantVariable):
+        """Special sentinel to indicate values are not yet set. This differs
+        from misc.UnknownVariable in that it's actually known outside of a for loop
+        higher order op.
+        """
+        pass
+
     # Any of these nested means the control flow is too complex to be
     # represented by a higher order op.
     FORBIDDEN_OPCODES = {
@@ -1187,11 +1195,11 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         "LIST_APPEND",
         "SET_ADD",
         "MAP_ADD",
+        # 3,12
+        "RETURN_CONST",
     }
 
     store_target: int
-
-    NOT_SET_SENTINEL = 0xDEADBEEF
 
     def __init__(self, value: "RangeIteratorVariable", **kwargs):
         from ..source import GlobalSource
@@ -1209,7 +1217,6 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         loop_body_instructions: List["Instruction"],
         symbolic_locals: Dict[str, VariableTracker],
     ):
-        from . import ConstantVariable
 
         if (
             loop_items := len(value.items)
@@ -1232,105 +1239,50 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         varnames = host_code_object.co_varnames
         args = [
             symbolic_locals.get(k)
-            or ConstantVariable.create(RangeHigherOrderVariable.NOT_SET_SENTINEL)
+            or RangeHigherOrderVariable.UnitializedVariable.create(0xdeaddead)
             for k in varnames
         ]
         # STORE_FAST always follows a FOR_ITER as CPython needs to store the next(iter) into the local
         # E.g. in `for i in range(10)`, there is a `STORE_FAST i``
         assert loop_body_instructions[0].opname == "STORE_FAST"
-        co_code: List[int] = []
+        co_code: List[Instruction] = []
         if sys.version_info >= (3, 11):
-            co_code.extend((opcode.opmap["RESUME"], 0))
+            co_code.append(Instruction(opcode.opmap["RESUME"], "RESUME", 0, None))
+            # Note: generators and async need a preceding RETURN_GENERATOR
+            # too, but we already blocked that by blocking YIELD_VALUE, so this
+            # is in essence a "pure" function.
 
         loop_body = loop_body_instructions[1:-1]
         if not loop_body:
             raise CannotConvertRangeToHigherOrder("Empty loop body.")
         # We skip the first instruction as it's a STORE_FAST, while we skip the last as it's the JUMP_BACKWARD.
         for inst in loop_body:
-            co_code.extend((inst.opcode, inst.arg or 0))
-            # 3.11 has inline cache entries too.
-            if sys.version_info >= (3, 11):
-                for _ in range(opcode._inline_cache_entries[inst.opcode]):
-                    co_code.extend((opcode.opmap["CACHE"], 0))
+            co_code.append(inst)
         # We need to replace the last `JUMP_BACKWARD` with a RETURN_VALUE of all
         # the locals.
         for i in range(host_code_object.co_nlocals):
-            co_code.extend((opcode.opmap["LOAD_FAST"], i))
+            co_code.append(Instruction(opcode.opmap["LOAD_FAST"], "LOAD_FAST", i, varnames[i]))
         co_code.extend(
             (
-                opcode.opmap["BUILD_TUPLE"],
-                host_code_object.co_nlocals,
-                opcode.opmap["RETURN_VALUE"],
-                0,
+                Instruction(opcode.opmap["BUILD_TUPLE"], "BUILD_TUPLE", host_code_object.co_nlocals, None),
+                Instruction(opcode.opmap["RETURN_VALUE"], "RETURN_VALUE", 0, None),
             )
         )
-        co_code = bytes(co_code)
-        argcount = host_code_object.co_nlocals
-        posonlyargcount = kwonlyargouncount = 0
-        nlocals = host_code_object.co_nlocals
-        stacksize = host_code_object.co_stacksize
-        flags = 1
-        codestring = co_code
-        constants = host_code_object.co_consts
-        names = host_code_object.co_names
-        filename = "<dynamo memory>"
-        name = "for_loop_body"
-        qualname = "for_loop_body"
-        firstlineno = 0
-        linetable = b""
-        exceptiontable = b""
-        freevars = ()
-        cellvars = ()
 
-        code_object = None
         # Translate instructions back to code object.
-        if sys.version_info >= (3, 12):
-            raise CannotConvertRangeToHigherOrder("Unsupported Python version")
-        elif sys.version_info >= (3, 11):
-            code_object = types.CodeType(
-                argcount,
-                posonlyargcount,
-                kwonlyargouncount,
-                nlocals,
-                stacksize,
-                flags,
-                codestring,
-                constants,
-                names,
-                varnames,
-                filename,
-                name,
-                qualname,
-                firstlineno,
-                linetable,
-                exceptiontable,
-                freevars,
-                cellvars,
-            )
-        elif sys.version_info >= (3, 8):  # noqa: UP036
-            code_object = types.CodeType(
-                argcount,
-                posonlyargcount,
-                kwonlyargouncount,
-                nlocals,
-                stacksize,
-                flags,
-                codestring,
-                constants,
-                names,
-                varnames,
-                filename,
-                name,
-                firstlineno,
-                linetable,
-                freevars,
-                cellvars,
-            )
-        else:
-            raise CannotConvertRangeToHigherOrder("Unsupported Python version")
+        def transform(insns, options: dict):
+            insns[:] = co_code
+            options["co_argcount"] = host_code_object.co_nlocals
+            options["co_posonlyargcount"] = 0
+            options["co_kwonlyargouncount"] = 0
+            options["co_nlocals"] = host_code_object.co_nlocals
+            options["co+flags"] = 1
+            options["co_filename"] = "<dynamo memory>"
+            options["co_name"] = "for_loop_body"
+            options["co_freevars"] = ()
+            options["co_cellvars"] = ()
 
-        if code_object is None:
-            raise CannotConvertRangeToHigherOrder("Could not construct code object")
+        code_object = transform_code_object(host_code_object, transform)
 
         obj = RangeHigherOrderVariable(value)
         obj.func = types.FunctionType(code_object, real_globals)

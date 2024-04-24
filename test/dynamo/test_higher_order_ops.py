@@ -1955,7 +1955,9 @@ class GraphModule(torch.nn.Module):
         assert_dict_matches_regex(
             self,
             dict(counters["graph_break"]),
-            {".*HigherOrderOperator body's output must consist of tensors or constants only": 1},
+            {
+                ".*HigherOrderOperator body's output must consist of tensors or constants only": 1
+            },
         )
 
     def test_nested_tuple_output(self):
@@ -6110,7 +6112,9 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
 
 
 class RangeHigherOrderTests(torch._dynamo.test_case.TestCase):
-    @torch._dynamo.config.patch(for_loop_medium_size_boundary=10)
+    @torch._dynamo.config.patch(
+        convert_for_loops_to_functions=True, for_loop_medium_size_boundary=10
+    )
     def test_loop_to_higher_order_simple(self):
         counters.clear()
         backend = EagerAndRecordGraphs()
@@ -6193,8 +6197,14 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(cnt.frame_count, 1)
         self.assertLessEqual(cnt.op_count, 40)
 
-    @torch._dynamo.config.patch(for_loop_medium_size_boundary=10)
+    @torch._dynamo.config.patch(
+        convert_for_loops_to_functions=True, for_loop_medium_size_boundary=10
+    )
     def test_loop_to_higher_order_consistent_namespace(self):
+        """This tests whether we respect CPython for loop semantics -- that is
+        the local variable (i) in a for loop, must also set the local variable (i)
+        outside the for loop.
+        """
         counters.clear()
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
@@ -6275,7 +6285,9 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(cnt.frame_count, 1)
         self.assertLessEqual(cnt.op_count, 40)
 
-    @torch._dynamo.config.patch(for_loop_medium_size_boundary=10)
+    @torch._dynamo.config.patch(
+        convert_for_loops_to_functions=True, for_loop_medium_size_boundary=10
+    )
     def test_loop_to_higher_order_step(self):
         counters.clear()
         backend = EagerAndRecordGraphs()
@@ -6358,7 +6370,9 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(cnt.frame_count, 1)
         self.assertLessEqual(cnt.op_count, 40)
 
-    @torch._dynamo.config.patch(for_loop_medium_size_boundary=2)
+    @torch._dynamo.config.patch(
+        convert_for_loops_to_functions=True, for_loop_medium_size_boundary=2
+    )
     def test_loop_to_higher_order_reject_comprehensions(self):
         counters.clear()
         backend = EagerAndRecordGraphs()
@@ -6373,7 +6387,9 @@ class GraphModule(torch.nn.Module):
         # Just not crashing is good enough.
         self.assertEqual(result, f(x))
 
-    @torch._dynamo.config.patch(for_loop_medium_size_boundary=10)
+    @torch._dynamo.config.patch(
+        convert_for_loops_to_functions=True, for_loop_medium_size_boundary=10
+    )
     def test_loop_to_higher_order_non_tensors(self):
         counters.clear()
         backend = EagerAndRecordGraphs()
@@ -6408,7 +6424,7 @@ class GraphModule(torch.nn.Module):
         _lambda_ = torch__dynamo_variables_higher_order_ops_call_function_lambda_a_a_proxy_args_kwargs_i_(0)
         for_loop_body_0 = self.for_loop_body_0
         _lambda__1 = torch__dynamo_variables_higher_order_ops_call_function_lambda_a_a_proxy_args_kwargs_i__1(0)
-        for_loop_wrapper = torch__dynamo_variables_higher_order_ops_for_loop_wrapper(for_loop_body_0, l_x_, l_x_, _lambda__1, 3735928559);  l_x_ = _lambda__1 = None
+        for_loop_wrapper = torch__dynamo_variables_higher_order_ops_for_loop_wrapper(for_loop_body_0, l_x_, l_x_, _lambda__1, 3735936685);  l_x_ = _lambda__1 = None
         getitem = for_loop_wrapper[0]
         getitem_1 = for_loop_wrapper[1];  for_loop_wrapper = None
         _lambda__2 = torch__dynamo_variables_higher_order_ops_call_function_lambda_a_a_proxy_args_kwargs_i__2(1)
