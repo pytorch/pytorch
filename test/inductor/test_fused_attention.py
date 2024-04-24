@@ -131,6 +131,35 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 rtol=rtol,
             )
 
+    @skipIfRocm
+    @torch._inductor.config.patch("freezing", True)
+    def _test_sdpa_rewriter_1_freezing(self):
+        def dot_prod_attention(
+            query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
+        ) -> torch.Tensor:
+            """Input tensors assumed to have shape (batch_size, n_head, seq_len, embed_dim)"""
+            return (
+                torch.matmul(query, key.transpose(-2, -1))
+                .div(math.sqrt(key.shape[-1]))
+                .softmax(dim=-1)
+                .matmul(value)
+            )
+
+        for dtype in [torch.float, torch.half]:
+            atol = 0.001
+            rtol = 1.3e-6 if dtype == torch.float else 0.7
+            if self.device == "cpu" and dtype == torch.half:
+                atol = 2e-3
+                rtol = 1e-2
+            with torch.no_grad():
+                self._check_common(
+                    dot_prod_attention,
+                    dtype=dtype,
+                    atol=atol,
+                    rtol=rtol,
+                    check_train=False,
+                )
+
     def _test_pattern_fails_with_reuse(self):
         """
         This test checks that the replacement is not done
@@ -806,6 +835,9 @@ if HAS_CUDA and PLATFORM_SUPPORTS_FUSED_ATTENTION:
         device = "cuda"
         test_sdpa_rewriter_1_cuda = (
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_1
+        )
+        test_sdpa_rewriter_1_freezing = (
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_1_freezing
         )
         test_pattern_fails_with_reuse_cuda = (
             TestSDPAPatternRewriterTemplate._test_pattern_fails_with_reuse

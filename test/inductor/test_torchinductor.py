@@ -70,6 +70,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     IS_X86,
     parametrize,
+    serialTest,
     skipIfRocm,
     subtest,
     TEST_WITH_ASAN,
@@ -80,6 +81,8 @@ from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten, tree_unflatten
 from torch.utils._triton import has_triton
 from torch.utils.weak import WeakTensorKeyDictionary
+
+DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -303,7 +306,9 @@ def compute_grads(args, kwrags, results, grads):
         return leaf_tensors
 
     flat_results = pytree.tree_leaves(results)
-    flat_diff_results = [r for r in flat_results if r.requires_grad]
+    flat_diff_results = [
+        r for r in flat_results if isinstance(r, torch.Tensor) and r.requires_grad
+    ]
     assert len(flat_diff_results) > 0
 
     leaf_tensors = gather_leaf_tensors(args, kwrags)
@@ -516,7 +521,7 @@ def check_model(
         grads = [
             torch.rand(r.shape, device=r.device, dtype=r.dtype)
             for r in correct_flat
-            if r.requires_grad
+            if isinstance(r, torch.Tensor) and r.requires_grad
         ]
         for g in grads:
             g /= g.norm()
@@ -1358,6 +1363,56 @@ class CommonTemplate:
             (10000,), dim=0, dtype=torch.float64, device=self.device
         )
         self.common(fn, (a, b), atol=1e-5, rtol=1e-5, check_lowp=False)
+
+    @skipCUDAIf(TEST_WITH_ROCM, "associative_scan is not supported on ROCm")
+    def test_custom_scan_op(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("associative_scan only supported on GPU")
+
+        def sum_combine(a, b):
+            return a + b
+
+        from torch._higher_order_ops.associative_scan import associative_scan
+
+        a = torch.randn(100, 100, device=self.device)
+        expect = torch.cumsum(a, 0)
+        actual = associative_scan(sum_combine, a, 0)
+        self.assertEqual(expect, actual)
+
+        def logcumsum_combine(a, b):
+            min_v = torch.minimum(a, b)
+            max_v = torch.maximum(a, b)
+            mask = (min_v != max_v) | ~min_v.isinf()
+            return torch.where(mask, max_v + (min_v - max_v).exp().log1p(), a)
+
+        expect = torch.logcumsumexp(a, 0)
+        actual = associative_scan(logcumsum_combine, a, 0)
+        self.assertEqual(expect, actual)
+
+    def test_custom_scan_op_compiled(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("associative_scan only supported on GPU")
+
+        from torch._higher_order_ops.associative_scan import associative_scan
+
+        def sum_combine(a, b):
+            return a + b
+
+        def fn(a, b, dim):
+            diff = (a - b).abs()
+            sad = associative_scan(sum_combine, diff, dim)
+            return sad.sum(dim)
+
+        a = torch.randn(100, 100, device=self.device)
+        b = torch.randn(100, 100, device=self.device)
+        self.common(fn, (a, b, 0))
+        cfn = torch.compile(fn)
+        _, code = run_and_get_code(cfn, a, b, 0)
+
+        # Check everything is fused into a single kernel
+        FileCheck().check_not("run(").check_regex(
+            r"triton_.*\.run\(arg[01]_1, arg[12]_1, buf1,"
+        ).check_not("run(").run(code[0])
 
     def test_embedding_bag_byte_unpack(self):
         if self.device != "cpu":
@@ -7581,8 +7636,7 @@ class CommonTemplate:
             sum_default_7 = torch.ops.aten.sum.default(mul_tensor_24)
             return (new_zeros_default_4, sum_default_7)
 
-        # TODO: Remove once https://github.com/pytorch/pytorch/issues/94017 is resolved
-        dtype = torch.float64 if self.device == "cpu" else torch.float32
+        dtype = torch.float32
         args = [
             ((1, 88, 40, 40), (140800, 1600, 40, 1), dtype),
             ((), (), dtype),
@@ -9278,6 +9332,7 @@ class CommonTemplate:
     @config.patch(
         "triton.autotune_pointwise", True
     )  # needed to introduce config that exceed max shared memory usage
+    @serialTest()
     def test_large_block_sizes(self):
         """
         Inductor will try triton configs like x = 64 and y = 1024 which will
@@ -9558,6 +9613,17 @@ class CommonTemplate:
         t = rand_strided((8, 1500, 1), (1504, 1, 1), device=self.device)
         self.assertFalse(complex_memory_overlap(t))
 
+    def test_generate_rand_fp8(self):
+        """
+        PyTorch can not generate fp8 tensors with a normal distribution because of
+        missing needed kernels.
+
+        We work around that in rand_strided by generating an fp16 tensor first and
+        then do casting.
+        """
+        t = rand_strided((2, 3), (3, 1), device=self.device, dtype=torch.float8_e4m3fn)
+        self.assertTrue(t.dtype is torch.float8_e4m3fn)
+
 
 @dataclasses.dataclass
 class TestFailure:
@@ -9626,7 +9692,7 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
     copy_tests(CommonTemplate, GPUTests, GPU_TYPE)
 
     class TritonCodeGenTests(TestCase):
-        from torch._inductor.triton_heuristics import CachingAutotuner
+        from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 
         class NoOpCompilerBackend:
             def __init__(self):
@@ -9678,7 +9744,7 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
 
                 for val in mod.__dict__.values():
                     if isinstance(
-                        val, torch._inductor.triton_heuristics.CachingAutotuner
+                        val, torch._inductor.runtime.triton_heuristics.CachingAutotuner
                     ):
                         kernels.append(val)
 
@@ -10316,6 +10382,69 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
                         if res:
                             seq_nr_set.add(int(res.group(1)))
             self.assertTrue(bwd_seq_nr_set.issubset(fwd_seq_nr_set))
+
+        @config.patch(
+            {
+                "coordinate_descent_tuning": True,
+                "triton.unique_kernel_names": True,
+                "benchmark_kernel": True,
+            }
+        )
+        @skipIfRocm
+        @unittest.skipIf(
+            torch.cuda.get_device_capability() < (9, 0),
+            "Triton does not support fp8 on A100",
+        )
+        def test_red_followed_by_transposed_pointwise(self):
+            bs = 26624
+            dim = 1024
+
+            @torch.compile(dynamic=False)
+            def f(in1, in2, a, b):
+                out = torch.nn.functional.silu(in1) * in2
+                out_row = (out / out.amax(dim=1, keepdim=True)).to(torch.float8_e4m3fn)
+                out_col = (out / out.amax(dim=0, keepdim=True)).to(torch.float8_e4m3fn)
+
+                # setup strides for _scaled_mm
+                out_row = out_row.contiguous()
+                out_col = out_col.t().contiguous().t()
+
+                return (
+                    torch._scaled_mm(out_row, a, out_dtype=torch.bfloat16)[0],
+                    torch._scaled_mm(b, out_col, out_dtype=torch.bfloat16)[0],
+                )
+
+            in1 = torch.randn((bs, dim), dtype=torch.bfloat16, device=GPU_TYPE)
+            in2 = torch.randn((bs, dim), dtype=torch.bfloat16, device=GPU_TYPE)
+            a = (
+                torch.randn((dim, dim), dtype=torch.bfloat16, device=GPU_TYPE)
+                .t()
+                .to(torch.float8_e4m3fn)
+            )
+            b = torch.randn((dim, bs), dtype=torch.bfloat16, device=GPU_TYPE).to(
+                torch.float8_e4m3fn
+            )
+
+            # warmup
+            _, (wrapper,) = run_and_get_code(f, in1, in2, a, b)
+
+            # Previously indcutor decide reduction hint for a reduction kernel without considering
+            # the pointwise nodes. That will cause the third reduction kernel in this wrapper to be a
+            # persistent inner reduction and cause bad perf.
+            #
+            # We fix that by making the third reduction a non-persistent reduction
+            # and improve the perf by 4.14x (451us -> 109us)
+            self.assertEqual(3, wrapper.count("def triton_red_"))
+            self.assertEqual(0, wrapper.count("def triton_per_"))
+
+            if DO_PERF_TEST:
+                with torch.profiler.profile(
+                    activities=[torch.profiler.ProfilerActivity.CUDA]
+                ) as p:
+                    for _ in range(1000):
+                        f(in1, in2, a, b)
+
+                print(p.key_averages().table(max_name_column_width=200))
 
     class RNNTest(TestCase):
         class Model(torch.nn.Module):
