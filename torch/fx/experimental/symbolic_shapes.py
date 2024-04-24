@@ -1370,7 +1370,7 @@ class ShapeGuardPrinter(StrPrinter):
                 for symbol, sources in self.symbol_to_source.items()
             })
 
-        assert self.symbol_to_source.get(expr), (
+        assert expr in self.symbol_to_source, (
             f"{expr} (could be from {[s.name() for s in self.var_to_sources[expr]]}) "
             f"not in {repr_symbol_to_source()}.  If this assert is failing, it could be "
             "due to the issue described in https://github.com/pytorch/pytorch/pull/90665"

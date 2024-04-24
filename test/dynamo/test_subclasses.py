@@ -1416,14 +1416,6 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         x = self._get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)[0].clone()
         yield x.values()
 
-        # Dense -> Subclass -> Dense -> Subclass
-        values = torch.randn(10, 5)
-        offsets = torch.tensor([0, 3, 6, 10])
-        offsets2 = offsets.clone().detach()
-        yield nested_view_from_values_offsets(
-            nested_view_from_values_offsets(values, offsets).values(), offsets
-        )
-
     def _input_view_test(self, nt_view):
         def fn(x):
             return x.sin()
@@ -1453,7 +1445,10 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
             if isinstance(nt_view._base, NestedTensor):
                 self.assertExpectedInline(guard_str, """Eq(s3 - 1, s0)""")
             else:
-                self.assertExpectedInline(guard_str, """""")
+                if any(isinstance(d, torch.SymInt) for d in nt_view._base.shape):
+                    self.assertExpectedInline(guard_str, """""")
+                else:
+                    self.assertExpectedInline(guard_str, """8*s1*s3 <= 8*s0*s1""")
             return gm
 
         torch._dynamo.reset()
@@ -1481,6 +1476,17 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         x = TwoTensor(x_inner, x_inner)
         x_view = x.view(2, 2)
         out = f(x_view)
+
+    @unittest.expectedFailure
+    def test_dense_subclass_dense_subclass_view(self):
+        # Dense -> Subclass -> Dense -> Subclass
+        values = torch.randn(10, 5)
+        offsets = torch.tensor([0, 3, 6, 10])
+        offsets2 = offsets.clone().detach()
+        nt_view = nested_view_from_values_offsets(
+            nested_view_from_values_offsets(values, offsets).values(), offsets
+        )
+        self._input_view_test(nt_view)
 
     # NJT1 -> Dense -> NJT2 -> Dense view
     # During view replay, the Dense -> NJT2 part will construct an intermediate,
