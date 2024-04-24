@@ -895,11 +895,9 @@ class CppWrapperCpu(WrapperCodeGen):
     @cache_on_self
     def get_output_refs(self):
         return [
-            (
-                f"torch::tensor({x.codegen_reference(self.wrapper_call)})"
-                if isinstance(x, ir.ShapeAsConstantBuffer) and not config.abi_compatible
-                else x.codegen_reference(self.wrapper_call)
-            )
+            f"torch::tensor({x.codegen_reference(self.wrapper_call)})"
+            if isinstance(x, ir.ShapeAsConstantBuffer) and not config.abi_compatible
+            else x.codegen_reference(self.wrapper_call)
             for x in V.graph.graph_outputs
         ]
 
@@ -1099,11 +1097,9 @@ class CppWrapperCpu(WrapperCodeGen):
             outputs_str = "output_tensors"
         else:
             outputs = [
-                (
-                    f"output_tensors[{i}]"
-                    if self.output_is_tensor[i]
-                    else f"output_tensors[{i}].item()"
-                )
+                f"output_tensors[{i}]"
+                if self.output_is_tensor[i]
+                else f"output_tensors[{i}].item()"
                 for i in range(len(V.graph.graph_outputs))
             ]
             outputs_str = f"[{', '.join(outputs)}]"
@@ -1282,22 +1278,44 @@ class CppWrapperCpu(WrapperCodeGen):
         )
 
     def generate_scatter_fallback(
-        self, output, inputs, kernel, python_kernel_name, src_is_tensor, reduce, kwargs
+        self,
+        output,
+        inputs,
+        cpp_kernel_name,
+        python_kernel_name,
+        src_is_tensor,
+        reduce,
+        kwargs,
     ):
         # No stack allocation when there is a fallback op
         self.allow_stack_allocation = False
 
         # TODO: needs updates to use C shim v2
-        # TODO: support other overload for cpp wrapper and remove the below assertions
         if config.abi_compatible:
             # call the ABI shim function instead of the ATen one
-            kernel = kernel.replace("at::", "aoti_torch_")
-            inputs_wrapped = [f"convert_arrayref_tensor_to_tensor({x})" for x in inputs]
-            line = f"{kernel}(convert_arrayref_tensor_to_tensor({output}), {','.join(inputs_wrapped)}"
+            if config.c_shim_version == "1":
+                cpp_kernel_name = (
+                    "aoti_torch_scatter_reduce_out"
+                    if python_kernel_name.startswith("aten.scatter_reduce")
+                    else "aoti_torch_scatter_out"
+                )
+            else:
+                cpp_kernel_name = self.get_c_shim_func_name(cpp_kernel_name)
+                # C shim only contains out-variant instead of inplace-variant
+                cpp_kernel_name = cpp_kernel_name.replace("__", "_") + "_out"
+            inputs_wrapped = [
+                f"convert_arrayref_tensor_to_tensor({x})"
+                if isinstance(x, str)
+                else str(x)
+                for x in inputs
+            ]
+            line = f"{cpp_kernel_name}(convert_arrayref_tensor_to_tensor({output}), {','.join(inputs_wrapped)}"
         else:
-            line = f"{kernel}({output}, {','.join(map(str, inputs))}"
+            line = f"{cpp_kernel_name}({','.join(map(str, inputs))}"
 
-        if python_kernel_name == "aten.scatter_":
+        if python_kernel_name.startswith("aten.scatter_reduce"):
+            line += f", {','.join(kwargs)}"
+        else:
             if src_is_tensor:
                 if reduce:
                     line += f", {V.graph.wrapper_code.val_to_arg_str(reduce)}"
@@ -1305,9 +1323,7 @@ class CppWrapperCpu(WrapperCodeGen):
                 assert (
                     reduce is None
                 ), "Expect reduce to be None for aten.scatter_ with scalar src"
-        else:
-            line += f", {','.join(kwargs)}"
-        line += f"){self.ending}"
+        line += ");"
         self.writeline(line)
 
     def generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
@@ -1398,7 +1414,6 @@ class CppWrapperCpu(WrapperCodeGen):
             and ir.is_contiguous_strides_for_shape(
                 buffer.get_stride(), buffer.get_size()
             )
-            and not buffer.is_extern()
         )
 
     def make_buffer_free(self, buffer):
