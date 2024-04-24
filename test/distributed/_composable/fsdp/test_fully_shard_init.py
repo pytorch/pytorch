@@ -487,6 +487,19 @@ class TestFullyShardMetaDeviceInit(FSDPTestMultiThread):
                 self.assertEqual(param.device, torch.device("meta"))
             self._test_to_empty_and_reset_parameters(model, mesh, mlp_dim)
 
+        # Test that we can call `fully_shard` under meta-device context and
+        # that `init_device_mesh` call still works
+        mlp_dim = 8
+        with torch.device("meta"):
+            model = nn.Sequential(MLP(mlp_dim, with_buffer=True), MLP(mlp_dim))
+            for param in model.parameters():
+                self.assertEqual(param.device, torch.device("meta"))
+            for module in (model[0], model[1], model):
+                fully_shard(module)
+        for param in model.parameters():
+            self.assertEqual(param.device, torch.device("meta"))
+        self._test_to_empty_and_reset_parameters(model, mesh, mlp_dim)
+
     @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_meta_device_2d_init(self):
         assert self.world_size >= 4, f"{self.world_size}"
