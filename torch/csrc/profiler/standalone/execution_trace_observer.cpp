@@ -236,8 +236,6 @@ const ExecutionTraceObserver::ID root_id{1};
 
 struct FunctionCallContext : public ObserverContext {
   std::string name;
-  std::string kernel_backend;
-  std::string kernel_file;
   ExecutionTraceObserver::ID op_id{uninitialized_id};
   ExecutionTraceObserver::ID parent_id{uninitialized_id};
   ExecutionTraceObserver::ID fw_parent_id{uninitialized_id};
@@ -275,24 +273,14 @@ static void writeJsonNode(
     const std::string& outputs = "[]",
     const std::string& output_shapes = "[]",
     const std::string& output_types = "[]",
-    const std::string& operator_schema = "",
-    const std::string& kernel_backend = "",
-    const std::string& kernel_file = "") {
+    const std::string& operator_schema = "") {
   out << fmt::format(
       R"JSON(
     {{
       "id": {}, "name": "{}", "ctrl_deps": {},
       "inputs": {{"values": {}, "shapes": {}, "types": {}}},
       "outputs": {{"values": {}, "shapes": {}, "types": {}}},
-      "attrs": [{{"name": "rf_id", "type": "uint64", "value": {}}},
-                {{"name": "fw_parent", "type": "uint64", "value": {}}},
-                {{"name": "seq_id", "type": "int64", "value": {}}},
-                {{"name": "scope", "type": "uint64", "value": {}}},
-                {{"name": "tid", "type": "uint64", "value": {}}},
-                {{"name": "fw_tid", "type": "uint64", "value": {}}},
-                {{"name": "op_schema", "type": "string", "value": "{}"}},
-                {{"name": "kernel_backend", "type": "string", "value": "{}"}},
-                {{"name": "kernel_file", "type": "string", "value": "{}"}}]
+      "attrs": [{{"name": "rf_id", "type": "uint64", "value": {}}}, {{"name": "fw_parent", "type": "uint64", "value": {}}}, {{"name": "seq_id", "type": "int64", "value": {}}}, {{"name": "scope", "type": "uint64", "value": {}}}, {{"name": "tid", "type": "uint64", "value": {}}}, {{"name": "fw_tid", "type": "uint64", "value": {}}}, {{"name": "op_schema", "type": "string", "value": "{}"}}]
     }})JSON",
       id,
       name,
@@ -309,9 +297,7 @@ static void writeJsonNode(
       scope,
       tid,
       fw_tid,
-      operator_schema,
-      kernel_backend,
-      kernel_file);
+      operator_schema);
 }
 
 inline std::string timeString(const std::time_t timepoint) {
@@ -456,44 +442,6 @@ inline void appendValueInfo(
   shapes.push_back(getValueShape(val));
 }
 
-inline void handleKernelBackendInfo(
-    FunctionCallContext& fc,
-    const RecordFunction& fn) {
-  // triton kernel related information are in kwinputs
-  const auto& kwinputs = fn.kwinputs();
-  if (kwinputs.find("kernel_backend") != kwinputs.end()) {
-    fc.kernel_backend = kwinputs.at("kernel_backend").toStringRef();
-    if (fc.kernel_backend == "triton") {
-      fc.kernel_file = kwinputs.at("kernel_file").toStringRef();
-      TORCH_INTERNAL_ASSERT(
-          kwinputs.find("kernel_file") != kwinputs.end(),
-          "kernel file is missing in triton kernel");
-      // Remove the path of the file name
-      if (fc.kernel_file.find_last_of('/') != std::string::npos)
-        fc.kernel_file =
-            fc.kernel_file.substr(fc.kernel_file.find_last_of('/') + 1);
-
-      // get grid information
-      TORCH_INTERNAL_ASSERT(
-          kwinputs.find("grid") != kwinputs.end(),
-          "grid is missing in triton kernel");
-      fc.input_values.emplace_back(
-          "\"" + kwinputs.at("grid").toStringRef() + "\"");
-      fc.input_types.emplace_back("\"String\"");
-      fc.input_shapes.emplace_back("[]");
-
-      // get stream information
-      TORCH_INTERNAL_ASSERT(
-          kwinputs.find("stream") != kwinputs.end(),
-          "stream is missing in triton kernel");
-      fc.input_values.emplace_back(
-          std::to_string(kwinputs.at("stream").toInt()));
-      fc.input_types.emplace_back("\"Int\"");
-      fc.input_shapes.emplace_back("[]");
-    }
-  }
-}
-
 static void recordOperatorStart(
     ExecutionTraceObserver& ob,
     FunctionCallContext& fc,
@@ -543,9 +491,6 @@ static void recordOperatorStart(
       appendValueInfo(
           ob, inputs[i], fc.input_values, fc.input_types, fc.input_shapes);
     }
-
-    handleKernelBackendInfo(fc, fn);
-
     fc.parent_id = ob.op_stack[tid].top();
     // get parent id from the forward stack, this can be different for
     // autograd ops, which may execute on a different thread than the original
@@ -670,9 +615,7 @@ static void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
           vectorToString(output_values),
           vectorToString(output_shapes),
           vectorToString(output_types),
-          op_schema_str,
-          fc.kernel_backend,
-          fc.kernel_file);
+          op_schema_str);
       ob->out << ",";
     } catch (const std::exception& e) {
       LOG(WARNING) << "Exception in execution trace observer: [" << fc.name
