@@ -6,7 +6,6 @@ import torch
 import torch.distributed._functional_collectives as funcol
 from torch.distributed._tensor import DTensor
 from torch.distributed._tensor._collective_utils import (
-    mesh_all_to_all,
     mesh_broadcast,
     mesh_scatter,
 )
@@ -673,70 +672,6 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             )
             mesh_scatter(received_tensor, scattered_tensors, mesh, mesh_dim=dim)
             self.assertEqual(received_tensor, torch.ones(3, 3) * self.rank)
-
-    @with_comms
-    def test_all_to_all_1d(self):
-        # transpose on a 2D tensor distributed over N nodes:
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
-        tensor_shape = [3, 3]
-        input_tensor_list = [
-            torch.ones(*tensor_shape, device=self.device_type)
-            * (rank + self.rank * self.world_size)
-            for rank in range(self.world_size)
-        ]
-        expected_tensor_list = [
-            torch.ones(tensor_shape, device=self.device_type)
-            * (self.rank + rank * self.world_size)  # i.e. transpose
-            for rank in range(self.world_size)
-        ]
-        for scatter_dim in range(len(tensor_shape)):
-            output_tensor_list = [
-                torch.empty_like(input_tensor_list[idx])
-                for idx in range(len(input_tensor_list))
-            ]
-            # scatter on dim > 0 would generate non-contiguous tensor, verify that works
-            mesh_all_to_all(output_tensor_list, input_tensor_list, mesh, mesh_dim=0)
-            output_tensor = torch.cat(output_tensor_list, dim=scatter_dim)
-            expected_tensor = torch.cat(expected_tensor_list, dim=scatter_dim)
-
-            self.assertEqual(output_tensor, expected_tensor)
-
-    @with_comms
-    def test_all_to_all_nd(self):
-        mesh_tensor = torch.arange(8).reshape(2, 2, 2)
-        mesh = DeviceMesh(self.device_type, mesh_tensor)
-        tensor_shape = [3, 3, 3]
-        # check all dim groups
-        dim_to_subgroups = mesh.get_group()
-        for dim, dim_group in enumerate(dim_to_subgroups):
-            my_coordinate = mesh.get_coordinate()[dim]
-            dim_group_size = get_world_size(dim_group)
-            global_ranks = [
-                get_global_rank(dim_group, i) for i in range(dim_group_size)
-            ]
-            input_tensor_list = [
-                torch.ones(*tensor_shape, device=self.device_type)
-                * (i + self.rank * dim_group_size)
-                for i in range(dim_group_size)
-            ]
-            expected_tensor_list = [
-                torch.ones(*tensor_shape, device=self.device_type)
-                * (my_coordinate + global_rank * dim_group_size)  # i.e. transpose
-                for global_rank in global_ranks
-            ]
-            for scatter_dim in range(len(tensor_shape)):
-                # input_tensor = torch.cat(input_tensor_list, dim=scatter_dim)
-                output_tensor_list = [
-                    torch.empty_like(input_tensor_list[idx])
-                    for idx in range(len(input_tensor_list))
-                ]
-                # scatter on dim > 0 would generate non-contiguous tensor, verify that works
-                mesh_all_to_all(
-                    output_tensor_list, input_tensor_list, mesh, mesh_dim=dim
-                )
-                output_tensor = torch.cat(output_tensor_list, dim=scatter_dim)
-                expected_tensor = torch.cat(expected_tensor_list, dim=scatter_dim)
-                self.assertEqual(output_tensor, expected_tensor)
 
 
 if __name__ == "__main__":
