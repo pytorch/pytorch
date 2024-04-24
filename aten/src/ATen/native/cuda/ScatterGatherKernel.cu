@@ -316,7 +316,6 @@ struct cuda_scatter_gather_base_kernel {
     auto index_size = is_scatter_like ? self_dim_size : src_dim_size;
     auto index_stride = is_scatter_like ? self_dim_stride : src_dim_stride;
 
-    // this should have complex in it
     AT_DISPATCH_ALL_TYPES_AND3(
       at::ScalarType::Half, at::ScalarType::BFloat16,
       at::ScalarType::ComplexFloat,
