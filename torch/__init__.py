@@ -1622,8 +1622,8 @@ import torch.nn.intrinsic
 _C._init_names(list(torch._storage_classes))
 
 # attach docstrings to torch and tensor functions
-from . import _torch_docs, _tensor_docs, _storage_docs
-del _torch_docs, _tensor_docs, _storage_docs
+from . import _torch_docs, _tensor_docs, _storage_docs, _size_docs
+del _torch_docs, _tensor_docs, _storage_docs, _size_docs
 
 
 def compiled_with_cxx11_abi() -> builtins.bool:

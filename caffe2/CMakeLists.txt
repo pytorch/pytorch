@@ -1336,8 +1336,11 @@ if(BUILD_TEST)
   endif()
   if(BUILD_AOT_INDUCTOR_TEST)
     add_subdirectory(
-      ${TORCH_ROOT}/test/cpp/aot_inductor
-      ${CMAKE_BINARY_DIR}/test_aot_inductor)
+      ${TORCH_ROOT}/test/cpp/aoti_abi_check
+      ${CMAKE_BINARY_DIR}/test_aoti_abi_check)
+    add_subdirectory(
+      ${TORCH_ROOT}/test/cpp/aoti_inference
+      ${CMAKE_BINARY_DIR}/test_aoti_inference)
   endif()
 endif()
 

@@ -11,7 +11,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from torch.distributed._composable import checkpoint, replicate
-from torch.distributed._composable.fsdp import FSDP, fully_shard, MixedPrecisionPolicy
+from torch.distributed._composable.fsdp import (
+    FSDP,
+    fully_shard,
+    MixedPrecisionPolicy,
+    OffloadPolicy,
+)
 from torch.distributed._composable.fsdp._fsdp_collectives import (
     foreach_all_gather,
     foreach_all_gather_copy_out,
@@ -99,6 +104,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             post_forward_mesh_info,
             self.device,
             MixedPrecisionPolicy(),
+            OffloadPolicy(),
         )
         fsdp_param_group.lazy_init()
         return fsdp_param_group
