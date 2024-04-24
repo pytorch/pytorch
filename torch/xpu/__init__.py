@@ -132,7 +132,7 @@ def _lazy_init():
                         f"XPU call failed lazily at initialization with error: {str(e)}\n\n"
                         f"XPU call was originally invoked at:\n\n{''.join(orig_traceback)}"
                     )
-                    raise Exception(msg) from e
+                    raise Exception(msg) from e  # noqa: TRY002
         finally:
             delattr(_tls, "is_initializing")
         _initialized = True

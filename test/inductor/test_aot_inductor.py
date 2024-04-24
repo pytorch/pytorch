@@ -14,8 +14,8 @@ from torch._dynamo.testing import rand_strided, same
 from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.exc import CppWrapperCodeGenError
+from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import TestCase
-from torch._inductor.utils import cache_dir
 
 from torch.export import Dim, export
 from torch.testing import FileCheck
@@ -2255,6 +2255,62 @@ class AOTInductorTestsTemplate:
         actual = aot_inductor_module(*example_inputs)
         expected = Model()(*example_inputs)
         torch.testing.assert_close(actual, expected)
+
+    @skipIfRocm
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @common_utils.parametrize("dynamic", [False, True])
+    @common_utils.parametrize("autotuning", [False, True])
+    def test_triton_kernel_unbacked_symint_in_grid(self, dynamic, autotuning):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def forward(self, x, y, n_elements_tensor):
+                output = torch.zeros_like(x)
+                n_elements_symint = n_elements_tensor.item()
+                n_elements = x.numel()
+
+                def grid(meta):
+                    return (triton.cdiv(n_elements_symint, meta["BLOCK_SIZE"]),)
+
+                if autotuning:
+                    add_kernel_autotuned[grid](
+                        x,
+                        y,
+                        output,
+                        n_elements,
+                    )
+                else:
+                    add_kernel[grid](
+                        x,
+                        y,
+                        output,
+                        n_elements,
+                        BLOCK_SIZE=16,
+                    )
+
+                return output
+
+        example_inputs = (
+            torch.randn(123, device="cuda"),
+            torch.randn(123, device="cuda"),
+            torch.tensor(123),
+        )
+
+        dynamic_shapes = None
+        if dynamic:
+            dim0 = Dim("s0", min=2, max=1024)
+            dynamic_shapes = {
+                "x": {0: dim0},
+                "y": {0: dim0},
+                "n_elements_tensor": {},
+            }
+
+        self.check_model(
+            Model(),
+            example_inputs,
+            dynamic_shapes=dynamic_shapes,
+        )
 
     @skipIfRocm
     def test_scaled_dot_product_efficient_attention(self):
