@@ -15,7 +15,7 @@ replace_needed_sofiles() {
     find $1 -name '*.so*' -o -name 'ld.lld' | while read sofile; do
         origname=$2
         patchedname=$3
-        if [[ "$origname" != "$patchedname" ]] || [[ "$DESIRED_CUDA" == *"rocm"* ]]; then
+        if [[ "$origname" != "$patchedname" ]]; then
             set +e
             origname=$($PATCHELF_BIN --print-needed $sofile | grep "$origname.*")
             ERRCODE=$?
