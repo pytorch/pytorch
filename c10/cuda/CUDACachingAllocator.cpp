@@ -1128,7 +1128,7 @@ class DeviceCachingAllocator {
 
       if (allocated_in_private_pools > 0) {
         private_pool_msg = "with " + format_size(allocated_in_private_pools) +
-            " allocated in private pools (eg: CUDAGraphs), ";
+            " allocated in private pools (e.g., CUDA Graphs), ";
       }
 
       // Make sure we do not have the device lock before calling our
