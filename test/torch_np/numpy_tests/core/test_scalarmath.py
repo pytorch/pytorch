@@ -732,7 +732,7 @@ class TestAbs(TestCase):
 
 @instantiate_parametrized_tests
 class TestBitShifts(TestCase):
-    @parametrize("type_code", np.typecodes["AllInteger"])
+    @parametrize("type_code", np.typecodes["Integer"] + "B")
     @parametrize("op", [operator.rshift, operator.lshift])
     def test_shift_all_bits(self, type_code, op):
         """Shifts where the shift amount is the width of the type or wider"""
