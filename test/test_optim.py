@@ -916,7 +916,7 @@ class TestOptimRenewed(TestCase):
         # Since this is a unit test, it is more expedient to simulate what the state_dict
         # would look like, which is basically CPU tensors with fused/capturable flag = True.
         optim_cls = optim_info.optim_cls
-        if optim_cls.__name__ == "SGD" and impl == "capturable":
+        if optim_cls.__name__ in ("SGD", "Adagrad", ) and impl == "capturable":
             # Capturable SGD does not exist
             self.skipTest("SGD does not currently support capturable")
 

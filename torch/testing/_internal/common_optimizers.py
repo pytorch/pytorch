@@ -1114,6 +1114,23 @@ optim_db: List[OptimizerInfo] = [
                 lambda opt: ReduceLROnPlateau(opt, threshold=1e-4),
             ],
         ),
+        decorators=(
+            DecorateInfo(
+                #  Note on tolerances:
+                #  difference comes from the fact that the non fused kernel have
+                #  more dtype cast operations. We have another test test_fused_cpu_matches_cuda
+                #  to make sure there is no discrepancies between cuda fused kernel
+                #  and cpu fused kernel
+                toleranceOverride(
+                    {
+                        torch.bfloat16: tol(atol=5e-3, rtol=5e-3),
+                        torch.float16: tol(atol=5e-3, rtol=5e-3),
+                    }
+                ),
+                "TestOptimRenewed",
+                "test_fused_matches_forloop",
+            ),
+        ),
         skips=(
             DecorateInfo(
                 skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115

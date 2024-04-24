@@ -269,6 +269,8 @@ def adagrad(
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with foreach optimizers")
+    if fused and torch.jit.is_scripting():
+        raise RuntimeError("torch.jit.script not supported with fused optimizers")
 
     if fused and not torch.jit.is_scripting():
         func = _fused_adagrad
