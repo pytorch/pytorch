@@ -9477,43 +9477,53 @@ foreach_unary_op_db: List[OpInfo] = [
         'exp',
         foreach_inputs_sample_func(1, False, False),
         backward_requires_result=True,
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
     ),
     ForeachFuncInfo(
         'acos',
         foreach_inputs_sample_func(1, False, False),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
     ),
     ForeachFuncInfo(
         'asin',
         foreach_inputs_sample_func(1, False, False),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
     ),
     ForeachFuncInfo(
         'atan',
         foreach_inputs_sample_func(1, False, False),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
     ),
     ForeachFuncInfo(
         'cos',
         foreach_inputs_sample_func(1, False, False),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
     ),
     ForeachFuncInfo(
         'cosh',
         foreach_inputs_sample_func(1, False, False),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
     ),
     ForeachFuncInfo(
         'log',
         foreach_inputs_sample_func(1, False, False),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
     ),
     ForeachFuncInfo(
         'log10',
         foreach_inputs_sample_func(1, False, False),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
     ),
     ForeachFuncInfo(
         'log2',
         foreach_inputs_sample_func(1, False, False),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
     ),
     ForeachFuncInfo(
         'tan',
         foreach_inputs_sample_func(1, False, False),
         backward_requires_result=True,
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
         decorators=(
             # due to https://github.com/pytorch/pytorch/pull/102427 enabling jiterator for complex
             DecorateInfo(
@@ -9532,6 +9542,7 @@ foreach_unary_op_db: List[OpInfo] = [
         'tanh',
         foreach_inputs_sample_func(1, False, False),
         backward_requires_result=True,
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
         decorators=(
             DecorateInfo(
                 toleranceOverride(
@@ -9546,10 +9557,12 @@ foreach_unary_op_db: List[OpInfo] = [
     ForeachFuncInfo(
         'sin',
         foreach_inputs_sample_func(1, False, False),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
     ),
     ForeachFuncInfo(
         'sinh',
         foreach_inputs_sample_func(1, False, False),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
     ),
     ForeachFuncInfo(
         'neg',
