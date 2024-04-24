@@ -761,11 +761,11 @@ class NumpyVariable(VariableTracker):
     """
 
     constant_fold_functions = (tnp.issubdtype,)
-    constant_collection_functions = (
-        tnp.finfo,
-        tnp.iinfo,
-        tnp.dtype,
-    )
+    constant_collection_functions = {
+        tnp.finfo: NumpyTypeInfoVariable,
+        tnp.iinfo: NumpyTypeInfoVariable,
+        tnp.dtype: NumpyDTypeVariable
+    }
 
     def __init__(self, value, **kwargs):
         super().__init__(**kwargs)
@@ -778,10 +778,10 @@ class NumpyVariable(VariableTracker):
         return fn in cls.constant_fold_functions
 
     @classmethod
-    def produces_constant_collection(cls, fn):
+    def get_constant_collection_for_func(cls, fn):
         mod = fn.__module__.split(".")
         assert len(mod) >= 2 and mod[:2] == ["torch", "_numpy"]
-        return fn in cls.constant_collection_functions
+        return cls.constant_collection_functions.get(fn, None)
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -800,11 +800,7 @@ class NumpyVariable(VariableTracker):
             )
 
         # We are dealing with a function that produces a const collection type (np.dtype, np.iinfo/np.finfo)
-        if self.produces_constant_collection(func):
-            if func is tnp.dtype:
-                collection_variable_typ = NumpyDTypeVariable
-            else:
-                collection_variable_typ = NumpyTypeInfoVariable
+        if collection_variable_typ := self.get_constant_collection_for_func(func) is not None:
             try:
                 return collection_variable_typ(
                     self.value(
@@ -816,7 +812,6 @@ class NumpyVariable(VariableTracker):
                 unimplemented(
                     f"{self.value.__name__} with non-const args: {args} {kwargs}"
                 )
-        # TODO Add all the functions that go from constants to constants to can_constant_fold_through
         if self.can_constant_fold_through(func) and (
             check_unspec_or_constant_args(args, kwargs)
         ):
@@ -838,6 +833,7 @@ class NumpyVariable(VariableTracker):
 
             args, kwargs = NumpyNdarrayVariable.patch_args(func.__name__, args, kwargs)
 
+            # TODO Add all the functions that go from constants to constants to can_constant_fold_through
             proxy = tx.output.create_proxy(
                 "call_function",
                 numpy_to_tensor_wrapper(func),
