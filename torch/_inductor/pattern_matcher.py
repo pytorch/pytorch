@@ -1237,7 +1237,7 @@ def _serialize_pattern(
         return f"{file_template}{formatted_imports}"
 
     if not SERIALIZED_PATTERN_PATH.is_dir():
-        raise Exception(
+        raise Exception(  # noqa: TRY002
             f"Could not find serialized patterns directory at {SERIALIZED_PATTERN_PATH}"
         )
 

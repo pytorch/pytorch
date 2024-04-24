@@ -1377,9 +1377,7 @@ class VariableBuilder:
             if not is_constant_source(self.get_source()):
                 if self.tx.export and not isinstance(self.get_source(), LocalSource):
                     raise AssertionError(
-                        "Dynamo attempts to add additional input during export: value={}, source={}".format(
-                            wrapped_value, self.get_source()
-                        )
+                        f"Dynamo attempts to add additional input during export: value={wrapped_value}, source={self.get_source()}"
                     )
                 fake_tensor_value = None
                 if isinstance(unspec_var, ConstantVariable):
