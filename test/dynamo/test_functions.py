@@ -2751,6 +2751,20 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(ValueError, "zip()"):
             opt_fn(x, ys[:1], zs)
 
+    def test_external_utils_wrapper(self):
+        def fn1(x):
+            return torch.sin(x)
+
+        def fn2(x):
+            return torch.cos(x)
+
+        opt_fn1 = torch.compile(torch._dynamo.external_utils.wrap_inline(fn1))
+        opt_fn2 = torch.compile(torch._dynamo.external_utils.wrap_inline(fn2))
+
+        opt_fn1(torch.randn(4))
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            opt_fn2(torch.randn(4))
+
 
 instantiate_parametrized_tests(FunctionTests)
 
