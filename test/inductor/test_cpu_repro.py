@@ -3681,12 +3681,14 @@ class CPUReproTests(TestCase):
         fn = Model()
         x = torch.zeros(2, 209985).to(torch.int64)
         _fn_opt = torch.compile()(fn)
-        _, code = run_and_get_cpp_code(_fn_opt, x)
-        FileCheck().check_count(
-            "return at::vec::VectorizedN<int64_t,2>::loadu(tmpbuf.data(), 16);",
-            2,
-            exactly=True,
-        ).run(code)
+        with torch.no_grad():
+            _, code = run_and_get_cpp_code(_fn_opt, x)
+            self.assertTrue(same(fn(x), _fn_opt(x)))
+            FileCheck().check_count(
+                "return at::vec::VectorizedN<int64_t,2>::loadu(tmpbuf.data(), 16);",
+                2,
+                exactly=True,
+            ).run(code)
 
 
 if __name__ == "__main__":
