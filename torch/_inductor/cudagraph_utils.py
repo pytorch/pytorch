@@ -2,6 +2,9 @@ import dataclasses
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import torch
+from torch._dynamo.utils import counters
+
+perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -123,6 +126,11 @@ def check_lowering_disable_cudagraph(
     device_node_mapping: Dict[torch.device, torch.fx.Node]
 ):
     return check_multiple_devices_or_any_cpu_nodes(device_node_mapping)
+
+
+def log_cudagraph_skip_and_bump_counter(msg):
+    perf_hint_log.warning(msg)
+    counters["inductor"]["cudagraph_skips"] += 1
 
 
 @dataclasses.dataclass
