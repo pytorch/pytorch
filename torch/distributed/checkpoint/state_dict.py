@@ -218,7 +218,7 @@ def _verify_options(
             fqn_param_mapping[fqn] = param
             all_fqns.add(fqn)
 
-    submodule_prefixes = set()
+    submodule_prefixes: Set[str] = set()
     if submodules:
         submodules = set(submodules)
         for name, module in model.named_modules():
@@ -226,8 +226,7 @@ def _verify_options(
                 continue
             fqns = _get_fqns(model, name)
             assert len(fqns) == 1, "Submodule FQN should only have 1 instance"
-            for fqn in fqns:
-                submodule_prefixes.add(f"{fqn}.")
+            submodule_prefixes.update(f"{fqn}." for fqn in fqns)
 
     fsdp_modules = FSDP.fsdp_modules(model)
     state_dict_config: StateDictConfig
