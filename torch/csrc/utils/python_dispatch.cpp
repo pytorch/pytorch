@@ -380,9 +380,7 @@ void initDispatchBindings(PyObject* module) {
              const char* op_name_with_overload,
              c10::DispatchKey dispatch) {
             HANDLE_TH_ERRORS
-            // Add the namespace if the op_name does not contain it
-            std::string reg_op_name(op_name_with_overload);
-            reg_op_name =
+            std::string reg_op_name =
                 std::string(ns).append("::").append(op_name_with_overload);
 
             auto& lib = self.cast<torch::Library&>();
