@@ -1619,6 +1619,10 @@ at::Tensor _convolution(
 #endif
       break;
     case ConvBackend::Overrideable:
+      input = input.contiguous(backend_memory_format);
+      weight = weight.contiguous(backend_memory_format);
+      bias = bias.defined() ? bias.contiguous() : bias;
+
       output = at::convolution_overrideable(
           input, weight, bias, params.stride, params.padding, params.dilation, params.transposed,
           params.output_padding, params.groups);
@@ -2194,6 +2198,8 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
       break;
     case ConvBackend::Overrideable:
       // Only reach here when input is backend with out-of-source implementation.
+      input = input.contiguous(backend_memory_format);
+      weight = weight.contiguous(backend_memory_format);
       std::tie(backend_grad_input, backend_grad_weight, backend_grad_bias) =
         at::convolution_backward_overrideable(grad_output, input, weight, params.stride, params.padding,
           params.dilation, params.transposed, params.output_padding, params.groups, output_mask);

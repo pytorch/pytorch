@@ -42,8 +42,8 @@ from torch.testing._internal.common_optimizers import (
 )
 
 from torch.testing._internal.common_utils import parametrize
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA, has_triton
-from torch.testing._internal.triton_utils import requires_cuda
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA, HAS_GPU, has_triton
+from torch.testing._internal.triton_utils import requires_cuda, requires_gpu
 
 
 class KernelCounts(NamedTuple):
@@ -109,7 +109,7 @@ def build_opt_kwarg_db():
         if optim_info.optim_cls not in KERNEL_COUNTS:
             continue
 
-        for device in ["cpu", "cuda"]:
+        for device in ["cpu", "cuda", "xpu"]:
             for optim_inputs in _get_optim_inputs_including_global_cliquey_kwargs(
                 device, None, optim_info, skip=("differentiable", "fused")
             ):
@@ -152,9 +152,9 @@ aten = torch.ops.aten
 
 try:
     try:
-        from .test_torchinductor import check_model, check_model_cuda
+        from .test_torchinductor import check_model, check_model_gpu
     except ImportError:
-        from test_torchinductor import check_model, check_model_cuda
+        from test_torchinductor import check_model, check_model_gpu
 except (unittest.SkipTest, ImportError) as e:
     sys.stderr.write(f"{type(e)}: {e}\n")
     if __name__ == "__main__":
@@ -644,5 +644,5 @@ instantiate_device_type_tests(CompiledOptimizerParityTests, globals())
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU or HAS_CUDA:
+    if HAS_CPU or HAS_GPU{}:
         run_tests(needs="filelock")
