@@ -82,7 +82,6 @@ class TestKernelBenchmark(TestCase):
         out = f(inp)
         self.verify_compiled_kernels()
 
-    @expectedFailureXPU
     @config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
     @fresh_inductor_cache()
     def test_matmul_triton_kernel_benchmark(self):
