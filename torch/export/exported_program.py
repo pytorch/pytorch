@@ -662,6 +662,14 @@ class ExportedProgram:
             self.constants[k] = v
 
         _replace_sym_size_ops_pass(gm)
+
+        if len(new_range_constraints) > 0:
+            res = _AddRuntimeAssertionsForInlineConstraintsPass(new_range_constraints)(
+                gm
+            )
+            assert res is not None
+            gm = res.graph_module
+
         exported_program = ExportedProgram(
             root=gm,
             graph=gm.graph,
@@ -673,11 +681,6 @@ class ExportedProgram:
             verifier=self.verifier,
             constants=self.constants,
         )
-        if len(new_range_constraints) > 0:
-            exported_program = exported_program._transform_do_not_use(
-                _AddRuntimeAssertionsForInlineConstraintsPass(new_range_constraints)
-            )
-
         return exported_program
 
     def _transform_do_not_use(self, *passes: PassType) -> "ExportedProgram":
@@ -866,7 +869,7 @@ def _get_updated_range_constraints(
     # runtime_var_to_range will make a difference compated to var_to_range.
     # e.g. [2, oo) -> [0, oo)
     for k, v in shape_env.var_to_range.items():
-        if k not in shape_env.replacements:
+        if k not in shape_env.replacements and k not in range_constraints:
             range_constraints[k] = v
     return range_constraints
 
