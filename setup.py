@@ -1386,6 +1386,12 @@ def main():
                 "include/tensorpipe/transport/uv/*.h",
             ]
         )
+    if get_cmake_cache_vars()["USE_KINETO"]:
+        torch_package_data.extend(
+            [
+                "include/kineto/*.h",
+            ]
+        )
     torchgen_package_data = [
         "packaged/**/*.cpp",
         "packaged/**/*.h",

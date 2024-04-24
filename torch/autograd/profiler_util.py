@@ -859,7 +859,7 @@ def _build_table(
                 "Self CPU Mem",
             ]
         )
-        if has_device_mem:
+        if use_device and has_device_mem:
             headers.extend(
                 [
                     f"{device_name} Mem",
@@ -1012,7 +1012,7 @@ def _build_table(
                     _format_memory(evt.self_cpu_memory_usage),
                 ]
             )
-            if has_device_mem:
+            if use_device and has_device_mem:
                 row_values.extend(
                     [
                         # Device Mem Total
