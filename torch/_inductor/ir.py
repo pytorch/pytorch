@@ -781,13 +781,10 @@ class Reduction(Loops):
                 # No need to split.
                 return ReductionHint.INNER, split
             if (
-                len(ranges) == 0
+                all(r == 1 for r in ranges)
                 and input_node is not None
                 and isinstance(input_node, TensorBox)
             ):
-                # Only handles the case where keep_dim = False.
-                # Otherwise, we need to propagate reduction dim info to the stage where
-                # the intermediate loader of the first Reduction is generated.
                 new_ranges, new_reduction_ranges = extract_input_node_reduction_ranges(
                     input_node
                 )
@@ -1165,13 +1162,17 @@ class Reduction(Loops):
         new_reduction_ranges,
         default,
     ):
-        assert len(original_ranges) == 0, f"{original_ranges}= is not equal to []"
+        assert all(r == 1 for r in original_ranges), f"{original_ranges=} is not all ones"
         reindex = View.dynamic_reshape_indexer(
-            original_reduction_ranges, tuple(new_ranges) + tuple(new_reduction_ranges)
+            original_reduction_ranges,
+            tuple(original_ranges) + tuple(new_ranges) + tuple(new_reduction_ranges)
         )
 
         def wrapper_fn(index, reduction_index):
-            return loader([], reindex(tuple(index) + tuple(reduction_index)))
+            return loader(
+                [0] * len(original_ranges),
+                reindex(tuple(index) + tuple(reduction_index)),
+            )
 
         return wrapper_fn
 
@@ -1310,7 +1311,7 @@ class Reduction(Loops):
             wrapper_fn,
             original_ranges,
             original_reduction_ranges,
-            new_ranges,
+            [*original_ranges, *new_ranges],
             new_reduction_ranges,
             reduction_type,
             -1,
