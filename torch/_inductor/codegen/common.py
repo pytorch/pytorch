@@ -229,12 +229,12 @@ class DataTypePropagation:
         if len(input_nodes) == 0:
             return None
 
-        all_input_nodes_propogated = all(
+        all_input_nodes_propagated = all(
             OptimizationContext.key in n.meta
             and n.meta[OptimizationContext.key].dtype is not None
             for n in input_nodes
         )
-        if not all_input_nodes_propogated:
+        if not all_input_nodes_propagated:
             return None
 
         return functools.reduce(
@@ -1348,11 +1348,9 @@ class Kernel(CodeGen):
             self.current_node = prior
 
     @contextlib.contextmanager
-    def swap_buffers(self, lb, cb=None, sb=None, cse_cache=None):
+    def swap_buffers(self, lb, cb=None, sb=None):
         if cb is None:
             cb = lb
-        if cse_cache is None:
-            cse_cache = {}
         loads = self.loads
         compute = self.compute
         stores = self.stores
@@ -1361,7 +1359,6 @@ class Kernel(CodeGen):
         self.compute = cb
         self.stores = sb
         self.cse = cse.clone()
-        self.cse.cache = cse_cache
         try:
             yield
         finally:
@@ -1459,8 +1456,9 @@ class Kernel(CodeGen):
                 def inner(*args, **kwargs):
                     # TritonTemplateKernel has no current_node
                     buf_bounds = ValueRanges.unknown()
-                    if hasattr(V.interpreter, "current_node"):
-                        fx_node = V.interpreter.current_node
+                    if (
+                        fx_node := getattr(V.interpreter, "current_node", None)
+                    ) and fx_node.target == name:
                         assert isinstance(self.node_to_bounds, dict)
                         buf_bounds = self.node_to_bounds.get(
                             fx_node, ValueRanges.unknown()

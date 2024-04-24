@@ -1851,6 +1851,8 @@ class CPUReproTests(TestCase):
         self.assertEqual(input_grad_aten_eager, input_grad)
         self.assertEqual(input_grad_decomp_eager, input_grad)
         self.assertEqual(input_grad[1, 2, 3, 4], torch.tensor(0.0))
+        # For forward and backward kernel
+        check_metrics_vec_kernel_count(2)
 
     @patch("torch.cuda.is_available", lambda: False)
     def test_scatter_using_atomic_add(self):
@@ -3648,6 +3650,7 @@ class CPUReproTests(TestCase):
         x = torch.randn(1, 4, 2, 2)
         self.common(fn, (x,))
 
+    @requires_vectorization
     def test_vec_indirect_load_cse_cache(self):
         # https://github.com/pytorch/pytorch/issues/123502.
         from math import inf
