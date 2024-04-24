@@ -1,14 +1,12 @@
 #include <c10/cuda/CUDAMiscFunctions.h>
-#include <c10/util/env.h>
+#include <cstdlib>
 
 namespace c10::cuda {
 
-// NOLINTNEXTLINE(bugprone-exception-escape,-warnings-as-errors)
 const char* get_cuda_check_suffix() noexcept {
-  static auto device_blocking_flag =
-      c10::utils::check_env("CUDA_LAUNCH_BLOCKING");
+  static char* device_blocking_flag = getenv("CUDA_LAUNCH_BLOCKING");
   static bool blocking_enabled =
-      (device_blocking_flag.has_value() && device_blocking_flag.value());
+      (device_blocking_flag && atoi(device_blocking_flag));
   if (blocking_enabled) {
     return "";
   } else {
