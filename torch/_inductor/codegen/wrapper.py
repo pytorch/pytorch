@@ -919,8 +919,11 @@ class WrapperCodeGen(CodeGen):
     def finalize_prefix(self):
         pass
 
-    def codegen_python_sizevar(self, x: Expr) -> str:
-        return pexpr(V.graph.sizevars.simplify(x))
+    def codegen_python_sizevar(self, x: Expr, *, simplify: bool = True) -> str:
+        if simplify:
+            return pexpr(V.graph.sizevars.simplify(x))
+        else:
+            return pexpr(x)
 
     def codegen_sizevar(self, x: Expr) -> str:
         return self.codegen_python_sizevar(x)

@@ -2229,6 +2229,7 @@ class ShapeEnv:
         self.log = log
         self.log.debug("create_env")
         self.frozen = False
+        self.runtime_asserts_frozen = False
         self.dim_constraints: Optional[DimConstraints] = None
         self.counter = collections.Counter()
         # Mapping from sympy.Symbol to the number of guards which mention this
@@ -2270,6 +2271,33 @@ class ShapeEnv:
         # duplicated nodes.
         self.fx_node_cache: Dict[Tuple[Callable, Tuple[Any, ...]], torch.fx.Node] = {}
         self.source_to_symbol: Dict[str, sympy.Symbol] = {}
+
+        # Suppose you want to replace an unbacked symbol with another
+        # unbacked symbol.  This is error prone because you can cause
+        # references to unbacked symbols to time travel backwards.  E.g.,
+        #
+        # u1 = x.item()
+        # ... use of u1 ...
+        # u2 = y.item()
+        # u3 = z.item()
+        # torch._check(u1 == u2 + u3)
+        #
+        # If you replace u1 with u2 + u3, then the use of u1 now
+        # references u2 and u3 prior to them actually being bound at
+        # runtime.
+        #
+        # To control for this, we track the order unbacked symbols
+        # were allocated, and only allow substitutions if they respect
+        # the dependency from this order; an unbacked symbol can only
+        # be substituted with unbacked symbols that come before it in the
+        # order.
+        #
+        # This also imposes an ordering on the unbacked symbol binding
+        # sites themselves: you are not allowed to reorder unbacked symbol
+        # bindings.  At the moment, this is not tracked, but we potentially
+        # could track this at the IR level using a higher order operator
+        # with something like effect token tracking.
+        self.unbacked_alloc_order: Dict[sympy.Symbol, int] = {}
 
         from torch.fx.experimental.validator import translation_validation_enabled
         self._translation_validation_enabled = translation_validation_enabled()
@@ -2521,6 +2549,17 @@ class ShapeEnv:
         only emit a warning which may lead to accuracy problems.
         """
         self.frozen = True
+
+    @record_shapeenv_event()
+    def freeze_runtime_asserts(self):
+        """Freeze this ShapeEnv to stop adding deferred runtime asserts.
+
+        We will error if you try to install a new runtime assert when it is
+        frozen.  This would indicate a lowering violation, or perhaps something
+        we know statically is already True but we are checking it again in a way
+        that is not clearly dischargeable.
+        """
+        self.runtime_asserts_frozen = True
 
     def _create_symbol_for_source(self, source: Source) -> Optional[sympy.Symbol]:
         if not self._translation_validation_enabled:
@@ -4742,6 +4781,10 @@ class ShapeEnv:
             return self.evaluate_expr(new_expr, fx_node=fx_node)
         # NB: Don't use new_expr as expr; it could contain gunk like shape0
         # which we don't want to guard on
+
+        # If you're here because of this assert, read Note [Backwards runtime asserts]
+        # in torch/_inductor/graph.py
+        assert not self.runtime_asserts_frozen, expr
 
         # OK, we're definitely doing a runtime assert now
         if (

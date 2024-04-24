@@ -24,6 +24,7 @@ import torch.testing._internal.optests as optests
 from torch._C import _disabled_torch_function_impl
 from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter, get_isolated_graphmodule
 from torch.utils._pytree import tree_map
+from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch import nn
 import re
 
@@ -1449,12 +1450,6 @@ def forward(self, x_1, y_1):
     add = torch.ops.aten.add.Tensor(y_1, 2);  y_1 = None
     return add""")  # noqa: B950
 
-    # This is due to https://github.com/pytorch/pytorch/pull/124316 which bans
-    # i0 = i1 refinement.  To work around it, you should assert i1 = s0 by
-    # hand.  This particular example the refinement is OK because i0 is always
-    # available when i1 and vice versa, but it is difficult to tell if it
-    # is safe in general.
-    @unittest.expectedFailure
     def test_unbacked_unify_guard_transitivity(self):
         def f(x1, x2, y):
             z1 = torch.zeros(x1.item())
@@ -1466,7 +1461,72 @@ def forward(self, x_1, y_1):
             else:
                 return y + 2
 
-        make_fx(f, tracing_mode="symbolic")(torch.tensor(10), torch.tensor(10), torch.randn(10))
+        gm = make_fx(f, tracing_mode="symbolic")(torch.tensor(10), torch.tensor(10), torch.randn(10))
+        insert_deferred_runtime_asserts(gm, gm.shape_env, "test")
+        gm.recompile()
+        r = str(gm.code).strip()
+        # TODO: There are some pointless 9223372036854775806 upper bounds here
+        # NB: The >= 2 bounds are a bit useless, but they are sound: they were
+        # backward propagated from the i0 = s0 refinement, and s0 has a >= 2
+        # constraint.
+        self.assertExpectedInline(
+            r, """\
+def forward(self, x1_1, x2_1, y_1):
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x1_1);  x1_1 = None
+    _check_is_size = torch._check_is_size(_local_scalar_dense)
+    ge = _local_scalar_dense >= 2
+    le = _local_scalar_dense <= 9223372036854775806
+    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, 'Runtime assertion failed for _local_scalar_dense >= 2');  ge = None
+    _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le, 'Runtime assertion failed for _local_scalar_dense <= 9223372036854775806');  le = None
+    mul = -1 * _local_scalar_dense
+    le_1 = mul <= 0;  mul = None
+    _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(le_1, "Runtime assertion failed for expression -u0 <= 0 on node 'le_1'\\nMore context: %mul : [num_users=1] = call_function[target=operator.mul](args = (-1, %_local_scalar_dense), kwargs = {})\\n%le_1 : [num_users=0] = call_function[target=operator.le](args = (%mul, 0), kwargs = {})");  le_1 = None
+    size = y_1.size(0)
+    zeros = torch.ops.aten.zeros.default([_local_scalar_dense], device = device(type='cpu'), pin_memory = False)
+    _local_scalar_dense_1 = torch.ops.aten._local_scalar_dense.default(x2_1);  x2_1 = None
+    _check_is_size_1 = torch._check_is_size(_local_scalar_dense_1)
+    ge_1 = _local_scalar_dense_1 >= 2
+    le_2 = _local_scalar_dense_1 <= 9223372036854775806
+    _assert_scalar_default_3 = torch.ops.aten._assert_scalar.default(ge_1, 'Runtime assertion failed for _local_scalar_dense_1 >= 2');  ge_1 = None
+    _assert_scalar_default_4 = torch.ops.aten._assert_scalar.default(le_2, 'Runtime assertion failed for _local_scalar_dense_1 <= 9223372036854775806');  le_2 = None
+    mul_1 = -1 * _local_scalar_dense_1
+    le_3 = mul_1 <= 0;  mul_1 = None
+    _assert_scalar_default_5 = torch.ops.aten._assert_scalar.default(le_3, "Runtime assertion failed for expression -u1 <= 0 on node 'le_3'\\nMore context: %mul_1 : [num_users=1] = call_function[target=operator.mul](args = (-1, %_local_scalar_dense_1), kwargs = {})\\n%le_3 : [num_users=0] = call_function[target=operator.le](args = (%mul_1, 0), kwargs = {})");  le_3 = None
+    mul_2 = -1 * _local_scalar_dense_1
+    add_1 = _local_scalar_dense + mul_2;  _local_scalar_dense = mul_2 = None
+    eq = add_1 == 0;  add_1 = None
+    _assert_scalar_default_6 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u0 - u1, 0) on node 'eq'\\nMore context: %add_1 : [num_users=1] = call_function[target=operator.add](args = (%_local_scalar_dense, %mul_2), kwargs = {})\\n%eq : [num_users=0] = call_function[target=operator.eq](args = (%add_1, 0), kwargs = {})");  eq = None
+    mul_3 = -1 * size;  size = None
+    add_2 = _local_scalar_dense_1 + mul_3;  mul_3 = None
+    eq_1 = add_2 == 0;  add_2 = None
+    _assert_scalar_default_7 = torch.ops.aten._assert_scalar.default(eq_1, "Runtime assertion failed for expression Eq(-s0 + u1, 0) on node 'eq_1'\\nMore context: %add_2 : [num_users=1] = call_function[target=operator.add](args = (%_local_scalar_dense_1, %mul_3), kwargs = {})\\n%eq_1 : [num_users=0] = call_function[target=operator.eq](args = (%add_2, 0), kwargs = {})");  eq_1 = None
+    zeros_1 = torch.ops.aten.zeros.default([_local_scalar_dense_1], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense_1 = None
+    add = torch.ops.aten.add.Tensor(y_1, 2);  y_1 = None
+    return add"""  # noqa: B950
+        )
+
+    def test_unbacked_unify_dependency_violation(self):
+        def f(x1, x2, x3, y):
+            z1 = x1.item()
+            torch._check(z1 // 9 == 1)
+            z2 = x2.item()
+            z3 = x3.item()
+            torch._check(z1 == z2 + z3)
+            return y * 2
+            if z2 + z3 == z1:
+                return y * 2
+            else:
+                return y + 3
+
+        # NB:
+
+        gm = make_fx(f, tracing_mode="symbolic")(torch.tensor(10), torch.tensor(5), torch.tensor(5), torch.randn(1))
+        insert_deferred_runtime_asserts(gm, gm.shape_env, "test")
+        gm.recompile()
+        self.assertEqual(gm(torch.tensor(12), torch.tensor(6), torch.tensor(6), torch.tensor([1.0])), torch.tensor([2.0]))
+        with self.assertRaises(RuntimeError):
+            gm(torch.tensor(20), torch.tensor(10), torch.tensor(10), torch.tensor([1.0]))
+
 
     def test_split_unbacked_sizes(self):
         def f(lengths, values):

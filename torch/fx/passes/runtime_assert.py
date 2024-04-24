@@ -9,6 +9,7 @@ else:
     ShapeEnv = Any
 
 import torch
+import torch.utils._pytree as pytree
 from torch import fx
 from torch.fx._utils import get_node_context, lazy_format_graph_code
 from torch.fx.experimental.sym_node import SymNode
@@ -48,7 +49,11 @@ def insert_deferred_runtime_asserts(
     # Import sympy locally
     import sympy
 
-    from torch.fx.experimental.symbolic_shapes import free_symbols
+    from torch.fx.experimental.symbolic_shapes import (
+        CallMethodKey,
+        DivideByKey,
+        free_symbols,
+    )
     from torch.utils._sympy.interp import sympy_interp
     from torch.utils._sympy.reference import PythonReferenceAnalysis
 
@@ -118,51 +123,90 @@ def insert_deferred_runtime_asserts(
         with graph.inserting_before(
             node.next if node not in placeholders else last_placeholder.next
         ):
-            example_value = get_example_value(node)
-            if example_value is None:
-                continue
+            # Unfortunately, this logic still must remain because manual
+            # make_fx calls may not explicitly bind all symbolic ints as
+            # arguments to the function, so we must infer it from the other
+            # arguments
+            if (
+                node in placeholders
+                and (example_value := get_example_value(node)) is not None
+            ):
 
+                def match_symbol(symint, cb):
+                    if (
+                        isinstance(symint, torch.SymInt)
+                        and isinstance(symint.node, SymNode)
+                        and isinstance(s := symint.node.expr, sympy.Symbol)
+                        and s not in symbol_to_proxy
+                        and s in needed_symbols
+                    ):
+                        symbol_to_proxy[s] = fx.Proxy(cb())
+                        log.debug("symbol_to_proxy[%s] = %s", s, symbol_to_proxy[s])
+                        defs.append(s)
+
+                match_symbol(example_value, lambda: node)
+                if isinstance(t := example_value, torch.Tensor):
+                    for i, s in enumerate(t.size()):
+                        match_symbol(s, lambda: graph.call_method("size", (node, i)))
+                    for i, s in enumerate(t.stride()):
+                        match_symbol(s, lambda: graph.call_method("stride", (node, i)))
+                    match_symbol(
+                        t.storage_offset(),
+                        lambda: graph.call_method("storage_offset", (node,)),
+                    )
+
+            # Handle asserts that aren't associated with any symbol.  This
+            # doesn't really have to be in the loop as it will only run once,
+            # it just needs to happen right after the placeholders.
             if node not in placeholders:
                 add_runtime_asserts(ras_by_symbol.pop(None, []))  # type: ignore[call-overload]
 
             defs = []
 
-            # For every new unbacked symbol, we need an fx.Node representing
-            # precisely this value.  There are a few places where the unbacked
-            # symbol could have come from, and we will check them to setup
-            # these nodes.
-            #
-            # For a case like item(), this is trivial (no new node is added.)
-            #
-            # For nonzero(), we need to add something like i0 = out.size(0)
-            #
-            # We could end up with duplicate nodes this way but it is not a
-            # big deal.
-            #
-            # We also do this to setup backed SymInts, but those are all going
-            # to be matched from placeholders
-            def match_symbol(symint, cb):
-                if (
-                    isinstance(symint, torch.SymInt)
-                    and isinstance(symint.node, SymNode)
-                    and isinstance(s := symint.node.expr, sympy.Symbol)
-                    and s not in symbol_to_proxy
-                    and s in needed_symbols
-                ):
-                    symbol_to_proxy[s] = fx.Proxy(cb())
-                    log.debug("symbol_to_proxy[%s] = %s", s, symbol_to_proxy[s])
+            if unbacked_bindings := node.meta.get("unbacked_bindings"):
+                for s, keypath in unbacked_bindings.items():
                     defs.append(s)
 
-            match_symbol(example_value, lambda: node)
-            if isinstance(t := example_value, torch.Tensor):
-                for i, s in enumerate(t.size()):
-                    match_symbol(s, lambda: graph.call_method("size", (node, i)))
-                for i, s in enumerate(t.stride()):
-                    match_symbol(s, lambda: graph.call_method("stride", (node, i)))
-                match_symbol(
-                    t.storage_offset(),
-                    lambda: graph.call_method("storage_offset", (node,)),
-                )
+                    # TODO: some CSE when generating these nodes can probably
+                    # help reduce graph size and improve compile itme
+                    def go(node, keypath):
+                        if keypath == ():
+                            return node
+                        if (
+                            len(keypath) >= 2
+                            and isinstance(keypath[0], CallMethodKey)
+                            and isinstance(keypath[1], pytree.SequenceKey)
+                        ):
+                            return go(
+                                graph.call_method(
+                                    keypath[0].name, (node, keypath[1].idx)
+                                ),
+                                keypath[2:],
+                            )
+                        elif isinstance(keypath[0], CallMethodKey):
+                            return go(
+                                graph.call_method(keypath[0].name, (node,)), keypath[1:]
+                            )
+                        elif isinstance(keypath[0], pytree.SequenceKey):
+                            return go(
+                                graph.call_function(
+                                    operator.getitem, (node, keypath[0].idx)
+                                ),
+                                keypath[1:],
+                            )
+                        elif isinstance(keypath[0], DivideByKey):
+                            # TODO: need to assert divisibility
+                            return go(
+                                graph.call_function(
+                                    operator.floordiv, (node, keypath[0].divisor)
+                                ),
+                                keypath[1:],
+                            )
+                        else:
+                            raise AssertionError(f"unrecognized keypath {keypath}")
+
+                    symbol_to_proxy[s] = fx.Proxy(go(node, keypath))
+                    log.debug("symbol_to_proxy[%s] = %s", s, symbol_to_proxy[s])
 
             for i0 in defs:
                 ras = ras_by_symbol.pop(i0, [])

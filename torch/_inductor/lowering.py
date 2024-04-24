@@ -2390,10 +2390,11 @@ def _local_scalar_dense(data):
 
 @register_lowering(aten._assert_scalar)
 def _assert_scalar(data, msg):
-    buffer = ir.AssertScalar(data, msg)
-    # This buffer isn't used by anyone (it returns None), so we must explicitly register it
-    buffer.name = V.graph.register_buffer(buffer)
-    return buffer
+    # NB: These will be handled at codegen time
+    # Not sure if we are guaranteed to be able to serve out truth from the
+    # deferred_runtime_asserts, TODO: try this assert out
+    # assert bool(data.scalar), data
+    return None
 
 
 def _full(fill_value, device, dtype, size):

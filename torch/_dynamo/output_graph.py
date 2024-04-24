@@ -26,7 +26,6 @@ from torch._utils_internal import signpost_event
 from torch.fx._lazy_graph_module import _make_graph_module  # type: ignore[attr-defined]
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.symbolic_shapes import free_symbols, is_symbolic, ShapeEnv
-from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from . import config, logging as torchdynamo_logging, variables
@@ -1232,14 +1231,6 @@ class OutputGraph:
             (self.current_tracer.create_arg(tuple(x.as_proxy() for x in rv)),),
             {},
         )
-        if not config.do_not_emit_runtime_asserts:
-            insert_deferred_runtime_asserts(
-                fx.GraphModule(root, self.graph),
-                self.shape_env,
-                name,
-            )
-        # NB: deferred runtime asserts can keep graphargs live, so make sure
-        # those are inserted before pruning
         self.remove_unused_graphargs()
         ncalls = count_calls(self.graph)
         counters["stats"]["calls_captured"] += ncalls
@@ -1444,6 +1435,14 @@ class OutputGraph:
                     )
                     used_symbols |= free_symbols(fake)
 
+        # TODO: We can prune unused symbols, but whether they are used or not
+        # is harder to tell: they may have uses in side the ShapeEnv that will
+        # get turned into deferred runtime asserts.  So we need to check for
+        # usages there, not just node uses.  Also, the used_symbols
+        # computation above is not enough, because a symbol may have solely
+        # been used for a runtime assert or guard, which won't occur in the
+        # graph at all.
+        """
         # After removing unused graphargs, prune unused binds_symbol
         for node in recheck_placeholders:
             symbol = placeholder_binds_symbol(node)
@@ -1453,6 +1452,7 @@ class OutputGraph:
                 else:
                     # Make sure we delete later occurrences of the same symbol
                     used_symbols.remove(symbol)
+        """
 
     def add_output_instructions(self, prefix: List[Instruction]) -> None:
         """
