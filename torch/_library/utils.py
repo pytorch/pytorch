@@ -114,6 +114,10 @@ def is_tensorlist_like_type(typ: torch.Type):
     )
 
 
+def is_tensor_like_type(typ: torch.Type):
+    return typ == _C.TensorType.get() or typ == _C.OptionalType(_C.TensorType.get())
+
+
 def mutates_and_returns_first_arg(op: torch._ops.OpOverload):
     """Check if an op is an inplace aten op, i.e. it mutates and returns the first arg.
 

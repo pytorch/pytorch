@@ -414,8 +414,27 @@ class CustomOpDef:
 
     def _register_to_dispatcher(self) -> None:
         lib = self._lib
+        schema_str = self._name + self._schema
+        cpp_schema = _C.parse_schema(schema_str)
+
+        for a in cpp_schema.arguments:
+            if not (
+                _library.utils.is_tensor_like_type(a.type)
+                or _library.utils.is_tensorlist_like_type(a.type)
+            ):
+                continue
+            if not a.kwarg_only:
+                continue
+            # If you want to support this, the progression is:
+            # - supporting kwarg-only Tensors that are non-differentiable
+            # - supporting kwarg-only Tensors (regardless of differentiability)
+            raise NotImplementedError(
+                f"custom_op with kwarg-only Tensor args. Please make your "
+                f"tensors not kwarg-only. Got: {schema_str}"
+            )
+
         lib.define(
-            f"{self._name}{self._schema}",
+            schema_str,
             tags=[_C.Tag.pt2_compliant_tag, _C.Tag.needs_fixed_stride_order],
         )
         self._opoverload = _library.utils.lookup_op(self._qualname)
