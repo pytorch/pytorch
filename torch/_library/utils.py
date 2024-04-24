@@ -221,3 +221,17 @@ def handle_dispatch_mode(curr_mode, op_overload, *args, **kwargs):
     # TODO: check that I got these args correct (in C++, we pass in "0000"??)
 
     return curr_mode.__torch_dispatch__(op_overload, overload_types, args, kwargs)
+
+
+def has_kwarg_only_args(schema: _C.FunctionSchema):
+    return any(a.kwarg_only for a in schema.arguments)
+
+
+def has_kwarg_only_tensors(schema: _C.FunctionSchema):
+    for a in schema.arguments:
+        if not (is_tensor_like_type(a.type) or is_tensorlist_like_type(a.type)):
+            continue
+        if not a.kwarg_only:
+            continue
+        return True
+    return False
