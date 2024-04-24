@@ -17,7 +17,7 @@ TORCH_API std::ostream& operator<<(std::ostream& out, const DeprecatedTypeProper
 TORCH_API std::ostream& print(
     std::ostream& stream,
     const Tensor& tensor,
-    int64_t linesize);
+    int64_t linesize, int64_t precision);
 static inline std::ostream& operator<<(std::ostream & out, const Tensor & t) {
   return print(out,t,80,4);
 }
