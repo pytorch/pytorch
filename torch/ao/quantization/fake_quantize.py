@@ -276,7 +276,8 @@ class FixedQParamsFakeQuantize(FakeQuantize):
         assert type(self.activation_post_process) in [
             FixedQParamsObserver, FixedWeightQParamsObserver
         ], f"{self.__class__.__name__}'s observer must be an instance of " +\
-        f"{FixedQParamsObserver.__name__} or {FixedWeightQParamsObserver.__name__}"
+        f"{FixedQParamsObserver.__name__} or " +\
+        f"{FixedWeightQParamsObserver.__name__}"
         self._observer_ctr = observer
         self.scale = self.activation_post_process.scale
         self.zero_point = self.activation_post_process.zero_point
