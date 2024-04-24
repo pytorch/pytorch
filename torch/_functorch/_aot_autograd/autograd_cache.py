@@ -30,31 +30,40 @@ def check_node_safe(node: Node):
     Checks that the node only uses supported operators.
     """
 
+    def is_torch_function(target):
+        if isinstance(target, str):
+            name = target
+        elif callable(target):
+            name = target.__name__
+        else:
+            return False
+        # TODO: is this the right check?
+        return name.startswith("torch.")
+
     def is_tensor(target: Node):
         return "example_value" in target.meta
 
-    match node.op:
-        case "call_function":
-            # We support only torch.* functions for now
-            # We can probably add an allowlist of safe non torch implementations as well
-            if not node.target.startswith("torch"):
-                raise BypassAOTAutogradCache(
-                    f"Unsupported call_function target {node.target}"
-                )
-        case "call_method":
-            method_target = node.args[0]
-            if not is_tensor(method_target):
-                # We support only method calls on tensors and symints
-                raise BypassAOTAutogradCache(
-                    f"Unsupported call_method target {node.target}"
-                )
-        # Cache safe
-        case "placeholder" | "call_module" | "get_attr" | "output":
-            # TODO: not all call_modules may be safe
-            pass
-
-        case _:
-            raise BypassAOTAutogradCache(f"Unsupported node op {node.op}")
+    # I'd love to use a match statement here, but it wasn't introduced until py3.10
+    if node.op == "call_function":
+        # We support only torch.* functions for now
+        # We can probably add an allowlist of safe non-torch implementations as well
+        if not is_torch_function(node.target):
+            raise BypassAOTAutogradCache(
+                f"Unsupported call_function target {node.target}"
+            )
+    elif node.op == "call_method":
+        method_target = node.args[0]
+        if not is_tensor(method_target):
+            # We support only method calls on tensors and symints
+            raise BypassAOTAutogradCache(
+                f"Unsupported call_method target {node.target}"
+            )
+    # Cache safe
+    elif node.op in  ("placeholder", "call_module", "get_attr",  "output"):
+        # TODO: not all call_modules may be safe
+        pass
+    else:
+        raise BypassAOTAutogradCache(f"Unsupported node op {node.op}")
 
 
 @functools.lru_cache(None)
