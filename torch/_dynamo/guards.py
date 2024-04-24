@@ -368,103 +368,6 @@ class NNModuleAttrAccessorInfo:
     l2_key: Optional[str] = None
 
 
-def getattr_on_nn_module(
-    source,
-    base_guard_manager,
-    base_example_value,
-    example_value,
-    base_source_name,
-    source_name,
-    guard_manager_enum,
-):
-    """
-    This tries to avoid calling the expensive nn module custom getattr method by
-    checking if the attribute is accessible via __dict__. For attributes that
-    are not accessible via __dict__ (like descriptors), we fallback to
-    PyObject_GetAttr.
-
-    There are two cases that we optimize for
-    1) attributes present directly in __dict__, e.g training.
-    2) parameters/buffers/modules - they can be accessed via _parameters,
-       _buffers, _modules keys in __dict__. For example, mod.linear can be
-       accessed as mod.__dict__["_parameters"]["linear"]
-
-    The most common and expensive case for nn module guards is of type
-    mod.submod1.submod2.submod3.training. We avoid the python getattr of nn
-    modules by going through the __dict__.
-    """
-    attr_name = source.member
-    mod_dict = base_example_value.__dict__
-
-    if attr_name in mod_dict:
-        accessor_info = NNModuleAttrAccessorInfo(True, attr_name, None)
-    elif "_parameters" in mod_dict and attr_name in mod_dict["_parameters"]:
-        accessor_info = NNModuleAttrAccessorInfo(True, "_parameters", attr_name)
-    elif "_buffers" in mod_dict and attr_name in mod_dict["_buffers"]:
-        accessor_info = NNModuleAttrAccessorInfo(True, "_buffers", attr_name)
-    elif "_modules" in mod_dict and attr_name in mod_dict["_modules"]:
-        accessor_info = NNModuleAttrAccessorInfo(True, "_modules", attr_name)
-    else:
-        accessor_info = NNModuleAttrAccessorInfo(False, None, None)
-
-    if not accessor_info.present_in_generic_dict:
-        # The attribute can be accessed by __getattribute__ call, so rely on
-        # PyObject_GetAttr
-        return base_guard_manager.getattr_manager(
-            attr=source.member,
-            source=source_name,
-            example_value=example_value,
-            guard_manager_enum=guard_manager_enum,
-        )
-    else:
-        assert accessor_info.l1_key
-        l1_key = accessor_info.l1_key
-        l2_key = accessor_info.l2_key
-
-        # Set source strings for debug info
-        mod_dict_source = f"{base_source_name}.__dict__"
-        l1_source = l2_source = None
-        l1_value = l2_value = None
-        if l2_key:
-            l1_source = f"{mod_dict_source}[{l1_key!r}]"
-            l1_value = mod_dict[l1_key]
-            # do not guard on key order for _parameters etc
-            l1_guard_manager_enum = GuardManagerType.GUARD_MANAGER
-            l2_source = source_name
-            l2_value = example_value
-            l2_guard_manager_enum = guard_manager_enum
-        else:
-            l1_source = source_name
-            l1_value = example_value
-            l1_guard_manager_enum = guard_manager_enum
-
-        # Get __dict__ accessor. No need to guard on dict key order, so use base
-        # Guard Manager
-        mod_generic_dict_manager = base_guard_manager.get_generic_dict_manager(
-            source=mod_dict_source,
-            example_value=mod_dict,
-            guard_manager_enum=GuardManagerType.GUARD_MANAGER,
-        )
-
-        # The example_value is set to None for _parameters, _buffers and
-        # _modules because we don't need key ordering.
-        l1_mgr = mod_generic_dict_manager.dict_getitem_manager(
-            key=l1_key,
-            source=l1_source,
-            example_value=l1_value,
-            guard_manager_enum=l1_guard_manager_enum,
-        )
-
-        if l2_key:
-            return l1_mgr.dict_getitem_manager(
-                key=l2_key,
-                source=l2_source,
-                example_value=l2_value,
-                guard_manager_enum=l2_guard_manager_enum,
-            )
-        return l1_mgr
-
-
 def getitem_on_dict_manager(
     source, base_guard_manager, base_example_value, example_value, guard_manager_enum
 ):
@@ -638,6 +541,145 @@ class GuardBuilder(GuardBuilderBase):
                     key, get_verbose_code_parts(f"{key_source} == {key!r}", guard)
                 )
 
+    def getattr_on_nn_module(
+        self,
+        source,
+        base_guard_manager,
+        base_example_value,
+        example_value,
+        base_source_name,
+        source_name,
+        guard_manager_enum,
+    ):
+        """
+        This tries to avoid calling the expensive nn module custom getattr method by
+        checking if the attribute is accessible via __dict__. For attributes that
+        are not accessible via __dict__ (like descriptors), we fallback to
+        PyObject_GetAttr.
+
+        There are two cases that we optimize for
+        1) attributes present directly in __dict__, e.g training.
+        2) parameters/buffers/modules - they can be accessed via _parameters,
+        _buffers, _modules keys in __dict__. For example, mod.linear can be
+        accessed as mod.__dict__["_parameters"]["linear"]
+
+        The most common and expensive case for nn module guards is of type
+        mod.submod1.submod2.submod3.training. We avoid the python getattr of nn
+        modules by going through the __dict__.
+        """
+
+        def getitem_on_dict_mgr(
+            mgr, key, source_name, base_example_value, example_value, guard_manager_enum
+        ):
+            if isinstance(mgr, DictGuardManager):
+                # Case where the user code relies on key order, e.g.,
+                # named_parameters
+                index = get_key_index(base_example_value, key)
+
+                # Install the key manager and add equals match guard
+                key_source = f"list({source_name}.keys())[{index!r}]"
+                mgr.get_key_manager(
+                    index=index,
+                    source=key_source,
+                    example_value=key,
+                    guard_manager_enum=GuardManagerType.GUARD_MANAGER,
+                ).add_equals_match_guard(l2_key, [f"{key_source} == {l2_key!r}"])
+
+                # Install the value manager
+                return mgr.get_value_manager(
+                    index=index,
+                    source=source_name,
+                    example_value=example_value,
+                    guard_manager_enum=guard_manager_enum,
+                )
+            else:
+                return mgr.dict_getitem_manager(
+                    key=key,
+                    source=source_name,
+                    example_value=example_value,
+                    guard_manager_enum=guard_manager_enum,
+                )
+
+        attr_name = source.member
+        mod_dict = base_example_value.__dict__
+
+        if attr_name in mod_dict:
+            accessor_info = NNModuleAttrAccessorInfo(True, attr_name, None)
+        elif "_parameters" in mod_dict and attr_name in mod_dict["_parameters"]:
+            accessor_info = NNModuleAttrAccessorInfo(True, "_parameters", attr_name)
+        elif "_buffers" in mod_dict and attr_name in mod_dict["_buffers"]:
+            accessor_info = NNModuleAttrAccessorInfo(True, "_buffers", attr_name)
+        elif "_modules" in mod_dict and attr_name in mod_dict["_modules"]:
+            accessor_info = NNModuleAttrAccessorInfo(True, "_modules", attr_name)
+        else:
+            accessor_info = NNModuleAttrAccessorInfo(False, None, None)
+
+        if not accessor_info.present_in_generic_dict:
+            # The attribute can be accessed by __getattribute__ call, so rely on
+            # PyObject_GetAttr
+            return base_guard_manager.getattr_manager(
+                attr=source.member,
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        else:
+            assert accessor_info.l1_key
+            l1_key = accessor_info.l1_key
+            l2_key = accessor_info.l2_key
+
+            # Set source strings for debug info
+            mod_dict_source = f"{base_source_name}.__dict__"
+            l1_source = l2_source = None
+            l1_value = l2_value = None
+            if l2_key:
+                l1_source = AttrSource(source.base, l1_key)
+                l1_source_name = l1_source.name()
+                l1_value = mod_dict[l1_key]
+                # do not guard on key order for _parameters etc unless the user code
+                # actually needs the key order (e.g. calling named_parameters)
+                l1_guard_manager_enum = self.get_guard_manager_type(l1_source, l1_value)
+
+                l2_source_name = source_name
+                l2_value = example_value
+                l2_guard_manager_enum = self.get_guard_manager_type(
+                    source, example_value
+                )
+            else:
+                l1_source_name = source_name
+                l1_value = example_value
+                l1_guard_manager_enum = self.get_guard_manager_type(
+                    source, example_value
+                )
+
+            # Get __dict__ accessor. No need to guard on dict key order, so use base
+            # Guard Manager
+            mod_generic_dict_manager = base_guard_manager.get_generic_dict_manager(
+                source=mod_dict_source,
+                example_value=mod_dict,
+                guard_manager_enum=GuardManagerType.GUARD_MANAGER,
+            )
+
+            l1_mgr = getitem_on_dict_mgr(
+                mgr=mod_generic_dict_manager,
+                key=l1_key,
+                source_name=l1_source_name,
+                base_example_value=mod_dict,
+                example_value=l1_value,
+                guard_manager_enum=l1_guard_manager_enum,
+            )
+
+            if l2_key:
+                return getitem_on_dict_mgr(
+                    mgr=l1_mgr,
+                    key=l2_key,
+                    source_name=l2_source_name,
+                    base_example_value=l1_value,
+                    example_value=l2_value,
+                    guard_manager_enum=l2_guard_manager_enum,
+                )
+            return l1_mgr
+
     def get_guard_manager_type(self, source, example_value):
         guard_manager_enum = GuardManagerType.GUARD_MANAGER
         if source.name() in self.check_fn_manager.output_graph.guard_on_key_order:
@@ -747,7 +789,7 @@ class GuardBuilder(GuardBuilderBase):
             assert base_guard_manager  # to make mypy happy
 
             if isinstance(base_example_value, torch.nn.Module):
-                return getattr_on_nn_module(
+                return self.getattr_on_nn_module(
                     source,
                     base_guard_manager,
                     base_example_value,
