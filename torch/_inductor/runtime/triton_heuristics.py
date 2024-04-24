@@ -16,12 +16,12 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 import torch
 
-from torch._dynamo.device_interface import DeviceGuard, get_interface_for_device
 from .coordinate_descent_tuner import CoordescTuner
 
 from .hints import (
     _NUM_THREADS_PER_WARP,
     AutotuneHint,
+    DeviceProperties,
     HeuristicType,
     ReductionHint,
     TileHint,
@@ -144,7 +144,12 @@ class CachingAutotuner(KernelInterface):
 
         assert len(configs) > 0, "Non-empty TritonConfig list required for compiling"
         self.fn = fn
-        self.triton_meta = triton_meta
+        self.device_props: DeviceProperties = triton_meta["device"]
+        self.triton_meta = {
+            **triton_meta,
+            "device": self.device_props.index,
+            "device_type": self.device_props.type,
+        }
         self.inductor_meta = {} if inductor_meta is None else inductor_meta
         self.save_cache_hook = save_cache_hook
         self.mutated_arg_names = mutated_arg_names
@@ -152,13 +157,6 @@ class CachingAutotuner(KernelInterface):
         self.heuristic_type = heuristic_type
         self.custom_kernel = custom_kernel
         self.cuda_kernel_saved = False
-
-        # Align the default design that default as cuda
-        self.device_type = (
-            triton_meta["device_type"] if "device_type" in triton_meta else "cuda"
-        )
-        self.device_interface = get_interface_for_device(self.device_type)
-
         if log.isEnabledFor(logging.DEBUG):
             log.debug(
                 "CachingAutotuner gets %d configs for %s",
@@ -186,7 +184,7 @@ class CachingAutotuner(KernelInterface):
         )
         self.filename = filename
 
-    def precompile(self, warm_cache_only_with_cc=None):
+    def precompile(self, warm_cache_only=False):
         with self.lock:
             if self.launchers:
                 return
@@ -198,7 +196,7 @@ class CachingAutotuner(KernelInterface):
             for c in self.configs:
                 try:
                     compiled_binary, launcher = self._precompile_config(
-                        c, warm_cache_only_with_cc
+                        c, warm_cache_only
                     )
                 except OutOfResources as e:
                     if len(self.configs) == 1:
@@ -219,19 +217,19 @@ class CachingAutotuner(KernelInterface):
 
             seen_configs = set(self.configs)
 
-            device_prop = self.device_interface.Worker.get_device_properties(
-                self.triton_meta["device"]
-            )
+            device_prop = self.device_props
             if (
                 self.inductor_meta.get("dynamic_scale_rblock", True)
                 and self.heuristic_type == HeuristicType.REDUCTION
                 and self.size_hints is not None
-                # Disable for AMDGPU as Triton is not ready to return n_regs for a compiled_binary.
-                and not self.inductor_meta.get("is_hip")
-                # Disable for Intel GPU as Triton is not ready to return n_regs for a compiled_binary.
-                and self.device_type != "xpu"
+                # Disable for AMDGPU/Intel as Triton is not ready to return n_regs for a compiled_binary.
+                and device_prop.type == "cuda"
+                and device_prop.major
                 and device_prop.major >= 8
             ):
+                assert device_prop.regs_per_multiprocessor
+                assert device_prop.max_threads_per_multi_processor
+                assert device_prop.multi_processor_count
                 for triton_config, compiled_binary in zip(
                     self.configs, compiled_binaries
                 ):
@@ -292,15 +290,21 @@ class CachingAutotuner(KernelInterface):
                         continue
                     seen_configs.add(new_config)
                     self.launchers.append(
-                        self._precompile_config(new_config, warm_cache_only_with_cc)[1]
+                        self._precompile_config(new_config, warm_cache_only)[1]
                     )
             self.configs = None
 
-    def _precompile_config(self, cfg: Config, warm_cache_only_with_cc: Optional[int]):
+    def get_device_interface(self):
+        # this code cannot run in compile workers, because it imports from torch
+        from torch._dynamo.device_interface import get_interface_for_device
+
+        return get_interface_for_device(self.device_props.type.replace("hip", "cuda"))
+
+    def _precompile_config(self, cfg: Config, warm_cache_only: bool):
         """Ahead of time compile a given autotuner config."""
         compile_meta = copy.deepcopy(self.triton_meta)
         for k, v in cfg.kwargs.items():
-            if torch.version.hip is not None:
+            if self.device_props.type != "hip":
                 if k == "matrix_instr_nonkdim":
                     compile_meta["matrix_instr_nonkdim"] = v
                     continue
@@ -314,22 +318,9 @@ class CachingAutotuner(KernelInterface):
             "assert_indirect_indexing", True
         ) and not self.inductor_meta.get("is_hip", False)
 
-        if warm_cache_only_with_cc:
-            cc = warm_cache_only_with_cc
-        else:
-            # Use device_type 'cuda' for both cuda and hip devices to retrieve
-            # the compute capability.
-            device_type = self.device_type if torch.version.hip is None else "cuda"
-            device_id = compile_meta["device"]
-            device = torch.device(device_type, device_id)
-            cc = self.device_interface.get_compute_capability(device)
-
-        # Setting device_type="hip" required on ROCm to pass down to triton
-        compile_meta["device_type"] = (
-            self.device_type if torch.version.hip is None else "hip"
-        )
-
-        compile_meta["cc"] = cc
+        # device type will be "hip" rather than "cuda" here
+        compile_meta["device_type"] = self.device_props.type
+        compile_meta["cc"] = self.device_props.cc
 
         if ASTSource:
             compile_args = (
@@ -348,9 +339,9 @@ class CachingAutotuner(KernelInterface):
                 rocm_warp_size = 64
 
             target = (
-                (compile_meta["device_type"], cc)
+                (compile_meta["device_type"], compile_meta["cc"])
                 if not torch.version.hip
-                else [compile_meta["device_type"], cc, rocm_warp_size]
+                else [compile_meta["device_type"], compile_meta["cc"], rocm_warp_size]
             )
 
             options = {
@@ -358,7 +349,7 @@ class CachingAutotuner(KernelInterface):
                 "num_stages": compile_meta["num_stages"],
                 "debug": compile_meta["debug"],
             }
-            if torch.version.hip is not None:
+            if self.device_props.type != "hip":
                 if "waves_per_eu" in compile_meta:
                     options["waves_per_eu"] = compile_meta["waves_per_eu"]
                 if "matrix_instr_nonkdim" in compile_meta:
@@ -373,16 +364,21 @@ class CachingAutotuner(KernelInterface):
             compile_args = (self.fn,)
             compile_kwargs = compile_meta
 
-        if warm_cache_only_with_cc:
+        if warm_cache_only:
             return (
                 triton.compile(*compile_args, **compile_kwargs),
                 None,
             )
 
+        # importing from torch is safe now that precompile has returned
+        from torch._dynamo.device_interface import DeviceGuard
+
+        device_interface = self.get_device_interface()
+
         # load binary to the correct device
-        with DeviceGuard(self.device_interface, compile_meta["device"]):  # type: ignore[attr-defined]
+        with DeviceGuard(device_interface, compile_meta["device"]):  # type: ignore[attr-defined]
             # need to initialize context
-            self.device_interface.synchronize(self.device_interface.current_device())
+            device_interface.synchronize(device_interface.current_device())
 
             try:
                 binary = triton.compile(*compile_args, **compile_kwargs)
@@ -600,8 +596,9 @@ class CachingAutotuner(KernelInterface):
             )
             return float("inf")
 
-        stream = self.device_interface.get_raw_stream(  # type: ignore[call-arg]
-            self.device_interface.current_device()
+        device_interface = self.get_device_interface()
+        stream = device_interface.get_raw_stream(  # type: ignore[call-arg]
+            device_interface.current_device()
         )
 
         def kernel_call():
@@ -740,7 +737,7 @@ class CachingAutotuner(KernelInterface):
 
         def benchmark_one_config(config):
             with self.lock:
-                _, launcher = self._precompile_config(config, None)
+                _, launcher = self._precompile_config(config, False)
             config2launcher[config] = launcher
 
             out = self.bench(launcher, *cloned_args, **kwargs)
