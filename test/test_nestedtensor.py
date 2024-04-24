@@ -4269,6 +4269,7 @@ class TestNestedTensorSubclass(TestCase):
     # Internally-defined NT use cases are lifted to here for maximum test realism.
     # TODO: Remove these when ViewNestedFromBuffer, etc. are deprecated.
     @skipCUDAIfRocm  # not needed
+    @skipIfTorchDynamo("compiles internally")
     @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     def test_dummy_mha_with_nt(self, device):
