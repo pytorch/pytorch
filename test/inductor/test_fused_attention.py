@@ -164,6 +164,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
     def _test_insignificant_strides(self):
         f32 = torch.float32
 
+        # repro taken from https://github.com/pytorch/pytorch/issues/124289
+        # constant_pad_nd is a single element tensor that gets expanded
+
         def forward(
             permute_3: "f32[1, 32, 1, 128]",
             permute_4: "f32[1, 32, 1, 128]",
