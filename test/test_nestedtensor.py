@@ -185,8 +185,7 @@ def layout_name(layout):
     return layout.__repr__().split(".")[-1]
 
 
-# Internally-defined conversion functions are lifted to here for maximum test realism.
-# TODO: Remove these when ViewNestedFromBuffer, etc. are deprecated.
+# Helper function for test_dummy_mha_with_nt
 @torch.fx.wrap
 def convert_dense_to_nested_tensor(values):
     offsets = torch.arange(
@@ -198,6 +197,8 @@ def convert_dense_to_nested_tensor(values):
     )
     return nt
 
+
+# Helper function for test_dummy_mha_with_nt
 @torch.fx.wrap
 def convert_jagged_to_nested_tensor(
     values: torch.Tensor, offsets: torch.Tensor, max_length: int
@@ -207,6 +208,7 @@ def convert_jagged_to_nested_tensor(
     return nt
 
 
+# Helper function for test_dummy_mha_with_nt
 @torch.fx.wrap
 def convert_nt_to_jagged(nt):
     return buffer_from_jagged(nt)
@@ -4263,6 +4265,55 @@ class TestNestedTensorSubclass(TestCase):
         output = f(values, offsets)
         output.sum().backward()
         self.assertEqual(values.grad, torch.ones_like(values))
+
+    # Internally-defined NT use cases are lifted to here for maximum test realism.
+    # TODO: Remove these when ViewNestedFromBuffer, etc. are deprecated.
+    @skipCUDAIfRocm  # not needed
+    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
+    def test_dummy_mha_with_nt(self, device):
+        bs = 3
+        d1 = 2
+        d2 = 4
+        d3 = 6
+        n_heads = 2
+        d_head = d3 // n_heads
+        max_length = 10
+
+        class mha(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(d2, d3, device=device)
+
+            def forward(self, query, value, offsets):
+
+                value = self.linear(value)
+                key = convert_jagged_to_nested_tensor(value, offsets, max_length)
+                value = convert_jagged_to_nested_tensor(value, offsets, max_length)
+                query = convert_dense_to_nested_tensor(query)
+                q = query.view(bs, -1, n_heads, d_head).transpose(1, 2)
+                k = key.view(bs, -1, n_heads, d_head).transpose(1, 2)
+                v = value.view(bs, -1, n_heads, d_head).transpose(1, 2)
+                attn_output = torch.nn.functional.scaled_dot_product_attention(
+                    q,
+                    k,
+                    v,
+                    attn_mask=None,
+                    dropout_p=0.0,
+                    is_causal=False,
+                )
+                attn_output = attn_output.transpose(1, 2)
+                attn_output = convert_nt_to_jagged(attn_output)
+                return attn_output
+
+        query = torch.rand(bs, d1, d3, device=device)
+        value = torch.rand(6, d2, device=device)
+        offsets = torch.tensor([0, 2, 3, 6], device=device)
+
+        m = mha()
+        symbolic_traced: torch.fx.GraphModule = torch.fx.symbolic_trace(m)
+        m = torch.compile(symbolic_traced)
+        loss = m(query, value, offsets).sum()
+        loss.backward()
 
 
 instantiate_parametrized_tests(TestNestedTensor)
