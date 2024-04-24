@@ -1855,8 +1855,9 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             return arg
 
         meta_val = fx_arg.meta["val"]
+        meta_stride = meta_val.stride()
 
-        stride_order = ir.get_stride_order(meta_val.stride())
+        stride_order = ir.get_stride_order(meta_stride)
         if stride_order and stride_order[-1] != 0:
             # contiguous stride order
             stride_order = list(reversed(range(len(arg.get_size()))))
@@ -1884,7 +1885,9 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         try:
             arg.get_stride()
             if is_aligned_realized_tensor(arg):
-                return arg
+                return V.graph.match_insignificant_strides(
+                    ir.ExternKernel.realize_input(arg), meta_stride
+                )
         except AttributeError:
             pass
 
@@ -1894,8 +1897,9 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         if isinstance(arg.data, ir.BaseView):
             if not is_aligned(arg):
                 if is_aligned(arg.unwrap_view()):
-                    arg = ir.TensorBox(ir.ExternKernel.realize_input(arg))
-                    return V.graph.match_insignificant_strides(arg, meta_val.stride())
+                    return V.graph.match_insignificant_strides(
+                        ir.ExternKernel.realize_input(arg), meta_stride
+                    )
 
         return ir.ExternKernel.require_stride_order(arg, stride_order)
 
