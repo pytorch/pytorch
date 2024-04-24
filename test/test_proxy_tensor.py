@@ -1898,9 +1898,7 @@ symbolic_tensor_failures = {
     xfail('nn.functional.binary_cross_entropy', ''),  # aten.new_empty.default - couldn't find symbolic meta function/decom...
     xfail('nn.functional.cross_entropy', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.ctc_loss'),  # aten._ctc_loss.Tensor - couldn't find symbolic meta function/decomposition
-    xfail('nn.functional.fractional_max_pool3d', ''),  # argument 'size' must be tuple of ints, but found element of t...
     xfail('quantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
-    xfail('resize_as_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('unique_consecutive', ''),  # aten.unique_consecutive.default - couldn't find symbolic meta function/decomposition
     xfail('unique', ''),  # aten._unique2.default - couldn't find symbolic meta function/decomposition
 
@@ -1951,29 +1949,17 @@ out_symbolic_tensor_failures = {
     xfail('angle', ''),
     xfail('argmax', ''),
     xfail('argmin', ''),
-    xfail('bmm', ''),
     xfail('fft.fft2', ''),
     xfail('fft.fftn', ''),
     xfail('fft.ifft2', ''),
     xfail('fft.ifftn', ''),
     xfail('gather', ''),
-    xfail('linalg.cholesky', ''),
-    xfail('linalg.cholesky_ex', ''),
-    xfail('linalg.det', ''),
-    xfail('linalg.det', 'singular'),
-    xfail('linalg.inv', ''),
-    xfail('linalg.inv_ex', ''),
     xfail('linalg.pinv', ''),
     xfail('linalg.pinv', 'hermitian'),
-    xfail('linalg.svdvals', ''),
     xfail('lu', ''),
-    xfail('max', 'reduction_with_dim'),
-    xfail('min', 'reduction_with_dim'),
-    xfail('nn.functional.avg_pool2d', ''),
     xfail('scatter_add', ''),
     xfail('scatter', ''),
     xfail('take_along_dim', ''),
-    xfail('topk', ''),
     xfail('triangular_solve', ''),
     xfail('view_copy', ''),
 
