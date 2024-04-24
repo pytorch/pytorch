@@ -990,6 +990,11 @@ class AlgorithmSelectorCache(PersistentCache):
             if timings:
                 return no_op
 
+            if config.search_autotune_cache and not (
+                config.max_autotune or config.max_autotune_gemm
+            ):
+                return no_op
+
             precompile_key = (
                 f"{name}: {inputs_key} : {torch.get_float32_matmul_precision()}"
             )
