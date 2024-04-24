@@ -191,6 +191,11 @@ class autocast:
         enabled: bool = True,
         cache_enabled: Optional[bool] = None,
     ):
+        if not isinstance(device_type, str):
+            raise ValueError(
+                f"Expected `device_type` of type `str`, got: `{type(device_type)}`"
+            )
+
         if torch._jit_internal.is_scripting():
             self._enabled = enabled
             self.device = device_type
@@ -198,8 +203,9 @@ class autocast:
             # TODO: support get_autocast_gpu/cpu_dtype
             assert dtype is not None
             return
-        self.device = device_type
+
         self.custom_backend_name = torch._C._get_privateuse1_backend_name()
+        self.device = device_type
         if self.device == "cuda":
             self.fast_dtype = torch.get_autocast_gpu_dtype()
         elif self.device == "cpu":
