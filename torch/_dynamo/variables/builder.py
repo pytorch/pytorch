@@ -167,6 +167,7 @@ from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
 from .torch_function import build_torch_function_fn, TensorWithTFOverrideVariable
 from .user_defined import (
     KeyedJaggedTensorVariable,
+    SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
 )
@@ -1376,9 +1377,7 @@ class VariableBuilder:
             if not is_constant_source(self.get_source()):
                 if self.tx.export and not isinstance(self.get_source(), LocalSource):
                     raise AssertionError(
-                        "Dynamo attempts to add additional input during export: value={}, source={}".format(
-                            wrapped_value, self.get_source()
-                        )
+                        f"Dynamo attempts to add additional input during export: value={wrapped_value}, source={self.get_source()}"
                     )
                 fake_tensor_value = None
                 if isinstance(unspec_var, ConstantVariable):
@@ -2050,7 +2049,8 @@ class SourcelessBuilder:
 
     @staticmethod
     def create(tx, value) -> VariableTracker:
-        fast_handler = SourcelessBuilder._type_handlers.get(type(value))
+        value_type = type(value)
+        fast_handler = SourcelessBuilder._type_handlers.get(value_type)
         if fast_handler:
             return fast_handler(tx, value)
 
@@ -2073,11 +2073,19 @@ class SourcelessBuilder:
             return UserDefinedClassVariable(value)
         elif isinstance(value, types.MethodWrapperType):
             return MethodWrapperVariable(value)
+        elif isinstance(value, torch.fx.graph_module.GraphModule):
+            return SourcelessGraphModuleVariable(value)
+        elif isinstance(
+            value, (torch.utils._pytree.TreeSpec, torch.utils._pytree.LeafSpec)
+        ):
+            return UserDefinedObjectVariable(value)
         elif PlacementVariable.is_placement(value):
             return PlacementVariable(value)
         elif DeviceMeshVariable.is_device_mesh(value):
             return DeviceMeshVariable(value)
-        unimplemented(f"Unexpected type in sourceless builder {type(value)}")
+        unimplemented(
+            f"Unexpected type in sourceless builder {value_type.__module__}.{value_type.__qualname__}"
+        )
 
     @staticmethod
     def wrap_constant_literal(value):
@@ -2108,6 +2116,7 @@ class SourcelessBuilder:
         )
         handlers[immutable_dict] = handlers[dict]
         handlers[immutable_list] = handlers[list]
+        handlers[types.ModuleType] = lambda tx, value: PythonModuleVariable(value)
 
         def passthrough(tx, value):
             return value
