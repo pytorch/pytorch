@@ -28,6 +28,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
 )
 
+assert_size_stride = torch._C._dynamo.guards.assert_size_stride
 AMPERE_OR_ROCM = TEST_WITH_ROCM or tf32_is_not_fp32()
 if TEST_SCIPY:
     import scipy.ndimage
@@ -1239,6 +1240,30 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(grad_grad_output.shape, gO.shape)
         self.assertEqual(grad_input.shape, input.shape)
         self.assertEqual(grad_weight.shape, weight.shape)
+
+    def test_channels_last_ouput_stride(self, device):
+        dtype = torch.float32
+
+        def get_conv_out(device, dtype):
+            input = torch.randn(
+                (2, 3, 16, 16), device=device, dtype=dtype, requires_grad=True
+            )
+            weight = torch.randn(
+                (512, 3, 3, 3), device=device, dtype=dtype, requires_grad=True
+            )
+            input = input.to(memory_format=torch.channels_last)
+            weight = weight.to(memory_format=torch.channels_last)
+            out = torch.conv2d(input, weight, None, (2, 2), (0, 0), (1, 1), 1)
+            return out
+
+        # input NHWC, output NHWC
+        out = get_conv_out(device, torch.float32)
+        assert_size_stride(out, (2, 512, 7, 7), (25088, 1, 3584, 512))
+
+        # xpu does not support float64 for chanel last conv.
+        # input NHWC, output NCHW
+        out = get_conv_out(device, torch.float64)
+        assert_size_stride(out, (2, 512, 7, 7), (25088, 49, 7, 1))
 
 
 instantiate_device_type_tests(TestConvolutionNNDeviceType, globals(), only_for="xpu")
