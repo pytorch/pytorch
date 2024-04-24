@@ -4,7 +4,7 @@ import functools
 from collections import namedtuple
 from typing import Callable
 
-from unittest import skip, skipUnless
+from unittest import expectedFailure, skip, skipUnless
 from unittest.mock import patch
 
 import torch
@@ -236,6 +236,38 @@ class TestTemplatedSDPA(InductorTestCase):
             )
 
         self.run_test(bias_mod, dtype)
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    def test_natten_2d(self, dtype):
+        H = 32
+        W = S // H
+        WINDOW = 3
+        assert W * H == S
+
+        def get_x_y(idx):
+            # This should be a floor divide, but we don't support that properly
+            return idx / W, idx % W
+
+        def natten_mask(score, b, h, q, kv):
+            q_x, q_y = get_x_y(q)
+            kv_x, kv_y = get_x_y(kv)
+            return torch.where(
+                ((q_x - kv_x).abs() <= WINDOW) | ((q_y - kv_y).abs() <= WINDOW),
+                score,
+                float("-inf"),
+            )
+
+        self.run_test(natten_mask, dtype)
+
+    @supported_platform
+    @expectedFailure
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    def test_silu_on_score(self, dtype):
+        def silu_score(score, b, h, q, kv):
+            return torch.nn.functional.silu(score)
+
+        self.run_test(silu_score, dtype)
 
     @supported_platform
     @skip("Triton bug ")  # https://github.com/pytorch/pytorch/issues/124571

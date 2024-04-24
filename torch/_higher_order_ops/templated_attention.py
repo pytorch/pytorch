@@ -28,6 +28,12 @@ def transform_getitem_args(x, index_args):
 
 
 class TransformGetItemToIndex(TorchFunctionMode):
+    # This is needed since we want to support calling
+    # A[q_idx], where q_idx is a scalar tensor in score_mod.
+    # Today, when q_idx is a scalar tensor, we implicitly convert it to a python
+    # scalar and create a view. We do not want that behavior in this case, so we
+    # use this torchfunctionmode to override that behavior for score_mod
+    # wherever we're running it.
     def __torch_function__(self, func, types, args, kwargs=None):
         if func == torch.Tensor.__getitem__:
             return torch.ops.aten.index(*transform_getitem_args(*args))
@@ -90,6 +96,8 @@ def math_attention(
     score_mod = torch.vmap(score_mod, in_dims=(0, None, 0, None, None) + in_dim_buffers)
     score_mod = torch.vmap(score_mod, in_dims=(0, 0, None, None, None) + in_dim_buffers)
 
+    # We wouldn't need these overrides in this file if Dynamo always did the
+    # rewriting.
     with TransformGetItemToIndex():
         scores = score_mod(scores, b, h, m, n, *other_buffers).to(torch.float32)
 

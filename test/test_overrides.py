@@ -1387,6 +1387,28 @@ class TestTorchFunctionMode(TestCase):
 
         self.assertTrue(called)
 
+    def test_getitem_call(self):
+        # This failed because the parser thinks the function is called to()
+        # but it's actually called _parse_to()
+
+        called = False
+
+        class A(TorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                nonlocal called
+                if kwargs is None:
+                    kwargs = {}
+                called = True
+                return func(*args, **kwargs)
+
+        a = torch.zeros(5)
+        b = torch.tensor(0)
+        with A():
+            a[b]
+
+        self.assertTrue(called)
+
+
     def test_distributions_bernoulli(self):
         # This failed because improper use of has_torch_function when
         # is_tensor_like should have been used instead, inside the

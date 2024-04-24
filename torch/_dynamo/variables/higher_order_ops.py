@@ -1520,7 +1520,8 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
         import operator
 
-        # We wouldn't need this if we can re-enable torchfunctionmode
+        # todo: We wouldn't need this if we can re-enable torchfunctionmode under
+        # compile mode in higher_order_ops/templated_attention.py
         for node in body_graph.nodes:
             if node.target == operator.getitem:
                 node.target = torch.ops.aten.index
