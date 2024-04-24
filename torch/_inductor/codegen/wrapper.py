@@ -661,10 +661,12 @@ class WrapperCodeGen(CodeGen):
     # this function (and below) takes a graph as input so
     # that stream caching happens per graph instance. this
     # is important for nested subgraph codegening.
+    # @Yueming TODO: fix it for user defined triton kernel
     def write_get_raw_stream(self, device_idx: int, graph=None) -> str:
         self.write_triton_header_once()
+        self.generate_stream_creation()
         name = f"stream{device_idx}"
-        self.writeline(f"{name} = get_raw_stream({device_idx})")
+        # self.writeline(f"{name} = get_raw_stream({device_idx})")
         return name
 
     def get_codegened_graph(self):
@@ -907,7 +909,6 @@ class WrapperCodeGen(CodeGen):
                     if num_used > 0:
                         self.header.writeline(f"static cudaStream_t cuda_stream{index} = nullptr;")
         else:
-            self.write_triton_header_once()
             self.header.writeline(f"")
             if config.multiple_streams:
                 for index, num_used in enumerate(V.graph.stream_graph.stream_pool):
@@ -943,7 +944,6 @@ class WrapperCodeGen(CodeGen):
         if config.profile_bandwidth:
             self.write_triton_header_once()
         result = IndentedBuffer()
-        self.generate_stream_creation()
         result.splice(self.header)
         # We do not want the cpp header for intermediate const graph. Headers would be
         # rendered by the main module instead.
