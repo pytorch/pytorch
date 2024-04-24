@@ -909,7 +909,7 @@ class InplacingTests(TestCase):
             return output
 
         inp = (T(10), T(10))
-        self.assertExpectedInline(count_numel(f, *inp), """80""")
+        self.assertExpectedInline(count_numel(f, *inp), """60""")
 
     @requires_cuda
     @skipIfRocm
@@ -939,7 +939,7 @@ class InplacingTests(TestCase):
             return output
 
         inp = (T(10), T(10))
-        self.assertExpectedInline(count_numel(f, *inp), """80""")
+        self.assertExpectedInline(count_numel(f, *inp), """60""")
 
     @requires_cuda
     @skipIfRocm
