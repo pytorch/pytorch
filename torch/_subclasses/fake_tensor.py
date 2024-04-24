@@ -548,6 +548,18 @@ class FakeTensor(torch.Tensor):
             else:
                 return args[0].fake_device
 
+        # this handler must be done inside FakeTensor subclass, not mode, because
+        # we can end up dispatching here when we have a fake tensor with
+        # symbolic sizes running under in_kernel_invocation_manager.
+        # The subclass is asked to handle this query because size (not
+        # sym_size) was called, but we are unable to serve it directly because
+        # there are symbolic sizes in the class.  The use of
+        # in_kernel_invocation_manager means it's incorrect to activate a
+        # mode to actually handle this (this caused
+        # https://github.com/pytorch/pytorch/issues/122772).
+        if handler := _DISPATCH_META_HANDLERS.get(func):
+            return handler(args)
+
         # Because fake mode can return NotImplemented (if it sees a subclass
         # it doesn't know how to deal with), this test here is important
         # because the next dispatch after a fake mode will attempt to use
@@ -587,6 +599,8 @@ class FakeTensor(torch.Tensor):
                 maybe_cur_fake_mode,
             )
             return NotImplemented
+
+        assert not fake_mode.in_kernel_invocation
 
         with fake_mode:  # type: ignore[attr-defined]
             return func(*args, **kwargs)
@@ -1479,6 +1493,9 @@ class FakeTensorMode(TorchDispatchMode):
                 r = func(*args, **kwargs)
         except NotImplementedError as not_implemented_error:
             return maybe_run_unsafe_fallback(not_implemented_error)
+        except Exception:
+            log.exception("failed while attempting to run meta for %s", func)
+            raise
 
         return self.wrap_meta_outputs_with_default_device_logic(
             r, func, flat_args, device=kwargs.get("device")
