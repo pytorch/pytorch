@@ -141,7 +141,7 @@ class TestSerialize(TestCase):
         inp = (torch.ones(10),)
         # Module will only be able to roundtrip if metadata
         # can be correctly parsed.
-        ep = export(MyModule(), inp)
+        ep = export(MyModule(), inp).run_decompositions()
         buffer = io.BytesIO()
         save(ep, buffer)
         loaded_ep = load(buffer)
@@ -194,7 +194,7 @@ class TestSerialize(TestCase):
                 torch.ones([512]),
                 torch.ones([512]),
             ),
-        )
+        ).run_decompositions()
 
         serialized = ExportedProgramSerializer().serialize(exported_module)
         node = serialized.exported_program.graph_module.graph.nodes[-1]

@@ -1655,11 +1655,34 @@ void int8_gemm(
   CuBlasLtMatrixLayout Bdesc(abType, k, n, mat2_ld, transpose_mat2);
   CuBlasLtMatrixLayout Cdesc(cType, m, n, result_ld);
 
-  cublasLtHandle_t ltHandle = at::cuda::getCurrentCUDABlasLtHandle();
-
   // cublas team: alpha and beta need to be the same dtype as of scaleType
   at::opmath_type<int32_t> alpha_val = 1;
   int32_t beta_val = 0;
+  cublasLtHandle_t ltHandle = at::cuda::getCurrentCUDABlasLtHandle();
+
+#ifdef USE_ROCM
+  CuBlasLtMatmulPreference preference;
+  size_t workspaceSize = _getWorkspaceSize();
+  preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, workspaceSize);
+  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
+  auto workspace = allocator.allocate(workspaceSize);
+  cublasLtMatmulHeuristicResult_t heuristicResult = {};
+  int returnedResult = 0;
+  TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
+      ltHandle,
+      computeDesc.descriptor(),
+      Adesc.descriptor(),
+      Bdesc.descriptor(),
+      Cdesc.descriptor(),
+      Cdesc.descriptor(),
+      preference.descriptor(),
+      1,
+      &heuristicResult,
+      &returnedResult));
+  if (returnedResult == 0) {
+    TORCH_CUDABLAS_CHECK(CUBLAS_STATUS_NOT_SUPPORTED);
+  }
+#endif
 
   cublasStatus_t cublasStatus = cublasLtMatmul(
       ltHandle,
@@ -1674,9 +1697,21 @@ void int8_gemm(
       Cdesc.descriptor(),
       result_ptr,
       Cdesc.descriptor(),
+#ifdef USE_ROCM
+      &heuristicResult.algo,
+#else
       nullptr, // Heuristics don't seem to work for int8
+#endif
+#ifdef USE_ROCM
+      workspace.mutable_get(),
+#else
       nullptr, // Non-zero workspace doesn't seem to work.
+#endif
+#ifdef USE_ROCM
+      workspaceSize,
+#else
       0,
+#endif
       at::cuda::getCurrentCUDAStream());
   TORCH_CHECK(
       cublasStatus == CUBLAS_STATUS_SUCCESS,

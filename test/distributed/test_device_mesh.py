@@ -143,6 +143,17 @@ class DeviceMeshTest(DTensorTestBase):
             )
             self.assertEqual(global_ranks, current_rank_expected_group_ranks)
 
+    @with_comms
+    def test_device_mesh_init_backend(self):
+        mesh = DeviceMesh(self.device_type, [1], _init_backend=False)
+
+        with self.assertRaisesRegex(RuntimeError, "process groups not initialized!"):
+            mesh.get_group()
+
+        # coordinates should always been populated when init_backend is False, as whenever
+        # we call init_backend we should make sure the default pg already created
+        mesh.get_coordinate()
+
     def test_fake_pg_device_mesh(self):
         fake_store = FakeStore()
         init_process_group("fake", store=fake_store, rank=0, world_size=self.world_size)
@@ -350,10 +361,10 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         dp_mesh_2 = mesh["dp"]
         self.assertEqual(ref_pg_count, _world.group_count)
 
-        # When we call the "tp" slice, it should create a new pg, as the "tp" slice is called
-        # for the first time.
+        # When we call the "tp" slice, it should not create a new pg, as the "tp" slice would
+        # just reuse the parent mesh pg.
         tp_mesh = mesh["tp"]
-        self.assertTrue(_world.group_count > ref_pg_count)
+        self.assertEqual(_world.group_count, ref_pg_count)
 
 
 class TestMeshEnv(DTensorTestBase):
