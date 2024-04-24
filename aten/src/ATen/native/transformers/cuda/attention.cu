@@ -726,7 +726,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
   return std::make_tuple(attention, logsumexp, Tensor(), Tensor(), max_seqlen_batch_q, max_seqlen_batch_k, philox_seed, philox_offset, debug_attn_mask);
 }
 
-std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_cuda(
+std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_cuda(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
@@ -773,7 +773,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_c
                       cudnn_seed/*Tensor dropoutseed*/,
                       cudnn_offset/*Tensor dropoutoffset*/);
 
-  return std::make_tuple(attention, log_sumexp, cudnn_seed, cudnn_offset);
+  return std::make_tuple(attention, log_sumexp, Tensor(), Tensor(), max_seqlen_batch_q, max_seqlen_batch_k, cudnn_seed, cudnn_offset, Tensor());
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attention_cuda(
@@ -952,7 +952,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     bool compute_logsumexp,
     c10::optional<double> scale,
     const c10::optional<at::Tensor>& causal_diagonal,
-    const c10::optional<at::Tensor>& seqlen_k) {
+    const c10::optional<at::Tensor>& seqlen_k,
+    const c10::optional<int64_t> window_size) {
 #if defined(USE_MEM_EFF_ATTENTION)
 // TODO In theory it is possible to compile with _CUDA_ARCH < 5.0 and run on a
 // machine that is >= 5.0. In practice, this is not a problem but since
@@ -1150,6 +1151,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
       CHECK_NOSPARSE_LASTCONTIGUOUS_CUDA(seqlen_k.value());
       TORCH_CHECK(seqlen_k->scalar_type() == at::ScalarType::Int);
       p.seqlen_k_ptr = (const int32_t*)seqlen_k->const_data_ptr();
+    }
+    if (window_size.has_value()) {
+      p.window_size = *window_size;
     }
     p.scale = sdp::calculate_scale(query, scale).as_float_unchecked();
 

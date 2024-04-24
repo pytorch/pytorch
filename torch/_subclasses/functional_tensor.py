@@ -1,14 +1,14 @@
 import contextlib
 import warnings
 from abc import ABC, abstractmethod
-from typing import Any, Callable, ContextManager, Dict, Optional, Tuple
+from typing import Any, Callable, ContextManager, Dict, Optional, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
 from torch._C import _functionalization_reapply_views_tls as _reapply_views
 from torch._ops import _get_dispatch_mode_pre_dispatch
 from torch.utils._python_dispatch import (
-    _detect_functional_mode,
+    _detect_infra_mode,
     _disable_infra_mode,
     return_and_correct_aliasing,
     TorchDispatchMode,
@@ -185,7 +185,7 @@ class FunctionalTensor(torch.Tensor):
         # and otherwise the sym_size() call will go to the proxy mode before hitting
         # FunctionalTensor.__torch_dispatch__
 
-        functional_mode = _detect_functional_mode()
+        functional_mode = _detect_infra_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL)
         assert functional_mode is not None
 
         with functional_mode:
@@ -511,7 +511,9 @@ class BaseFunctionalizeAPI(ABC):
         pass
 
     @abstractmethod
-    def unwrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
+    def unwrap_tensors(
+        self, args: Union[torch.Tensor, Tuple[torch.Tensor, ...]]
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, ...]]:
         pass
 
     @abstractmethod
@@ -553,7 +555,9 @@ class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
                 torch.Tensor, FunctionalTensor.to_functional, args
             )
 
-    def unwrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
+    def unwrap_tensors(
+        self, args: Union[torch.Tensor, Tuple[torch.Tensor, ...]]
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, ...]]:
         return torch.utils._pytree.tree_map_only(
             FunctionalTensor, FunctionalTensor.from_functional, args
         )
@@ -593,7 +597,9 @@ class CppFunctionalizeAPI(BaseFunctionalizeAPI):
 
         return _wrap_all_tensors_to_functional(args, level=0)
 
-    def unwrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
+    def unwrap_tensors(
+        self, args: Union[torch.Tensor, Tuple[torch.Tensor, ...]]
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, ...]]:
         from torch._functorch.eager_transforms import (
             _unwrap_all_tensors_from_functional,
         )
@@ -630,7 +636,9 @@ class FunctorchFunctionalizeAPI(BaseFunctionalizeAPI):
 
         return _wrap_all_tensors_to_functional(args, level=self.interpreter.level())
 
-    def unwrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
+    def unwrap_tensors(
+        self, args: Union[torch.Tensor, Tuple[torch.Tensor, ...]]
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, ...]]:
         from torch._functorch.eager_transforms import (
             _unwrap_all_tensors_from_functional,
         )

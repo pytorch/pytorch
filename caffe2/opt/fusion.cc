@@ -3,8 +3,7 @@
 #include "caffe2/opt/converter.h"
 #include "caffe2/opt/passes.h"
 
-namespace caffe2 {
-namespace opt {
+namespace caffe2::opt {
 
 using namespace nom;
 
@@ -33,7 +32,7 @@ bool fuseConvBNHelper(repr::NNModule* nn, caffe2::Workspace* ws) {
 
     auto bnNode = consumer;
     auto bn = repr::nn::get<repr::BatchNormalization>(bnNode);
-    auto bnOutputs = nn::getOutputs(bnNode);
+    auto bnOutputs = repr::nn::getOutputs(bnNode);
     NOM_REQUIRE_OR_CONT(bnOutputs.size() == 1);
     auto bnOutput = bnOutputs.front();
 
@@ -124,5 +123,4 @@ void fuseConvBN(nom::repr::NNModule* nn, caffe2::Workspace* ws) {
 
 REGISTER_WS_OPT_PASS_FROM_FUNC(FuseConvBN, fuseConvBN);
 
-} // namespace opt
-} // namespace caffe2
+} // namespace caffe2::opt

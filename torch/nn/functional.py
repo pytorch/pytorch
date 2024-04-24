@@ -2574,6 +2574,21 @@ def layer_norm(
         )
     return torch.layer_norm(input, normalized_shape, weight, bias, eps, torch.backends.cudnn.enabled)
 
+def rms_norm(
+    input: Tensor,
+    normalized_shape: List[int],
+    weight: Optional[Tensor] = None,
+    eps: Optional[float] = None,
+) -> Tensor:
+    r"""Apply Root Mean Square Layer Normalization.
+
+    See :class:`~torch.nn.RMSNorm` for details.
+    """
+    if has_torch_function_variadic(input, weight):
+        return handle_torch_function(
+            rms_norm, (input, weight), input, normalized_shape, weight=weight, eps=eps
+        )
+    return torch.rms_norm(input, normalized_shape, weight, eps)
 
 def group_norm(
     input: Tensor, num_groups: int, weight: Optional[Tensor] = None, bias: Optional[Tensor] = None, eps: float = 1e-5
@@ -3145,8 +3160,8 @@ def binary_cross_entropy(
         reduction_enum = _Reduction.get_enum(reduction)
     if target.size() != input.size():
         raise ValueError(
-            "Using a target size ({}) that is different to the input size ({}) is deprecated. "
-            "Please ensure they have the same size.".format(target.size(), input.size())
+            f"Using a target size ({target.size()}) that is different to the input size ({input.size()}) is deprecated. "
+            "Please ensure they have the same size."
         )
 
     if weight is not None:
@@ -5411,7 +5426,7 @@ def multi_head_attention_forward(
         assert bias_v is None
 
     #
-    # reshape q, k, v for multihead attention and make em batch first
+    # reshape q, k, v for multihead attention and make them batch first
     #
     q = q.view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
     if static_k is None:

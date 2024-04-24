@@ -227,10 +227,21 @@ class UnflattenedModule(torch.nn.Module):
         ]
         self.check_input_constraints = True
         # TODO(zhxchen17) We can register modules ahead of time instead of reorder later.
-        _reorder_submodules(self, {fqn: i for i, fqn in enumerate(fqn_list)})
-        assert [
-            fqn for fqn, _ in self.named_modules(remove_duplicate=False)
-        ] == fqn_list
+        fqn_order = {fqn: i for i, fqn in enumerate(fqn_list)}
+        # In the case of legacy IR, we might be missing some modules from metadata.
+        for name, _ in self.named_modules(remove_duplicate=False):
+            if name not in fqn_order:
+                fqn_order[name] = len(fqn_order)
+        _reorder_submodules(self, fqn_order)
+        assert [fqn for fqn, _ in self.named_modules(remove_duplicate=False)] == list(
+            fqn_order.keys()
+        )
+
+    def _print_graph(self):
+        for fqn, mod in self.named_modules():
+            print(fqn + ":")
+            if hasattr(mod, "graph") and isinstance(mod.graph, torch.fx.Graph):
+                print(mod.graph)
 
     def forward(self, *args, **kwargs):
         signature = self.module_call_graph[0].signature
@@ -608,6 +619,7 @@ class _ModuleFrame:
             self.parent_call_module.kwargs = kwarg_nodes
 
     def add_placeholder(self, x):
+        assert self.fqn != "", f"Cannot add placeholder {x} to root module"
         assert x.graph is self.flat_graph
         # x is not in subgraph, create a new placeholder for subgraph
         with self.graph.inserting_before(None):

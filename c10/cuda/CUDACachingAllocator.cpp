@@ -66,9 +66,9 @@ namespace Native {
 //   smallest available free block or allocate a new block using cudaMalloc.
 // - To reduce fragmentation, requests between 1MB and 10MB will allocate and
 //   split a 20MB block, if no free block of sufficient size is available.
-// - To further reduce fragmentation, blocks >= 200MB are not allowed to be
-//   split. These oversize cached blocks will still satisfy requests within
-//   20MB of the oversize cached block size.
+// - To further reduce fragmentation, blocks >= max_split_size are not allowed
+//   to be split. These oversize cached blocks will still satisfy requests
+//   within 1MB of the oversize cached block size.
 //
 // With this allocator, allocations and frees should logically be considered
 // "usages" of the memory segment associated with streams, just like kernel
@@ -1149,7 +1149,7 @@ class DeviceCachingAllocator {
           "CUDA out of memory. Tried to allocate ",
           format_size(alloc_size),
           ". GPU ",
-          device,
+          static_cast<int>(device),
           " has a total capacity of ",
           format_size(device_total),
           " of which ",
@@ -2842,7 +2842,8 @@ static void uncached_delete(void* ptr) {
 
   const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
   if (C10_UNLIKELY(interp)) {
-    (*interp)->trace_gpu_memory_deallocation(reinterpret_cast<uintptr_t>(ptr));
+    (*interp)->trace_gpu_memory_deallocation(
+        c10::kCUDA, reinterpret_cast<uintptr_t>(ptr));
   }
   C10_CUDA_CHECK(cudaFree(ptr));
 }
@@ -2926,7 +2927,7 @@ class NativeCachingAllocator : public CUDAAllocator {
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
       (*interp)->trace_gpu_memory_allocation(
-          reinterpret_cast<uintptr_t>(*devPtr));
+          c10::kCUDA, reinterpret_cast<uintptr_t>(*devPtr));
     }
   }
 
@@ -2941,7 +2942,7 @@ class NativeCachingAllocator : public CUDAAllocator {
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
       (*interp)->trace_gpu_memory_deallocation(
-          reinterpret_cast<uintptr_t>(block->ptr));
+          c10::kCUDA, reinterpret_cast<uintptr_t>(block->ptr));
     }
     device_allocator[block->device]->free(block);
   }
@@ -3130,7 +3131,7 @@ class NativeCachingAllocator : public CUDAAllocator {
       const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
       if (C10_UNLIKELY(interp)) {
         (*interp)->trace_gpu_memory_allocation(
-            reinterpret_cast<uintptr_t>(devPtr));
+            c10::kCUDA, reinterpret_cast<uintptr_t>(devPtr));
       }
     } else {
       if (size != 0) {

@@ -60,6 +60,7 @@ else:
         def __init__(self) -> None:
             self.mesh_stack: List[DeviceMesh] = []
             self.child_to_parent_mapping: Dict[DeviceMesh, DeviceMesh] = {}
+            self.parent_to_child_mapping: Dict[DeviceMesh, Dict[str, DeviceMesh]] = {}
 
         def get_current_mesh(self) -> "DeviceMesh":
             if len(self.mesh_stack) == 0:
@@ -69,6 +70,13 @@ else:
         def create_child_mesh(
             self, device_mesh: "DeviceMesh", mesh_dim: int, mesh_dim_name: str
         ) -> "DeviceMesh":
+            # Directly return the child mesh if it is already created.
+            child_mesh_mappings = self.parent_to_child_mapping.get(device_mesh)
+            if child_mesh_mappings:
+                sub_mesh = child_mesh_mappings.get(mesh_dim_name)
+                if sub_mesh:
+                    return sub_mesh
+
             # swap the current dim to the last dim then reshape to flatten out other
             # dims, so we can just extract the list of ranks which contains cur_rank.
             cur_rank = device_mesh.get_rank()
@@ -81,6 +89,7 @@ else:
                     device_mesh.device_type,
                     mesh_1d,
                     mesh_dim_names=(mesh_dim_name,),
+                    _init_backend=False,
                 )
                 if cur_rank in mesh_1d:
                     res_sub_mesh = sub_mesh
@@ -88,6 +97,9 @@ else:
             res_sub_mesh._dim_group_infos = [device_mesh._dim_group_infos[mesh_dim]]  # type: ignore[possibly-undefined]
             # Assign the current DeviceMesh as the parent of the child DeviceMesh.
             self.child_to_parent_mapping[res_sub_mesh] = device_mesh
+            self.parent_to_child_mapping.setdefault(device_mesh, {})[
+                mesh_dim_name
+            ] = res_sub_mesh
             return res_sub_mesh
 
         def get_parent_mesh(self, device_mesh: "DeviceMesh") -> Optional["DeviceMesh"]:
@@ -196,12 +208,13 @@ else:
             mesh: Union[torch.Tensor, "ArrayLike"],
             *,
             mesh_dim_names: Optional[Tuple[str, ...]] = None,
+            _init_backend: bool = True,
         ) -> None:
             self.device_type = device_type
             if isinstance(mesh, torch.Tensor) and mesh.device.type != "cpu":
                 raise ValueError(f"`mesh` must be a CPU tensor, got {mesh}")
             self.mesh = (
-                mesh.detach().cpu()
+                mesh.detach().to(device="cpu", dtype=torch.int)
                 if isinstance(mesh, torch.Tensor)
                 else torch.tensor(mesh, dtype=torch.int)
             )
@@ -211,14 +224,22 @@ else:
             self._flatten_mesh_list = tuple(self.mesh.flatten().tolist())
             self._hash = hash((self._flatten_mesh_list, self.mesh.shape, id(self)))
 
-            # Skip process group initialization if xla device.
+            # Skip process group initialization if xla device or init backend is False
             # TODO(yeounoh) implement DeviceMesh backend and register XLA backend.
             if device_type != "xla":
                 # always try to create default (world) pg, even if it is not initialized
                 # already. The world pg is used for device mesh identity (rank) on each
                 # process (we need to know if the current global rank is in the mesh or not).
-                self._get_or_create_default_group()
-                self._init_process_groups()
+                if _init_backend:
+                    self._get_or_create_default_group()
+                    self._init_process_groups()
+
+                # calculate the coordinates of the current global rank on the mesh
+                rank_coords = (self.mesh == get_rank()).nonzero()
+                assert rank_coords.size(0) in (0, 1)
+                self._coordinate_on_dim: Optional[List[int]] = (
+                    rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
+                )
 
         def _get_or_create_default_group(self):
             default_initialized = is_initialized()
@@ -247,12 +268,6 @@ else:
                     )
                 device_handle.set_device(get_rank() % num_devices_per_host)
 
-            # calculate the coordinates of the current global rank on the mesh
-            rank_coords = (self.mesh == get_rank()).nonzero()
-            assert rank_coords.size(0) in (0, 1)
-            self._coordinate_on_dim: Optional[List[int]] = (
-                rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
-            )
             return _get_default_group()
 
         def _init_process_groups(self):
@@ -378,7 +393,6 @@ else:
 
             mesh_dim = _mesh_resources.get_mesh_dim_by_name(self, mesh_dim_name)
             submesh = _mesh_resources.create_child_mesh(self, mesh_dim, mesh_dim_name)
-
             return submesh
 
         def get_group(
@@ -543,7 +557,7 @@ else:
                     f"Found len(mesh_dim_names): {len(mesh_dim_names)} and len(mesh_shape):{len(mesh_shape)}.",
                 )
 
-        mesh = torch.arange(math.prod(mesh_shape)).view(mesh_shape)
+        mesh = torch.arange(math.prod(mesh_shape), dtype=torch.int).view(mesh_shape)
         device_mesh = DeviceMesh(
             device_type=device_type,
             mesh=mesh,

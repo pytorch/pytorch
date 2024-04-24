@@ -7,7 +7,6 @@ import unittest
 import itertools
 import warnings
 import math
-import sys
 from math import inf, nan, isnan
 import random
 from random import randrange
@@ -19,7 +18,7 @@ from torch.testing._internal.common_utils import \
      TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU, iter_indices,
      make_fullrank_matrices_with_distinct_singular_values,
      freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, parametrize, skipIfTorchDynamo,
-     setLinalgBackendsToDefaultFinally)
+     setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, has_hipsolver,
      onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
@@ -44,6 +43,15 @@ assert torch.get_default_dtype() is torch.float32
 if TEST_SCIPY:
     import scipy
 
+def blaslt_supported_device():
+    if torch.cuda.is_available():
+        if torch.version.hip:
+            for arch in ['gfx90a', 'gfx94']:
+                if arch in torch.cuda.get_device_properties(0).gcnArchName:
+                    return True
+        else:
+            return True
+    return False
 
 @unittest.skipIf(IS_ARM64, "Issue with numpy version on arm")
 class TestLinalg(TestCase):
@@ -4419,33 +4427,48 @@ class TestLinalg(TestCase):
 
     @dtypesIfCUDA(torch.float, torch.complex64)  # Integer matmul just supported on CPU
     @dtypes(torch.int64, torch.float, torch.complex64)
+    @setBlasBackendsToDefaultFinally
     def test_matmul_small_brute_force_1d_Nd(self, device, dtype):
-        make_arg = partial(make_tensor, device=device, dtype=dtype)
+        for backend in ["cublas", "cublaslt"]:
+            if torch.device(device).type == 'cuda':
+                torch.backends.cuda.preferred_blas_library(backend)
 
-        for (size_x, size_y), nctg_x, nctg_y in product(self.gen_sizes_matmul(1), (True, False), (True, False)):
-            x = make_arg(size_x, noncontiguous=nctg_x)
-            y = make_arg(size_y, noncontiguous=nctg_y)
-            self.check_single_matmul(x, y)
+            make_arg = partial(make_tensor, device=device, dtype=dtype)
+
+            for (size_x, size_y), nctg_x, nctg_y in product(self.gen_sizes_matmul(1), (True, False), (True, False)):
+                x = make_arg(size_x, noncontiguous=nctg_x)
+                y = make_arg(size_y, noncontiguous=nctg_y)
+                self.check_single_matmul(x, y)
 
     @dtypesIfCUDA(torch.float, torch.complex64)  # Integer matmul just supported on CPU
     @dtypes(torch.int64, torch.float, torch.complex64)
+    @setBlasBackendsToDefaultFinally
     def test_matmul_small_brute_force_2d_Nd(self, device, dtype):
-        make_arg = partial(make_tensor, device=device, dtype=dtype)
+        for backend in ["cublas", "cublaslt"]:
+            if torch.device(device).type == 'cuda':
+                torch.backends.cuda.preferred_blas_library(backend)
 
-        for (size_x, size_y), nctg_x, nctg_y in product(self.gen_sizes_matmul(2), (True, False), (True, False)):
-            x = make_arg(size_x, noncontiguous=nctg_x)
-            y = make_arg(size_y, noncontiguous=nctg_y)
-            self.check_single_matmul(x, y)
+            make_arg = partial(make_tensor, device=device, dtype=dtype)
+
+            for (size_x, size_y), nctg_x, nctg_y in product(self.gen_sizes_matmul(2), (True, False), (True, False)):
+                x = make_arg(size_x, noncontiguous=nctg_x)
+                y = make_arg(size_y, noncontiguous=nctg_y)
+                self.check_single_matmul(x, y)
 
     @dtypesIfCUDA(torch.float, torch.complex64)  # Integer matmul just supported on CPU
     @dtypes(torch.int64, torch.float, torch.complex64)
+    @setBlasBackendsToDefaultFinally
     def test_matmul_small_brute_force_3d_Nd(self, device, dtype):
-        make_arg = partial(make_tensor, device=device, dtype=dtype)
+        for backend in ["cublas", "cublaslt"]:
+            if torch.device(device).type == 'cuda':
+                torch.backends.cuda.preferred_blas_library(backend)
 
-        for (size_x, size_y), nctg_x, nctg_y in product(self.gen_sizes_matmul(3), (True, False), (True, False)):
-            x = make_arg(size_x, noncontiguous=nctg_x)
-            y = make_arg(size_y, noncontiguous=nctg_y)
-            self.check_single_matmul(x, y)
+            make_arg = partial(make_tensor, device=device, dtype=dtype)
+
+            for (size_x, size_y), nctg_x, nctg_y in product(self.gen_sizes_matmul(3), (True, False), (True, False)):
+                x = make_arg(size_x, noncontiguous=nctg_x)
+                y = make_arg(size_y, noncontiguous=nctg_y)
+                self.check_single_matmul(x, y)
 
     @dtypes(torch.float, torch.complex64)
     def test_matmul_out_kernel_errors_with_autograd(self, device, dtype):
@@ -5771,7 +5794,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         self.assertEqual(c, cpu_result)
 
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
-    @unittest.skipIf(SM90OrLater, "Expected failure on sm90")
+    @unittest.skipIf(SM90OrLater and not TEST_WITH_ROCM, "Expected failure on sm90")
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @onlyCUDA
     @parametrize("k", [16, 32])
@@ -5779,9 +5802,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @parametrize("use_transpose_a", [True, False])
     @parametrize("use_transpose_b", [True, False])
     def test__int_mm(self, device, k, n, use_transpose_a, use_transpose_b):
-        if TEST_WITH_ROCM:
-            self.skipTest("_int_mm not compiled for ROCM")
-
         def genf_int_float(x, y, use_transpose):
             if use_transpose:
                 x, y = y, x
@@ -5814,7 +5834,10 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         SM80OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0)
         SM70 = torch.cuda.is_available() and torch.cuda.get_device_capability() == (7, 0)
         SM75 = torch.cuda.is_available() and torch.cuda.get_device_capability() == (7, 5)
-        if version >= (11, 7):
+
+        if TEST_WITH_ROCM:
+            _test(17, k, n, use_transpose_a, use_transpose_b, True)
+        elif version >= (11, 7):
             if not use_transpose_a and use_transpose_b:
                 if SM80OrLater or (version >= (12, 3) and (SM70 or SM75)):
                     _test(17, k, n, use_transpose_a, use_transpose_b, version > (11, 7))
@@ -5989,8 +6012,8 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         inner_k_tiles = 2
 
         torch.manual_seed(1)
-        a = torch.rand((m, k), dtype=torch.bfloat16, device=device)
-        b = torch.rand((k, n), dtype=torch.bfloat16, device=device)
+        a_bf16 = torch.rand((m, k), dtype=torch.bfloat16, device=device)
+        b_bf16 = torch.rand((k, n), dtype=torch.bfloat16, device=device)
 
         def convert_weight_to_int4pack(b):
             b_int32, b_scales_and_zeros = self._group_quantize_tensor(
@@ -6007,12 +6030,18 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                 a, b_int4pack, q_group, b_scales_and_zeros
             )
 
-        b_int4pack, b_scales_and_zeros = convert_weight_to_int4pack(b)
-        res = weight_int4pack_mm(a, b_int4pack, b_scales_and_zeros)
-        ref = torch.mm(a, b)
+        b_int4pack, b_scales_and_zeros_bf16 = convert_weight_to_int4pack(b_bf16)
 
-        mean_err = ((res - ref).abs() / ref).mean()
-        self.assertTrue(mean_err < 0.05)
+        for dtype in [torch.bfloat16] + ([torch.float16, torch.float32] if device == "cpu" else []):
+            a = a_bf16.to(dtype=dtype)
+            b = b_bf16.to(dtype=dtype)
+            b_scales_and_zeros = b_scales_and_zeros_bf16.to(dtype=dtype)
+            ref = torch.mm(a, b)
+            res = weight_int4pack_mm(a, b_int4pack, b_scales_and_zeros)
+
+            mean_err = ((res - ref).abs() / ref).mean()
+            self.assertTrue(mean_err < 0.05)
+
 
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
@@ -6026,9 +6055,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
         if TEST_WITH_ROCM:
             self.skipTest("_int4_mm not compiled for ROCM")
-
-        if sys.version_info >= (3, 12):
-            self.skipTest("Dynamo is not supported on Python 3.12+")
 
         q_group = 32
         inner_k_tiles = 2
@@ -6119,9 +6145,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @parametrize("k", [32, 64])
     @parametrize("n", [48, 64])
     def test_compile_int8_mm(self, device, m, k, n):
-        if sys.version_info >= (3, 12):
-            self.skipTest("Dynamo is not supported on Python 3.12+")
-
         torch.manual_seed(1)
         a = torch.rand((m, k), dtype=torch.bfloat16, device=device)
         b = torch.rand((n, k), dtype=torch.bfloat16, device=device)
@@ -7658,6 +7681,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
         def run_subtest(guess_rank, actual_rank, matrix_size, batches, device, pca, **options):
             density = options.pop('density', 1)
+            use_svd_lowrank = options.pop('use_svd_lowrank', False)
             if isinstance(matrix_size, int):
                 rows = columns = matrix_size
             else:
@@ -7669,7 +7693,11 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                 a_input = random_sparse_matrix(rows, columns, density, device=device, dtype=dtype)
                 a = a_input.to_dense()
 
-            u, s, v = pca(a_input, q=guess_rank, **options)
+            if use_svd_lowrank:
+                m = a_input.mean(dim=-2, keepdim=True)
+                u, s, v = pca(a_input, q=guess_rank, M=m, **options)
+            else:
+                u, s, v = pca(a_input, q=guess_rank, **options)
 
             self.assertEqual(s.shape[-1], guess_rank)
             self.assertEqual(u.shape[-2], rows)
@@ -7707,6 +7735,8 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                     if guess_rank <= min(*size):
                         run_subtest(guess_rank, actual_rank, size, batches, device, torch.pca_lowrank)
                         run_subtest(guess_rank, actual_rank, size[::-1], batches, device, torch.pca_lowrank)
+                        run_subtest(guess_rank, actual_rank, size, batches, device, torch.svd_lowrank, use_svd_lowrank=True)
+                        run_subtest(guess_rank, actual_rank, size[::-1], batches, device, torch.svd_lowrank, use_svd_lowrank=True)
 
         # sparse input
         for guess_rank, size in [
@@ -7954,6 +7984,27 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
         self.assertEqual(out_ref, out1.cpu())
         self.assertEqual(out1, out2)
+
+    @onlyCUDA
+    @unittest.skipIf(not blaslt_supported_device(), "blasLt not supported on current device")
+    @setBlasBackendsToDefaultFinally
+    def test_preferred_blas_library(self):
+        # The main purpose of this test is to make sure these "backend" calls work normally without raising exceptions.
+        m1 = torch.randint(2, 5, (2048, 2400), device='cuda', dtype=torch.float)
+        m2 = torch.randint(2, 5, (128, 2400), device='cuda', dtype=torch.float)
+
+        torch.backends.cuda.preferred_blas_library('cublaslt')
+        out1 = torch.nn.functional.linear(m1, m2)
+
+        torch.backends.cuda.preferred_blas_library('cublas')
+        out2 = torch.nn.functional.linear(m1, m2)
+
+        # Although blas preferred flags doesn't affect CPU currently,
+        # we set this to make sure the flag can switch back to default normally.
+        out_ref = torch.nn.functional.linear(m1.cpu(), m2.cpu())
+
+        self.assertEqual(out1, out2)
+        self.assertEqual(out_ref, out2.cpu())
 
     def test_permute_matmul(self):
         a = torch.ones([2, 5, 24, 24])
