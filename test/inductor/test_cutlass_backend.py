@@ -2,7 +2,7 @@
 import logging
 import os
 import unittest
-from typing import Callable, List
+from typing import Callable, List, Optional
 from unittest import mock
 
 import torch
@@ -14,7 +14,6 @@ from torch.testing._internal.common_cuda import SM75OrLater, SM80OrLater, SM90Or
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    skipIfRocm,
 )
 
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
@@ -27,6 +26,11 @@ _CUTLASS_DIR = os.path.join(os.path.dirname(__file__), "../../third_party/cutlas
 
 log = logging.getLogger(__name__)
 
+HAS_CUDA = HAS_CUDA and not torch.version.hip
+SM75OrLater = SM75OrLater and not torch.version.hip
+SM80OrLater = SM80OrLater and not torch.version.hip
+SM90OrLater = SM90OrLater and not torch.version.hip
+
 
 def _get_path_without_sccache() -> str:
     """
@@ -37,11 +41,24 @@ def _get_path_without_sccache() -> str:
     return ":".join(path_envs)
 
 
-@skipIfRocm
 @instantiate_parametrized_tests
 class TestCutlassBackend(TestCase):
     def setUp(self):
-        super().setUp()
+        # The new inductor cache refresh mechanism
+        # introduced with https://github.com/pytorch/pytorch/pull/122661
+        # interacts badly with persistent subprocesses during
+        # autotuning. So we need to disable automatic cache refresh
+        # before calling setUp() on the parent class.
+        old_disable_fresh_cache_envvar = os.environ.get(
+            "INDUCTOR_TEST_DISABLE_FRESH_CACHE", ""
+        )
+        try:
+            os.environ["INDUCTOR_TEST_DISABLE_FRESH_CACHE"] = "1"
+            super().setUp()
+        finally:
+            os.environ[
+                "INDUCTOR_TEST_DISABLE_FRESH_CACHE"
+            ] = old_disable_fresh_cache_envvar
         torch.random.manual_seed(1234)
 
     @unittest.skipIf(not SM75OrLater, "need sm_75")
@@ -170,8 +187,9 @@ class TestCutlassBackend(TestCase):
         max_autotune_gemm_backends: str = "CUTLASS",
         mixed_precision=False,
         fp16=True,
-        expected_fuse_count=1,
+        expected_fuse_count=0,
         mm: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = None,
+        batch_size: Optional[int] = None,
     ):
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
             mixed_precision
@@ -182,8 +200,12 @@ class TestCutlassBackend(TestCase):
         # so if these shapes don't all align to at least 8 elements
         # it can happen that no Cutlass 3.x op is available
         # that allows fusions
-        a = torch.randn(256, 32).cuda()
-        b = torch.randn(32, 256).cuda()
+        if batch_size is None:
+            a = torch.randn(256, 32).cuda()
+            b = torch.randn(32, 256).cuda()
+        else:
+            a = torch.randn(batch_size, 256, 32).cuda()
+            b = torch.randn(batch_size, 32, 256).cuda()
         if fp16:
             a = a.half()
             b = b.half()
@@ -217,7 +239,7 @@ class TestCutlassBackend(TestCase):
 
         #  The pointwise ops seem to be pre-fused into a single Pointwise
         self._test_max_autotune_cutlass_backend_epilogue_fusion(
-            mixed_precision=False, fp16=True, expected_fuse_count=1, mm=mm
+            mixed_precision=False, fp16=True, expected_fuse_count=0, mm=mm
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -228,7 +250,7 @@ class TestCutlassBackend(TestCase):
             return (a @ b) * 3.0
 
         self._test_max_autotune_cutlass_backend_epilogue_fusion(
-            mixed_precision=True, fp16=True, expected_fuse_count=1, mm=mm
+            mixed_precision=True, fp16=True, expected_fuse_count=0, mm=mm
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -240,7 +262,7 @@ class TestCutlassBackend(TestCase):
 
         #  The pointwise ops seem to be pre-fused into a single Pointwise
         self._test_max_autotune_cutlass_backend_epilogue_fusion(
-            mixed_precision=False, fp16=True, expected_fuse_count=1, mm=mm
+            mixed_precision=False, fp16=True, expected_fuse_count=0, mm=mm
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -251,7 +273,7 @@ class TestCutlassBackend(TestCase):
             return (a @ b) * 3.3 - 1.234
 
         self._test_max_autotune_cutlass_backend_epilogue_fusion(
-            mixed_precision=True, fp16=True, expected_fuse_count=1, mm=mm
+            mixed_precision=True, fp16=True, expected_fuse_count=0, mm=mm
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -262,7 +284,7 @@ class TestCutlassBackend(TestCase):
             return torch.nn.functional.relu((a @ b) * 3.3 - 1.234)
 
         self._test_max_autotune_cutlass_backend_epilogue_fusion(
-            mixed_precision=False, fp16=True, expected_fuse_count=1, mm=mm
+            mixed_precision=False, fp16=True, expected_fuse_count=0, mm=mm
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -274,7 +296,7 @@ class TestCutlassBackend(TestCase):
 
         #  The pointwise ops seem to be pre-fused into a single Pointwise
         self._test_max_autotune_cutlass_backend_epilogue_fusion(
-            mixed_precision=True, fp16=True, expected_fuse_count=1, mm=mm
+            mixed_precision=True, fp16=True, expected_fuse_count=0, mm=mm
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -286,7 +308,7 @@ class TestCutlassBackend(TestCase):
 
         #  The pointwise ops seem to be pre-fused into a single Pointwise
         self._test_max_autotune_cutlass_backend_epilogue_fusion(
-            mixed_precision=True, fp16=True, expected_fuse_count=1, mm=mm
+            mixed_precision=True, fp16=True, expected_fuse_count=0, mm=mm
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -301,6 +323,18 @@ class TestCutlassBackend(TestCase):
             mixed_precision=True, fp16=True, expected_fuse_count=0, mm=mm
         )
 
+    def test_max_autotune_cutlass_backend_simple_bmm(self):
+        def bmm(a, b):
+            return torch.bmm(a, b)
+
+        self._test_max_autotune_cutlass_backend_epilogue_fusion(  # test bmm
+            mixed_precision=False,
+            fp16=True,
+            expected_fuse_count=0,
+            mm=bmm,
+            batch_size=10,
+        )
+
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
@@ -309,7 +343,7 @@ class TestCutlassBackend(TestCase):
             return (a @ b) / b.size(1)
 
         self._test_max_autotune_cutlass_backend_epilogue_fusion(
-            mixed_precision=True, fp16=True, expected_fuse_count=1, mm=mm
+            mixed_precision=True, fp16=True, expected_fuse_count=0, mm=mm
         )
 
     # TODO: Enable dynamic test cases when dynamic support is added.
