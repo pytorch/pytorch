@@ -1009,7 +1009,7 @@ class EQUALS_MATCH : public LeafGuard {
       }
 
       // Cache the value here.
-      if (result && !_first_passing_value){
+      if (result && !_first_passing_value) {
         _first_passing_value = py::cast<py::object>(value);
       }
       return result;

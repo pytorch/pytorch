@@ -630,8 +630,9 @@ class GuardBuilder(GuardBuilderBase):
 
             # Set source strings for debug info
             mod_dict_source = f"{base_source_name}.__dict__"
-            l1_source = l2_source = None
+            l1_source_name = l2_source_name = None
             l1_value = l2_value = None
+            l1_guard_manager_enum = l2_guard_manager_enum = None
             if l2_key:
                 l1_source = AttrSource(source.base, l1_key)
                 l1_source_name = l1_source.name()
@@ -867,6 +868,7 @@ class GuardBuilder(GuardBuilderBase):
                     guard_manager_enum,
                 )
             else:
+                assert base_guard_manager  # to make mypy happy
                 return base_guard_manager.dict_getitem_manager(
                     key=source.index,
                     source=source_name,
