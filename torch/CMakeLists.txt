@@ -79,6 +79,7 @@ list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${LIBSHM_SRCDIR})
 set(TORCH_PYTHON_LINK_LIBRARIES
     python::python
     pybind::pybind11
+    opentelemetry::api
     shm
     fmt::fmt-header-only
     ATEN_CPU_FILES_GEN_LIB)

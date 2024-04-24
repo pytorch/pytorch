@@ -131,7 +131,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         with self.assertRaisesRegex(
             optests.OpCheckError, "Argument x is not defined as mutable but was mutated"
         ):
-            optests.opcheck(op, (x,), {})
+            torch.library.opcheck(op, (x,), {})
 
     def test_incorrect_schema_view(self, device):
         lib = self.lib()
@@ -167,7 +167,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
             optests.OpCheckError,
             "Argument x is not defined to alias output but was aliasing",
         ):
-            optests.opcheck(op, (x,), {})
+            torch.library.opcheck(op, (x,), {})
 
     def test_missing_abstract_impl(self, device):
         lib = self.lib()
@@ -196,7 +196,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
             optests.OpCheckError,
             "_test_custom_op.foo.default",
         ):
-            optests.opcheck(op, (x,), {})
+            torch.library.opcheck(op, (x,), {})
 
     def test_incorrect_abstract_impl(self, device):
         lib = self.lib()
@@ -234,7 +234,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
 
         x = torch.tensor([0, 1.0], requires_grad=True)
         with self.assertRaisesRegex(optests.OpCheckError, "Shapes .* are not equal"):
-            optests.opcheck(op, (x,), {})
+            torch.library.opcheck(op, (x,), {})
 
     def test_missing_functionalization(self, device):
         lib = self.lib()
@@ -269,7 +269,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
             optests.OpCheckError,
             "We only support functionalizing operators whose outputs do not have alias annotations",
         ):
-            optests.opcheck(op, (y,), {})
+            torch.library.opcheck(op, (y,), {})
 
     def test_autograd_registered_at_backend(self, device):
         lib = self.lib()
@@ -295,7 +295,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
             torch.testing._internal.optests.OpCheckError,
             "does not have an autograd kernel",
         ):
-            optests.opcheck(op, (x,), {})
+            torch.library.opcheck(op, (x,), {})
 
         # I'm not sure why this is necessary
         del lib
@@ -323,7 +323,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         with self.assertRaisesRegex(
             optests.OpCheckError, "eager-mode PyTorch vs AOTAutograd"
         ):
-            optests.opcheck(op, (x,), {})
+            torch.library.opcheck(op, (x,), {})
 
     @ops(custom_op_db.custom_op_db, dtypes=OpDTypes.any_one)
     def test_opcheck_opinfo(self, device, dtype, op):
@@ -332,19 +332,11 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         ):
             args = [sample_input.input] + list(sample_input.args)
             kwargs = sample_input.kwargs
-            if op.op in (
-                numpy_nonzero._opoverload,
-                torch.ops._torch_testing.numpy_nms,
-            ):
-                ctx = self.assertRaisesRegex(optests.OpCheckError, "failed with")
-            else:
-                ctx = contextlib.nullcontext()
-            with ctx:
-                optests.opcheck(
-                    op.op,
-                    args,
-                    kwargs,
-                )
+            torch.library.opcheck(
+                op.op,
+                args,
+                kwargs,
+            )
 
     def test_opcheck_fails_basic(self, device):
         @custom_op(f"{self.test_ns}::foo")
@@ -360,7 +352,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         with self.assertRaisesRegex(
             optests.OpCheckError, "Autograd has not been implemented for operator"
         ):
-            optests.opcheck(self.get_op(f"{self.test_ns}::foo"), (x,), {})
+            torch.library.opcheck(self.get_op(f"{self.test_ns}::foo"), (x,), {})
 
     def test_autograd_registration_check_autograd_kernel(self, device):
         lib = self.lib()
@@ -746,7 +738,7 @@ class TestCustomOp(CustomOpTestCaseBase):
         )
 
     def test_supported_return_types_single_return(self):
-        for typ in torch._custom_op.impl.SUPPORTED_RETURN_TYPES:
+        for typ in torch._library.infer_schema.SUPPORTED_RETURN_TYPES:
             for example in self._generate_examples(typ):
                 try:
 
@@ -765,7 +757,7 @@ class TestCustomOp(CustomOpTestCaseBase):
                     custom_ops._destroy(f"{self.test_ns}::foo")
 
     def test_supported_return_types_multi_return(self):
-        for typ in torch._custom_op.impl.SUPPORTED_RETURN_TYPES:
+        for typ in torch._library.infer_schema.SUPPORTED_RETURN_TYPES:
             for example in self._generate_examples(typ):
                 try:
 
@@ -785,7 +777,7 @@ class TestCustomOp(CustomOpTestCaseBase):
                     custom_ops._destroy(f"{self.test_ns}::foo")
 
     def test_supported_param_types(self):
-        for typ in torch._custom_op.impl.SUPPORTED_PARAM_TYPES:
+        for typ in torch._library.infer_schema.SUPPORTED_PARAM_TYPES:
 
             @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
             def foo(x: Tensor, y: typ) -> Tensor:
@@ -1748,6 +1740,17 @@ dynamic shape operator: _torch_testing.numpy_nonzero.default
             res = torch._library.utils.is_functional_schema(schema)
             self.assertEqual(res, expected)
 
+    def test_incorrect_schema_types(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            with self.assertRaisesRegex(RuntimeError, "unknown type specifier"):
+                lib.define("foo12(Tensor a) -> asdfasdf")
+            with self.assertRaisesRegex(RuntimeError, "unknown type specifier"):
+                lib.define("foo12(asdf a) -> Tensor")
+            with self.assertRaisesRegex(RuntimeError, "Use `SymInt` or `int`"):
+                lib.define("foo12(int64_t a) -> Tensor")
+            with self.assertRaisesRegex(RuntimeError, "Use `float`"):
+                lib.define("foo12(double a) -> Tensor")
+
     def test_is_tensorlist_like_type(self):
         tensorlists = [
             # Tensor[]
@@ -2486,14 +2489,18 @@ class TestCustomOpAPI(TestCase):
                 return grad * x.cos()
 
             if mode == "function":
-                torch.library.register_autograd(numpy_sin, setup_context, backward)
+                torch.library.register_autograd(
+                    numpy_sin, backward, setup_context=setup_context
+                )
             elif mode == "qualname":
                 torch.library.register_autograd(
-                    "mylib::numpy_sin", setup_context, backward
+                    "mylib::numpy_sin", backward, setup_context=setup_context
                 )
             elif mode == "opoverload":
                 torch.library.register_autograd(
-                    torch.ops.mylib.numpy_sin.default, setup_context, backward
+                    torch.ops.mylib.numpy_sin.default,
+                    backward,
+                    setup_context=setup_context,
                 )
 
             x = torch.randn(3, requires_grad=True)
@@ -2531,13 +2538,16 @@ class TestCustomOpAPI(TestCase):
 
                 if mode == "qualname":
                     torch.library.register_autograd(
-                        "_torch_testing::sin5", setup_context, backward, lib=lib
+                        "_torch_testing::sin5",
+                        backward,
+                        setup_context=setup_context,
+                        lib=lib,
                     )
                 elif mode == "opoverload":
                     torch.library.register_autograd(
                         torch.ops._torch_testing.sin5.default,
-                        setup_context,
                         backward,
+                        setup_context=setup_context,
                         lib=lib,
                     )
                 x = torch.randn(3, requires_grad=True)
@@ -2770,6 +2780,7 @@ optests.generate_opcheck_tests(
     additional_decorators={
         "test_pt2_compliant_tag_mini_op_test_no_abstract": [unittest.expectedFailure]
     },
+    test_utils=optests.generate_tests.DEPRECATED_DEFAULT_TEST_UTILS,
 )
 
 optests.generate_opcheck_tests(
@@ -2779,6 +2790,7 @@ optests.generate_opcheck_tests(
         os.path.dirname(__file__),
         "minioptest_failures_dict.json",
     ),
+    test_utils=optests.generate_tests.DEPRECATED_DEFAULT_TEST_UTILS,
 )
 
 
@@ -2871,7 +2883,7 @@ opcheck(op, args, kwargs, test_utils="test_schema")
 
         failures = {
             "mini_op_test::incorrect_schema": {
-                "MiniOpTest.test_aot_dispatch_static__test_delayed_error": {
+                "MiniOpTest.test_aot_dispatch_dynamic__test_delayed_error": {
                     "comment": "",
                     "status": "success",
                 }
@@ -2901,7 +2913,7 @@ opcheck(op, args, kwargs, test_utils="test_schema")
 
         failures = {
             "mini_op_test::incorrect_schema": {
-                "MiniOpTest.test_aot_dispatch_static__test_delayed_error_nopenopenope": {
+                "MiniOpTest.test_aot_dispatch_dynamic__test_delayed_error_nopenopenope": {
                     "comment": "",
                     "status": "xfail",
                 },
@@ -2921,10 +2933,10 @@ opcheck(op, args, kwargs, test_utils="test_schema")
     def test_opcheck(self):
         x = torch.randn(3, requires_grad=True)
         with self.assertRaisesRegex(ValueError, "OpOverload"):
-            optests.opcheck(torch.sin, (x,))
+            torch.library.opcheck(torch.sin, (x,))
         with self.assertRaisesRegex(ValueError, "test_utils to be subset of"):
-            optests.opcheck(torch.ops.aten.sin.default, (x,), test_utils="blah")
-        result = optests.opcheck(torch.ops.aten.sin.default, (x,))
+            torch.library.opcheck(torch.ops.aten.sin.default, (x,), test_utils="blah")
+        result = torch.library.opcheck(torch.ops.aten.sin.default, (x,))
 
         self.assertEqual(
             result,
@@ -2932,12 +2944,11 @@ opcheck(op, args, kwargs, test_utils="test_schema")
                 "test_schema": "SUCCESS",
                 "test_autograd_registration": "SUCCESS",
                 "test_faketensor": "SUCCESS",
-                "test_aot_dispatch_static": "SUCCESS",
                 "test_aot_dispatch_dynamic": "SUCCESS",
             },
         )
 
-        result = optests.opcheck(
+        result = torch.library.opcheck(
             torch.ops.aten.sin.default, (x,), test_utils="test_schema"
         )
         self.assertEqual(
@@ -2947,7 +2958,7 @@ opcheck(op, args, kwargs, test_utils="test_schema")
             },
         )
 
-        result = optests.opcheck(
+        result = torch.library.opcheck(
             torch.ops.aten.sin.default,
             (x,),
             test_utils=["test_schema", "test_faketensor"],
@@ -2960,6 +2971,21 @@ opcheck(op, args, kwargs, test_utils="test_schema")
             },
         )
 
+    def test_opcheck_customopdef(self):
+        sample_inputs = [
+            (torch.randn(3),),
+            (torch.randn(3, requires_grad=True),),
+        ]
+        if torch.cuda.is_available():
+            sample_inputs.extend(
+                [
+                    (torch.randn(3, device="cuda"),),
+                    (torch.randn(3, device="cuda", requires_grad=True),),
+                ]
+            )
+        for args in sample_inputs:
+            torch.library.opcheck(custom_op_db.numpy_cube, args)
+
     def test_is_inside_opcheck_mode(self):
         self.assertFalse(optests.is_inside_opcheck_mode())
         with optests.generate_tests.OpCheckMode(
@@ -2971,9 +2997,9 @@ opcheck(op, args, kwargs, test_utils="test_schema")
         op = op_with_incorrect_schema(self, "foo")
         x = torch.randn(3)
         with self.assertRaisesRegex(Exception, "is not defined to alias output"):
-            optests.opcheck(op, (x,))
+            torch.library.opcheck(op, (x,))
 
-        result = optests.opcheck(op, (x,), raise_exception=False)
+        result = torch.library.opcheck(op, (x,), raise_exception=False)
         self.assertTrue(isinstance(result["test_schema"], RuntimeError))
         del result["test_schema"]
         self.assertEqual(
@@ -2981,7 +3007,6 @@ opcheck(op, args, kwargs, test_utils="test_schema")
             {
                 "test_autograd_registration": "SUCCESS",
                 "test_faketensor": "SUCCESS",
-                "test_aot_dispatch_static": "SUCCESS",
                 "test_aot_dispatch_dynamic": "SUCCESS",
             },
         )
