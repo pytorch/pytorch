@@ -8,14 +8,14 @@ from . import utils
 
 
 class InfoProtocol(Protocol):
-    _setup_context_fn: Optional[Callable]
     _backward_fn: Optional[Callable]
+    _setup_context_fn: Optional[Callable]
 
 
 @dataclasses.dataclass
 class Info:
-    _setup_context_fn: Optional[Callable]
     _backward_fn: Optional[Callable]
+    _setup_context_fn: Optional[Callable]
 
 
 def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
