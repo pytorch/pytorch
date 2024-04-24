@@ -208,6 +208,165 @@ main()
 
         self.check_output_and_recompiles(fn)
 
+    def test_dynamo_boxed(self):
+        def get_placeholders(gm_):
+            placeholders = []
+            for node in gm_.graph.nodes:
+                if node.op == "placeholder":
+                    placeholders.append(node)
+            return placeholders
+
+        def eager_with_check(gm, is_bwd):
+            def inner_compiler(gm_, example_inputs_):
+                placeholders = get_placeholders(gm_)
+                if is_bwd:
+                    # should be boxed inputs
+                    assert len(placeholders) == 1
+                    pass
+                else:
+                    assert len(placeholders) > 1
+
+                return gm_
+
+            return torch.compile(gm, backend=inner_compiler)
+
+        fwd_compiler_fn = functools.partial(eager_with_check, is_bwd=False)
+        bwd_compiler_fn = functools.partial(eager_with_check, is_bwd=True)
+
+        def fn(inputs):
+            args_0, args_1, args_2 = inputs
+            out = torch.mm(args_0, args_1)
+            out = torch.mm(out, args_2)
+            loss = out.sum()
+            with compiled_autograd.enable(bwd_compiler_fn):
+                loss.backward()
+            yield args_0.grad
+            yield args_1.grad
+            yield args_2.grad
+
+        inputs = [
+            torch.randn([1, 2], requires_grad=True),
+            torch.randn([2, 3], requires_grad=True),
+            torch.randn([3, 4], requires_grad=True),
+        ]
+
+        compiled_fn = eager_with_check(fn, is_bwd=False)
+        grads = list(compiled_fn(inputs))
+        self.assertEqual(len(grads), 3)
+        self.assertNotEqual(grads[0], None)
+        self.assertNotEqual(grads[1], None)
+        self.assertNotEqual(grads[2], None)
+
+    def test_inputs_aliasing_bytecode_attr_mutations(self):
+        # Freeze compiled autograd graph
+        compiler = torch._dynamo.compiled_autograd.AutogradCompilerInstance(compiler_fn)
+        param = torch.ones(100)
+        activ = torch.ones(100) * 2
+        inputs = [param, activ]
+        proxies, _ = compiler.begin_capture(inputs=inputs, sizes=[])
+        param_proxy, activ_proxy = proxies
+        buf = activ_proxy * 2
+        torch.ops.inductor.accumulate_grad_.default(param_proxy, buf)
+        compiled_fn = compiler.end_capture(buf)
+
+        def bytecode_hook(code, out_code):
+            import dis
+            import sys
+
+            if sys.version_info < (3, 11):
+                call_op = "CALL_FUNCTION"
+            else:
+                call_op = "CALL"
+
+            insts = list(dis.get_instructions(out_code))
+            call_graph_idx = next(
+                i for i, inst in enumerate(insts) if inst.opname == call_op
+            )
+            # pre-graph should alias: inputs_ref_0 = inputs[0]
+            matches = [
+                inst
+                for inst in insts[:call_graph_idx]
+                if inst.opname == "STORE_FAST" and inst.argval == "inputs_ref_0"
+            ]
+            self.assertTrue(len(matches) == 1)
+            # post-graph should access inputs_ref_0 instead of inputs
+            matches = [
+                inst for inst in insts[call_graph_idx:] if inst.argval == "inputs"
+            ]
+            self.assertTrue(len(matches) == 0)
+            matches = [
+                inst
+                for inst in insts[call_graph_idx:]
+                if inst.opname == "LOAD_FAST" and inst.argval == "inputs_ref_0"
+            ]
+            self.assertTrue(len(matches) == 1)
+
+        torch._dynamo.reset()
+        handle = torch._dynamo.convert_frame.register_bytecode_hook(bytecode_hook)
+        try:
+            compiled_fn(inputs=[param, activ], sizes=(), hooks=())
+        finally:
+            handle.remove()
+
+    def test_inputs_aliasing_bytecode_stack_restore(self):
+        from torch.testing._internal.logging_tensor import LoggingTensor
+
+        # Create a graph that allows inputs stealing
+        def forward(inputs):
+            add = inputs[0] + 1
+            add_1 = add + inputs[1]  # handled in suffix for tensor subclass
+            out = add_1.cpu()
+            return (out,)
+
+        gm = torch.fx.symbolic_trace(forward)
+        torch._dynamo.utils.set_locals_to_steal(gm, ["inputs"])
+        compiled_fn = torch.compile(gm)
+
+        inputs = [
+            torch.ones(1000000, dtype=torch.float32),
+            LoggingTensor(torch.ones(1)),
+        ]
+
+        def bytecode_hook(code, out_code):
+            import dis
+            import sys
+
+            if sys.version_info < (3, 11):
+                call_op = "CALL_FUNCTION"
+            else:
+                call_op = "CALL"
+
+            insts = list(dis.get_instructions(out_code))
+            call_graph_idx = next(
+                i for i, inst in enumerate(insts) if inst.opname == call_op
+            )
+            # pre-graph should alias: inputs_ref_0 = inputs[0]
+            matches = [
+                inst
+                for inst in insts[:call_graph_idx]
+                if inst.opname == "STORE_FAST" and inst.argval == "inputs_ref_0"
+            ]
+            self.assertTrue(len(matches) == 1)
+            # post-graph should access inputs_ref_0 instead of inputs
+            matches = [
+                inst for inst in insts[call_graph_idx:] if inst.argval == "inputs"
+            ]
+            self.assertTrue(len(matches) == 0)
+            matches = [
+                inst
+                for inst in insts[call_graph_idx:]
+                if inst.opname == "LOAD_FAST" and inst.argval == "inputs_ref_0"
+            ]
+            self.assertTrue(len(matches) == 1)
+
+        torch._dynamo.reset()
+        handle = torch._dynamo.convert_frame.register_bytecode_hook(bytecode_hook)
+        try:
+            out = compiled_fn(inputs)
+            self.assertTrue(len(inputs) == 0)
+        finally:
+            handle.remove()
+
     def test_implicit_add(self):
         def fn():
             y = torch.randn(1, 4, requires_grad=True)
@@ -1091,6 +1250,98 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent, m) {
 
         self.check_output_and_recompiles(fn, 3)
 
+    @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    def test_free_activation_memory(self):
+        self.assertTrue(torch.cuda.memory_allocated() == 0)
+
+        # Use an op to check that the memory is freed by the time the op is executed
+        def assertion_impl(to_clone):
+            mem_allocated = torch.cuda.memory_allocated()
+            self.assertTrue(
+                mem_allocated < 4000000, "activations should have been freed"
+            )
+            return to_clone.clone()
+
+        with torch.library._scoped_library("test_compiled_autograd", "FRAGMENT") as lib:
+            lib.define(
+                "assertion_op(Tensor x) -> Tensor", tags=(torch.Tag.pt2_compliant_tag,)
+            )
+            lib.impl("assertion_op", assertion_impl, "CPU")
+            lib.impl("assertion_op", lambda x: x.clone(), "Meta")
+
+            # Create a graph that allows inputs stealing
+            def forward(activations):
+                add = activations[0] + 1
+                out = add.cpu()
+                cloned_out = torch.ops.test_compiled_autograd.assertion_op(out)
+                return (cloned_out,)
+
+            gm = torch.fx.symbolic_trace(forward)
+            torch._dynamo.utils.set_locals_to_steal(gm, ["activations"])
+            compiled_fn = torch.compile(gm)
+
+            # allocate at least 4,000,000 bytes (1,000,000 * 4 bytes)
+            activations = [torch.ones(1000000, dtype=torch.float32, device="cuda")]
+            self.assertTrue(torch.cuda.memory_allocated() > 4000000)
+
+            out = compiled_fn(activations)
+            self.assertTrue(len(activations) == 0)
+
+    @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    def test_free_activation_memory_subclass(self):
+        # cover the case when aot inputs have subclasses, resulting in a different runtime wrapper
+        self.assertTrue(torch.cuda.memory_allocated() == 0)
+
+        # Use an op to check that the memory is freed by the time the op is executed
+        def assertion_impl(to_clone):
+            mem_allocated = torch.cuda.memory_allocated()
+            self.assertTrue(
+                mem_allocated < 1200000, "some activations should have been freed"
+            )
+            self.assertTrue(
+                mem_allocated > 800000,
+                "currently subclasses don't seem to be freed in inductor",
+            )
+            return to_clone.clone()
+
+        with torch.library._scoped_library("test_compiled_autograd", "FRAGMENT") as lib:
+            lib.define(
+                "assertion_op(Tensor x) -> Tensor", tags=(torch.Tag.pt2_compliant_tag,)
+            )
+            lib.impl("assertion_op", assertion_impl, "CPU")
+            lib.impl("assertion_op", lambda x: x.clone(), "Meta")
+            lib.impl("assertion_op", lambda x: x.clone(), "NestedTensor")
+
+            def fn(inputs):
+                _, y = inputs
+                out = y.cpu()
+                cloned_out = torch.ops.test_compiled_autograd.assertion_op(out)
+                return cloned_out
+
+            gm = torch.fx.symbolic_trace(fn)
+            torch._dynamo.utils.set_locals_to_steal(gm, ["inputs"])
+            compiled_fn = torch.compile(gm)
+
+            from torch.nested._internal.nested_tensor import jagged_from_list
+
+            activations = [
+                jagged_from_list(
+                    [
+                        torch.ones((1, 100000), device="cuda"),  # 400,000 bytes
+                        torch.ones((1, 100000), device="cuda"),  # 400,000 bytes
+                    ],
+                    None,
+                )[
+                    0
+                ],  # NestedTensor
+                torch.ones((1, 100000), device="cuda"),  # 400,000 bytes
+            ]
+            # 1,200,000 bytes (3 * 4 * 100,000 bytes)
+            self.assertTrue(torch.cuda.memory_allocated() > 1200000)
+
+            out = compiled_fn(activations)
+            self.assertTrue(len(activations) == 0)
+
 
 def load_test_module(name):
     testdir = Path(__file__).absolute().parent.parent
@@ -1262,6 +1513,7 @@ known_failing_tests = {
     "test_save_for_backward_inputs_are_namedtuple",  # torch._dynamo.exc.Unsupported: 'skip function
     "test_autograd_function_backed_op",  # RuntimeError: compiled_args not implemented
     "test_setitem",  # AssertionError: Tensor-likes are not close!
+    "test_grad_nonleaf_register_hook",  # IndexError: list index out of range (NB: x.grad = y where both x and y are input tensors)
 }
 
 if not HAS_CUDA:

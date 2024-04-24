@@ -133,12 +133,12 @@ Library& Library::_def(c10::FunctionSchema&& schema, c10::OperatorName* out_name
   }
   switch (rv) {
     case _RegisterOrVerify::REGISTER:
-      if (impl_abstract_pystub_.has_value()) {
+      if (python_module_.has_value()) {
         registrars_.emplace_back(
-          c10::Dispatcher::singleton().registerAbstractImplPyStub(
+          c10::Dispatcher::singleton().registerPythonModule(
             schema.operator_name(),
-            impl_abstract_pystub_->first,
-            impl_abstract_pystub_->second)
+            python_module_->first,
+            python_module_->second)
         );
       }
       registrars_.emplace_back(
