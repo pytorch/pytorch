@@ -22117,9 +22117,9 @@ python_ref_db = [
         torch_opinfo_name="roll",
         validate_view_consistency=False,
         skips=(
-            # RuntimeError: no _refs support for torch.Tensor.__getitem__
-            # Leaving it as a ref because fftshift uses it
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
+            # # RuntimeError: no _refs support for torch.Tensor.__getitem__
+            # # Leaving it as a ref because fftshift uses it
+            # DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
         ),
     ),
     PythonRefInfo(

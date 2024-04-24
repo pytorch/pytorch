@@ -1,4 +1,4 @@
-from typing import Callable, List, Tuple
+from typing import Callable, List, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -20,7 +20,8 @@ from torch.overrides import TorchFunctionMode
 
 
 def transform_getitem_args(
-    x: torch.Tensor, index_args
+    x: torch.Tensor,
+    index_args: Union[torch.Tensor, Tuple[torch.Tensor], List[torch.Tensor]],
 ) -> Tuple[torch.Tensor, List[torch.Tensor]]:
     if isinstance(index_args, tuple):
         return (x, list(index_args))
