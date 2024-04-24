@@ -32,8 +32,8 @@ class FunctionCtx:
     def save_for_backward(self, *tensors: torch.Tensor):
         r"""Save given tensors for a future call to :func:`~Function.backward`.
 
-        ``save_for_backward`` should be called at most once, only from inside the
-        :func:`forward` method, and only with tensors.
+        ``save_for_backward`` should be called at most once, in either the
+        :func:`setup_context` or :func:`forward` methods, and only with tensors.
 
         All tensors intended to be used in the backward pass should be saved
         with ``save_for_backward`` (as opposed to directly on ``ctx``) to prevent
@@ -91,8 +91,9 @@ class FunctionCtx:
     def save_for_forward(self, *tensors: torch.Tensor):
         r"""Save given tensors for a future call to :func:`~Function.jvp`.
 
-        ``save_for_forward`` should be only called once, from inside the :func:`forward`
-        method, and only be called with tensors.
+        ``save_for_forward`` should be called at most once, in either the
+        :func:`setup_context` or :func:`forward` methods, and all arguments
+        should be tensors.
 
         In :func:`jvp`, saved objects can be accessed through the :attr:`saved_tensors`
         attribute.
@@ -144,8 +145,8 @@ class FunctionCtx:
     def mark_dirty(self, *args: torch.Tensor):
         r"""Mark given tensors as modified in an in-place operation.
 
-        **This should be called at most once, only from inside the**
-        :func:`forward` **method, and all arguments should be inputs.**
+        This should be called at most once, in either the :func:`setup_context`
+        or :func:`forward` methods, and all arguments should be inputs.
 
         Every tensor that's been modified in-place in a call to :func:`forward`
         should be given to this function, to ensure correctness of our checks.
@@ -188,8 +189,8 @@ class FunctionCtx:
     def mark_non_differentiable(self, *args: torch.Tensor):
         r"""Mark outputs as non-differentiable.
 
-        **This should be called at most once, only from inside the**
-        :func:`forward` **method, and all arguments should be tensor outputs.**
+        This should be called at most once, in either the :func:`setup_context`
+        or :func:`forward` methods, and all arguments should be tensor outputs.
 
         This will mark outputs as not requiring gradients, increasing the
         efficiency of backward computation. You still need to accept a gradient
@@ -220,7 +221,8 @@ class FunctionCtx:
     def set_materialize_grads(self, value: bool):
         r"""Set whether to materialize grad tensors. Default is ``True``.
 
-        **This should be called only from inside the** :func:`forward` **method**
+        This should be called only from either the :func:`setup_context` or
+        :func:`forward` methods.
 
         If ``True``, undefined grad tensors will be expanded to tensors full of zeros
         prior to calling the :func:`backward` and :func:`jvp` methods.

@@ -24,6 +24,12 @@ verbose_progress = False
 # use fx aot graph codegen cache
 fx_graph_cache = os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE") == "1"
 
+# enable autotune local cache
+autotune_local_cache = True
+
+# enable autotune remote cache
+autotune_remote_cache = os.environ.get("TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE") == "1"
+
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
 
@@ -92,6 +98,10 @@ pattern_matcher = True
 # torch._inductor.config.post_grad_custom_post_pass = my_custom_post_pass
 post_grad_custom_pre_pass: Optional[Callable[[torch.fx.graph.Graph], None]] = None
 post_grad_custom_post_pass: Optional[Callable[[torch.fx.graph.Graph], None]] = None
+
+# Registers a custom joint graph pass.
+joint_custom_pre_pass: Optional[Callable[[torch.fx.Graph], None]] = None
+joint_custom_post_pass: Optional[Callable[[torch.fx.Graph], None]] = None
 
 # Registers a custom pregrad pass. Note that the pre-grad IR is 1.
 # non-functional, 2. non-normalized, and 3. prone to change. Ideally we should
@@ -209,14 +219,6 @@ max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") 
 # enable slow autotuning passes to select gemm algorithms
 max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
 
-# enable autotune local cache
-use_autotune_local_cache = True
-
-# enable autotune remote cache
-use_autotune_remote_cache = (
-    os.environ.get("TORCH_INDUCTOR_AUTOTUNE_REMOTE_CACHE") == "1"
-)
-
 # force cublas and triton to use the same precision; cublas supports TF32 for matmul operations
 # when m, n, k are multiples of 16, 16, 8, whereas triton supports TF32 for matmul operations
 # for any combinations of m, n, k, regardless of their alignment. setting this flag will ensure
@@ -244,6 +246,15 @@ save_args = os.environ.get("TORCHINDUCTOR_SAVE_ARGS") == "1"
 
 # We will disable creating subprocess for autotuning if this is False
 autotune_in_subproc = os.environ.get("TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC") == "1"
+
+# The following three timeouts are applicable if autotune_in_subproc is True:
+
+# Max time that a a valid benchmark result may take during autotuning
+max_autotune_subproc_result_timeout_seconds = 60.0
+# Additional time we allow subprocesses to terminate gracefully after the timeout until we send a SIGTERM
+max_autotune_subproc_graceful_timeout_seconds = 1.0
+# Additional time that we grant after a SIGTERM until we do a hard SIGKILL of subprocesses
+max_autotune_subproc_terminate_timeout_seconds = 2.0
 
 # If autotuning in subprocess, whether to use multiple devices
 autotune_multi_device = os.environ.get("TORCHINDUCTOR_AUTOTUNE_MULTI_DEVICE") == "1"
@@ -301,8 +312,14 @@ benchmark_fusion = os.environ.get("TORCHINDUCTOR_BENCHMARK_FUSION") == "1"
 enabled_metric_tables = os.environ.get("TORCHINDUCTOR_ENABLED_METRIC_TABLES", "")
 
 benchmark_multi_templates = (
-    os.environ.get("TORCHINDUCTOR_BENCHMARK_MULTI_TEMPLATES", "0") == "1"
+    os.environ.get(
+        "TORCHINDUCTOR_BENCHMARK_MULTI_TEMPLATES", "0" if is_fbcode() else "1"
+    )
+    == "1"
 )
+
+# Take how many of the top triton kernels to benchmark epilogue
+max_epilogue_benchmarked_choices = 3
 
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
@@ -421,6 +438,17 @@ kernel_name_max_ops = 10
 # Pad input tensors of matmul/bmm/addmm to leverage Tensor Cores in NVIDIA GPUs
 shape_padding = os.environ.get("TORCHINDUCTOR_SHAPE_PADDING", "1") == "1"
 
+# Control if we will do padding for pointwise/reductions
+comprehensive_padding = (
+    os.environ.get("TORCHINDUCTOR_COMPREHENSIVE_PADDING", "0" if is_fbcode() else "1")
+    == "1"
+)
+pad_channels_last = False
+
+# Whether to treat output of the backward graph as user visible.
+# For user visible outputs, inductor will make sure the stride matches with eager.
+bw_outputs_user_visible = True
+
 # Fx-based linear/matmul/bmm + permute/transpose vertical fusion
 permute_fusion = os.environ.get("TORCHINDUCTOR_PERMUTE_FUSION", "0") == "1"
 
@@ -492,16 +520,18 @@ class cpp:
 
     # Do not generate loops when the condition doesn't hold, like:
     # for(long i0=4096; i0<4096; i0+=1)
-    no_redundant_loops = True
+    no_redundant_loops = (
+        os.environ.get("TORCHINDUCTOR_CPP_NO_REDUNDANT_LOOPS", "1") == "1"
+    )
 
     # Assume number of threads is dynamic, don't specialize thread number.
     # Kernels don't recompile on thread number changes with this flag on.
     # For single-threaded workload, turning it on would incur a slight
     # performance degradation.
-    dynamic_threads = False
+    dynamic_threads = os.environ.get("TORCHINDUCTOR_CPP_DYNAMIC_THREADS", "0") == "1"
 
     simdlen: Optional[int] = None
-    min_chunk_size = 4096
+    min_chunk_size = int(os.environ.get("TORCHINDUCTOR_CPP_MIN_CHUNK_SIZE", "4096"))
     cxx = (
         None,  # download gcc12 from conda-forge if conda is installed
         # "g++-12",
@@ -512,10 +542,12 @@ class cpp:
         # "g++.par",
     )
     # Allow kernel performance profiling via PyTorch profiler
-    enable_kernel_profile = False
+    enable_kernel_profile = (
+        os.environ.get("TORCHINDUCTOR_CPP_ENABLE_KERNEL_PROFILE", "0") == "1"
+    )
 
     # enable weight prepacking to get a better performance; may lead to large memory footprint
-    weight_prepack = True
+    weight_prepack = os.environ.get("TORCHINDUCTOR_CPP_WEIGHT_PREPACK", "1") == "1"
 
     # Inject a bug into our relu implementation; useful for testing our repro
     # extraction and minification functionality.
@@ -531,23 +563,32 @@ class cpp:
     descriptive_names = "original_aten"
 
     # how many nodes to allow into a single horizontal fusion
-    max_horizontal_fusion_size = 16
+    max_horizontal_fusion_size = int(
+        os.environ.get("TORCHINDUCTOR_CPP_MAX_HORIZONTAL_FUSION_SIZE", "16")
+    )
 
     # Make scatter_reduce fallback when reduce is sum to avoid performance regression
     # using atomic_add.
-    fallback_scatter_reduce_sum = True
+    fallback_scatter_reduce_sum = (
+        os.environ.get("TORCHINDUCTOR_CPP_FALLBACK_SCATTER_REDUCE_SUM", "1") == "1"
+    )
 
     # Use funsafe-math-optimizations when compiling
-    enable_unsafe_math_opt_flag = False
+    enable_unsafe_math_opt_flag = (
+        os.environ.get("TORCHINDUCTOR_CPP_ENABLE_UNSAFE_MATH_OPT_FLAG", "0") == "1"
+    )
 
     # Use ffp-contract when compiling
-    enable_floating_point_contract_flag = False
+    enable_floating_point_contract_flag = (
+        os.environ.get("TORCHINDUCTOR_CPP_ENABLE_FLOATING_POINT_CONTRACT_FLAG", "0")
+        == "1"
+    )
 
 
 # config specific to codegen/triton.py
 class triton:
     # Use cudagraphs on output code
-    cudagraphs = False
+    cudagraphs = os.environ.get("TORCHINDUCTOR_CUDAGRAPHS") == "1"
 
     # Use cudagraph trees for memory pooling if `cudagraphs` is True
     cudagraph_trees = True
@@ -625,18 +666,6 @@ class triton:
     # hint to Triton when arguments are divisible by 16
     divisible_by_16 = True
 
-    # theses are not enforced, but they are used by asserts in triton_heuristics.py
-    # NOTE: mobilevit_s in timm_models required X to be set to the higher value 2048
-
-    # Max RBLOCK will be large for multi-kernel since we do more aggressive
-    # persistent reduction.
-    max_block = {
-        "X": 2048,
-        "Y": 1024,
-        "Z": 1024,
-        "R": 4096 * (16 if multi_kernel else 1),
-    }
-
     # Minimum RBLOCK to be used for a TritonSplitScanKernel
     # NOTE: This also indirectly controls the size of workspace buffer required
     min_split_scan_rblock = 256
@@ -685,6 +714,10 @@ class aot_inductor:
 
     # flag to decide whether to create a submodule for constant graph.
     use_runtime_constant_folding: bool = False
+
+    # flag to force weight to be appened to the shared library and mmaped  by the runtime
+    # rather than embedded into the data section. Needed to support 1B+ parameter models
+    force_mmap_weights: bool = False
 
 
 class cuda:
