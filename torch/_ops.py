@@ -1134,6 +1134,7 @@ class _OpNamespace(types.ModuleType):
                 f"'_OpNamespace' '{self.name}' object has no attribute '{op_name}'"
             ) from e
 
+        op.__module__ = module_name
         opoverloadpacket = OpOverloadPacket(
             qualified_op_name, op_name, op, overload_names
         )
@@ -1147,16 +1148,17 @@ class _OpNamespace(types.ModuleType):
 
 def _get_packet(qualname, op_module):
     op, overload_names = torch._C._jit_get_operation(qualname)
-    # let the script frontend know that op is identical to the builtin op
-    # with qualified_op_name
-    torch.jit._builtins._register_builtin(op, qualname)
     if op is not None:
+        # let the script frontend know that op is identical to the builtin op
+        # with qualified_op_name
+        torch.jit._builtins._register_builtin(op, qualname)
         op.__module__ = op_module
     return op, overload_names
 
 
 def _refresh_packet(packet):
     op, overload_names = _get_packet(packet._qualified_op_name, packet._op.__module__)
+    assert op is not None
     packet._op = op
     packet._overload_names = overload_names
 
