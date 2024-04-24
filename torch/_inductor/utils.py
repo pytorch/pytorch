@@ -1445,3 +1445,20 @@ def should_assume_input_aligned(example_input: torch.Tensor):
     if example_input.device.type != "cuda":
         return False
     return config.assume_aligned_inputs or tensor_is_aligned(example_input)
+
+
+def maybe_get_suppress_shape_guards_ctx():
+    # Try to get TracingContext.try_get().fake_mode.shape_env.suppress_guards()
+    # If it's not available, return a nullcontext.
+
+    # If we're dealing with cudagraphs, we might not have a tracing_context
+    tracing_context = torch._guards.TracingContext.try_get()
+    if not tracing_context:
+        return contextlib.nullcontext()
+
+    # In standalone inductor compile mode, we might not have a shape_env attached to the fake mode
+    shape_env = tracing_context.fake_mode.shape_env
+    if not shape_env:
+        return contextlib.nullcontext()
+
+    return shape_env.suppress_guards()
