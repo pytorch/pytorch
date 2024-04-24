@@ -1,16 +1,16 @@
 # This file used to build libtorch.so.
 # Now it only builds the Torch python bindings.
 
+if(BUILD_PYTHONLESS)
+  return()
+endif()
+
 if(NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
   project(torch CXX C)
   find_package(torch REQUIRED)
   option(USE_CUDA "Use CUDA" ON)
   set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-endif()
-
-if(NOT BUILD_PYTHON)
-  return()
 endif()
 
 set(TORCH_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}")

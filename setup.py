@@ -226,7 +226,11 @@
 #
 #   USE_PRIORITIZED_TEXT_FOR_LD
 #      Uses prioritized text form cmake/prioritized_text.txt for LD
+#
+#   BUILD_LIBTORCH
+#      Builds libtorch.so and its dependencies
 
+import os
 import sys
 
 if sys.platform == "win32" and sys.maxsize.bit_length() == 31:
@@ -236,6 +240,14 @@ if sys.platform == "win32" and sys.maxsize.bit_length() == 31:
     sys.exit(-1)
 
 import platform
+
+BUILD_LIBTORCH_WHL = os.getenv("BUILD_LIBTORCH_WHL", "0") == "1"
+
+# set up appropriate env variables
+if BUILD_LIBTORCH_WHL:
+    # Set up environment variables for building libtorch.so
+    os.environ["BUILD_FUNCTORCH"] = "OFF"
+    os.environ["BUILD_PYTHONLESS"] = "OFF"
 
 python_min_version = (3, 8, 0)
 python_min_version_str = ".".join(map(str, python_min_version))
@@ -341,7 +353,10 @@ cmake_python_include_dir = sysconfig.get_path("include")
 ################################################################################
 # Version, create_version_file, and package_name
 ################################################################################
-package_name = os.getenv("TORCH_PACKAGE_NAME", "torch")
+
+DEFAULT_PACKAGE_NAME = "torch" if not BUILD_LIBTORCH_WHL else "libtorch"
+
+package_name = os.getenv("TORCH_PACKAGE_NAME", "libtorch")
 package_type = os.getenv("PACKAGE_TYPE", "wheel")
 version = get_torch_version()
 report(f"Building wheel {package_name}-{version}")
@@ -956,8 +971,13 @@ def configure_extension_build():
 
     main_compile_args = []
     main_libraries = ["torch_python"]
+
     main_link_args = []
     main_sources = ["torch/csrc/stub.c"]
+
+    if BUILD_LIBTORCH_WHL:
+        main_libraries = []
+        main_sources = []
 
     if cmake_cache_vars["USE_CUDA"]:
         library_dirs.append(os.path.dirname(cmake_cache_vars["CUDA_CUDA_LIB"]))
