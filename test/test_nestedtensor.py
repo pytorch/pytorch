@@ -10,6 +10,7 @@ import math
 
 import numpy as np
 import torch
+import torch._inductor
 import torch.nn
 import torch.nn.functional as F
 from torch.testing._internal.common_cuda import (
@@ -3999,19 +4000,21 @@ class TestNestedTensorSubclass(TestCase):
 
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     def test_return_nt_constructed_in_graph(self, device):
-        def fn(values, offsets):
+        def fn():
+            values = torch.rand((10, 8), device=device)
+            offsets = torch.tensor([0, 1, 3, 6, 10], device=device)
             nt = torch.nested.nested_tensor_from_jagged(values, offsets)
             nt = nt.cos()
             return nt
 
-        values = torch.rand((10, 8), device=device)
-        offsets = torch.tensor([0, 1, 3, 6, 10], device=device)
+        with torch._inductor.config.patch(fallback_random=True):
+            fn_c = torch.compile(fn, fullgraph=True)
 
-        fn_c = torch.compile(fn, fullgraph=True)
-
-        ref = fn(values, offsets)
-        res = fn_c(values, offsets)
-        self.assertEqual(ref, res)
+            torch.manual_seed(42)
+            ref = fn()
+            torch.manual_seed(42)
+            res = fn_c()
+            self.assertEqual(ref, res)
 
     # Doesn't work until we have real views
     @xfailIfTorchDynamo
