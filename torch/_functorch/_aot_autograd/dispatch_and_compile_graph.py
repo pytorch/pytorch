@@ -15,6 +15,7 @@ from torch._dynamo.utils import lazy_format_graph_code
 from torch._logging import getArtifactLogger, trace_structured
 from torch._subclasses.functional_tensor import FunctionalTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.utils._python_dispatch import _detect_infra_mode
 
 from .. import config
 from .functional_utils import (
@@ -113,9 +114,7 @@ def aot_dispatch_base_graph(
                 )
                 fake = buffer.from_functional()
                 # The fake tensor in turn is associated with a proxy node.
-                proxy_mode = torch._C._get_dispatch_mode(
-                    torch._C._TorchDispatchModeKey.PROXY
-                )
+                proxy_mode = _detect_infra_mode(torch._C._TorchDispatchModeKey.PROXY)
                 assert proxy_mode is not None
                 proxy = torch.fx.experimental.proxy_tensor.get_proxy_slot(
                     fake, proxy_mode.tracer
