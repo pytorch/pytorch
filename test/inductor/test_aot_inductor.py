@@ -966,7 +966,6 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
-    @skipIfRocm
     @common_utils.parametrize("dynamic", [False, True])
     def test_cond_non_tensor_predicates(self, dynamic):
         inputs1 = (
@@ -993,7 +992,6 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
-    @skipIfRocm
     def test_while_loop_simple(self):
         inputs = (
             torch.randn((10, 20), device=self.device),
@@ -1011,7 +1009,6 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
-    @skipIfRocm
     def test_while_loop_nested(self):
         inputs = (
             torch.randn((10, 20), device=self.device),
@@ -1030,7 +1027,6 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
-    @skipIfRocm
     def test_while_loop_with_outer_code(self):
         inputs = (
             torch.randn((10, 20), device=self.device),
@@ -1048,7 +1044,6 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
-    @skipIfRocm
     def test_while_loop_with_parameters(self):
         inputs = (torch.randn((10, 20), device=self.device),)
         dim0_a = Dim("s0", min=2, max=1024)
@@ -1062,7 +1057,6 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
-    @skipIfRocm
     def test_while_loop_with_outer_buffers(self):
         inputs = (
             torch.randn((10, 20), device=self.device),
@@ -1649,7 +1643,6 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(model, example_inputs)
 
-    @skipIfRocm
     @common_utils.parametrize("grid_type", [1, 2, 3])
     @common_utils.parametrize("num_dims", [1, 2])
     @common_utils.parametrize("dynamic", [False, True])
@@ -1724,7 +1717,6 @@ class AOTInductorTestsTemplate:
             dynamic_shapes = {"x": {0: dim0_x}, "y": {0: dim0_y}}
         self.check_model(Model(), (x, y), dynamic_shapes=dynamic_shapes)
 
-    @skipIfRocm
     def test_triton_kernel_dynamic_shape_with_div(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
@@ -1749,7 +1741,6 @@ class AOTInductorTestsTemplate:
         dynamic_shapes = {"x": {0: dim0_x}}
         self.check_model(Model(), (x,), dynamic_shapes=dynamic_shapes)
 
-    @skipIfRocm
     def test_triton_kernel_reinterpret_view(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
@@ -1778,7 +1769,6 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(10, 20, device=self.device),)
         self.check_model(Model(), example_inputs)
 
-    @skipIfRocm
     def test_triton_kernel_with_none_input(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
@@ -1820,7 +1810,6 @@ class AOTInductorTestsTemplate:
 
         self.check_model(Model(), example_inputs)
 
-    @skipIfRocm
     def test_triton_kernel_equal_to_1_arg(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
@@ -1839,7 +1828,6 @@ class AOTInductorTestsTemplate:
 
         self.check_model(Model(), example_inputs)
 
-    @skipIfRocm
     @common_utils.parametrize("dynamic", [False, True])
     def test_triton_kernel_equal_to_1_float_arg(self, dynamic):
         if self.device != "cuda":
@@ -2167,7 +2155,6 @@ class AOTInductorTestsTemplate:
         model.weight += 1
         self.check_model(model, example_inputs)
 
-    @skipIfRocm
     def test_triton_kernel_extern_kernel_arg(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
@@ -2186,7 +2173,6 @@ class AOTInductorTestsTemplate:
 
         self.check_model(Model(), example_inputs)
 
-    @skipIfRocm
     def test_triton_kernel_multi_output_arg(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
@@ -2205,7 +2191,6 @@ class AOTInductorTestsTemplate:
 
         self.check_model(Model(), example_inputs)
 
-    @skipIfRocm
     @config.patch({"abi_compatible": True})
     def test_triton_kernel_reinterpret_view_mem_leak(self):
         # Check for memory leak when using user-defined Triton Kernel + AOTI.
@@ -2246,7 +2231,6 @@ class AOTInductorTestsTemplate:
         expected = Model()(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
-    @skipIfRocm
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("autotuning", [False, True])
