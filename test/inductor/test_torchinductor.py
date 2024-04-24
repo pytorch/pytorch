@@ -8612,7 +8612,7 @@ class CommonTemplate:
             self.common(fn, (torch.ones(1, 1, 13, dtype=dtype),))
 
     @unittest.skipIf(not HAS_CPU or not RUN_CPU, "requires C++ compiler")
-    def test_data_type_propogation(self):
+    def test_data_type_propagation(self):
         from torch._dynamo.utils import detect_fake_mode
         from torch._inductor.codegen.common import boolean_ops
         from torch._inductor.compile_fx import _shape_env_from_inputs
