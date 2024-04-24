@@ -217,12 +217,10 @@ class FakeQuantize(FakeQuantizeBase):
 
     @torch.jit.export
     def extra_repr(self):
-        return 'fake_quant_enabled={}, observer_enabled={}, ' \
-               'quant_min={}, quant_max={}, dtype={}, qscheme={}, ch_axis={}, ' \
-               'scale={}, zero_point={}'.format(
-                   self.fake_quant_enabled, self.observer_enabled,
-                   self.activation_post_process.quant_min, self.activation_post_process.quant_max,
-                   self.dtype, self.qscheme, self.ch_axis, self.scale, self.zero_point)
+        return f'fake_quant_enabled={self.fake_quant_enabled}, observer_enabled={self.observer_enabled}, ' \
+               f'quant_min={self.activation_post_process.quant_min}, quant_max={self.activation_post_process.quant_max}, ' \
+               f'dtype={self.dtype}, qscheme={self.qscheme}, ch_axis={self.ch_axis}, ' \
+               f'scale={self.scale}, zero_point={self.zero_point}'
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         # We cannot currently register scalar values as buffers, so need to manually
@@ -289,11 +287,10 @@ class FixedQParamsFakeQuantize(FakeQuantize):
     @torch.jit.export
     def extra_repr(self):
         """Define a string representation of the object's attributes."""
-        return 'fake_quant_enabled={}, observer_enabled={}, scale={}, zero_point={}, ' \
-               'dtype={}, quant_min={}, quant_max={}, qscheme={}'.format(
-                   self.fake_quant_enabled, self.observer_enabled,
-                   self.scale, self.zero_point, self.dtype,
-                   self.activation_post_process.quant_min, self.activation_post_process.quant_max, self.qscheme)
+        return f'fake_quant_enabled={self.fake_quant_enabled}, observer_enabled={self.observer_enabled}, ' \
+               f'scale={self.scale}, zero_point={self.zero_point}, ' \
+               f'dtype={self.dtype}, quant_min={self.activation_post_process.quant_min}, ' \
+               f'quant_max={self.activation_post_process.quant_max}, qscheme={self.qscheme}'
 
 
 class FusedMovingAvgObsFakeQuantize(FakeQuantize):
@@ -335,18 +332,10 @@ class FusedMovingAvgObsFakeQuantize(FakeQuantize):
     @torch.jit.export
     def extra_repr(self) -> str:
         return (
-            "fake_quant_enabled={}, observer_enabled={}, scale={}, zero_point={}, "
-            "dtype={}, quant_min={}, quant_max={}, qscheme={}, reduce_range={}".format(
-                self.fake_quant_enabled,
-                self.observer_enabled,
-                self.scale,
-                self.zero_point,
-                self.dtype,
-                self.activation_post_process.quant_min,
-                self.activation_post_process.quant_max,
-                self.qscheme,
-                self.activation_post_process.reduce_range,
-            )
+            f"fake_quant_enabled={self.fake_quant_enabled}, observer_enabled={self.observer_enabled}, "
+            f"scale={self.scale}, zero_point={self.zero_point}, dtype={self.dtype}, "
+            f"quant_min={self.activation_post_process.quant_min}, quant_max={self.activation_post_process.quant_max}, "
+            f"qscheme={self.qscheme}, reduce_range={self.activation_post_process.reduce_range}"
         )
 
     def forward(self, X: torch.Tensor) -> torch.Tensor:
