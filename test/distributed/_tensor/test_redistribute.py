@@ -351,10 +351,7 @@ class RedistributeTest(DTensorTestBase):
             torch.randn((5, 5), device=self.device_type),
         ]
 
-        sharding_src_dst_pairs = [
-            ([Shard(0)], [Shard(1)]),
-            ([Shard(1)], [Shard(0)])
-        ]
+        sharding_src_dst_pairs = [([Shard(0)], [Shard(1)]), ([Shard(1)], [Shard(0)])]
 
         comm_mode = CommDebugMode()
 
@@ -368,10 +365,15 @@ class RedistributeTest(DTensorTestBase):
                 local_out_dt = out_dt.to_local()
                 local_expected_dt = expected_dt.to_local()
                 self.assertEqual(out_dt.to_local(), expected_dt.to_local())
-                self.assertEqual(comm_mode.get_comm_counts()[torch.ops._dtensor.shard_dim_alltoall], 1)
+                self.assertEqual(
+                    comm_mode.get_comm_counts()[torch.ops._dtensor.shard_dim_alltoall],
+                    1,
+                )
 
         # test 2d device mesh
-        mesh_2d = DeviceMesh(self.device_type, torch.arange(self.world_size).reshape(2, 2))
+        mesh_2d = DeviceMesh(
+            self.device_type, torch.arange(self.world_size).reshape(2, 2)
+        )
         data_to_test_2d = [
             # evenly sharded case
             torch.randn((8, 8), device=self.device_type),
@@ -392,7 +394,9 @@ class RedistributeTest(DTensorTestBase):
 
         for input_data in data_to_test_2d:
             if input_data.ndim > 2:
-                sharding_spec_combs = sharding_src_dst_pairs_2d + [([Shard(0), Shard(2)], [Shard(1), Shard(0)])]
+                sharding_spec_combs = sharding_src_dst_pairs_2d + [
+                    ([Shard(0), Shard(2)], [Shard(1), Shard(0)])
+                ]
             else:
                 sharding_spec_combs = sharding_src_dst_pairs_2d
             for src, dst in sharding_spec_combs:

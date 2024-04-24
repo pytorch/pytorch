@@ -30,13 +30,17 @@ def _shard_dim_alltoall_meta(input, gather_dim, shard_dim, group_name):
     stacked_list = [torch.empty_like(input) for _ in range(group_size)]
     return torch.cat(stacked_list, dim=gather_dim).chunk(group_size, dim=shard_dim)
 
+
 _dtensor_lib_impl = torch.library.Library("_dtensor", "IMPL")
 _dtensor_lib_impl.impl("shard_dim_alltoall", _shard_dim_alltoall_meta, "Meta")
+
 
 def shard_dim_alltoall(input, gather_dim, shard_dim, mesh, mesh_dim):
     group_name = funcol._resolve_group_name((mesh, mesh_dim))
     # TODO: enable async op for shard_dim_alltoall
-    return torch.ops._dtensor.shard_dim_alltoall(input, gather_dim, shard_dim, group_name)
+    return torch.ops._dtensor.shard_dim_alltoall(
+        input, gather_dim, shard_dim, group_name
+    )
 
 
 def mesh_scatter(
