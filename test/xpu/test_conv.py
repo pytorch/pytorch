@@ -1260,7 +1260,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         out = get_conv_out(device, torch.float32)
         assert_size_stride(out, (2, 512, 7, 7), (25088, 1, 3584, 512))
 
-        # xpu does not support float64 for chanel last conv.
+        # Like most conv backend, xpu does not support float64 for chanel last conv.
         # input NHWC, output NCHW
         out = get_conv_out(device, torch.float64)
         assert_size_stride(out, (2, 512, 7, 7), (25088, 49, 7, 1))
