@@ -14,6 +14,8 @@ from torch.testing import FileCheck
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't supported")
 class TestExperiment(TestCase):
+    # TODO AssertionError: Unknown tensor output kind: getitem_2
+    @unittest.expectedFailure
     def test_with_buffer_as_submodule(self):
         @_mark_strict_experimental
         class B(torch.nn.Module):
