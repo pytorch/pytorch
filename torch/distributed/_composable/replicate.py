@@ -60,14 +60,15 @@ class _ReplicateState(_State):
                 prefix=f"{recurse_prefix}{name}",
             )
 
-    @torch._dynamo.disable(recursive=True)
     def lazy_init(self) -> None:
-        self.init(*self._init_args, **self._init_kwargs)
-        self.register_comm_hook()
-        self._init_args = tuple()
-        self._init_kwargs = {}
+        @torch._dynamo.disable(recursive=True)
+        def _lazy_init():
+            self.init(*self._init_args, **self._init_kwargs)
+            self.register_comm_hook()
+            self._init_args = tuple()
+            self._init_kwargs = {}
+        _lazy_init()
 
-    @torch._dynamo.disable(recursive=True)
     def init(
         self,
         module: nn.Module,
@@ -109,7 +110,6 @@ class _ReplicateState(_State):
         # Weakref to the DDP instance is currently only used for testing.
         replicate.state(self.module)._ddp_weakref = weakref.ref(self._ddp)
 
-    @torch._dynamo.disable(recursive=True)
     def register_comm_hook(self) -> None:
         for comm_args, comm_kwargs in self._comm_hook_args:
             self._ddp.register_comm_hook(*comm_args, **comm_kwargs)
