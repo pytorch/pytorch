@@ -149,7 +149,7 @@ class _AddRuntimeAssertionsForInlineConstraintsPass(_ExportPassBaseDeprecatedDoN
 
         # Populate the stack trace with dummy vals to respect IR
         for node in val.graph_module.graph.nodes:
-            if not node.meta.get("stack_trace", None):
+            if not node.meta.get("stack_trace", None) and node.op not in ["placeholder", "output"]:
                 node.meta["stack_trace"] = "".join(traceback.format_stack(limit=1))
 
         return PassResult(val.graph_module, val.modified)

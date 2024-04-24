@@ -7,6 +7,8 @@ import torch
 import torch._inductor
 from torch._dynamo.utils import counters
 from torch._inductor.test_case import run_tests, TestCase
+from torch._inductor.utils import run_and_get_code
+from torch.testing import FileCheck
 
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -158,10 +160,6 @@ class TestDecomposeMemMM(TestCase):
             counters["inductor"]["decompose_mm"] - decompose_mm_fwd,
             expected_val,
         )
-        self.assertEqual(
-            counters["inductor"]["decompose_mmt"],
-            expected_val,
-        )
         counters.clear()
 
     @parametrize(
@@ -201,10 +199,6 @@ class TestDecomposeMemMM(TestCase):
             counters["inductor"]["decompose_mm"] - decompose_mm_fwd,
             expected_val,
         )
-        self.assertEqual(
-            counters["inductor"]["decompose_mm_large_k"],
-            expected_val,
-        )
         counters.clear()
 
     @parametrize("m,k,n, should_decompose", [(20480, 5, 2, True)])
@@ -240,11 +234,24 @@ class TestDecomposeMemMM(TestCase):
             counters["inductor"]["decompose_mm"],
             1 if has_bias else 2,
         )
-        self.assertEqual(
-            counters["inductor"]["decompose_mmt"],
-            expected_val,
-        )
         counters.clear()
+
+    def test_realize_input(self):
+        m = 20480
+        k = 5
+        n = 2
+        torch._logging.set_logs(inductor=logging.DEBUG)
+        input1 = torch.randn(m, k, device="cuda").T.contiguous()
+        input2 = torch.randn(k, n, device="cuda")
+
+        @torch.compile()
+        def foo(x, y):
+            return x.T.contiguous() @ y
+
+        out, code = run_and_get_code(foo, input1, input2)
+
+        # two kernels generated
+        FileCheck().check_count(".run(", 2, exactly=True).run(code[0])
 
 
 if __name__ == "__main__":

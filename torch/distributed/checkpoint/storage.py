@@ -1,13 +1,17 @@
 import abc
 import os
 from dataclasses import dataclass
-from typing import Any, List, Union, runtime_checkable
-from typing_extensions import Protocol
+from typing import Any, List, Union
+
+from torch.distributed.checkpoint.metadata import Metadata, MetadataIndex
+from torch.distributed.checkpoint.planner import (
+    LoadPlan,
+    LoadPlanner,
+    SavePlan,
+    SavePlanner,
+)
 
 from torch.futures import Future
-
-from .metadata import Metadata, MetadataIndex, STATE_DICT_TYPE
-from .planner import LoadPlan, LoadPlanner, SavePlan, SavePlanner
 
 __all__ = ["WriteResult", "StorageWriter", "StorageReader"]
 
@@ -18,39 +22,6 @@ class WriteResult:
 
     size_in_bytes: int
     storage_data: Any
-
-
-@runtime_checkable
-class AsyncStager(Protocol):
-    """
-    AsyncStager protocol for objects that can be staged asynchronously. This protocol is meant
-    to provide extensibility for dcp.async_save, allowing users to customize how data is staged
-    previous to executing the usual dcp.save path in parallel.
-    """
-
-    # default to True since most people will stage synchronously
-    _synchronize_after_execute: bool = True
-
-    @property
-    def synchronize_after_execute(self) -> bool:
-        """
-        Whether to synchronize after executing the stage.
-        """
-
-        return self._synchronize_after_execute
-
-    def stage(self, state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
-        """
-        Stages the object anyway it wants. Could be async or sync...
-        """
-        raise NotImplementedError(f"{self.__class__.__name__} must implement stage method")
-
-    def synchronize(self) -> None:
-        """
-        In the case `stage` is async in some way, and we need to synchronize before returning
-        out of dcp.async_save
-        """
-        pass
 
 
 class StorageWriter(abc.ABC):

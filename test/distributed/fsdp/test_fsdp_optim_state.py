@@ -363,7 +363,7 @@ class TestFSDPOptimState(FSDPTest):
             # these settings are not implemented since the transformer is
             # wrapped with FSDP at the top-level, which means that there is
             # only a single flat parameter, making these booleans vacuous
-            raise NotImplementedError()
+            raise NotImplementedError
         if group is None:
             group = dist.distributed_c10d._get_default_group()
         model = TransformerWithSharedParams.init(

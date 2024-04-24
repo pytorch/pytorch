@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: quantization"]
 import copy
-import sys
 
 import unittest
 from typing import List
@@ -61,9 +60,6 @@ _QUANT_OPS = {
 
 # TODO: rename to TestPortMetadataPass to align with the util name?
 @unittest.skipIf(IS_WINDOWS, "Windows not yet supported for torch.compile")
-@unittest.skipIf(
-    sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-)
 class TestMetaDataPorting(QuantizationTestCase):
     def _test_quant_tag_preservation_through_decomp(
         self, model, example_inputs, from_node_to_tags

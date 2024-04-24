@@ -26,8 +26,8 @@ from typing import (
 import torch
 from torch import Tensor
 from torch._utils import _get_available_device_type, _get_device_module
-from torch.distributed._state_dict_utils import _offload_state_dict_to_cpu
 from torch.distributed._shard._utils import narrow_tensor_by_index
+from torch.distributed._state_dict_utils import _offload_state_dict_to_cpu
 from torch.futures import Future
 
 from .metadata import Metadata, MetadataIndex, STATE_DICT_TYPE
@@ -41,7 +41,7 @@ from .planner import (
     WriteItem,
     WriteItemType,
 )
-from .storage import StorageReader, StorageWriter, WriteResult, AsyncStager
+from .storage import StorageReader, StorageWriter, WriteResult
 from .utils import _create_file_view
 
 __all__ = ["FileSystemWriter", "FileSystemReader"]
@@ -393,7 +393,7 @@ class FileSystem(FileSystemBase):
         return False
 
 
-class FileSystemWriter(StorageWriter, AsyncStager):
+class FileSystemWriter(StorageWriter):
     """
     Basic implementation of StorageWriter using file IO.
 
@@ -443,7 +443,6 @@ class FileSystemWriter(StorageWriter, AsyncStager):
         # and then apply necessary synchronization here. (For example, call
         # this method before optim.step())
         pass
-
 
     def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
         if checkpoint_id:
@@ -549,6 +548,13 @@ class FileSystemWriter(StorageWriter, AsyncStager):
 
         self.fs.rename(tmp_path, meta_path)
 
+    @property
+    def checkpoint_id(self) -> Union[str, os.PathLike]:
+        """
+        return the checkpoint_id that will be used to save the checkpoint.
+        """
+        return self.path
+
     @classmethod
     def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
         return FileSystem.validate_checkpoint_id(checkpoint_id)
@@ -623,6 +629,13 @@ class FileSystemReader(StorageReader):
 
     def prepare_global_plan(self, global_plan: List[LoadPlan]) -> List[LoadPlan]:
         return global_plan
+
+    @property
+    def checkpoint_id(self) -> Union[str, os.PathLike]:
+        """
+        return the checkpoint_id that will be used to save the checkpoint.
+        """
+        return self.path
 
     @classmethod
     def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:

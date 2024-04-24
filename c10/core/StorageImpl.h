@@ -17,6 +17,7 @@
 namespace c10 {
 
 C10_API void throwNullDataPtrError();
+C10_API void warnDeprecatedDataPtr();
 
 // A storage represents the underlying backing data buffer for a
 // tensor.  This concept was inherited from the original Torch7
@@ -130,6 +131,9 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
       if (throw_on_mutable_data_ptr_) {
         throwNullDataPtrError();
       }
+      if (warn_deprecated_on_mutable_data_ptr_) {
+        warnDeprecatedDataPtr();
+      }
       maybe_materialize_cow();
     }
     return data_ptr_;
@@ -161,6 +165,9 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     if (C10_UNLIKELY(has_data_ptr_check_)) {
       if (throw_on_mutable_data_ptr_) {
         throwNullDataPtrError();
+      }
+      if (warn_deprecated_on_mutable_data_ptr_) {
+        warnDeprecatedDataPtr();
       }
       maybe_materialize_cow();
     }
@@ -246,6 +253,11 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     refresh_has_data_ptr_check();
   }
 
+  void set_warn_deprecated_on_mutable_data_ptr() {
+    warn_deprecated_on_mutable_data_ptr_ = true;
+    refresh_has_data_ptr_check();
+  }
+
  protected:
   // materialize_cow_storage needs to call set_data_ptr_no_materlize_cow
   friend void c10::impl::cow::materialize_cow_storage(StorageImpl& storage);
@@ -261,7 +273,8 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
 
  private:
   void refresh_has_data_ptr_check() {
-    has_data_ptr_check_ = is_cow() || throw_on_mutable_data_ptr_;
+    has_data_ptr_check_ = is_cow() || throw_on_mutable_data_ptr_ ||
+        warn_deprecated_on_mutable_data_ptr_;
   }
 
   inline bool is_cow() const {
@@ -288,6 +301,8 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   bool has_data_ptr_check_ = false;
   // If we should throw when mutable_data_ptr() or mutable_data() is called.
   bool throw_on_mutable_data_ptr_ = false;
+  // If we warn when mutable_data_ptr() or mutable_data() is called.
+  bool warn_deprecated_on_mutable_data_ptr_ = false;
   Allocator* allocator_;
   impl::PyObjectSlot pyobj_slot_;
 };

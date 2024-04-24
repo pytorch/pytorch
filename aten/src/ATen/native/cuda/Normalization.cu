@@ -267,9 +267,9 @@ Tensor batch_norm_elementwise_backward_eval(
     auto weight_nd = weight.as_strided(shape, strides);
     auto iter = TensorIteratorConfig()
         .add_output(grad_input)
-        .add_input(grad_out)
-        .add_input(invstd_nd)
-        .add_input(weight_nd)
+        .add_const_input(grad_out)
+        .add_const_input(invstd_nd)
+        .add_const_input(weight_nd)
         .check_all_same_dtype(false)
         .promote_inputs_to_common_dtype(false)
         .build();
@@ -285,8 +285,8 @@ Tensor batch_norm_elementwise_backward_eval(
   } else {
     auto iter = TensorIteratorConfig()
         .add_output(grad_input)
-        .add_input(grad_out)
-        .add_input(invstd_nd)
+        .add_const_input(grad_out)
+        .add_const_input(invstd_nd)
         .check_all_same_dtype(false)
         .promote_inputs_to_common_dtype(false)
         .build();
@@ -386,7 +386,7 @@ void batch_norm_update_stats_and_invert(
       .add_output(running_mean)
       .add_output(running_var)
       .add_output(save_var)
-      .add_input(save_mean)
+      .add_const_input(save_mean)
       .add_input(save_var)
       .add_input(running_mean)
       .add_input(running_var)

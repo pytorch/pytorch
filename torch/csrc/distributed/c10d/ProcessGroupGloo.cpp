@@ -7,8 +7,6 @@
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <chrono>
 #include <exception>
-#include <ratio>
-#include <tuple>
 
 #ifdef _WIN32
 #include <gloo/common/win.h>

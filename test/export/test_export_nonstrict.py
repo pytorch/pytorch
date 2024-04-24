@@ -18,14 +18,12 @@ def mocked_non_strict_export(*args, **kwargs):
 
 
 def make_dynamic_cls(cls):
-    suffix = "_non_strict"
-
     cls_prefix = "NonStrictExport"
 
     test_class = testing.make_test_cls_with_mocked_export(
         cls,
         cls_prefix,
-        suffix,
+        test_export.NON_STRICT_SUFFIX,
         mocked_non_strict_export,
         xfail_prop="_expected_failure_non_strict",
     )

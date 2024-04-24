@@ -310,7 +310,7 @@ def default_collate(batch):
         >>> # Option 2: In-place modify `default_collate_fn_map`
         >>> def collate_customtype_fn(batch, *, collate_fn_map=None):
         ...     return ...
-        >>> default_collate_fn_map.update(CustoType, collate_customtype_fn)
+        >>> default_collate_fn_map.update(CustomType, collate_customtype_fn)
         >>> default_collate(batch)  # Handle `CustomType` automatically
     """
     return collate(batch, collate_fn_map=default_collate_fn_map)
