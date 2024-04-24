@@ -357,13 +357,14 @@ class AutogradFunctionVariable(VariableTracker):
             and torch.is_grad_enabled()
             and config.capture_autograd_function
         ):
+            forward_fn = self.fn_cls.forward
             # Note - this is the same check used in autograd/function.py, except inverted.
             # If we want to support functorch transforms here, we will need to enable this.
             if (
                 self.fn_cls.setup_context
                 != torch.autograd.function._SingleLevelFunction.setup_context
             ):
-                self.fn_cls.forward = (
+                forward_fn = (
                     torch.autograd.function.autograd_function_forward_rewritten(
                         self.fn_cls.forward, self.fn_cls.setup_context
                     )
@@ -386,7 +387,7 @@ class AutogradFunctionVariable(VariableTracker):
                 )
 
             return AutogradFunctionApplyVariable(
-                self.fn_cls.forward,
+                forward_fn,
                 self.fn_cls.backward,
                 source,
                 source=AttrSource(source, member="apply"),

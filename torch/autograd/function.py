@@ -586,6 +586,7 @@ class Function(_SingleLevelFunction):
 
 
 def autograd_function_forward_rewritten(original_forward, original_setup_context):
+    @functools.wraps(original_forward)
     def new_forward(ctx, *args, **kwargs):
         output = original_forward(*args, **kwargs)
         original_setup_context(ctx, args, output)
