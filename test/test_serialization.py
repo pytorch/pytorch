@@ -22,7 +22,7 @@ from torch._utils_internal import get_file_path_2
 from torch._utils import _rebuild_tensor
 from torch.utils._import_utils import import_dill
 from torch.serialization import check_module_version_greater_or_equal, get_default_load_endianness, \
-    set_default_load_endianness, LoadEndianness
+    set_default_load_endianness, LoadEndianness, MmapVisibility
 
 from torch.testing._internal.common_utils import (
     IS_FILESYSTEM_UTF8_ENCODING, TemporaryDirectoryName,
@@ -3953,6 +3953,29 @@ class TestSerialization(TestCase, SerializationMixin):
             result = torch.load(f, mmap=True)
             for v in result.values():
                 self.assertTrue(v.is_cuda)
+
+    def test_serialization_mmap_loading_visibility(self):
+        m = torch.nn.Linear(3, 5)
+        sd = m.state_dict()
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(sd, f)
+            # with MmapVisibility.MAP_PRIVATE, should not be able to modify file
+            f.seek(0)
+            sd_loaded = torch.load(f.name, mmap=True)
+            sd_loaded['weight'][0][0] = 0
+            f.seek(0)
+            sd_loaded2 = torch.load(f.name, mmap=True)
+            self.assertEqual(sd_loaded2['weight'], sd['weight'])
+            # with MmapVisibility.MAP_SHARED, should be able to modify file
+            torch.serialization.set_default_mmap_visibility(MmapVisibility.MAP_SHARED)
+            f.seek(0)
+            sd_loaded = torch.load(f.name, mmap=True)
+            sd_loaded['weight'][0][0] = 0
+            f.seek(0)
+            sd_loaded2 = torch.load(f.name, mmap=True)
+            self.assertNotEqual(sd_loaded2['weight'], sd['weight'])
+            self.assertEqual(sd_loaded2['weight'][0][0].item(), 0)
+            self.assertEqual(sd_loaded2['weight'], sd_loaded['weight'])
 
     @parametrize('dtype', (torch.float8_e5m2, torch.float8_e4m3fn, torch.complex32))
     @parametrize('weights_only', (True, False))

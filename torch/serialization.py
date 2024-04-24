@@ -105,6 +105,35 @@ def set_default_load_endianness(endianness):
         raise TypeError("Invalid argument type in function set_default_load_endianness")
     _default_load_endian = endianness
 
+class MmapVisibility(Enum):
+    MAP_PRIVATE = 1
+    MAP_SHARED = 2
+
+_default_mmap_visibility: MmapVisibility = MmapVisibility.MAP_PRIVATE
+
+def get_default_mmap_visibility() -> MmapVisibility:
+    '''
+    Get default mmap visibility for :func:`torch.load` with ``mmap=True``
+
+    Defaults to ``MAP_PRIVATE``.
+
+    Returns:
+        default_mmap_visibility: MmapVisibility
+    '''
+    return _default_mmap_visibility
+
+def set_default_mmap_visibility(mmap_visibility: MmapVisibility):
+    '''
+    Set default mmap visibility for :func:`torch.load` with ``mmap=True``
+
+    Args:
+        mmap_visibility: the new default mmap visibility
+    '''
+    if not isinstance(mmap_visibility, MmapVisibility):
+        raise TypeError("Invalid argument type in function set_default_visibility")
+    global _default_mmap_visibility
+    _default_mmap_visibility = mmap_visibility
+
 def _is_zipfile(f) -> bool:
     # This is a stricter implementation than zipfile.is_zipfile().
     # zipfile.is_zipfile() is True if the magic number appears anywhere in the
@@ -1012,7 +1041,8 @@ def load(
                     if not _is_path(f):
                         raise ValueError("f must be a file path in order to use the mmap argument")
                     size = os.path.getsize(f)
-                    overall_storage = torch.UntypedStorage.from_file(os.fspath(f), False, size)
+                    shared = get_default_mmap_visibility() == MmapVisibility.MAP_SHARED
+                    overall_storage = torch.UntypedStorage.from_file(os.fspath(f), shared, size)
                 if weights_only:
                     try:
                         return _load(opened_zipfile,
