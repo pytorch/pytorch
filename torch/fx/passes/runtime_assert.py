@@ -259,3 +259,5 @@ def insert_deferred_runtime_asserts(
                     )
 
                 add_runtime_asserts(ras)
+
+    assert not ras_by_symbol, f"Unhandled runtime assertions: {ras_by_symbol}"
