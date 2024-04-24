@@ -33,6 +33,7 @@ static uint64_t storageImpl_counter = 0;
 static uint64_t last_storageImpl_saved_value = 0;
 
 static bool storage_register = false;
+static bool serialize_register = false;
 // register guard
 namespace at {
 namespace detail {
@@ -179,9 +180,11 @@ void for_deserialization(const at::Tensor& t, std::unordered_map<std::string, bo
 }
 
 void custom_serialization_registry() {
-  torch::jit::TensorBackendMetaRegistry(c10::DeviceType::PrivateUse1,
-                                        &for_serialization,
-                                        &for_deserialization);
+  if (!serialize_register) {
+    torch::jit::TensorBackendMetaRegistry(
+        c10::DeviceType::PrivateUse1, &for_serialization, &for_deserialization);
+    serialize_register = true;
+  }
 }
 
 //check if BackendMeta serialization correctly
@@ -228,6 +231,7 @@ void custom_storage_registry() {
   if (!storage_register) {
     c10::SetStorageImplCreate(
         c10::DeviceType::PrivateUse1, &make_custom_storage_impl);
+    storage_register = true;
   }
 }
 
