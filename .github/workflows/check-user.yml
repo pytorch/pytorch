@@ -12,7 +12,7 @@ on:
       workflow-type:
         description: Type of runners to use
         value: ${{ jobs.check-user.outputs.workflow-type }}
-
+s
 
 jobs:
   check-user:
@@ -28,7 +28,7 @@ jobs:
         id: set-condition
         run: |
           if grep -q "${{ inputs.user_name }}" arc_users.yaml; then
-            echo "workflow-type=./.github/workflows/_linux-build-rg.yml" >> $GITHUB_OUTPUT
+            echo "workflow-type=_linux-build-rg.yml" >> $GITHUB_OUTPUT
           else
-            echo "workflow-type=./.github/workflows/_linux-build-label.yml" >> $GITHUB_OUTPUT
+            echo "workflow-type=_linux-build-label.yml" >> $GITHUB_OUTPUT
           fi
