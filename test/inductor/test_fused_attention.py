@@ -163,7 +163,6 @@ class TestSDPAPatternRewriterTemplate(TestCase):
 
     def _test_insignificant_strides(self):
         f32 = torch.float32
-        i64 = torch.int64
 
         def forward(
             permute_3: "f32[1, 32, 1, 128]",
