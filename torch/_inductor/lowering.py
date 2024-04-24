@@ -16,6 +16,7 @@ import torch.ao.quantization.fx._decomposed
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo.create_parameter_op import _bind_nn_parameter
+from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.triton_kernel_wrap import (
     triton_kernel_wrapper_functional,
     triton_kernel_wrapper_mutation,
@@ -58,9 +59,10 @@ from .utils import (
     is_dynamic,
     is_gpu,
     is_pointwise_use,
+    needs_fallback_due_to_atomic_add_limitations,
     pad_listlike,
-    parallel_num_threads,
     sympy_product,
+    use_scatter_fallback,
 )
 from .virtualized import ops, V
 
@@ -88,8 +90,9 @@ def add_needs_realized_inputs(fn):
         return [add_needs_realized_inputs(x) for x in fn]
     needs_realized_inputs.add(fn)
     if isinstance(fn, torch._ops.OpOverloadPacket):
-        for overload in fn.overloads():
-            needs_realized_inputs.add(getattr(fn, overload))
+        needs_realized_inputs.update(
+            getattr(fn, overload) for overload in fn.overloads()
+        )
 
 
 def add_layout_constraint(fn, constraint):
@@ -1629,7 +1632,7 @@ def bernoulli_p(x, *args):
 # This shouldn't be called in general
 @register_lowering(aten._foobar)
 def _foobar(_):
-    raise AssertionError()
+    raise AssertionError
 
 
 @functools.lru_cache(1)
@@ -1904,7 +1907,6 @@ def sdpa_constraint(fx_node, *args, **kwargs):
 
 
 # WIP
-make_fallback(aten.index_reduce)  # @pearu
 make_fallback(aten._adaptive_avg_pool3d)  # @isuruf
 make_fallback(aten.adaptive_max_pool3d)  # @isuruf
 make_fallback(aten.fractional_max_pool3d)  # @isuruf
@@ -2087,6 +2089,9 @@ make_fallback(aten._flash_attention_backward.default, sdpa_constraint)
 make_fallback(aten._efficient_attention_forward.default, sdpa_constraint)
 make_fallback(aten._efficient_attention_backward.default, sdpa_constraint)
 make_fallback(aten._scaled_mm.default, constrain_to_fx_strides)
+
+# index_reduce requires fallback when use_scatter_fallback(...) returns True
+make_fallback(aten.index_reduce)
 
 
 # Register with type_promotion_kind None.
@@ -2819,11 +2824,6 @@ def _unsafe_index_put_(self, indices, values, accumulate=False):
     return index_put_impl_(self, indices, values, accumulate, check=False)
 
 
-def needs_fallback_due_to_atomic_add_limitations(dtype):
-    # tl.atomic_add does NOT support the following types
-    return dtype in {torch.int64, torch.bool, torch.bfloat16}
-
-
 def index_put_impl_(self, indices, values, accumulate, check):
     # Dispatch to masked fill for single boolean index with single value
     if (
@@ -2964,7 +2964,7 @@ def scatter(x, dim: int, index, src, **kwargs):
 
 
 def scatter_fallback(
-    fn,
+    op_overload: torch._ops.OpOverload,
     self,
     dim: int,
     index,
@@ -2973,28 +2973,17 @@ def scatter_fallback(
     reduce: Optional[str] = None,
     include_self: bool = True,
 ):
-    reduce_ty = "add" if fn == "aten.scatter_" else "sum"
-    if (
-        reduce not in {None, reduce_ty}
-        or (
-            isinstance(src, TensorBox)
-            and is_gpu(src.get_device().type)
-            and needs_fallback_due_to_atomic_add_limitations(src.get_dtype())
-        )
-        or (
-            fn == "aten.scatter_reduce_"
-            and reduce == "sum"
-            and isinstance(src, TensorBox)
-            and src.get_device() == torch.device("cpu")
-            and config.cpp.fallback_scatter_reduce_sum
-            and (config.cpp.dynamic_threads or parallel_num_threads() != 1)
-        )
-        or (reduce == reduce_ty and self.get_dtype() in {torch.bool, torch.int64})
-        or torch.are_deterministic_algorithms_enabled()
+    src_is_tensor = isinstance(src, TensorBox)
+    if use_scatter_fallback(
+        op_overload,
+        reduce,
+        self.get_dtype(),
+        src.get_dtype() if src_is_tensor else type(src),
+        src.get_device().type if src_is_tensor else "not impl",
+        src_is_tensor,
     ):
         ir.ScatterFallback(
-            V.graph.current_node.target,
-            fn,
+            op_overload,
             self,
             dim,
             index,
@@ -3011,18 +3000,18 @@ def scatter_fallback(
 def scatter_(self, dim: int, index, src, *, reduce: Optional[str] = None):
     assert reduce in {None, "add", "multiply"}
 
-    fallback_result = scatter_fallback(
-        "aten.scatter_", self, dim, index, src, reduce=reduce
-    )
-
-    if fallback_result:
-        return fallback_result
+    if reduce is None:
+        op_overload = getattr(aten.scatter_, V.graph.current_node.target._overloadname)  # type: ignore[union-attr]
+        fallback_result = scatter_fallback(
+            op_overload, self, dim, index, src, reduce=reduce
+        )
+        if fallback_result is not None:
+            return fallback_result
 
     if reduce == "add":
         reduce = "sum"
     elif reduce == "multiply":
         reduce = "prod"
-
     return scatter_reduce_(self, dim, index, src, reduce)
 
 
@@ -3045,8 +3034,12 @@ def scatter_reduce(x, dim: int, index, src, reduction_type, **kwargs):
 def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = True):
     assert reduce in {None, "sum", "prod", "mean", "amax", "amin"}
 
+    assert (
+        len(aten.scatter_reduce_.overloads()) == 1
+        and "two" in aten.scatter_reduce_.overloads()
+    ), "aten.scatter_reduce_.two is not the unique overload of aten.scatter_reduce_"
     fallback_result = scatter_fallback(
-        "aten.scatter_reduce_",
+        aten.scatter_reduce_.two,
         self,
         dim,
         index,
@@ -5750,6 +5743,30 @@ def templated_attention(*args, **kwargs):
                 "sdpa", choices, [query, key, value], layout
             )
     raise ValueError("TemplatedAttention was passed a subgraph with no output node!")
+
+
+@register_lowering(associative_scan_op, type_promotion_kind=None)
+def associative_scan(combine_fn: ir.Subgraph, input, dim: int):
+    from .subgraph_lowering import InputDescriptor, lower_pointwise_subgraph
+
+    subgraph_inputs = [
+        InputDescriptor(dtype=input.get_dtype(), device=input.get_device())
+        for _ in range(2)
+    ]
+    lowered_combine_fn = lower_pointwise_subgraph(combine_fn, subgraph_inputs)
+
+    def wrapped_combine_fn(lhs, rhs):
+        res = lowered_combine_fn(
+            *pytree.tree_leaves(lhs),
+            *pytree.tree_leaves(rhs),
+        )
+        return (res,)
+
+    kwargs = _make_scan_inner(input, axis=dim, dtype=None)
+    result = ir.Scan.create(**kwargs, combine_fn=wrapped_combine_fn)
+    if result is None:
+        raise RuntimeError("Unable to generate code for associative_scan op")
+    return result[0]
 
 
 @register_lowering(torch.ops.prims._sink_tokens.default)

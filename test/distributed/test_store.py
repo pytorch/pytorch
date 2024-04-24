@@ -5,8 +5,8 @@ import os
 import socket
 import sys
 import tempfile
-import time
 import threading
+import time
 from datetime import timedelta
 from sys import platform
 
@@ -14,9 +14,12 @@ import torch
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
 import torch.distributed.rpc as rpc
-from torch.distributed import DistNetworkError, DistError, DistStoreError
+from torch.distributed import DistError, DistNetworkError, DistStoreError
 from torch.testing._internal.common_distributed import MultiThreadedTestCase
-from torch.testing._internal.common_utils import instantiate_parametrized_tests, parametrize
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 
 if not dist.is_available():
     print("torch.distributed not available, skipping tests", file=sys.stderr)
@@ -24,17 +27,17 @@ if not dist.is_available():
 
 import torch.testing._internal.common_utils as common
 from torch.testing._internal.common_distributed import (
-    skip_if_win32,
     create_tcp_store,
-    tp_transports
+    skip_if_win32,
+    tp_transports,
 )
 from torch.testing._internal.common_utils import (
-    TestCase,
-    load_tests,
-    run_tests,
-    retry_on_connect_failures,
     ADDRESS_IN_USE,
     CONNECT_TIMEOUT,
+    load_tests,
+    retry_on_connect_failures,
+    run_tests,
+    TestCase,
 )
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -62,7 +65,7 @@ def gpus_for_rank(world_size):
     gpus_for_rank = []
     for rank in range(world_size):
         gpus_for_rank.append(
-            visible_devices[rank * gpus_per_process: (rank + 1) * gpus_per_process]
+            visible_devices[rank * gpus_per_process : (rank + 1) * gpus_per_process]
         )
     return gpus_for_rank
 
@@ -102,7 +105,9 @@ class StoreTestBase:
         self._test_set_get_check(self._create_store())
 
     def _test_compare_set(self, store):
-        missing_key_result = store.compare_set("cs_key0", "wrong_old_value", "new_value0")
+        missing_key_result = store.compare_set(
+            "cs_key0", "wrong_old_value", "new_value0"
+        )
         self.assertEqual(b"wrong_old_value", missing_key_result)
 
         store.set("cs_key0", "value0")
@@ -189,10 +194,14 @@ class FileStoreTest(TestCase, StoreTestBase):
         rpc_backend_options = rpc.TensorPipeRpcBackendOptions()
         rpc_backend_options.init_method = f"file://{file.name}"
         rpc_backend_options._transports = tp_transports()
-        rpc.init_rpc("worker", rank=0, world_size=1, rpc_backend_options=rpc_backend_options)
+        rpc.init_rpc(
+            "worker", rank=0, world_size=1, rpc_backend_options=rpc_backend_options
+        )
 
         # Init PG using file
-        dist.init_process_group("gloo", rank=0, world_size=1, init_method=f"file://{file.name}")
+        dist.init_process_group(
+            "gloo", rank=0, world_size=1, init_method=f"file://{file.name}"
+        )
         dist.destroy_process_group()
         assert os.path.exists(file.name)
 
@@ -228,7 +237,9 @@ class PrefixStoreTest(TestCase):
         self.file = tempfile.NamedTemporaryFile(delete=False)
 
     def test_get_underlying_store(self):
-        tcp_store = dist.TCPStore(host_name=DEFAULT_HOSTNAME, port=0, world_size=1, is_master=True)
+        tcp_store = dist.TCPStore(
+            host_name=DEFAULT_HOSTNAME, port=0, world_size=1, is_master=True
+        )
         hash_store = dist.HashStore()
         file_store = dist.FileStore(self.file.name, world_size=1)
         for store in [tcp_store, hash_store, file_store]:
@@ -305,8 +316,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
         )
 
         backend_opts = rpc.TensorPipeRpcBackendOptions(
-            init_method=f"tcp://{addr}:{port}",
-            _transports=tp_transports()
+            init_method=f"tcp://{addr}:{port}", _transports=tp_transports()
         )
         rpc.init_rpc(
             name="worker0",
@@ -362,11 +372,17 @@ class TCPStoreTest(TestCase, StoreTestBase):
         self._test_numkeys_delkeys(self._create_store())
 
     def _create_client(self, index, addr, port, world_size):
-        client_store = dist.TCPStore(addr, port, world_size=world_size, timeout=timedelta(seconds=10))
+        client_store = dist.TCPStore(
+            addr, port, world_size=world_size, timeout=timedelta(seconds=10)
+        )
         self.assertEqual(b"value", client_store.get("key"))
         client_store.set(f"new_key{index}", f"new_value{index}")
-        self.assertEqual(f"next_value{index}".encode(),
-                         client_store.compare_set(f"new_key{index}", f"new_value{index}", f"next_value{index}"))
+        self.assertEqual(
+            f"next_value{index}".encode(),
+            client_store.compare_set(
+                f"new_key{index}", f"new_value{index}", f"next_value{index}"
+            ),
+        )
 
     def _multi_worker_helper(self, world_size):
         addr = DEFAULT_HOSTNAME
@@ -408,22 +424,34 @@ class TCPStoreTest(TestCase, StoreTestBase):
         self.assertEqual(b"tato", v1)
 
     def test_store_timeout_on_missing_clients(self):
-        with self.assertRaisesRegex(DistStoreError, r"Timed out after \d+ seconds waiting for clients. \d+/\d+ clients joined."):
+        with self.assertRaisesRegex(
+            DistStoreError,
+            r"Timed out after \d+ seconds waiting for clients. \d+/\d+ clients joined.",
+        ):
             # world_size is 2 so it should timeout
             dist.TCPStore("localhost", 0, 2, True, timeout=timedelta(seconds=2))
 
         # when wait_for_workers is not set, then there should be no exception raised
-        dist.TCPStore("localhost", 0, 2, True, timeout=timedelta(seconds=2), wait_for_workers=False)
+        dist.TCPStore(
+            "localhost",
+            0,
+            2,
+            True,
+            timeout=timedelta(seconds=2),
+            wait_for_workers=False,
+        )
+
 
 class LibUvTCPStoreTest(TCPStoreTest):
-
     def _create_store(self):
         store = create_tcp_store(use_libuv=True)
         store.set_timeout(timedelta(seconds=300))
         return store
 
     def _create_store_with_ws(self, addr, world_size):
-        return create_tcp_store(addr, world_size, wait_for_workers=False, use_libuv=True)
+        return create_tcp_store(
+            addr, world_size, wait_for_workers=False, use_libuv=True
+        )
 
 
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
@@ -445,9 +473,12 @@ class PrefixTCPStoreTest(TestCase, StoreTestBase):
 
     def test_underlying_non_prefix_store(self):
         store = self._create_store()
-        wrapped_store = dist.PrefixStore(self.prefix, dist.PrefixStore(self.prefix, store))
+        wrapped_store = dist.PrefixStore(
+            self.prefix, dist.PrefixStore(self.prefix, store)
+        )
         self.assertEqual(self.tcpstore, store._underlying_non_prefix_store)
         self.assertEqual(self.tcpstore, wrapped_store._underlying_non_prefix_store)
+
 
 class MyPythonStore(dist.Store):
     def __init__(self):
@@ -482,6 +513,7 @@ class MyPythonStore(dist.Store):
         if expected == val or val is None:
             val = self.store[key] = newValue
         return val
+
 
 class PythonStoreTest(TestCase):
     def test_set_get(self):
@@ -578,7 +610,9 @@ class RendezvousTCPTest(TestCase):
             next(gen)
 
     def test_dns_timeout(self):
-        with self.assertRaisesRegex(DistNetworkError, "client socket has timed out after.*dnsnotexist") as manager:
+        with self.assertRaisesRegex(
+            DistNetworkError, "client socket has timed out after.*dnsnotexist"
+        ) as manager:
             gen = dist.rendezvous(
                 "tcp://dnsnotexist:23456?world_size=2&rank=0",
                 timeout=timedelta(seconds=1),
@@ -641,6 +675,7 @@ class RendezvousTCPTest(TestCase):
         store0, rank0, size0 = next(gen0)
         self.assertTrue(store0.libuvBackend)
 
+
 class DummyStore(dist.Store):
     def __init__(self):
         self.appends = []
@@ -662,10 +697,12 @@ class DummyStore(dist.Store):
     def has_extended_api(self):
         return True
 
+
 class TestPythonStore(TestCase):
     def test_optional_methods_fail(self):
         class TestStore(dist.Store):
             pass
+
         store = TestStore()
         self.assertFalse(store.has_extended_api())
         with self.assertRaisesRegex(RuntimeError, "Not implemented."):
@@ -678,6 +715,7 @@ class TestPythonStore(TestCase):
     def test_has_extended_api_passthrough(self):
         class TestStore(dist.Store):
             pass
+
         test_store = TestStore()
         store = dist.PrefixStore("p", test_store)
         self.assertFalse(store.has_extended_api())
@@ -712,10 +750,10 @@ class TestPythonStore(TestCase):
     def test_multi_set_roundtrip(self):
         store = DummyStore()
         prefix = dist.PrefixStore("p", store)
-        prefix.multi_set(["foo", "bar"], [b'x', b'y'])
+        prefix.multi_set(["foo", "bar"], [b"x", b"y"])
         self.assertEqual(1, len(store.multi_sets))
         self.assertEqual(["p/foo", "p/bar"], store.multi_sets[0][0])
-        self.assertEqual([b'x', b'y'], store.multi_sets[0][1])
+        self.assertEqual([b"x", b"y"], store.multi_sets[0][1])
 
     def test_extended_methods_fallbacks(self):
         test_store = MyPythonStore()
@@ -735,7 +773,9 @@ class TestMultiThreadedWait(MultiThreadedTestCase):
     stores = [
         dist.FileStore(tempfile.NamedTemporaryFile(delete=False).name, 1),
         dist.HashStore(),
-        dist.PrefixStore("pre", dist.FileStore(tempfile.NamedTemporaryFile(delete=False).name, 1)),
+        dist.PrefixStore(
+            "pre", dist.FileStore(tempfile.NamedTemporaryFile(delete=False).name, 1)
+        ),
         create_tcp_store(),
         create_tcp_store(use_libuv=True),
         dist.PrefixStore("pre", create_tcp_store()),
@@ -764,15 +804,18 @@ class TestMultiThreadedWait(MultiThreadedTestCase):
 
 instantiate_parametrized_tests(TestMultiThreadedWait)
 
+
 @skip_if_win32()
 class TimeoutTest(TestCase):
     def tearDown(self):
         import signal
+
         super().tearDown()
         signal.signal(signal.SIGUSR1, signal.SIG_IGN)
 
     def test_interrupt_doesnt_break_wait(self):
         import signal
+
         rank_res = [None, None]
 
         def run(rank, my_store):
@@ -789,13 +832,29 @@ class TimeoutTest(TestCase):
             time.sleep(1)
 
         rank0_store = dist.TCPStore(
-            host_name=DEFAULT_HOSTNAME, port=0, world_size=2, is_master=True, wait_for_workers=False)
+            host_name=DEFAULT_HOSTNAME,
+            port=0,
+            world_size=2,
+            is_master=True,
+            wait_for_workers=False,
+        )
         rank1_store = dist.TCPStore(
-            host_name=DEFAULT_HOSTNAME, port=rank0_store.port, world_size=2, is_master=False, wait_for_workers=False)
+            host_name=DEFAULT_HOSTNAME,
+            port=rank0_store.port,
+            world_size=2,
+            is_master=False,
+            wait_for_workers=False,
+        )
 
         ths = []
         for i in range(2):
-            t = threading.Thread(target=run, args=(i, [rank0_store, rank1_store][i],))
+            t = threading.Thread(
+                target=run,
+                args=(
+                    i,
+                    [rank0_store, rank1_store][i],
+                ),
+            )
             t.start()
             ths.append(t)
 
@@ -821,7 +880,12 @@ class InitPgWithUvStore(TestCase):
 
     def test_with_url_param(self):
         port = common.find_free_port()
-        dist.init_process_group("gloo", rank=0, world_size=1, init_method=f"tcp://{DEFAULT_HOSTNAME}:{port}?use_libuv=1")
+        dist.init_process_group(
+            "gloo",
+            rank=0,
+            world_size=1,
+            init_method=f"tcp://{DEFAULT_HOSTNAME}:{port}?use_libuv=1",
+        )
         self._run_test()
 
     def test_with_env_var(self):
@@ -842,6 +906,7 @@ class InitPgWithUvStore(TestCase):
         self.assertTrue(isinstance(store, dist.TCPStore))
         self.assertTrue(store.libuvBackend)
         dist.destroy_process_group()
+
 
 if __name__ == "__main__":
     assert (

@@ -1292,6 +1292,59 @@ def forward(self, getitem, const):
     return (sin,)""",
             )
 
+    def test_map_example_value_metadata_consistent_with_eager(self):
+        from torch._higher_order_ops.map import map_dense
+
+        backend = EagerAndRecordGraphs()
+
+        def inner(x):
+            return x.sin(), x.cos().T, x.sin().view(-1)
+
+        rand_44 = torch.randn(4, 4)
+        inps = [
+            torch.randn(3),
+            torch.randn(3, 4),
+            torch.randn(3, 4, 5, requires_grad=True),
+            torch.randn(3, 4, 5, requires_grad=True).permute((2, 0, 1)),
+            torch.randn(3, 4, 5, requires_grad=True).detach(),
+            torch.randn(3, 4, 5, requires_grad=True).narrow(1, 1, 2),
+            rand_44.T,
+            rand_44[::2],
+            rand_44[::2, ::2],
+            rand_44[1::3, 1::3],
+            rand_44[1::3, 1::2].T,
+            rand_44.unsqueeze(1),
+            rand_44.squeeze(0),
+            rand_44.reshape(2, 8),
+        ]
+        for x in inps:
+            compiled_ret = torch.compile(
+                control_flow.map, backend=backend, fullgraph=True
+            )(inner, x)
+            eager_sin, eager_transpose, eager_view = map_dense(inner, (x,), tuple())
+
+            map_node = next(
+                node
+                for node in backend.graphs[0].graph.nodes
+                if node.op == "call_function" and "map" in node.name
+            )
+
+            fake_sin, fake_transpose, fake_view = map_node.meta["example_value"]
+
+            def _check_size_stride_contiguous(x, y):
+                self.assertEqual(y.size(), x.size())
+                self.assertEqual(y.stride(), x.stride())
+                self.assertEqual(y.requires_grad, x.requires_grad)
+                self.assertEqual(x.is_contiguous(), True)
+                self.assertEqual(y.is_contiguous(), True)
+
+            _check_size_stride_contiguous(eager_sin, fake_sin)
+            _check_size_stride_contiguous(eager_transpose, fake_transpose)
+            _check_size_stride_contiguous(eager_view, fake_view)
+
+            torch._dynamo.reset()
+            backend.graphs.clear()
+
     def test_cond_subgraph_name_is_valid(self):
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
@@ -1322,8 +1375,7 @@ def forward(self, getitem, const):
 
         cond_gm = backend.graphs[0]
         name_set = set()
-        for name, _ in cond_gm.named_modules():
-            name_set.add(name)
+        name_set.update(name for name, _ in cond_gm.named_modules())
         self.assertEqual(
             name_set,
             {
@@ -1682,8 +1734,7 @@ def forward(self):
         self.assertEqual(result, x + y + x)
         wrap_gm = backend.graphs[0]
         names = set()
-        for mod_name, _ in wrap_gm.named_modules():
-            names.add(mod_name)
+        names.update(mod_name for mod_name, _ in wrap_gm.named_modules())
         self.assertEqual(
             names,
             {
@@ -2638,6 +2689,25 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
             """torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'error')])""",
             munge_exc(record.getMessage()),
         )
+
+    @make_logging_test(recompiles=True)
+    def test_linearize_recompiles(self, records):
+        @torch.compile(backend="eager")
+        def fn(x):
+            out, jvp_fn = torch.func.linearize(torch.sin, x)
+            return out, jvp_fn(x)
+
+        x = torch.randn(2, 3)
+        fn(x)
+        self.assertEqual(len(records), 0)
+
+        z = torch.randn(2, 3)
+        fn(z)
+        self.assertEqual(len(records), 0)
+
+        y = torch.randn(3, 4)
+        fn(y)
+        self.assertGreater(len(records), 0)
 
 
 class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
@@ -5026,6 +5096,87 @@ class GraphModule(torch.nn.Module):
             )
         self.assertEqual(actual, expected)
 
+    @config.patch(capture_func_transforms=True)
+    def test_linearize_jvp_fn(self):
+        counters.clear()
+
+        def wrapper_fn(x):
+            output, jvp_fn = torch.func.linearize(torch.sin, x)
+            return output, jvp_fn(x)
+
+        x = torch.randn(3, 3, 3)
+        wrapped_gm = self._compile_check(wrapper_fn, (x,), fullgraph=False, graph_idx=0)
+
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
+
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_self_tensor_constant0 : torch.Tensor):
+        l_self_tensor_constant0 = L_self_tensor_constant0
+
+        alias_default = torch.ops.aten.alias.default(l_self_tensor_constant0);  l_self_tensor_constant0 = None
+
+        sin_default = torch.ops.aten.sin.default(alias_default)
+
+        alias_default_1 = torch.ops.aten.alias.default(alias_default)
+
+        cos_default = torch.ops.aten.cos.default(alias_default_1);  alias_default_1 = None
+
+        alias_default_2 = torch.ops.aten.alias.default(sin_default)
+        return (alias_default, cos_default, sin_default)
+""",
+        )
+
+        wrapped_gm = self._compile_check(wrapper_fn, (x,), fullgraph=False, graph_idx=1)
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, getattr_L_self_FX_CONST_FOLDED_ATTRS_0_ : torch.nn.parameter.Parameter, getattr_L_self_FX_CONST_FOLDED_ATTRS_1_ : torch.nn.parameter.Parameter, L_flat_tangents_1_ : torch.Tensor):
+        getattr_l_self_fx_const_folded_attrs_0_ = getattr_L_self_FX_CONST_FOLDED_ATTRS_0_
+        getattr_l_self_fx_const_folded_attrs_1_ = getattr_L_self_FX_CONST_FOLDED_ATTRS_1_
+        l_flat_tangents_1_ = L_flat_tangents_1_
+
+        _new_zeros_with_same_feature_meta_default = torch.ops.aten._new_zeros_with_same_feature_meta.default(l_flat_tangents_1_, getattr_l_self_fx_const_folded_attrs_0_);  getattr_l_self_fx_const_folded_attrs_0_ = None
+
+        copy__default = torch.ops.aten.copy_.default(_new_zeros_with_same_feature_meta_default, l_flat_tangents_1_);  _new_zeros_with_same_feature_meta_default = l_flat_tangents_1_ = None
+
+        mul_tensor = torch.ops.aten.mul.Tensor(copy__default, getattr_l_self_fx_const_folded_attrs_1_);  copy__default = getattr_l_self_fx_const_folded_attrs_1_ = None
+        return (mul_tensor,)
+""",
+        )
+
+    def test_linearize_disable_capture(self):
+        counters.clear()
+        with config.patch(capture_func_transforms=False):
+            # We have verified above that this
+            # function compiles
+            def wrapper_fn(x):
+                out, _ = torch.func.linearize(torch.sin, x)
+                return out
+
+            x = torch.randn(2, 3)
+            actual = wrapper_fn(x)
+            expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(
+                x
+            )
+            self.assertEqual(len(counters["graph_break"]), 1)
+            self.assertEqual(
+                {
+                    "torch.func.linearize capture is disabled, it can be "
+                    "turned on by setting `torch._dynamo.config.capture_func_transforms=True`": 1,
+                },
+                dict(counters["graph_break"]),
+            )
+            self.assertEqual(actual, expected)
+
+    @config.patch(capture_func_transforms=True)
     @config.patch(error_on_recompile=True)
     def test_vmap_recompile(self):
         @torch.compile(backend="eager")
