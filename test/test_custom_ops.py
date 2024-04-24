@@ -2171,6 +2171,26 @@ class TestCustomOpAPI(TestCase):
         self.assertEqual(x, expected)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_kwarg_only_tensors(self):
+        with self.assertRaisesRegex(NotImplementedError, "kwarg-only Tensor args"):
+
+            @torch.library.custom_op("_torch_testing::foo", mutates_args=())
+            def foo(x: Tensor, *, y: int, z: Tensor) -> Tensor:
+                pass
+
+        with self.assertRaisesRegex(NotImplementedError, "kwarg-only Tensor args"):
+
+            @torch.library.custom_op("_torch_testing::foo", mutates_args=())
+            def foo2(x: Tensor, *, y: int, z: Optional[Tensor]) -> Tensor:
+                pass
+
+        with self.assertRaisesRegex(NotImplementedError, "kwarg-only Tensor args"):
+
+            @torch.library.custom_op("_torch_testing::foo", mutates_args=())
+            def foo3(x: Tensor, *, y: int, z: List[Tensor]) -> Tensor:
+                pass
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_manual_schema_error(self):
         with self.assertRaisesRegex(ValueError, "the op mutates {'x'}"):
 
