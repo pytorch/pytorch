@@ -117,22 +117,16 @@ runs:
         delay=10
         attempt=1
 
-        while true; do
+        for attempt in $(seq 1 $max_attempts); do
           echo "Attempt $attempt of $max_attempts: Checking if Docker daemon is running..."
-
           if docker info > /dev/null 2>&1; then
             echo "Docker is running. Proceeding with the next steps"
-            break
+            exit 0
           else
             echo "Docker is not running yet."
-
-            if [ $attempt -ge $max_attempts ]; then
-              echo "Reached maximum attempts to connect to Docker. Exiting."
-              exit 1
-            else
-              echo "Retrying in $delay seconds..."
-              sleep $delay
-              ((attempt++))
-            fi
+            echo "Retrying in $delay seconds..."
+            sleep $delay
           fi
         done
+        echo "Reached maximum attempts to connect to Docker. Exiting."
+        exit 1
