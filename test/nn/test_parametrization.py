@@ -1416,7 +1416,7 @@ class TestNNParametrization(NNTestCase):
 
     def test_register_parametrization_no_grad(self):
         r"""Test that it is possible to register a parametrization without gradient"""
-        class NoResize(nn.Module):
+        class SplitAndCat(nn.Module):
             def right_inverse(self, x):
                 return x[0], x[1]
 
@@ -1427,7 +1427,7 @@ class TestNNParametrization(NNTestCase):
 
         model.weight.requires_grad = False
         # One parametrization with unsafe=True
-        parametrize.register_parametrization(model, "weight", NoResize())
+        parametrize.register_parametrization(model, "weight", SplitAndCat())
         # making sure the decomposed Tensors both have requires_grad == False
         self.assertFalse(model.parametrizations.weight.original0.requires_grad)
         self.assertFalse(model.parametrizations.weight.original1.requires_grad)
