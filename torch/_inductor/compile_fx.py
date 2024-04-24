@@ -513,7 +513,25 @@ def compile_fx_inner(
             if isinstance(t, torch.Tensor)
         )
 
+        if not config.triton.cudagraph_support_input_mutation:
+            # Skip supports for cudagraph-managed tensors
+            from torch._inductor.cudagraph_utils import (
+                check_for_mutation_ignore_cuda_graph_managed_tensor,
+            )
+
+            has_mutation_str = check_for_mutation_ignore_cuda_graph_managed_tensor(
+                gm, compiled_graph, num_fixed
+            )
+            has_mutation = has_mutation_str is not None
+
+            if has_mutation:
+                compiled_graph.disabled_cudagraphs_reason = has_mutation_str
+        else:
+            # Check mutation later to support cudagraph-managed tensors
+            has_mutation = None
+
         cudagraph_tests = [
+            (not has_mutation, "mutated inputs"),
             (not has_incompatible_cudagraph_ops(gm), "incompatible ops"),
             (not complex_memory_overlap_inputs, "complex memory overlap"),
             (
