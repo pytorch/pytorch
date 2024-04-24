@@ -592,6 +592,8 @@ class FakeTensor(torch.Tensor):
             )
             return NotImplemented
 
+        assert not fake_mode.in_kernel_invocation
+
         with fake_mode:  # type: ignore[attr-defined]
             return func(*args, **kwargs)
 
