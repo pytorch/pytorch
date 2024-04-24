@@ -60,6 +60,14 @@ def register_fake_operators():
             torch._C.DispatchKey.Meta
         )(meta_takes_foo_tuple_return)
 
+    if (
+        torch._C.DispatchKey.Meta
+        not in torch.ops._TorchScriptTesting.takes_foo.default.py_kernels
+    ):
+        torch.ops._TorchScriptTesting.takes_foo.default.py_impl(
+            torch._C.DispatchKey.Meta
+        )(lambda cc, x: cc.add_tensor(x))
+
 
 def register_fake_classes():
     @torch._library.register_fake_class("_TorchScriptTesting::_Foo")
@@ -113,7 +121,7 @@ def load_torchbind_test_lib():
 
 
 @contextlib.contextmanager
-def _register_py_impl_temporially(op_overload, key, fn):
+def _register_py_impl_temporarily(op_overload, key, fn):
     try:
         op_overload.py_impl(key)(fn)
         yield

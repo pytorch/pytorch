@@ -56,7 +56,6 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.torchbind_impls import (
-    _register_py_impl_temporially,
     load_torchbind_test_lib,
     register_fake_classes,
     register_fake_operators,
@@ -469,12 +468,7 @@ class TestPasses(TestCase):
 
         m = MyModule()
         inputs = (torch.ones(2, 3),)
-        with _register_py_impl_temporially(
-            torch.ops._TorchScriptTesting.takes_foo.default,
-            torch._C.DispatchKey.Meta,
-            lambda cc, x: cc.add_tensor(x),
-        ):
-            ep = torch.export.export(m, inputs, strict=False)
+        ep = torch.export.export(m, inputs, strict=False)
 
         inp = torch.randn(2, 3)
         orig_res = m(inp)

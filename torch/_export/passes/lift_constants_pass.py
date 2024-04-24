@@ -243,10 +243,9 @@ def lift_constants_pass(
 
 def rewrite_script_object_meta(
     gm: torch.fx.GraphModule,
-) -> Dict[str, Union[torch.Tensor, FakeScriptObject,],]:
-    """When tracing, we produce a graph with an actual ScriptObject in the
-    meta["val"]. Eventually we want to change this behavior, when FakeMode infra
-    for ScriptObjects lands.
+) -> Dict[str, Union[torch.Tensor, FakeScriptObject],]:
+    """When tracing, we produce a graph with FakeScriptObject in the
+    meta["val"].
 
     For now, we rewrie meta["val"] to be a placeholder CustomObjArgument
     """
@@ -263,7 +262,7 @@ def rewrite_script_object_meta(
 
         assert not isinstance(
             node.meta["val"], torch.ScriptObject
-        ), "ScriptObject should already be fakified."
+        ), "ScriptObject should already be fakified in to FakeScriptObject."
 
         if isinstance(
             node.meta["val"],

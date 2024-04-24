@@ -873,9 +873,9 @@ class TorchBindOpOverload(OpOverload):
             raise RuntimeError(
                 f"Torchbind op {self} received a FakeScriptObject input when dispatching {handler}."
                 f" but no python implementation is found."
+                f" Please file an issue on this when you encounter this error."
                 f" This error can happen when you export or compile the model."
-                f" To fix it, you can register a python impl by torch.ops.{self}.py_impl(torch._C.{handler})(...)."
-                f" Note this error can still happpen even if a C++ implementation "
+                f" It can still happpen even if a C++ implementation for {dispatch_key}. "
                 f" has been registered. That's because FakeScriptObject purely lives in python and cannot work "
                 f" with a C++ implementation."
             )

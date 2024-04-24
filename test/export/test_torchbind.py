@@ -17,7 +17,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.torchbind_impls import (
-    _register_py_impl_temporially,
+    _register_py_impl_temporarily,
     load_torchbind_test_lib,
     register_fake_classes,
     register_fake_operators,
@@ -212,14 +212,9 @@ def forward(self, obj_attr, x):
             def forward(self, x):
                 return x + torch.ops._TorchScriptTesting.takes_foo(self.attr, x)
 
-        with _register_py_impl_temporially(
-            torch.ops._TorchScriptTesting.takes_foo.default,
-            torch._C.DispatchKey.Meta,
-            lambda cc, x: cc.add_tensor(x),
-        ):
-            ep = self._test_export_same_as_eager(
-                MyModule(), (torch.ones(2, 3),), strict=False, pre_dispatch=pre_dispatch
-            )
+        ep = self._test_export_same_as_eager(
+            MyModule(), (torch.ones(2, 3),), strict=False, pre_dispatch=pre_dispatch
+        )
         self.assertExpectedInline(
             ep.module().code.strip(),
             """\
@@ -286,6 +281,11 @@ def forward(self, x, cc):
                 return x + torch.ops._TorchScriptTesting.takes_foo(cc, x)
 
         cc = torch.classes._TorchScriptTesting._Foo(10, 20)
+
+        del torch.ops._TorchScriptTesting.takes_foo.default.py_kernels[
+            torch._C.DispatchKey.Meta
+        ]
+        torch.ops._TorchScriptTesting.takes_foo.default._dispatch_cache.clear()
         # Even though a C++ implementation for takes_foo.default is registered,
         # we still need the python implementation for takes_foo.default to trace with FakeFoo.
         with self.assertRaisesRegex(RuntimeError, "no python implementation is found"):
@@ -296,7 +296,7 @@ def forward(self, x, cc):
                 pre_dispatch=pre_dispatch,
             )
 
-        with _register_py_impl_temporially(
+        with _register_py_impl_temporarily(
             torch.ops._TorchScriptTesting.takes_foo.default,
             torch._C.DispatchKey.Meta,
             lambda cc, x: cc.add_tensor(x),
@@ -341,14 +341,9 @@ def forward(self, token, x, cc):
                 return x + b
 
         input = torch.ones(2, 3)
-        with _register_py_impl_temporially(
-            torch.ops._TorchScriptTesting.takes_foo.default,
-            torch._C.DispatchKey.Meta,
-            lambda cc, x: cc.add_tensor(x),
-        ):
-            ep = self._test_export_same_as_eager(
-                MyModule(), (input,), strict=False, pre_dispatch=pre_dispatch
-            )
+        ep = self._test_export_same_as_eager(
+            MyModule(), (input,), strict=False, pre_dispatch=pre_dispatch
+        )
         self.assertExpectedInline(
             ep.module().code.strip(),
             """\
@@ -388,14 +383,9 @@ def forward(self, token, obj_attr, x):
                 return x + b
 
         input = torch.ones(2, 3)
-        with _register_py_impl_temporially(
-            torch.ops._TorchScriptTesting.takes_foo.default,
-            torch._C.DispatchKey.Meta,
-            lambda cc, x: cc.add_tensor(x),
-        ):
-            ep = self._test_export_same_as_eager(
-                MyModule(), (input,), strict=False, pre_dispatch=pre_dispatch
-            )
+        ep = self._test_export_same_as_eager(
+            MyModule(), (input,), strict=False, pre_dispatch=pre_dispatch
+        )
         self.assertExpectedInline(
             ep.module().code.strip(),
             """\
@@ -445,14 +435,9 @@ def forward(self, token, obj_attr, x):
                 return x + b
 
         input = torch.ones(2, 3)
-        with _register_py_impl_temporially(
-            torch.ops._TorchScriptTesting.takes_foo.default,
-            torch._C.DispatchKey.Meta,
-            lambda cc, x: cc.add_tensor(x),
-        ):
-            ep = self._test_export_same_as_eager(
-                MyModule(), (input,), strict=False, pre_dispatch=pre_dispatch
-            )
+        ep = self._test_export_same_as_eager(
+            MyModule(), (input,), strict=False, pre_dispatch=pre_dispatch
+        )
         self.assertExpectedInline(
             ep.module().code.strip(),
             """\
