@@ -551,6 +551,8 @@ class TestExport(TestCase):
             torch.allclose(ep.module()(torch.zeros(2, 3)), torch.ones(2, 3) * 21)
         )
 
+    # Predispatch has different expected results
+    @testing.expectedFailureSerDerPreDispatch
     def test_torch_fn(self):
         class M1(torch.nn.Module):
             def __init__(self):
@@ -565,7 +567,7 @@ class TestExport(TestCase):
                 x = x + x
                 return x
 
-        ep1 = export(M1(), (torch.randn(3, 3),)).run_decompositions()
+        ep1 = export(M1(), (torch.randn(3, 3),))
         expected_result = [
             ("linear_1", "builtin_function_or_method.linear"),
             ("linear_1", "builtin_function_or_method.linear"),
@@ -590,9 +592,7 @@ class TestExport(TestCase):
                 x = torch.add(x, x)
                 return x
 
-        ep2 = export(
-            M2(), (torch.randn(3, 3), torch.randn(3, 3), torch.randn(3))
-        ).run_decompositions()
+        ep2 = export(M2(), (torch.randn(3, 3), torch.randn(3, 3), torch.randn(3)))
         expected_result = [
             ("linear_1", "builtin_function_or_method.linear"),
             ("linear_1", "builtin_function_or_method.linear"),
@@ -2253,6 +2253,8 @@ def forward(self, arg_0):
             )
         )
 
+    @testing.expectedFailureSerDerPreDispatch  # .item call becomes aten.item in predispatch IR
+    @testing.expectedFailurePreDispatchRunDecomp  # assert name is still referring to item
     def test_automatic_constrain_size(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -2262,13 +2264,11 @@ def forward(self, arg_0):
         ep = export(M(), (torch.tensor(1), torch.ones(4, 5)))
 
         if is_non_strict_test(self._testMethodName):
-            error_msg = r"Runtime assertion failed for item >= 0"
+            error_msg = r"Runtime assertion failed for _local_scalar_dense >= 0"
         elif is_retracebility_test(self._testMethodName):
-            error_msg = r"Runtime assertion failed for item_default >= 0"
+            error_msg = r"Runtime assertion failed for _local_scalar_dense_default >= 0"
         else:
-            error_msg = (
-                "item is outside of inline constraint \[0, 9223372036854775806\]."
-            )
+            error_msg = "_local_scalar_dense is outside of inline constraint \[0, 9223372036854775806\]."
         with self.assertRaisesRegex(RuntimeError, error_msg):
             _ = ep.module()(torch.tensor(-1), torch.randn(4, 5))
 
@@ -2316,6 +2316,8 @@ def forward(self, arg_0):
                 self.assertTrue(isinstance(node.meta["val"], (Tensor, int)))
 
     @testing.expectedFailureNonStrict
+    @testing.expectedFailureSerDerPreDispatch  # .item() becomes aten.item in predispatch IR
+    @testing.expectedFailurePreDispatchRunDecomp  # Assert message is still using the old node name, so it shoudl fail
     def test_export_with_inline_constraints(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -2333,7 +2335,7 @@ def forward(self, arg_0):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            r"item is outside of inline constraint \[4, 7\]",
+            r"_local_scalar_dense is outside of inline constraint \[4, 7\]",
         ) as cm:
             ep.module()(torch.tensor([30]))
 
@@ -2892,6 +2894,8 @@ def forward(self, arg_0):
         with self.assertRaisesRegex(ValueError, "Trying to flatten user inputs"):
             exported_program.module()(torch.rand(2, 3), torch.rand(2, 3))
 
+    @testing.expectedFailureSerDerPreDispatch  # linear shouldn't decompose
+    @testing.expectedFailurePreDispatchRunDecomp  # no action needed here
     def test_export_decomps_simple(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -2905,6 +2909,11 @@ def forward(self, arg_0):
         m = M()
         ep = export(m, inp)
         state_dict = ep.state_dict
+
+        FileCheck().check_count("torch.ops.aten.t.default", 1, exactly=True).run(
+            ep.graph_module.code
+        )
+        self.assertTrue(torch.allclose(ep.module()(*inp), m(*inp)))
 
         core_aten_ep = ep.run_decompositions()
         FileCheck().check_count("torch.ops.aten.permute.default", 1, exactly=True).run(
@@ -3608,8 +3617,8 @@ def forward(self, arg_0):
 
         inp = (torch.randn(4, 4),)
         mod = Foo()
-        ep_strict = torch.export.export(mod, inp).run_decompositions()
-        ep_non_strict = torch.export.export(mod, inp, strict=False).run_decompositions()
+        ep_strict = torch.export.export(mod, inp)
+        ep_non_strict = torch.export.export(mod, inp, strict=False)
 
         gm_unflat_non_strict = unflatten(ep_non_strict)
         self.assertTrue(hasattr(gm_unflat_non_strict, "bar"))
@@ -3626,8 +3635,8 @@ graph():
     %x : [num_users=1] = placeholder[target=x]
     %weight : [num_users=1] = get_attr[target=weight]
     %bias : [num_users=1] = get_attr[target=bias]
-    %permute : [num_users=1] = call_function[target=torch.ops.aten.permute.default](args = (%weight, [1, 0]), kwargs = {})
-    %addmm : [num_users=1] = call_function[target=torch.ops.aten.addmm.default](args = (%bias, %x, %permute), kwargs = {})
+    %t : [num_users=1] = call_function[target=torch.ops.aten.t.default](args = (%weight,), kwargs = {})
+    %addmm : [num_users=1] = call_function[target=torch.ops.aten.addmm.default](args = (%bias, %x, %t), kwargs = {})
     return addmm""",
         )
 
@@ -3698,8 +3707,9 @@ graph():
     %x : [num_users=1] = placeholder[target=x]
     %weight : [num_users=1] = get_attr[target=weight]
     %bias : [num_users=1] = get_attr[target=bias]
-    %linear : [num_users=1] = call_function[target=torch.ops.aten.linear.default](args = (%x, %weight, %bias), kwargs = {})
-    return linear""",
+    %t : [num_users=1] = call_function[target=torch.ops.aten.t.default](args = (%weight,), kwargs = {})
+    %addmm : [num_users=1] = call_function[target=torch.ops.aten.addmm.default](args = (%bias, %x, %t), kwargs = {})
+    return addmm""",
         )
         self.assertExpectedInline(
             str(gm_unflat_non_strict.bar_different.leaf.linear.graph).strip(),
@@ -3708,8 +3718,9 @@ graph():
     %add_2 : [num_users=1] = placeholder[target=add_2]
     %weight : [num_users=1] = get_attr[target=weight]
     %bias : [num_users=1] = get_attr[target=bias]
-    %linear_1 : [num_users=1] = call_function[target=torch.ops.aten.linear.default](args = (%add_2, %weight, %bias), kwargs = {})
-    return linear_1""",
+    %t_1 : [num_users=1] = call_function[target=torch.ops.aten.t.default](args = (%weight,), kwargs = {})
+    %addmm_1 : [num_users=1] = call_function[target=torch.ops.aten.addmm.default](args = (%bias, %add_2, %t_1), kwargs = {})
+    return addmm_1""",
         )
 
         gm_flat_non_strict = ep_non_strict.module()
@@ -4211,7 +4222,7 @@ def forward(self, x):
 
         inps = (torch.ones(5),)
 
-        ep = torch.export.export(M(), inps).run_decompositions()
+        ep = torch.export.export(M(), inps)
         self.assertExpectedInline(
             str(ep.graph_module.code.strip()),
             """\
@@ -4472,9 +4483,7 @@ class TestOneOffModelExportResult(TestCase):
         k = torch.randn(1, 16, 16, 64, dtype=torch.bfloat16, device="cuda")
         v = torch.randn(1, 16, 16, 64, dtype=torch.bfloat16, device="cuda")
 
-        ep = torch.export.export(
-            ScaledDotProductAttention(), (q, k, v)
-        ).run_decompositions()
+        ep = torch.export.export(ScaledDotProductAttention(), (q, k, v))
         self.assertExpectedInline(
             ep.graph_module.code.strip(),
             """\
