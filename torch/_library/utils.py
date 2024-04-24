@@ -105,7 +105,8 @@ def is_functional_schema(schema: Any) -> bool:
     return is_functional(schema)
 
 
-def is_tensorlist_like_type(typ: torch.Type):
+# should be torch._C.JitType but that annotation is busted
+def is_tensorlist_like_type(typ: Any) -> bool:
     return (
         typ == _C.ListType(_C.TensorType.get())
         or typ == _C.ListType(_C.OptionalType(_C.TensorType.get()))
@@ -114,7 +115,8 @@ def is_tensorlist_like_type(typ: torch.Type):
     )
 
 
-def is_tensor_like_type(typ: torch.Type):
+# should be torch._C.JitType but that annotation is busted
+def is_tensor_like_type(typ: Any) -> bool:
     return typ == _C.TensorType.get() or typ == _C.OptionalType(_C.TensorType.get())
 
 
@@ -221,3 +223,17 @@ def handle_dispatch_mode(curr_mode, op_overload, *args, **kwargs):
     # TODO: check that I got these args correct (in C++, we pass in "0000"??)
 
     return curr_mode.__torch_dispatch__(op_overload, overload_types, args, kwargs)
+
+
+def has_kwarg_only_args(schema: _C.FunctionSchema):
+    return any(a.kwarg_only for a in schema.arguments)
+
+
+def has_kwarg_only_tensors(schema: _C.FunctionSchema):
+    for a in schema.arguments:
+        if not (is_tensor_like_type(a.type) or is_tensorlist_like_type(a.type)):
+            continue
+        if not a.kwarg_only:
+            continue
+        return True
+    return False
