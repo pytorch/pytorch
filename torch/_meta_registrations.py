@@ -21,6 +21,7 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     IntLike,
     make_contiguous_strides_for,
+    Number,
     TensorLike,
 )
 
@@ -3531,8 +3532,8 @@ def meta__weight_int4pack_mm(x, w, q_group_size, q_scale_and_zeros):
     torch._check(x.dim() == 2, lambda: "x must be a 2D tensor")
     torch._check(w.dim() == 4, lambda: "w must be a 4D tensor")
     torch._check(
-        x.dtype in [torch.float16, torch.bfloat16],
-        lambda: f"expected x to be f16/bf16, got {x.dtype}",
+        x.dtype in [torch.float32, torch.float16, torch.bfloat16],
+        lambda: f"expected x to be f32/f16/bf16, got {x.dtype}",
     )
     torch._check(
         w.dtype is torch.int32,
@@ -3545,8 +3546,8 @@ def meta__weight_int4pack_mm(x, w, q_group_size, q_scale_and_zeros):
 def meta__weight_int8pack_mm(x, w, q_scales):
     torch._check(x.dim() == 2, lambda: "x must be a 2D tensor")
     torch._check(
-        x.dtype in [torch.float16, torch.bfloat16],
-        lambda: f"expected x to be f16/bf16, got {x.dtype}",
+        x.dtype in [torch.float32, torch.float16, torch.bfloat16],
+        lambda: f"expected x to be f32/f16/bf16, got {x.dtype}",
     )
     torch._check(w.dim() == 2, lambda: "w must be a 2D tensor")
     torch._check(
@@ -6081,6 +6082,32 @@ def meta_bucketize(self, boundaries, *, out_int32=False, right=False):
     return torch.empty_like(
         self, dtype=torch.int32 if out_int32 else torch.int64
     ).contiguous()
+
+
+@register_meta([aten.histc])
+@out_wrapper()
+def meta_histc(input, bins=100, min=0, max=0):
+    fn_name = "histc()"
+    if device_hint(input) == "cpu":
+        torch._check(
+            input.is_floating_point(),
+            lambda: f"\"histogram_cpu\" not implemented for '{input.dtype}'",
+        )
+    torch._check(
+        isinstance(bins, IntLike),
+        lambda: f"{fn_name}: argument 'bins' must be int, not {type(bins)}",
+    )
+    torch._check(bins > 0, lambda: f"{fn_name}: bins must be > 0, but got {bins}")
+    torch._check(
+        isinstance(min, Number),
+        lambda: f"{fn_name}: argument 'min' must be Number, not {type(min)}",
+    )
+    torch._check(
+        isinstance(max, Number),
+        lambda: f"{fn_name}: argument 'max' must be Number, not {type(max)}",
+    )
+    torch._check(max >= min, lambda: "{fn_name}: max must be larger than min")
+    return torch.empty(bins, device=input.device, dtype=input.dtype)
 
 
 @register_meta(

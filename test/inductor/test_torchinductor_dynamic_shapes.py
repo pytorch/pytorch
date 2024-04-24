@@ -9,7 +9,6 @@ import unittest
 from functools import partial
 
 import torch
-import torch._custom_ops as custom_ops
 import torch.library
 from torch._dynamo.testing import make_test_cls_with_patches
 from torch._inductor.codegen.common import device_codegens, register_backend_for_device
@@ -280,30 +279,20 @@ class TestInductorDynamic(TestCase):
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_item_to_inputs_kernel_nobreak(self, device):
-        with torch.library._scoped_library("test", "DEF") as lib:
-            try:
+        @torch.library.custom_op("test::foo", mutates_args=())
+        def foo(x: torch.Tensor, y: int) -> torch.Tensor:
+            return x.clone()
 
-                @custom_ops.custom_op("test::foo")
-                def foo(x: torch.Tensor, y: int) -> torch.Tensor:
-                    raise NotImplementedError()
+        @foo.register_fake
+        def _(x: torch.Tensor, y: int) -> torch.Tensor:
+            return x.clone()
 
-                @custom_ops.impl("test::foo")
-                def foo_impl(x: torch.Tensor, y: int) -> torch.Tensor:
-                    return x.clone()
+        @torch.compile(fullgraph=True)
+        def f(x, r):
+            y = x.item()
+            return torch.ops.test.foo(r, y)
 
-                @torch.library.impl_abstract("test::foo", lib=lib)
-                def foo_meta(x: torch.Tensor, y: int) -> torch.Tensor:
-                    return x.clone()
-
-                @torch.compile(fullgraph=True)
-                def f(x, r):
-                    y = x.item()
-                    return torch.ops.test.foo(r, y)
-
-                f(torch.tensor([3], device=device), torch.randn(10, device=device))
-
-            finally:
-                custom_ops._destroy("test::foo")
+        f(torch.tensor([3], device=device), torch.randn(10, device=device))
 
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
@@ -396,34 +385,24 @@ class TestInductorDynamic(TestCase):
     )
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_dynamic_stride_nobreak(self, device):
-        with torch.library._scoped_library("test", "DEF") as lib:
-            try:
+        @torch.library.custom_op("test::foo", mutates_args=())
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            stride = x.item()
+            return torch.empty_strided((1,), (stride,), device=x.device)
 
-                @custom_ops.custom_op("test::foo")
-                def foo(x: torch.Tensor) -> torch.Tensor:
-                    raise NotImplementedError()
+        @foo.register_fake
+        def _(x: torch.Tensor) -> torch.Tensor:
+            ctx = torch.library.get_ctx()
+            stride = ctx.new_dynamic_size()
+            return torch.empty_strided((1,), (stride,), device=x.device)
 
-                @custom_ops.impl("test::foo")
-                def foo_impl(x: torch.Tensor) -> torch.Tensor:
-                    stride = x.item()
-                    return torch.empty_strided((1,), (stride,), device=x.device)
+        @torch.compile(fullgraph=True)
+        def f(x):
+            r = torch.ops.test.foo(x)
+            y = r.stride(0)
+            return torch.empty(y, device=x.device)
 
-                @torch.library.impl_abstract("test::foo", lib=lib)
-                def foo_meta(x: torch.Tensor) -> torch.Tensor:
-                    ctx = torch.library.get_ctx()
-                    stride = ctx.new_dynamic_size()
-                    return torch.empty_strided((1,), (stride,), device=x.device)
-
-                @torch.compile(fullgraph=True)
-                def f(x):
-                    r = torch.ops.test.foo(x)
-                    y = r.stride(0)
-                    return torch.empty(y, device=x.device)
-
-                f(torch.tensor([3], device=device))
-
-            finally:
-                custom_ops._destroy("test::foo")
+        f(torch.tensor([3], device=device))
 
     @torch._inductor.config.patch(disable_cpp_codegen=True)
     def test_floor(self):
