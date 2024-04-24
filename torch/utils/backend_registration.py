@@ -1,4 +1,8 @@
 import torch
+from torch.overrides import (
+    handle_torch_function,
+    has_torch_function_unary,
+)
 from torch._C import _rename_privateuse1_backend, _get_privateuse1_backend_name
 from typing import List, Optional, Union
 
@@ -126,9 +130,13 @@ def _normalization_device(custom_backend_name: str, device: Optional[Union[int, 
 def _generate_tensor_methods_for_privateuse1_backend(custom_backend_name: str) -> None:
     @property  # type: ignore[misc]
     def wrap_tensor_backend(self: torch.Tensor) -> bool:
+        if has_torch_function_unary(self):
+            # TODO mypy doesn't support @property, see: https://github.com/python/mypy/issues/6185
+            return handle_torch_function(wrap_tensor_backend.__get__, (self,), self)  # type: ignore[attr-defined]
         return self.device.type == custom_backend_name
 
     _check_register_once(torch.Tensor, f'is_{custom_backend_name}')
+    wrap_tensor_backend.fget.__name__ = f'is_{custom_backend_name}'  # type: ignore[attr-defined]
     setattr(torch.Tensor, f'is_{custom_backend_name}', wrap_tensor_backend)
 
     def wrap_tensor_to(self: torch.Tensor, device: Optional[Union[int, torch.device]] = None, non_blocking=False,
@@ -147,10 +155,13 @@ def _generate_tensor_methods_for_privateuse1_backend(custom_backend_name: str) -
                 the argument has no effect.
             **kwargs (dict): For compatibility, may contain the key ``memory_format`` argument.
         """
+        if has_torch_function_unary(self):
+            return handle_torch_function(wrap_tensor_to, (self,), self, device=device, non_blocking=False, **kwargs)
         device_idx = _normalization_device(custom_backend_name, device)
         return self.to(device=torch.device(f'{custom_backend_name}:{device_idx}'), non_blocking=non_blocking, **kwargs)
 
     _check_register_once(torch.Tensor, custom_backend_name)
+    wrap_tensor_to.__name__ = custom_backend_name
     setattr(torch.Tensor, custom_backend_name, wrap_tensor_to)
 
 
