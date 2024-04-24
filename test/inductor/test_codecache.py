@@ -319,8 +319,8 @@ class TestFxGraphCache(TestCase):
 
         compiled_fn = torch.compile(fn, fullgraph=True)
 
-        x = torch.randn(4, device="cuda")
-        y = torch.randn(4, device="cuda")
+        x = torch.randn(4, device=GPU_TYPE)
+        y = torch.randn(4, device=GPU_TYPE)
         compiled_fn(x, y)
 
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
