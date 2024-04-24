@@ -8148,6 +8148,28 @@ class TestLogical(TestCaseMPS):
 
         [helper(dtype) for dtype in [torch.float32, torch.float16, torch.int32, torch.int16, torch.uint8, torch.int8, torch.bool]]
 
+    def test_isin(self):
+        def helper(dtype):
+            shapes = [([2, 5], [3, 5, 2]), ([10, 3, 5], [20, 1, 3]), ([5], [10])]
+            for shape_tuple in shapes:
+                for inverted in [True, False]:
+                    if dtype == torch.float32 or dtype == torch.float16:
+                        A = torch.randn(size=shape_tuple[0], device='cpu', dtype=dtype)
+                        B = torch.randn(size=shape_tuple[1], device='cpu', dtype=dtype)
+                    else:
+                        A = torch.randint(0, 100, size=shape_tuple[0], device='cpu', dtype=dtype)
+                        B = torch.randint(0, 100, size=shape_tuple[1], device='cpu', dtype=dtype)
+
+                    A_mps = A.clone().detach().to('mps')
+                    B_mps = B.clone().detach().to('mps')
+
+                    cpu_ref = torch.isin(A, B, invert=inverted)
+                    mps_out = torch.isin(A_mps, B_mps, invert=inverted)
+
+                    self.assertEqual(mps_out, cpu_ref)
+
+        [helper(dtype) for dtype in [torch.float32, torch.int32, torch.int16, torch.uint8, torch.int8]]
+
 class TestSmoothL1Loss(TestCaseMPS):
 
     def _smooth_l1_loss_helper(self, reduction="mean", requires_grad=False):
