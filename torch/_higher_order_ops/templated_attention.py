@@ -19,14 +19,18 @@ from torch.fx.experimental.proxy_tensor import (
 from torch.overrides import TorchFunctionMode
 
 
-class FunctionLog(TorchFunctionMode):
+def transform_getitem_args(x, index_args):
+    if isinstance(index_args, tuple):
+        return (x, list(index_args))
+    elif not isinstance(index_args, (list, tuple)):
+        return (x, [index_args])
+    return (x, index_args)
+
+
+class TransformGetItemToIndex(TorchFunctionMode):
     def __torch_function__(self, func, types, args, kwargs=None):
         if func == torch.Tensor.__getitem__:
-            index_args = args[1]
-            if not isinstance(args[1], list):
-                index_args = [index_args]
-            return torch.ops.aten.index(args[0], index_args)
-        # print("redispatching inside")
+            return torch.ops.aten.index(*transform_getitem_args(*args))
         return func(*args, **(kwargs or {}))
 
 
@@ -86,7 +90,7 @@ def math_attention(
     score_mod = torch.vmap(score_mod, in_dims=(0, None, 0, None, None) + in_dim_buffers)
     score_mod = torch.vmap(score_mod, in_dims=(0, 0, None, None, None) + in_dim_buffers)
 
-    with FunctionLog():
+    with TransformGetItemToIndex():
         scores = score_mod(scores, b, h, m, n, *other_buffers).to(torch.float32)
 
     # TODO Unconditionally return logsumexp for backwards
@@ -136,7 +140,7 @@ def trace_templated_attention(
     example_vals = [
         torch.zeros((), dtype=query.dtype, requires_grad=query.requires_grad)
     ] + [torch.zeros((), dtype=torch.int) for _ in range(4)]
-    with FunctionLog():
+    with TransformGetItemToIndex():
         score_graph = make_fx(score_mod)(*example_vals, *other_buffers)
     proxy_mode.tracer.root.register_module("sdpa_score", score_graph)
     node_args = (query, key, value, score_graph, *other_buffers)

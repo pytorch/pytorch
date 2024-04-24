@@ -178,7 +178,7 @@ def _maybe_remove_batch_dim(name, batched_output, vmap_level, batch_size, out_di
         raise ValueError(
             f"vmap({name}, ...): `{name}` must only return "
             f"Tensors, got type {type(batched_output)}. "
-            "Did you mean to set out_dim= to None for output?"
+            "Did you mean to set out_dims= to None for output?"
         )
 
     return _remove_batch_dim(batched_output, vmap_level, batch_size, out_dim)

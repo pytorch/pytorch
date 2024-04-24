@@ -32,8 +32,7 @@
 using namespace at;
 using namespace torch::autograd::utils;
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 Py_ssize_t THPVariable_length(PyObject* self) {
   HANDLE_TH_ERRORS
@@ -552,5 +551,4 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

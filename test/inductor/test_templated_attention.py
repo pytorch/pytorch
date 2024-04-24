@@ -163,7 +163,7 @@ class TestTemplatedSDPA(InductorTestCase):
         head_offset = torch.rand(H, device="cuda", dtype=dtype)
 
         def score_mod(score, b, h, m, n):
-            return score + index(head_offset, [h])
+            return score + head_offset[h]
 
         self.run_test(score_mod, dtype)
 
@@ -174,9 +174,7 @@ class TestTemplatedSDPA(InductorTestCase):
         seq_idx[S // 2 :] = 1
 
         def seq_mask_mod(score, b, h, q, kv):
-            return torch.where(
-                index(seq_idx, [q]) == index(seq_idx, [kv]), score, float("-inf")
-            )
+            return torch.where(seq_idx[q] == seq_idx[kv], score, float("-inf"))
 
         self.run_test(seq_mask_mod, dtype)
 
@@ -186,7 +184,7 @@ class TestTemplatedSDPA(InductorTestCase):
         bias = torch.randn(S, S, device="cuda", dtype=dtype)
 
         def bias_mod(score, b, h, q, kv):
-            return score + index(bias, [q, kv])
+            return score + bias[q, kv]
 
         self.run_test(bias_mod, dtype)
 
@@ -196,7 +194,7 @@ class TestTemplatedSDPA(InductorTestCase):
         bias = torch.randn(B, S, S, device="cuda", dtype=dtype)
 
         def bias_mod(score, b, h, q, kv):
-            return score + index(bias, [b, q, kv])
+            return score + bias[b, q, kv]
 
         self.run_test(bias_mod, dtype)
 
@@ -206,7 +204,7 @@ class TestTemplatedSDPA(InductorTestCase):
         bias = torch.randn(B, H, S, S, device="cuda", dtype=dtype)
 
         def bias_mod(score, b, h, q, kv):
-            return score + index(bias, [b, h, q, kv])
+            return score + bias[b, h, q, kv]
 
         self.run_test(bias_mod, dtype)
 
@@ -216,7 +214,7 @@ class TestTemplatedSDPA(InductorTestCase):
         rel_bias = torch.randn(2 * S, device="cuda", dtype=dtype)
 
         def bias_mod(score, b, h, q, kv):
-            return score + index(rel_bias, [(q - kv) + S])
+            return score + rel_bias[(q - kv) + S]
 
         self.run_test(bias_mod, dtype)
 
@@ -227,7 +225,7 @@ class TestTemplatedSDPA(InductorTestCase):
 
         def bias_mod(score, b, h, q, kv):
             causal_attention = q >= kv
-            cur_num_bidirectional = index(num_bidirectional, (b,))
+            cur_num_bidirectional = num_bidirectional[b]
             bidirectional_attention_on_video = (q <= cur_num_bidirectional) & (
                 kv <= cur_num_bidirectional
             )
@@ -252,8 +250,8 @@ class TestTemplatedSDPA(InductorTestCase):
 
         def create_njt_wrapper(orig_score_mod, offsets, seq_idx):
             def njt_score_mod(qk, b, h, q, kv):
-                q_nested = q - index(offsets, [index(seq_idx, [q])])
-                kv_nested = kv - index(offsets, [index(seq_idx, [kv])])
+                q_nested = q - offsets[seq_idx[q]]
+                kv_nested = kv - offsets[seq_idx[kv]]
                 return orig_score_mod(qk, b, h, q_nested, kv_nested)
 
             return njt_score_mod
@@ -312,9 +310,9 @@ class TestTemplatedSDPA(InductorTestCase):
         tok_scale = torch.randn(S, device="cuda")
 
         def bias_mod(score, batch, head, token_q, token_kv):
-            score = score + index(tok_scale, [token_q])
-            score = score + index(batch_scale, [batch])
-            score = score + index(head_scale, [head])
+            score = score + tok_scale[token_q]
+            score = score + batch_scale[batch]
+            score = score + head_scale[head]
             return score
 
         self.run_test(bias_mod)

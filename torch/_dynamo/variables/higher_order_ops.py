@@ -1475,6 +1475,10 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         self, tx, query: "VariableTracker", score_function: "VariableTracker"
     ):
         from torch._dynamo.symbolic_convert import InstructionTranslator
+        from torch._higher_order_ops.templated_attention import (
+            transform_getitem_args,
+            TransformGetItemToIndex,
+        )
         from .builder import SourcelessBuilder
 
         tx: InstructionTranslator = tx
@@ -1499,23 +1503,8 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         bhmn = [create_scalar() for _ in range(4)]
         new_args = [score, *bhmn]
-        from torch.overrides import TorchFunctionMode
 
-        def transform_getitem_args(x, index_args):
-            if not isinstance(index_args, list):
-                return (x, [index_args])
-            return (x, index_args)
-
-        class FunctionLog(TorchFunctionMode):
-            def __torch_function__(self, func, types, args, kwargs=None):
-                if func == torch.Tensor.__getitem__:
-                    index_args = transform_getitem_args(args[0], args[1])
-                    return torch.ops.aten.index(*index_args)
-                return func(*args, **(kwargs or {}))
-
-        x = torch.randn(3)
-        i = torch.tensor(0)
-        with FunctionLog():
+        with TransformGetItemToIndex():
             (
                 (body_output, body_treespec),
                 body_graph,
@@ -1531,11 +1520,11 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
         import operator
 
+        # We wouldn't need this if we can re-enable torchfunctionmode
         for node in body_graph.nodes:
             if node.target == operator.getitem:
                 node.target = torch.ops.aten.index
                 node.args = transform_getitem_args(*node.args)
-        print(body_graph)
 
         body_name = add_subgraph(
             tx,
