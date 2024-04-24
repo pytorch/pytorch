@@ -311,8 +311,8 @@ static void slow_conv3d_update_output_frame(
 template <typename scalar_t>
 void slow_conv3d_backward_update_grad_input_frame(
     TensorAccessor<scalar_t, 4> grad_input,
-    TensorAccessor<scalar_t, 4> grad_output,
-    TensorAccessor<scalar_t, 2> weight,
+    TensorAccessor<const scalar_t, 4> grad_output,
+    TensorAccessor<const scalar_t, 2> weight,
     TensorAccessor<scalar_t, 2> fgrad_input,
     int64_t kernel_depth,
     int64_t kernel_height,
@@ -431,9 +431,9 @@ void slow_conv3d_backward_out_cpu_template(
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kBFloat16, kHalf, input.scalar_type(), "slow_conv3d_cpu_grad_input", [&] {
     auto grad_input_a = grad_input.accessor<scalar_t, 5>();
-    auto grad_output_a = grad_output_contiguous.accessor<scalar_t, 5>();
+    auto grad_output_a = grad_output_contiguous.accessor<const scalar_t, 5>();
     auto fgrad_input_a = fgrad_input.accessor<scalar_t, 3>();
-    auto weight_2d_a = weight2d.accessor<scalar_t, 2>();
+    auto weight_2d_a = weight2d.accessor<const scalar_t, 2>();
     at::parallel_for(0, batch_size, CONV3D_GRAIN_SALT,
                     [&](int64_t start, int64_t end) {
 
@@ -464,8 +464,8 @@ void slow_conv3d_backward_out_cpu_template(
 template <typename scalar_t>
 void slow_conv3d_backward_weight_frame(
     TensorAccessor<scalar_t, 2> grad_weight,
-    TensorAccessor<scalar_t, 4> grad_output,
-    TensorAccessor<scalar_t, 2> finput,
+    TensorAccessor<const scalar_t, 4> grad_output,
+    TensorAccessor<const scalar_t, 2> finput,
     int64_t groups) {
   // Compute grad_weight += grad_output.reshape({grad_output.shape(0), -1}) * finput.T
   // Note gemm expects fortran order, so all 3 matrices are transposed.
@@ -538,8 +538,8 @@ static void slow_conv3d_backward_parameters_out_cpu_template(
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kBFloat16, kHalf, input.scalar_type(), "slow_conv3d_cpu_grad_weight", [&] {
     auto grad_weight_2d_a = grad_weight_2d.accessor<scalar_t, 2>();
-    auto grad_output_a = grad_output_contiguous.accessor<scalar_t, 5>();
-    auto finput_a = finput.accessor<scalar_t, 3>();
+    auto grad_output_a = grad_output_contiguous.accessor<const scalar_t, 5>();
+    auto finput_a = finput.accessor<const scalar_t, 3>();
     for (const auto t : c10::irange(batch_size)) {
       auto grad_output_t = grad_output_a[t];
       auto finput_t = finput_a[t];

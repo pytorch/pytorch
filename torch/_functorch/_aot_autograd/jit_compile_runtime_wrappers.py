@@ -8,6 +8,7 @@ in `runtime_wrappers`.
 """
 
 import logging
+import time
 from contextlib import nullcontext
 from functools import wraps
 from typing import Any, List, Optional, Sequence
@@ -16,7 +17,13 @@ import torch
 import torch.utils.dlpack
 from torch import Tensor
 from torch._dynamo.utils import lazy_format_graph_code
-from torch._guards import detect_fake_mode, tracing, TracingContext
+from torch._guards import (
+    compile_context,
+    CompileContext,
+    detect_fake_mode,
+    tracing,
+    TracingContext,
+)
 from torch._logging import getArtifactLogger, trace_structured
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses import FakeTensor
@@ -162,7 +169,7 @@ def aot_dispatch_base(
 
     # Create a wrapper to set up the rng functionalize bits
     @wraps(compiled_fw)
-    def rng_functionalization_wrapper(args):
+    def rng_functionalization_wrapper(args: List[Any]):
         # see note: [Returning Fake Tensors on First AOT Autograd Call]
         nonlocal fakified_out
         if fakified_out is not None:
@@ -170,7 +177,6 @@ def aot_dispatch_base(
             fakified_out = None
             return out
 
-        # args is a list because compiled_fw is boxed_call
         if fw_metadata.is_rng_op_functionalized:
             # Add the seed and offset to args
             seed, offset = CUDARngStateHelper.get_torch_state_as_tuple()
@@ -370,8 +376,24 @@ def aot_dispatch_autograd(
                 len(bw_outs)
                 == len(fw_metadata.input_info) + inner_meta.num_outputs_rng_offset
             )
-            for i, (bw_out) in enumerate(bw_outs):
-                if bw_out is None and _can_detach(_input_node(fx_g, i)):
+            bw_outs_no_rng = bw_outs
+            if inner_meta.num_outputs_rng_offset > 0:
+                bw_outs_no_rng = bw_outs[: -inner_meta.num_outputs_rng_offset]
+            assert len(bw_outs_no_rng) == len(fw_metadata.input_info)
+
+            for i, (bw_out) in enumerate(bw_outs_no_rng):
+                # If our input experiences a metadata mutation inside the graph (e.g. set_()),
+                # we *must* not detach, otherwise it will be the detach'd input that gets the metadata mutation
+                metadata_mutation_in_graph = (
+                    fw_metadata.input_info[i].mutation_type
+                    == MutationType.MUTATED_IN_GRAPH
+                    and fw_metadata.input_info[i].mutates_storage_metadata
+                )
+                if (
+                    bw_out is None
+                    and not metadata_mutation_in_graph
+                    and _can_detach(_input_node(fx_g, i))
+                ):
                     _indices_of_inps_to_detach.append(i)
 
         if aot_config.enable_log:
@@ -517,6 +539,7 @@ def aot_dispatch_autograd(
                 _LazyGraphModule.force_recompile(bw_module)
 
     saved_context = TracingContext.try_get()
+    saved_compile_context = CompileContext.try_get()
 
     backward_state_indices = [
         idx for idx, x in enumerate(flat_args) if isinstance(x, BackwardState)
@@ -903,12 +926,44 @@ Got grad_output types: {str(grad_output_types)}"""
                 ctx.maybe_clear_saved_tensors()
                 if CompiledFunction.compiled_bw is None:
                     context = torch._C._DisableAutocast if disable_amp else nullcontext
-                    with tracing(saved_context), context(), track_graph_compiling(
-                        aot_config, "backward"
-                    ):
-                        CompiledFunction.compiled_bw = aot_config.bw_compiler(
-                            bw_module, placeholder_list
-                        )
+                    with tracing(saved_context), compile_context(
+                        saved_compile_context
+                    ), context(), track_graph_compiling(aot_config, "backward"):
+                        fail_type: Optional[str] = None
+                        fail_reason: Optional[str] = None
+                        start_time = time.time()
+                        try:
+                            CompiledFunction.compiled_bw = aot_config.bw_compiler(
+                                bw_module, placeholder_list
+                            )
+                        except Exception as e:
+                            fail_type = str(type(e))
+                            fail_reason = str(e)
+                            if saved_compile_context is not None:
+                                e.compile_id = saved_compile_context.compile_id  # type: ignore[attr-defined]
+                            raise
+                        finally:
+                            # TODO: Similar to CompilationMetrics, we would
+                            # like to report inductor_compile_time, but we
+                            # cannot conveniently do so because these are
+                            # keyed on utils.frame, and frame key is not
+                            # incremented on backwards compilations.  Maybe
+                            # should just bump the frame key here too?
+                            end_time = time.time()
+                            # TODO: Put this in scuba?  But CompilationMetrics
+                            # is kind of not a great match, because there's no
+                            # interaction with Dynamo, so a lot of Dynamo only
+                            # events don't exist anymore.  So we need a new
+                            # scuba table. Lazy lazy...
+                            trace_structured(
+                                "aot_autograd_backward_compilation_metrics",
+                                lambda: {
+                                    "start_time": start_time,
+                                    "elapsed_time": time.time() - start_time,
+                                    "fail_type": fail_type,
+                                    "fail_reason": fail_reason,
+                                },
+                            )
 
                 out = call_func_at_runtime_with_args(
                     CompiledFunction.compiled_bw,
@@ -993,7 +1048,7 @@ Got grad_output types: {str(grad_output_types)}"""
     ]
 
     @wraps(compiled_function)
-    def debug_compiled_function(*args):
+    def debug_compiled_function(args: List[Any]):
         # TODO: Check aliasing relationships
         # TODO: Check strides for metadata mutation
         # (NB: ideally, this logic is factored out of this function and
@@ -1013,6 +1068,6 @@ Got grad_output types: {str(grad_output_types)}"""
                     f"{describe_input(i, aot_config)} would not require grad",
                 )
 
-        return compiled_function(*args)
+        return compiled_function(args)
 
     return debug_compiled_function
