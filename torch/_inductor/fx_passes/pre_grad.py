@@ -218,6 +218,11 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
     if config.pre_grad_custom_pass is not None:
         config.pre_grad_custom_pass(gm.graph)
     stable_topological_sort(gm.graph)
+
+    from .quantization import quant_lift_up
+
+    quant_lift_up(gm)
+
     gm.graph.lint()
     gm.recompile()
     optimus_scuba_log["after_recompile_pre_grad"] = upload_graph(gm.graph)

@@ -956,7 +956,7 @@ class TransferEvents {
         static_cast<int32_t>(activity->resourceId())};
 
     auto event = Result::create(
-        activity->timestamp() * 1000,
+        activity->timestamp(),
         noTID, // Placeholder
         device_and_resource,
         ExtraFields<EventType::Kineto>{

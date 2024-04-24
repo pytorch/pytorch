@@ -36,7 +36,7 @@ from torch._inductor.utils import BoxedBool, count_tangents
 from torch._logging import trace_structured
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
-from torch._utils_internal import compiletime_strobelight_meta
+from torch._utils_internal import compile_time_strobelight_meta
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
@@ -513,7 +513,25 @@ def compile_fx_inner(
             if isinstance(t, torch.Tensor)
         )
 
+        if not config.triton.cudagraph_support_input_mutation:
+            # Skip supports for cudagraph-managed tensors
+            from torch._inductor.cudagraph_utils import (
+                check_for_mutation_ignore_cuda_graph_managed_tensor,
+            )
+
+            has_mutation_str = check_for_mutation_ignore_cuda_graph_managed_tensor(
+                gm, compiled_graph, num_fixed
+            )
+            has_mutation = has_mutation_str is not None
+
+            if has_mutation:
+                compiled_graph.disabled_cudagraphs_reason = has_mutation_str
+        else:
+            # Check mutation later to support cudagraph-managed tensors
+            has_mutation = None
+
         cudagraph_tests = [
+            (not has_mutation, "mutated inputs"),
             (not has_incompatible_cudagraph_ops(gm), "incompatible ops"),
             (not complex_memory_overlap_inputs, "complex memory overlap"),
             (
@@ -1349,7 +1367,7 @@ def compile_fx(
             graph, joint_inputs, **kwargs, compiler="inductor"
         )
 
-    @compiletime_strobelight_meta(phase_name="bw_compiler")
+    @compile_time_strobelight_meta(phase_name="bw_compiler")
     @dynamo_utils.dynamo_timed
     @dynamo_utils.maybe_cprofile
     def bw_compiler(model: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
