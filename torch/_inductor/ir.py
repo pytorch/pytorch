@@ -1162,10 +1162,12 @@ class Reduction(Loops):
         new_reduction_ranges,
         default,
     ):
-        assert all(r == 1 for r in original_ranges), f"{original_ranges=} is not all ones"
+        assert all(
+            r == 1 for r in original_ranges
+        ), f"{original_ranges=} is not all ones"
         reindex = View.dynamic_reshape_indexer(
             original_reduction_ranges,
-            tuple(original_ranges) + tuple(new_ranges) + tuple(new_reduction_ranges)
+            tuple(original_ranges) + tuple(new_ranges) + tuple(new_reduction_ranges),
         )
 
         def wrapper_fn(index, reduction_index):

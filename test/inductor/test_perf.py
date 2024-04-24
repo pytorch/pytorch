@@ -487,30 +487,18 @@ class FusionTests(TestCase):
 
         inp = (T(4, 2048, hidden_size, dtype=torch.float), T(1, dtype=torch.float))
 
-        # 3 kernels:
-        # kernel 1: (input = X, scale, LN scale, LN bias, output = LN_pointwise(X), welford_reduction(X) * 2)
-        # kernel 2: (input = X, welford_reduction(X) * 2, LN scale, LN bias, output = first-level amax (split-reduction))
-        # kernel 3: (input = first-level amax, output = final amax)
-        # scale (1) + X (4*2048*hidden_size) * 3 + welford_reduction (4*2048) * 4 +
-        #   LN scale (hidden_size) * 2 + LN bias (hidden_size) * 2 + amax (num_splits * 2 + 1)
-        # num_splits depends on SM architectures.
-        expected_amax_keep_dim_numel = (
-            1 + hidden_size * 4 + 4 * 2048 * hidden_size * 3 + 4 * 2048 * 4 + 1
-        )
-        self.assertGreaterAlmostEqual(
-            int(count_numel(f, *inp, True)), expected_amax_keep_dim_numel
-        )
-
         # 2 kernels:
         # kernel 1: (input = X, scale, LN scale, LN bias, output = LN_pointwise(X), first-level amax (split-reduction))
         # kernel 2: (input = first-level amax, output = final amax)
         # scale (1) + X (4*2048*hidden_size) * 2 + LN scale (hidden_size) + LN bias (hidden_size) + amax (4 * 2048 * 2 + 1)
-
-        expected_amax_no_keep_dim_numel = (
+        expected_numel = (
             1 + hidden_size * 2 + 4 * 2048 * hidden_size * 2 + 4 * 2048 * 2 + 1
         )
         self.assertExpectedInline(
-            count_numel(f, *inp, False), str(expected_amax_no_keep_dim_numel)
+            count_numel(f, *inp, True), str(expected_numel)
+        )
+        self.assertExpectedInline(
+            count_numel(f, *inp, False), str(expected_numel)
         )
 
     def test_pointwise_multi_level_reduction(self):
