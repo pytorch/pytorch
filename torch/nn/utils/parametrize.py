@@ -420,8 +420,9 @@ def register_parametrization(
 
         def right_inverse(self, X: Tensor) -> Union[Tensor, Sequence[Tensor]]
 
-    This method is called on the unparametrized tensor (original ``module.weight``) when the first paramet`rization
-    is registered to compute the initial value of the original tensor (or tensors) that original unparameterized tensor can be "decomposed" into.
+    This method is called on the unparametrized tensor (original ``module.weight``) when the first parametrization
+    is registered to compute the initial value of the original tensor (or tensors) that original
+    unparameterized tensor can be "decomposed" into.
     If this method is not implemented, the original tensor will be just the unparametrized tensor.
 
     If all the parametrizations registered on a tensor implement `right_inverse` it is possible
@@ -435,10 +436,11 @@ def register_parametrization(
     with names ``original0``, ``original1``,...
 
 
-    What happens during eager mode `forward` run:
-        `parametrizations` are implemented with `ModuleList`, so each `parametrization` will be a `Module`
+    What happens during `forward` run:
+        `parametrizations` are implemented with `ModuleDict` mapping from tensor_name to a
+        `ParametrizationList` (a subclass of `ModuleList`), so each `parametrization` will be a `ModuleList`
         when the model calls `self.weight` in forward, instead of returnning the original weight, it
-        will return the `parametrizations` (`ModuleList`) that's registered for the weight (for the first
+        will return the `parametrization`s (`ModuleList`) that's registered for the weight (for the first
         parametrization, the weight might be "decomposed" into multiple tensors stored as `original0`,
         `original1`, `original2` etc. depending on the specific parametrization),
         and it will run the forward method for each of the module (parametrization) one by one, taking

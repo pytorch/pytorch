@@ -1415,14 +1415,13 @@ class TestNNParametrization(NNTestCase):
                         gradcheck(fn, (m.parametrizations.weight.original,))
 
     def test_register_parametrization_no_grad(self):
-        r"""Test that it is possible to register a parametrization without gradient
-        """
+        r"""Test that it is possible to register a parametrization without gradient"""
         class NoResize(nn.Module):
             def right_inverse(self, x):
                 return x[0], x[1]
 
             def forward(self, x0, x1):
-                return torch.cat(x0, x1)
+                return torch.cat([x0, x1])
 
         model = nn.Linear(8, 8)
 
