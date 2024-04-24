@@ -1,10 +1,6 @@
 #pragma once
 
-#include <condition_variable>
 #include <memory>
-#include <mutex>
-#include <stdexcept>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -369,6 +365,14 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     return pg_name_;
   }
 
+  void setGroupDesc(const std::string& desc) {
+    pg_desc_ = desc;
+  }
+
+  const std::string& getGroupDesc() const {
+    return pg_desc_;
+  }
+
   // See similar functions in ProcessGroup.hpp for context.
   c10::optional<at::Device> getBoundDeviceId() const {
     return bound_device_id_;
@@ -399,6 +403,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   // remains the same across use of this process group.
   DebugLevel dist_debug_level_;
   std::string pg_name_;
+  std::string pg_desc_;
 
   std::function<void(std::shared_ptr<WorkInfo>)> onCompletionHook_;
 
