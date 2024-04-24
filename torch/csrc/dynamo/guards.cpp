@@ -1009,7 +1009,7 @@ class EQUALS_MATCH : public LeafGuard {
       }
 
       // Cache the value here.
-      if (result && _first_passing_value.is_none()) {
+      if (result && !_first_passing_value){
         _first_passing_value = py::cast<py::object>(value);
       }
       return result;
@@ -1027,7 +1027,7 @@ class EQUALS_MATCH : public LeafGuard {
   // Cache the first value whose pointer is not equal to value.ptr(). This is
   // useful in nn module guards where getattr name is a string, which is same as
   // a key in the __dict__ but the pointer is different.
-  py::object _first_passing_value = py::none();
+  py::object _first_passing_value;
 
   // Type of the value
   PyTypeObject* _value_type;
