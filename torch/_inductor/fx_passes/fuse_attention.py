@@ -502,6 +502,83 @@ def _sfdp_replacement_18(query, key, value, causal_mask, dropout_p):
     )
 
 
+def _sfdp_pattern_19(
+    query,
+    key,
+    value,
+    attn_mask,
+    inv_scale,
+    q_zp,
+    q_scale,
+    k_zp,
+    k_scale,
+    v_zp,
+    v_scale,
+    a_zp,
+    a_scale,
+    a_inv_scale,
+    o_zp,
+    o_inv_scale,
+    dropout_p,
+):
+    # UINT8 QUANTIZED SDPA
+    q = query.permute([0, 2, 1, 3])
+    q = (q.float() - q_zp) * q_scale
+    k = key.permute([0, 2, 1, 3]).transpose(-2, -1)
+    k = (k.float() - k_zp) * k_scale
+    v = value.permute([0, 2, 1, 3])
+    v = (v.float() - v_zp) * v_scale
+    a = torch.nn.functional.dropout(
+        (torch.matmul(q, k).div(inv_scale) + attn_mask).softmax(dim=-1),
+        dropout_p,
+    )
+    qa = torch.clamp_max(
+        torch.clamp_min(torch.round(a * a_inv_scale) + a_zp, 0), 255
+    ).to(torch.uint8)
+    a = (qa.float() - a_zp) * a_scale
+    o = a.matmul(v)
+    o = o.permute(0, 2, 1, 3).contiguous()
+    return torch.clamp_max(
+        torch.clamp_min(torch.round(o * o_inv_scale) + o_zp, 0), 255
+    ).to(torch.uint8)
+
+
+def _sfdp_replacement_19(
+    query,
+    key,
+    value,
+    attn_mask,
+    inv_scale,
+    q_zp,
+    q_scale,
+    k_zp,
+    k_scale,
+    v_zp,
+    v_scale,
+    a_zp,
+    a_scale,
+    a_inv_scale,
+    o_zp,
+    o_inv_scale,
+    dropout_p,
+):
+    counters["inductor"]["fuse_attention"] += 1
+    # TODO: support UINT8 SDPA kernel
+    output = aten.scaled_dot_product_attention(
+        (query.transpose(1, 2).float() - q_zp) * q_scale,
+        (key.transpose(1, 2).float() - k_zp) * k_scale,
+        (value.transpose(1, 2).float() - v_zp) * v_scale,
+        attn_mask=attn_mask,
+        dropout_p=dropout_p,
+        is_causal=False,
+        scale=1.0 / inv_scale,
+    )
+    output = torch.clamp_max(
+        torch.clamp_min(torch.round(output * o_inv_scale) + o_zp, 0), 255
+    ).to(torch.uint8)
+    return output.transpose(1, 2).contiguous()
+
+
 def _sfdp_params_check(match):
     assert all(k in match.kwargs for k in ("query", "key", "value"))
     query = match.kwargs["query"].meta["val"]
@@ -511,8 +588,9 @@ def _sfdp_params_check(match):
         query.device == key.device == value.device
     ):
         return False
-    add_mask_node = filter_nodes(match.nodes, aten.add.Tensor)
+    add_nodes = filter_nodes(match.nodes, aten.add.Tensor)
     # Has attn_mask add.
+    add_mask_node = [n for n in add_nodes if n.prev.target == torch.ops.aten.div.Tensor]
     if len(add_mask_node) > 0:
         attn_mask_node = add_mask_node[0].args[1]
         # attn_mask_node may be a float/int number.
@@ -596,6 +674,8 @@ def _get_sfdp_patterns():
     m_inp = functools.partial(torch.empty, (2, 1, 1, 4), device=device)
     # inv_scale
     c_inp = functools.partial(torch.tensor, 2.0, device=device)
+    zp_inp = functools.partial(torch.tensor, 127, device=device)
+    scale_inp = functools.partial(torch.tensor, 0.018, device=device)
     # workaround https://github.com/pytorch/pytorch/issues/97894
     # 0.113377 is a "magic" value that lets us recover the lost input arg relationship
     d = {"dropout_p": 0.113377}
@@ -627,6 +707,10 @@ def _get_sfdp_patterns():
         m_bs1 = functools.partial(m_bs1_inp, dtype=dtype)
         m_bs1_float = functools.partial(m_bs1_inp, dtype=torch.float)
         m_bs1_bool = functools.partial(m_bs1_inp, dtype=torch.bool)
+        g_u8 = functools.partial(g_inp, dtype=torch.uint8, requires_grad=False)
+        c_u8 = functools.partial(c_inp, dtype=torch.uint8)
+        zp = functools.partial(zp_inp, dtype=torch.int)
+        scale = functools.partial(scale_inp, dtype=torch.float)
 
         candidates = [
             (
@@ -794,14 +878,45 @@ def _get_sfdp_patterns():
                     _sfdp_extra_check(aten.div.Tensor, disable_cuda=True),
                 )
             )
+        # uint8 quantization
+        if dtype == torch.float:
+            candidates.append(
+                (
+                    _sfdp_pattern_19,
+                    _sfdp_replacement_19,
+                    [
+                        g_u8(),
+                        g_u8(),
+                        g_u8(),
+                        m(),
+                        c_u8(),
+                        zp(),
+                        scale(),
+                        zp(),
+                        scale(),
+                        zp(),
+                        scale(),
+                        zp(),
+                        scale(),
+                        scale(),
+                        zp(),
+                        scale(),
+                    ],
+                    d,
+                    _sfdp_extra_check(aten.div.Tensor),
+                ),
+            )
 
         for pattern, replacement, args, workaround, extra_check in candidates:
             # XXX: when adding a new pattern, re-run `gen_attention_patterns` so the pattern
             # gets serialized to a python file and does not require tracing at runtime.
             assert isinstance(workaround, dict)
             name = pattern.__name__
+            is_uint8 = args[0].dtype == torch.uint8
 
-            if dtype != torch.float:
+            if is_uint8:
+                name += "_u8"
+            elif dtype != torch.float:
                 name += "_half"
                 if (
                     any(p in name for p in mask_fp32_patterns)
@@ -811,16 +926,17 @@ def _get_sfdp_patterns():
             if args[0].size(0) == 1:
                 name += "_bs1"
 
-            training_name = name + "_training"
-            yield training_name, {
-                "search_fn": pattern,
-                "replace_fn": replacement,
-                "example_inputs": args,
-                "trace_fn": joint_fwd_bwd,
-                "pass_dicts": patterns,
-                "extra_check": extra_check,
-                "scalar_workaround": workaround,
-            }
+            if not is_uint8:
+                training_name = name + "_training"
+                yield training_name, {
+                    "search_fn": pattern,
+                    "replace_fn": replacement,
+                    "example_inputs": args,
+                    "trace_fn": joint_fwd_bwd,
+                    "pass_dicts": patterns,
+                    "extra_check": extra_check,
+                    "scalar_workaround": workaround,
+                }
 
             if workaround:
                 assert len(workaround) == 1 and "dropout_p" in workaround
