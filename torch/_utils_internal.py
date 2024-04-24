@@ -63,15 +63,15 @@ def throw_abstract_impl_not_imported_error(opname, module, context):
 
 
 # Meta only, act as nop otherwise.
-def compiletime_strobelight_meta(phase_name):
-    def compiletime_strobelight_meta_inner(function):
+def compile_time_strobelight_meta(phase_name):
+    def compile_time_strobelight_meta_inner(function):
         @functools.wraps(function)
         def wrapper_function(*args, **kwargs):
             return function(*args, **kwargs)
 
         return wrapper_function
 
-    return compiletime_strobelight_meta_inner
+    return compile_time_strobelight_meta_inner
 
 
 # Meta only, see

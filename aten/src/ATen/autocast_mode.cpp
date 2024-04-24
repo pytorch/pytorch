@@ -6,60 +6,14 @@
 
 namespace at::autocast {
 
-bool is_enabled() {
-  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastCUDA);
+bool is_autocast_enabled(at::DeviceType device_type) {
+  at::DispatchKey dispatch_key = get_autocast_dispatch_key_from_device_type(device_type);
+  return !c10::impl::tls_is_dispatch_key_excluded(dispatch_key);
 }
 
-void set_enabled(bool new_enabled) {
-  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastCUDA, !new_enabled);
-}
-
-bool is_cpu_enabled() {
-  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastCPU);
-}
-
-void set_cpu_enabled(bool new_enabled) {
-  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastCPU, !new_enabled);
-}
-
-bool is_xpu_enabled() {
-  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastXPU);
-}
-
-void set_xpu_enabled(bool new_enabled) {
-  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastXPU, !new_enabled);
-}
-
-bool is_ipu_enabled() {
-  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastIPU);
-}
-
-void set_ipu_enabled(bool new_enabled) {
-  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastIPU, !new_enabled);
-}
-
-bool is_hpu_enabled() {
-  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastHPU);
-}
-
-void set_hpu_enabled(bool new_enabled) {
-  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastHPU, !new_enabled);
-}
-
-bool is_xla_enabled() {
-  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastXLA);
-}
-
-void set_xla_enabled(bool new_enabled) {
-  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastXLA, !new_enabled);
-}
-
-bool is_privateuseone_enabled() {
-  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastPrivateUse1);
-}
-
-void set_privateuseone_enabled(bool new_enabled) {
-  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastPrivateUse1, !new_enabled);
+void set_autocast_enabled(at::DeviceType device_type, bool enabled) {
+  at::DispatchKey dispatch_key = get_autocast_dispatch_key_from_device_type(device_type);
+  c10::impl::tls_set_dispatch_key_excluded(dispatch_key, !enabled);
 }
 
 namespace {
@@ -91,30 +45,40 @@ std::mutex cached_casts_mutex;
 // it calls clear_cache() to ensure cached Tensors don't leak outside the autocasting region.
 thread_local int nesting = 0;
 
-// autocast_cpu_dtype is the lower_precision_fp used by AutocastCPU.
-thread_local at::ScalarType autocast_cpu_dtype = at::kBFloat16;
-
-// autocast_xpu_dtype is the lower_precision_fp used by AutocastXPU.
-thread_local at::ScalarType autocast_xpu_dtype = at::kBFloat16;
-
-// autocast_ipu_dtype is the lower_precision_fp used by AutocastIPU.
-thread_local at::ScalarType autocast_ipu_dtype = at::kHalf;
-
-// autocast_hpu_dtype is the lower_precision_fp used by AutocastHPU.
-thread_local at::ScalarType autocast_hpu_dtype = at::kBFloat16;
-
-// autocast_xla_dtype is the lower_precision_fp used by AutocastXLA.
-thread_local at::ScalarType autocast_xla_dtype = at::kBFloat16;
+// The order of this array MUST exactly match the definition order of DeviceType
+// in c10/core/DeviceType.h.
+static_assert(
+    at::COMPILE_TIME_MAX_DEVICE_TYPES == 21,
+    "The definition of the default autocast data type per device backend doesn't match with the definition of the device type.");
+thread_local std::array<at::ScalarType, at::COMPILE_TIME_MAX_DEVICE_TYPES>
+    autocast_dtype = {
+        at::kBFloat16, // CPU
+        at::kHalf, // CUDA.
+        at::ScalarType::Undefined, // Reserved for explicit MKLDNN
+        at::ScalarType::Undefined, // OpenGL
+        at::ScalarType::Undefined, // OpenCL
+        at::ScalarType::Undefined, // IDEEP.
+        at::kHalf, // AMD HIP
+        at::ScalarType::Undefined, // FPGA
+        at::ScalarType::Undefined, // ONNX Runtime / Microsoft
+        at::kBFloat16, // XLA / TPU
+        at::ScalarType::Undefined, // Vulkan
+        at::ScalarType::Undefined, // Metal
+        at::kBFloat16, // XPU
+        at::ScalarType::Undefined, // MPS
+        at::ScalarType::Undefined, // Meta (tensors with no data)
+        at::kBFloat16, // HPU / HABANA
+        at::ScalarType::Undefined, // SX-Aurora / NEC
+        at::ScalarType::Undefined, // Lazy Tensors
+        at::kHalf, // Graphcore IPU
+        at::ScalarType::Undefined, // Meta training and inference devices
+        at::kHalf, // PrivateUse1 device
+};
 
 // should we enabled the cache inside autocast.
 thread_local bool cache_enabled = true;
 
-// autocast_gpu_dtype is the lower_precision_fp used by AutocastGPU.
-thread_local at::ScalarType autocast_gpu_dtype = at::kHalf;
-
-// autocast_privateuseone_dtype is the lower_precision_fp used by AutocastPrivateUse1.
-thread_local at::ScalarType autocast_privateuseone_dtype = at::kHalf;
-}
+} // anonymous namespace
 
 void clear_cache() {
   const std::lock_guard<std::mutex> lock(cached_casts_mutex);
@@ -129,60 +93,12 @@ int decrement_nesting() {
   return --nesting;
 }
 
-at::ScalarType get_autocast_gpu_dtype() {
-  return autocast_gpu_dtype;
+at::ScalarType get_autocast_dtype(at::DeviceType device_type) {
+  return autocast_dtype[static_cast<int>(device_type)];
 }
 
-at::ScalarType get_autocast_cpu_dtype() {
-  return autocast_cpu_dtype;
-}
-
-at::ScalarType get_autocast_xpu_dtype() {
-  return autocast_xpu_dtype;
-}
-
-at::ScalarType get_autocast_ipu_dtype() {
-  return autocast_ipu_dtype;
-}
-
-at::ScalarType get_autocast_hpu_dtype() {
-  return autocast_hpu_dtype;
-}
-
-at::ScalarType get_autocast_xla_dtype() {
-  return autocast_xla_dtype;
-}
-
-at::ScalarType get_autocast_privateuseone_dtype() {
-  return autocast_privateuseone_dtype;
-}
-
-void set_autocast_cpu_dtype(at::ScalarType dtype) {
-  autocast_cpu_dtype = dtype;
-}
-
-void set_autocast_gpu_dtype(at::ScalarType dtype) {
-  autocast_gpu_dtype = dtype;
-}
-
-void set_autocast_xpu_dtype(at::ScalarType dtype) {
-  autocast_xpu_dtype = dtype;
-}
-
-void set_autocast_ipu_dtype(at::ScalarType dtype) {
-  autocast_ipu_dtype = dtype;
-}
-
-void set_autocast_hpu_dtype(at::ScalarType dtype) {
-  autocast_hpu_dtype = dtype;
-}
-
-void set_autocast_xla_dtype(at::ScalarType dtype) {
-  autocast_xla_dtype = dtype;
-}
-
-void set_autocast_privateuseone_dtype(at::ScalarType dtype) {
-  autocast_privateuseone_dtype = dtype;
+void set_autocast_dtype(at::DeviceType device_type, at::ScalarType dtype) {
+  autocast_dtype[static_cast<int>(device_type)] = dtype;
 }
 
 bool is_autocast_cache_enabled() {

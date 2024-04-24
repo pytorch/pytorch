@@ -660,6 +660,14 @@ class GraphLowering(torch.fx.Interpreter):
             return self.name_to_buffer[buffer_name]
         if buffer_name in self.graph_inputs:
             return self.graph_inputs[buffer_name]
+        if buffer_name in self.constants:
+            data = V.graph.constants[buffer_name]
+            return ir.ConstantBuffer(
+                buffer_name,
+                ir.FixedLayout(
+                    data.device, data.dtype, *V.graph.static_sizes_strides(data)
+                ),
+            )
         return None
 
     def get_dtype(self, buffer_name: str):
