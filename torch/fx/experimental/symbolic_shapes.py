@@ -97,6 +97,7 @@ __all__ = [
     "StatefulSymbolicContext", "SubclassSymbolicContext", "statically_known_true",
     "guard_size_oblivious", "check_consistent",
     "compute_unbacked_bindings", "ConvertIntKey",
+    "rebind_unbacked",
 ]
 
 # FX node metadata keys for symbolic shape FX graph.
@@ -265,6 +266,29 @@ def check_consistent(new, old) -> None:
         assert isinstance(old, scalar_types) and not isinstance(old, bool), f"{old} != {new}"
         torch._check(old == new, lambda: f"{old} != {new} (old != new)")
 
+def rebind_unbacked(shape_env, n: torch.fx.Node, result):
+    """
+    Suppose we are retracing a pre-existing FX graph that previously had
+    fake tensor propagation (and therefore unbacked SymInts).  When we retrace,
+    we re-propagate fake tensors, which results in new unbacked SymInts.
+    When this happens, we need to tell the shape environment about the equivalence
+    of the old and new unbacked SymInts.  Pass us the old torch.fx.Node (which
+    has the old binding information) and the new result (which we can extract the
+    new unbacked SymInts out from).
+    """
+    if bindings := n.meta.get("unbacked_bindings"):
+        for raw_u0, path in bindings.items():
+            u1 = pytree.key_get(result, path)
+            # We should never have bindings for raw bools; instead they should
+            # have been converted to ints via ConvertIntKey
+            assert type(u1) is not bool
+            if isinstance(u1, (int, float)):
+                raw_u1 = sympy.sympify(u1)
+            else:
+                raw_u1 = u1.node.expr
+            # TODO: replace with rename unbacked to
+            shape_env.defer_runtime_assert(sympy.Eq(raw_u0, raw_u1), "")
+
 def canonicalize_bool_expr(expr: SympyBoolean) -> SympyBoolean:
     r""" Canonicalize a boolean expression by transforming it into a lt / le
     inequality and moving all the non-constant terms to the rhs.
@@ -406,11 +430,11 @@ def find_symbol_binding_fx_nodes(graph):
 @dataclass(frozen=True)
 class ConvertIntKey:
     def __str__(self) -> str:
-        return ".__int__()"
+        return ".cast_symbool_to_symint_guardless()"
 
     def get(self, b: bool) -> int:
         """Get the int value from bool"""
-        return int(b)
+        return cast_symbool_to_symint_guardless(b)
 
 
 @dataclass(frozen=True)
@@ -1229,7 +1253,7 @@ def _eval_is_non_overlapping_and_dense(sizes, strides):
 
 def cast_symbool_to_symint_guardless(symbool: torch.SymBool) -> torch.SymInt:
     int_sym = sympy.Piecewise((1, symbool.node.expr), (0, True))
-    return symbool.node.shape_env.create_symintnode(int_sym, hint=int(symbool.node.require_hint()))
+    return symbool.node.shape_env.create_symintnode(int_sym, hint=int(symbool.node.require_hint()) if has_hint(symbool) else None)
 
 SYMPY_INTERP = {
     'Abs': operator.abs,
