@@ -1,7 +1,6 @@
 import copy
 import itertools
 import logging
-import math
 from typing import List, Optional
 
 import torch
@@ -355,8 +354,8 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
                 if hash_id not in conv_bn_to_fuse:
                     conv_bn_to_fuse[hash_id] = ConvBNFusion(node, conv, bn)
                 else:
-                    # <TODO> Leslie: if any single Conv module used by multi Conv-BN patterns,
-                    # We assume Conv Module following by same BN Module.
+                    # <TODO> Leslie: if any Conv module used by multi Conv-BN patterns,
+                    # We assume this conv module following by same BN Module in current implementation.
                     # If not, we should extend implementation to disable the Conv-BN fusion for this case.
                     assert bn == conv_bn_to_fuse[hash_id].bn_module
                     conv_bn_to_fuse[hash_id].add_bn_node(node)
@@ -389,8 +388,17 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
                     continue
                 if type(bn_eps) is not float:
                     continue
+
+                def _used_by_same_conv_module(users):
+                    conv_module_name = users[0].args[0].target
+                    return all(
+                        conv_module_name == user.args[0].target for user in users
+                    )
+
                 bn_args_is_constant = all(
-                    n.op == "get_attr" and len(n.users) == 1 for n in node.args[1:5]
+                    n.op == "get_attr"
+                    and (len(n.users) == 1 or _used_by_same_conv_module(list(n.users)))
+                    for n in node.args[1:5]
                 )
                 if not bn_args_is_constant:
                     continue
@@ -414,36 +422,17 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
                         bn_bias=bn_bias,
                     )
                 else:
-                    # <TODO> Leslie: if any single Conv module used by multi Conv-BN patterns,
-                    # We assume Conv Module following by same BN Module.
+                    # <TODO> Leslie: if any Conv module used by multi Conv-BN patterns,
+                    # We assume this conv module following by same BN Module in current implementation.
                     # If not, we should extend implementation to disable the Conv-BN fusion for this case.
-                    assert bn_eps == conv_bn_to_fuse[hash_id].bn_eps
                     assert (
-                        torch.allclose(
-                            bn_running_mean,
-                            conv_bn_to_fuse[hash_id].bn_running_mean,
-                            rtol=1e-5,
-                        )
-                        and torch.allclose(
-                            bn_running_var,
-                            conv_bn_to_fuse[hash_id].bn_running_var,
-                            rtol=1e-5,
-                        )
-                        and math.isclose(
-                            bn_eps,
-                            conv_bn_to_fuse[hash_id].bn_eps,
-                            rel_tol=1e-5,
-                        )
-                        and torch.allclose(
-                            bn_weight,
-                            conv_bn_to_fuse[hash_id].bn_weight,
-                            rtol=1e-5,
-                        )
-                        and torch.allclose(
-                            bn_bias,
-                            conv_bn_to_fuse[hash_id].bn_bias,
-                            rtol=1e-5,
-                        )
+                        hash(bn_running_mean)
+                        == hash(conv_bn_to_fuse[hash_id].bn_running_mean)
+                        and hash(bn_running_var)
+                        == hash(conv_bn_to_fuse[hash_id].bn_running_var)
+                        and hash(bn_eps) == hash(conv_bn_to_fuse[hash_id].bn_eps)
+                        and hash(bn_weight) == hash(conv_bn_to_fuse[hash_id].bn_weight)
+                        and hash(bn_bias) == hash(conv_bn_to_fuse[hash_id].bn_bias)
                     )
                     conv_bn_to_fuse[hash_id].add_bn_node(node)
 
