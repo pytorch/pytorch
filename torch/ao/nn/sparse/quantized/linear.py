@@ -99,9 +99,8 @@ class Linear(torch.nn.Module):
         return 'SparseQuantizedLinear'
 
     def extra_repr(self):
-        return 'in_features={}, out_features={}, scale={}, zero_point={}, qscheme={}'.format(
-            self.in_features, self.out_features, self.scale, self.zero_point, self.weight().qscheme()
-        )
+        return (f'in_features={self.in_features}, out_features={self.out_features}, scale={self.scale}, '
+                f'zero_point={self.zero_point}, qscheme={self.weight().qscheme()}')
 
     def __repr__(self):
         return _hide_packed_params_repr(self, LinearPackedParams)
