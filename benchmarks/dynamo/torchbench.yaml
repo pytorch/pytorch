@@ -1,0 +1,258 @@
+# Some models have large dataset that doesn't fit in memory. Lower the batch
+# size to test the accuracy.
+batch_size:
+  training:
+    demucs: 4
+    dlrm: 1024
+    densenet121: 4
+    hf_Reformer: 4
+    hf_T5_base: 4
+    timm_efficientdet: 1
+    llama_v2_7b_16h: 1
+    # reduced from 16 due to cudagraphs OOM in TorchInductor dashboard
+    yolov3: 8
+
+  inference:
+    timm_efficientdet: 32
+
+
+dont_change_batch_size:
+  - demucs
+  - pytorch_struct
+  - pyhpc_turbulent_kinetic_energy
+  # https://github.com/pytorch/benchmark/pull/1656
+  - vision_maskrcnn
+
+
+tolerance:
+  # Need lower tolerance on GPU. GPU kernels have non deterministic kernels for these models.
+  higher:
+    - alexnet
+    - attention_is_all_you_need_pytorch
+    - densenet121
+    - hf_Albert
+    - vgg16
+    - mobilenet_v3_large
+    - nvidia_deeprecommender
+    - timm_efficientdet
+
+  # These models need >1e-3 tolerance
+  even_higher:
+    - soft_actor_critic
+    - tacotron2
+
+  higher_fp16:
+    - doctr_reco_predictor
+    - drq
+    - hf_Whisper
+
+  higher_bf16:
+    - doctr_reco_predictor
+    - drq
+    - hf_Whisper
+
+  cosine: []
+
+
+# These benchmarks took >600s on an i9-11900K CPU
+very_slow: &VERY_SLOW_MODELS
+  # 3339s
+  - hf_BigBird
+  # 3062s
+  - hf_Longformer
+  # 930s
+  - hf_T5
+
+
+# These benchmarks took >60s on an i9-11900K CPU
+slow:
+  - *VERY_SLOW_MODELS
+  # 137s
+  - BERT_pytorch
+  # 116s
+  - demucs
+  # 242s
+  - fastNLP_Bert
+  # 221s
+  - hf_Albert
+  # 400s
+  - hf_Bart
+  # 334s
+  - hf_Bert
+  # 187s
+  - hf_DistilBert
+  # 470s
+  - hf_GPT2
+  # 141s
+  - hf_Reformer
+  # 317s
+  - speech_transformer
+  # 99s
+  - vision_maskrcnn
+
+
+non_deterministic:
+  # https://github.com/pytorch/pytorch/issues/98355
+  - mobilenet_v3_large
+  - sam_fast
+
+
+dtype:
+  force_amp_for_fp16_bf16_models:
+    - DALLE2_pytorch
+    - doctr_det_predictor
+    - doctr_reco_predictor
+    - Super_SloMo
+    - tts_angular
+    - pyhpc_turbulent_kinetic_energy
+    - detectron2_fcos_r_50_fpn
+
+  force_fp16_for_bf16_models:
+    - vision_maskrcnn
+
+
+# models in canary_models that we should run anyway
+canary_models:
+  - torchrec_dlrm
+
+
+detectron2_models: &DETECTRON2_MODELS
+  - detectron2_fasterrcnn_r_101_c4
+  - detectron2_fasterrcnn_r_101_dc5
+  - detectron2_fasterrcnn_r_101_fpn
+  - detectron2_fasterrcnn_r_50_c4
+  - detectron2_fasterrcnn_r_50_dc5
+  - detectron2_fasterrcnn_r_50_fpn
+  - detectron2_maskrcnn_r_101_c4
+  - detectron2_maskrcnn_r_101_fpn
+  - detectron2_maskrcnn_r_50_fpn
+
+
+# These models support only train mode. So accuracy checking can't be done in
+# eval mode.
+only_training:
+  - *DETECTRON2_MODELS
+  - tts_angular
+  - tacotron2
+  - demucs
+  - hf_Reformer
+  - pytorch_struct
+  - yolov3
+
+
+trt_not_yet_working:
+  - alexnet
+  - resnet18
+  - resnet50
+  - mobilenet_v2
+  - mnasnet1_0
+  - squeezenet1_1
+  - shufflenetv2_x1_0
+  - vgg16
+  - resnext50_32x4d
+
+
+skip:
+  all:
+    # OOMs (A100 40G)
+    - detectron2_maskrcnn
+    # TIMEOUT, https://github.com/pytorch/pytorch/issues/98467
+    - tacotron2
+    # Failing in eager mode
+    - hf_clip
+    # multi gpu not always available in benchmark runners
+    - simple_gpt_tp_manual
+
+  device:
+    cpu:
+      # OOMs
+      - hf_T5_generate
+      # model is CUDA only
+      - cm3leon_generate
+      # timeout
+      - nanogpt
+      # timeout
+      - sam
+      # model is CUDA only
+      - sam_fast
+      # model is CUDA only
+      - llama_v2_7b_16h
+      # flaky
+      - stable_diffusion
+      # requires FBGEMM, CUDA only
+      - torchrec_dlrm
+      - simple_gpt
+      # works on cuda, accuracy failure on cpu
+      - hf_Whisper
+      - stable_diffusion_text_encoder
+      - llava
+
+    cuda: []
+
+  test:
+    training:
+      - *DETECTRON2_MODELS
+      # not designed for training
+      - pyhpc_equation_of_state
+      - pyhpc_isoneutral_mixing
+      - pyhpc_turbulent_kinetic_energy
+      - maml
+      - llama
+      - llama_v2_7b_16h
+      - simple_gpt
+      - sam_fast
+      # Model's DEFAULT_TRAIN_BSIZE is not implemented
+      - cm3leon_generate
+      - hf_T5_generate
+      - doctr_det_predictor
+      - doctr_reco_predictor
+      - moondream
+      # doesnt fit in memory
+      - phi_1_5
+      - detectron2_fcos_r_50_fpn
+
+  control_flow:
+    - cm3leon_generate
+    - detectron2_fcos_r_50_fpn
+    - fastNLP_Bert
+    - hf_Longformer
+    - hf_Reformer
+    - hf_T5_generate
+    - opacus_cifar10
+    - speech_transformer
+
+  # Models that should only run in --multiprocess mode
+  multiprocess:
+    - simple_gpt
+
+  # for these models, conv-batchnorm fusing causes big numerical churn.
+  # Skip them
+  freezing:
+    - mnasnet1_0
+    - moco
+    - shufflenet_v2_x1_0
+
+
+
+
+accuracy:
+  skip:
+    large_models:
+      # Models too large to have eager, dynamo and fp64_numbers simultaneosuly
+      # even for 40 GB machine. We have tested accuracy for smaller version of
+      # these models
+      - hf_GPT2_large
+      - hf_T5_large
+      - timm_vision_transformer_large
+      # accuracy https://github.com/pytorch/pytorch/issues/93847
+      - maml
+      - llama_v2_7b_16h
+      - Background_Matting
+      - stable_diffusion_unet
+    eager_not_deterministic:
+      # Models that deterministic algorithms can not be turned on for eager mode.
+      - Background_Matting
+
+  max_batch_size:
+    hf_GPT2: 2
+    pytorch_unet: 2

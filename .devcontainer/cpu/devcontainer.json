@@ -1,0 +1,37 @@
+// For format details, see https://aka.ms/devcontainer.json. For config options, see the
+// README at: https://github.com/devcontainers/templates/tree/main/src/anaconda
+{
+  "name": "PyTorch - CPU",
+  "build": {
+    "context": "../..",
+    "dockerfile": "../Dockerfile",
+    "args": {
+      "USERNAME": "vscode",
+      "BUILDKIT_INLINE_CACHE": "0",
+      "CLANG_VERSION": ""
+    }
+  },
+
+  // Features to add to the dev container. More info: https://containers.dev/features.
+  "features": {
+    // This is needed for lintrunner
+    "ghcr.io/devcontainers/features/rust:1" : {}
+  },
+
+  // Use 'forwardPorts' to make a list of ports inside the container available locally.
+  // "forwardPorts": [],
+
+  // Use 'postCreateCommand' to run commands after the container is created.
+  "postCreateCommand": "bash .devcontainer/scripts/install-dev-tools.sh",
+
+  // Configure tool-specific properties.
+  // "customizations": {},
+  "customizations": {
+    "vscode": {
+      "extensions": ["streetsidesoftware.code-spell-checker"]
+    }
+  }
+
+  // Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
+  // "remoteUser": "root"
+}
