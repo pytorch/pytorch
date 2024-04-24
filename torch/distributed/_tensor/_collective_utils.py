@@ -6,9 +6,11 @@ from functools import lru_cache
 from typing import List, Optional
 
 import torch
+import torch.distributed._functional_collectives as funcol
 import torch.distributed._tensor.placement_types as placement_types
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed.distributed_c10d import (
+    _get_group_size_by_name,
     all_to_all,
     broadcast,
     get_global_rank,
@@ -23,7 +25,18 @@ from torch.distributed.distributed_c10d import (
 logger = logging.getLogger(__name__)
 
 
-# TODO: we need to migrate these APIs to be functional collectives
+def _shard_dim_alltoall_meta(input, gather_dim, shard_dim, group_name):
+    group_size = _get_group_size_by_name(group_name)
+    stacked_list = [torch.empty_like(input) for _ in range(group_size)]
+    return torch.cat(stacked_list, dim=gather_dim).chunk(group_size, dim=shard_dim)
+
+_dtensor_lib_impl = torch.library.Library("_dtensor", "IMPL")
+_dtensor_lib_impl.impl("shard_dim_alltoall", _shard_dim_alltoall_meta, "Meta")
+
+def shard_dim_alltoall(input, gather_dim, shard_dim, mesh, mesh_dim):
+    group_name = funcol._resolve_group_name((mesh, mesh_dim))
+    # TODO: enable async op for shard_dim_alltoall
+    return torch.ops._dtensor.shard_dim_alltoall(input, gather_dim, shard_dim, group_name)
 
 
 def mesh_scatter(

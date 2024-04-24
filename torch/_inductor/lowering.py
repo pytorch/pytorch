@@ -5969,6 +5969,18 @@ try:
         ir._WaitKernel.create_wait(_c10d_functional.wait_tensor.default, inp)
         return inp
 
+    @register_lowering(torch.ops._dtensor.shard_dim_alltoall)
+    def _shard_dim_alltoall(inp, gather_dim, shard_dim, group_name):
+        return ir.TensorBox.create(
+            ir._CollectiveKernel.create_out_of_place(
+                torch.ops._dtensor.shard_dim_alltoall.default,
+                inp,
+                gather_dim,
+                shard_dim,
+                group_name,
+            )
+        )
+
 except ImportError:
     log.info(
         "Inductor support for distributed collectives depends on building torch.distributed"
