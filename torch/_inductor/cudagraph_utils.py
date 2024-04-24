@@ -134,3 +134,25 @@ class BoxedDeviceIndex:
     def set(self, device_idx: Optional[int]):
         assert device_idx is None or isinstance(device_idx, int)
         self.value = device_idx
+
+
+def check_for_mutation_ignore_cuda_graph_managed_tensor(
+    gm: torch.fx.GraphModule, compiled_graph, num_fixed: int
+) -> Optional[str]:
+    default_msg = format_default_skip_message("mutated inputs")
+
+    # doesnt work for non-trees because the warmup run would apply mutation twice
+    if torch._inductor.config.triton.cudagraph_trees:
+        # checking if mutation is only on parameters/static inputs
+        mutation_indices = [
+            idx for idx in compiled_graph.mutated_input_idxs if idx >= num_fixed
+        ]
+        has_mutation = len(mutation_indices) != 0
+        if not has_mutation:
+            return None
+        placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]
+        return get_mutation_stack_trace(placeholders, mutation_indices)
+
+    else:
+        has_mutation = len(compiled_graph.mutated_inputs) != 0
+        return None if not has_mutation else default_msg
