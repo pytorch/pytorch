@@ -16,7 +16,13 @@ import torch
 import torch.utils.dlpack
 from torch import Tensor
 from torch._dynamo.utils import lazy_format_graph_code
-from torch._guards import detect_fake_mode, tracing, TracingContext
+from torch._guards import (
+    compile_context,
+    CompileContext,
+    detect_fake_mode,
+    tracing,
+    TracingContext,
+)
 from torch._logging import getArtifactLogger, trace_structured
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses import FakeTensor
@@ -532,6 +538,7 @@ def aot_dispatch_autograd(
                 _LazyGraphModule.force_recompile(bw_module)
 
     saved_context = TracingContext.try_get()
+    saved_compile_context = CompileContext.try_get()
 
     backward_state_indices = [
         idx for idx, x in enumerate(flat_args) if isinstance(x, BackwardState)
@@ -918,9 +925,9 @@ Got grad_output types: {str(grad_output_types)}"""
                 ctx.maybe_clear_saved_tensors()
                 if CompiledFunction.compiled_bw is None:
                     context = torch._C._DisableAutocast if disable_amp else nullcontext
-                    with tracing(saved_context), context(), track_graph_compiling(
-                        aot_config, "backward"
-                    ):
+                    with tracing(saved_context), compile_context(
+                        saved_compile_context
+                    ), context(), track_graph_compiling(aot_config, "backward"):
                         CompiledFunction.compiled_bw = aot_config.bw_compiler(
                             bw_module, placeholder_list
                         )

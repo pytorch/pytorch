@@ -769,7 +769,6 @@ class CommonTemplate:
     def test_eager_aoti_cache_hit(self):
         ns = "aten"
         op_name = "abs"
-        op_overload_name = "default"
         dispatch_key = "CPU"
         device = "cpu"
         if self.device.lower() == "cuda":
@@ -780,7 +779,6 @@ class CommonTemplate:
         kernel_lib_path = aoti_compile_with_persistent_cache(
             ns,
             op_name,
-            op_overload_name,
             device,
             False,
             getattr(torch.ops.aten, op_name),
@@ -804,9 +802,12 @@ class CommonTemplate:
 
                 for overload_name in overload_names:
                     try:
+                        reg_op_name = qualified_op_name
                         schema = torch._C._get_schema(qualified_op_name, overload_name)
+                        if schema.overload_name:
+                            reg_op_name = f"{qualified_op_name}.{schema.overload_name}"
                         torch_compile_op_lib_impl._impl_with_aoti_compile(  # noqa: F821
-                            schema.name, schema.overload_name, dispatch_key
+                            reg_op_name, dispatch_key
                         )
                     except Exception as e:
                         continue
@@ -823,7 +824,6 @@ class CommonTemplate:
 
         ns = "aten"
         op_name = "abs"
-        op_overload_name = "default"
 
         device = "cpu"
         if self.device.lower() == "cuda":
@@ -833,7 +833,6 @@ class CommonTemplate:
         kernel_lib_path = aoti_compile_with_persistent_cache(
             ns,
             op_name,
-            op_overload_name,
             input_tensor.device.type,
             False,
             fn,
@@ -843,12 +842,10 @@ class CommonTemplate:
         self.assertTrue(len(kernel_lib_path) > 0)
 
         device_kernel_cache = aoti_eager_cache_dir(ns, device)
-        kernel_conf = device_kernel_cache / f"{op_name}.{op_overload_name}.json"
+        kernel_conf = device_kernel_cache / f"{op_name}.json"
         self.assertTrue(kernel_conf.exists())
 
-        json_data = load_aoti_eager_cache(
-            "aten", "abs", "default", input_tensor.device.type
-        )
+        json_data = load_aoti_eager_cache("aten", "abs", input_tensor.device.type)
         self.assertTrue(json_data is not None)
         self.assertTrue(isinstance(json_data, list))
         self.assertTrue(len(json_data) > 0)
@@ -867,9 +864,11 @@ class CommonTemplate:
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     def test_eager_aoti_with_scalar(self):
         namespace_name = "aten"
-        dispatch_key = "CPU"
         op_name = "add"
         op_overload_name = "Tensor"
+        op_name_with_overload = f"{op_name}.{op_overload_name}"
+
+        dispatch_key = "CPU"
         device = torch.device("cpu")
         if self.device.lower() == "cuda":
             dispatch_key = "CUDA"
@@ -881,8 +880,7 @@ class CommonTemplate:
 
         kernel_lib_path = aoti_compile_with_persistent_cache(
             namespace_name,
-            op_name,
-            op_overload_name,
+            op_name_with_overload,
             a.device.type,
             False,
             torch.ops.aten.add,
@@ -891,10 +889,10 @@ class CommonTemplate:
         )
         self.assertTrue(Path(kernel_lib_path).exists())
         device_kernel_cache = aoti_eager_cache_dir(namespace_name, device.type)
-        kernel_conf = device_kernel_cache / f"{op_name}.{op_overload_name}.json"
+        kernel_conf = device_kernel_cache / f"{op_name_with_overload}.json"
         self.assertTrue(kernel_conf.exists())
         json_data = load_aoti_eager_cache(
-            namespace_name, op_name, op_overload_name, a.device.type
+            namespace_name, op_name_with_overload, a.device.type
         )
         op_info = json_data[0]
         self.assertTrue(isinstance(op_info, dict))
@@ -913,8 +911,6 @@ class CommonTemplate:
         # Scalar
         self.assertTrue("scalar_value" in op_info["meta_info"][2])
 
-        qualified_op_name = f"{namespace_name}::add"
-        _, overload_names = torch._C._jit_get_operation(qualified_op_name)
         with _scoped_library("aten", "IMPL") as torch_compile_op_lib_impl:
             a = torch.randn(128, device=device)
             b = torch.randn(128, device=device)
@@ -924,11 +920,17 @@ class CommonTemplate:
             for scalar_value in scalar_values:
                 ref_values.append(torch.add(a, b, alpha=scalar_value))
 
+            qualified_op_name = f"{namespace_name}::{op_name}"
+            _, overload_names = torch._C._jit_get_operation(qualified_op_name)
+            print(overload_names)
             for overload_name in overload_names:
                 try:
-                    schema = torch._C._get_schema(qualified_op_name, overload_name)
+                    reg_op_name = qualified_op_name
+                    schema = torch._C._get_schema(reg_op_name, overload_name)
+                    if schema.overload_name:
+                        reg_op_name = f"{reg_op_name}.{schema.overload_name}"
                     torch_compile_op_lib_impl._impl_with_aoti_compile(  # noqa: F821
-                        schema.name, schema.overload_name, dispatch_key
+                        reg_op_name, dispatch_key
                     )
                 except Exception as e:
                     continue
@@ -937,8 +939,8 @@ class CommonTemplate:
             for scalar_value in scalar_values:
                 res_values.append(torch.add(a, b, alpha=scalar_value))
 
-            for ref_val, res_val in zip(ref_values, res_values):
-                self.assertEqual(ref_val, res_val)
+            self.assertEqual(len(ref_values), len(res_values))
+            self.assertEqual(ref_values, res_values)
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     def test_torch_compile_override_registration(self):
@@ -964,32 +966,18 @@ class CommonTemplate:
             ref = opt_fn(x)
             ref_array.append(ref)
 
-        class WrapperFn:
-            def __init__(self, op_name) -> None:
-                self.op_name = op_name
-
-            def __call__(self, *args, **kwargs):
-                with torch._C._SetExcludeDispatchKeyGuard(
-                    torch._C.DispatchKey.Python, False
-                ):
-                    opt_fn = torch.compile(
-                        getattr(torch.ops.aten, self.op_name), dynamic=dynamic
-                    )
-                    return opt_fn(*args, **kwargs)
-
-        def make_elementwise(op_name):
-            return WrapperFn(op_name)
-
         def register_ops(op_set, dispatch_key, torch_compile_op_lib_impl):
             for _op_name in op_set:
                 qualified_op_name = f"{namespace_name}::{_op_name}"
                 _, overload_names = torch._C._jit_get_operation(qualified_op_name)
-                fallback_fn = make_elementwise(_op_name)
                 for overload_name in overload_names:
                     try:
+                        reg_op_name = qualified_op_name
                         schema = torch._C._get_schema(qualified_op_name, overload_name)
+                        if schema.overload_name:
+                            reg_op_name = f"{qualified_op_name}.{schema.overload_name}"
                         torch_compile_op_lib_impl._impl_with_aoti_compile(  # noqa: F821
-                            schema.name, schema.overload_name, dispatch_key, fallback_fn
+                            reg_op_name, dispatch_key
                         )
                     except Exception as e:
                         continue
@@ -1622,6 +1610,56 @@ class CommonTemplate:
             (10000,), dim=0, dtype=torch.float64, device=self.device
         )
         self.common(fn, (a, b), atol=1e-5, rtol=1e-5, check_lowp=False)
+
+    @skipCUDAIf(TEST_WITH_ROCM, "associative_scan is not supported on ROCm")
+    def test_custom_scan_op(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("associative_scan only supported on GPU")
+
+        def sum_combine(a, b):
+            return a + b
+
+        from torch._higher_order_ops.associative_scan import associative_scan
+
+        a = torch.randn(100, 100, device=self.device)
+        expect = torch.cumsum(a, 0)
+        actual = associative_scan(sum_combine, a, 0)
+        self.assertEqual(expect, actual)
+
+        def logcumsum_combine(a, b):
+            min_v = torch.minimum(a, b)
+            max_v = torch.maximum(a, b)
+            mask = (min_v != max_v) | ~min_v.isinf()
+            return torch.where(mask, max_v + (min_v - max_v).exp().log1p(), a)
+
+        expect = torch.logcumsumexp(a, 0)
+        actual = associative_scan(logcumsum_combine, a, 0)
+        self.assertEqual(expect, actual)
+
+    def test_custom_scan_op_compiled(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("associative_scan only supported on GPU")
+
+        from torch._higher_order_ops.associative_scan import associative_scan
+
+        def sum_combine(a, b):
+            return a + b
+
+        def fn(a, b, dim):
+            diff = (a - b).abs()
+            sad = associative_scan(sum_combine, diff, dim)
+            return sad.sum(dim)
+
+        a = torch.randn(100, 100, device=self.device)
+        b = torch.randn(100, 100, device=self.device)
+        self.common(fn, (a, b, 0))
+        cfn = torch.compile(fn)
+        _, code = run_and_get_code(cfn, a, b, 0)
+
+        # Check everything is fused into a single kernel
+        FileCheck().check_not("run(").check_regex(
+            r"triton_.*\.run\(arg[01]_1, arg[12]_1, buf1,"
+        ).check_not("run(").run(code[0])
 
     def test_embedding_bag_byte_unpack(self):
         if self.device != "cpu":
@@ -7845,8 +7883,7 @@ class CommonTemplate:
             sum_default_7 = torch.ops.aten.sum.default(mul_tensor_24)
             return (new_zeros_default_4, sum_default_7)
 
-        # TODO: Remove once https://github.com/pytorch/pytorch/issues/94017 is resolved
-        dtype = torch.float64 if self.device == "cpu" else torch.float32
+        dtype = torch.float32
         args = [
             ((1, 88, 40, 40), (140800, 1600, 40, 1), dtype),
             ((), (), dtype),
