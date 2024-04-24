@@ -1414,6 +1414,26 @@ class TestNNParametrization(NNTestCase):
 
                         gradcheck(fn, (m.parametrizations.weight.original,))
 
+    def test_register_parametrization_no_grad(self):
+        r"""Test that it is possible to register a parametrization without gradient
+        """
+        class NoResize(nn.Module):
+            def right_inverse(self, x):
+                return x[0], x[1]
+
+            def forward(self, x0, x1):
+                return torch.cat(x0, x1)
+
+        model = nn.Linear(8, 8)
+
+        model.weight.requires_grad = False
+        # One parametrization with unsafe=True
+        parametrize.register_parametrization(model, "weight", NoResize())
+        # making sure the decomposed Tensors both have requires_grad == False
+        self.assertFalse(model.parametrizations.weight.original0.requires_grad)
+        self.assertFalse(model.parametrizations.weight.original1.requires_grad)
+
+
     @swap([True, False])
     def test_new_spectral_norm_load_state_dict(self):
         for activate_times in (0, 3):
