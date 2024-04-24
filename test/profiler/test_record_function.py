@@ -13,88 +13,21 @@ try:
 except ImportError:
     None
 
-import collections
-import gc
-import json
-import os
-import re
-import subprocess
-import sys
-import tempfile
-import textwrap
-import threading
-import unittest
-import weakref
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
-from unittest.mock import patch
+from typing import Any, Dict
 
-import expecttest
 import torch
-import torch.nn as nn
 import torch.optim
 import torch.utils.data
 import torch.utils.data.datapipes as dp
-from torch._C._profiler import _TensorMetadata
 from torch.autograd import (
     _record_function_with_args_enter,
     _record_function_with_args_exit,
 )
-from torch.autograd.profiler import KinetoStepTracker, profile as _profile
-from torch.autograd.profiler_legacy import profile as _profile_legacy
-from torch.profiler import (
-    _utils,
-    DeviceType,
-    ExecutionTraceObserver,
-    kineto_available,
-    profile,
-    ProfilerAction,
-    ProfilerActivity,
-    record_function,
-    supported_activities,
-)
-from torch.profiler._pattern_matcher import (
-    Conv2dBiasFollowedByBatchNorm2dPattern,
-    ExtraCUDACopyPattern,
-    ForLoopIndexingPattern,
-    FP32MatMulPattern,
-    GradNotSetToNonePattern,
-    MatMulDimInFP16Pattern,
-    NamePattern,
-    OptimizerSingleTensorPattern,
-    Pattern,
-    report_all_anti_patterns,
-    SynchronizedDataLoaderPattern,
-)
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
-from torch.testing._internal.common_device_type import skipCUDAVersionIn
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    IS_JETSON,
-    IS_WINDOWS,
-    parametrize,
-    run_tests,
-    serialTest,
-    skipIfTorchDynamo,
-    TemporaryDirectoryName,
-    TemporaryFileName,
-    TEST_WITH_ASAN,
-    TEST_WITH_CROSSREF,
-    TEST_WITH_ROCM,
-    TestCase,
-)
+from torch.autograd.profiler import profile as _profile
+from torch.profiler import kineto_available, record_function
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 Json = Dict[str, Any]
-
-try:
-    import psutil
-
-    HAS_PSUTIL = True
-except ImportError:
-    HAS_PSUTIL = False
-import pickle
-
-from torch._C._profiler import _ExperimentalConfig, _ExtraFields_PyCall
 
 
 class TestRecordFunction(TestCase):
