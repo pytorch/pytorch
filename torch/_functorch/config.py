@@ -26,6 +26,16 @@ debug_assert = False
 
 debug_partitioner = os.environ.get("AOT_PARTITIONER_DEBUG", False)
 
+# Today, if you are in a situation where there is "false aliasing"
+# (e.g. you have a bunch of model parameters that all alias the same underlying buffer),
+# our checks for this situation are very slow if these inputs have dynamic shapes.
+# This config is set to ensure that there aren't too many aliased inputs in this situation,
+# so that we error loudly instead of compiling forever.
+# Eventually, we should make these checks faster.
+# For now, however, you can simply turn off dynamic shapes by marking your inputs static
+# when you run into this situation.
+_max_aliased_inputs_with_dynamic_shapes_enabled = 5
+
 static_weight_shapes = True
 
 # Applies CSE to the graph before partitioning
