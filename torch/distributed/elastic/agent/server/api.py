@@ -85,7 +85,7 @@ class WorkerSpec:
     entrypoint: Union[Callable, str, None] = None
     args: Tuple = ()
     max_restarts: int = 3
-    monitor_interval: float = 30.0
+    monitor_interval: float = 0.1
     master_port: Optional[int] = None
     master_addr: Optional[str] = None
     local_addr: Optional[str] = None
@@ -916,7 +916,7 @@ class SimpleElasticAgent(ElasticAgent):
                     )
                     self._restart_workers(self._worker_group)
             else:
-                raise Exception(f"[{role}] Worker group in {state.name} state")
+                raise Exception(f"[{role}] Worker group in {state.name} state")  # noqa: TRY002
 
     def _exit_barrier(self):
         """
