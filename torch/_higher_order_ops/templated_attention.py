@@ -96,7 +96,7 @@ def math_attention(
     score_mod = torch.vmap(score_mod, in_dims=(0, None, 0, None, None) + in_dim_buffers)
     score_mod = torch.vmap(score_mod, in_dims=(0, 0, None, None, None) + in_dim_buffers)
 
-    # We wouldn't need these overrides in this file if Dynamo always did the
+    # todo: We wouldn't need these overrides in this file if Dynamo always did the
     # rewriting.
     with TransformGetItemToIndex():
         scores = score_mod(scores, b, h, m, n, *other_buffers).to(torch.float32)
@@ -214,9 +214,10 @@ def templated_attention_functionalize(
     with ctx.redispatch_to_next() as m:
         functional_score_mod = ctx.functionalize(score_mod)
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
-        mutates = _has_potential_branch_input_mutation(
-            functional_score_mod, example_vals, pre_dispatch
-        )
+        with TransformGetItemToIndex():
+            mutates = _has_potential_branch_input_mutation(
+                functional_score_mod, example_vals, pre_dispatch
+            )
         # The only care about mutations of existing buffers since we can't replay these.
         # However, we can just error if anything is detected
         if mutates:

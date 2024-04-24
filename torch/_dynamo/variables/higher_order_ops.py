@@ -1518,14 +1518,6 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 source_target=self.value,
                 set_subgraph_inputs="flatten_manual",
             )
-        import operator
-
-        # todo: We wouldn't need this if we can re-enable torchfunctionmode under
-        # compile mode in higher_order_ops/templated_attention.py
-        for node in body_graph.nodes:
-            if node.target == operator.getitem:
-                node.target = torch.ops.aten.index
-                node.args = transform_getitem_args(*node.args)
 
         body_name = add_subgraph(
             tx,
