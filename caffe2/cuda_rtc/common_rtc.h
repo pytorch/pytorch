@@ -50,11 +50,11 @@ class CudaRTCFunction {
     if (compile_result != NVRTC_SUCCESS) {
       size_t log_size;
       NVRTC_CHECK(nvrtcGetProgramLogSize(prog, &log_size));
-      vector<char> nvrtc_log(log_size);
-      NVRTC_CHECK(nvrtcGetProgramLog(prog, nvrtc_log.data()));
+      std::string nvrtc_log(log_size, '\0');
+      NVRTC_CHECK(nvrtcGetProgramLog(prog, &nvrtc_log[0]));
       LOG(FATAL) << "Compilation failure for nvrtc("
                  << nvrtcGetErrorString(compile_result) << "): \n"
-                 << nvrtc_log.data();
+                 << nvrtc_log;
     }
     size_t ptx_size;
     NVRTC_CHECK(nvrtcGetPTXSize(prog, &ptx_size));
