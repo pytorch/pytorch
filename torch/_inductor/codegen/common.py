@@ -229,12 +229,12 @@ class DataTypePropagation:
         if len(input_nodes) == 0:
             return None
 
-        all_input_nodes_propogated = all(
+        all_input_nodes_propagated = all(
             OptimizationContext.key in n.meta
             and n.meta[OptimizationContext.key].dtype is not None
             for n in input_nodes
         )
-        if not all_input_nodes_propogated:
+        if not all_input_nodes_propagated:
             return None
 
         return functools.reduce(
