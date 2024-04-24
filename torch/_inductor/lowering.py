@@ -1894,7 +1894,8 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         if isinstance(arg.data, ir.BaseView):
             if not is_aligned(arg):
                 if is_aligned(arg.unwrap_view()):
-                    return arg
+                    arg = ir.TensorBox(ir.ExternKernel.realize_input(arg))
+                    return V.graph.match_insignificant_strides(arg, meta_val.stride())
 
         return ir.ExternKernel.require_stride_order(arg, stride_order)
 
