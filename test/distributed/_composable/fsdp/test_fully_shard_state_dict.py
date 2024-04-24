@@ -148,9 +148,14 @@ class TestFullyShardStateDict(FSDPTest):
                 param.to_local(),
                 torch.ones_like(param.to_local()) * new_fill_value,
             )
-            self.assertEqual(
-                param.to_local().data_ptr(), param_name_to_data_ptr[param_name]
-            )
+            local_param = param.to_local()
+            # Only guarantee that the local tensor's data pointer does not
+            # change if the sharding was even (i.e. no padding); otherwise,
+            # FSDP may re-pad the local tensor, changing its data pointer
+            if local_param.size(0) * param.device_mesh.size() == param.size(0):
+                self.assertEqual(
+                    local_param.data_ptr(), param_name_to_data_ptr[param_name]
+                )
 
 
 if __name__ == "__main__":
