@@ -994,8 +994,9 @@ class EQUALS_MATCH : public LeafGuard {
         _value_type(Py_TYPE(value.ptr())) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
-    // Fast path - pointer equality check.
-    if (value != _value.ptr()) {
+    // Fast path - pointer equality check. Pointer equality checks are ok
+    // because objects guarded with EQUALS_MATCH are immutable.
+    if (value != _value.ptr() && value != _first_passing_value.ptr()) {
       // Check type
       if (Py_TYPE(value) != _value_type) {
         return false;
@@ -1005,6 +1006,11 @@ class EQUALS_MATCH : public LeafGuard {
       if (result == -1) {
         PyErr_Clear();
         return false;
+      }
+
+      // Cache the value here.
+      if (result && _first_passing_value.is_none()) {
+        _first_passing_value = py::cast<py::object>(value);
       }
       return result;
     }
@@ -1017,6 +1023,11 @@ class EQUALS_MATCH : public LeafGuard {
   // selected objects which do not have high memory footprint, so holding on to
   // these objects is ok.
   py::object _value;
+
+  // Cache the first value whose pointer is not equal to value.ptr(). This is
+  // useful in nn module guards where getattr name is a string, which is same as
+  // a key in the __dict__ but the pointer is different.
+  py::object _first_passing_value = py::none();
 
   // Type of the value
   PyTypeObject* _value_type;
@@ -2318,9 +2329,6 @@ class DictSubclassGuardManager : public DictGuardManager {
   }
 };
 
-// import torch._dynamo.guards and get GuardManagerTypeEnum
-static py::object default_manager_enum = py::none();
-
 std::unique_ptr<GuardManager> make_guard_manager(
     RootGuardManager* root,
     std::string source,
@@ -2358,8 +2366,7 @@ std::unique_ptr<GuardManager> make_guard_manager(
     // overridden keys method, we still optimize for the common case with
     // DictGuardManager by relying on PyDict_Next.
 
-    if (guard_manager_enum.is(py::none()) ||
-        guard_manager_enum.is(base_guard_manager_enum)) {
+    if (guard_manager_enum.is(base_guard_manager_enum)) {
       // For dicts that don't need to guard on keys, we can just rely on the
       // base GuardManager.
       return std::make_unique<GuardManager>(root, std::move(source));
@@ -3623,7 +3630,7 @@ PyObject* torch_c_dynamo_guards_init() {
           py::arg("key"),
           py::arg("source"),
           py::arg("example_value"),
-          py::arg("guard_manager_enum") = default_manager_enum,
+          py::arg("guard_manager_enum"),
           py::return_value_policy::reference)
       // return by reference because GuardManager has the ownership of accessors
       // and guard managers
@@ -3633,7 +3640,7 @@ PyObject* torch_c_dynamo_guards_init() {
           py::arg("key"),
           py::arg("source"),
           py::arg("example_value"),
-          py::arg("guard_manager_enum") = default_manager_enum,
+          py::arg("guard_manager_enum"),
           py::return_value_policy::reference)
       // return by reference because GuardManager has the ownership of accessors
       // and guard managers
@@ -3643,7 +3650,7 @@ PyObject* torch_c_dynamo_guards_init() {
           py::arg("key"),
           py::arg("source"),
           py::arg("example_value"),
-          py::arg("guard_manager_enum") = default_manager_enum,
+          py::arg("guard_manager_enum"),
           py::return_value_policy::reference)
       // return by reference because GuardManager has the ownership of accessors
       // and guard managers
@@ -3653,7 +3660,7 @@ PyObject* torch_c_dynamo_guards_init() {
           py::arg("key"),
           py::arg("source"),
           py::arg("example_value"),
-          py::arg("guard_manager_enum") = default_manager_enum,
+          py::arg("guard_manager_enum"),
           py::return_value_policy::reference)
       // return by reference because GuardManager has the ownership of accessors
       // and guard managers
@@ -3673,7 +3680,7 @@ PyObject* torch_c_dynamo_guards_init() {
           },
           py::arg("source"),
           py::arg("example_value"),
-          py::arg("guard_manager_enum") = default_manager_enum,
+          py::arg("guard_manager_enum"),
           py::return_value_policy::reference)
 
       // return by reference because GuardManager has the ownership of accessors
@@ -3694,7 +3701,7 @@ PyObject* torch_c_dynamo_guards_init() {
           },
           py::arg("source"),
           py::arg("example_value"),
-          py::arg("guard_manager_enum") = default_manager_enum,
+          py::arg("guard_manager_enum"),
           py::return_value_policy::reference)
       // return by reference because GuardManager has the ownership of accessors
       // and guard managers
@@ -3704,7 +3711,7 @@ PyObject* torch_c_dynamo_guards_init() {
           py::arg("f_globals"),
           py::arg("source"),
           py::arg("example_value"),
-          py::arg("guard_manager_enum") = default_manager_enum,
+          py::arg("guard_manager_enum"),
           py::return_value_policy::reference)
       // return by reference because GuardManager has the ownership of accessors
       // and guard managers
@@ -3724,7 +3731,7 @@ PyObject* torch_c_dynamo_guards_init() {
           },
           py::arg("source"),
           py::arg("example_value"),
-          py::arg("guard_manager_enum") = default_manager_enum,
+          py::arg("guard_manager_enum"),
           py::return_value_policy::reference)
       // return by reference because GuardManager has the ownership of accessors
       // and guard managers
@@ -3734,7 +3741,7 @@ PyObject* torch_c_dynamo_guards_init() {
           py::arg("index"),
           py::arg("source"),
           py::arg("example_value"),
-          py::arg("guard_manager_enum") = default_manager_enum,
+          py::arg("guard_manager_enum"),
           py::return_value_policy::reference)
       // return by reference because GuardManager has the ownership of accessors
       // and guard managers
@@ -3744,7 +3751,7 @@ PyObject* torch_c_dynamo_guards_init() {
           py::arg("global_name"),
           py::arg("source"),
           py::arg("example_value"),
-          py::arg("guard_manager_enum") = default_manager_enum,
+          py::arg("guard_manager_enum"),
           py::return_value_policy::reference)
       // return by reference because GuardManager has the ownership of accessors
       // and guard managers
@@ -3754,7 +3761,7 @@ PyObject* torch_c_dynamo_guards_init() {
           py::arg("python_lambda"),
           py::arg("source"),
           py::arg("example_value"),
-          py::arg("guard_manager_enum") = default_manager_enum,
+          py::arg("guard_manager_enum"),
           py::return_value_policy::reference)
       // return by reference because GuardManager has the ownership of accessors
       // and guard managers
@@ -3774,7 +3781,7 @@ PyObject* torch_c_dynamo_guards_init() {
           },
           py::arg("source"),
           py::arg("example_value"),
-          py::arg("guard_manager_enum") = default_manager_enum,
+          py::arg("guard_manager_enum"),
           py::return_value_policy::reference)
       // return by reference because C++ GuardManager has the ownership of
       // accessors and guard managers
@@ -3784,7 +3791,7 @@ PyObject* torch_c_dynamo_guards_init() {
           py::arg("attr"),
           py::arg("source"),
           py::arg("example_value"),
-          py::arg("guard_manager_enum") = default_manager_enum,
+          py::arg("guard_manager_enum"),
           py::return_value_policy::reference);
 
   // Root Guard Manager
@@ -3829,7 +3836,7 @@ PyObject* torch_c_dynamo_guards_init() {
           py::arg("index"),
           py::arg("source"),
           py::arg("example_value"),
-          py::arg("guard_manager_enum") = default_manager_enum,
+          py::arg("guard_manager_enum"),
           py::return_value_policy::reference)
       // return by reference because GuardManager has the ownership of accessors
       // and guard managers
@@ -3849,7 +3856,7 @@ PyObject* torch_c_dynamo_guards_init() {
           py::arg("index"),
           py::arg("source"),
           py::arg("example_value"),
-          py::arg("guard_manager_enum") = default_manager_enum,
+          py::arg("guard_manager_enum"),
           py::return_value_policy::reference)
       // return by reference because GuardManager has the ownership of leaf
       // guards
@@ -3916,7 +3923,7 @@ PyObject* torch_c_dynamo_guards_init() {
           py::arg("attr"),
           py::arg("source"),
           py::arg("example_value"),
-          py::arg("guard_manager_enum") = default_manager_enum,
+          py::arg("guard_manager_enum"),
           py::return_value_policy::reference);
 
   // Dict Guard Manager

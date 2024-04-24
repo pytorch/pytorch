@@ -469,7 +469,7 @@ class GuardBuilder(GuardBuilderBase):
         # limit the number of cache entries with same ID_MATCH'd object.
         self.id_matched_objs: Dict[str, ReferenceType[object]] = {}
 
-    def guard_on_dict_keys_and_ignore_order(self, value, guard):
+    def guard_on_dict_keys_and_ignore_order(self, example_value, guard):
         dict_mgr = self.get_guard_manager(guard)
         if isinstance(dict_mgr, DictGuardManager):
             raise NotImplementedError(
@@ -479,12 +479,17 @@ class GuardBuilder(GuardBuilderBase):
 
         # Iterate over the dicts and install a dict_getitem_manager.
         dict_source = guard.originating_source.name()
-        for idx, key in enumerate(value.keys()):
+        for key in example_value.keys():
+            value = example_value[key]
+            value_source = GetItemSource(guard.originating_source, index=key)
+            guard_manager_enum = self.get_guard_manager_type(
+                value_source, example_value
+            )
             dict_mgr.dict_getitem_manager(
                 key=key,
                 source=f"{dict_source}[{key!r}]",
-                example_value=value[key],
-                guard_manager_enum=GuardManagerType.GUARD_MANAGER,
+                example_value=value,
+                guard_manager_enum=guard_manager_enum,
             )
 
     def guard_on_dict_keys_and_order(self, value, guard):
@@ -622,7 +627,9 @@ class GuardBuilder(GuardBuilderBase):
         elif istype(source, GradSource):
             assert base_guard_manager  # to make mypy happy
             return base_guard_manager.grad_manager(
-                source=source_name, example_value=example_value
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
             )
         elif istype(source, AttrSource):
             assert base_guard_manager  # to make mypy happy
@@ -740,6 +747,7 @@ class GuardBuilder(GuardBuilderBase):
                 python_lambda=from_numpy,
                 source=source_name,
                 example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
             )
         elif istype(source, TupleIteratorGetItemSource):
             assert base_guard_manager  # to make mypy happy
