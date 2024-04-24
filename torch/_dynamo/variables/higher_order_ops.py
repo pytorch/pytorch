@@ -1475,10 +1475,7 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         self, tx, query: "VariableTracker", score_function: "VariableTracker"
     ):
         from torch._dynamo.symbolic_convert import InstructionTranslator
-        from torch._higher_order_ops.templated_attention import (
-            transform_getitem_args,
-            TransformGetItemToIndex,
-        )
+        from torch._higher_order_ops.templated_attention import TransformGetItemToIndex
         from .builder import SourcelessBuilder
 
         tx: InstructionTranslator = tx

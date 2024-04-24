@@ -20283,6 +20283,8 @@ python_ref_db = [
             #  aten._local_scalar_dense.default - erroring out! [...]
             # triggered by mid_val = boundaries[mid]
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref_executor"),
+            # No ref support for getitem
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref"),
         )
     ),
     PythonRefInfo(
