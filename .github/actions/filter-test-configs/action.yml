@@ -13,6 +13,13 @@ inputs:
     required: true
     type: string
     description: JSON description of what test configs to run.
+  selected-test-configs:
+    required: false
+    type: string
+    description: |
+      A comma-separated list of test configurations from the test matrix to keep,
+      The empty list means we are going to keep every configurations by defaults
+    default: ""
   job-name:
     type: string
     required: false
@@ -126,6 +133,7 @@ runs:
           --workflow "${GITHUB_WORKFLOW}" \
           --job-name "${JOB_NAME}" \
           --test-matrix "${{ inputs.test-matrix }}" \
+          --selected-test-configs "${{ inputs.selected-test-configs }}" \
           --pr-number "${PR_NUMBER}" \
           --tag "${TAG}" \
           --event-name "${EVENT_NAME}" \
