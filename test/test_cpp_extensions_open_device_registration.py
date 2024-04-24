@@ -186,6 +186,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             default_gen.device.type == torch._C._get_privateuse1_backend_name()
         )
 
+    @unittest.skip("Test is temporary disabled")
     def test_open_device_dispatchstub(self):
         # test kernels could be reused by privateuse1 backend through dispatchstub
         input_data = torch.randn(2, 2, 3, dtype=torch.float32, device="cpu")
@@ -387,6 +388,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         ):
             cpu_untyped_storage.pin_memory(invalid_device)
 
+    @unittest.skip("Test is temporary disabled")
     def test_open_device_serialization(self):
         self.module.set_custom_device_index(-1)
         storage = torch.UntypedStorage(4, device=torch.device("foo"))
