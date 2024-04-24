@@ -139,53 +139,41 @@ class Library:
         handle = entry.abstract_impl.register(func_to_register, source)
         self._registration_handles.append(handle)
 
-    def _impl_with_aoti_compile(self, op_name, op_overload_name='', dispatch_key='', fallback_fn=None):
+    def _impl_with_aoti_compile(self, op_name, dispatch_key=''):
         r'''Register the operator to use the AOTI-compiled implementation.
 
         Args:
-            op_name: operator name or OpOverload object.
-            op_overload_name: operator overload name
+            op_name: operator name (along with the overload) or OpOverload object.
             dispatch_key: dispatch key that the input function should be registered for. By default, it uses
                           the dispatch key that the library was created with.
-            fallback_fn: This is a user-defined function that is used as a backup plan in case the AOT inductor
-                         fails to generate a kernel. The purpose of this function is to ensure that the operation
-                         can still be executed even if the kernel production fails. If the AOT inductor fails and
-                         no fallback function is provided, an error will be raised during the operation.
 
         Example::
             >>> my_lib = Library("aten", "IMPL")
-            >>> def div_cpu(self, other):
-            >>>     return self * (1 / other)
-            >>> my_lib._impl_with_aoti_compile("aten::div", "Tensor", "CPU", div_cpu)
+            >>> my_lib._impl_with_aoti_compile("div.Tensor", "CPU")
         '''
-        impl_fn_name = "impl_with_aoti_compile"
 
         if isinstance(op_name, str):
-            op_name_no_overload = op_name
+            name = op_name
         elif isinstance(op_name, OpOverload):
-            op_name_no_overload = op_name._schema.name
-            op_overload_name = op_name._schema.overload_name
+            name = op_name._schema.name
+            overload_name = op_name._schema.overload_name
+            if overload_name != '':
+                name = name + '.' + overload_name
         else:
             raise RuntimeError("_impl_with_aoti_compile should be passed either a name or an OpOverload object "
                                "as the first argument")
 
-        assert isinstance(op_name_no_overload, str)
-        assert self.m is not None
-        assert hasattr(self.m, impl_fn_name)
-        impl_fn = getattr(self.m, impl_fn_name)
-        assert callable(impl_fn)
-        op_name_with_overload = op_name_no_overload.split("::")[-1]
-        if op_overload_name:
-            op_name_with_overload = op_name_with_overload + "." + op_overload_name
-
-        key = self.ns + "/" + op_name_with_overload + "/" + dispatch_key
+        key = self.ns + "/" + name.split("::")[-1] + "/" + dispatch_key
         if key in _impls:
             # TODO: in future, add more info about where the existing function is registered (this info is
             # today already returned by the C++ warning when _impl_with_aoti_compile is called but we error out before that)
-            raise RuntimeError(f"This is not allowed since there's already a kernel registered from python overriding "
-                               f"{op_name_with_overload}'s behavior for {dispatch_key} dispatch key and {self.ns} namespace.")
+            raise RuntimeError("This is not allowed since there's already a kernel registered from python overriding {}"
+                               "'s behavior for {} dispatch key and {} namespace.".
+                               format(name.split("::")[-1], dispatch_key, self.ns))
 
-        impl_fn(self.ns, op_name_no_overload, op_overload_name, dispatch_key, fallback_fn)
+        assert self.m is not None
+        impl_fn: Callable = self.m.impl_with_aoti_compile
+        impl_fn(self.ns, name.split("::")[-1], dispatch_key)
 
         _impls.add(key)
         self._op_impls.add(key)

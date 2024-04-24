@@ -16,22 +16,22 @@
 #include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
-#include <torch/csrc/utils/tensor_new.h>
 
 #include <c10/util/flat_hash_map.h>
 #include <pybind11/operators.h>
 #include <pybind11/stl.h>
+#include <torch/csrc/inductor/aoti_eager/kernel_holder.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_raii.h>
-
-#include <torch/csrc/inductor/aoti_eager/kernel_holder.h>
 
 #include <iostream>
 #include <utility>
 
 namespace py = pybind11;
 
-namespace torch::impl::dispatch {
+namespace torch {
+namespace impl {
+namespace dispatch {
 
 // NB: I'd like to index this on OperatorHandle, but I can't, as I can't
 // guarantee that the main interpreter has finish doing all registrations before
@@ -106,91 +106,101 @@ struct EnableHermeticPyObject {
   bool old_python_snapshot_;
 };
 
-PythonKernelHolder::PythonKernelHolder(
-    py::object func,
-    c10::DispatchKey dispatch_key,
-    bool with_keyset)
-    : func_(func.release().ptr(), getPyInterpreter()),
-      dispatch_key_(dispatch_key),
-      with_keyset_(with_keyset) {}
+class PythonKernelHolder : public c10::OperatorKernel {
+  c10::SafePyObject func_;
+  c10::DispatchKey dispatch_key_;
+  // If "with_keyset", then we expect a keyset as the first arg.
+  bool with_keyset_;
 
-void PythonKernelHolder::operator()(
-    const c10::OperatorHandle& op,
-    c10::DispatchKeySet keyset,
-    torch::jit::Stack* stack) {
-  // Figure out if we can handle it hermetically, or if we have
-  // to double dispatch
+ public:
+  PythonKernelHolder(
+      py::object func,
+      c10::DispatchKey dispatch_key,
+      bool with_keyset = false)
+      : func_(func.release().ptr(), getPyInterpreter()),
+        dispatch_key_(dispatch_key),
+        with_keyset_(with_keyset) {}
 
-  // If Torch Dispatch Mode is active, use its PyInterpreter for dispatch
-  const auto mode_stack_len = c10::impl::TorchDispatchModeTLS::stack_len();
-  if (mode_stack_len > 0) {
-    const auto& cur_torch_dispatch_mode_state =
-        c10::impl::TorchDispatchModeTLS::get_stack_at(mode_stack_len - 1);
-    cur_torch_dispatch_mode_state->pyinterpreter()
-        ->python_op_registration_trampoline(
-            op, dispatch_key_, keyset, stack, with_keyset_);
-    return;
-  }
+  void operator()(
+      const c10::OperatorHandle& op,
+      c10::DispatchKeySet keyset,
+      torch::jit::Stack* stack) {
+    // Figure out if we can handle it hermetically, or if we have
+    // to double dispatch
 
-  const auto& schema = op.schema();
-  const auto num_arguments = schema.arguments().size();
+    // If Torch Dispatch Mode is active, use its PyInterpreter for dispatch
+    const auto mode_stack_len = c10::impl::TorchDispatchModeTLS::stack_len();
+    if (mode_stack_len > 0) {
+      const auto& cur_torch_dispatch_mode_state =
+          c10::impl::TorchDispatchModeTLS::get_stack_at(mode_stack_len - 1);
+      cur_torch_dispatch_mode_state->pyinterpreter()
+          ->python_op_registration_trampoline(
+              op, dispatch_key_, keyset, stack, with_keyset_);
+      return;
+    }
 
-  // Otherwise, find a PyInterpreter on a Tensor IF if has Python key (which
-  // means it's a nontrivial tensor subclass)
-  for (const auto& ivalue : torch::jit::last(*stack, num_arguments)) {
-    if (ivalue.isTensor()) {
-      auto* interpreter =
-          ivalue.unsafeToTensorImpl()->pyobj_slot()->pyobj_interpreter();
-      if (interpreter &&
-          ivalue.unsafeToTensorImpl()->key_set().has(at::DispatchKey::Python)) {
-        (*interpreter)
-            ->python_op_registration_trampoline(
-                op, dispatch_key_, keyset, stack, with_keyset_);
-        return;
-      }
-    } else if (ivalue.isTensorList() || ivalue.isOptionalTensorList()) {
-      // NB: use toListRef as it doesn't induce refcount bumps
-      // (toTensorListRef is not a thing)
-      for (const auto& nv : ivalue.toListRef()) {
-        if (nv.isNone()) {
-          continue;
-        }
+    const auto& schema = op.schema();
+    const auto num_arguments = schema.arguments().size();
+
+    // Otherwise, find a PyInterpreter on a Tensor IF if has Python key (which
+    // means it's a nontrivial tensor subclass)
+    for (const auto& ivalue : torch::jit::last(*stack, num_arguments)) {
+      if (ivalue.isTensor()) {
         auto* interpreter =
-            nv.unsafeToTensorImpl()->pyobj_slot()->pyobj_interpreter();
+            ivalue.unsafeToTensorImpl()->pyobj_slot()->pyobj_interpreter();
         if (interpreter &&
-            nv.unsafeToTensorImpl()->key_set().has(at::DispatchKey::Python)) {
+            ivalue.unsafeToTensorImpl()->key_set().has(
+                at::DispatchKey::Python)) {
           (*interpreter)
               ->python_op_registration_trampoline(
                   op, dispatch_key_, keyset, stack, with_keyset_);
           return;
         }
+      } else if (ivalue.isTensorList() || ivalue.isOptionalTensorList()) {
+        // NB: use toListRef as it doesn't induce refcount bumps
+        // (toTensorListRef is not a thing)
+        for (const auto& nv : ivalue.toListRef()) {
+          if (nv.isNone()) {
+            continue;
+          }
+          auto* interpreter =
+              nv.unsafeToTensorImpl()->pyobj_slot()->pyobj_interpreter();
+          if (interpreter &&
+              nv.unsafeToTensorImpl()->key_set().has(at::DispatchKey::Python)) {
+            (*interpreter)
+                ->python_op_registration_trampoline(
+                    op, dispatch_key_, keyset, stack, with_keyset_);
+            return;
+          }
+        }
       }
     }
-  }
 
-  // Nothing requires the operator to be homed to a specific interpreter, so
-  // run it on the current interpreter
+    // Nothing requires the operator to be homed to a specific interpreter, so
+    // run it on the current interpreter
 
-  auto arguments = torch::jit::pop(*stack, op.schema().arguments().size());
-  py::gil_scoped_acquire g;
-  // Jan 2024: We're slated to get rid of multipy, so stop forcing hermetic
-  // mode unconditionally in all situations when you're using multipy.
-  // Eventually just delete this entirely.  (Note that you may break multipy
-  // anyway this way with dispatcher registered functions that require
-  // hermetic to be off.)
+    auto arguments = torch::jit::pop(*stack, op.schema().arguments().size());
+    py::gil_scoped_acquire g;
+    // Jan 2024: We're slated to get rid of multipy, so stop forcing hermetic
+    // mode unconditionally in all situations when you're using multipy.
+    // Eventually just delete this entirely.  (Note that you may break multipy
+    // anyway this way with dispatcher registered functions that require
+    // hermetic to be off.)
 #if defined(USE_DEPLOY)
-  EnableHermeticPyObject g2;
+    EnableHermeticPyObject g2;
 #endif
-  auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
-  auto func = py::reinterpret_borrow<py::object>(func_.ptr(getPyInterpreter()));
-  auto obj = with_keyset_
-      ? func(keyset, *args_kwargs.first, **args_kwargs.second)
-      : func(*args_kwargs.first, **args_kwargs.second);
-  if (!obj) {
-    throw python_error();
+    auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
+    auto func =
+        py::reinterpret_borrow<py::object>(func_.ptr(getPyInterpreter()));
+    auto obj = with_keyset_
+        ? func(keyset, *args_kwargs.first, **args_kwargs.second)
+        : func(*args_kwargs.first, **args_kwargs.second);
+    if (!obj) {
+      throw python_error();
+    }
+    pushPyOutToStack(op, stack, obj, "PythonKernelHolder");
   }
-  pushPyOutToStack(op, stack, obj, "PythonKernelHolder");
-}
+};
 
 static torch::_RegisterOrVerify register_or_verify() {
   if (isMainPyInterpreter()) {
@@ -246,7 +256,7 @@ void initDispatchBindings(PyObject* module) {
       .def("debug", &c10::OperatorHandle::debug)
       .def(
           "redispatch_boxed",
-          [](const py::object& self,
+          [](py::object self,
              c10::DispatchKeySet keyset,
              py::args args,
              const py::kwargs& kwargs) {
@@ -368,24 +378,13 @@ void initDispatchBindings(PyObject* module) {
           "impl_with_aoti_compile",
           [](const py::object& self,
              const char* ns,
-             const char* op_name,
-             const char* op_overload_name,
-             c10::DispatchKey dispatch,
-             py::object fall_back_func) {
+             const char* op_name_with_overload,
+             c10::DispatchKey dispatch) {
             HANDLE_TH_ERRORS
             // Add the namespace if the op_name does not contain it
-            std::string reg_op_name(op_name);
-            if (reg_op_name.find("::") == std::string::npos) {
-              reg_op_name = std::string(ns).append("::").append(op_name);
-            }
-
-            // Appends the overload name
-            if (op_overload_name != nullptr) {
-              std::string str_op_overload_name(op_overload_name);
-              if (!str_op_overload_name.empty()) {
-                reg_op_name.append(".").append(str_op_overload_name);
-              }
-            }
+            std::string reg_op_name(op_name_with_overload);
+            reg_op_name =
+                std::string(ns).append("::").append(op_name_with_overload);
 
             auto& lib = self.cast<torch::Library&>();
             lib.impl(
@@ -395,24 +394,14 @@ void initDispatchBindings(PyObject* module) {
                     CppFunction::makeFromBoxedFunctor(
                         std::make_unique<
                             torch::inductor::AOTIPythonKernelHolder>(
-                            fall_back_func,
-                            dispatch,
-                            ns,
-                            op_name,
-                            op_overload_name))),
+                            dispatch, ns, op_name_with_overload))),
                 register_or_verify());
-            python_registrations_[lib._resolve(op_name)].insert_or_assign(
-                dispatch,
-                std::make_shared<c10::SafePyObject>(
-                    fall_back_func.release().ptr(), getPyInterpreter()));
             END_HANDLE_TH_ERRORS_PYBIND
           },
           "",
           py::arg("ns"),
-          py::arg("op_name"),
-          py::arg("op_overload_name"),
-          py::arg("dispatch"),
-          py::arg("fall_back_func"))
+          py::arg("op_name_with_overload"),
+          py::arg("dispatch"))
       .def(
           "impl",
           [](const py::object& self,
@@ -555,16 +544,6 @@ void initDispatchBindings(PyObject* module) {
             c10::Dispatcher::singleton().findOp(torch::jit::parseName(name));
         TORCH_CHECK(op, "operator ", name, " does not exist");
         return op->hasKernelForDispatchKey(dispatch);
-      });
-
-  m.def(
-      // Returns whether or not the kernel for this dispatach key is a
-      // fallthrough kernel
-      "_dispatch_kernel_for_dispatch_key_is_fallthrough",
-      [](const char* name, c10::DispatchKey dispatch) -> bool {
-        auto op =
-            c10::Dispatcher::singleton().findOp(torch::jit::parseName(name));
-        return op->isKernelFallthroughKernel(dispatch);
       });
 
   m.def(
@@ -953,9 +932,6 @@ void initDispatchBindings(PyObject* module) {
         ->set_warn_deprecated_on_mutable_data_ptr();
   });
 
-  m.def("_only_lift_cpu_tensors", &torch::utils::only_lift_cpu_tensors);
-  m.def("_set_only_lift_cpu_tensors", &torch::utils::set_only_lift_cpu_tensors);
-
   using c10::impl::TorchDispatchModeKey;
   py::enum_<TorchDispatchModeKey>(m, "_TorchDispatchModeKey")
       .value("FUNCTIONAL", TorchDispatchModeKey::FUNCTIONAL)
@@ -987,4 +963,6 @@ void python_op_registration_trampoline_impl(
   pushPyOutToStack(op, stack, obj, "PythonKernelHolder");
 }
 
-} // namespace torch::impl::dispatch
+} // namespace dispatch
+} // namespace impl
+} // namespace torch
