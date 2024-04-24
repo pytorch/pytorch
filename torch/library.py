@@ -151,6 +151,9 @@ class Library:
             >>> my_lib = Library("aten", "IMPL")
             >>> my_lib._impl_with_aoti_compile("div.Tensor", "CPU")
         '''
+        if dispatch_key == '':
+            dispatch_key = self.dispatch_key
+        assert dispatch_key in ['CPU', 'CUDA', 'XPU']
 
         if isinstance(op_name, str):
             name = op_name
