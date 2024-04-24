@@ -1,0 +1,34 @@
+name: Check whether the workflow owner can use ARC runners
+
+on:
+  workflow_call:
+    inputs:
+      user_name:
+        required: true
+        type: string
+        description: The name of the workflow owner.
+
+    outputs:
+      workflow-type:
+        description: Type of runners to use
+        value: ${{ jobs.check-user.outputs.workflow-type }}
+
+
+jobs:
+  check-user:
+    runs-on: linux.4xlarge
+    outputs:
+      workflow-type: ${{ steps.set-condition.outputs.workflow-type }}
+    steps:
+      - name: Download the latest arc_users.yml
+        run: |
+          wget https://raw.githubusercontent.com/pytorch/test-infra/44e046ac67dc0ff7be98025d39984ad2e4def044/.github/arc_users.yaml
+
+      - name: Check if user is in arc_users.yml
+        id: set-condition
+        run: |
+          if grep -q "${{ inputs.user_name }}" arc_users.yaml; then
+            echo "workflow-type=rg" >> $GITHUB_OUTPUT
+          else
+            echo "workflow-type=label" >> $GITHUB_OUTPUT
+          fi
