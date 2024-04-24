@@ -3997,6 +3997,7 @@ class TestNestedTensorSubclass(TestCase):
         nt1_t, nt2_t, nt3_t, nt4_t = (x.transpose(1, 2) for x in (nt1, nt2, nt3, nt4))
         check_size(nt1_t, nt2_t, nt3_t, nt4_t)
 
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     def test_return_nt_constructed_in_graph(self, device):
         def fn(values, offsets):
             nt = torch.nested.nested_tensor_from_jagged(values, offsets)
