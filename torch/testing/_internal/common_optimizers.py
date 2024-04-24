@@ -1104,7 +1104,8 @@ optim_db: List[OptimizerInfo] = [
         Adagrad,
         optim_inputs_func=optim_inputs_func_adagrad,
         optim_error_inputs_func=optim_error_inputs_func_adagrad,
-        supported_impls=("foreach", "differentiable"),
+        supported_impls=("foreach", "differentiable", "fused"),
+        supports_fused_on=("cpu",),
         supports_sparse=True,
         metadata_for_sparse=(
             {"lr": 0.1, "weight_decay": 0, "lr_decay": 0},

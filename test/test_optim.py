@@ -1677,7 +1677,7 @@ class TestOptimRenewed(TestCase):
                 optimizers.append(optimizer)
         self._compare_between(inpts, models, optimizers)
 
-    @onlyCPU
+    @onlyNativeDeviceTypes
     @optims([optim for optim in optim_db if "fused" in optim.supported_impls], dtypes=[torch.float32])
     def test_grad_scaling_autocast_fused_optimizers(self, device, dtype, optim_info):
         # This ut is from test_cuda.py test_grad_scaling_autocast_fused_optimizers
@@ -1689,6 +1689,7 @@ class TestOptimRenewed(TestCase):
         optim_cls = optim_info.optim_cls
         for optim_input in optim_inputs:
             kwargs = optim_input.kwargs
+            kwargs["fused"] = True
             for _separate_unscale in (True, False):
                 self._grad_scaling_autocast_fused_optimizers(
                     optimizer_ctor=optim_cls, optimizer_kwargs=kwargs, separate_unscale=_separate_unscale)
@@ -1704,25 +1705,27 @@ class TestOptimRenewed(TestCase):
             kwargs['lr'] = 1.0
         opt_control = optimizer_ctor(mod_control.parameters(), **kwargs)
 
-        scaler = torch.cpu.amp.GradScaler(init_scale=128.0)
+        scaler_scaling = torch.cpu.amp.GradScaler(init_scale=128.0)
+        scaler_control = torch.cpu.amp.GradScaler(init_scale=128.0)
+
         for input, target in data:
             opt_control.zero_grad()
             with torch.autocast('cpu', dtype=torch.half):
                 output_control = mod_control(input)
                 loss_control = loss_fn(output_control, target)
-            scaler.scale(loss_control).backward()
-            scaler.step(opt_control)
-            scaler.update()
+            scaler_control.scale(loss_control).backward()
+            scaler_control.step(opt_control)
+            scaler_control.update()
 
             opt_scaling.zero_grad()
             with torch.autocast('cpu', dtype=torch.half):
                 output_scaling = mod_scaling(input)
                 loss_scaling = loss_fn(output_scaling, target)
-            scaler.scale(loss_scaling).backward()
+            scaler_scaling.scale(loss_scaling).backward()
             if separate_unscale:
-                scaler.unscale_(opt_scaling)
-            scaler.step(opt_scaling)
-            scaler.update()
+                scaler_scaling.unscale_(opt_scaling)
+            scaler_scaling.step(opt_scaling)
+            scaler_scaling.update()
 
             self.assertEqual(loss_control, loss_scaling,)
             for param_control, param_scaling in zip(mod_control.parameters(), mod_scaling.parameters()):
