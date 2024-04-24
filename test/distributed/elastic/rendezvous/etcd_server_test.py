@@ -6,8 +6,8 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 import os
-import unittest
 import sys
+import unittest
 
 import etcd
 from torch.distributed.elastic.rendezvous.etcd_rendezvous import (
@@ -19,6 +19,7 @@ from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
 if os.getenv("CIRCLECI"):
     print("T85992919 temporarily disabling in circle ci", file=sys.stderr)
     sys.exit(0)
+
 
 class EtcdServerTest(unittest.TestCase):
     def test_etcd_server_start_stop(self):
