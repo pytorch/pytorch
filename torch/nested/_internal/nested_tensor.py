@@ -99,7 +99,7 @@ class NestedTensor(torch.Tensor):
             True,  # dispatch_layout
             ks,
             # don't try to calculate storage based on non-zero size
-            _override_storage_size=values.numel() * values.dtype.itemsize,
+            _override_numel=values.numel(),
         )
         r._ragged_idx = _ragged_idx
         r._size = _size
