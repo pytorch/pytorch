@@ -2,13 +2,12 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <ATen/core/boxing/KernelFunction.h>
 
 #include <torch/csrc/dynamo/guards.h>
 #include <torch/csrc/inductor/aoti_eager/kernel_meta_info.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner.h>
 #include <torch/csrc/utils/pybind.h>
-
-#include <torch/csrc/utils/python_dispatch.h>
 
 #include <string>
 
@@ -27,19 +26,12 @@ struct AOTIKernelState {
 // kernel library is loaded and executed. If a cache miss occurs, the AOT
 // Inductor is called again to generate the kernel library.
 class AOTIPythonKernelHolder : public c10::OperatorKernel {
-  // A PythonKernelHolder object that holds the fallback PyTorch kernel in case
-  // the AOT Inductor fails to generate a kernel.
-  torch::impl::dispatch::PythonKernelHolder python_kernel_holder_;
   // A DispatchKey object that represents the dispatch key for the kernel.
   c10::DispatchKey dispatch_key_;
   // Namespace of the kernel.
   std::string ns_;
   // Name of the operation the kernel performs.
-  std::string op_name_;
-  // Name of the overloaded operation the kernel performs.
-  std::string op_overload_name_;
-  // Has a fallback function or not.
-  bool has_fall_back_;
+  std::string op_name_with_overload_;
   // The device on which the kernel is to be executed.
   c10::Device device_;
   // The Python interpreter to get OpOverload object with the given op_name and
@@ -52,11 +44,9 @@ class AOTIPythonKernelHolder : public c10::OperatorKernel {
 
  public:
   AOTIPythonKernelHolder(
-      py::object fall_back_func,
       c10::DispatchKey dispatch_key,
       c10::string_view ns,
-      c10::string_view op_name,
-      c10::string_view op_overload_name);
+      c10::string_view op_name_with_overload);
 
   void operator()(
       const c10::OperatorHandle& op,
