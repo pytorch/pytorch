@@ -445,10 +445,10 @@ class FileSystemWriter(StorageWriter):
         self.fs.mkdir(self.path)
         return plan
 
-    def prepare_global_plan(self, global_plan: List[SavePlan]) -> List[SavePlan]:
+    def prepare_global_plan(self, plans: List[SavePlan]) -> List[SavePlan]:
         new_plans = [
             dataclasses.replace(plan, storage_data=_StoragePrefix(f"__{i}_"))
-            for i, plan in enumerate(global_plan)
+            for i, plan in enumerate(plans)
         ]
         return new_plans
 
@@ -617,8 +617,8 @@ class FileSystemReader(StorageReader):
     def prepare_local_plan(self, plan: LoadPlan) -> LoadPlan:
         return plan
 
-    def prepare_global_plan(self, global_plan: List[LoadPlan]) -> List[LoadPlan]:
-        return global_plan
+    def prepare_global_plan(self, plans: List[LoadPlan]) -> List[LoadPlan]:
+        return plans
 
     @property
     def checkpoint_id(self) -> Union[str, os.PathLike]:
