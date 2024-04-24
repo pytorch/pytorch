@@ -3960,22 +3960,21 @@ class TestSerialization(TestCase, SerializationMixin):
         with tempfile.NamedTemporaryFile() as f:
             torch.save(sd, f)
             # with MmapVisibility.MAP_PRIVATE, should not be able to modify file
-            f.seek(0)
             sd_loaded = torch.load(f.name, mmap=True)
             sd_loaded['weight'][0][0] = 0
-            f.seek(0)
             sd_loaded2 = torch.load(f.name, mmap=True)
             self.assertEqual(sd_loaded2['weight'], sd['weight'])
             # with MmapVisibility.MAP_SHARED, should be able to modify file
             torch.serialization.set_default_mmap_visibility(MmapVisibility.MAP_SHARED)
-            f.seek(0)
-            sd_loaded = torch.load(f.name, mmap=True)
-            sd_loaded['weight'][0][0] = 0
-            f.seek(0)
-            sd_loaded2 = torch.load(f.name, mmap=True)
-            self.assertNotEqual(sd_loaded2['weight'], sd['weight'])
-            self.assertEqual(sd_loaded2['weight'][0][0].item(), 0)
-            self.assertEqual(sd_loaded2['weight'], sd_loaded['weight'])
+            try:
+                sd_loaded = torch.load(f.name, mmap=True)
+                sd_loaded['weight'][0][0] = 0
+                sd_loaded2 = torch.load(f.name, mmap=True)
+                self.assertNotEqual(sd_loaded2['weight'], sd['weight'])
+                self.assertEqual(sd_loaded2['weight'][0][0].item(), 0)
+                self.assertEqual(sd_loaded2['weight'], sd_loaded['weight'])
+            finally:
+                torch.serialization.set_default_mmap_visibility(MmapVisibility.MAP_PRIVATE)
 
     @parametrize('dtype', (torch.float8_e5m2, torch.float8_e4m3fn, torch.complex32))
     @parametrize('weights_only', (True, False))
