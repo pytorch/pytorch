@@ -10,39 +10,119 @@
 
 namespace at::autocast {
 
-TORCH_API bool is_enabled();
-TORCH_API void set_enabled(bool enabled);
+TORCH_API bool is_autocast_enabled(at::DeviceType device_type);
+TORCH_API void set_autocast_enabled(at::DeviceType device_type, bool enabled);
+TORCH_API at::ScalarType get_autocast_dtype(at::DeviceType device_type);
+TORCH_API void set_autocast_dtype(
+    at::DeviceType device_type,
+    at::ScalarType dtype);
 TORCH_API void clear_cache();
 TORCH_API int increment_nesting();
 TORCH_API int decrement_nesting();
-TORCH_API bool is_cpu_enabled();
-TORCH_API void set_cpu_enabled(bool enabled);
-TORCH_API at::ScalarType get_autocast_gpu_dtype();
-TORCH_API at::ScalarType get_autocast_cpu_dtype();
-TORCH_API void set_autocast_gpu_dtype(at::ScalarType dtype);
-TORCH_API void set_autocast_cpu_dtype(at::ScalarType dtype);
-TORCH_API bool is_xpu_enabled();
-TORCH_API void set_xpu_enabled(bool enabled);
-TORCH_API at::ScalarType get_autocast_xpu_dtype();
-TORCH_API void set_autocast_xpu_dtype(at::ScalarType dtype);
-TORCH_API bool is_ipu_enabled();
-TORCH_API void set_ipu_enabled(bool enabled);
-TORCH_API at::ScalarType get_autocast_ipu_dtype();
-TORCH_API void set_autocast_ipu_dtype(at::ScalarType dtype);
-TORCH_API bool is_hpu_enabled();
-TORCH_API void set_hpu_enabled(bool enabled);
-TORCH_API at::ScalarType get_autocast_hpu_dtype();
-TORCH_API void set_autocast_hpu_dtype(at::ScalarType dtype);
-TORCH_API bool is_xla_enabled();
-TORCH_API void set_xla_enabled(bool enabled);
-TORCH_API at::ScalarType get_autocast_xla_dtype();
-TORCH_API void set_autocast_xla_dtype(at::ScalarType dtype);
-TORCH_API bool is_privateuseone_enabled();
-TORCH_API void set_privateuseone_enabled(bool enabled);
-TORCH_API at::ScalarType get_autocast_privateuseone_dtype();
-TORCH_API void set_autocast_privateuseone_dtype(at::ScalarType dtype);
 TORCH_API bool is_autocast_cache_enabled();
 TORCH_API void set_autocast_cache_enabled(bool enabled);
+
+// deprecated CUDA-specific autocast APIs
+C10_DEPRECATED_MESSAGE(
+    "at::autocast::is_enabled() is deprecated. Please use at::autocast::is_autocast_enabled(at::kCUDA) instead.")
+TORCH_API inline bool is_enabled() {
+  TORCH_WARN_DEPRECATION(
+      "at::autocast::",
+      __func__,
+      "() is deprecated. Please use at::autocast::is_autocast_enabled(at::kCUDA) instead.")
+  return is_autocast_enabled(at::kCUDA);
+}
+C10_DEPRECATED_MESSAGE(
+    "at::autocast::set_enabled(enabled) is deprecated. Please use at::autocast::set_autocast_enabled(at::kCUDA, enabled) instead.")
+TORCH_API inline void set_enabled(bool enabled) {
+  TORCH_WARN_DEPRECATION(
+      "at::autocast::",
+      __func__,
+      "(enabled) is deprecated. Please use at::autocast::set_autocast_enabled(at::kCUDA, enabled) instead.")
+  set_autocast_enabled(at::kCUDA, enabled);
+}
+C10_DEPRECATED_MESSAGE(
+    "at::autocast::get_autocast_gpu_dtype() is deprecated. Please use at::autocast::get_autocast_dtype(at::kCUDA) instead.")
+TORCH_API inline at::ScalarType get_autocast_gpu_dtype() {
+  TORCH_WARN_DEPRECATION(
+      "at::autocast::",
+      __func__,
+      "() is deprecated. Please use at::autocast::get_autocast_dtype(at::kCUDA) instead.")
+  return get_autocast_dtype(at::kCUDA);
+}
+C10_DEPRECATED_MESSAGE(
+    "at::autocast::set_autocast_gpu_dtype(dtype) is deprecated. Please use at::autocast::set_autocast_dtype(at::kCUDA, dtype) instead.")
+TORCH_API inline void set_autocast_gpu_dtype(at::ScalarType dtype) {
+  TORCH_WARN_DEPRECATION(
+      "at::autocast::",
+      __func__,
+      "(dtype) is deprecated. Please use at::autocast::set_autocast_dtype(at::kCUDA, dtype) instead.")
+  set_autocast_dtype(at::kCUDA, dtype);
+}
+
+#define DECLARE_DEPRECATED_AUTOCAST_APIS(name, device_type)                                          \
+  C10_DEPRECATED_MESSAGE(                                                                            \
+      "at::autocast::is_" #name                                                                      \
+      "_enabled() is deprecated. Please use at::autocast::is_autocast_enabled(" #device_type         \
+      ") instead.")                                                                                  \
+  TORCH_API inline bool is_##name##_enabled() {                                                      \
+    TORCH_WARN_DEPRECATION(                                                                          \
+        "at::autocast::",                                                                            \
+        __func__,                                                                                    \
+        "() is deprecated. Please use at::autocast::is_autocast_enabled(" #device_type               \
+        ") instead.")                                                                                \
+    return is_autocast_enabled(device_type);                                                         \
+  }                                                                                                  \
+                                                                                                     \
+  C10_DEPRECATED_MESSAGE(                                                                            \
+      "at::autocast::set_" #name                                                                     \
+      "_enabled(enabled) is deprecated. Please use at::autocast::set_autocast_enabled(" #device_type \
+      ", enabled) instead.")                                                                         \
+  TORCH_API inline void set_##name##_enabled(bool enabled) {                                         \
+    TORCH_WARN_DEPRECATION(                                                                          \
+        "at::autocast::",                                                                            \
+        __func__,                                                                                    \
+        "(enabled) is deprecated. Please use at::autocast::set_autocast_enabled(" #device_type       \
+        ", enabled) instead.")                                                                       \
+    set_autocast_enabled(device_type, enabled);                                                      \
+  }                                                                                                  \
+                                                                                                     \
+  C10_DEPRECATED_MESSAGE(                                                                            \
+      "at::autocast::get_autocast_" #name                                                            \
+      "_dtype() is deprecated. Please use at::autocast::get_autocast_dtype(" #device_type            \
+      ") instead.")                                                                                  \
+  TORCH_API inline at::ScalarType get_autocast_##name##_dtype() {                                    \
+    TORCH_WARN_DEPRECATION(                                                                          \
+        "at::autocast::",                                                                            \
+        __func__,                                                                                    \
+        "() is deprecated. Please at::autocast::get_autocast_dtype(" #device_type                    \
+        ") instead.")                                                                                \
+    return get_autocast_dtype(device_type);                                                          \
+  }                                                                                                  \
+                                                                                                     \
+  C10_DEPRECATED_MESSAGE(                                                                            \
+      "at::autocast::set_autocast_" #name                                                            \
+      "_dtype(dtype) is deprecated. Please use at::autocast::set_autocast_dtype(" #device_type       \
+      ", dtype) instead.")                                                                           \
+  TORCH_API inline void set_autocast_##name##_dtype(at::ScalarType dtype) {                          \
+    TORCH_WARN_DEPRECATION(                                                                          \
+        "at::autocast::",                                                                            \
+        __func__,                                                                                    \
+        "(dtype) is deprecated. Please use at::autocast::set_autocast_dtype(" #device_type           \
+        ", dtype) instead.")                                                                         \
+    set_autocast_dtype(device_type, dtype);                                                          \
+  }
+
+#define AT_FORALL_DEPRECATED_AUTOCAST_BAKCNEDS(_) \
+  _(cpu, at::kCPU)                                \
+  _(xpu, at::kXPU)                                \
+  _(xla, at::kXLA)                                \
+  _(hpu, at::kHPU)                                \
+  _(ipu, at::kIPU)                                \
+  _(privateuseone, at::kPrivateUse1)
+
+// deprecated other backend specific autocast APIs
+AT_FORALL_DEPRECATED_AUTOCAST_BAKCNEDS(DECLARE_DEPRECATED_AUTOCAST_APIS)
 
 namespace {
 inline bool is_autocast_eligible(
@@ -96,24 +176,14 @@ inline DispatchKey get_autocast_dispatch_key_from_device_type(
 
 inline at::ScalarType get_lower_precision_fp_from_device_type(
     c10::DeviceType device_type) {
-  switch (device_type) {
-    case c10::DeviceType::CUDA:
-      return get_autocast_gpu_dtype();
-    case c10::DeviceType::CPU:
-      return get_autocast_cpu_dtype();
-    case c10::DeviceType::XPU:
-      return get_autocast_xpu_dtype();
-    case c10::DeviceType::IPU:
-      return get_autocast_ipu_dtype();
-    case c10::DeviceType::HPU:
-      return get_autocast_hpu_dtype();
-    case c10::DeviceType::XLA:
-      return get_autocast_xla_dtype();
-    case c10::DeviceType::PrivateUse1:
-      return get_autocast_privateuseone_dtype();
-    default:
-      throw std::runtime_error(
-          "unknown device type for autocast in get_lower_precision_fp_from_device_type");
+  if (device_type == at::kCPU || device_type == at::kCUDA ||
+      device_type == at::kXPU || device_type == at::kIPU ||
+      device_type == at::kHPU || device_type == at::kXLA ||
+      device_type == at::kPrivateUse1) {
+    return get_autocast_dtype(device_type);
+  } else {
+    throw std::runtime_error(
+        "unknown device type for autocast in get_lower_precision_fp_from_device_type");
   }
 }
 
