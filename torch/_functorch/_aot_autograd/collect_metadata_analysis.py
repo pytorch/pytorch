@@ -8,7 +8,6 @@ a functionalized version of the graph under compilation.
 """
 
 import collections
-import contextlib
 import logging
 from functools import wraps
 from typing import Callable, DefaultDict, Dict, List
@@ -19,7 +18,7 @@ from torch import Tensor
 from torch._guards import detect_fake_mode
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._subclasses.meta_utils import safe_is_leaf
-from torch.fx.experimental.symbolic_shapes import is_concrete_int, PropagateUnbackedSymInts
+from torch.fx.experimental.symbolic_shapes import is_concrete_int
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
