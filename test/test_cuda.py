@@ -4104,7 +4104,7 @@ class TestCudaOptims(TestCase):
     @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
     @parametrize("foreach, fused", [(False, False), (True, False), (False, True)])
     @optims(
-        optim_db,
+        [optim for optim in optim_db if "foreach" in optim.supported_impls and "fused" in optim.supported_impls],
         dtypes=[torch.float32]
     )
     def test_graph_grad_scaling(self, device, dtype, optim_info, foreach, fused):
