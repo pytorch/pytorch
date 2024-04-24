@@ -18,7 +18,6 @@ from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     transform_subclass,
 )
-from .. import config
 
 aot_joint_log = getArtifactLogger(__name__, "aot_joint_graph")
 
@@ -220,7 +219,7 @@ def gen_alias_from_base(
     # In summary, we use the fact that FunctionalTensorWrapper saves the view
     # functions applied to itself (collected during functionalization) so as
     # to replay them (view functions) on the aliased_base_tensor.
-    if config.view_replay_for_aliased_outputs and target_functional_tensor is not None:
+    if target_functional_tensor is not None:
         from .schemas import FunctionalTensorMetadataEq
 
         assert isinstance(target_functional_tensor, FunctionalTensorMetadataEq)
@@ -238,10 +237,11 @@ def gen_alias_from_base(
             #
             # In order for this to work, we should have a way to replace those
             # symbolic shapes with concrete numbers.
-            aot_joint_log.info(
+            aot_joint_log.warning(
                 "could not reconstruct view by re-applying a ViewMeta sequence. "
+                "This error is possibly caused by dynamic shapes. "
                 "Fallbacking to reconstruction using as_strided. "
-                "Reason: %s",
+                "Error message: %s",
                 str(e),
             )
         else:
