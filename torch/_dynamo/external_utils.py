@@ -64,6 +64,8 @@ def create_new_fn(fn):
     return new_fn
 
 
+# Return the same wrapper if we wrap the same function/nn.module again.
+@functools.lru_cache
 def wrap_inline(fn):
     """
     Create an extra frame around fn that is not in skipfiles
