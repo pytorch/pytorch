@@ -16,6 +16,7 @@ from typing import (
 from torch.utils._exposed_in import exposed_in
 
 from .. import _C, _library, _ops, autograd, library, Tensor
+from . import utils
 
 
 device_types_t = Optional[Union[str, Sequence[str]]]
@@ -364,10 +365,12 @@ class CustomOpDef:
         :class:`torch.autograd.Function`. The semantics of ``backward_fn`` are the
         same as :meth:`torch.autograd.Function.backward`.
 
-        ``setup_context_fn(ctx, inputs, output)`` runs during the forward pass.
+        ``setup_context(ctx, inputs, output)`` runs during the forward pass.
         Please save quantities needed for backward onto the ``ctx`` object via
         either :meth:`torch.autograd.function.FunctionCtx.save_for_backward`
-        or assigning them as attributes of ``ctx``.
+        or assigning them as attributes of ``ctx``. If your custom op has
+        kwarg-only arguments, we expect the signature of ``setup_context``
+        to be ``setup_context(ctx, inputs, keyword_only_inputs, output)``.
 
         Both ``setup_context_fn`` and ``backward_fn`` must be traceable. That is,
         they may not directly access :meth:`torch.Tensor.data_ptr` and they must
@@ -399,6 +402,26 @@ class CustomOpDef:
             >>> y = numpy_sin(x)
             >>> grad_x, = torch.autograd.grad(y, x, torch.ones_like(y))
             >>> assert torch.allclose(grad_x, x.cos())
+            >>>
+            >>> # Example with a keyword-only arg
+            >>> @torch.library.custom_op("mylib::numpy_mul", mutates_args=())
+            >>> def numpy_mul(x: Tensor, *, val: float) -> Tensor:
+            >>>     x_np = x.cpu().numpy()
+            >>>     y_np = x_np * val
+            >>>     return torch.from_numpy(y_np).to(device=x.device)
+            >>>
+            >>> def setup_context(ctx, inputs, keyword_only_inputs, output) -> Tensor:
+            >>>     ctx.val = keyword_only_inputs["val"]
+            >>>
+            >>> def backward(ctx, grad):
+            >>>     return grad * ctx.val
+            >>>
+            >>> numpy_mul.register_autograd(backward, setup_context=setup_context)
+            >>>
+            >>> x = torch.randn(3, requires_grad=True)
+            >>> y = numpy_mul(x, val=3.14)
+            >>> grad_x, = torch.autograd.grad(y, x, torch.ones_like(y))
+            >>> assert torch.allclose(grad_x, torch.full_like(x, 3.14))
 
         """
         schema = self._opoverload._schema
@@ -416,15 +439,7 @@ class CustomOpDef:
         lib = self._lib
         schema_str = self._name + self._schema
         cpp_schema = _C.parse_schema(schema_str)
-
-        for a in cpp_schema.arguments:
-            if not (
-                _library.utils.is_tensor_like_type(a.type)
-                or _library.utils.is_tensorlist_like_type(a.type)
-            ):
-                continue
-            if not a.kwarg_only:
-                continue
+        if utils.has_kwarg_only_tensors(cpp_schema):
             # If you want to support this, the progression is:
             # - supporting kwarg-only Tensors that are non-differentiable
             # - supporting kwarg-only Tensors (regardless of differentiability)
