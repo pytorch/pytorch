@@ -43,6 +43,8 @@
 #include <ATen/native/transformers/cuda/mem_eff_attention/pytorch_utils.h>
 #endif
 
+#include <ATen/native/cudnn/MHA.h>
+
 namespace at::native {
 
 std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
@@ -117,7 +119,7 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
         determinisitic,
         philox_seed,
         philox_offset);
-    return std::make_tuple(dQuery, dKey, dValue);
+    return std::make_tuple(std::move(dQuery), std::move(dKey), std::move(dValue));
   } else {
     // Dense forward
     auto [dQuery, dKey, dValue, dSoftmax] = pytorch_flash::mha_bwd(
@@ -146,6 +148,52 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
   return std::make_tuple(Tensor(), Tensor(), Tensor());
 }
 
+std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_backward_cuda(
+    const Tensor& grad_out,
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const Tensor& out,
+    const Tensor& logsumexp,
+    const Tensor& cumulative_sequence_length_q,
+    const Tensor& cumulative_sequence_length_k,
+    const int64_t max_seqlen_batch_q,
+    const int64_t max_seqlen_batch_k,
+    double dropout_p,
+    bool is_causal,
+    const Tensor& philox_seed,
+    const Tensor& philox_offset,
+    c10::optional<double> scale) {
+    const int64_t batch_size = query.size(0);
+    const int64_t num_heads = query.size(1);
+    const int64_t head_dim = query.size(3);
+
+    const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
+
+    auto dq = at::empty_like(query);
+    auto dk = at::empty_like(key);
+    auto dv = at::empty_like(value);
+    run_cudnn_SDP_bprop(batch_size /*int64_t b*/,
+                        num_heads /*int64_t h*/,
+                        max_seqlen_batch_q /*int64_t s_q*/,
+                        max_seqlen_batch_k /*int64_t s_kv*/,
+                        head_dim /*int64_t d*/,
+                        softmax_scale /*float scaling_factor*/,
+                        is_causal /*bool is_causal*/,
+                        dropout_p /*float dropout_probability*/,
+                        query /*const Tensor& q*/,
+                        key /*const Tensor& k*/,
+                        value /*const Tensor& v*/,
+                        out /*const Tensor& o*/,
+                        grad_out/*const Tensor& dO*/,
+                        logsumexp.unsqueeze(-1)/*const Tensor& softmaxstats*/,
+                        dq/*Tensor& dQ*/,
+                        dk/*Tensor& dK*/,
+                        dv/*Tensor& dV*/,
+                        philox_seed/*Tensor& dropoutseed*/,
+                        philox_offset/*Tensor& dropoutoffset*/);
+    return std::make_tuple(dq, dk, dv);
+}
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>
 _efficient_attention_backward(
