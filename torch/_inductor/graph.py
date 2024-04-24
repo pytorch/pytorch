@@ -377,9 +377,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.cache_path: str = ""  # This is the path in the filesystem where the compiled artifact is stored
         self.cache_linemap: List[
             Tuple[int, str]
-        ] = (
-            []
-        )  # This is the linemap used by the profiler to mark custom compiled kernels getting run
+        ] = []  # This is the linemap used by the profiler to mark custom compiled kernels getting run
         # Used if lowering encounters cases where cudagraphs are not supported
         self.disable_cudagraphs_reason: Optional[str] = None
 
@@ -1120,7 +1118,8 @@ class GraphLowering(torch.fx.Interpreter):
             ):
                 debug("fallback_handler")
                 result = fallback_handler(n.target, add_to_fallback_set=False)(
-                    *args, **kwargs  # type: ignore[possibly-undefined]
+                    *args,
+                    **kwargs,  # type: ignore[possibly-undefined]
                 )
             elif n.op == "call_function" and n.target in layout_constraints:
                 debug("layout_constraints")
@@ -1380,9 +1379,9 @@ class GraphLowering(torch.fx.Interpreter):
                 elif isinstance(x, FakeTensor):
                     return defake(x)
                 else:
-                    assert isinstance(
-                        x, torch.Tensor
-                    ), "Unknown type when creating real inputs" + str(type(x))
+                    assert isinstance(x, torch.Tensor), (
+                        "Unknown type when creating real inputs" + str(type(x))
+                    )
                     return x
 
             if tracing_context := torch._guards.TracingContext.try_get():

@@ -19,6 +19,7 @@ printers. So simple operations like minimum and maximum cannot be translated to
 SymPy expressions yet, despite sympy.Min and sympy.Max existing.
 
 """
+
 import itertools
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Literal, Optional, overload, Tuple, Union
@@ -211,14 +212,12 @@ class IndexPropagation:
         name: Literal["indirect_indexing"],
         args: Tuple[Any, ...],
         kwargs: Dict[str, Any],
-    ) -> IndexPropVar:
-        ...
+    ) -> IndexPropVar: ...
 
     @overload
     def fallback(
         self, name: str, args: Tuple[Any, ...], kwargs: Dict[str, Any]
-    ) -> IndexPropResult:
-        ...
+    ) -> IndexPropResult: ...
 
     def fallback(
         self, name: str, args: Tuple[Any, ...], kwargs: Dict[str, Any]
@@ -243,8 +242,7 @@ class IndexPropagation:
         is_valid_expr = new_expr is not NotImplemented and (
             # Inductor doesn't expect floating point in sympy expressions, but
             # allow floating point constants to be propagated
-            new_expr.is_constant()
-            or new_expr.expr.is_integer
+            new_expr.is_constant() or new_expr.expr.is_integer
         )
         if not is_valid_expr:
             return self.fallback(name, args, kwargs)

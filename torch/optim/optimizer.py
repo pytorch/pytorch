@@ -269,15 +269,23 @@ class Optimizer:
             options (used when a parameter group doesn't specify them).
     """
 
-    OptimizerPreHook: TypeAlias = Callable[[Self, Args, Kwargs], Optional[Tuple[Args, Kwargs]]]  # type: ignore[misc]
+    OptimizerPreHook: TypeAlias = Callable[
+        [Self, Args, Kwargs], Optional[Tuple[Args, Kwargs]]
+    ]  # type: ignore[misc]
     OptimizerPostHook: TypeAlias = Callable[[Self, Args, Kwargs], None]  # type: ignore[misc]
 
     _optimizer_step_pre_hooks: Dict[int, OptimizerPreHook]
     _optimizer_step_post_hooks: Dict[int, OptimizerPostHook]
     _optimizer_state_dict_pre_hooks: 'OrderedDict[int, Callable[["Optimizer"], None]]'
-    _optimizer_state_dict_post_hooks: 'OrderedDict[int, Callable[["Optimizer", StateDict], Optional[StateDict]]]'
-    _optimizer_load_state_dict_pre_hooks: 'OrderedDict[int, Callable[["Optimizer", StateDict], Optional[StateDict]]]'
-    _optimizer_load_state_dict_post_hooks: 'OrderedDict[int, Callable[["Optimizer"], None]]'
+    _optimizer_state_dict_post_hooks: (
+        'OrderedDict[int, Callable[["Optimizer", StateDict], Optional[StateDict]]]'
+    )
+    _optimizer_load_state_dict_pre_hooks: (
+        'OrderedDict[int, Callable[["Optimizer", StateDict], Optional[StateDict]]]'
+    )
+    _optimizer_load_state_dict_post_hooks: (
+        'OrderedDict[int, Callable[["Optimizer"], None]]'
+    )
 
     def __init__(self, params: ParamsT, defaults: Dict[str, Any]) -> None:
         torch._C._log_api_usage_once("python.optimizer")
@@ -773,7 +781,9 @@ class Optimizer:
         handle = hooks.RemovableHandle(self._optimizer_load_state_dict_post_hooks)
         self._optimizer_load_state_dict_post_hooks[handle.id] = hook
         if prepend:
-            self._optimizer_load_state_dict_post_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
+            self._optimizer_load_state_dict_post_hooks.move_to_end(
+                handle.id, last=False
+            )  # type: ignore[attr-defined]
         return handle
 
     @torch._disable_dynamo
@@ -832,7 +842,10 @@ class Optimizer:
                     for k, v in value.items()
                 }
             elif isinstance(value, Iterable):
-                return type(value)(_cast(param, v, param_id=param_id, param_groups=param_groups) for v in value)  # type: ignore[call-arg]
+                return type(value)(
+                    _cast(param, v, param_id=param_id, param_groups=param_groups)
+                    for v in value
+                )  # type: ignore[call-arg]
             else:
                 return value
 
@@ -918,12 +931,10 @@ class Optimizer:
                         torch._foreach_zero_(grads)
 
     @overload
-    def step(self, closure: None = ...) -> None:
-        ...
+    def step(self, closure: None = ...) -> None: ...
 
     @overload
-    def step(self, closure: Callable[[], float]) -> float:
-        ...
+    def step(self, closure: Callable[[], float]) -> float: ...
 
     def step(self, closure: Optional[Callable[[], float]] = None) -> Optional[float]:
         r"""Performs a single optimization step (parameter update).

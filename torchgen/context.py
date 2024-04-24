@@ -38,7 +38,7 @@ F3 = TypeVar("F3", Tuple[NativeFunction, Any], List[NativeFunction])
 
 @contextlib.contextmanager
 def native_function_manager(
-    g: Union[NativeFunctionsGroup, NativeFunctionsViewGroup, NativeFunction]
+    g: Union[NativeFunctionsGroup, NativeFunctionsViewGroup, NativeFunction],
 ) -> Iterator[None]:
     if isinstance(g, NativeFunctionsGroup):
         # By default, we associate all errors with structured native functions
@@ -93,7 +93,7 @@ def method_with_native_function(func: Callable[[S, F], T]) -> Callable[[S, F], T
 
 
 def method_with_nested_native_function(
-    func: Callable[[S, F3], T]
+    func: Callable[[S, F3], T],
 ) -> Callable[[S, F3], T]:
     @functools.wraps(func)
     def wrapper(slf: S, f: F3) -> T:
@@ -106,7 +106,7 @@ def method_with_nested_native_function(
 # Convenience decorator for functions that explicitly take in a BackendIndex,
 # instead of indirectly taking one in as a closure
 def with_native_function_and_index(
-    func: Callable[[F, BackendIndex], T]
+    func: Callable[[F, BackendIndex], T],
 ) -> Callable[[F, BackendIndex], T]:
     @functools.wraps(func)
     def wrapper(f: F, backend_index: BackendIndex) -> T:
@@ -118,7 +118,7 @@ def with_native_function_and_index(
 
 # Convenience decorator for functions that explicitly take in a Dict of BackendIndices
 def with_native_function_and_indices(
-    func: Callable[[F, Dict[DispatchKey, BackendIndex]], T]
+    func: Callable[[F, Dict[DispatchKey, BackendIndex]], T],
 ) -> Callable[[F, Dict[DispatchKey, BackendIndex]], T]:
     @functools.wraps(func)
     def wrapper(f: F, backend_indices: Dict[DispatchKey, BackendIndex]) -> T:

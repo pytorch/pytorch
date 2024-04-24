@@ -2536,7 +2536,9 @@ class Layout(IRNode):
         if ndim not in [4, 5] or shape[1] == 1:
             return False
         for left, right, size in zip(
-            strides, make_channels_last_strides_for(shape), shape  # type: ignore[arg-type]
+            strides,
+            make_channels_last_strides_for(shape),
+            shape,  # type: ignore[arg-type]
         ):
             if size != 1 and left != right:
                 return False
@@ -3359,7 +3361,8 @@ class ComputedBuffer(Buffer):
                 else:
                     indices = index_vars
                 stride_lengths = [
-                    V.graph.sizevars.stride_hints(expr, indices) for expr in reads  # type: ignore[arg-type]
+                    V.graph.sizevars.stride_hints(expr, indices)
+                    for expr in reads  # type: ignore[arg-type]
                 ]
                 from .scheduler import pick_loop_order
 
@@ -5059,7 +5062,9 @@ class DynamicScalar(ExternKernel):
     # TODO: handle bools carefully
     def __init__(self, sym, data):
         data.realize()
-        super().__init__(None, NoneLayout(torch.device("cpu")), self.unwrap_storage([data]))  # type: ignore[arg-type]
+        super().__init__(
+            None, NoneLayout(torch.device("cpu")), self.unwrap_storage([data])
+        )  # type: ignore[arg-type]
         if isinstance(sym, sympy.Symbol):
             self.sym = sym
             self.is_bool = False
@@ -5292,7 +5297,9 @@ class FallbackKernel(ExternKernelAlloc):
 
         self.cpp_kernel_name = kernel._schema.name
         self.cpp_kernel_overload_name = kernel._schema.overload_name
-        self.cpp_kernel_key = f"{self.cpp_kernel_name.replace('::', '_')}_{self.cpp_kernel_overload_name}"  # type: ignore[union-attr]
+        self.cpp_kernel_key = (
+            f"{self.cpp_kernel_name.replace('::', '_')}_{self.cpp_kernel_overload_name}"  # type: ignore[union-attr]
+        )
 
         self.cpp_op_schema = get_cpp_op_schema(kernel)
         self.init_args_default_value(kernel._schema)
@@ -5322,8 +5329,8 @@ class FallbackKernel(ExternKernelAlloc):
         assert hasattr(
             self, "args_default_value"
         ), "self.args_default_value has to be provided"
-        assert pos < len(
-            self.args_default_value
+        assert (
+            pos < len(self.args_default_value)
         ), f"expected the index {pos} to be smaller than len(self.args_default_value): {len(self.args_default_value)}"
         arg_default_value = self.args_default_value[pos]["value"]
         log.debug(
@@ -5525,7 +5532,9 @@ class FallbackKernel(ExternKernelAlloc):
             self.python_kernel_name = f"torch.ops.higher_order.{kernel.__name__}"
         else:
             # For non-aten OpOverload, i.e. custom ops
-            self.python_kernel_name = f"{kernel.__module__.replace('._ops.', '.ops.')}.{kernel.__name__}"  # type: ignore[union-attr]
+            self.python_kernel_name = (
+                f"{kernel.__module__.replace('._ops.', '.ops.')}.{kernel.__name__}"  # type: ignore[union-attr]
+            )
             if V.graph.cpp_wrapper:
                 self.use_runtime_dispatch = True
                 self.set_cpp_kernel(kernel)
@@ -8427,7 +8436,9 @@ class _CollectiveKernel(FallbackKernel):
 
         self.cpp_kernel_name = kernel._schema.name
         self.cpp_kernel_overload_name = kernel._schema.overload_name
-        self.cpp_kernel_key = f"{self.cpp_kernel_name.replace('::', '_')}_{self.cpp_kernel_overload_name}"  # type: ignore[union-attr]
+        self.cpp_kernel_key = (
+            f"{self.cpp_kernel_name.replace('::', '_')}_{self.cpp_kernel_overload_name}"  # type: ignore[union-attr]
+        )
 
         self.cpp_op_schema = get_cpp_op_schema(kernel)
         self.ordered_kwargs_for_cpp_kernel = [

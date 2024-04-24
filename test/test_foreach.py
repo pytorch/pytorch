@@ -97,7 +97,9 @@ class ForeachFuncWrapper:
 
 class InplaceForeachVersionBumpCheck:
     def __init__(
-        self, testcase: TestCase, tensorlist: "List[torch.Tensor]"  # noqa: F821
+        self,
+        testcase: TestCase,
+        tensorlist: "List[torch.Tensor]",  # noqa: F821
     ) -> None:
         self._testcase = testcase
         self._tensorlist = tensorlist
@@ -483,11 +485,9 @@ class TestForeach(TestCase):
             else inputs
         )
         try:
-            with (
-                InplaceForeachVersionBumpCheck(self, inputs[0])
-                if is_inplace
-                else nullcontext()
-            ):
+            with InplaceForeachVersionBumpCheck(
+                self, inputs[0]
+            ) if is_inplace else nullcontext():
                 actual = op(inputs, self.is_cuda, is_fastpath, **kwargs)
         except RuntimeError as e:
             with self.assertRaisesRegex(type(e), re.escape(str(e))):

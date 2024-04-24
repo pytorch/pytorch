@@ -2,6 +2,7 @@
 
 Any job with a specific `sync-tag` must match all other jobs with the same `sync-tag`.
 """
+
 import argparse
 import itertools
 import json

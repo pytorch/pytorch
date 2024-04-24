@@ -54,7 +54,7 @@ class TestFreezing(JitTestCase):
                 self.a = 1  # folded
                 self.b = 1.2  # folded
                 self.c = "hello"  # folded
-                self.c2 = "hi\xA1"  # not folded
+                self.c2 = "hi\xa1"  # not folded
                 self.d = [1, 1]  # folded
                 self.e = [1.0, 1.1]  # folded
                 self.f = ["hello", "world"]  # folded
@@ -66,7 +66,7 @@ class TestFreezing(JitTestCase):
                     torch.tensor([5.5], requires_grad=True),
                 )  # folded
                 self.h = {"layer": [torch.tensor([7.7], requires_grad=True)]}
-                self.h2 = {"layer\xB1": [torch.tensor([8.8], requires_grad=True)]}
+                self.h2 = {"layer\xb1": [torch.tensor([8.8], requires_grad=True)]}
                 self.t = torch.tensor([1.2, 2.4], requires_grad=True)  # folded
                 self.ts = [
                     torch.tensor([1.0, 2.0], requires_grad=True),

@@ -615,9 +615,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 NNModuleVariable,
                 UnspecializedNNModuleVariable,
             ),
-        ), str(
-            type(args[1])
-        )  # true_fn
+        ), str(type(args[1]))  # true_fn
 
         assert isinstance(
             args[2],
@@ -627,9 +625,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 NNModuleVariable,
                 UnspecializedNNModuleVariable,
             ),
-        ), str(
-            type(args[2])
-        )  # false_fn
+        ), str(type(args[2]))  # false_fn
 
         # Our strategy for tracing the true/false branches of cond
         # are to checkpoint our graphstate, run the true branch,

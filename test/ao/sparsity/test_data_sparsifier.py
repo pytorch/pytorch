@@ -483,8 +483,9 @@ class TestBaseDataSparsifier(_BaseDataSparsiferTestCase):
             nn.Parameter(torch.randn(4, 4)),
             nn.Parameter(torch.randn(5, 5)),
         )
-        param4, param5 = nn.Parameter(torch.randn(1, 1)), nn.Parameter(
-            torch.randn(4, 4)
+        param4, param5 = (
+            nn.Parameter(torch.randn(1, 1)),
+            nn.Parameter(torch.randn(4, 4)),
         )
         data_list = [("param1", param1), ("param2", param2), ("param3", param3)]
         defaults = {"test": 3}
@@ -501,9 +502,7 @@ class TestBaseDataSparsifier(_BaseDataSparsiferTestCase):
         (
             emb1,
             emb2,
-        ) = nn.Embedding(
-            10, 3
-        ), nn.Embedding(20, 3)
+        ) = nn.Embedding(10, 3), nn.Embedding(20, 3)
         emb1_bag, emb2_bag = nn.EmbeddingBag(10, 3), nn.EmbeddingBag(20, 3)
 
         emb3, emb3_bag = nn.Embedding(15, 3), nn.EmbeddingBag(20, 3)
@@ -586,8 +585,9 @@ class TestNormDataSparsifiers(_NormDataSparsifierTestCase):
             nn.Parameter(torch.randn(4, 4)),
             nn.Parameter(torch.randn(5, 5)),
         )
-        param4, param5 = nn.Parameter(torch.randn(10, 10)), nn.Parameter(
-            torch.randn(4, 4)
+        param4, param5 = (
+            nn.Parameter(torch.randn(10, 10)),
+            nn.Parameter(torch.randn(4, 4)),
         )
         data_list = [("param1", param1), ("param2", param2), ("param3", param3)]
         defaults = {
@@ -633,9 +633,7 @@ class TestNormDataSparsifiers(_NormDataSparsifierTestCase):
         (
             emb1,
             emb2,
-        ) = nn.Embedding(
-            10, 3
-        ), nn.Embedding(20, 3)
+        ) = nn.Embedding(10, 3), nn.Embedding(20, 3)
         emb1_bag, emb2_bag = nn.EmbeddingBag(10, 3), nn.EmbeddingBag(20, 3)
 
         emb3, emb3_bag = nn.Embedding(15, 3), nn.EmbeddingBag(20, 3)

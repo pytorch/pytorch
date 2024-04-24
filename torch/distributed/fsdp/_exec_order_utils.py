@@ -189,9 +189,9 @@ class _ExecOrderData:
             return
         if self.is_first_iter:
             msg_prefix = "Forward order differs across ranks:"
-            optional_local_indices: Tuple[
-                Optional[int], ...
-            ] = self._get_handle_indices(handle)
+            optional_local_indices: Tuple[Optional[int], ...] = (
+                self._get_handle_indices(handle)
+            )
             device = handle.device  # guaranteed to be non-CPU
             num_valid_indices = sum(
                 (index is not None) for index in optional_local_indices
@@ -249,8 +249,7 @@ class _ExecOrderData:
                         (
                             rank,
                             world_indices[
-                                rank
-                                * num_valid_indices : (rank + 1)
+                                rank * num_valid_indices : (rank + 1)
                                 * num_valid_indices
                             ],
                         )

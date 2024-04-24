@@ -1,4 +1,5 @@
-""" Triton Implementation of the Templated SDPA Kernel"""
+"""Triton Implementation of the Templated SDPA Kernel"""
+
 import logging
 from typing import Any, List
 

@@ -1,6 +1,7 @@
 """Import mangling.
 See mangling.md for details.
 """
+
 import re
 
 _mangle_index = 0

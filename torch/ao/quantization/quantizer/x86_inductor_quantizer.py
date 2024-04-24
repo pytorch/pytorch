@@ -740,13 +740,13 @@ class X86InductorQuantizer(Quantizer):
                 continue
 
             self._annotate_conv_node_helper(conv_node, False, quantization_config)
-            bn_output_node.meta[
-                QUANT_ANNOTATION_KEY
-            ] = _X86InductorQuantizationAnnotation(
-                # TODO<leslie> Remove the annotate of output in QAT when qat util support pattern matcher.
-                output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
-                _annotated=True,
-                _is_output_of_quantized_pattern=True,
+            bn_output_node.meta[QUANT_ANNOTATION_KEY] = (
+                _X86InductorQuantizationAnnotation(
+                    # TODO<leslie> Remove the annotate of output in QAT when qat util support pattern matcher.
+                    output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
+                    _annotated=True,
+                    _is_output_of_quantized_pattern=True,
+                )
             )
             nodes_to_mark_annotated = list(conv_partition.nodes)
             nodes_to_mark_annotated.extend(list(bn_partition.nodes))
@@ -779,12 +779,12 @@ class X86InductorQuantizer(Quantizer):
                     matmul_node = node
                     for input_node in matmul_node.args:
                         input_qspec_map[input_node] = get_input_act_qspec(config)
-                    matmul_node.meta[
-                        QUANT_ANNOTATION_KEY
-                    ] = _X86InductorQuantizationAnnotation(
-                        input_qspec_map=input_qspec_map,
-                        _annotated=True,
-                        _is_output_of_quantized_pattern=True,
+                    matmul_node.meta[QUANT_ANNOTATION_KEY] = (
+                        _X86InductorQuantizationAnnotation(
+                            input_qspec_map=input_qspec_map,
+                            _annotated=True,
+                            _is_output_of_quantized_pattern=True,
+                        )
                     )
 
     def _annotate_conv2d_binary_unary(

@@ -124,11 +124,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
             "aten::dequantize"
         ).check_not("aten::quantize_per_channel").check("aten::dequantize").check_next(
             "aten::conv2d"
-        ).check_next(
-            "aten::quantize_per_tensor"
-        ).check_next(
-            "aten::dequantize"
-        ).run(
+        ).check_next("aten::quantize_per_tensor").check_next("aten::dequantize").run(
             freezed.graph
         )
 
@@ -734,13 +730,9 @@ class TestQuantizeJitPasses(QuantizationTestCase):
             'prim::GetAttr[name="conv"]'
         ).check("prim::CallMethod").check(
             'Observer = prim::GetAttr[name="_observer_'
-        ).check(
-            "aten::flatten"
-        ).check_not(
+        ).check("aten::flatten").check_not(
             'Observer = prim::GetAttr[name="_observer_'
-        ).run(
-            m.graph
-        )
+        ).run(m.graph)
 
     # TODO: this is too long, split this to test_insert_observers.py and remove
     # insrt_observers prefix
@@ -770,17 +762,11 @@ class TestQuantizeJitPasses(QuantizationTestCase):
             'prim::GetAttr[name="conv1"]'
         ).check("prim::CallMethod").check(
             'Observer = prim::GetAttr[name="_observer_'
-        ).check(
-            "aten::flatten"
-        ).check_not(
+        ).check("aten::flatten").check_not(
             'Observer = prim::GetAttr[name="_observer_'
-        ).check(
-            'prim::GetAttr[name="conv2"]'
-        ).check(
+        ).check('prim::GetAttr[name="conv2"]').check(
             'Observer = prim::GetAttr[name="_observer_'
-        ).run(
-            m.graph
-        )
+        ).run(m.graph)
 
     def test_insert_observers_propagate_observed_in_submodule(self):
         """Make sure we propagate observed property through general ops"""
@@ -809,17 +795,11 @@ class TestQuantizeJitPasses(QuantizationTestCase):
             'prim::GetAttr[name="conv1"]'
         ).check("prim::CallMethod").check(
             'Observer = prim::GetAttr[name="_observer_'
-        ).check(
-            "prim::CallMethod"
-        ).check_not(
+        ).check("prim::CallMethod").check_not(
             'Observer = prim::GetAttr[name="_observer_'
-        ).check(
-            'prim::GetAttr[name="conv2"]'
-        ).check(
+        ).check('prim::GetAttr[name="conv2"]').check(
             'Observer = prim::GetAttr[name="_observer_'
-        ).run(
-            m.graph
-        )
+        ).run(m.graph)
 
     def test_insert_observers_propagate_observed_for_function(self):
         def channel_shuffle(x: torch.Tensor, groups: int) -> torch.Tensor:
@@ -1334,11 +1314,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
             "aten::avg_pool2d"
         ).check("aten::q_scale").check_next("aten::q_zero_point").check_next(
             "prim::dtype"
-        ).check_next(
-            "aten::quantize_per_tensor"
-        ).check(
-            "aten::dequantize"
-        ).run(
+        ).check_next("aten::quantize_per_tensor").check("aten::dequantize").run(
             model.graph
         )
 
@@ -1757,9 +1733,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
                     "aten::relu"
                 ).check_not(f"quantized::conv{dim}d(").check_not(
                     "quantized::relu("
-                ).run(
-                    m.graph
-                )
+                ).run(m.graph)
 
     @skipIfNoFBGEMM
     def test_quantized_add_alpha(self):
@@ -1910,9 +1884,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
                     "aten::relu("
                 ).check_not("aten::relu_(").check_not("quantized::add(").check_not(
                     "quantized::relu("
-                ).run(
-                    m.graph
-                )
+                ).run(m.graph)
 
     @skipIfNoFBGEMM
     def test_quantized_add(self):
@@ -2119,9 +2091,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
                     "aten::relu("
                 ).check_not("aten::relu_(").check_not("quantized::add(").check_not(
                     "quantized::relu("
-                ).run(
-                    m.graph
-                )
+                ).run(m.graph)
 
     @skipIfNoFBGEMM
     def test_quantized_add_scalar_relu(self):
@@ -2205,11 +2175,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
                     "aten::relu("
                 ).check_not("aten::relu_(").check_not(
                     "quantized::add_scalar("
-                ).check_not(
-                    "quantized::relu("
-                ).run(
-                    m.graph
-                )
+                ).check_not("quantized::relu(").run(m.graph)
 
     @skipIfNoFBGEMM
     def test_quantized_cat(self):
@@ -2544,9 +2510,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
                     "aten::relu("
                 ).check_not("aten::relu_(").check_not("quantized::mul(").check_not(
                     "quantized::relu("
-                ).run(
-                    m.graph
-                )
+                ).run(m.graph)
 
     @skipIfNoFBGEMM
     def test_quantized_mul_scalar_relu(self):
@@ -2629,11 +2593,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
                     "aten::relu("
                 ).check_not("aten::relu_(").check_not(
                     "quantized::mul_scalar("
-                ).check_not(
-                    "quantized::relu("
-                ).run(
-                    m.graph
-                )
+                ).check_not("quantized::relu(").run(m.graph)
 
     @override_qengines
     def test_hardswish(self):
@@ -3103,9 +3063,7 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
             'Observer = prim::GetAttr[name="_observer_'
         ).check("prim::CallMethod").check_not(
             'Observer = prim::GetAttr[name="_observer_'
-        ).run(
-            m.graph
-        )
+        ).run(m.graph)
 
     def test_insert_quant_dequant_linear_dynamic(self):
         class M(torch.nn.Module):
@@ -3141,21 +3099,11 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
                 act_quant_func
             ).check_next("aten::dequantize").check(
                 "aten::_choose_qparams_per_tensor"
-            ).check_next(
-                act_quant_func
-            ).check_next(
-                "aten::dequantize"
-            ).check(
+            ).check_next(act_quant_func).check_next("aten::dequantize").check(
                 wt_quant_func
-            ).check_next(
-                "aten::dequantize"
-            ).check_not(
-                wt_quant_func
-            ).check(
+            ).check_next("aten::dequantize").check_not(wt_quant_func).check(
                 "return"
-            ).run(
-                m.graph
-            )
+            ).run(m.graph)
 
     @override_qengines
     def test_dynamic_multi_op(self):

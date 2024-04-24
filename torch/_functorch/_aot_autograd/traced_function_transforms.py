@@ -425,9 +425,7 @@ def create_functionalized_fn(
                     and not inpt_info.mutates_data
                     and not inpt_info.mutates_storage_metadata
                 ):
-                    assert (
-                        not inpt_info.requires_grad
-                    ), "Found a graph input that requires_grad and was mutated in the backward. This is not supported"
+                    assert not inpt_info.requires_grad, "Found a graph input that requires_grad and was mutated in the backward. This is not supported"
                     # Otherwise, put the mutation in the graph
                     before.copy_(after)
             # Now that we covered mutations to *forward* inputs during the backward,
@@ -438,10 +436,11 @@ def create_functionalized_fn(
             for f_inpt, before, after in zip(
                 f_args[1], tangents_before, tangents_after
             ):
-                assert not has_metadata_mutation(
-                    f_inpt, before, check_only_storage_mutation=False
-                ) and not has_data_mutation(
-                    f_inpt
+                assert (
+                    not has_metadata_mutation(
+                        f_inpt, before, check_only_storage_mutation=False
+                    )
+                    and not has_data_mutation(f_inpt)
                 ), "Found an input to the backward that was mutated during the backward pass. This is not supported"
 
         if aot_config.keep_inference_input_mutations:

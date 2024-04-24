@@ -225,7 +225,7 @@ def _type_of(key):
 
 
 def convert_shape_to_inductor(
-    lst: Iterable[Union[int, torch.SymInt]]
+    lst: Iterable[Union[int, torch.SymInt]],
 ) -> List[sympy.Expr]:
     """
     Gets the shape and stride of a tensor. For non-symbolic tensors, this is
@@ -238,7 +238,7 @@ def convert_shape_to_inductor(
 
 
 def convert_shape_to_symint(
-    lst: Iterable[Union[int, sympy.Expr]]
+    lst: Iterable[Union[int, sympy.Expr]],
 ) -> List[Union[int, torch.SymInt]]:
     """
     Takes a list of shapes from Inductor and converts them into symints (or just
@@ -379,11 +379,9 @@ RV = TypeVar("RV", covariant=True)
 
 class CachedMethod(Generic[P, RV], Protocol):
     @staticmethod
-    def clear_cache(self) -> None:
-        ...
+    def clear_cache(self) -> None: ...
 
-    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> RV:
-        ...
+    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> RV: ...
 
 
 # See https://github.com/python/mypy/issues/13222#issuecomment-1193073470 to understand the type signature

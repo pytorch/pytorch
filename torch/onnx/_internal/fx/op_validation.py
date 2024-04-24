@@ -304,7 +304,10 @@ def _convert_torch_args_to_onnxfunction_args(
     args: List[fx_type_utils.Argument],
     kwargs: Dict[str, fx_type_utils.Argument],
     allow_extra_kwargs: bool = False,
-) -> Tuple[List[Any], Dict[str, Any],]:
+) -> Tuple[
+    List[Any],
+    Dict[str, Any],
+]:
     """Convert Python args and kwargs to OnnxFunction acceptable with matching ONNX ParamSchema.
 
     NOTE: This is different from the param_schema separating in dispatcher, since at this point

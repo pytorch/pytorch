@@ -6,7 +6,6 @@ This file contains utilities related to functionalization in AOTAutograd:
 4. checking if a graph is functional i.e. whether it contains any mutation ops
 """
 
-
 import torch
 from torch import Tensor
 from torch._logging import getArtifactLogger
@@ -387,9 +386,7 @@ def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
                 placeholders.remove(n.args[0])
                 mutation_count += 1
             else:
-                assert (
-                    not n.target._schema.is_mutable
-                ), f"aot_autograd expected to have an entirely functional graph, but found {n.format_node()}"
+                assert not n.target._schema.is_mutable, f"aot_autograd expected to have an entirely functional graph, but found {n.format_node()}"
     return mutation_count
 
 
@@ -432,7 +429,5 @@ def _check_if_mutation_can_be_in_graph(
     # If there was a `set_()`, we require that all mutations were under no_grad,
     # so we can (safely) emit the set_() in the graph at runtime
     if mutates_storage_metadata:
-        assert (
-            in_graph
-        ), "input tensor encountered a set_(), but had other mutations that prevented us from including it in the graph safely"
+        assert in_graph, "input tensor encountered a set_(), but had other mutations that prevented us from including it in the graph safely"
     return in_graph

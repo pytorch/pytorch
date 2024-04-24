@@ -697,7 +697,8 @@ def _process_dynamic_shapes(
                 id(tensor),
                 i,
                 StrictMinMaxConstraint(
-                    vr=ValueRanges(lower=dim.value, upper=dim.value), warn_only=False  # type: ignore[attr-defined]
+                    vr=ValueRanges(lower=dim.value, upper=dim.value),
+                    warn_only=False,  # type: ignore[attr-defined]
                 ),
                 debug_name=dim.__name__,
             )
@@ -779,7 +780,11 @@ def _process_dynamic_shapes(
     combined_args = signature.bind(*args, **kwargs).arguments
 
     # This means user didn't specify dynamic shapes with argument names.
-    combined_args = combined_args if isinstance(dynamic_shapes, Mapping) else list(combined_args.values())  # type: ignore[assignment]
+    combined_args = (
+        combined_args
+        if isinstance(dynamic_shapes, Mapping)
+        else list(combined_args.values())
+    )  # type: ignore[assignment]
     for tensor, shape in tree_zip(combined_args, dynamic_shapes):
         update_symbols(tensor, shape)
 

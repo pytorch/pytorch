@@ -117,6 +117,7 @@ perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 @dataclasses.dataclass(frozen=True)
 class GraphID:
     "Unique counter of a cuda graph recording"
+
     id: int
 
 
@@ -675,6 +676,7 @@ class OutputAliasInfo:
 
 class _UnaliasedStorage(OutputAliasInfo):
     "Singleton to mark that the graph output constructs a new alias or is None"
+
     pass
 
 
@@ -683,6 +685,7 @@ UnaliasedStorage = _UnaliasedStorage()
 
 class AliasesPriorGraphOutput(OutputAliasInfo):
     "Marks that the graph output aliases an output of a prior graph"
+
     __slots__ = ["index"]
 
     index: PathOutputIndex
@@ -906,9 +909,9 @@ class CUDAGraphNode:
         self.static_output_tensors: OutputList[Optional[Tensor]] = []
 
         # Cleared after recording
-        self.recording_outputs: Optional[
-            OutputList[Union[torch.Tensor, int]]
-        ] = self._record(wrapped_function.model, recording_inputs)
+        self.recording_outputs: Optional[OutputList[Union[torch.Tensor, int]]] = (
+            self._record(wrapped_function.model, recording_inputs)
+        )
         self.outputs_metadata: OutputList[Union[Dict[str, Any], int, None]] = []
 
         # As with inputs, we do not want to keep the outputs permanently alive because that would prevent
@@ -1161,13 +1164,15 @@ class CUDAGraphNode:
                 self.output_storage_alias.append(UnaliasedStorage)
                 continue
 
-            torch._check(
-                o.is_cuda or o.untyped_storage().data_ptr() == 0,
-                lambda: (
-                    "Expected all cuda outputs in cuda graph recording. Non cuda output "
-                    f"from {self.stack_traces[i] if self.stack_traces else '(unknown)'}"
+            (
+                torch._check(
+                    o.is_cuda or o.untyped_storage().data_ptr() == 0,
+                    lambda: (
+                        "Expected all cuda outputs in cuda graph recording. Non cuda output "
+                        f"from {self.stack_traces[i] if self.stack_traces else '(unknown)'}"
+                    ),
                 ),
-            ),
+            )
 
             ref = static_input_persistent_storage_ptrs.get(
                 o.untyped_storage().data_ptr(), None
@@ -1602,9 +1607,7 @@ def format_tb(frames):
 
 
 def check_memory_pool(device, pool_id, live_storages_ptrs: List[StorageWeakRefWrapper]):
-    assert all(
-        isinstance(elem, StorageWeakRefWrapper) for elem in live_storages_ptrs
-    )  # noqa: C419
+    assert all(isinstance(elem, StorageWeakRefWrapper) for elem in live_storages_ptrs)  # noqa: C419
     unique_storages = {stor.data_ptr() for stor in live_storages_ptrs if stor()}
 
     # check if there is a divergence first, then do the expensive snapshot call after

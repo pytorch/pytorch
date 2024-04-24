@@ -155,9 +155,9 @@ class _InductorModule(torch.nn.Module):
     def __init__(self, gm: torch.fx.GraphModule) -> None:
         super().__init__()
         self.gm = gm
-        self.compiled: Optional[
-            Callable[[List[torch.Tensor]], List[torch.Tensor]]
-        ] = None
+        self.compiled: Optional[Callable[[List[torch.Tensor]], List[torch.Tensor]]] = (
+            None
+        )
 
     def forward(self, *args: torch.Tensor, tag: str) -> List[torch.Tensor]:
         if self.compiled is None:

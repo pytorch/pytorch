@@ -62,6 +62,7 @@ class Wishart(ExponentialFamily):
     [4] Odell, P. L. & Feiveson, A. H., 1966. `A Numerical Procedure to Generate a SampleCovariance Matrix`. JASA, 61(313):199-203.
     [5] Ku, Y.-C. & Bloomfield, P., 2010. `Generating Random Wishart Matrices with Fractional Degrees of Freedom in OX`.
     """
+
     arg_constraints = {
         "covariance_matrix": constraints.positive_definite,
         "precision_matrix": constraints.positive_definite,
@@ -80,9 +81,12 @@ class Wishart(ExponentialFamily):
         scale_tril: Optional[torch.Tensor] = None,
         validate_args=None,
     ):
-        assert (covariance_matrix is not None) + (scale_tril is not None) + (
-            precision_matrix is not None
-        ) == 1, "Exactly one of covariance_matrix or precision_matrix or scale_tril may be specified."
+        assert (
+            (covariance_matrix is not None)
+            + (scale_tril is not None)
+            + (precision_matrix is not None)
+            == 1
+        ), "Exactly one of covariance_matrix or precision_matrix or scale_tril may be specified."
 
         param = next(
             p

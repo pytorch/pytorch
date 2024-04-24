@@ -983,16 +983,18 @@ init_command = [
     'PyYAML==6.0.1',
 ]
 
-# Black + usort
 [[linter]]
-code = 'UFMT'
+code = 'RUFF_FORMAT'
 include_patterns = [
     '**/*.py',
     '**/*.pyi',
 ]
 command = [
     'python3',
-    'tools/linter/adapters/ufmt_linter.py',
+    '-m',
+    'lintrunner_adapters',
+    'run',
+    'ruff_format_linter',
     '--',
     '@{{PATHSFILE}}'
 ]

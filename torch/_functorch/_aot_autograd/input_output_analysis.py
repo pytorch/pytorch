@@ -366,9 +366,7 @@ def compute_overlapping_inputs(fwd_inputs, aliased_input_indices):
                 )
             ):
                 dynamic_shape_indices.add(j_)
-        assert (
-            len(dynamic_shape_indices) == 0
-        ), f"""\
+        assert len(dynamic_shape_indices) == 0, f"""\
 Encountered a graph where:
 - {num_aliases} graph inputs all share the same storage (input indices: {str(aliased_input_indices)})
 - at least one of these aliased inputs was mutated

@@ -40,7 +40,7 @@ standard_library = ["typing_extensions"]
 
 [tool.ruff]
 target-version = "py38"
-line-length = 120
+line-length = 88
 
 [tool.ruff.lint]
 # NOTE: Synchoronize the ignores with .flake8

@@ -1,5 +1,4 @@
-"""Locally Optimal Block Preconditioned Conjugate Gradient methods.
-"""
+"""Locally Optimal Block Preconditioned Conjugate Gradient methods."""
 # Author: Pearu Peterson
 # Created: February 2020
 
@@ -997,7 +996,10 @@ class LOBPCG:
         )
 
     def _get_svqb(
-        self, U: Tensor, drop: bool, tau: float  # Tensor  # bool  # float
+        self,
+        U: Tensor,
+        drop: bool,
+        tau: float,  # Tensor  # bool  # float
     ) -> Tensor:
         """Return B-orthonormal U.
 

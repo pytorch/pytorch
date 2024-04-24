@@ -365,8 +365,8 @@ class TensorParallelRNGTracker(RNGStateTracker):
                 try:
                     yield
                 finally:
-                    self.rng_states[
-                        "tensor-parallel-rng"
-                    ] = self._device_handle.get_rng_state()
+                    self.rng_states["tensor-parallel-rng"] = (
+                        self._device_handle.get_rng_state()
+                    )
         else:
             yield

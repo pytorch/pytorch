@@ -1154,8 +1154,11 @@ def set_example_value(node, example_value):
     # the program was traced).
     node.meta["example_value"] = example_value
     shape_env = TracingContext.get().fake_mode.shape_env
-    if symbol_to_path := torch.fx.experimental.symbolic_shapes.compute_unbacked_bindings(
-        shape_env, example_value
+    if (
+        symbol_to_path
+        := torch.fx.experimental.symbolic_shapes.compute_unbacked_bindings(
+            shape_env, example_value
+        )
     ):
         node.meta["unbacked_bindings"] = symbol_to_path
 

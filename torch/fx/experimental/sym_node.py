@@ -343,7 +343,9 @@ class SymNode:
         return self.and_(other)
 
     def is_non_overlapping_and_dense(self, sizes, strides):
-        return self.is_non_overlapping_and_dense_indicator(sizes, strides).eq(to_node(self, 1))  # type: ignore[attr-defined]
+        return self.is_non_overlapping_and_dense_indicator(sizes, strides).eq(
+            to_node(self, 1)
+        )  # type: ignore[attr-defined]
 
     def int_(self):
         return self.guard_int("", 0)  # NB: uses Python backtrace

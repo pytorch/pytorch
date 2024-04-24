@@ -1071,7 +1071,7 @@ def emit_body(
                 refargname2inplace_foreacharg[ref_arg.name] = foreach_arg
 
     def gen_differentiable_input(
-        arg: Union[Argument, SelfArgument, TensorOptionsArguments]
+        arg: Union[Argument, SelfArgument, TensorOptionsArguments],
     ) -> Optional[DifferentiableInput]:
         if isinstance(arg, TensorOptionsArguments):
             return None

@@ -583,7 +583,8 @@ def _export_non_strict(
             return SymIntArgument(name=node.name)
         elif isinstance(val, torch.ScriptObject):
             return CustomObjArgument(
-                name=node.name, class_fqn=val._type().qualified_name()  # type: ignore[attr-defined]
+                name=node.name,
+                class_fqn=val._type().qualified_name(),  # type: ignore[attr-defined]
             )
         else:
             # TODO: this branch is likely wrong, all permissible ConstantArgument type
@@ -597,9 +598,15 @@ def _export_non_strict(
         user_outputs=set(graph_signature.user_outputs),  # type: ignore[arg-type]
         buffer_mutations=graph_signature.buffers_to_mutate,  # type: ignore[arg-type]
         user_input_mutations=graph_signature.user_inputs_to_mutate,  # type: ignore[arg-type]
-        grad_params=graph_signature.backward_signature.gradients_to_parameters if is_joint else {},  # type: ignore[arg-type, union-attr]
-        grad_user_inputs=graph_signature.backward_signature.gradients_to_user_inputs if is_joint else {},  # type: ignore[arg-type, union-attr]
-        loss_output=graph_signature.backward_signature.loss_output if is_joint else None,  # type: ignore[arg-type, union-attr]
+        grad_params=graph_signature.backward_signature.gradients_to_parameters
+        if is_joint
+        else {},  # type: ignore[arg-type, union-attr]
+        grad_user_inputs=graph_signature.backward_signature.gradients_to_user_inputs
+        if is_joint
+        else {},  # type: ignore[arg-type, union-attr]
+        loss_output=graph_signature.backward_signature.loss_output
+        if is_joint
+        else None,  # type: ignore[arg-type, union-attr]
         inputs=[
             make_argument_spec(i, node)
             for i, node in enumerate(gm.graph.nodes)

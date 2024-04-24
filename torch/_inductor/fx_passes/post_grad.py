@@ -95,9 +95,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             )
             pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
             if not is_same_dict(counters["inductor"], inductor_before_change):
-                optimus_scuba_log[
-                    f"{pattern_matcher_pass.pass_name}_post_grad"
-                ] = upload_graph(gm.graph)
+                optimus_scuba_log[f"{pattern_matcher_pass.pass_name}_post_grad"] = (
+                    upload_graph(gm.graph)
+                )
 
     if config._fuse_ddp_communication:
         fuse_ddp_communication(

@@ -650,9 +650,12 @@ class TestFSDPUseOrigParamsUnshardReshard(FSDPTest):
             losses1 = []
             losses2 = []
             losses = []
-            for _model, _optim in (fsdp_model, optim), (
-                fsdp_model_orig_params,
-                optim_orig_params,
+            for _model, _optim in (
+                (fsdp_model, optim),
+                (
+                    fsdp_model_orig_params,
+                    optim_orig_params,
+                ),
             ):
                 _optim.zero_grad()
                 loss1 = _model(*inp1)

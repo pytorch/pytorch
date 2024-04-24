@@ -37,7 +37,8 @@ def filtered_configs(
     m = max(
         next_power_of_2(
             V.graph.sizevars.size_hint(
-                m, fallback=torch._inductor.config.unbacked_symint_fallback  # type: ignore[arg-type]
+                m,
+                fallback=torch._inductor.config.unbacked_symint_fallback,  # type: ignore[arg-type]
             )
         ),
         min_block_size,
@@ -45,7 +46,8 @@ def filtered_configs(
     n = max(
         next_power_of_2(
             V.graph.sizevars.size_hint(
-                n, fallback=torch._inductor.config.unbacked_symint_fallback  # type: ignore[arg-type]
+                n,
+                fallback=torch._inductor.config.unbacked_symint_fallback,  # type: ignore[arg-type]
             )
         ),
         min_block_size,
@@ -53,7 +55,8 @@ def filtered_configs(
     k = max(
         next_power_of_2(
             V.graph.sizevars.size_hint(
-                k, fallback=torch._inductor.config.unbacked_symint_fallback  # type: ignore[arg-type]
+                k,
+                fallback=torch._inductor.config.unbacked_symint_fallback,  # type: ignore[arg-type]
             )
         ),
         min_block_size,
@@ -202,8 +205,7 @@ def mm_options(config, sym_m, sym_n, sym_k, layout, b_prologue_cast_type=None):
     """
     even_k_symbolic = (
         # it isn't worth guarding on this
-        sympy.gcd(sym_k, config.kwargs["BLOCK_K"])
-        == config.kwargs["BLOCK_K"]
+        sympy.gcd(sym_k, config.kwargs["BLOCK_K"]) == config.kwargs["BLOCK_K"]
     )
     allow_tf32 = torch.backends.cuda.matmul.allow_tf32 and (
         not inductor_config.force_same_precision

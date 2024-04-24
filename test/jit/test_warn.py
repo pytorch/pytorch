@@ -143,6 +143,4 @@ class TestWarn(JitTestCase):
             str="UserWarning: I am warning you from foo", count=1, exactly=True
         ).check_count(
             str="UserWarning: I am warning you from bar", count=1, exactly=True
-        ).run(
-            f.getvalue()
-        )
+        ).run(f.getvalue())

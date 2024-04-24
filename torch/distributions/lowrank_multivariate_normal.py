@@ -78,6 +78,7 @@ class LowRankMultivariateNormal(Distribution):
 
             capacitance = I + cov_factor.T @ inv(cov_diag) @ cov_factor
     """
+
     arg_constraints = {
         "loc": constraints.real_vector,
         "cov_factor": constraints.independent(constraints.real, 2),

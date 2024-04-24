@@ -716,9 +716,7 @@ def aot_dispatch_autograd(
             # We need to return them in the forward, but ensure that they all do not get gradients in the backward,
             # and we filter them out here before passing the remaining grad_outputs into the compiled backward.
             num_intermediate_bases = CompiledFunction.metadata.num_intermediate_bases
-            num_graph_handled_inputs = (
-                CompiledFunction.metadata.num_mutated_graph_handled_indices_seen_by_autograd
-            )
+            num_graph_handled_inputs = CompiledFunction.metadata.num_mutated_graph_handled_indices_seen_by_autograd
             num_mutated_runtime_inps = (
                 CompiledFunction.metadata.num_mutated_inp_runtime_indices
             )
@@ -750,8 +748,7 @@ def aot_dispatch_autograd(
             inp_tangents, out_tangents, intermediate_base_tangents = (
                 flat_args[num_tokens:num_mutated_runtime_inps],
                 flat_args[
-                    num_tokens
-                    + num_mutated_runtime_inps : num_tokens
+                    num_tokens + num_mutated_runtime_inps : num_tokens
                     + num_mutated_runtime_inps
                     + CompiledFunction.metadata.num_outputs
                 ],
@@ -860,9 +857,7 @@ def aot_dispatch_autograd(
             grad_output_types_ = [
                 torch.Tensor if x is FakeTensor else x for x in grad_output_types
             ]
-            assert (
-                grad_output_types_ == CompiledFunction.metadata.output_types
-            ), f"""\
+            assert grad_output_types_ == CompiledFunction.metadata.output_types, f"""\
 We incorrectly attempted to compile the backward with incorrect subclass metadata.
 If you run into this error, please file an issue.
 Expected grad_output types: {str(CompiledFunction.metadata.output_types)}

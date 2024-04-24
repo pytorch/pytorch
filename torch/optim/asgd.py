@@ -273,9 +273,8 @@ def _single_tensor_asgd(
         # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
         if not torch._utils.is_compiling() and capturable:
             assert (
-                param.is_cuda and mu.is_cuda and eta.is_cuda and step_t.is_cuda
-            ) or (
-                param.is_xla and mu.is_xla and eta.is_xla and step_t.is_xla
+                (param.is_cuda and mu.is_cuda and eta.is_cuda and step_t.is_cuda)
+                or (param.is_xla and mu.is_xla and eta.is_xla and step_t.is_xla)
             ), "If capturable=True, params, mus, etas, and state_steps must be CUDA or XLA tensors."
 
         if torch.is_complex(param):
@@ -432,9 +431,7 @@ def _multi_tensor_asgd(
             new_mus = []
 
             for i in range(len(grouped_mus)):
-                new_eta = _to_tensor(
-                    lr / (1 + lambd * lr * step**alpha), device=device
-                )
+                new_eta = _to_tensor(lr / (1 + lambd * lr * step**alpha), device=device)
                 new_etas.append(new_eta)
                 new_mu = _to_tensor(1 / max(1, step - t0), device=device)
                 new_mus.append(new_mu)

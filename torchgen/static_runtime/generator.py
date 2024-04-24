@@ -25,7 +25,7 @@ logger: logging.Logger = logging.getLogger()
 
 
 def has_alias(
-    arguments: Sequence[Union[Argument, SelfArgument, TensorOptionsArguments]]
+    arguments: Sequence[Union[Argument, SelfArgument, TensorOptionsArguments]],
 ) -> bool:
     for arg in arguments:
         annotation = getattr(arg, "annotation", None)
@@ -287,7 +287,7 @@ def is_supported(g: Union[NativeFunctionsGroup, NativeFunctionsViewGroup]) -> bo
 
 
 def ivalue_type_conversion_method(
-    arg_type: Union[BaseType, OptionalType, Type]
+    arg_type: Union[BaseType, OptionalType, Type],
 ) -> Optional[Tuple[bool, str]]:
     """
     Return the method call expression of `c10::ivalue' to convert its contained value to

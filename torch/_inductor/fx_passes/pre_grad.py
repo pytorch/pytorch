@@ -211,9 +211,9 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
                 )
                 pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
                 if not is_same_dict(counters["inductor"], inductor_before_change):
-                    optimus_scuba_log[
-                        f"{pattern_matcher_pass.pass_name}_pre_grad"
-                    ] = upload_graph(gm.graph)
+                    optimus_scuba_log[f"{pattern_matcher_pass.pass_name}_pre_grad"] = (
+                        upload_graph(gm.graph)
+                    )
 
     if config.pre_grad_custom_pass is not None:
         config.pre_grad_custom_pass(gm.graph)

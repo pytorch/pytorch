@@ -379,8 +379,8 @@ class OpDispatcher:
                 assert res.ndim == 0, "output tensor should be scalar!"
                 return res
         elif isinstance(res, (list, tuple)):
-            assert spec is not None and isinstance(
-                spec, (list, tuple)
+            assert (
+                spec is not None and isinstance(spec, (list, tuple))
             ), f"output spec does not match with output! Expected list/tuple, got {spec}."
             res_list = []
             for e, s in zip(res, spec):

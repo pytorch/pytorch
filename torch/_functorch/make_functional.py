@@ -477,7 +477,7 @@ def make_functional_with_buffers(
 
 
 def transpose_stack(
-    tuple_of_tuple_of_tensors: Tuple[Tuple[Tensor, ...], ...]
+    tuple_of_tuple_of_tensors: Tuple[Tuple[Tensor, ...], ...],
 ) -> Tuple[Tensor, ...]:
     tuple_of_tuple_of_tensors = tuple(zip(*tuple_of_tuple_of_tensors))
     results = tuple(

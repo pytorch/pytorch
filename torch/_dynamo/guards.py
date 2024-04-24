@@ -1323,9 +1323,9 @@ class GuardBuilder(GuardBuilderBase):
             from sympy import Symbol
 
             source_pairs: List[Tuple[Source, Source]] = []
-            derived_equalities: List[  # type: ignore[type-arg]
+            derived_equalities: List[
                 Tuple[Source, Union[Source, Symbol], Callable]
-            ] = []
+            ] = []  # type: ignore[type-arg]
             phantom_symbols: Dict[str, Symbol] = {}
             for constraint in output_graph.export_constraints:
                 if constraint.t_id in output_graph.tracked_fakes_id_to_source:
@@ -1537,8 +1537,8 @@ class GuardBuilder(GuardBuilderBase):
         func_name = getframeinfo(caller)[2]
         del caller
         # We use func_name for export, so might as well get a nice defensive check out of it
-        assert func_name in dir(
-            self.__class__
+        assert (
+            func_name in dir(self.__class__)
         ), f"_produce_guard_code must be called from inside GuardedCode. Called from {func_name}"
 
         # Not all guards have names, some can be installed globally (see asserts on HAS_GRAD)

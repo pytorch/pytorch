@@ -1171,9 +1171,7 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
             output_gradients = []
             for i, (a, grad) in enumerate(zip(args, gradients)):
                 if isinstance(a, torch.Tensor) and a.requires_grad:
-                    assert (
-                        grad is not None
-                    ), """\
+                    assert grad is not None, """\
 Found a parameter that did not receive a gradient.
 "This is most likely a bug, but if this needs to be supported please comment on this Github issue:
 https://github.com/pytorch/pytorch/issues/101192
@@ -1286,7 +1284,9 @@ def aot_export_joint_simple(
     if config.debug_assert:
         # Smoke test that after partitioning, we can run the forward without any calling convention changes.
         fw_module, bw_module = aot_config.default_partition(  # noqa: F821
-            fx_g, args, num_fwd_outputs=len(fw_metadata.output_infos)  # noqa: F821
+            fx_g,
+            args,
+            num_fwd_outputs=len(fw_metadata.output_infos),  # noqa: F821
         )
         # Attempt to run the fw_module with the original user inputs
         fake_mode = detect_fake_mode(args)

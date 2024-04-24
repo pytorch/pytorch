@@ -248,9 +248,7 @@ def returntype_type(t: Type, *, mutable: bool, symint: bool = False) -> CType:
         elif t.name == BaseTy.Scalar:
             return BaseCType(scalarT)
     elif isinstance(t, ListType):
-        assert (
-            not mutable
-        ), "Native functions should never return a mutable tensor list. They should return void."
+        assert not mutable, "Native functions should never return a mutable tensor list. They should return void."
         elem = returntype_type(t.elem, mutable=False)
         assert t.size is None, f"fixed size list returns not supported: {t}"
         return VectorCType(elem)
@@ -376,7 +374,7 @@ def argument(
     has_tensor_options: bool,
 ) -> List[Binding]:
     def sub_argument(
-        a: Union[Argument, TensorOptionsArguments, SelfArgument]
+        a: Union[Argument, TensorOptionsArguments, SelfArgument],
     ) -> List[Binding]:
         return argument(
             a,

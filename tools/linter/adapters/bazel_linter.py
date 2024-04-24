@@ -5,6 +5,7 @@ archive is downloaded from some sites like GitHub because it can change. Specifi
 GitHub gives no guarantee to keep the same value forever. Check for more details at
 https://github.com/community/community/discussions/46034.
 """
+
 import argparse
 import json
 import re

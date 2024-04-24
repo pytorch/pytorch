@@ -383,9 +383,9 @@ def group_filter_overloads(
     pairs: Sequence[PythonSignatureNativeFunctionPair],
     pred: Callable[[NativeFunction], bool],
 ) -> Dict[BaseOperatorName, List[PythonSignatureNativeFunctionPair]]:
-    grouped: Dict[
-        BaseOperatorName, List[PythonSignatureNativeFunctionPair]
-    ] = defaultdict(list)
+    grouped: Dict[BaseOperatorName, List[PythonSignatureNativeFunctionPair]] = (
+        defaultdict(list)
+    )
     for pair in pairs:
         if pred(pair.function):
             grouped[pair.function.func.name.name].append(pair)
@@ -519,12 +519,12 @@ def create_python_bindings_sharded(
     grouped = group_filter_overloads(pairs, pred)
 
     def key_func(
-        kv: Tuple[BaseOperatorName, List[PythonSignatureNativeFunctionPair]]
+        kv: Tuple[BaseOperatorName, List[PythonSignatureNativeFunctionPair]],
     ) -> str:
         return kv[0].base
 
     def env_func(
-        kv: Tuple[BaseOperatorName, List[PythonSignatureNativeFunctionPair]]
+        kv: Tuple[BaseOperatorName, List[PythonSignatureNativeFunctionPair]],
     ) -> Dict[str, List[str]]:
         name, fn_pairs = kv
         return {
@@ -676,9 +676,7 @@ def load_deprecated_signatures(
                     function=pair.function,
                 )
             )
-        assert (
-            any_schema_found
-        ), f"No native function with name {aten_name} matched signature:\n  {str(schema)}"
+        assert any_schema_found, f"No native function with name {aten_name} matched signature:\n  {str(schema)}"
 
     return results
 

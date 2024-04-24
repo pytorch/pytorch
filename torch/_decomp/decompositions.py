@@ -1960,7 +1960,9 @@ def _get_batch_norm_reserve_tensor(
     )
     reserve_size = 0
     if backend == torch._C._BatchNormBackend.Cudnn:  # type: ignore[attr-defined]
-        reserve_size = torch._C._get_cudnn_batch_norm_reserve_space_size(input, training)  # type: ignore[attr-defined]
+        reserve_size = torch._C._get_cudnn_batch_norm_reserve_space_size(
+            input, training
+        )  # type: ignore[attr-defined]
     return torch.empty(
         reserve_size, dtype=torch.uint8, layout=input.layout, device=input.device
     )
@@ -2247,7 +2249,9 @@ def native_batch_norm_backward(
     dot_p = torch.sum(grad_out_cast * (input_cast - mean), reduction_axes)  # type: ignore[operator]
 
     grad_mean = _broadcast_batch_norm_backward(grad_output_sum * norm, broadcast_mask)
-    proj_scale = _broadcast_batch_norm_backward(torch.mul(dot_p * norm, invstd * invstd), broadcast_mask)  # type: ignore[operator]
+    proj_scale = _broadcast_batch_norm_backward(
+        torch.mul(dot_p * norm, invstd * invstd), broadcast_mask
+    )  # type: ignore[operator]
 
     if weight_cast is None:
         grad_scale = _broadcast_batch_norm_backward(invstd, broadcast_mask) * 1.0  # type: ignore[arg-type]
@@ -3246,8 +3250,9 @@ def one_layer_lstm_data(inp, hidden, params, has_biases, batch_sizes, reverse=Fa
 
     orig_hx = hidden[0]
     orig_cx = hidden[1]
-    hx, cx = orig_hx.narrow(0, 0, last_batch_size), orig_cx.narrow(
-        0, 0, last_batch_size
+    hx, cx = (
+        orig_hx.narrow(0, 0, last_batch_size),
+        orig_cx.narrow(0, 0, last_batch_size),
     )
 
     for inp in split_inp:
@@ -3763,8 +3768,8 @@ def nll_loss_forward(
 
     n_classes = self.shape[-1]
 
-    assert weight is None or (
-        weight.dim() == 1 and weight.numel() == n_classes
+    assert (
+        weight is None or (weight.dim() == 1 and weight.numel() == n_classes)
     ), f"weight tensor should be defined either for all {n_classes} classes or no classes but got weight tensor of shape: {weight.shape}"  # noqa: B950
 
     return _nll_loss_forward(self, target, weight, reduction, ignore_index)

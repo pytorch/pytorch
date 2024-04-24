@@ -2,6 +2,7 @@
 The following example demonstrates how to train a ConvNeXt model
 with intermediate activations sharded across mutliple GPUs via DTensor
 """
+
 import os
 import time
 

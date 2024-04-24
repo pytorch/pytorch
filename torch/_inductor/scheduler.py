@@ -161,9 +161,9 @@ class BaseSchedulerNode:
         self.ancestors: Set[str] = set()
         self.min_order: int
         self.max_order: int
-        self.last_usage: Set[
-            str
-        ] = set()  # buffers that won't be used after this kernel
+        self.last_usage: Set[str] = (
+            set()
+        )  # buffers that won't be used after this kernel
         self.written = False
 
     def __repr__(self):
@@ -351,9 +351,9 @@ class BaseSchedulerNode:
             ordered_reads = sorted(self.read_writes.reads, key=lambda x: x.name)
 
             for read in ordered_reads:
-                input_node: Optional[
-                    BaseSchedulerNode
-                ] = self.scheduler.name_to_node.get(read.name)
+                input_node: Optional[BaseSchedulerNode] = (
+                    self.scheduler.name_to_node.get(read.name)
+                )
                 if (
                     input_node
                     and V.graph.wrapper_code.can_reuse(input_node, self)
@@ -404,9 +404,9 @@ class BaseSchedulerNode:
                             # update last usage of reused node
                             self.last_usage.discard(input_node.get_name())
 
-                            V.kernel.inplace_update_buffers[
-                                self.get_name()
-                            ] = input_node.get_name()
+                            V.kernel.inplace_update_buffers[self.get_name()] = (
+                                input_node.get_name()
+                            )
                         break
 
     def allocate(self):
@@ -1280,9 +1280,9 @@ class Scheduler:
         self.name_to_node: Dict[str, BaseSchedulerNode] = {
             n.get_name(): n for n in self.nodes
         }
-        self.name_to_fused_node: Dict[
-            str, BaseSchedulerNode
-        ] = dict()  # set in fuse_nodes()
+        self.name_to_fused_node: Dict[str, BaseSchedulerNode] = (
+            dict()
+        )  # set in fuse_nodes()
 
         # mutation_real_name: Maps back to the original name for codegen
         # Example:

@@ -12,6 +12,7 @@ if we want to generate code for another C++ library.
 Add new types to `types.py` if these types are ATen/c10 related.
 Add new types to `types_base.py` if they are basic and not attached to ATen/c10.
 """
+
 from dataclasses import dataclass
 from typing import Dict
 

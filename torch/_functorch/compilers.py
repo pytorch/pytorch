@@ -154,9 +154,7 @@ class DebugInterpreter(fx.Interpreter):
                 subst_symint_tuple(nv.size()) == rv.size()
             ), f"{desc()}: {nv.size()} aka {subst_symint_tuple(nv.size())} != {rv.size()}"
             same_strides = check_significant_strides(nv, rv)
-            assert (
-                same_strides
-            ), f"{desc()}: {nv.stride()} aka {subst_symint_tuple(nv.stride())} != {rv.stride()}"
+            assert same_strides, f"{desc()}: {nv.stride()} aka {subst_symint_tuple(nv.stride())} != {rv.stride()}"
 
         r = super().run_node(n)
         if "val" in n.meta:

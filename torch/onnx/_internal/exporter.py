@@ -123,9 +123,9 @@ class OnnxRegistry:
         # NOTE: _registry is the registry maps OpNameto a list of ONNXFunctions. It is important
         # not to directly modify this variable. Instead, access to it should be done through
         # the public methods: register_custom_op, get_ops, and is_registered_op.
-        self._registry: Dict[
-            registration.OpName, List[registration.ONNXFunction]
-        ] = defaultdict(list)
+        self._registry: Dict[registration.OpName, List[registration.ONNXFunction]] = (
+            defaultdict(list)
+        )
         # FIXME: Avoid importing onnxscript into torch
         from onnxscript.function_libs.torch_lib import (  # type: ignore[import]  # noqa: F401
             registration,
@@ -360,7 +360,9 @@ class ResolvedExportOptions(ExportOptions):
     def __init__(
         self,
         options: Union[ExportOptions, "ResolvedExportOptions"],
-        model: Optional[Union[torch.nn.Module, Callable, torch_export.ExportedProgram]] = None,  # type: ignore[name-defined]
+        model: Optional[
+            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
+        ] = None,  # type: ignore[name-defined]
     ):
         from torch.onnx._internal.fx import (  # TODO: Prevent circular dep
             diagnostics,
@@ -616,9 +618,9 @@ class ONNXRuntimeOptions:
     session_options: Optional[Sequence["onnxruntime.SessionOptions"]] = None
     """ONNX Runtime session options."""
 
-    execution_providers: Optional[
-        Sequence[Union[str, Tuple[str, Dict[Any, Any]]]]
-    ] = None
+    execution_providers: Optional[Sequence[Union[str, Tuple[str, Dict[Any, Any]]]]] = (
+        None
+    )
     """ONNX Runtime execution providers to use during model execution."""
 
     execution_provider_options: Optional[Sequence[Dict[Any, Any]]] = None
@@ -659,9 +661,9 @@ class ONNXProgram:
     _fake_context: Final[Optional[ONNXFakeContext]]  # type: ignore[misc]
     _export_exception: Final[Optional[Exception]]  # type: ignore[misc]
     _model_signature: Final[Optional[torch.export.ExportGraphSignature]]  # type: ignore[misc]
-    _model_torch: Final[  # type: ignore[misc]
+    _model_torch: Final[
         Optional[Union[torch.nn.Module, Callable, torch_export.ExportedProgram]]
-    ]
+    ]  # type: ignore[misc]
 
     @_beartype.beartype
     def __init__(
@@ -1230,9 +1232,7 @@ class Exporter:
 
         with self.options.diagnostic_context, decomposition_skip.enable_decomposition_skips(
             self.options
-        ), torch._dynamo.config.patch(
-            dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)
-        ):
+        ), torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
             graph_module = self.options.fx_tracer.generate_fx(
                 self.options, self.model, self.model_args, self.model_kwargs
             )

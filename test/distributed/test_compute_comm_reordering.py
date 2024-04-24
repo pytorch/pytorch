@@ -205,17 +205,9 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
                 "extern_kernels.mm("
             ).check("extern_kernels.mm(").check("_wait_tensor(").check(
                 "triton_poi_fused_mul"
-            ).check(
-                "dist.all_reduce("
-            ).check(
-                "_wait_tensor("
-            ).check(
+            ).check("dist.all_reduce(").check("_wait_tensor(").check(
                 "triton_poi_fused_add"
-            ).check(
-                "extern_kernels.mm("
-            ).run(
-                code
-            )
+            ).check("extern_kernels.mm(").run(code)
             out = compiled(inputs, **self.get_world_trs())
             correct = func(inputs, **self.get_world_trs())
             self.assertTrue(same(out, correct))
@@ -262,17 +254,9 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
                 "extern_kernels.mm("
             ).check("extern_kernels.mm(").check("_wait_tensor(").check(
                 "triton_poi_fused_mul"
-            ).check(
-                "dist.all_reduce("
-            ).check(
-                "_wait_tensor("
-            ).check(
+            ).check("dist.all_reduce(").check("_wait_tensor(").check(
                 "triton_poi_fused_add"
-            ).check(
-                "extern_kernels.mm("
-            ).run(
-                code
-            )
+            ).check("extern_kernels.mm(").run(code)
             out = compiled(inputs, **self.get_world_trs())
             correct = func(inputs, **self.get_world_trs())
             self.assertTrue(same(out, correct))

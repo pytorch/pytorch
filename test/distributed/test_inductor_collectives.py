@@ -557,9 +557,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             code = run_and_get_triton_code(compiled_fn, *inputs, **trs)
             FileCheck().check_regex(
                 "all_to_all_single\\(buf\\d+\\[0\\], buf\\d+_inputs\\[0\\], output_split_sizes=None, input_split_sizes=None"
-            ).run(
-                code
-            )  # noqa: B950
+            ).run(code)  # noqa: B950
 
             eager_out = example(*inputs, **trs)
             inductor_out = compiled_fn(*inputs, **trs)
@@ -602,13 +600,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             "buf1 = buf0"
         ).check("buf1_work = dist.all_reduce(buf1").check(
             "fun_col_impl._register_tensor_work(buf1, buf1_work)"
-        ).check(
-            "buf0 = _wait_tensor(buf0)"
-        ).check(
-            "return (buf0, )"
-        ).run(
-            code
-        )
+        ).check("buf0 = _wait_tensor(buf0)").check("return (buf0, )").run(code)
         correct = func(inputs, **self.get_world_trs())
         self.assertTrue(same(out, correct))
 
@@ -638,17 +630,9 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             "buf1.copy_("
         ).check("buf2 = buf1").check("buf2_work = dist.all_reduce(buf2").check(
             "fun_col_impl._register_tensor_work(buf2, buf2_work)"
-        ).check(
-            "buf1 = _wait_tensor(buf1)"
-        ).check(
-            "buf4 = buf1"
-        ).check(
+        ).check("buf1 = _wait_tensor(buf1)").check("buf4 = buf1").check(
             "buf5 = empty"
-        ).check(
-            "return (buf1, buf5"
-        ).run(
-            code
-        )
+        ).check("return (buf1, buf5").run(code)
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
         self.assertTrue(same(out, correct))
@@ -679,19 +663,11 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             "triton_poi__0.run(arg0_1, buf0, buf5"
         ).check_not("copy_(").check("buf1 = buf0; del buf0  # reuse").check(
             "buf2 = buf1"
-        ).check(
-            "buf2_work = dist.all_reduce(buf2"
-        ).check(
+        ).check("buf2_work = dist.all_reduce(buf2").check(
             "fun_col_impl._register_tensor_work(buf2, buf2_work)"
-        ).check(
-            "buf1 = _wait_tensor(buf1)"
-        ).check(
-            "buf4 = buf1"
-        ).check(
+        ).check("buf1 = _wait_tensor(buf1)").check("buf4 = buf1").check(
             "return (buf1, buf5, buf6"
-        ).run(
-            code
-        )
+        ).run(code)
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
         self.assertTrue(same(out, correct))
@@ -1140,28 +1116,14 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             "triton_poi__0.run(arg0_1, buf0, buf5"
         ).check("buf1 = empty").check("buf2 = empty").check_not("copy_(").check(
             "buf3_inputs = [buf0,arg0_1]"
-        ).check(
-            "buf3 = [buf1,buf2]"
-        ).check(
+        ).check("buf3 = [buf1,buf2]").check(
             "buf3_work = fun_col_impl._all_gather_into_tensor_coalesced_fallback("
             "output_tensors=buf3, input_tensors=buf3_inputs"
-        ).check(
-            "fun_col_impl._register_tensor_work(buf3, buf3_work)"
-        ).check(
+        ).check("fun_col_impl._register_tensor_work(buf3, buf3_work)").check(
             "buf1 = _wait_tensor(buf1)"
-        ).check(
-            "buf4 = buf1"
-        ).check(
-            "buf6 = buf0; del buf0  # reuse"
-        ).check(
+        ).check("buf4 = buf1").check("buf6 = buf0; del buf0  # reuse").check(
             "buf2 = _wait_tensor(buf2)"
-        ).check(
-            "buf7 = buf2"
-        ).check(
-            "return (buf1, buf5, buf6, buf2"
-        ).run(
-            code
-        )
+        ).check("buf7 = buf2").check("return (buf1, buf5, buf6, buf2").run(code)
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
         assert same(out, correct), f"{out} va {correct}"
@@ -1198,23 +1160,11 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         ).check(
             "buf3_work = fun_col_impl._reduce_scatter_tensor_coalesced_fallback("
             "output_tensors=buf3, input_tensors=buf3_inputs"
-        ).check(
-            "fun_col_impl._register_tensor_work(buf3, buf3_work)"
-        ).check(
+        ).check("fun_col_impl._register_tensor_work(buf3, buf3_work)").check(
             "buf1 = _wait_tensor(buf1)"
-        ).check(
-            "buf4 = buf1"
-        ).check(
-            "buf6 = buf0; del buf0  # reuse"
-        ).check(
+        ).check("buf4 = buf1").check("buf6 = buf0; del buf0  # reuse").check(
             "buf2 = _wait_tensor(buf2)"
-        ).check(
-            "buf7 = buf2"
-        ).check(
-            "return (buf1, buf5, buf6, buf2"
-        ).run(
-            code
-        )
+        ).check("buf7 = buf2").check("return (buf1, buf5, buf6, buf2").run(code)
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
         assert same(out, correct), f"{out} va {correct}"

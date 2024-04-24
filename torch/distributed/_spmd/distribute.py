@@ -735,7 +735,8 @@ def _convert_to_distributed(
                     obj = node_to_obj[inp_arg]
                     if isinstance(obj, DTensor):
                         output_schemas[inp_arg.name] = Schema(
-                            obj.device_mesh, obj.placements  # type: ignore[arg-type]
+                            obj.device_mesh,
+                            obj.placements,  # type: ignore[arg-type]
                         )
         elif node.op == OP.CALL_FUNCTION:
             args = tree_map(partial(_remap_arg, node_to_obj), node.args)

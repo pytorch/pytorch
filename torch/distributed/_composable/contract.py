@@ -174,9 +174,7 @@ def contract(state_cls: Type[_State] = _State):
             return module.__dict__.setdefault(  # type: ignore[call-overload]
                 STATE_KEY,
                 {},  # TODO(@yhcharles): this is a temporary fix, need a better way
-            ).get(
-                func
-            )  # type: ignore[call-overload]
+            ).get(func)  # type: ignore[call-overload]
 
         wrapper.state = get_state  # type: ignore[attr-defined]
 

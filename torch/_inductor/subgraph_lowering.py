@@ -1,6 +1,4 @@
-"""Utilities for lowering subgraphs used by higher order operators
-
-"""
+"""Utilities for lowering subgraphs used by higher order operators"""
 
 import functools
 import operator

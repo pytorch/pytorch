@@ -1,4 +1,5 @@
 """Utilities for converting and operating on ONNX, JIT and torch types."""
+
 from __future__ import annotations
 
 from typing import (
@@ -30,8 +31,7 @@ if TYPE_CHECKING:
 @runtime_checkable
 class TensorLike(Protocol):
     @property
-    def dtype(self) -> Optional[torch.dtype]:
-        ...
+    def dtype(self) -> Optional[torch.dtype]: ...
 
 
 def is_torch_complex_dtype(tensor_dtype: torch.dtype) -> bool:

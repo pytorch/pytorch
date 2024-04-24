@@ -59,8 +59,7 @@ class Node(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def next_functions(self) -> Tuple[Tuple[Optional["Node"], int], ...]:
-        ...
+    def next_functions(self) -> Tuple[Tuple[Optional["Node"], int], ...]: ...
 
     @abc.abstractmethod
     def metadata(self) -> dict:
@@ -68,8 +67,7 @@ class Node(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def _register_hook_dict(self, tensor: torch.Tensor) -> None:
-        ...
+    def _register_hook_dict(self, tensor: torch.Tensor) -> None: ...
 
     @abc.abstractmethod
     def register_hook(self, fn: Callable[..., Any]) -> RemovableHandle:
@@ -479,7 +477,9 @@ def register_multi_grad_hook(
 
                 if count[id] == 0:
                     # On the first call, compute the actual nb_calls and buffer
-                    nb_calls = sum(torch._C._will_engine_execute_node(g) for g in grad_fns)  # type: ignore[attr-defined]
+                    nb_calls = sum(
+                        torch._C._will_engine_execute_node(g) for g in grad_fns
+                    )  # type: ignore[attr-defined]
 
                 buffer[id][idx] = grad
                 count[id] += 1

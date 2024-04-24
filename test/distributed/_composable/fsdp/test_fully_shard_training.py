@@ -751,8 +751,7 @@ class TestFullyShardGradientAccumulation(FSDPTest):
 
                     global_inp = torch.rand((global_batch_size, lin_dim), device="cuda")
                     local_inp = global_inp[
-                        self.rank
-                        * local_batch_size : (self.rank + 1)
+                        self.rank * local_batch_size : (self.rank + 1)
                         * local_batch_size
                     ].detach()
                     losses: List[torch.Tensor] = []

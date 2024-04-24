@@ -249,11 +249,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     "empty_strided_cuda", 1, exactly=True
                 ).check("triton_tem_fused_relu_0.run").check_count(
                     "del", 3, exactly=True
-                ).check(
-                    "return"
-                ).run(
-                    out_code[0]
-                )
+                ).check("return").run(out_code[0])
 
         @fresh_inductor_cache()
         @torch._inductor.config.patch(max_autotune_gemm_backends="ATEN")
@@ -267,9 +263,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     "empty_strided_cuda", 1, exactly=True
                 ).check("extern_kernels.").check_count("del", 3, exactly=True).check(
                     "return"
-                ).run(
-                    out_code[0]
-                )
+                ).run(out_code[0])
 
         def test_changed_layout(self):
             # cat addmm planning will change layout - make sure propagated

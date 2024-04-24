@@ -56,8 +56,7 @@ class Storage:
 
     def _write_file(
         self, f: Any, is_real_file: _bool, save_size: _bool, element_size: int
-    ) -> None:
-        ...
+    ) -> None: ...
 
     def element_size(self) -> int:  # type: ignore[empty-body]
         ...
@@ -77,7 +76,9 @@ class Storage:
     def data_ptr(self) -> int:  # type: ignore[empty-body]
         ...
 
-    def from_file(self, filename: str, shared: bool = False, nbytes: int = 0) -> "Storage":  # type: ignore[empty-body]
+    def from_file(
+        self, filename: str, shared: bool = False, nbytes: int = 0
+    ) -> "Storage":  # type: ignore[empty-body]
         ...
 
     def _new_with_file(self, f: Any, element_size: int) -> "Storage":  # type: ignore[empty-body]

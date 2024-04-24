@@ -1331,9 +1331,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent, m) {
                         torch.ones((1, 100000), device="cuda"),  # 400,000 bytes
                     ],
                     None,
-                )[
-                    0
-                ],  # NestedTensor
+                )[0],  # NestedTensor
                 torch.ones((1, 100000), device="cuda"),  # 400,000 bytes
             ]
             # 1,200,000 bytes (3 * 4 * 100,000 bytes)

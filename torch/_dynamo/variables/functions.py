@@ -427,9 +427,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             closure_scope = None
         self.closure_scope = closure_scope
         # Either a source or a VT with .can_reconstruct() == True
-        self.wrapped_reconstructible: Optional[
-            Union[Source, VariableTracker]
-        ] = wrapped_reconstructible
+        self.wrapped_reconstructible: Optional[Union[Source, VariableTracker]] = (
+            wrapped_reconstructible
+        )
 
     def self_args(self):
         return []

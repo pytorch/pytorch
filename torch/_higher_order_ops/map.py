@@ -193,7 +193,8 @@ def map_wrapper(f, xs, *args):
         return flat_out
 
     return pytree.tree_unflatten(
-        map_impl(flat_fn, flat_xs, args), out_spec  # type: ignore[arg-type]
+        map_impl(flat_fn, flat_xs, args),
+        out_spec,  # type: ignore[arg-type]
     )
 
 

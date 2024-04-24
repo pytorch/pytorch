@@ -145,7 +145,9 @@ if try_import_cutlass():
                 "element_d": DataTypeTag[operation.D.element],  # type: ignore[name-defined]
                 "layout_d": LayoutTag[instance_layout_D],  # type: ignore[name-defined]
                 "element_accumulator": DataTypeTag[operation.accumulator_type()],  # type: ignore[name-defined]
-                "opcode_class": OpcodeClassTag[operation.tile_description.math_instruction.opcode_class],  # type: ignore[name-defined] # noqa: B950
+                "opcode_class": OpcodeClassTag[
+                    operation.tile_description.math_instruction.opcode_class
+                ],  # type: ignore[name-defined] # noqa: B950
                 "arch": "cutlass::arch::Sm%d" % operation.arch,
                 "tile_shape_m": str(operation.tile_description.tile_shape[0]),
                 "tile_shape_n": str(operation.tile_description.tile_shape[1]),
@@ -166,7 +168,9 @@ if try_import_cutlass():
                     operation.tile_description.math_instruction.instruction_shape[2]
                 ),
                 "kernel_schedule": str(KernelScheduleTag[operation.kernel_schedule]),  # type: ignore[name-defined]
-                "epilogue_schedule": str(EpilogueScheduleTag[operation.epilogue_schedule]),  # type: ignore[name-defined]
+                "epilogue_schedule": str(
+                    EpilogueScheduleTag[operation.epilogue_schedule]
+                ),  # type: ignore[name-defined]
                 "epilogue_functor": epilogue_functor,
                 "stages": stage_count_string,
                 "align_a": str(operation.A.alignment),
@@ -175,9 +179,9 @@ if try_import_cutlass():
                 "align_d": str(operation.C.alignment),
                 "transform_a": ComplexTransformTag[operation.A.complex_transform],  # type: ignore[name-defined]
                 "transform_b": ComplexTransformTag[operation.B.complex_transform],  # type: ignore[name-defined]
-                "math_operation": MathOperationTag[  # type: ignore[name-defined]
+                "math_operation": MathOperationTag[
                     operation.tile_description.math_instruction.math_operation
-                ],
+                ],  # type: ignore[name-defined]
                 "epilogue_vector_length": str(epilogue_vector_length),
                 "element_epilogue": str(DataTypeTag[operation.element_epilogue]),  # type: ignore[name-defined]
                 "tile_scheduler": str(TileSchedulerTag[operation.tile_scheduler]),  # type: ignore[name-defined]

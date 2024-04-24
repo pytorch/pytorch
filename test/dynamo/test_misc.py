@@ -1204,9 +1204,7 @@ not ___dict_contains('bbbbbbbb', G['sys'].modules)
 not ___dict_contains('cccccccc', G['sys'].modules)
 str(L['x'].device) == 'cpu'
 str(L['x'].dtype) == 'torch.float32'
-utils_device.CURRENT_DEVICE == None""".split(
-            "\n"
-        ):
+utils_device.CURRENT_DEVICE == None""".split("\n"):
             self.assertIn(
                 line,
                 guard_code_str,
@@ -2652,7 +2650,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             "int",
             np.intp,
             np.int32,
-            np.uint8
+            np.uint8,
             # np.dtype('int')       # XXX: as above
         ]
 
@@ -7586,9 +7584,9 @@ def fn():
             ]
 
         def write_state(state):
-            torch.set_grad_enabled(state[0]),
+            (torch.set_grad_enabled(state[0]),)
             torch.use_deterministic_algorithms(state[1])
-            torch._C._set_cublas_allow_tf32(state[2]),
+            (torch._C._set_cublas_allow_tf32(state[2]),)
 
         @torch.compile(backend=my_compiler)
         def fn(x):
@@ -7683,8 +7681,7 @@ def fn():
 
     def test_torch_compile_ctx_on_forward_and_training_step(self):
         class MyModel(torch.nn.Module):
-            def forward(self):
-                ...
+            def forward(self): ...
 
             def training_step(self):
                 self()
@@ -7816,9 +7813,7 @@ def fn():
             "tensor 'L['input']' size mismatch at index 0. expected 2, actual 3"
         ).check(
             "tensor 'L['input']' size mismatch at index 0. expected 3, actual 4"
-        ).run(
-            prof.report()
-        )
+        ).run(prof.report())
 
     def test_guards_strip_function_call(self):
         from torch._dynamo.guards import strip_function_call

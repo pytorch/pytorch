@@ -265,7 +265,8 @@ class TestBundledInputs(TestCase):
         with self.assertRaises(TypeError):
             m = torch.jit.script(SingleTensorModel())
             torch.utils.bundled_inputs.augment_model_with_bundled_inputs(
-                m, inputs="foo"  # type: ignore[arg-type]
+                m,
+                inputs="foo",  # type: ignore[arg-type]
             )
 
         # List of non tuples. Most common error using the api.

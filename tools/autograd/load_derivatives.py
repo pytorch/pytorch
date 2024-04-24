@@ -124,9 +124,9 @@ def load_derivatives(
         # function schema is the complete declaration including mutability annotation / default value and etc.
         # signature is the canonical schema for a group of functions (in-place/out/functional variants)
         # that are semantically related.
-        functions_by_signature: Dict[
-            FunctionSchema, List[NativeFunction]
-        ] = defaultdict(list)
+        functions_by_signature: Dict[FunctionSchema, List[NativeFunction]] = (
+            defaultdict(list)
+        )
         functions_by_schema: Dict[str, NativeFunction] = {}
         for function in native_functions:
             functions_by_signature[function.func.signature()].append(function)

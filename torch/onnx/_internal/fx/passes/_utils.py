@@ -2,6 +2,7 @@
 
 These functions should NOT be directly invoked outside of `passes` package.
 """
+
 from __future__ import annotations
 
 import collections

@@ -144,7 +144,10 @@ class CUDATemplateKernel(CUDAKernel):
         return f"PT_EXPORT int {self.kernel_name}({', '.join(arg_defs)}, {self._EXTRA_CPP_ARGS})"
 
     def call_kernel(
-        self, name: str, node: "CUDATemplateBuffer", epilogue_nodes: List[ir.Buffer]  # type: ignore[name-defined]
+        self,
+        name: str,
+        node: "CUDATemplateBuffer",
+        epilogue_nodes: List[ir.Buffer],  # type: ignore[name-defined]
     ) -> None:
         """
         Generates code to call the kernel through V.graph.wrapper_code.
@@ -306,7 +309,9 @@ class CUDATemplateCaller(ChoiceCaller):
         make_kernel_render: Callable[[CUDATemplateBuffer, Optional[List[IRNode]]], str],
         bmreq: CUDABenchmarkRequest,
         template: "CUDATemplate",  # type: ignore[name-defined]
-        info_kwargs: Optional[Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]],  # type: ignore[type-arg]
+        info_kwargs: Optional[
+            Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]
+        ],  # type: ignore[type-arg]
     ):
         super().__init__(name, input_nodes, layout)
         self.category = category
@@ -348,7 +353,8 @@ class CUDATemplateCaller(ChoiceCaller):
                 for en in self.info_kwargs.get("epilogue_nodes", [])  # type: ignore[union-attr]
             ]
             epilogue_node_strs: List[str] = [
-                str(en) for en in self.info_kwargs.get("epilogue_nodes", [])  # type: ignore[union-attr]
+                str(en)
+                for en in self.info_kwargs.get("epilogue_nodes", [])  # type: ignore[union-attr]
             ]
             return {
                 "backend": "CUDA",

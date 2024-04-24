@@ -80,16 +80,13 @@ class TypePromotionRule(abc.ABC):
     # A class that overrides __eq__() and does not define __hash__() will have its __hash__() implicitly set to None.
     # Ref: https://docs.python.org/3/reference/datamodel.html#object.__hash__
     @abc.abstractmethod
-    def __hash__(self) -> int:
-        ...
+    def __hash__(self) -> int: ...
 
     @abc.abstractmethod
-    def __repr__(self):
-        ...
+    def __repr__(self): ...
 
     @abc.abstractmethod
-    def __eq__(self, other: object) -> bool:
-        ...
+    def __eq__(self, other: object) -> bool: ...
 
     def is_valid(self) -> bool:
         """Check if the rule is valid."""
@@ -292,8 +289,8 @@ class ReductionTypePromotionRule(TypePromotionRule):
     def preview_type_promotion(
         self, args: tuple, kwargs: dict
     ) -> TypePromotionSnapshot:
-        assert len(args) >= 1 and isinstance(
-            arg := args[0], torch.Tensor
+        assert (
+            len(args) >= 1 and isinstance(arg := args[0], torch.Tensor)
         ), f"Reduction op torch.ops.{self.namespace}.{self.op_name} expects at least one argument"
         dtype: Optional[torch.dtype] = kwargs.get("dtype", None)
 
@@ -329,8 +326,8 @@ class AllOrAnyReductionTypePromotionRule(ReductionTypePromotionRule):
     def preview_type_promotion(
         self, args: tuple, kwargs: dict
     ) -> TypePromotionSnapshot:
-        assert len(args) >= 1 and isinstance(
-            arg := args[0], torch.Tensor
+        assert (
+            len(args) >= 1 and isinstance(arg := args[0], torch.Tensor)
         ), f"Reduction op torch.ops.{self.namespace}.{self.op_name} expects at least one argument"
         computation_dtype = torch.bool
         # Preserves uint8 -- probably a legacy mask thing
@@ -352,8 +349,8 @@ class SumLikeReductionTypePromotionRule(ReductionTypePromotionRule):
     def preview_type_promotion(
         self, args: tuple, kwargs: dict
     ) -> TypePromotionSnapshot:
-        assert len(args) >= 1 and isinstance(
-            arg := args[0], torch.Tensor
+        assert (
+            len(args) >= 1 and isinstance(arg := args[0], torch.Tensor)
         ), f"Reduction op torch.ops.{self.namespace}.{self.op_name} expects at least one argument"
         dtype: Optional[torch.dtype] = kwargs.get("dtype", None)
         # The below logic is copied from `torch/_refs/__init__.py` reduction ops impl.
@@ -1727,9 +1724,7 @@ class InsertTypePromotion(_pass.Transform):
         fake_mode = self.fake_mode
         assert fake_mode is not None, "Cannot detect fake_mode."
 
-        with proxy_tensor.maybe_disable_fake_tensor_mode(), (
-            fake_mode
-        ), fx_traceback.preserve_node_meta():
+        with proxy_tensor.maybe_disable_fake_tensor_mode(), fake_mode, fx_traceback.preserve_node_meta():
             self.interpreter.run(*fake_args)
 
         return self.module

@@ -2,6 +2,7 @@
 
 The module returns a no-op decorator when the beartype library is not installed.
 """
+
 import enum
 import functools
 import os

@@ -1364,7 +1364,7 @@ def get_grouped_by_view_native_functions(
     native_functions: Sequence[NativeFunction],
 ) -> Sequence[Union[NativeFunction, NativeFunctionsViewGroup]]:
     def maybe_create_view_group(
-        d: Dict[Union[ViewSchemaKind, SchemaKind], NativeFunction]
+        d: Dict[Union[ViewSchemaKind, SchemaKind], NativeFunction],
     ) -> List[Union[NativeFunction, NativeFunctionsViewGroup]]:
         funcs: List[Union[NativeFunction, NativeFunctionsViewGroup]] = []
         if ViewSchemaKind.aliasing in d:
@@ -1409,7 +1409,7 @@ def get_grouped_native_functions(
     native_functions: Sequence[NativeFunction],
 ) -> Sequence[Union[NativeFunction, NativeFunctionsGroup]]:
     def flatten_pre_group(
-        d: Dict[SchemaKind, NativeFunction]
+        d: Dict[SchemaKind, NativeFunction],
     ) -> Sequence[Union[NativeFunction, NativeFunctionsGroup]]:
         r = NativeFunctionsGroup.from_dict(d)
         if r is None:
@@ -1476,9 +1476,7 @@ def get_native_function_declarations_from_ns_grouped_kernels(
 {ns_helper.prologue}
 {newline.join(ordered_kernels)}
 {ns_helper.epilogue}
-        """.split(
-                newline
-            )
+        """.split(newline)
         )
     return declarations
 
@@ -1671,9 +1669,7 @@ def get_namespaced_declaration(
 {ns_helper.prologue}
 {newline.join(ordered_kernels)}
 {ns_helper.epilogue}
-        """.split(
-                newline
-            )
+        """.split(newline)
         )
     return declarations
 
@@ -2449,7 +2445,7 @@ def gen_source_files(
     )
 
     def key_func(
-        fn: Union[NativeFunction, NativeFunctionsGroup, NativeFunctionsViewGroup]
+        fn: Union[NativeFunction, NativeFunctionsGroup, NativeFunctionsViewGroup],
     ) -> str:
         return fn.root_name
 
@@ -2491,10 +2487,10 @@ def gen_source_files(
     )
 
     def functionalization_env_callable(
-        g: Union[NativeFunction, NativeFunctionsGroup, NativeFunctionsViewGroup]
+        g: Union[NativeFunction, NativeFunctionsGroup, NativeFunctionsViewGroup],
     ) -> Dict[str, List[str]]:
         def gen_op_headers(
-            g: Union[NativeFunction, NativeFunctionsGroup, NativeFunctionsViewGroup]
+            g: Union[NativeFunction, NativeFunctionsGroup, NativeFunctionsViewGroup],
         ) -> List[str]:
             if isinstance(g, NativeFunctionsViewGroup):
                 # view ops always get a functionalization kernel

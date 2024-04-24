@@ -233,7 +233,9 @@ def check(f, t, delta, check_val=True, graph_input=False):
         else:  # results returned are the same
             assert torch.all(
                 true_result == our_result
-            ), f"results are different {true_result}, {our_result}"  # check results are the same
+            ), (
+                f"results are different {true_result}, {our_result}"
+            )  # check results are the same
 
 
 class NoChangeTestCase(TestCase):

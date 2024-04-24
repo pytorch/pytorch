@@ -1084,13 +1084,9 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
                 """local "L['self']" ID_MATCH"""
             ).check(f"""{expected_guard_source} "L['self'].net" TYPE_MATCH""").check(
                 f"""{expected_guard_source} "L['self'].net" ID_MATCH"""
-            ).check(
-                f"""{expected_guard_source} "L['self'].net[0]" TYPE_MATCH"""
-            ).check(
+            ).check(f"""{expected_guard_source} "L['self'].net[0]" TYPE_MATCH""").check(
                 f"""{expected_guard_source} "L['self'].net[0]" ID_MATCH"""
-            ).run(
-                GUARDS_FILE.getvalue()
-            )
+            ).run(GUARDS_FILE.getvalue())
             self.assertTrue(same(correct_outputs, outputs))
 
     def test_fsdp_skip_register_attr_or_module(self):

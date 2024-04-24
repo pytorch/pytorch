@@ -523,7 +523,7 @@ def iter_tensors(
 
 
 def _maybe_get_opdef(
-    op: Union[CustomOpDef, _ops.OpOverload, str]
+    op: Union[CustomOpDef, _ops.OpOverload, str],
 ) -> Optional[CustomOpDef]:
     if isinstance(op, CustomOpDef):
         return op

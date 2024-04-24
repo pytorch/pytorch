@@ -121,9 +121,7 @@ class Unboxing:
         return (
             f"""
     {ctype.cpp_type(strip_ref=True)} {out_name} = {arg_name}.toOptional<{base_type.cpp_type(strip_ref=True)}>();
-            """.split(
-                "\n"
-            ),
+            """.split("\n"),
             decl,
         )
 
@@ -141,9 +139,7 @@ class Unboxing:
             code.extend(
                 f"""
     {ctype.cpp_type(strip_ref=True)} {out_name} = {arg_name}.toTensorList();
-                """.split(
-                    "\n"
-                )
+                """.split("\n")
             )
         elif isinstance(t.elem, BaseType) and (
             t.elem.name == BaseTy.int or t.elem.name == BaseTy.SymInt
@@ -151,26 +147,20 @@ class Unboxing:
             code.extend(
                 f"""
     {ctype.cpp_type(strip_ref=True)} {out_name} = {arg_name}.toIntList();
-                """.split(
-                    "\n"
-                )
+                """.split("\n")
             )
         elif isinstance(t.elem, BaseType) and t.elem.name == BaseTy.float:
             code.extend(
                 f"""
     {ctype.cpp_type(strip_ref=True)} {out_name} = {arg_name}.toDoubleList();
-                """.split(
-                    "\n"
-                )
+                """.split("\n")
             )
         elif isinstance(t.elem, BaseType) and t.elem.name == BaseTy.bool:
             # handle list type with size, e.g., bool[4]
             code.extend(
                 f"""
     {ctype.cpp_type(strip_ref=True)} {out_name} = {arg_name}.toBoolList();
-                """.split(
-                    "\n"
-                )
+                """.split("\n")
             )
         # pytorch codegen:
         # we have to use c10::List for optional element. e.g., Tensor?[] -> c10::List<::std::optional<at::Tensor>>
@@ -190,9 +180,7 @@ for (auto {elem_name}: {in_name}) {{
 #else
 torch::executor::ArrayRef<torch::executor::optional<torch::executor::Tensor>> {out_name} = {arg_name}.toListOptionalTensor();
 #endif
-                """.split(
-                    "\n"
-                )
+                """.split("\n")
             )
         else:
             # use ArrayRef as default.
@@ -208,8 +196,6 @@ torch::executor::ArrayRef<torch::executor::optional<torch::executor::Tensor>> {o
         {vec_name}.push_back({res_name});
     }}
     {ctype.cpp_type(strip_ref=True)} {out_name}({vec_name});
-                """.split(
-                    "\n"
-                )
+                """.split("\n")
             )
         return code, decl

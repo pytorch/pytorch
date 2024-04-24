@@ -714,6 +714,7 @@ def aot_graph_input_parser(
 
     class TensorContainer:
         "Container for tensors as attributes"
+
         pass
 
     # Dictionary for tensors from annotations

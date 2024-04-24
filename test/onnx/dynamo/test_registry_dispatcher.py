@@ -1,5 +1,6 @@
 # Owner(s): ["module: onnx"]
 """Unit tests for the internal registration wrapper module."""
+
 from __future__ import annotations
 
 import operator

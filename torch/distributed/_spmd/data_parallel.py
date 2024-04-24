@@ -408,10 +408,13 @@ def build_data_parallel_strategies(
                         assert (
                             non_grad_type == output_node_type
                         ), f"Found more than one non grad types! Expect {output_node_type} but found {non_grad_type}!"
-                    assert output_node_type in [
-                        NodeType.PARAM,
-                        NodeType.STATE,
-                    ], f"Expecting output node type to be either state or param, but found {output_node_type}!"
+                    assert (
+                        output_node_type
+                        in [
+                            NodeType.PARAM,
+                            NodeType.STATE,
+                        ]
+                    ), f"Expecting output node type to be either state or param, but found {output_node_type}!"
 
                     dp_strategy_map[node] = DataParallelStrategy(
                         output_node_type, [replica_strategy, shard_strategy]

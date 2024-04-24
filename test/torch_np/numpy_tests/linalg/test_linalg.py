@@ -1,8 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
-""" Test functions for linalg module
+"""Test functions for linalg module"""
 
-"""
 import functools
 import itertools
 import os

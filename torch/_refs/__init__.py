@@ -3958,7 +3958,10 @@ def _index_fill(
         )  # type: ignore[arg-type]
     else:
         value = torch.scalar_tensor(
-            value, dtype=x.dtype, layout=x.layout, device=x.device  # type: ignore[arg-type]
+            value,
+            dtype=x.dtype,
+            layout=x.layout,
+            device=x.device,  # type: ignore[arg-type]
         )
 
     # index_copy has some unnecessary preconditions when x is a scalar. We do this to work through them
@@ -3995,7 +3998,10 @@ def index_add(
 ):
     # index_add always returns a new contiguous tensor
     return x.clone(memory_format=torch.contiguous_format).index_add_(
-        dim, index, tensor, alpha=alpha  # type: ignore[arg-type]
+        dim,
+        index,
+        tensor,
+        alpha=alpha,  # type: ignore[arg-type]
     )
 
 

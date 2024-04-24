@@ -1,4 +1,5 @@
 r"""Functional interface."""
+
 import math
 from typing import List
 

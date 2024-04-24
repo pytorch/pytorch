@@ -354,8 +354,10 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         if op.gemm_kind == cutlass_lib.GemmKind.Universal3x:
             if epilogue_nodes is not None and len(epilogue_nodes) > 0:
                 emitter = EmitGemmUniversal3xInstanceWithEVT()
-                op.epilogue_functor = lambda epilogue_functor_type_name: self.render_evt_epilogue_declaration(
-                    output_buffer_name, epilogue_functor_type_name, epilogue_nodes
+                op.epilogue_functor = (
+                    lambda epilogue_functor_type_name: self.render_evt_epilogue_declaration(
+                        output_buffer_name, epilogue_functor_type_name, epilogue_nodes
+                    )
                 )
             else:
                 emitter = cutlass_gemm_op.EmitGemmUniversal3xInstance()

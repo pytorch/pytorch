@@ -6,6 +6,7 @@ This module contains functionality to support the JIT's scripting frontend, nota
 This is not intended to be imported directly; please use the exposed
 functionalities in `torch.jit`.
 """
+
 import collections
 import copy
 import enum
@@ -313,10 +314,10 @@ class ScriptMeta(type):
                     else:
                         return infer_methods_to_compile(module)
 
-                self.__dict__[
-                    "_actual_script_module"
-                ] = torch.jit._recursive.create_script_module(
-                    self, make_stubs, share_types=not added_methods_in_init
+                self.__dict__["_actual_script_module"] = (
+                    torch.jit._recursive.create_script_module(
+                        self, make_stubs, share_types=not added_methods_in_init
+                    )
                 )
 
                 # Delete the Python attributes that now shadow the ScriptModule
@@ -1018,7 +1019,9 @@ def call_prepare_scriptable_func_impl(obj, memo):
     if obj_id in memo:
         return memo[id(obj)]
 
-    obj = obj.__prepare_scriptable__() if hasattr(obj, "__prepare_scriptable__") else obj  # type: ignore[operator]
+    obj = (
+        obj.__prepare_scriptable__() if hasattr(obj, "__prepare_scriptable__") else obj
+    )  # type: ignore[operator]
     # Record obj in memo to avoid infinite recursion in the case of cycles in the module
     # hierarchy when recursing below.
     memo[obj_id] = obj
@@ -1342,7 +1345,11 @@ def script(
             obj, torch.jit._recursive.infer_methods_to_compile
         )
     else:
-        obj = obj.__prepare_scriptable__() if hasattr(obj, "__prepare_scriptable__") else obj  # type: ignore[operator]
+        obj = (
+            obj.__prepare_scriptable__()
+            if hasattr(obj, "__prepare_scriptable__")
+            else obj
+        )  # type: ignore[operator]
 
     if isinstance(obj, dict):
         return create_script_dict(obj)

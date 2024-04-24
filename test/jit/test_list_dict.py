@@ -1645,9 +1645,7 @@ class TestDict(JitTestCase):
 
         def test_dictcomprehension_is_typed_from_annotation():
             metasyntactics = ["foo", "bar", "baz"]
-            x: Dict[str, Optional[int]] = {
-                word: None for word in metasyntactics
-            }  # noqa: RUF025
+            x: Dict[str, Optional[int]] = {word: None for word in metasyntactics}  # noqa: RUF025
             return x
 
         self.checkScript(test_dictcomprehension_is_typed_from_annotation, ())
@@ -1823,7 +1821,7 @@ class TestDict(JitTestCase):
     def test_popitem(self):
         @torch.jit.script
         def popitem(
-            x: Dict[str, Tensor]
+            x: Dict[str, Tensor],
         ) -> Tuple[Tuple[str, Tensor], Dict[str, Tensor]]:
             item = x.popitem()
             return item, x

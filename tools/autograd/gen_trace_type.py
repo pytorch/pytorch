@@ -137,7 +137,7 @@ ADD_TRACE_INPUT = CodeTemplate("""jit::tracer::addInputs(node, "${name}", ${inpu
 
 def format_trace_inputs(f: NativeFunction) -> str:
     def dispatch_trace_input(
-        arg: Union[Argument, TensorOptionsArguments]
+        arg: Union[Argument, TensorOptionsArguments],
     ) -> Sequence[str]:
         if isinstance(arg, TensorOptionsArguments):
             name = "options"

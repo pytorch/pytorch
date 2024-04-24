@@ -118,11 +118,7 @@ class MultiKernelState:
         if need_clone_args:
             args, _ = multi_kernel_call.kernels[{idx}].clone_args(*args)
         multi_kernel_call.kernels[{idx}].run(*args, {', '.join(get_numel_argdefs(kernels[idx]))}, grid=grid, stream=stream)
-        """.format(
-                    idx
-                ).strip(
-                    "\n"
-                )
+        """.format(idx).strip("\n")
                 for idx in range(len(kernels))
             ]
         )

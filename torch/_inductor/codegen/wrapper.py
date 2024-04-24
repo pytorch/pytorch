@@ -207,9 +207,9 @@ MAX_STACK_ALLOCATION_SIZE = 1024 * 100
 class MemoryPlanningState:
     def __init__(self):
         super().__init__()
-        self.reuse_pool: Dict[
-            ReuseKey, List[FreeIfNotReusedLine]
-        ] = collections.defaultdict(list)
+        self.reuse_pool: Dict[ReuseKey, List[FreeIfNotReusedLine]] = (
+            collections.defaultdict(list)
+        )
         self.total_allocated_buffer_size: int = 0
 
     def __contains__(self, key: ReuseKey) -> bool:
@@ -1086,7 +1086,8 @@ class WrapperCodeGen(CodeGen):
                     if isinstance(
                         arg, (int, sympy.Integer)
                     ) and V.graph.sizevars.statically_known_equals(
-                        arg, 1  # type: ignore[arg-type]
+                        arg,
+                        1,  # type: ignore[arg-type]
                     ):
                         equal_to_1_arg_idx.append(idx)
         index_dtype = "tl.int32"

@@ -9,8 +9,7 @@ from torch import fx
 
 
 class CompiledFn(Protocol):
-    def __call__(self, *args: torch.Tensor) -> Tuple[torch.Tensor, ...]:
-        ...
+    def __call__(self, *args: torch.Tensor) -> Tuple[torch.Tensor, ...]: ...
 
 
 CompilerFn = Callable[[fx.GraphModule, List[torch.Tensor]], CompiledFn]

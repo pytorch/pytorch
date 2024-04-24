@@ -100,6 +100,7 @@ class StreamContext(AbstractContextManager):
     N.B. This class only exists to facilitate device-agnostic code
 
     """
+
     cur_stream: Optional[Stream]
 
     def __init__(self, stream):

@@ -867,11 +867,11 @@ class CPUReproTests(TestCase):
                     window_overlap * 2 + 1,
                 )
             )
-            diagonal_attention_scores[
-                :, :3, :, window_overlap:
-            ] = diagonal_chunked_attention_scores[
-                :, :, :window_overlap, : window_overlap + 1
-            ]
+            diagonal_attention_scores[:, :3, :, window_overlap:] = (
+                diagonal_chunked_attention_scores[
+                    :, :, :window_overlap, : window_overlap + 1
+                ]
+            )
             return diagonal_attention_scores
 
         self.common(
@@ -2319,7 +2319,7 @@ class CPUReproTests(TestCase):
             ) as vec_checker:
 
                 def get_index():
-                    return -itervars[0] ** 2 + 2 * itervars[0] + itervars[1]
+                    return -(itervars[0] ** 2) + 2 * itervars[0] + itervars[1]
 
                 ranges = [0, 100, 200]
                 vec_checker.itervars = itervars[:2]
@@ -2334,7 +2334,7 @@ class CPUReproTests(TestCase):
             ) as vec_checker:
 
                 def get_index():
-                    return -itervars[0] ** 2 + 2 * itervars[0] + itervars[1]
+                    return -(itervars[0] ** 2) + 2 * itervars[0] + itervars[1]
 
                 ranges = [0, 100, 200]
                 vec_checker.itervars = itervars

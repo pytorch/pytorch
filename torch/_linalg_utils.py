@@ -1,6 +1,4 @@
-"""Various linear algebra utility methods for internal use.
-
-"""
+"""Various linear algebra utility methods for internal use."""
 
 from typing import Optional, Tuple
 

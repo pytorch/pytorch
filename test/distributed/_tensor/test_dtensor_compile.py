@@ -457,9 +457,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
             "buf0 = torch.ops._c10d_functional.all_gather_into_tensor.default(primal"
         ).check("buf1 = torch.ops._c10d_functional.wait_tensor.default(buf0").check(
             "extern_kernels.mm(buf0,"
-        ).run(
-            code
-        )
+        ).run(code)
 
 
 @instantiate_parametrized_tests

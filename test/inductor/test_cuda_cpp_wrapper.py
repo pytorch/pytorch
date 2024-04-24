@@ -91,9 +91,9 @@ if TEST_WITH_ROCM:
         test_failures_cuda_wrapper[test_name] = test_torchinductor.TestFailure(
             ("cuda_wrapper",), is_skip=True
         )
-        test_failures_cuda_wrapper[
-            dynamic_shapes_test_name
-        ] = test_torchinductor.TestFailure(("cuda_wrapper",), is_skip=True)
+        test_failures_cuda_wrapper[dynamic_shapes_test_name] = (
+            test_torchinductor.TestFailure(("cuda_wrapper",), is_skip=True)
+        )
 
 if config.abi_compatible:
     xfail_list = [
@@ -106,9 +106,9 @@ if config.abi_compatible:
         test_failures_cuda_wrapper[test_name] = test_torchinductor.TestFailure(
             ("cuda_wrapper",), is_skip=False
         )
-        test_failures_cuda_wrapper[
-            f"{test_name}_dynamic_shapes"
-        ] = test_torchinductor.TestFailure(("cuda_wrapper",), is_skip=False)
+        test_failures_cuda_wrapper[f"{test_name}_dynamic_shapes"] = (
+            test_torchinductor.TestFailure(("cuda_wrapper",), is_skip=False)
+        )
     skip_list = [
         "test_multi_device_cuda",
     ]
@@ -116,9 +116,9 @@ if config.abi_compatible:
         test_failures_cuda_wrapper[test_name] = test_torchinductor.TestFailure(
             ("cuda_wrapper",), is_skip=True
         )
-        test_failures_cuda_wrapper[
-            f"{test_name}_dynamic_shapes"
-        ] = test_torchinductor.TestFailure(("cuda_wrapper",), is_skip=True)
+        test_failures_cuda_wrapper[f"{test_name}_dynamic_shapes"] = (
+            test_torchinductor.TestFailure(("cuda_wrapper",), is_skip=True)
+        )
 
 
 def make_test_case(

@@ -1209,22 +1209,28 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
 
                 # Increased tolerances are needed to pass when using TF32
                 # See: https://github.com/pytorch/pytorch/issues/67764
-                torch.testing.assert_close(
-                    local_loss.cpu(),
-                    ddp_loss.cpu(),
-                    rtol=1e-03,
-                    atol=1e-08,
-                ), "Losses differ between local optimizer and ZeRO"
+                (
+                    torch.testing.assert_close(
+                        local_loss.cpu(),
+                        ddp_loss.cpu(),
+                        rtol=1e-03,
+                        atol=1e-08,
+                    ),
+                    "Losses differ between local optimizer and ZeRO",
+                )
 
                 for local_p, ddp_p in zip(
                     local_model.parameters(), ddp_model.parameters()
                 ):
-                    torch.testing.assert_close(
-                        local_p.cpu(),
-                        ddp_p.cpu(),
-                        rtol=1e-03,
-                        atol=1e-04,
-                    ), "Models differ after a step"
+                    (
+                        torch.testing.assert_close(
+                            local_p.cpu(),
+                            ddp_p.cpu(),
+                            rtol=1e-03,
+                            atol=1e-04,
+                        ),
+                        "Models differ after a step",
+                    )
 
     @common_distributed.skip_if_lt_x_gpu(4)
     @parametrize(

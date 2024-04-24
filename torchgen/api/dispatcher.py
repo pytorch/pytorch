@@ -78,7 +78,7 @@ def returns_type(rs: Sequence[Return], *, symint: bool = True) -> CType:
 
 def jit_arguments(func: FunctionSchema) -> List[Argument]:
     def to_argument(
-        a: Union[Argument, TensorOptionsArguments, SelfArgument]
+        a: Union[Argument, TensorOptionsArguments, SelfArgument],
     ) -> List[Argument]:
         if isinstance(a, Argument):
             return [a]

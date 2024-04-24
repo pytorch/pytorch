@@ -1390,7 +1390,13 @@ def _get_notallclose_msg(
     return (
         prefix + "Jacobian %smismatch for output %d with respect to input %d,\n"
         "numerical:%s\nanalytical:%s\n"
-        % (mode, output_idx, input_idx, numerical, analytical)
+        % (
+            mode,
+            output_idx,
+            input_idx,
+            numerical,
+            analytical,
+        )
     )
 
 

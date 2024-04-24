@@ -200,7 +200,10 @@ def handle_effects(
     unwrapped_kwargs = ctx.unwrap_tensors(kwargs)  # type: ignore[arg-type]
     with ctx.redispatch_to_next():
         (new_token, *unwrapped_outs) = with_effects(
-            unwrapped_token, op, *unwrapped_args, **unwrapped_kwargs  # type: ignore[arg-type]
+            unwrapped_token,
+            op,
+            *unwrapped_args,
+            **unwrapped_kwargs,  # type: ignore[arg-type]
         )
 
     if len(op._schema.returns) == 0:

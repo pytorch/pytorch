@@ -399,9 +399,9 @@ class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
         outer_fused_nodes: List[Union[FusedSchedulerNode, SchedulerNode]],
         outer_loop_fusion_depth,
     ):
-        self.outer_fused_nodes: List[
-            Union[FusedSchedulerNode, SchedulerNode]
-        ] = outer_fused_nodes
+        self.outer_fused_nodes: List[Union[FusedSchedulerNode, SchedulerNode]] = (
+            outer_fused_nodes
+        )
         self.outer_loop_fusion_depth = outer_loop_fusion_depth
         flatten_snodes = []
         for _node in self.outer_fused_nodes:
@@ -1238,7 +1238,9 @@ class CppVecOverrides(CppOverrides):
                     # fallback to scalar ops
                     scalar_ops = super(CppVecOverrides, self)
                     scalar_func = getattr(
-                        scalar_ops, func.__name__, scalar_ops.__getattr__(func.__name__)  # type: ignore[attr-defined]
+                        scalar_ops,
+                        func.__name__,
+                        scalar_ops.__getattr__(func.__name__),  # type: ignore[attr-defined]
                     )
                     assert scalar_func is not None
                     return scalar_func(*args, **kwargs)
@@ -3069,7 +3071,8 @@ class CppVecKernelChecker(CppVecKernel):
                     # to check that expr_ranges.upper + 1 is representable as well
                     return range_expressable_in_32_bits(
                         ValueRanges(
-                            int(expr_ranges.lower), int(expr_ranges.upper) + 1  # type: ignore[arg-type]
+                            int(expr_ranges.lower),
+                            int(expr_ranges.upper) + 1,  # type: ignore[arg-type]
                         )
                     )
 
@@ -3401,9 +3404,12 @@ class CppKernelProxy(CppKernel):
                     node.run(vars, reduction_vars)
                 else:
                     in_suffix = True
-                    assert node.group[1] == (
-                        group,
-                        (),
+                    assert (
+                        node.group[1]
+                        == (
+                            group,
+                            (),
+                        )
                     ), f"unexpected group: {node.group[1]} != {group}, {reduction_group}"
                     # we can fuse in some extra pointwise into the suffix
                     with kernel.write_to_suffix():

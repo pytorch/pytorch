@@ -6,6 +6,7 @@ calls run_tests to ensure that the test will be run in OSS CI.
 
 Takes ~2 minuters to run without the multiprocessing, probably overkill.
 """
+
 import argparse
 import json
 import multiprocessing as mp

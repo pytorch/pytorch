@@ -163,7 +163,11 @@ def binary_folding_init():
 
                 if (
                     other_meta_value.dtype != torch.float
-                    and weight_meta_value.dtype not in (torch.float16, torch.bfloat16)
+                    and weight_meta_value.dtype
+                    not in (
+                        torch.float16,
+                        torch.bfloat16,
+                    )
                 ):
                     return False
 

@@ -41,7 +41,9 @@ class ShardingPropagator:
         ] = {}
         # op map to save static argnum to decide to reuse sharding prop cache or re-run sharding prop
         self.op_to_schema_info: Dict[OpOverload, RuntimeSchemaInfo] = {}
-        self.propagate_op_sharding = lru_cache(None)(self.propagate_op_sharding_non_cached)  # type: ignore[method-assign]
+        self.propagate_op_sharding = lru_cache(None)(
+            self.propagate_op_sharding_non_cached
+        )  # type: ignore[method-assign]
 
     def register_sharding_prop_rule(
         self,

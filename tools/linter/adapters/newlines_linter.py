@@ -1,6 +1,7 @@
 """
 NEWLINE: Checks files to make sure there are no trailing newlines.
 """
+
 import argparse
 import json
 import logging
