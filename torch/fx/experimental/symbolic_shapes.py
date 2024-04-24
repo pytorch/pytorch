@@ -2404,7 +2404,11 @@ class ShapeEnv:
 
     # Unlike set_replacement, this records a shapeenv event
     @record_shapeenv_event()
-    def _rename_unbacked_to(self, orig_s: sympy.Expr, new_s: sympy.Expr):
+    def _rename_unbacked_to(self, orig_s: sympy.Symbol, new_s: sympy.Symbol):
+        assert isinstance(orig_s, sympy.Symbol), orig_s
+        assert isinstance(new_s, sympy.Symbol), new_s
+        assert free_unbacked_symbols(new_s), new_s
+        assert free_unbacked_symbols(orig_s), orig_s
         if self._ignore_fresh_unbacked_symbols_tls():
             return
         dest = self.replacements.get(orig_s)
