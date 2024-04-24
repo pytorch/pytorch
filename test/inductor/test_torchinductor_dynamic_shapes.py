@@ -98,7 +98,7 @@ if HAS_CPU:
     copy_tests(DynamicShapesCommonTemplate, DynamicShapesCpuTests, "cpu", test_failures)
 
 
-if HAS_GPU and not TEST_WITH_ASAN:
+if HAS_CUDA and not TEST_WITH_ASAN:
 
     class DynamicShapesGPUTests(TestCase):
         common = check_model_gpu
@@ -219,6 +219,15 @@ class TestInductorDynamic(TestCase):
         r = f(x, b)
         opt_r = opt_f(x, b)
         self.assertEqual(r, opt_r)
+
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_nonzero_no_realloc(self, device):
+        @torch.compile(fullgraph=True, dynamic=True)
+        def f(x, y):
+            z = x.nonzero()
+            return torch.split(z, [y.size(0)])
+
+        f(torch.tensor([1, 0, 1, 1, 0, 1, 0]), torch.randn(4))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_item_nobreak(self, device):
