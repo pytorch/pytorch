@@ -210,8 +210,8 @@ AOTIKernelMetadata AOTIPythonKernelHolder::get_inputs_metadata(
         false, // is symbloic
         input.scalar_type(),
         device,
-        input.sym_sizes().vec(),
-        input.sym_strides().vec());
+        input.sizes().vec(),
+        input.strides().vec());
   }
   return inputs_metadata;
 }
@@ -270,16 +270,12 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
       auto sizes = metadata["sizes"].cast<std::vector<int64_t>>();
       auto strides = metadata["strides"].cast<std::vector<int64_t>>();
 
-      std::vector<c10::SymInt> sym_sizes;
-      std::vector<c10::SymInt> sym_strides;
       std::vector<std::optional<c10::SymInt>> sym_optional_sizes;
       std::vector<std::optional<c10::SymInt>> sym_optional_strides;
       for (int64_t size : sizes) {
-        sym_sizes.push_back(c10::SymInt(size));
         sym_optional_sizes.push_back(std::optional<c10::SymInt>(size));
       }
       for (int64_t stride : strides) {
-        sym_strides.push_back(c10::SymInt(stride));
         sym_optional_strides.push_back(std::optional<c10::SymInt>(stride));
       }
 
@@ -288,8 +284,8 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
           is_dynamic,
           data_type,
           c10::Device(c10::Device(device_type).type(), device_index),
-          sym_sizes,
-          sym_strides);
+          sizes,
+          strides);
       tensor_checks.emplace_back(
           state,
           nullptr,
@@ -346,13 +342,11 @@ void AOTIPythonKernelHolder::cache_miss(
       unpack_tensors(op.schema().arguments(), *stack, device_, inputs),
       "Failed to unpack tensors for the stack to run the AOTI kernel.");
   auto outputs = kernel->run(inputs);
-  if (outputs.size() > 0) {
-    torch::jit::drop(*stack, op.schema().arguments().size());
-    // TODO: Get the output type of this operation and then convert to the
-    // output type.
-    for (auto& output : outputs) {
-      torch::jit::push(*stack, std::move(output));
-    }
+  torch::jit::drop(*stack, op.schema().arguments().size());
+  // TODO: Get the output type of this operation and then convert to the
+  // output type.
+  for (auto& output : outputs) {
+    torch::jit::push(*stack, std::move(output));
   }
 }
 

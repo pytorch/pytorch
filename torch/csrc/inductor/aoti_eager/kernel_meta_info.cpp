@@ -6,35 +6,15 @@ namespace torch::inductor {
 TensorMetadata::TensorMetadata(const at::Tensor& src_tensor)
     : is_symbolic_(false),
       device_(src_tensor.device()),
-      sizes_(src_tensor.sym_sizes().vec()),
-      strides_(src_tensor.sym_strides().vec()) {
-  for (const auto& size : sizes_) {
-    if (size.is_symbolic()) {
-      is_symbolic_ = true;
-      break;
-    }
-  }
-
-  if (!is_symbolic_) {
-    for (const auto& stride : strides_) {
-      if (stride.is_symbolic()) {
-        is_symbolic_ = true;
-        break;
-      }
-    }
-  }
-
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      !is_symbolic_,
-      "Eager through torch.compile does not support symbolic shape now.");
-}
+      sizes_(src_tensor.sizes().vec()),
+      strides_(src_tensor.sizes().vec()) {}
 
 TensorMetadata::TensorMetadata(
     bool is_symbolic,
     c10::ScalarType dtype,
     c10::Device device,
-    std::vector<c10::SymInt> sizes,
-    std::vector<c10::SymInt> strides)
+    std::vector<int64_t> sizes,
+    std::vector<int64_t> strides)
     : is_symbolic_(is_symbolic),
       dtype_(dtype),
       device_(device),
@@ -62,15 +42,11 @@ size_t TensorMetadataHash::operator()(
       hash, std::hash<c10::DeviceType>()(tensor_metadata.device_.type()));
 
   for (auto& e : tensor_metadata.sizes_) {
-    if (!e.is_symbolic()) {
-      hash = c10::hash_combine(hash, std::hash<int64_t>()(e.expect_int()));
-    }
+    hash = c10::hash_combine(hash, std::hash<int64_t>()(e));
   }
 
   for (auto& e : tensor_metadata.strides_) {
-    if (!e.is_symbolic()) {
-      hash = c10::hash_combine(hash, std::hash<int64_t>()(e.expect_int()));
-    }
+    hash = c10::hash_combine(hash, std::hash<int64_t>()(e));
   }
   return hash;
 }
