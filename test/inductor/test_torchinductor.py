@@ -9103,9 +9103,10 @@ class CommonTemplate:
         ref2 = fn(inp2)
         res2 = fn_c(inp2)
         self.assertEqual(ref2, res2)
-        # dynamic shapes
-        self.assertEqual(1, len(failed_guards))
-        first_guard_failure = failed_guards[0]
+        # if dynamic shapes isn't already turned on, we might have a guard failure as we turn
+        # on dynamic shapes
+        self.assertLessEqual(len(failed_guards), 1)
+        failed_guard_count_iteration_2 = len(failed_guards)
 
         failed_guards = []
         ref3 = fn(inp3)
@@ -9113,7 +9114,7 @@ class CommonTemplate:
         self.assertEqual(ref3, res3)
         # we might still have the dynamics shapes failure, but offset change shouldn't be guarded on
         # see Note: [Input Alignment handling in Inductor]
-        self.assertLessEqual(len(failed_guards), 1)
+        self.assertLessEqual(len(failed_guards), failed_guard_count_iteration_2)
 
     @requires_gpu()
     @config.patch(assume_aligned_inputs=False)
@@ -9457,6 +9458,8 @@ class CommonTemplate:
         b = torch.randn(65, 2**24, device=self.device)
         fn(a, b)
 
+    # Skipped on ROCm until https://github.com/ROCm/triton/issues/443 resolved
+    @skipIfRocm
     def test_fuse_large_params(self):
         def pt2_optimizer_step(optimizer):
             @torch.compile()
