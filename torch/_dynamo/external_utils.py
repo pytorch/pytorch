@@ -28,31 +28,12 @@ def is_compiling() -> bool:
 
 
 def create_new_fn(fn):
-    members = [
-        "co_argcount",
-        "co_posonlyargcount",
-        "co_kwonlyargcount",
-        "co_nlocals",
-        "co_stacksize",
-        "co_flags",
-        "co_code",
-        "co_consts",
-        "co_names",
-        "co_varnames",
-        "co_filename",
-        "co_name",
-        "co_qualname",
-        "co_firstlineno",
-        "co_lnotab",
-        "co_exceptiontable",
-        "co_freevars",
-        "co_cellvars",
-    ]
+    from .bytecode_transformation import transform_code_object
 
-    new_code = types.CodeType(
-        *[getattr(fn.__code__, member) for member in members],
-    )
+    def nothing(*args):
+        pass
 
+    new_code = transform_code_object(fn.__code__, nothing)
     new_fn = types.FunctionType(
         new_code,
         fn.__globals__,
