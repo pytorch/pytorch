@@ -382,6 +382,23 @@ def disable_saved_tensors_hooks(error_message):
             torch._C._autograd._saved_tensors_hooks_disable(maybe_prev_message)
 
 
+class _MultiHandle(RemovableHandle):
+    handles: Tuple[RemovableHandle, ...]
+
+    def __init__(self, handles: Tuple[RemovableHandle, ...]):
+        self.handles = handles
+
+    def remove(self):
+        for handle in self.handles:
+            handle.remove()
+
+    def __getstate__(self):
+        return self.handles
+
+    def __setstate__(self, state):
+        self.handles = state
+
+
 def register_multi_grad_hook(
     tensors: Sequence[torch.Tensor],
     fn: Union[
@@ -442,22 +459,6 @@ def register_multi_grad_hook(
     if mode not in supported_modes:
         raise ValueError(f"Expects mode to be one of {supported_modes} but got {mode}")
 
-    class Handle(RemovableHandle):
-        handles: Tuple[RemovableHandle, ...]
-
-        def __init__(self, handles: Tuple[RemovableHandle, ...]):
-            self.handles = handles
-
-        def remove(self):
-            for handle in self.handles:
-                handle.remove()
-
-        def __getstate__(self):
-            return self.handles
-
-        def __setstate__(self, state):
-            self.handles = state
-
     if mode == "all":
         count: Dict[int, int] = dict()
         nb_calls = None
@@ -516,7 +517,7 @@ def register_multi_grad_hook(
             if tensor.requires_grad
         )
 
-    return Handle(handles)  # type: ignore[possibly-undefined]
+    return _MultiHandle(handles)  # type: ignore[possibly-undefined]
 
 
 # NOTE [Allow mutation on tensors saved for backward]

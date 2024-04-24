@@ -51,6 +51,7 @@ def is_hashable(x):
                 variables.SkipFunctionVariable,
                 variables.misc.NumpyVariable,
                 variables.NNModuleVariable,
+                variables.UnspecializedNNModuleVariable,
                 variables.MethodWrapperVariable,
                 variables.TorchInGraphFunctionVariable,
                 variables.TypingVariable,
@@ -90,6 +91,8 @@ class ConstDictVariable(VariableTracker):
                 x = tuple(Hashable(e).underlying_value for e in self.vt.items)
             elif isinstance(self.vt, variables.NNModuleVariable):
                 return self.vt.module
+            elif isinstance(self.vt, variables.UnspecializedNNModuleVariable):
+                return self.vt.value
             elif isinstance(self.vt, variables.UserFunctionVariable):
                 return self.vt.get_function()
             else:
@@ -417,7 +420,7 @@ class DictView(VariableTracker):
     def view_items_vt(self):
         # Returns an iterable of the unpacked items
         # Implement in the subclasses
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def unpack_var_sequence(self, tx):
         def unwrap(x):
@@ -612,7 +615,7 @@ class DataClassVariable(ConstDictVariable):
         assert self.is_matching_cls(user_cls)
 
     def as_proxy(self):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def reconstruct(self, codegen):
         codegen.extend_output([codegen._create_load_const(self.user_cls)])
@@ -734,14 +737,14 @@ class CustomizedDictVariable(ConstDictVariable):
     # called from builder.py
     @classmethod
     def wrap(cls, builder, obj):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def __init__(self, items, user_cls, **options):
         super().__init__(items, user_cls, **options)
         assert self.is_matching_cls(user_cls)
 
     def as_proxy(self):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     # 'RETURN_VALUE triggered compile'
     # called from torch/_dynamo/codegen.py

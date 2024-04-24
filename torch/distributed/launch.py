@@ -83,7 +83,7 @@ Parsing the local_rank argument
     >>> # xdoctest: +SKIP
     >>> import argparse
     >>> parser = argparse.ArgumentParser()
-    >>> parser.add_argument("--local-rank", type=int)
+    >>> parser.add_argument("--local-rank", "--local_rank", type=int)
     >>> args = parser.parse_args()
 
 Set your device to local rank using either
@@ -99,6 +99,19 @@ or
     >>> with torch.cuda.device(args.local_rank):
     >>>    # your code to run
     >>>    ...
+
+.. versionchanged:: 2.0.0
+
+    The launcher will passes the ``--local-rank=<rank>`` argument to your script.
+    From PyTorch 2.0.0 onwards, the dashed ``--local-rank`` is preferred over the
+    previously used underscored ``--local_rank``.
+
+    For backward compatibility, it may be necessary for users to handle both
+    cases in their argument parsing code. This means including both ``"--local-rank"``
+    and ``"--local_rank"`` in the argument parser. If only ``"--local_rank"`` is
+    provided, the launcher will trigger an error: "error: unrecognized arguments:
+    --local-rank=<rank>". For training code that only supports PyTorch 2.0.0+,
+    including ``"--local-rank"`` should be sufficient.
 
 3. In your training program, you are supposed to call the following function
 at the beginning to start the distributed backend. It is strongly recommended
@@ -146,13 +159,9 @@ will not pass ``--local-rank`` when you specify this flag.
 
 """
 
-import logging
 import warnings
 
 from torch.distributed.run import get_args_parser, run
-
-
-logger = logging.getLogger(__name__)
 
 
 def parse_args(args):

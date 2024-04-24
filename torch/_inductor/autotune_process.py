@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from torch._inductor.select_algorithm import TritonTemplateCaller
 
 from . import config
-from .utils import do_bench
+from .runtime.runtime_utils import do_bench
 from .virtualized import V
 
 CUDA_VISIBLE_DEVICES = "CUDA_VISIBLE_DEVICES"
@@ -422,7 +422,7 @@ class BenchmarkRequest:
     def make_run_fn(
         self, *input_tensors: torch.Tensor, output_tensor: torch.Tensor
     ) -> Callable[[], None]:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def cleanup_run_fn(self) -> None:
         pass
@@ -495,7 +495,7 @@ class TestBenchmarkRequest(BenchmarkRequest):
         self, *input_tensors: torch.Tensor, output_tensor: Optional[torch.Tensor] = None
     ) -> float:
         if self.value is None:
-            raise Exception("Failed to run")
+            raise Exception("Failed to run")  # noqa: TRY002
         return self.value
 
 

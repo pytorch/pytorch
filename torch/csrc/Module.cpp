@@ -8,6 +8,7 @@
 #endif
 
 #include <ATen/ATen.h>
+#include <ATen/BlasBackend.h>
 #include <ATen/DLConvertor.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/LegacyVmapMode.h>
@@ -1931,6 +1932,17 @@ Call this whenever a new thread is created in order to propagate values from
   });
   py_module.def("_get_linalg_preferred_backend", []() {
     return at::globalContext().linalgPreferredBackend();
+  });
+
+  py::enum_<at::BlasBackend>(py_module, "_BlasBackend")
+      .value("Cublas", at::BlasBackend::Cublas)
+      .value("Cublaslt", at::BlasBackend::Cublaslt);
+
+  py_module.def("_set_blas_preferred_backend", [](at::BlasBackend b) {
+    at::globalContext().setBlasPreferredBackend(b);
+  });
+  py_module.def("_get_blas_preferred_backend", []() {
+    return at::globalContext().blasPreferredBackend();
   });
 
   py_module.def(

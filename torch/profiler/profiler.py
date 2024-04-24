@@ -12,7 +12,6 @@ from typing_extensions import Self
 
 import torch
 import torch.autograd.profiler as prof
-from torch._C import _get_privateuse1_backend_name
 from torch._C._profiler import (
     _add_execution_trace_observer,
     _disable_execution_trace_observer,
@@ -71,8 +70,10 @@ class _KinetoProfile:
 
     Args:
         activities (iterable): list of activity groups (CPU, CUDA) to use in profiling, supported values:
-            ``torch.profiler.ProfilerActivity.CPU``, ``torch.profiler.ProfilerActivity.CUDA``.
-            Default value: ProfilerActivity.CPU and (when available) ProfilerActivity.CUDA.
+            ``torch.profiler.ProfilerActivity.CPU``, ``torch.profiler.ProfilerActivity.CUDA``,
+            ``torch.profiler.ProfilerActivity.XPU``.
+            Default value: ProfilerActivity.CPU and (when available) ProfilerActivity.CUDA
+            or (when available) ProfilerActivity.XPU.
         record_shapes (bool): save information about operator's input shapes.
         profile_memory (bool): track tensor memory allocation/deallocation (see ``export_memory_timeline``
             for more details).
@@ -125,9 +126,13 @@ class _KinetoProfile:
         self.profiler: Optional[prof.profile] = None
         self.mem_tl: Optional[MemoryProfileTimeline] = None
         self.use_device = None
-        privateuse1_backend = _get_privateuse1_backend_name()
-        if privateuse1_backend != "privateuseone":
-            self.use_device = privateuse1_backend
+        if ProfilerActivity.CUDA in self.activities:
+            self.use_device = "cuda"
+        elif ProfilerActivity.XPU in self.activities:
+            self.use_device = "xpu"
+        else:
+            self.use_device = "privateuseone"
+
         # user-defined metadata to be amended to the trace
         self.preset_metadata: Dict[str, str] = dict()
 
@@ -143,7 +148,7 @@ class _KinetoProfile:
             use_cuda=(ProfilerActivity.CUDA in self.activities),
             use_cpu=(ProfilerActivity.CPU in self.activities),
             use_mtia=(ProfilerActivity.MTIA in self.activities),
-            use_device=None,
+            use_device=self.use_device,
             record_shapes=self.record_shapes,
             with_flops=self.with_flops,
             profile_memory=self.profile_memory,
@@ -216,18 +221,11 @@ class _KinetoProfile:
             return self.profiler.export_chrome_trace(path)
 
     def export_stacks(self, path: str, metric: str = "self_cpu_time_total"):
-        """Save stack traces in a file in a format suitable for visualization.
+        """Save stack traces to a file
 
         Args:
             path (str): save stacks file to this location;
             metric (str): metric to use: "self_cpu_time_total" or "self_cuda_time_total"
-
-        .. note::
-            Example of using FlameGraph tool:
-
-            - git clone https://github.com/brendangregg/FlameGraph
-            - cd FlameGraph
-            - ./flamegraph.pl --title "CPU time" --countname "us." profiler.stacks > perf_viz.svg
         """
         assert self.profiler
         return self.profiler.export_stacks(path, metric)
@@ -450,8 +448,10 @@ class profile(_KinetoProfile):
 
     Args:
         activities (iterable): list of activity groups (CPU, CUDA) to use in profiling, supported values:
-            ``torch.profiler.ProfilerActivity.CPU``, ``torch.profiler.ProfilerActivity.CUDA``.
-            Default value: ProfilerActivity.CPU and (when available) ProfilerActivity.CUDA.
+            ``torch.profiler.ProfilerActivity.CPU``, ``torch.profiler.ProfilerActivity.CUDA``,
+            ``torch.profiler.ProfilerActivity.XPU``.
+            Default value: ProfilerActivity.CPU and (when available) ProfilerActivity.CUDA
+            or (when available) ProfilerActivity.XPU.
         schedule (Callable): callable that takes step (int) as a single parameter and returns
             ``ProfilerAction`` value that specifies the profiler action to perform at each step.
         on_trace_ready (Callable): callable that is called at each step when ``schedule``
@@ -742,6 +742,11 @@ class profile(_KinetoProfile):
         if action_list:
             for action in action_list:
                 action()
+
+    def _stats(self) -> Optional[prof._ProfilerStats]:
+        if self.profiler is None:
+            return None
+        return self.profiler._stats
 
 
 class ExecutionTraceObserver(_ITraceObserver):

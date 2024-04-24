@@ -1,10 +1,13 @@
 import copyreg
 import functools
+import logging
 import sys
 import traceback
 import warnings
 from collections import defaultdict
-from typing import Any, DefaultDict, List, Optional
+from typing import Any, Callable, DefaultDict, Generic, List, Optional
+
+from typing_extensions import ParamSpec
 
 import torch
 
@@ -935,3 +938,25 @@ class _LazySeedTracker:
 
     def get_calls(self) -> List:
         return self.call_order
+
+
+logger = logging.getLogger(__name__)
+P = ParamSpec("P")
+
+
+class CallbackRegistry(Generic[P]):
+    def __init__(self, name: str):
+        self.name = name
+        self.callback_list: List[Callable[P, None]] = []
+
+    def add_callback(self, cb: Callable[P, None]) -> None:
+        self.callback_list.append(cb)
+
+    def fire_callbacks(self, *args: P.args, **kwargs: P.kwargs) -> None:
+        for cb in self.callback_list:
+            try:
+                cb(*args, **kwargs)
+            except Exception as e:
+                logger.exception(
+                    "Exception in callback for %s registered with gpu trace", self.name
+                )

@@ -369,7 +369,7 @@ def get_mode(args):
     return "training"
 
 
-def get_skip_tests(suite, is_training: bool):
+def get_skip_tests(suite, device, is_training: bool):
     """
     Generate -x seperated string to skip the unusual setup training tests
     """
@@ -384,6 +384,10 @@ def get_skip_tests(suite, is_training: bool):
             skip_tests.update(
                 module.TorchBenchmarkRunner().skip_not_suitable_for_training_models
             )
+        if device == "cpu":
+            skip_tests.update(module.TorchBenchmarkRunner().skip_models_for_cpu)
+        elif device == "cuda":
+            skip_tests.update(module.TorchBenchmarkRunner().skip_models_for_cuda)
     else:
         if hasattr(module, "SKIP"):
             skip_tests.update(module.SKIP)
@@ -436,7 +440,7 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
                         launcher_cmd = f"python -m torch.backends.xeon.run_cpu {args.cpu_launcher_args}"
                     cmd = f"{launcher_cmd} benchmarks/dynamo/{suite}.py --{testing} --{dtype} -d{device} --output={output_filename}"
                     cmd = f"{cmd} {base_cmd} {args.extra_args} --no-skip --dashboard"
-                    skip_tests_str = get_skip_tests(suite, args.training)
+                    skip_tests_str = get_skip_tests(suite, device, args.training)
                     cmd = f"{cmd} {skip_tests_str}"
 
                     if args.log_operator_inputs:

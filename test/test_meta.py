@@ -64,6 +64,9 @@ i32 = torch.int32
 i64 = torch.int64
 b8 = torch.bool
 u8 = torch.uint8
+u16 = torch.uint16
+u32 = torch.uint32
+u64 = torch.uint64
 
 foreach_op_db = (
     foreach_unary_op_db +
@@ -659,9 +662,8 @@ meta_function_expected_failures = {
     torch.Tensor.nonzero : {f64, i32, c128, i64, i16, c32, f16, u8, c64, bf16, b8, i8, f32},
     torch.Tensor.item : {f64, i32, c128, i64, i16, f16, u8, c32, c64, bf16, b8, i8, f32},
     torch.bincount : {i32, i64, u8, i16, i8},
-    torch.functional.unique : {f64, i32, i64, u8, i16, f16, bf16, b8, i8, f32},
-    torch.functional.unique_consecutive : {f64, i32, i64, u8, i16, f16, bf16, b8, i8, f32},
-    torch.histc : {f64, f16, bf16, f32},
+    torch.functional.unique : {f64, i32, i64, u8, i16, f16, bf16, b8, i8, f32, u16, u32, u64},
+    torch.functional.unique_consecutive : {f64, i32, i64, u8, i16, f16, bf16, b8, i8, f32, u16, u32, u64},
     torch.histogram : {f64, f32},
     torch.histogramdd : {f64, f32},
     torch.kthvalue : {f64, i32, i64, u8, i16, f16, bf16, i8, f32},
@@ -738,7 +740,6 @@ meta_function_device_expected_failures['cuda'] = {
     torch.functional.unique: {f16},  # aten::_unique2, aten::unique_dim
     torch.functional.unique_consecutive: {f16},  # aten::unique_consecutive
     torch.geqrf: {f32, f64},  # aten::geqrf
-    torch.histc: {i16, i32, i64, i8},  # aten::histc, aten::histc.out
     torch.kthvalue: {f16},  # aten::kthvalue.values
 }
 
@@ -832,16 +833,14 @@ meta_dispatch_expected_failures = {
     aten._histogramdd_from_bin_cts.default : {f32, f64},
     aten._histogramdd_from_bin_tensors.default : {f32, f64},
     aten._local_scalar_dense.default : {c32, c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
-    aten._unique2.default : {i8, f64, i64, f16, bf16, f32, i32, b8, i16, u8},
+    aten._unique2.default : {i8, f64, i64, f16, bf16, f32, i32, b8, i16, u8, u16, u32, u64},
     aten.bincount.default : {i64, i8, i32, i16, u8},
     aten.equal.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
-    aten.histc.default : {bf16, f32, f64},
-    aten.histc.out : {bf16, f32, f64},
     aten.histogram.bin_ct : {f32, f64},
     aten.histogram.bins_tensor : {f32, f64},
     aten.kthvalue.default : {i8, f64, i64, f16, bf16, f32, i32, i16, u8},
-    aten.unique_consecutive.default : {i8, f64, i64, f16, bf16, f32, i32, b8, i16, u8},
-    aten.unique_dim.default : {i8, f64, i64, f16, bf16, f32, i32, b8, i16, u8},
+    aten.unique_consecutive.default : {i8, f64, i64, f16, bf16, f32, i32, b8, i16, u8, u16, u32, u64},
+    aten.unique_dim.default : {i8, f64, i64, f16, bf16, f32, i32, b8, i16, u8, u16, u32, u64},
     aten.upsample_nearest3d.vec : {bf16, f32, f64, u8},
 
 }
@@ -880,8 +879,6 @@ meta_dispatch_device_expected_failures['cpu'] = {
     aten._batch_norm_with_update.default: {bf16, f16},
 
     aten.native_layer_norm.default: {bf16, f16},
-    aten.histc.default: {f16},
-    aten.histc.out: {f16},
 }
 
 meta_dispatch_device_expected_failures['cuda'] = {
@@ -890,8 +887,6 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten._use_cudnn_ctc_loss.Tensor: {f32, f64},  # aten::_use_cudnn_ctc_loss.Tensor
     aten.cudnn_grid_sampler.default: {f16, f32, f64},  # aten::cudnn_grid_sampler
     aten.geqrf.default: {f32, f64},  # aten::geqrf
-    aten.histc.default: {i16, i32, i64, i8},  # aten::histc
-    aten.histc.out: {i16, i32, i64, i8},  # aten::histc.out
     aten.kthvalue.default: {f16},  # aten::kthvalue.values
     aten.linalg_eigvalsh.out: {f32, f64},  # aten::linalg_eigvalsh.out
     aten.log_sigmoid_forward.default: {bf16, f16, f64, f32},

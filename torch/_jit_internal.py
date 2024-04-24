@@ -46,7 +46,6 @@ import torch.package._mangling as package_mangling
 from torch._awaits import _Await
 from torch._C import _Await as CAwait, Future as CFuture
 from torch._sources import fake_range, get_source_lines_and_file, parse_def
-from torch._utils_internal import log_torchscript_usage
 from torch.futures import Future
 
 IS_PY39_PLUS: Final[bool] = sys.version_info >= (3, 9)
@@ -583,7 +582,6 @@ def export(fn):
         # any compiled methods and wasn't decorated with `@torch.jit.export`
         m = torch.jit.script(MyModule())
     """
-    log_torchscript_usage("export")
     fn._torchscript_modifier = FunctionModifiers.EXPORT
     return fn
 
@@ -625,7 +623,6 @@ def unused(fn):
             # exception raised
             m(torch.rand(100))
     """
-    log_torchscript_usage("unused")
     if isinstance(fn, property):
         prop = fn
         setattr(  # noqa: B010
@@ -713,7 +710,6 @@ def ignore(drop=False, **kwargs):
         import os
         os.remove('m.pt')
     """
-    log_torchscript_usage("ignore")
 
     if callable(drop):
         # used without any args, so drop is actually a function
@@ -985,7 +981,7 @@ def _get_overloaded_methods(method, mod_class):
     mod_class_fileno = get_source_lines_and_file(mod_class)[1]
     mod_end_fileno = mod_class_fileno + len(get_source_lines_and_file(mod_class)[0])
     if not (method_line_no >= mod_class_fileno and method_line_no <= mod_end_fileno):
-        raise Exception(
+        raise Exception(  # noqa: TRY002
             "Overloads are not useable when a module is redeclared within the same file: "
             + str(method)
         )

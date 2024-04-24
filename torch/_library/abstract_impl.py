@@ -8,7 +8,7 @@ from torch._library.utils import Kernel, RegistrationHandle
 
 
 class AbstractImplHolder:
-    """A holder where one can register an abstract impl to."""
+    """A holder where one can register an fake impl to."""
 
     def __init__(self, qualname: str):
         self.qualname: str = qualname
@@ -16,58 +16,58 @@ class AbstractImplHolder:
         self.lib: Optional[torch.library.Library] = None
 
     def register(self, func: Callable, source: str) -> RegistrationHandle:
-        """Register an abstract impl.
+        """Register an fake impl.
 
         Returns a RegistrationHandle that one can use to de-register this
-        abstract impl.
+        fake impl.
         """
         if self.kernel is not None:
             raise RuntimeError(
-                f"impl_abstract(...): the operator {self.qualname} "
-                f"already has an abstract impl registered at "
+                f"register_fake(...): the operator {self.qualname} "
+                f"already has an fake impl registered at "
                 f"{self.kernel.source}."
             )
         if torch._C._dispatch_has_kernel_for_dispatch_key(self.qualname, "Meta"):
             raise RuntimeError(
-                f"impl_abstract(...): the operator {self.qualname} "
+                f"register_fake(...): the operator {self.qualname} "
                 f"already has an DispatchKey::Meta implementation via a "
                 f"pre-existing torch.library or TORCH_LIBRARY registration. "
                 f"Please either remove that registration or don't call "
-                f"impl_abstract."
+                f"register_fake."
             )
 
         if torch._C._dispatch_has_kernel_for_dispatch_key(
             self.qualname, "CompositeImplicitAutograd"
         ):
             raise RuntimeError(
-                f"impl_abstract(...): the operator {self.qualname} "
+                f"register_fake(...): the operator {self.qualname} "
                 f"already has an implementation for this device type via a "
                 f"pre-existing registration to "
                 f"DispatchKey::CompositeImplicitAutograd."
-                f"CompositeImplicitAutograd operators do not need an abstract "
+                f"CompositeImplicitAutograd operators do not need an fake "
                 f"impl; "
                 f"instead, the operator will decompose into its constituents "
                 f"and those "
-                f"can have abstract impls defined on them."
+                f"can have fake impls defined on them."
             )
 
         # Store the kernel in this holder
         self.kernel = Kernel(func, source)
 
-        # Also register the abstract impl to Meta key
+        # Also register the fake impl to Meta key
         if self.lib is None:
             ns = self.qualname.split("::")[0]
             self.lib = torch.library.Library(ns, "FRAGMENT")
         meta_kernel = construct_meta_kernel(self.qualname, self)
         self.lib.impl(self.qualname, meta_kernel, "Meta")
 
-        def deregister_abstract_impl():
+        def deregister_fake_class():
             if self.lib:
                 self.lib._destroy()
                 self.lib = None
             self.kernel = None
 
-        return RegistrationHandle(deregister_abstract_impl)
+        return RegistrationHandle(deregister_fake_class)
 
 
 def construct_meta_kernel(
@@ -116,11 +116,12 @@ def set_ctx_getter(ctx_getter):
 
 class AbstractImplCtx:
     """
-    Context object for writing abstract implementations for custom operators.
+    Context object for writing fake implementations for custom operators.
     """
 
-    def __init__(self, _shape_env, _op):
-        self._shape_env = _shape_env
+    def __init__(self, _fake_mode, _op):
+        self._fake_mode = _fake_mode
+        self._shape_env = _fake_mode.shape_env
         self._op = _op
 
     def create_unbacked_symint(self, *, min=2, max=None) -> torch.SymInt:
@@ -132,7 +133,7 @@ class AbstractImplCtx:
     def new_dynamic_size(self, *, min=0, max=None) -> torch.SymInt:
         """Constructs a new symint (symbolic int) representing a data-dependent value.
 
-        This is useful for writing the abstract implementation (which is necessary
+        This is useful for writing the fake implementation (which is necessary
         for torch.compile) for a CustomOp where an output Tensor has a size
         that depends on the data of the input Tensors.
 
@@ -160,10 +161,10 @@ class AbstractImplCtx:
             >>> lib = torch.library.Library("mymodule", "FRAGMENT")
             >>> lib.define("mymodule::custom_nonzero(Tensor x) -> Tensor")
             >>>
-            >>> @torch.library.impl_abstract("mymodule::custom_nonzero")
-            >>> def custom_nonzero_abstract(x):
+            >>> @torch.library.register_fake("mymodule::custom_nonzero")
+            >>> def _(x):
             >>>     # Number of nonzero-elements is data-dependent.
-            >>>     # Since we cannot peek at the data in an abstract impl,
+            >>>     # Since we cannot peek at the data in an fake impl,
             >>>     # we use the ctx object to construct a new symint that
             >>>     # represents the data-dependent size.
             >>>     ctx = torch.library.get_ctx()
@@ -173,7 +174,7 @@ class AbstractImplCtx:
             >>>     return result
             >>>
             >>> @torch.library.impl(lib, "custom_nonzero", "CPU")
-            >>> def custom_nonzero_cpu(x):
+            >>> def _(x):
             >>>     x_np = x.numpy()
             >>>     res = np.stack(np.nonzero(x_np), axis=1)
             >>>     return torch.tensor(res, device=x.device)
@@ -204,3 +205,38 @@ class AbstractImplCtx:
             result, min=min, max=max
         )
         return result
+
+    def to_fake_tensor(self, tensor: torch.Tensor):
+        """
+        Creates a fake tensor from a concrete tensor. Note: this is not needed for register_fake.
+
+        This is useful for register_fake_class (which is necessary for torch.compile) for custom class.
+        Users need to implement a from_real method that takes a real custom object and creates a fake
+        custom object. Users can use this API to create fake tensors for the tensor states in the custom object.
+
+        Args:
+            tensor (torch.Tensor): A concrete tensor.
+
+        Example::
+            >>> import torch
+            >>> @torch._library.register_fake_class("_TorchScriptTesting::_TensorQueue")  # xdoctest: +SKIP
+            ... class FakeTensorQueue:
+            ...     def __init__(self, q):
+            ...         self.queue = q
+            ...
+            ...     @classmethod
+            ...     def from_real(cls, real_tq):
+            ...         ctx = torch.library.get_ctx()
+            ...         fake_queue = [ctx.to_fake_tensor(t) for t in real_tq.get_raw_queue()]
+            ...         return cls(fake_queue)
+            ...
+            ...     def push(self, x):
+            ...         self.queue.append(x)
+            ...
+            ...     def pop(self):
+            ...         return self.queue.pop(0)
+            ...
+            ...     def size(self):
+            ...         return len(self.queue)
+        """
+        return self._fake_mode.from_tensor(tensor)

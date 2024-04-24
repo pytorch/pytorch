@@ -38,7 +38,7 @@ from torch.distributed.utils import (
 )
 from torch.utils import _pytree as pytree
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 # Do not include "process_group" to enable hybrid shard and MoE cases
 HOMOGENEOUS_ATTR_NAMES = (
@@ -630,7 +630,7 @@ def _pre_backward_hook(
         and hasattr(handle, "_ran_pre_backward_hook")
         and handle._ran_pre_backward_hook
     ):
-        log.debug("%s %s", id(state), "Not Running pre backward! Already Ran!")
+        logger.debug("%s %s", id(state), "Not Running pre backward! Already Ran!")
         return grad
 
     with torch.profiler.record_function("FullyShardedDataParallel._pre_backward_hook"):
@@ -699,7 +699,7 @@ def _post_backward_hook(
     - Otherwise, the ``_saved_grad_shard`` attribute is the reduced sharded
     gradient (accumulating with any existing gradient).
     """
-    _log_post_backward_hook(state, handle, log)
+    _log_post_backward_hook(state, handle, logger)
     flat_param = handle.flat_param
     flat_param._post_backward_called = True
     with torch.autograd.profiler.record_function(

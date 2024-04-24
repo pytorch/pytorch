@@ -399,13 +399,19 @@ class CPUReproTests(TestCase):
         # Reproducer from the maml_omniglot model in Torchbench
         in_channel = 1
         out_channel = 3
-        mod = M(in_channel, out_channel).eval()
-        v = torch.randn(5, in_channel, 15, 15)
-        with torch.no_grad():
-            self.common(
-                mod,
-                (v,),
-            )
+        amp_enabled_configs = [False]
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            # When amp is enabled here, the input to Conv is a FlexibleLayout.
+            # While it's disabled, the input is a FixedLayout.
+            amp_enabled_configs.append(True)
+        for amp_enabled in amp_enabled_configs:
+            mod = M(in_channel, out_channel).eval()
+            v = torch.randn(5, in_channel, 15, 15)
+            with torch.no_grad(), torch.cpu.amp.autocast(enabled=amp_enabled):
+                self.common(
+                    mod,
+                    (v,),
+                )
 
     @unittest.skipIf(not torch._C._has_mkldnn, "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
@@ -1624,6 +1630,19 @@ class CPUReproTests(TestCase):
                         self.common(fn, (value, mask))
                         assert metrics.generated_cpp_vec_kernel_count >= 1
 
+    def test_channels_last_view_as_complex(self):
+        # https://github.com/pytorch/pytorch/issues/122448#issuecomment-2046169554
+
+        def reduce_example(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            """Applies the rotary embedding to the query and key tensors."""
+            x_out = torch.view_as_complex(torch.stack([x.float(), y.float()], dim=-1))
+            return x_out
+
+        args = [torch.randn(1, 1, 1, 128), torch.randn(1, 1, 1, 128)]
+        expected = reduce_example(*args)
+        actual = torch.compile(reduce_example, fullgraph=True)(*args)
+        self.assertEqual(expected, actual)
+
     def test_load_same_bool_tensor_twice(self):
         @torch._dynamo.optimize("inductor")
         def fn(a, b):
@@ -1754,6 +1773,19 @@ class CPUReproTests(TestCase):
             res_grad = test_args_for_opt["input"].grad
             self.assertEqual(ref_grad, res_grad)
 
+    def test_meta_device(self):
+        @torch.compile(fullgraph=True)
+        def fn():
+            x = torch.ops.aten.empty.memory_format(
+                [1024, 128, 128],
+                dtype=torch.float16,
+                device="meta",
+                pin_memory=False,
+            )
+            return x.sin() + 1
+
+        self.assertEqual(fn().shape, [1024, 128, 128])
+
     def test_decomposed_fake_quant_per_channel(self):
         def fq(input, scales, zero_points, axis, quant_min, quant_max):
             res = torch.fake_quantize_per_channel_affine(
@@ -1819,6 +1851,8 @@ class CPUReproTests(TestCase):
         self.assertEqual(input_grad_aten_eager, input_grad)
         self.assertEqual(input_grad_decomp_eager, input_grad)
         self.assertEqual(input_grad[1, 2, 3, 4], torch.tensor(0.0))
+        # For forward and backward kernel
+        check_metrics_vec_kernel_count(2)
 
     @patch("torch.cuda.is_available", lambda: False)
     def test_scatter_using_atomic_add(self):
@@ -2419,6 +2453,20 @@ class CPUReproTests(TestCase):
                 metrics.reset()
                 self.common(fn, (x,))
                 assert metrics.generated_cpp_vec_kernel_count == 0
+
+    def test_outer_loop_fusion(self):
+        def fn(x):
+            max = torch.amax(x, dim=-1, keepdim=True)
+            return x - max
+
+        x = torch.randn(4, 12, 1023, 1022)
+
+        with config.patch({"cpp.simdlen": None}):
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn, (x,))
+            assert len(metrics.cpp_outer_loop_fused_inner_counts) == 1
+            assert metrics.cpp_outer_loop_fused_inner_counts[0] == 2
 
     def test_argmin(self):
         def fn(x):
