@@ -29,9 +29,7 @@
 
 namespace py = pybind11;
 
-namespace torch {
-namespace impl {
-namespace dispatch {
+namespace torch::impl::dispatch {
 
 // NB: I'd like to index this on OperatorHandle, but I can't, as I can't
 // guarantee that the main interpreter has finish doing all registrations before
@@ -547,6 +545,16 @@ void initDispatchBindings(PyObject* module) {
       });
 
   m.def(
+      // Returns whether or not the kernel for this dispatach key is a
+      // fallthrough kernel
+      "_dispatch_kernel_for_dispatch_key_is_fallthrough",
+      [](const char* name, c10::DispatchKey dispatch) -> bool {
+        auto op =
+            c10::Dispatcher::singleton().findOp(torch::jit::parseName(name));
+        return op->isKernelFallthroughKernel(dispatch);
+      });
+
+  m.def(
       "_dispatch_has_kernel_for_any_dispatch_key",
       [](const char* name, c10::DispatchKeySet ks) -> bool {
         auto op =
@@ -932,6 +940,9 @@ void initDispatchBindings(PyObject* module) {
         ->set_warn_deprecated_on_mutable_data_ptr();
   });
 
+  m.def("_only_lift_cpu_tensors", &torch::utils::only_lift_cpu_tensors);
+  m.def("_set_only_lift_cpu_tensors", &torch::utils::set_only_lift_cpu_tensors);
+
   using c10::impl::TorchDispatchModeKey;
   py::enum_<TorchDispatchModeKey>(m, "_TorchDispatchModeKey")
       .value("FUNCTIONAL", TorchDispatchModeKey::FUNCTIONAL)
@@ -963,6 +974,4 @@ void python_op_registration_trampoline_impl(
   pushPyOutToStack(op, stack, obj, "PythonKernelHolder");
 }
 
-} // namespace dispatch
-} // namespace impl
-} // namespace torch
+} // namespace torch::impl::dispatch

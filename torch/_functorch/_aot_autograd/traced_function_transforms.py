@@ -372,8 +372,8 @@ def create_functionalized_fn(
 
             # Populate the current FunctionalTensorMode with the tokens per
             # operator. See Note [FunctionalTensorMode is Stateful]
-            functional_tensor_mode = (
-                torch.utils._python_dispatch._detect_functional_mode()
+            functional_tensor_mode = torch.utils._python_dispatch._detect_infra_mode(
+                torch._C._TorchDispatchModeKey.FUNCTIONAL
             )
             assert functional_tensor_mode is not None
             for i, k in enumerate(meta.tokens.keys()):

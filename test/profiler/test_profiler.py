@@ -11,7 +11,7 @@ try:
 
     tqdm.tqdm.monitor_interval = 0
 except ImportError:
-    None
+    pass
 
 import collections
 import gc
