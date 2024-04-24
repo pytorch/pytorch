@@ -105,7 +105,7 @@ def is_functional_schema(schema: Any) -> bool:
     return is_functional(schema)
 
 
-def is_tensorlist_like_type(typ: torch.Type):
+def is_tensorlist_like_type(typ: torch.JitType):
     return (
         typ == _C.ListType(_C.TensorType.get())
         or typ == _C.ListType(_C.OptionalType(_C.TensorType.get()))
@@ -114,7 +114,7 @@ def is_tensorlist_like_type(typ: torch.Type):
     )
 
 
-def is_tensor_like_type(typ: torch.Type):
+def is_tensor_like_type(typ: torch.JitType):
     return typ == _C.TensorType.get() or typ == _C.OptionalType(_C.TensorType.get())
 
 
