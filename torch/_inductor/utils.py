@@ -671,7 +671,8 @@ def fresh_inductor_cache(cache_entries=None):
     for obj in _registered_caches:
         obj.cache_clear()
 
-    with tempfile.TemporaryDirectory() as inductor_cache_dir:
+    inductor_cache_dir = tempfile.mkdtemp()
+    try:
         with mock.patch.dict(
             os.environ, {"TORCHINDUCTOR_CACHE_DIR": inductor_cache_dir}
         ):
@@ -689,6 +690,10 @@ def fresh_inductor_cache(cache_entries=None):
                                 if ".lock" not in f
                             }
                         )
+        shutil.rmtree(inductor_cache_dir)
+    except Exception:
+        log.warning("on error, temporary cache dir kept at %s", inductor_cache_dir)
+        raise
 
 
 def argsort(seq) -> List[int]:
@@ -1366,9 +1371,16 @@ def needs_fallback_due_to_atomic_add_limitations(dtype):
 
 
 def use_scatter_fallback(
-    fn, reduction_type, self_dtype, src_dtype, src_device_type, src_is_tensor
+    op_overload: torch._ops.OpOverload,
+    reduction_type,
+    self_dtype,
+    src_dtype,
+    src_device_type,
+    src_is_tensor,
 ):
-    reduce_ty = "add" if fn == "aten.scatter_" else "sum"
+    reduce_ty = (
+        "add" if op_overload.overloadpacket == torch.ops.aten.scatter_ else "sum"
+    )
 
     return (
         reduction_type not in {None, reduce_ty}
@@ -1378,7 +1390,7 @@ def use_scatter_fallback(
             and needs_fallback_due_to_atomic_add_limitations(src_dtype)
         )
         or (
-            fn == "aten.scatter_reduce_"
+            op_overload.overloadpacket == torch.ops.aten.scatter_reduce_
             and reduction_type == "sum"
             and src_is_tensor
             and src_device_type == "cpu"
@@ -1424,29 +1436,22 @@ def aoti_eager_cache_dir(namespace: str, device: str):
     return Path(cache_dir()) / "aoti_eager" / namespace / device
 
 
-def format_op_overload_name(op_overload_name):
-    return op_overload_name if op_overload_name else "default"
-
-
-def aoti_eager_op_conf_lock(op_func_name, op_overload_name):
+def aoti_eager_op_conf_lock(op_func_name_with_overload: str):
     # Avoid circular import
     from torch._inductor.codecache import get_lock_dir, LOCK_TIMEOUT
 
-    op_conf_lock_file = f"{op_func_name}.{op_overload_name}.lock"
+    op_conf_lock_file = f"{op_func_name_with_overload}.lock"
     lock_dir = get_lock_dir()
     return FileLock(os.path.join(lock_dir, op_conf_lock_file), timeout=LOCK_TIMEOUT)
 
 
-def load_aoti_eager_cache(
-    ns: str, op_func_name: str, op_overload_name: str, device_type: str
-):
+def load_aoti_eager_cache(ns: str, op_func_name_with_overload: str, device_type: str):
     device_kernel_cache = aoti_eager_cache_dir(ns, device_type)
-    op_overload_name = format_op_overload_name(op_overload_name)
-    op_conf = device_kernel_cache / f"{op_func_name}.{op_overload_name}.json"
+    op_conf = device_kernel_cache / f"{op_func_name_with_overload}.json"
     if not op_conf.exists():
         return []
 
-    with aoti_eager_op_conf_lock(op_func_name, op_overload_name):
+    with aoti_eager_op_conf_lock(op_func_name_with_overload):
         with open(op_conf) as f:
             json_data = json.load(f)
             for item in json_data:
@@ -1471,8 +1476,7 @@ def load_aoti_eager_cache(
 
 def aoti_compile_with_persistent_cache(
     ns: str,
-    op_func_name: str,
-    op_overload_name: str,
+    op_func_name_with_overload: str,
     device_type: str,
     dynamic: bool,
     f: Callable[..., Any],
@@ -1540,11 +1544,9 @@ def aoti_compile_with_persistent_cache(
 
             json_data = []
             update_json = True
-            op_overload_name = format_op_overload_name(op_overload_name)
-            op_conf_file_name = f"{op_func_name}.{op_overload_name}"
-            op_conf = persistent_cache / f"{op_conf_file_name}.json"
+            op_conf = persistent_cache / f"{op_func_name_with_overload}.json"
             mode = "r" if op_conf.exists() else "w"
-            with aoti_eager_op_conf_lock(op_func_name, op_overload_name):
+            with aoti_eager_op_conf_lock(op_func_name_with_overload):
                 with open(op_conf, mode) as op_conf_file:
                     try:
                         json_data = json.load(op_conf_file)
