@@ -12,13 +12,14 @@ from torch._dynamo.backends.debugging import boxed_nop
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
     check_multiple_devices_or_any_cpu_nodes,
+    format_default_skip_message,
     get_mutation_stack_trace,
     get_placeholders,
 )
 from torch._inductor.utils import (
     BoxedBool,
     count_tangents,
-    has_incompatible_cudagraph_ops,
+    get_first_incompatible_cudagraph_node,
     num_fw_fixed_arguments,
     output_node,
 )
@@ -99,8 +100,8 @@ def check_for_skip(aot_model: torch.fx.GraphModule, num_fixed) -> Optional[str]:
     ):
         return skip
 
-    if has_incompatible_cudagraph_ops(aot_model):
-        return "skipping cudagraphs due to incompatible op"
+    if node := get_first_incompatible_cudagraph_node(aot_model):
+        return format_default_skip_message(f"incompatible op ({node.name})")
 
     return None
 
