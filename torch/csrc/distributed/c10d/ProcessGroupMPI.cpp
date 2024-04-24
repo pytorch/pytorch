@@ -3,7 +3,6 @@
 #ifdef USE_C10D_MPI
 
 #include <iostream>
-#include <limits>
 #include <map>
 
 #include <c10/core/DeviceGuard.h>
@@ -107,7 +106,8 @@ c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupMPI::WorkMPI::getFuture() {
   return future_;
 }
 
-void ProcessGroupMPI::WorkMPI::finishWorkMPIError(std::exception_ptr eptr) {
+void ProcessGroupMPI::WorkMPI::finishWorkMPIError(
+    const std::exception_ptr& eptr) {
   future_->setError(eptr);
   finish(eptr);
 }
@@ -132,7 +132,7 @@ ProcessGroupMPI::AsyncWork::~AsyncWork() {
   if (request_ != MPI_REQUEST_NULL) {
     std::cerr
         << "Attempted destruction of AsyncWork before work has completed, "
-        << "terminating the program." << std::endl;
+        << "terminating the program." << '\n';
     std::terminate();
   }
 }
@@ -210,7 +210,7 @@ std::vector<at::Tensor> ProcessGroupMPI::AsyncWork::result() {
 }
 
 void ProcessGroupMPI::AsyncWork::populateException() {
-  std::array<char, MPI_MAX_ERROR_STRING> buf;
+  std::array<char, MPI_MAX_ERROR_STRING> buf{};
   int len = buf.size();
   MPI_CHECK(MPI_Error_string(status_.MPI_ERROR, buf.data(), &len));
   exception_ =
@@ -267,8 +267,8 @@ c10::intrusive_ptr<ProcessGroupMPI> ProcessGroupMPI::createProcessGroupMPI(
 
     // If no ranks are specified, assume we're creating the root group
     if (!ranks.empty()) {
-      MPI_Group worldGroup;
-      MPI_Group ranksGroup;
+      MPI_Group worldGroup = nullptr;
+      MPI_Group ranksGroup = nullptr;
       MPI_CHECK(MPI_Comm_group(MPI_COMM_WORLD, &worldGroup));
       MPI_CHECK(
           MPI_Group_incl(worldGroup, ranks.size(), ranks.data(), &ranksGroup));
@@ -383,7 +383,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::enqueue(
   auto work =
       c10::make_intrusive<WorkMPI>(entry->dst, profilingTitle, inputTensors);
   std::unique_lock<std::mutex> lock(pgMutex_);
-  queue_.push_back(std::make_tuple(std::move(entry), work));
+  queue_.emplace_back(std::move(entry), work);
   lock.unlock();
   queueProduceCV_.notify_one();
   return work;
@@ -539,7 +539,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::gather(
   checkSingleTensor(inputTensors);
 
   if (rank_ != opts.rootRank) {
-    if (outputTensors.size() > 0) {
+    if (!outputTensors.empty()) {
       TORCH_CHECK(
           false,
           "Gather: number of output tensors should be 0 "
@@ -615,7 +615,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::scatter(
   checkSingleTensor(outputTensors);
 
   if (rank_ != opts.rootRank) {
-    if (inputTensors.size() > 0) {
+    if (!inputTensors.empty()) {
       TORCH_CHECK(
           false,
           "Scatter: number of input tensors should be 0 "
@@ -670,7 +670,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::scatter(
     return enqueue(
         std::move(entry),
         "mpi:scatter",
-        inputTensors.size() > 0
+        !inputTensors.empty()
             ? c10::optional<std::vector<at::Tensor>>(inputTensors[0])
             : c10::nullopt);
   } else {
@@ -679,7 +679,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::scatter(
     return enqueue(
         std::move(entry),
         "mpi:scatter",
-        inputTensors.size() > 0
+        !inputTensors.empty()
             ? c10::optional<std::vector<at::Tensor>>(inputTensors[0])
             : c10::nullopt);
   }
@@ -701,7 +701,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::alltoall_base(
   checkSingleTensorHelper(inputTensor);
   checkSingleTensorHelper(outputTensor);
 
-  if (outputSplitSizes.size() == 0 && inputSplitSizes.size() == 0) {
+  if (outputSplitSizes.empty() && inputSplitSizes.empty()) {
     // We can use alltoall
     TORCH_CHECK(
         outputTensor.numel() == inputTensor.numel() &&
