@@ -14,10 +14,9 @@ from torch._higher_order_ops.templated_attention import (
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch.nn.attention._templated_attention import (
-    _alibi_bias,
-    _alibi_causal,
     _causal,
     _compose,
+    _generate_alibi_bias,
     _identity,
     _rel_bias,
     _rel_causal,
@@ -57,13 +56,12 @@ test_dtypes_fast = [torch.float16]
 if common_utils.TEST_WITH_ROCM:
     test_dtypes = [torch.float32]
 
-test_score_modes = [
+test_score_mods = [
     _identity,
     _causal,
     _rel_bias,
     _rel_causal,
-    _alibi_bias,
-    _alibi_causal,
+    _generate_alibi_bias(8),
 ]
 
 
@@ -104,7 +102,7 @@ class TestTemplatedSDPA(InductorTestCase):
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
-    @common_utils.parametrize("score_mod", test_score_modes)
+    @common_utils.parametrize("score_mod", test_score_mods)
     def test_builtin_score_mods(self, dtype: torch.dtype, score_mod: Callable):
         self.run_test(score_mod, dtype)
 

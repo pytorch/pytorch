@@ -92,7 +92,7 @@ def _templated_attention(
     return out
 
 
-"""The common used score_mod functions for templated attention in PyTorch."""
+"""Some common used score_mod functions for templated attention in PyTorch."""
 
 
 def _identity(
@@ -135,23 +135,15 @@ def _rel_causal(
     return torch.where(token_q <= token_kv, score + (token_q - token_kv), float("-inf"))
 
 
-def _alibi_bias(
-    score: torch.Tensor,
-    batch: torch.Tensor,
-    head: torch.Tensor,
-    token_q: torch.Tensor,
-    token_kv: torch.Tensor,
-) -> torch.Tensor:
-    return score + (token_q - token_kv) * head
+def _generate_alibi_bias(num_heads: int):
+    def _alibi_bias(
+        score: torch.Tensor,
+        batch: torch.Tensor,
+        head: torch.Tensor,
+        token_q: torch.Tensor,
+        token_kv: torch.Tensor,
+    ) -> torch.Tensor:
+        scale = torch.exp2(-((head + 1) * 8.0 / num_heads))
+        return score + (token_kv - token_q) * scale
 
-
-def _alibi_causal(
-    score: torch.Tensor,
-    batch: torch.Tensor,
-    head: torch.Tensor,
-    token_q: torch.Tensor,
-    token_kv: torch.Tensor,
-) -> torch.Tensor:
-    return torch.where(
-        token_q <= token_kv, score + (token_q - token_kv) * head, float("-inf")
-    )
+    return _alibi_bias
