@@ -121,7 +121,7 @@ runs:
           echo "Attempt $attempt of $max_attempts: Checking if Docker daemon is running..."
 
           if docker info > /dev/null 2>&1; then
-            echo "Docker is running. Proceeding with the next steps."
+            echo "Docker is running. Proceeding with the next steps"
             break
           else
             echo "Docker is not running yet."
