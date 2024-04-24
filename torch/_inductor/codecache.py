@@ -1282,6 +1282,7 @@ def valid_vec_isa_list() -> List[VecISA]:
         return isa_list
 
 
+@functools.lru_cache(None)
 def pick_vec_isa() -> VecISA:
     if config.is_fbcode():
         return VecAVX2()
