@@ -16,6 +16,7 @@
 #include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
+#include <torch/csrc/utils/tensor_new.h>
 
 #include <c10/util/flat_hash_map.h>
 #include <pybind11/operators.h>
