@@ -2272,10 +2272,10 @@ class Scheduler:
                 possible_fusions_group_by_priority[fusion_pair_priority].append(
                     (node1, node2)
                 )
-        # Sorted by fusion_pair_priority and return the possible fusions with highest priority
-        possible_fusions_with_highest_priority = sorted(
+        # return the possible fusions with highest priority
+        possible_fusions_with_highest_priority = min(
             possible_fusions_group_by_priority.items(), key=lambda item: item[0]
-        )[0][1]
+        )[1]
         assert len(possible_fusions_with_highest_priority) > 0
         return possible_fusions_with_highest_priority
 
