@@ -10,12 +10,11 @@ from torch.library import impl, Library
 # name is not too long
 quantized_decomposed_lib = Library("quantized_decomposed", "DEF")
 
-_DTYPE_TO_QVALUE_BOUNDS = {
-    torch.uint8: (0, 255),
-    torch.int8: (-128, 127),
-    torch.int16: (-(2**15), 2**15 - 1),
-    torch.int32: (-(2**31), 2**31 - 1),
-}
+_INTEGER_DTYPES = [torch.uint8, torch.int8, torch.int16, torch.int32]
+_FLOAT_DTYPES = [torch.float8_e5m2, torch.float8_e4m3fn]
+
+_DTYPE_TO_QVALUE_BOUNDS = {k : (torch.iinfo(k).min, torch.iinfo(k).max) for k in _INTEGER_DTYPES}
+_DTYPE_TO_QVALUE_BOUNDS.update({k : (int(torch.finfo(k).min), int(torch.finfo(k).max)) for k in _FLOAT_DTYPES})
 
 # Helper to check the passed in quant min and max are valid for the dtype
 def _quant_min_max_bounds_check(quant_min, quant_max, dtype):
@@ -616,7 +615,7 @@ def choose_qparams_per_token(
         n_bits = 8
         quant_max = 2 ** (n_bits - 1) - 1
     else:
-        raise Exception(f"unsupported dtype in choose_qparams_per_token: {dtype}")
+        raise Exception(f"unsupported dtype in choose_qparams_per_token: {dtype}")  # noqa: TRY002
 
     scales = scales.clamp(min=1e-5).div(quant_max)
     zero_points = torch.zeros_like(scales)
