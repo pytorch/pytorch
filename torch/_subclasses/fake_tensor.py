@@ -1482,7 +1482,7 @@ class FakeTensorMode(TorchDispatchMode):
                 r = func(*args, **kwargs)
         except NotImplementedError as not_implemented_error:
             return maybe_run_unsafe_fallback(not_implemented_error)
-        except:
+        except Exception:
             log.exception("failed while attempting to run meta for %s", func)
             raise
 
