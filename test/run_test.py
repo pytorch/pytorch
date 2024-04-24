@@ -1671,7 +1671,6 @@ def main():
 
     test_directory = str(REPO_ROOT / "test")
     selected_tests = get_selected_tests(options)
-    selected_tests = [test for test in selected_tests if test.startswith(CPP_TEST_PREFIX)]
 
     test_prioritizations = import_results()
     test_prioritizations.amend_tests(selected_tests)
