@@ -31,6 +31,8 @@ static uint64_t last_abs_saved_value = 0;
 
 static uint64_t storageImpl_counter = 0;
 static uint64_t last_storageImpl_saved_value = 0;
+
+static bool storage_register = false;
 // register guard
 namespace at {
 namespace detail {
@@ -223,7 +225,10 @@ c10::intrusive_ptr<c10::StorageImpl> make_custom_storage_impl(c10::StorageImpl::
 
 // Register our dummy storageImpl create method.
 void custom_storage_registry() {
-  c10::SetStorageImplCreate(c10::DeviceType::PrivateUse1, &make_custom_storage_impl);
+  if (!storage_register) {
+    c10::SetStorageImplCreate(
+        c10::DeviceType::PrivateUse1, &make_custom_storage_impl);
+  }
 }
 
 bool custom_storageImpl_called() {

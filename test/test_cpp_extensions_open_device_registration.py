@@ -4,8 +4,8 @@ import os
 import shutil
 import sys
 import tempfile
-import unittest
 import types
+import unittest
 from typing import Union
 
 import torch
@@ -29,29 +29,36 @@ def remove_build_path():
         shutil.rmtree(default_build_root, ignore_errors=True)
 
 
-class DummyModule:
-    @staticmethod
+def generate_faked_module():
     def device_count() -> int:
         return 1
 
-    @staticmethod
     def get_rng_state(device: Union[int, str, torch.device] = "foo") -> torch.Tensor:
         # create a tensor using our custom device object.
         return torch.empty(4, 4, device="foo")
 
-    @staticmethod
     def set_rng_state(
         new_state: torch.Tensor, device: Union[int, str, torch.device] = "foo"
     ) -> None:
         pass
 
-    @staticmethod
     def is_available():
         return True
 
-    @staticmethod
     def current_device():
         return 0
+
+    # create a new module to fake torch.foo dynamicly
+    foo = types.ModuleType("foo")
+
+    foo.device_count = device_count
+    foo.get_rng_state = get_rng_state
+    foo.set_rng_state = set_rng_state
+    foo.is_available = is_available
+    foo.current_device = current_device
+    foo._lazy_init = lambda: None
+
+    return foo
 
 
 @unittest.skipIf(IS_ARM64, "Does not work on arm")
@@ -63,14 +70,17 @@ class TestCppExtensionOpenRgistration(common.TestCase):
 
     def setUp(self):
         super().setUp()
+
         # cpp extensions use relative paths. Those paths are relative to
         # this file, so we'll change the working directory temporarily
         self.old_working_dir = os.getcwd()
         os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
         assert self.module is not None
 
     def tearDown(self):
         super().tearDown()
+
         # return the working directory (see setUp)
         os.chdir(self.old_working_dir)
 
@@ -88,20 +98,12 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             verbose=True,
         )
 
-        # fake torch.foo module to implement lazy init.
-        foo = types.ModuleType("foo")
-        foo._lazy_init = lambda: None
-        sys.modules["torch.foo"] = foo
-
-    @classmethod
-    def tearDownClass(cls):
-        remove_build_path()
-
-        # remove faked torch.foo
-        del sys.modules["torch.foo"]
+        # register torch.foo module and foo device to torch
+        torch.utils.rename_privateuse1_backend("foo")
+        torch.utils.generate_methods_for_privateuse1_backend(for_storage=True)
+        torch._register_device_module("foo", generate_faked_module())
 
     def test_base_device_registration(self):
-        torch.utils.rename_privateuse1_backend("foo")
         self.assertFalse(self.module.custom_add_called())
         # create a tensor using our custom device object
         device = self.module.custom_device()
@@ -121,46 +123,30 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         self.assertFalse(z.is_cpu)
         self.assertTrue(z.device == device)
         self.assertEqual(z, z_cpu)
-        z2 = z_cpu + z_cpu
 
     def test_common_registration(self):
-        # check whether the error can be reported correctly
-        # check that register module name should be the same as custom backend
+        # check unsupported device and duplicated registration
         with self.assertRaisesRegex(RuntimeError, "Expected one of cpu"):
-            torch._register_device_module("xxx", DummyModule)
-        # check generator registered before using
-        torch.utils.rename_privateuse1_backend("foo")
-        with self.assertRaisesRegex(RuntimeError, "torch has no module of"):
-            with torch.random.fork_rng(device_type="foo"):
-                pass
-        # check attributes before registered
-        self.assertFalse(hasattr(torch.Tensor, "is_foo"))
-        self.assertFalse(hasattr(torch.Tensor, "foo"))
-        self.assertFalse(hasattr(torch.TypedStorage, "is_foo"))
-        self.assertFalse(hasattr(torch.TypedStorage, "foo"))
-        self.assertFalse(hasattr(torch.UntypedStorage, "is_foo"))
-        self.assertFalse(hasattr(torch.UntypedStorage, "foo"))
-        self.assertFalse(hasattr(torch.nn.Module, "foo"))
+            torch._register_device_module("dev", generate_faked_module())
+        with self.assertRaisesRegex(RuntimeError, "The runtime module of"):
+            torch._register_device_module("foo", generate_faked_module())
 
-        # first rename custom backend
-        torch.utils.rename_privateuse1_backend("foo")
         # backend name can only rename once
         with self.assertRaisesRegex(
             RuntimeError, "torch.register_privateuse1_backend()"
         ):
-            torch.utils.rename_privateuse1_backend("xxx")
-        # register foo module, torch.foo
-        torch._register_device_module("foo", DummyModule)
+            torch.utils.rename_privateuse1_backend("dev")
+
+        # generator tensor and module can be registered only once
+        with self.assertRaisesRegex(RuntimeError, "The custom device module of"):
+            torch.utils.generate_methods_for_privateuse1_backend()
+
+        # check whether torch.foo have been registered correctly
         self.assertTrue(
             torch.utils.backend_registration._get_custom_mod_func("device_count")() == 1
         )
         with self.assertRaisesRegex(RuntimeError, "Try to call torch.foo"):
             torch.utils.backend_registration._get_custom_mod_func("func_name_")
-        # default set for_tensor and for_module are True, so only set for_storage is True
-        torch.utils.generate_methods_for_privateuse1_backend(for_storage=True)
-        # generator tensor and module can be registered only once
-        with self.assertRaisesRegex(RuntimeError, "The custom device module of"):
-            torch.utils.generate_methods_for_privateuse1_backend()
 
         # check attributes after registered
         self.assertTrue(hasattr(torch.Tensor, "is_foo"))
@@ -175,21 +161,25 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         device = self.module.custom_device()
         # None of our CPU operations should call the custom add function.
         self.assertFalse(self.module.custom_add_called())
+
         # check generator registered before using
         with self.assertRaisesRegex(
             RuntimeError,
             "Please register a generator to the PrivateUse1 dispatch key",
         ):
-            gen_ = torch.Generator(device=device)
+            torch.Generator(device=device)
+
         self.module.register_generator_first()
         gen = torch.Generator(device=device)
         self.assertTrue(gen.device == device)
+
         # generator can be registered only once
         with self.assertRaisesRegex(
             RuntimeError,
             "Only can register a generator to the PrivateUse1 dispatch key once",
         ):
             self.module.register_generator_second()
+
         self.module.register_hook()
         default_gen = self.module.default_generator(0)
         self.assertTrue(
@@ -198,12 +188,12 @@ class TestCppExtensionOpenRgistration(common.TestCase):
 
     def test_open_device_dispatchstub(self):
         # test kernels could be reused by privateuse1 backend through dispatchstub
-        torch.utils.rename_privateuse1_backend("foo")
         input_data = torch.randn(2, 2, 3, dtype=torch.float32, device="cpu")
         foo_input_data = input_data.to("foo")
         output_data = torch.abs(input_data)
         foo_output_data = torch.abs(foo_input_data)
         self.assertEqual(output_data, foo_output_data.cpu())
+
         output_data = torch.randn(2, 2, 6, dtype=torch.float32, device="cpu")
         # output operand will resize flag is True in TensorIterator.
         foo_input_data = input_data.to("foo")
@@ -212,6 +202,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         torch.abs(input_data, out=output_data[:, :, 0:6:2])
         torch.abs(foo_input_data, out=foo_output_data[:, :, 0:6:2])
         self.assertEqual(output_data, foo_output_data.cpu())
+
         # output operand will resize flag is True in TensorIterator.
         # and convert output to contiguous tensor in TensorIterator.
         output_data = torch.randn(2, 2, 6, dtype=torch.float32, device="cpu")
@@ -222,18 +213,19 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         self.assertEqual(output_data, foo_output_data.cpu())
 
     def test_open_device_quantized(self):
-        torch.utils.rename_privateuse1_backend("foo")
         input_data = torch.randn(3, 4, 5, dtype=torch.float32, device="cpu").to("foo")
         quantized_tensor = torch.quantize_per_tensor(input_data, 0.1, 10, torch.qint8)
         self.assertEqual(quantized_tensor.device, torch.device("foo:0"))
         self.assertEqual(quantized_tensor.dtype, torch.qint8)
 
     def test_open_device_random(self):
+        # check if torch.foo have implemented get_rng_state
         with torch.random.fork_rng(device_type="foo"):
             pass
 
     def test_open_device_tensor(self):
         device = self.module.custom_device()
+
         # check whether print tensor.type() meets the expectation
         dtypes = {
             torch.bool: "torch.foo.BoolTensor",
@@ -249,21 +241,27 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         for tt, dt in dtypes.items():
             test_tensor = torch.empty(4, 4, dtype=tt, device=device)
             self.assertTrue(test_tensor.type() == dt)
+
         # check whether the attributes and methods of the corresponding custom backend are generated correctly
         x = torch.empty(4, 4)
         self.assertFalse(x.is_foo)
+
         x = x.foo(torch.device("foo"))
         self.assertFalse(self.module.custom_add_called())
         self.assertTrue(x.is_foo)
+
         # test different device type input
         y = torch.empty(4, 4)
         self.assertFalse(y.is_foo)
+
         y = y.foo(torch.device("foo:0"))
         self.assertFalse(self.module.custom_add_called())
         self.assertTrue(y.is_foo)
+
         # test different device type input
         z = torch.empty(4, 4)
         self.assertFalse(z.is_foo)
+
         z = z.foo(0)
         self.assertFalse(self.module.custom_add_called())
         self.assertTrue(z.is_foo)
@@ -273,52 +271,61 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         x = torch.empty(4, 4)
         z1 = x.storage()
         self.assertFalse(z1.is_foo)
+
         z1 = z1.foo()
         self.assertFalse(self.module.custom_add_called())
         self.assertTrue(z1.is_foo)
+
         with self.assertRaisesRegex(RuntimeError, "Invalid device"):
             z1.foo(torch.device("cpu"))
+
         z1 = z1.cpu()
         self.assertFalse(self.module.custom_add_called())
         self.assertFalse(z1.is_foo)
+
         z1 = z1.foo(device="foo:0", non_blocking=False)
         self.assertFalse(self.module.custom_add_called())
         self.assertTrue(z1.is_foo)
+
         with self.assertRaisesRegex(RuntimeError, "Invalid device"):
             z1.foo(device="cuda:0", non_blocking=False)
+
         # check UntypedStorage
         y = torch.empty(4, 4)
         z2 = y.untyped_storage()
         self.assertFalse(z2.is_foo)
+
         z2 = z2.foo()
         self.assertFalse(self.module.custom_add_called())
         self.assertTrue(z2.is_foo)
+
         # check custom StorageImpl create
         self.module.custom_storage_registry()
+
         z3 = y.untyped_storage()
         self.assertFalse(self.module.custom_storageImpl_called())
+
         z3 = z3.foo()
         self.assertTrue(self.module.custom_storageImpl_called())
         self.assertFalse(self.module.custom_storageImpl_called())
+
         z3 = z3[0:3]
         self.assertTrue(self.module.custom_storageImpl_called())
 
     def test_open_device_storage_pin_memory(self):
-        torch.utils.rename_privateuse1_backend("foo")
-        with self.assertRaisesRegex(RuntimeError, "The custom device module of"):
-            torch.utils.generate_methods_for_privateuse1_backend(
-                for_tensor=False, for_module=False, for_storage=True
-            )
         # Check if the pin_memory is functioning properly on custom device
         cpu_tensor = torch.empty(3)
         self.assertFalse(cpu_tensor.is_foo)
         self.assertFalse(cpu_tensor.is_pinned("foo"))
+
         cpu_tensor_pin = cpu_tensor.pin_memory("foo")
         self.assertTrue(cpu_tensor_pin.is_pinned("foo"))
+
         # Test storage pin_memory on custom device string
         cpu_storage = cpu_tensor.storage()
         foo_device = torch.device("foo")
         self.assertFalse(cpu_storage.is_pinned("foo"))
+
         cpu_storage_pin = cpu_storage.pin_memory("foo")
         self.assertFalse(cpu_storage.is_pinned())
         self.assertFalse(cpu_storage.is_pinned("foo"))
@@ -326,14 +333,14 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         self.assertFalse(cpu_storage_pin.is_pinned())
         self.assertTrue(cpu_storage_pin.is_pinned("foo"))
         self.assertTrue(cpu_storage_pin.is_pinned(foo_device))
+
         cpu_storage_pin_already = cpu_storage_pin.pin_memory("foo")
         self.assertTrue(cpu_storage_pin.is_pinned("foo"))
         self.assertTrue(cpu_storage_pin.is_pinned(foo_device))
         self.assertTrue(cpu_storage_pin_already.is_pinned("foo"))
         self.assertTrue(cpu_storage_pin_already.is_pinned(foo_device))
-
-        # Test storage pin_memory on torch.device
         self.assertFalse(cpu_storage.is_pinned("foo"))
+
         cpu_storage_pinned = cpu_storage.pin_memory(foo_device)
         self.assertFalse(cpu_storage.is_pinned())
         self.assertFalse(cpu_storage.is_pinned("foo"))
@@ -347,30 +354,34 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         cpu_untyped_storage = cpu_tensor.untyped_storage()
         self.assertFalse(cpu_untyped_storage.is_pinned())
         self.assertFalse(cpu_untyped_storage.is_pinned("foo"))
+
         cpu_untyped_storage_pinned = cpu_untyped_storage.pin_memory("foo")
         self.assertFalse(cpu_untyped_storage_pinned.is_pinned())
         self.assertTrue(cpu_untyped_storage_pinned.is_pinned("foo"))
         self.assertTrue(cpu_untyped_storage_pinned.is_pinned(foo_device))
+
         cpu_untyped_storage_pinned = cpu_untyped_storage.pin_memory(foo_device)
         self.assertFalse(cpu_untyped_storage_pinned.is_pinned())
         self.assertTrue(cpu_untyped_storage_pinned.is_pinned("foo"))
         self.assertTrue(cpu_untyped_storage_pinned.is_pinned(foo_device))
+
         with self.assertRaisesRegex(TypeError, "positional arguments but 3 were given"):
             cpu_untyped_storage_pinned.is_pinned("foo1", "foo2")
 
         # Test storage pin_memory on error device
         self.assertFalse(cpu_storage_pinned.is_pinned("hpu"))
+        self.assertFalse(cpu_untyped_storage_pinned.is_pinned("hpu"))
+        invalid_device = torch.device("hpu")
+        self.assertFalse(cpu_untyped_storage_pinned.is_pinned(invalid_device))
+
         with self.assertRaisesRegex(
             NotImplementedError, "with arguments from the 'HPU' backend"
         ):
             cpu_storage.pin_memory("hpu")
-        self.assertFalse(cpu_untyped_storage_pinned.is_pinned("hpu"))
         with self.assertRaisesRegex(
             NotImplementedError, "with arguments from the 'HPU' backend"
         ):
             cpu_untyped_storage.pin_memory("hpu")
-        invalid_device = torch.device("hpu")
-        self.assertFalse(cpu_untyped_storage_pinned.is_pinned(invalid_device))
         with self.assertRaisesRegex(
             NotImplementedError, "with arguments from the 'HPU' backend"
         ):
@@ -388,6 +399,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         cpu_storage = torch.empty(4, 4).storage()
         foo_storage = torch.serialization.default_restore_location(cpu_storage, "foo:0")
         self.assertTrue(foo_storage.is_foo)
+
         # test tensor MetaData serialization
         x = torch.empty(4, 4).long()
         y = x.foo()
@@ -404,6 +416,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             self.assertTrue(z1.is_foo)
             # loads BackendMeta data correctly
             self.assertTrue(self.module.check_backend_meta(z1))
+
             # cross-backend
             z2 = torch.load(path, map_location="cpu")
             # loads correctly onto the cpu backend device
@@ -412,19 +425,19 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             self.assertFalse(self.module.check_backend_meta(z2))
 
     def test_open_device_storage_resize(self):
-        torch.utils.rename_privateuse1_backend("foo")
         cpu_tensor = torch.randn([8])
         foo_tensor = cpu_tensor.foo()
         foo_storage = foo_tensor.storage()
         self.assertTrue(foo_storage.size() == 8)
+
         # Only register tensor resize_ function.
         foo_tensor.resize_(8)
         self.assertTrue(foo_storage.size() == 8)
+
         with self.assertRaisesRegex(TypeError, "Overflow"):
             foo_tensor.resize_(8**29)
 
     def test_open_device_storage_type(self):
-        torch.utils.rename_privateuse1_backend("foo")
         # test cpu float storage
         cpu_tensor = torch.randn([8]).float()
         cpu_storage = cpu_tensor.storage()
@@ -458,15 +471,13 @@ class TestCppExtensionOpenRgistration(common.TestCase):
 
     @unittest.skip("Test is temporary disabled")
     def test_open_device_faketensor(self):
-        torch.utils.rename_privateuse1_backend("foo")
         with torch._subclasses.fake_tensor.FakeTensorMode.push():
             a = torch.empty(1, device="foo")
             b = torch.empty(1, device="foo:0")
             result = a + b
 
     def test_open_device_named_tensor(self):
-        torch.utils.rename_privateuse1_backend("foo")
-        a = torch.empty([2, 3, 4, 5], device="foo", names=["N", "C", "H", "W"])
+        torch.empty([2, 3, 4, 5], device="foo", names=["N", "C", "H", "W"])
 
     # Not an open registration test - this file is just very convenient
     # for testing torch.compile on custom C++ operators
@@ -500,13 +511,11 @@ class TestCppExtensionOpenRgistration(common.TestCase):
 
     @unittest.skip("Test is temporary disabled")
     def test_open_device_scalar_type_fallback(self):
-        torch.utils.rename_privateuse1_backend("foo")
         z_cpu = torch.Tensor([[0, 0, 0, 1, 1, 2], [0, 1, 2, 1, 2, 2]]).to(torch.int64)
         z = torch.triu_indices(3, 3, device="foo")
         self.assertEqual(z_cpu, z)
 
     def test_open_device_tensor_type_fallback(self):
-        torch.utils.rename_privateuse1_backend("foo")
         # create tensors located in custom device
         x = torch.Tensor([[1, 2, 3], [2, 3, 4]]).to("foo")
         y = torch.Tensor([1, 0, 2]).to("foo")
@@ -516,9 +525,11 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         device = self.module.custom_device()
         self.assertTrue(x.device == device)
         self.assertFalse(x.is_cpu)
+
         # call sub op, which will fallback to cpu
         z = torch.sub(x, y)
         self.assertEqual(z_cpu, z)
+
         # call index op, which will fallback to cpu
         z_cpu = torch.Tensor([3, 1])
         y = torch.Tensor([1, 0]).long().to("foo")
@@ -526,7 +537,6 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         self.assertEqual(z_cpu, z)
 
     def test_open_device_tensorlist_type_fallback(self):
-        torch.utils.rename_privateuse1_backend("foo")
         # create tensors located in custom device
         v_foo = torch.Tensor([1, 2, 3]).to("foo")
         # create result tensor located in cpu
@@ -538,9 +548,9 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         device = self.module.custom_device()
         self.assertTrue(v_foo.device == device)
         self.assertFalse(v_foo.is_cpu)
+
         # call _foreach_add op, which will fallback to cpu
         z = torch._foreach_add(x, y)
-
         self.assertEqual(z_cpu, z[0])
         self.assertEqual(z_cpu, z[1])
 
