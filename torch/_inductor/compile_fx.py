@@ -59,6 +59,7 @@ from .ir import ExternKernelNode
 from .utils import (
     get_cloned_parameter_buffer_name,
     has_incompatible_cudagraph_ops,
+    maybe_get_suppress_shape_guards_ctx,
     output_node,
 )
 from .virtualized import V
@@ -517,7 +518,25 @@ def compile_fx_inner(
             if isinstance(t, torch.Tensor)
         )
 
+        if not config.triton.cudagraph_support_input_mutation:
+            # Skip supports for cudagraph-managed tensors
+            from torch._inductor.cudagraph_utils import (
+                check_for_mutation_ignore_cuda_graph_managed_tensor,
+            )
+
+            has_mutation_str = check_for_mutation_ignore_cuda_graph_managed_tensor(
+                gm, compiled_graph, num_fixed
+            )
+            has_mutation = has_mutation_str is not None
+
+            if has_mutation:
+                compiled_graph.disabled_cudagraphs_reason = has_mutation_str
+        else:
+            # Check mutation later to support cudagraph-managed tensors
+            has_mutation = None
+
         cudagraph_tests = [
+            (not has_mutation, "mutated inputs"),
             (not has_incompatible_cudagraph_ops(gm), "incompatible ops"),
             (not complex_memory_overlap_inputs, "complex memory overlap"),
             (
@@ -829,13 +848,6 @@ def get_input_idxs_to_check(
     """
     ids_to_check = []
 
-    tracing_context = torch._guards.TracingContext.try_get()
-    suppress_guards_ctx = (
-        tracing_context.fake_mode.shape_env.suppress_guards
-        if tracing_context
-        else contextlib.nullcontext
-    )
-
     for i, input in enumerate(inputs):
         if not isinstance(input, torch.Tensor):
             # non-tensors don't need alignment
@@ -843,7 +855,7 @@ def get_input_idxs_to_check(
         if input.device.type != "cuda":
             # right now we only care for cuda tensors
             continue
-        with suppress_guards_ctx():
+        with maybe_get_suppress_shape_guards_ctx():
             # suppress guards so that tensor_is_aligned and should_assume_input_aligned
             # do not add guards on input's storage offset
             if i in static_input_idxs and tensor_is_aligned(input):

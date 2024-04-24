@@ -54,7 +54,7 @@ class WorkerGroupTest(unittest.TestCase):
             args=(),
             rdzv_handler=None,
             max_restarts=50,
-            monitor_interval=1,
+            monitor_interval=0.1,
         )
         worker_group = WorkerGroup(spec)
 
@@ -157,7 +157,7 @@ class SimpleElasticAgentTest(unittest.TestCase):
     def _get_worker_spec(
         self,
         max_restarts=1,
-        monitor_interval=1.0,
+        monitor_interval=0.1,
         role="test_trainer",
         local_world_size=8,
         local_addr=None,
