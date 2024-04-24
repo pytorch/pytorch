@@ -46,7 +46,9 @@ def get_collective_type(node: ir.IRNode) -> NCCL_COLL:
         elif "reduce_scatter" in kernel_name:
             return NCCL_COLL.REDUCE_SCATTER
         else:
-            raise Exception(f"Unsupported collective kernel: {kernel_name}")
+            raise Exception(  # noqa: TRY002
+                f"Unsupported collective kernel: {kernel_name}"
+            )  # noqa: TRY002
 
     if isinstance(node, (ir.AllReduce, ir.AllReduceCoalesced)):
         return NCCL_COLL.ALL_REDUCE
@@ -55,13 +57,12 @@ def get_collective_type(node: ir.IRNode) -> NCCL_COLL:
     elif isinstance(node, (ir.ReduceScatterTensor, ir.ReduceScatterTensorCoalesced)):
         return NCCL_COLL.REDUCE_SCATTER
     else:
-        raise Exception(f"Unsupported collective type: {node}")
+        raise Exception(f"Unsupported collective type: {node}")  # noqa: TRY002
 
 
 def get_collective_input_size_bytes(node: ir.IRNode) -> int:
     sz_bytes = 0
     for inp in node.inputs:  # type: ignore[attr-defined]
-        shape = inp.layout.size
         numel = sympy_product(inp.layout.size)
         if isinstance(numel, sympy.Integer):
             # For ease of testing
@@ -239,7 +240,6 @@ def estimate_nccl_collective_runtime(node: ir.IRNode) -> float:
 
     # =============== latency computation ===============
     intraHw = NCCL_HW.NVLINK
-    hw = intraHw if nNodes == 1 else NCCL_HW.NET
 
     if coll == NCCL_COLL.ALL_REDUCE:
         if nNodes > 1:
