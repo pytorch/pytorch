@@ -12,7 +12,6 @@ on:
       workflow-type:
         description: Type of runners to use
         value: ${{ jobs.check-user.outputs.workflow-type }}
-s
 
 jobs:
   check-user:
