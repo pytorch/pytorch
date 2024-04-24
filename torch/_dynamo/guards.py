@@ -375,6 +375,7 @@ def getattr_on_nn_module(
     example_value,
     base_source_name,
     source_name,
+    guard_manager_enum,
 ):
     """
     This tries to avoid calling the expensive nn module custom getattr method by
@@ -410,7 +411,10 @@ def getattr_on_nn_module(
         # The attribute can be accessed by __getattribute__ call, so rely on
         # PyObject_GetAttr
         return base_guard_manager.getattr_manager(
-            attr=source.member, source=source_name, example_value=example_value
+            attr=source.member,
+            source=source_name,
+            example_value=example_value,
+            guard_manager_enum=guard_manager_enum,
         )
     else:
         assert accessor_info.l1_key
@@ -424,21 +428,22 @@ def getattr_on_nn_module(
         if l2_key:
             l1_source = f"{mod_dict_source}[{l1_key!r}]"
             l1_value = mod_dict[l1_key]
+            # do not guard on key order for _parameters etc
+            l1_guard_manager_enum = GuardManagerType.GUARD_MANAGER
             l2_source = source_name
             l2_value = example_value
+            l2_guard_manager_enum = guard_manager_enum
         else:
             l1_source = source_name
             l1_value = example_value
+            l1_guard_manager_enum = guard_manager_enum
 
-        # Guard manager for mod.__dict__
-        # NB - The example_value is deliberately set to None to avoid building a
-        # DictGuardManager. DictGuardManager iterates over all the key, value
-        # pairs. But for mod __dict__, this could be wasteful because Dynamo
-        # guards on very few keys. In this case, the alternative of just using
-        # PyDict_GetItem on the dictionary is faster than DictGuardManager. We
-        # made this decision by experimentation on a few HF models.
+        # Get __dict__ accessor. No need to guard on dict key order, so use base
+        # Guard Manager
         mod_generic_dict_manager = base_guard_manager.get_generic_dict_manager(
-            source=mod_dict_source, example_value=None
+            source=mod_dict_source,
+            example_value=mod_dict,
+            guard_manager_enum=GuardManagerType.GUARD_MANAGER,
         )
 
         # The example_value is set to None for _parameters, _buffers and
@@ -446,12 +451,16 @@ def getattr_on_nn_module(
         l1_mgr = mod_generic_dict_manager.dict_getitem_manager(
             key=l1_key,
             source=l1_source,
-            example_value=None if l2_key else l1_value,
+            example_value=l1_value,
+            guard_manager_enum=l1_guard_manager_enum,
         )
 
         if l2_key:
             return l1_mgr.dict_getitem_manager(
-                key=l2_key, source=l2_source, example_value=l2_value
+                key=l2_key,
+                source=l2_source,
+                example_value=l2_value,
+                guard_manager_enum=l2_guard_manager_enum,
             )
         return l1_mgr
 
@@ -572,7 +581,7 @@ class GuardBuilder(GuardBuilderBase):
         # limit the number of cache entries with same ID_MATCH'd object.
         self.id_matched_objs: Dict[str, ReferenceType[object]] = {}
 
-    def guard_on_dict_keys_and_ignore_order(self, value, guard):
+    def guard_on_dict_keys_and_ignore_order(self, example_value, guard):
         dict_mgr = self.get_guard_manager(guard)
         if isinstance(dict_mgr, DictGuardManager):
             raise NotImplementedError(
@@ -582,12 +591,17 @@ class GuardBuilder(GuardBuilderBase):
 
         # Iterate over the dicts and install a dict_getitem_manager.
         dict_source = guard.originating_source.name()
-        for idx, key in enumerate(value.keys()):
+        for key in example_value.keys():
+            value = example_value[key]
+            value_source = GetItemSource(guard.originating_source, index=key)
+            guard_manager_enum = self.get_guard_manager_type(
+                value_source, example_value
+            )
             dict_mgr.dict_getitem_manager(
                 key=key,
                 source=f"{dict_source}[{key!r}]",
-                example_value=value[key],
-                guard_manager_enum=GuardManagerType.GUARD_MANAGER,
+                example_value=value,
+                guard_manager_enum=guard_manager_enum,
             )
 
     def guard_on_dict_keys_and_order(self, value, guard):
@@ -725,7 +739,9 @@ class GuardBuilder(GuardBuilderBase):
         elif istype(source, GradSource):
             assert base_guard_manager  # to make mypy happy
             return base_guard_manager.grad_manager(
-                source=source_name, example_value=example_value
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
             )
         elif istype(source, AttrSource):
             assert base_guard_manager  # to make mypy happy
@@ -738,6 +754,7 @@ class GuardBuilder(GuardBuilderBase):
                     example_value,
                     base_source_name,
                     source_name,
+                    guard_manager_enum,
                 )
 
             return base_guard_manager.getattr_manager(
@@ -854,6 +871,7 @@ class GuardBuilder(GuardBuilderBase):
                 python_lambda=from_numpy,
                 source=source_name,
                 example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
             )
         elif istype(source, TupleIteratorGetItemSource):
             assert base_guard_manager  # to make mypy happy
