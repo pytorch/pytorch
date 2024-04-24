@@ -376,6 +376,36 @@ class OptimizeForInferenceTemplate(TestCase):
             )
 
     @torch._inductor.config.patch(layout_optimization=False)
+    def test_folded_conv_bn_with_dead_nodes(self):
+        mod = (
+            ConvBN(3, 32, bias=True, kernel_size=3, stride=2)
+            .to(self.device)
+            .to(torch.float32)
+        )
+
+        for _ in range(10):
+            mod(torch.rand(3, 3, 32, 32).to(self.device).to(torch.float32))
+
+        mod.eval()
+        x = torch.rand(3, 3, 32, 32).to(self.device).to(torch.float32)
+
+        @torch.compile()
+        def foo(mod, x):
+            mod(x)
+            return mod(x)
+
+        with torch.no_grad():
+            out_eager = mod(x)
+            out_optimized_for_infernece, code = run_and_get_code(foo, mod, x)
+
+        self.assertNotIn(
+            "aten._native_batch_norm_legit_no_training(",
+            code[0],
+        )
+
+        self.assertEqual(out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2)
+
+    @torch._inductor.config.patch(layout_optimization=False)
     def test_dont_change_dtype_folding(self):
         dtype = torch.float16 if self.device == "cuda" else torch.bfloat16
 

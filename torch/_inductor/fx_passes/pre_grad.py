@@ -308,10 +308,19 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
         (torch.nn.Conv3d, F.batch_norm),
     ]
     modules = dict(gm.named_modules())
+
+    def connect_to_output(node, gm):
+        from .mkldnn_fusion import _is_ancestor_node
+
+        output_nodes = [_node for _node in gm.graph.nodes if _node.op == "output"]
+        return any(_is_ancestor_node(output_node, node) for output_node in output_nodes)
+
     for pattern in modules_patterns:
         for node in gm.graph.nodes:
             if matches_module_pattern(pattern, node, modules):
                 if len(node.args[0].users) > 1:  # Output of conv is used by other nodes
+                    continue
+                if not connect_to_output(node, gm):
                     continue
                 conv = modules[node.args[0].target]
                 bn = modules[node.target]
@@ -330,6 +339,8 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
             if matches_module_function_pattern(pattern, node, modules):
                 # TODO: support kwargs.
                 if len(node.args) != 8:
+                    continue
+                if not connect_to_output(node, gm):
                     continue
                 conv = modules[node.args[0].target]
                 bn_training = node.args[5]

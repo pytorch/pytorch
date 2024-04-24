@@ -27,6 +27,27 @@ from .quantization import (
     _register_woq_lowerings,
 )
 
+
+def _is_ancestor_node(_current_node, _ancestor_node):
+    # Check whether _ancestor_node is the ancestor node of _current_node
+    _node_list = [_current_node]
+    _visited_nodes = set()
+    while len(_node_list) != 0:
+        _current_node = _node_list.pop(0)
+        if _current_node not in _visited_nodes:
+            _visited_nodes.add(_current_node)
+            if _current_node == _ancestor_node:
+                return True
+            elif isinstance(_current_node, torch.fx.Node) and _current_node.op not in [
+                "placeholder",
+                "output",
+                "get_attr",
+            ]:
+                for input in _current_node.all_input_nodes:
+                    _node_list.append(input)  # noqa: PERF402
+    return False
+
+
 if torch._C._has_mkldnn:
     aten = torch.ops.aten
     mkldnn = torch.ops.mkldnn
@@ -401,23 +422,6 @@ if torch._C._has_mkldnn:
         # * compute_node: Conv2
         # _get_remaining_users will return the users of extra_input_node which are not
         # ancestor node of compute_node.
-        def _is_ancestor_node(_current_node, _ancestor_node):
-            # Check whether _ancestor_node is the ancestor node of _current_node
-            _node_list = [_current_node]
-            _visited_nodes = set()
-            while len(_node_list) != 0:
-                _current_node = _node_list.pop(0)
-                if _current_node not in _visited_nodes:
-                    _visited_nodes.add(_current_node)
-                    if _current_node == _ancestor_node:
-                        return True
-                    elif isinstance(
-                        _current_node, torch.fx.Node
-                    ) and _current_node.op not in ["placeholder", "output", "get_attr"]:
-                        for input in _current_node.all_input_nodes:
-                            _node_list.append(input)  # noqa: PERF402
-            return False
-
         return [
             user
             for user in list(extra_input_node.users)
