@@ -701,6 +701,7 @@ class GuardBuilder(GuardBuilderBase):
                     guard_manager_enum,
                 )
             else:
+                assert base_guard_manager  # to make mypy happy
                 return base_guard_manager.dict_getitem_manager(
                     key=source.index,
                     source=source_name,
