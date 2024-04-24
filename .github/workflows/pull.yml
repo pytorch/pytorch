@@ -29,6 +29,7 @@ jobs:
 
   target-determination:
     name: before-test
+    bad-syntax: true
     uses: ./.github/workflows/target_determination.yml
     needs: llm-td
     permissions:
