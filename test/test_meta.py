@@ -1725,7 +1725,7 @@ class TestMeta(TestCase):
             self.assertEqual(out.shape, [10, 16])
 
     def test_local_scalar_dense_call(self):
-        with self.assertRaisesRegex(AssertionError, "aten::\_local\_scalar\_dense operator \(aka Tensor\.item\(\)\) cannot be called on meta tensors\."):
+        with self.assertRaisesRegex(RuntimeError, "cannot be called on meta tensors"):
             meta_tensor = torch.randn(1, device='meta')
             meta_tensor.item()
 
