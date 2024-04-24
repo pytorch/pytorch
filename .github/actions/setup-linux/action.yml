@@ -105,3 +105,34 @@ runs:
 
         echo "${RESOLVED_IP} ${PT_DOMAIN}" | sudo tee -a /etc/hosts
         cat /etc/hosts
+
+    - name: Check that the docker daemon is running
+      shell: bash
+      continue-on-error: true
+      if: ${{ steps.check_arc_runner.outputs.IN_ARC_RUNNER == 'true' }}
+      run: |
+        set +x
+
+        max_attempts=6
+        delay=10
+        attempt=1
+
+        while true; do
+          echo "Attempt $attempt of $max_attempts: Checking if Docker daemon is running..."
+
+          if docker info > /dev/null 2>&1; then
+            echo "Docker is running. Proceeding with the next steps."
+            break
+          else
+            echo "Docker is not running yet."
+
+            if [ $attempt -ge $max_attempts ]; then
+              echo "Reached maximum attempts to connect to Docker. Exiting."
+              exit 1
+            else
+              echo "Retrying in $delay seconds..."
+              sleep $delay
+              ((attempt++))
+            fi
+          fi
+        done
