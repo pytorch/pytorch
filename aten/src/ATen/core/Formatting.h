@@ -19,7 +19,7 @@ TORCH_API std::ostream& print(
     const Tensor& tensor,
     int64_t linesize);
 static inline std::ostream& operator<<(std::ostream & out, const Tensor & t) {
-  return print(out,t,80);
+  return print(out,t,80,4);
 }
-TORCH_API void print(const Tensor & t, int64_t linesize=80);
+TORCH_API void print(const Tensor & t, int64_t linesize=80, int64_t precision=4);
 }

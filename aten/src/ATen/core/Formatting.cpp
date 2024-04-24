@@ -66,7 +66,7 @@ std::ostream& operator<<(std::ostream & out, const DeprecatedTypeProperties& t) 
   return out << t.toString();
 }
 
-static std::tuple<double, int> __printFormat(std::ostream& stream, const Tensor& self) {
+static std::tuple<double, int> __printFormat(std::ostream& stream, const Tensor& self, int64_t precision) {
   auto size = self.numel();
   if(size == 0) {
     return std::make_tuple(1., 0);
@@ -121,7 +121,7 @@ static std::tuple<double, int> __printFormat(std::ostream& stream, const Tensor&
   if(intMode) {
     if(expMax > 9) {
       sz = 11;
-      stream << std::scientific << std::setprecision(4);
+      stream << std::scientific << std::setprecision(precision);
     } else {
       sz = static_cast<int>(expMax) + 1;
       stream << defaultfloat;
@@ -132,19 +132,19 @@ static std::tuple<double, int> __printFormat(std::ostream& stream, const Tensor&
       if(std::fabs(expMax) > 99 || std::fabs(expMin) > 99) {
         sz = sz + 1;
       }
-      stream << std::scientific << std::setprecision(4);
+      stream << std::scientific << std::setprecision(precision);
     } else {
       if(expMax > 5 || expMax < 0) {
         sz = 7;
         scale = std::pow(10, expMax-1);
-        stream << std::fixed << std::setprecision(4);
+        stream << std::fixed << std::setprecision(precision);
       } else {
         if(expMax == 0) {
           sz = 7;
         } else {
           sz = static_cast<int>(expMax) + 6;
         }
-        stream << std::fixed << std::setprecision(4);
+        stream << std::fixed << std::setprecision(precision);
       }
     }
   }
@@ -162,9 +162,9 @@ static void printScale(std::ostream & stream, double scale) {
   FormatGuard guard(stream);
   stream << defaultfloat << scale << " *" << '\n';
 }
-static void __printMatrix(std::ostream& stream, const Tensor& self, int64_t linesize, int64_t indent)
+static void __printMatrix(std::ostream& stream, const Tensor& self, int64_t linesize, int64_t precision, int64_t indent)
 {
-  auto [scale, sz] = __printFormat(stream, self);
+  auto [scale, sz] = __printFormat(stream, self, precision);
 
   __printIndent(stream, indent);
   int64_t nColumnPerLine = (linesize-indent)/(sz+1);
@@ -211,7 +211,7 @@ static void __printMatrix(std::ostream& stream, const Tensor& self, int64_t line
   }
 }
 
-static void __printTensor(std::ostream& stream, Tensor& self, int64_t linesize)
+static void __printTensor(std::ostream& stream, Tensor& self, int64_t linesize, int64_t precision)
 {
   std::vector<int64_t> counter(self.ndimension()-2);
   bool start = true;
@@ -248,14 +248,14 @@ static void __printTensor(std::ostream& stream, Tensor& self, int64_t linesize)
       stream << counter[i]+1 << ",";
     }
     stream << ".,.) = " << '\n';
-    __printMatrix(stream, tensor, linesize, 1);
+    __printMatrix(stream, tensor, linesize, precision, 1);
   }
 }
 
-void print(const Tensor & t, int64_t linesize) {
-  print(std::cout,t,linesize);
+void print(const Tensor & t, int64_t linesize, int64_t precision) {
+  print(std::cout,t,linesize, precision);
 }
-std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesize) {
+std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesize, int64_t precision) {
   FormatGuard guard(stream);
   if(!tensor_.defined()) {
     stream << "[ Tensor (undefined) ]";
@@ -283,7 +283,7 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
       stream << "[ " << tensor_.toString() << "{}";
     } else if(tensor.ndimension() == 1) {
       if (tensor.numel() > 0) {
-        auto [scale, sz] = __printFormat(stream, tensor);
+        auto [scale, sz] = __printFormat(stream, tensor, precision);
         if(scale != 1) {
           printScale(stream, scale);
         }
@@ -295,12 +295,12 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
       stream << "[ " << tensor_.toString() << "{" << tensor.size(0) << "}";
     } else if(tensor.ndimension() == 2) {
       if (tensor.numel() > 0) {
-        __printMatrix(stream, tensor, linesize, 0);
+        __printMatrix(stream, tensor, linesize, precision, 0);
       }
       stream << "[ " << tensor_.toString() << "{" << tensor.size(0) << "," <<  tensor.size(1) << "}";
     } else {
       if (tensor.numel() > 0) {
-        __printTensor(stream, tensor, linesize);
+        __printTensor(stream, tensor, linesize, precision);
       }
       stream << "[ " << tensor_.toString() << "{" << tensor.size(0);
       for (const auto i : c10::irange(1, tensor.ndimension())) {
@@ -317,10 +317,10 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
           tensor_.qscheme() == c10::kPerChannelAffineFloatQParams) {
         stream << ", scales: ";
         Tensor scales = tensor_.q_per_channel_scales();
-        print(stream, scales, linesize);
+        print(stream, scales, linesize, precision);
         stream << ", zero_points: ";
         Tensor zero_points = tensor_.q_per_channel_zero_points();
-        print(stream, zero_points, linesize);
+        print(stream, zero_points, linesize, precision);
         stream << ", axis: " << tensor_.q_per_channel_axis();
       }
     }
