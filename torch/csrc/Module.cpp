@@ -8,6 +8,7 @@
 #endif
 
 #include <ATen/ATen.h>
+#include <ATen/BlasBackend.h>
 #include <ATen/DLConvertor.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/LegacyVmapMode.h>
@@ -162,12 +163,14 @@ static PyObject* THPModule_initExtension(
     PyObject* shm_manager_path) {
   HANDLE_TH_ERRORS
 #if !defined(FBCODE_CAFFE2)
-  if (torch::get_cpp_stacktraces_enabled() && !torch::get_disable_addr2line()) {
+  if (torch::get_cpp_stacktraces_enabled()) {
     c10::SetStackTraceFetcher([]() -> std::string {
       auto tb = torch::CapturedTraceback::gather(false, false, true);
-      LOG(WARNING)
-          << "symbolizing C++ stack trace for exception; if this hangs, rerun with TORCH_DISABLE_ADDR2LINE=1..."
-          << std::endl;
+      if (torch::get_symbolize_mode() == torch::unwind::Mode::addr2line) {
+        LOG(WARNING)
+            << "symbolizing C++ stack trace for exception; if this hangs, rerun with TORCH_DISABLE_ADDR2LINE=1..."
+            << std::endl;
+      }
       auto s_tbs = torch::symbolize({tb.get()});
       std::stringstream oss;
       oss << "C++ CapturedTraceback:" << std::endl;
@@ -1931,6 +1934,17 @@ Call this whenever a new thread is created in order to propagate values from
   });
   py_module.def("_get_linalg_preferred_backend", []() {
     return at::globalContext().linalgPreferredBackend();
+  });
+
+  py::enum_<at::BlasBackend>(py_module, "_BlasBackend")
+      .value("Cublas", at::BlasBackend::Cublas)
+      .value("Cublaslt", at::BlasBackend::Cublaslt);
+
+  py_module.def("_set_blas_preferred_backend", [](at::BlasBackend b) {
+    at::globalContext().setBlasPreferredBackend(b);
+  });
+  py_module.def("_get_blas_preferred_backend", []() {
+    return at::globalContext().blasPreferredBackend();
   });
 
   py_module.def(
