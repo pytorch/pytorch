@@ -39,7 +39,7 @@ class FakeTensorProp(torch.fx.Interpreter):
         def check_consistent_and_snapshot(new, old=nil):
             from torch.fx.experimental.symbolic_shapes import check_consistent
 
-            if old is not nil and self.check_consistency:
+            if old is not nil and old is not None and self.check_consistency:
                 check_consistent(new, old)
 
             if isinstance(new, FakeTensor):
