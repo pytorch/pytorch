@@ -351,8 +351,20 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
         self._verify_msd(model_sd, dist_msd)
 
         # another way
-        loaded_model_sd = _load_state_dict_from_keys("model", model_sd)
-        self._verify_msd(model_sd, loaded_model_sd)
+        loaded_model_sd = _load_state_dict_from_keys(
+            "model", checkpoint_id=self.temp_dir
+        )["model"]
+        self._verify_msd(model_sd, loaded_model_sd, offload_to_cpu=True)
+
+        loaded_optim_state = _load_state_dict_from_keys(
+            "optimizer.state", checkpoint_id=self.temp_dir
+        )["optimizer"]["state"]
+        self.assertNotIn("param_groups", loaded_optim_state)
+        for k, v in dist_optim.state_dict()["state"].items():
+            for optim_key in ["exp_avg", "exp_avg_sq", "step"]:
+                self._compare_tensor(
+                    loaded_optim_state[k][optim_key], v[optim_key], offload_to_cpu=True
+                )
 
 
 class TestNoCPU(DTensorTestBase):
