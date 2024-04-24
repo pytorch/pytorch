@@ -1632,6 +1632,19 @@ def setLinalgBackendsToDefaultFinally(fn):
     return _fn
 
 
+# Reverts the blas backend back to default to make sure potential failures in one
+# test do not affect other tests
+def setBlasBackendsToDefaultFinally(fn):
+    @wraps(fn)
+    def _fn(*args, **kwargs):
+        _preferred_backend = torch.backends.cuda.preferred_blas_library()
+        try:
+            fn(*args, **kwargs)
+        finally:
+            torch.backends.cuda.preferred_blas_library(_preferred_backend)
+    return _fn
+
+
 # Context manager for setting deterministic flag and automatically
 # resetting it to its original value
 class DeterministicGuard:
