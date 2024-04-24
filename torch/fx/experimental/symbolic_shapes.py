@@ -67,6 +67,7 @@ from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._traceback import format_frame, CapturedTraceback
 from torch._utils_internal import signpost_event
 from torch._subclasses.meta_utils import is_sparse_any
+import torch.utils._pytree as pytree
 
 from torch._logging import LazyString
 
@@ -95,6 +96,7 @@ __all__ = [
     "has_free_symbols", "sym_eq", "SymbolicContext", "StatelessSymbolicContext",
     "StatefulSymbolicContext", "SubclassSymbolicContext", "statically_known_true",
     "guard_size_oblivious", "check_consistent",
+    "compute_unbacked_bindings", "ConvertIntKey",
 ]
 
 # FX node metadata keys for symbolic shape FX graph.
@@ -398,6 +400,101 @@ def find_symbol_binding_fx_nodes(graph):
         for node in graph.nodes
         if is_symbol_binding_fx_node(node)
     }
+
+
+# Analogous to ConvertIntSource
+@dataclass(frozen=True)
+class ConvertIntKey:
+    def __str__(self) -> str:
+        return ".__int__()"
+
+    def get(self, b: bool) -> int:
+        """Get the int value from bool"""
+        return int(b)
+
+
+@dataclass(frozen=True)
+class CallMethodKey:
+    name: str
+
+    def __str__(self) -> str:
+        return f".{self.name}()"
+
+    def get(self, o: Any) -> Any:
+        """Call the method on object"""
+        return getattr(o, self.name)()
+
+
+def compute_unbacked_bindings(shape_env, example_value):
+    """
+    After having run fake tensor propagation and producing example_value
+    result, traverse example_value looking for freshly bound unbacked
+    symbols and record their paths for later.  It is an error if
+    we have allocated an unbacked SymInt but it cannot be found in
+    example_value.  (NB: this means if you have a multi-output
+    function, you must call this on the tuple of tensor output, you
+    cannot wait!)
+    """
+    pending = set(shape_env.pending_fresh_unbacked_symbols)
+    if pending:
+        shape_env.pending_fresh_unbacked_symbols.clear()
+
+        def free_unbacked_symbols_with_path(
+            a, path
+        ) -> Dict[sympy.Symbol, pytree.KeyPath]:
+            r = {}
+            if isinstance(a, (tuple, list)):
+                for i in range(len(a)):
+                    r.update(
+                        free_unbacked_symbols_with_path(
+                            a[i], path + (pytree.SequenceKey(i),)
+                        )
+                    )
+            elif isinstance(a, torch.Tensor):
+                r.update(
+                    free_unbacked_symbols_with_path(
+                        a.size(), path + (CallMethodKey("size"),)
+                    )
+                )
+                r.update(
+                    free_unbacked_symbols_with_path(
+                        a.stride(), path + (CallMethodKey("stride"),)
+                    )
+                )
+                r.update(
+                    free_unbacked_symbols_with_path(
+                        a.storage_offset(), path + (CallMethodKey("storage_offset"),)
+                    )
+                )
+
+            # NB: Intentionally access _expr, not expr, do not want
+            # simplification!
+            elif (
+                isinstance(a, (torch.SymInt, torch.SymFloat))
+                and isinstance(s := a.node._expr, sympy.Symbol)
+                and s in pending
+            ):
+                r[s] = path
+                pending.remove(s)
+            # The annoyance here arises from the fact that SymBool is
+            # allocated by allocating a SymInt and then testing if it's equal
+            # to one.  So you have a complicated binding site logic for this.
+            elif (
+                isinstance(a, torch.SymBool)
+                and isinstance(s := a.node._expr, sympy.Eq)
+                # This must match create_unbacked_symbool EXACTLY
+                and isinstance(s.lhs, sympy.Symbol)
+                and s.rhs == 1
+                and s.lhs in pending
+            ):
+                r[s.lhs] = path + (ConvertIntKey(),)
+                pending.remove(s.lhs)
+
+            return r
+
+        symbol_to_path = free_unbacked_symbols_with_path(example_value, ())
+        assert not pending, f"pending {pending} not in {example_value}"
+        return symbol_to_path
 
 def definitely_true(a):
     """
@@ -2072,6 +2169,26 @@ class ShapeEnv:
         # signpost_event
         self.co_fields = co_fields if co_fields else {}
 
+        # Whenever we allocate a fresh unbacked Symbol, we add it to this
+        # pending list.  Unbacked symbol allocation can occur at unpredictable
+        # points during meta tensor propagation, but at some point, the we
+        # have to know what the binding site for an unbacked symbol is, and
+        # this is computed when we actually place the node in the graph.  The
+        # important thing is that we always actually handle every unaccounted
+        # for unbacked symbol, so this list helps us keep track of them and
+        # then make sure they are all accounted for.
+        #
+        # We could potentially give rise to errors earlier by lexically
+        # scoping when we do propagation, and only allowing unbacked symbols
+        # to be allocated at this point in time.  However this is inconvenient
+        # to do in Dynamo, because fake tensor propagation is far from when we
+        # analyze binding sites (set_example_value), so we do it in a more
+        # mutatey way.
+        #
+        # NB: fresh unbacked symbols NEVER get substitutions applied to them,
+        # they are binding sites!
+        self.pending_fresh_unbacked_symbols: List[sympy.Symbol] = []
+
         # Version counter used to invalidate cached values
         self._prev_cache_key = self._get_key()
         self._version_counter = 0
@@ -2180,7 +2297,7 @@ class ShapeEnv:
             elif key == "name_to_node":
                 # Compare just the set of keys is the same.
                 return set(value.keys())
-            elif key == "symbol_guard_counter":
+            elif key in ["symbol_guard_counter", "pending_fresh_unbacked_symbols"]:
                 # Skip this for comparisons
                 return None
             return value
@@ -2643,6 +2760,7 @@ class ShapeEnv:
         """
         symbol: sympy.Symbol = sympy.Symbol(f"f{next(self.unbacked_symfloat_counter)}")
         self.counter["create_unbacked_symbol"] += 1
+        self.pending_fresh_unbacked_symbols.append(symbol)
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         vr = self.var_to_range[symbol] = ValueRanges.unknown()
 
@@ -2658,6 +2776,7 @@ class ShapeEnv:
         """Create a symbolic integer without a hint value
         """
         symbol: sympy.Symbol = sympy.Symbol(f"u{next(self.unbacked_symint_counter)}", integer=True)
+        self.pending_fresh_unbacked_symbols.append(symbol)
         self.counter["create_unbacked_symbol"] += 1
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         vr = self.var_to_range[symbol] = self._default_unspecified_value_range()
@@ -2680,6 +2799,7 @@ class ShapeEnv:
         """Create a symbolic boolean without a hint value
         """
         symbol: sympy.Symbol = sympy.Symbol(f"u{next(self.unbacked_symint_counter)}", integer=True)
+        self.pending_fresh_unbacked_symbols.append(symbol)
         self.counter["create_unbacked_symbol"] += 1
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         vr = self.var_to_range[symbol] = ValueRanges(0, 1)
