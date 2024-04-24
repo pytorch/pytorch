@@ -755,17 +755,21 @@ def get_np_to_tnp_map():
     return np_fn_to_tnp_fn
 
 
+@functools.lru_cache(maxsize=1)
+def np_constant_collections_map():
+    return {
+        tnp.finfo: NumpyTypeInfoVariable,
+        tnp.iinfo: NumpyTypeInfoVariable,
+        tnp.dtype: NumpyDTypeVariable,
+    }
+
+
 class NumpyVariable(VariableTracker):
     """
     Wrapper around `numpy.*`. Currently, is able to trace a small subset of numpy functions as well as numpy dtypes.
     """
 
     constant_fold_functions = (tnp.issubdtype,)
-    constant_collection_functions = {
-        tnp.finfo: NumpyTypeInfoVariable,
-        tnp.iinfo: NumpyTypeInfoVariable,
-        tnp.dtype: NumpyDTypeVariable
-    }
 
     def __init__(self, value, **kwargs):
         super().__init__(**kwargs)
@@ -781,7 +785,7 @@ class NumpyVariable(VariableTracker):
     def get_constant_collection_for_func(cls, fn):
         mod = fn.__module__.split(".")
         assert len(mod) >= 2 and mod[:2] == ["torch", "_numpy"]
-        return cls.constant_collection_functions.get(fn, None)
+        return np_constant_collections_map().get(fn, None)
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -800,7 +804,9 @@ class NumpyVariable(VariableTracker):
             )
 
         # We are dealing with a function that produces a const collection type (np.dtype, np.iinfo/np.finfo)
-        if collection_variable_typ := self.get_constant_collection_for_func(func) is not None:
+        if (
+            collection_variable_typ := self.get_constant_collection_for_func(func)
+        ) is not None:
             try:
                 return collection_variable_typ(
                     self.value(
