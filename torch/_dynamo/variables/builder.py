@@ -446,10 +446,6 @@ class VariableBuilder:
             # For SUPPORTED_NODES, we guard on the dictionary version (PEP509)
             # under the assumption that the values themselves don't change.
             self.install_guards(GuardBuilder.DICT_VERSION)
-
-            # The keys on the SUPPORTED_NODES can be arbitrary, so save on the
-            # key order.
-            self.tx.output.guard_on_key_order.add(self.source.name())
             result = {
                 ConstantVariable.create(k): UserDefinedObjectVariable(
                     v,
@@ -474,32 +470,12 @@ class VariableBuilder:
                 # but not completely secure job ensuring a property wasn't changed.
                 self.install_guards(GuardBuilder.BOOL_FALSE)
             else:
-                self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
+                self.install_guards(GuardBuilder.DICT_LENGTH)
 
             # Optimisation for the common case strings, ints, etc
             all_const = all(ConstantVariable.is_literal(k) for k in value.keys())
             if all_const:
-                # TODO(anijain2305) - Do we have to guard on all the keys? Can
-                # keys be guarded lazily, similar to values?
                 self.install_guards(GuardBuilder.DICT_CONST_KEYS)
-            else:
-                # Guard on the key order
-                # This is not ideal, i.e., there is no need to guard on the key
-                # order. But we guard on the key order because of the complexity
-                #
-                # 1) For non-constant objects, we can't save the key in the
-                # guard context because it can be memory heavy. We can add
-                # weakrefs but this complicates the accesses.
-                #
-                # 2) For non-constant objects, we also have to guard on the keys
-                # (like TENSOR_MATCH on tensor). We might also have guards on
-                # the attributes of the keys (like tensor.grad). To make this
-                # work in tree strucutre is complicated.
-                #
-                # So, instead we guard on the key order. While guarding on key
-                # order, we just save the indices and use it to access keys and
-                # values. Indices are cheap to save.
-                self.tx.output.guard_on_key_order.add(self.source.name())
 
             # We need all the keys to be hashable. We do this within the
             # _HashableTracker class in dicts.py
