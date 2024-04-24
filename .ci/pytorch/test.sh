@@ -283,6 +283,11 @@ test_python() {
   assert_git_not_dirty
 }
 
+test_python_xpu() {
+  # shellcheck disable=SC2086
+  PYTORCH_ENABLE_XPU_FALLBACK=1 time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests $INCLUDE_CLAUSE --verbose $PYTHON_TEST_EXTRA_OPTION
+  assert_git_not_dirty
+}
 
 test_dynamo_shard() {
   if [[ -z "$NUM_TEST_SHARDS" ]]; then
@@ -1269,7 +1274,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *rocm* && -n "$TESTS_TO_INCLUDE" ]]; then
   test_aten
 elif [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
   install_torchvision
-  test_python
+  test_python_xpu
   test_aten
   test_xpu_bin
 else
