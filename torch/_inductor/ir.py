@@ -4910,7 +4910,7 @@ class ScatterFallback(ExternKernel):
         wrapper.generate_scatter_fallback(
             x,
             [x, self.constant_args[0], index, src],
-            self.get_kernel_name(),
+            self.cpp_kernel_name,
             self.python_kernel_name,
             self.src_is_tensor,
             reduce,
@@ -4919,25 +4919,6 @@ class ScatterFallback(ExternKernel):
 
     def should_allocate(self):
         return False
-
-    def get_cpp_kernel(self):
-        reduce = self.kwargs["reduce"]
-        if self.python_kernel_name == "aten.scatter_":
-            if self.src_is_tensor:
-                kernel = (
-                    "at::scatter_out" if reduce is None else "at::scatter_reduce_out"
-                )
-            else:
-                assert (
-                    reduce is None
-                ), "Expect reduce to be None for aten.scatter_ with scalar src"
-                kernel = "at::scatter_out"
-        else:
-            assert (
-                reduce is not None
-            ), "Expect reduce to be not None for aten.scatter_reduce_"
-            kernel = "at::scatter_reduce_out"
-        return kernel
 
     def get_mutation_names(self):
         return [self.inputs[0].get_name()]
@@ -4948,7 +4929,6 @@ class ScatterFallback(ExternKernel):
     def __init__(
         self,
         op_overload,
-        python_kernel_name,
         x,
         dim: int,
         index,
@@ -4957,7 +4937,6 @@ class ScatterFallback(ExternKernel):
         reduce: Optional[str] = None,
         include_self: bool = True,
     ):
-        assert python_kernel_name in {"aten.scatter_", "aten.scatter_reduce_"}
         self.src_is_tensor = isinstance(src, TensorBox)
 
         constant_args: Tuple[Any, ...]
@@ -4974,11 +4953,11 @@ class ScatterFallback(ExternKernel):
             self.unwrap_storage(tensors),
             constant_args,
             {"reduce": reduce, "include_self": include_self},
-            python_kernel_name=python_kernel_name,
+            python_kernel_name=str(op_overload),
             ordered_kwargs_for_cpp_kernel=["reduce", "include_self"],
             op_overload=op_overload,
         )
-        self.cpp_kernel_name = self.get_cpp_kernel()
+        self.cpp_kernel_name = get_aten_cpp_kernel_name(op_overload)
         self.name = V.graph.register_buffer(self)
         mark_node_as_mutating(self, x)
 
