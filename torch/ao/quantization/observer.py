@@ -35,6 +35,7 @@ __all__ = [
     "per_channel_weight_observer_range_neg_127_to_127",
     "weight_observer_range_neg_127_to_127",
     "FixedQParamsObserver",
+    "FixedWeightQParamsObserver",
     "HistogramObserver",
     "MinMaxObserver",
     "MovingAverageMinMaxObserver",
@@ -1390,6 +1391,83 @@ class FixedQParamsObserver(ObserverBase):
     def forward(self, X):
         return X
 
+    @torch.jit.export
+    def calculate_qparams(self):
+        return self.scale, self.zero_point
+
+class FixedWeightQParamsObserver(UniformQuantizationObserverBase):
+    r"""
+    Observer that simulates quantize and dequantize with fixed
+    quantization parameters in training time. Only per tensor
+    quantization is supported. It works for weight tensors, whereas
+    the `FixedQParamsObserver` observer only works for activations
+    tensors.
+
+    Args:
+        `scale` (float): fixed scale for the observer
+        `zero_point` (int): fixed zero point for the observer
+        `dtype`, `qscheme`, `quant_min`, `quant_max`
+        `qscheme: Quantization scheme to be used
+        `reduce_range`: Reduces the range of the quantized data type by 1 bit
+        `quant_min`: Minimum quantization value. If unspecified, it will follow the 8-bit setup.
+        `quant_max`: Maximum quantization value. If unspecified, it will follow the 8-bit setup.
+        `eps`: Epsilon value for float32, Defaults to `torch.finfo(torch.float32).eps`.
+    """
+
+    scale: torch.Tensor
+    zero_point: torch.Tensor
+
+    def __init__(
+        self,
+        scale,
+        zero_point,
+        dtype=torch.quint8,
+        qscheme=torch.per_tensor_affine,
+        reduce_range=False,
+        quant_min=None,
+        quant_max=None,
+        factory_kwargs=None,
+        eps=torch.finfo(torch.float32).eps,
+        is_dynamic=False,
+    ) -> None:
+        if not is_per_tensor(qscheme):
+            raise NotImplementedError(
+                "FixedWeightQParamsObserver's qscheme only support torch.per_tensor_symmetric \
+                    and torch.per_tensor_affine."
+            )
+        # For x86 quantized kernels, we need to ensure that the vpmaddubsw
+        # instruction does not overflow. We allow for a reduce_range argument to
+        # observers that reduces the quantized range to (0,127) or (-64, 63).
+        # For more details see aten/src/ATen/native/quantized/cpu/qconv.cpp
+        # This is not an optimal choice for non x86 backends as it loses a bit
+        # of precision for activations.
+        super().__init__(
+            dtype=dtype,
+            qscheme=qscheme,
+            reduce_range=reduce_range,
+            quant_min=quant_min,
+            quant_max=quant_max,
+            factory_kwargs=factory_kwargs,
+            eps=eps,
+            is_dynamic=is_dynamic,
+        )
+        factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
+        self.register_buffer("scale", torch.tensor([scale], dtype=torch.float))
+        self.register_buffer("zero_point", torch.tensor([zero_point], dtype=torch.int))
+        if (
+            self.qscheme == torch.per_tensor_symmetric
+            and self.reduce_range
+            and self.dtype == torch.quint8
+        ):
+            raise NotImplementedError(
+                "Cannot reduce range for symmetric \
+                                       quantization for quint8"
+            )
+
+    def forward(self, X):
+        return X
+
+    # Never used
     @torch.jit.export
     def calculate_qparams(self):
         return self.scale, self.zero_point

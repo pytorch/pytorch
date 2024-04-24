@@ -7,6 +7,7 @@ from torch.ao.quantization.observer import (
     HistogramObserver,
     MovingAveragePerChannelMinMaxObserver,
     FixedQParamsObserver,
+    FixedWeightQParamsObserver,
     default_fixed_qparams_range_0to1_observer,
     default_fixed_qparams_range_neg1to1_observer,
     _with_args,
@@ -270,10 +271,12 @@ class FixedQParamsFakeQuantize(FakeQuantize):
     """
 
     # TODO: rename observer to observer_ctr
-    def __init__(self, observer):
-        super().__init__(observer=observer)
-        assert type(self.activation_post_process) == FixedQParamsObserver, \
-            f"{self.__class__.__name__}'s observer must be a {FixedQParamsObserver.__name__}"
+    def __init__(self, observer, **observer_kwargs):
+        super().__init__(observer=observer, **observer_kwargs)
+        assert type(self.activation_post_process) in [
+            FixedQParamsObserver, FixedWeightQParamsObserver
+        ], f"{self.__class__.__name__}'s observer must be an instance of " +\
+        f"{FixedQParamsObserver.__name__} or {FixedWeightQParamsObserver.__name__}"
         self._observer_ctr = observer
         self.scale = self.activation_post_process.scale
         self.zero_point = self.activation_post_process.zero_point
