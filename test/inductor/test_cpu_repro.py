@@ -2801,6 +2801,11 @@ class CPUReproTests(TestCase):
                 metrics.reset()
                 x = torch.randn(64, 58, 28, 28)
                 self.common(channel_shuffle, (x, 2))
+                print("============================")
+                print("os env ATEN_CPU_CAPABILITY: ", os.getenv("ATEN_CPU_CAPABILITY"))
+                print("simdlen: ", simdlen)
+                print("supported isa: ", codecache.supported_vec_isa_list)
+                print("codecache.pick_vec_isa(): ", codecache.pick_vec_isa())
                 if simdlen != 1:
                     check_metrics_vec_kernel_count(2)
 
