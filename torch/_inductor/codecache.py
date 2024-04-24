@@ -1067,7 +1067,7 @@ def get_compiler_version_info(compiler):
             ).decode(*SUBPROCESS_DECODE_ARGS)
         except Exception as e:
             return ""
-    # Mutiple line to one line string.
+    # Mutiple lines to one line string.
     version_string = version_string.replace("\r", "_")
     version_string = version_string.replace("\n", "_")
     return version_string
@@ -1076,7 +1076,7 @@ def get_compiler_version_info(compiler):
 def _get_isa_dry_compile_fingerprint(isa_flags: str) -> str:
     # ISA dry compile will cost about 1 sec time each startup time.
     # Please check the issue: https://github.com/pytorch/pytorch/issues/100378
-    # Acturaly, dry compile is checking compile capability for ISA.
+    # Actually, dry compile is checking compile capability for ISA.
     # We just record the compiler version, isa options and pytorch version info,
     # and generated them to output binary hash path.
     # It would optimize and skip compile existing binary.
