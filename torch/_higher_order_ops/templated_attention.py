@@ -1,4 +1,4 @@
-from typing import Callable, List, Tuple, Union
+from typing import Any, Callable, Tuple
 
 import torch
 import torch.utils._pytree as pytree
@@ -19,10 +19,7 @@ from torch.fx.experimental.proxy_tensor import (
 from torch.overrides import TorchFunctionMode
 
 
-def transform_getitem_args(
-    x: torch.Tensor,
-    index_args: Union[torch.Tensor, Tuple[torch.Tensor], List[torch.Tensor]],
-) -> Tuple[torch.Tensor, List[torch.Tensor]]:
+def transform_getitem_args(x: torch.Tensor, index_args) -> Tuple[Any, ...]:
     if isinstance(index_args, tuple):
         return (x, list(index_args))
     elif not isinstance(index_args, (list, tuple)):
