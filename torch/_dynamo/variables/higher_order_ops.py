@@ -12,8 +12,6 @@ from typing import Dict, List, Optional, TYPE_CHECKING
 if TYPE_CHECKING:
     from torch._dynamo.variables.lists import RangeIteratorVariable
 
-from ..bytecode_transformation import Instruction, assemble, transform_code_object
-
 import torch._C
 import torch.fx
 import torch.nn
@@ -30,6 +28,7 @@ from torch._ops import HigherOrderOperator
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.utils import _pytree as pytree
 from .. import variables
+from ..bytecode_transformation import Instruction, transform_code_object
 
 from ..exc import UncapturedHigherOrderOpError, unimplemented, Unsupported
 from ..source import AttrSource
@@ -1158,6 +1157,7 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         from misc.UnknownVariable in that it's actually known outside of a for loop
         higher order op.
         """
+
         pass
 
     # Any of these nested means the control flow is too complex to be
@@ -1217,7 +1217,6 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         loop_body_instructions: List["Instruction"],
         symbolic_locals: Dict[str, VariableTracker],
     ):
-
         if (
             loop_items := len(value.items)
         ) < torch._dynamo.config.for_loop_medium_size_boundary:
@@ -1239,7 +1238,7 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         varnames = host_code_object.co_varnames
         args = [
             symbolic_locals.get(k)
-            or RangeHigherOrderVariable.UnitializedVariable.create(0xdeaddead)
+            or RangeHigherOrderVariable.UnitializedVariable.create(0xDEADDEAD)
             for k in varnames
         ]
         # STORE_FAST always follows a FOR_ITER as CPython needs to store the next(iter) into the local
@@ -1256,15 +1255,21 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         if not loop_body:
             raise CannotConvertRangeToHigherOrder("Empty loop body.")
         # We skip the first instruction as it's a STORE_FAST, while we skip the last as it's the JUMP_BACKWARD.
-        for inst in loop_body:
-            co_code.append(inst)
+        co_code.extend(loop_body)
         # We need to replace the last `JUMP_BACKWARD` with a RETURN_VALUE of all
         # the locals.
         for i in range(host_code_object.co_nlocals):
-            co_code.append(Instruction(opcode.opmap["LOAD_FAST"], "LOAD_FAST", i, varnames[i]))
+            co_code.append(
+                Instruction(opcode.opmap["LOAD_FAST"], "LOAD_FAST", i, varnames[i])
+            )
         co_code.extend(
             (
-                Instruction(opcode.opmap["BUILD_TUPLE"], "BUILD_TUPLE", host_code_object.co_nlocals, None),
+                Instruction(
+                    opcode.opmap["BUILD_TUPLE"],
+                    "BUILD_TUPLE",
+                    host_code_object.co_nlocals,
+                    None,
+                ),
                 Instruction(opcode.opmap["RETURN_VALUE"], "RETURN_VALUE", 0, None),
             )
         )

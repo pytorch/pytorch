@@ -1225,7 +1225,9 @@ class InstructionTranslatorBase(
     def FOR_ITER(self, inst: Instruction):
         it = self.pop().realize()
         skip_rest = False
-        if (config.convert_for_loops_to_functions and isinstance(it, variables.RangeIteratorVariable)):
+        if config.convert_for_loops_to_functions and isinstance(
+            it, variables.RangeIteratorVariable
+        ):
             try:
                 # Converts a loop to a function body, to benefit
                 # from function compilation caching.
@@ -1250,9 +1252,7 @@ class InstructionTranslatorBase(
                     for loc in new_locals
                 ]
                 for name, v in zip(self.f_code.co_varnames, args):
-                    if (
-                        isinstance(v, RangeHigherOrderVariable.UnitializedVariable)
-                    ):
+                    if isinstance(v, RangeHigherOrderVariable.UnitializedVariable):
                         continue
                     self.symbolic_locals[name] = v
 
