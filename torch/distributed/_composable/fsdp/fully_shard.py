@@ -5,7 +5,7 @@ import typing_extensions
 import torch
 import torch.nn as nn
 from torch.distributed._composable import contract
-from torch.distributed._tensor import DeviceMesh, DTensor
+from torch.distributed._tensor import DeviceMesh
 
 from ._fsdp_api import MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo
@@ -286,26 +286,7 @@ class FSDP:
         # https://github.com/pytorch/pytorch/issues/113045
         with torch.no_grad():
             for fsdp_param in fsdp_param_group.fsdp_params:
-                module_info = fsdp_param._module_info
-                new_param = getattr(module_info.module, module_info.param_name)
-                if new_param is not fsdp_param.sharded_param:
-                    raise AssertionError(
-                        "Expects swap_tensors to preserve object but got "
-                        f"{new_param} instead of {fsdp_param.sharded_param}"
-                    )
-                local_tensor = new_param._local_tensor
-                padded_sharded_size = fsdp_param.padded_sharded_param_size
-                if local_tensor.size() != padded_sharded_size:
-                    padded_local_tensor = local_tensor.new_zeros(padded_sharded_size)
-                    padded_local_tensor[: local_tensor.size(0)].copy_(local_tensor)
-                    local_tensor = padded_local_tensor
-                if fsdp_param.pin_memory and not local_tensor.is_pinned():
-                    local_tensor = local_tensor.cpu().pin_memory()
-                fsdp_param._sharded_param_data = local_tensor.view(-1)
-                assert isinstance(fsdp_param.sharded_param, DTensor)  # mypy
-                fsdp_param.sharded_param._local_tensor = local_tensor[
-                    : fsdp_param.sharded_size[0]
-                ]
+                fsdp_param.reset_sharded_param()
         return ret
 
 
