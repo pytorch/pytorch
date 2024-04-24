@@ -63,10 +63,12 @@ class _ReplicateState(_State):
     def lazy_init(self) -> None:
         @torch._dynamo.disable(recursive=True)
         def _lazy_init():
+            assert self._init_args is not None
             self.init(*self._init_args, **self._init_kwargs)
             self.register_comm_hook()
             self._init_args = tuple()
             self._init_kwargs = {}
+
         _lazy_init()
 
     def init(
