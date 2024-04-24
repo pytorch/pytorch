@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import contextlib
+import copy
 import functools
 import importlib
 import itertools
@@ -88,6 +89,57 @@ class ConvBN(torch.nn.Module):
 
     def forward(self, x):
         return self.bn(self.conv(x))
+
+
+class FunctionalBNShareSameConv(torch.nn.Module):
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        bias=False,
+        kernel_size=3,
+        stride=2,
+        running_mean=None,
+        running_var=None,
+        weight=None,
+        bn_bias=None,
+    ):
+        super().__init__()
+        self.out_channels = out_channels
+        self.conv = torch.nn.Conv2d(
+            in_channels, out_channels, bias=bias, kernel_size=kernel_size, stride=stride
+        )
+        self.running_mean = running_mean
+        self.running_var = running_var
+        self.weight = weight
+        self.bias = bn_bias
+        self.running_mean2 = copy.deepcopy(running_mean)
+        self.running_var2 = copy.deepcopy(running_var)
+        self.weight2 = copy.deepcopy(weight)
+        self.bias2 = copy.deepcopy(bn_bias)
+
+    def forward(self, x):
+        temp = torch.nn.functional.batch_norm(
+            self.conv(x),
+            self.running_mean,
+            self.running_var,
+            self.weight,
+            self.bias,
+            False,
+            0.1,
+            1e-5,
+        )
+        temp2 = torch.nn.functional.batch_norm(
+            self.conv(x),
+            self.running_mean2,
+            self.running_var2,
+            self.weight2,
+            self.bias2,
+            False,
+            0.1,
+            1e-5,
+        )
+        return temp + temp2
 
 
 class OptimizeForInferenceTemplate(TestCase):
@@ -378,20 +430,60 @@ class OptimizeForInferenceTemplate(TestCase):
     @torch._inductor.config.patch(layout_optimization=False)
     def test_folded_conv_bn_with_dead_nodes(self):
         mod = (
-            ConvBN(3, 32, bias=True, kernel_size=3, stride=2)
+            ConvBN(32, 32, bias=True, kernel_size=3, stride=2)
             .to(self.device)
             .to(torch.float32)
         )
 
+        # Change the parameter of BN module from default
         for _ in range(10):
-            mod(torch.rand(3, 3, 32, 32).to(self.device).to(torch.float32))
+            mod(torch.rand(3, 32, 32, 32).to(self.device).to(torch.float32))
 
         mod.eval()
-        x = torch.rand(3, 3, 32, 32).to(self.device).to(torch.float32)
+        x = torch.rand(3, 32, 32, 32).to(self.device).to(torch.float32)
 
         @torch.compile()
         def foo(mod, x):
             mod(x)
+            return mod(x)
+
+        with torch.no_grad():
+            out_eager = mod(x)
+            out_optimized_for_infernece, code = run_and_get_code(foo, mod, x)
+
+        self.assertNotIn(
+            "aten._native_batch_norm_legit_no_training(",
+            code[0],
+        )
+
+        self.assertEqual(out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2)
+
+    @torch._inductor.config.patch(layout_optimization=False)
+    def test_folded_same_conv_with_multi_functional_bn(self):
+        x = torch.rand(3, 32, 32, 32).to(self.device).to(torch.float32)
+        running_mean = torch.mean(x, dim=(0, 2, 3))
+        print(running_mean.size(), flush=True)
+        running_var = torch.var(x, dim=(0, 2, 3))
+
+        mod = (
+            FunctionalBNShareSameConv(
+                32,
+                32,
+                bias=True,
+                kernel_size=3,
+                stride=2,
+                running_mean=running_mean,
+                running_var=running_var,
+                weight=torch.ones(32),
+                bn_bias=torch.zeros(32),
+            )
+            .eval()
+            .to(self.device)
+            .to(torch.float32)
+        )
+
+        @torch.compile()
+        def foo(mod, x):
             return mod(x)
 
         with torch.no_grad():
