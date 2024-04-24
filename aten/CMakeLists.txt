@@ -50,6 +50,7 @@ set(ATEN_INSTALL_BIN_SUBDIR "bin" CACHE PATH "ATen install binary subdirectory")
 set(ATEN_INSTALL_LIB_SUBDIR "lib" CACHE PATH "ATen install library subdirectory")
 set(ATEN_INSTALL_INCLUDE_SUBDIR "include" CACHE PATH "ATen install include subdirectory")
 set(MEM_EFF_ATTENTION_CUDA_SOURCES)
+set(AT_HIPSPARSELT_ENABLED 1)
 
 set(TH_LINK_STYLE STATIC)
 set(TH_CPU_INCLUDE
@@ -99,12 +100,6 @@ if(NOT USE_CUSPARSELT)
   set(AT_CUSPARSELT_ENABLED 0)
 else()
   set(AT_CUSPARSELT_ENABLED 1)
-endif()
-
-if(not USE_HIPSPARSELT)
-  set(AT_HIPSPARSELT_ENABLED 0)
-else()
-  set(AT_HIPSPARSELT_ENABLED 1)
 endif()
 
 list(APPEND ATen_CPU_INCLUDE
