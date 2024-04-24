@@ -18,7 +18,6 @@ from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
     HAS_CUDA,
-    HAS_GPU,
 )
 
 if IS_WINDOWS and IS_CI:
@@ -374,7 +373,7 @@ if HAS_CPU:
     )
 
 
-if HAS_GPU and not TEST_WITH_ASAN:
+if HAS_CUDA and not TEST_WITH_ASAN:
 
     class DynamicShapesCodegenGPUTests(TestCase):
         maxDiff = None
