@@ -444,8 +444,8 @@ class OptimizeForInferenceTemplate(TestCase):
     @torch._inductor.config.patch(layout_optimization=False)
     def test_folded_conv_functional_bn_with_dead_nodes(self):
         x = torch.rand(3, 32, 32, 32).to(self.device).to(torch.float32)
-        running_mean = torch.mean(x, dim=(0, 2, 3))
-        running_var = torch.var(x, dim=(0, 2, 3))
+        running_mean = torch.mean(x, dim=(0, 2, 3)).to(self.device)
+        running_var = torch.var(x, dim=(0, 2, 3)).to(self.device)
 
         mod = (
             ConvFunctionBN(
@@ -456,8 +456,8 @@ class OptimizeForInferenceTemplate(TestCase):
                 stride=2,
                 running_mean=running_mean,
                 running_var=running_var,
-                weight=torch.ones(32),
-                bn_bias=torch.zeros(32),
+                weight=torch.ones(32).to(self.device),
+                bn_bias=torch.zeros(32).to(self.device),
             )
             .eval()
             .to(self.device)
