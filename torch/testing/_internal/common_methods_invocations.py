@@ -9678,6 +9678,7 @@ foreach_unary_op_db: List[OpInfo] = [
         'zero',
         foreach_inputs_sample_func(1, False, False),
         dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
+        dtypesIfCUDA=all_types_and_complex_and(torch.bfloat16, torch.half),
         supports_out=False,
     ),
     ForeachFuncInfo(
