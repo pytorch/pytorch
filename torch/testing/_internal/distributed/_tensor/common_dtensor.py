@@ -383,8 +383,12 @@ def with_comms(func: TestFunc) -> TestFunc:
             self.device_type = "cpu"
 
         self.init_pg()
-        func(self, *args, **kwargs)  # type: ignore[misc]
-        self.destroy_pg()
+        try:
+            func(self, *args, **kwargs)  # type: ignore[misc]
+        except Exception as e:
+            raise e
+        finally:
+            self.destroy_pg()
 
     return wrapper
 
