@@ -604,20 +604,21 @@ def distribute_tensor(
                 )
             return tensor
 
-        if (
-            parent_mesh := _mesh_resources.get_parent_mesh(tensor.device_mesh)
-        ) == _mesh_resources.get_parent_mesh(device_mesh) and parent_mesh is not None:
+        parent_mesh = _mesh_resources.get_parent_mesh(tensor.device_mesh)
+        if parent_mesh is not None and _mesh_resources.get_parent_mesh(device_mesh):
             if parent_mesh.ndim != 2:
                 raise ValueError(
                     "Currently, distribute_tensor only supports 2D parent device mesh."
                 )
+            # TODO: these checks need to be extended once we support nD parent
+            # device mesh.
             if (
                 _mesh_resources.get_parent_mesh_dim(tensor.device_mesh) == 0
-                and list(tensor.placements())[0].is_shard()
+                and next(iter(tensor.placements)).is_shard()
                 and placements[0].is_shard()
             ):
                 raise ValueError(
-                    "The DTensor is already sharded on mesh dimension 0."
+                    "The DTensor is already sharded on mesh dimension 0. "
                     "We could not shard on the other mesh dimensions."
                 )
             local_tensor = tensor._local_tensor
@@ -644,13 +645,15 @@ def distribute_tensor(
             local_tensor = placement._replicate_tensor(local_tensor, device_mesh, idx)
         else:
             raise RuntimeError(
-                f"Trying to distribute tensor with unsupported placements {placement} on device mesh dimension {idx}!"
+                f"Trying to distribute tensor with unsupported placements {placement} "
+                f"on device mesh dimension {idx}!"
             )
     placements = tuple(placements)
 
     if parent_mesh:
+        # TODO: this has to be changed to the submesh when we support nD submesh.
         device_mesh = parent_mesh
-        placements = list(placements) + list(tensor.placements)
+        placements = tuple(list(placements) + list(cast(DTensor, tensor).placements))
 
     assert local_tensor is not None, "distributing a tensor should not be None"
     # detach the local tensor passed to DTensor since after the construction
