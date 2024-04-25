@@ -2713,7 +2713,7 @@ class ForeachFuncInfo(OpInfo):
         name,
         sample_inputs_func,
         *,
-        dtypes=floating_and_complex_types(),
+        dtypes=None,
         dtypesIfCUDA=None,
         dtypesIfROCM=None,
         supports_alpha_param=False,
