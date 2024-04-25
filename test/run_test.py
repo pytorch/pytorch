@@ -191,6 +191,8 @@ XPU_TEST = [
 RUN_PARALLEL_BLOCKLIST = [
     "test_cpp_extensions_jit",
     "test_cpp_extensions_open_device_registration",
+    "test_cpp_extensions_stream_and_event",
+    "test_cpp_extensions_mtia_backend",
     "test_jit_disabled",
     "test_mobile_optimizer",
     "test_multiprocessing",
@@ -214,8 +216,6 @@ CI_SERIAL_LIST = [
     "test_fake_tensor",
     "test_cpp_api_parity",
     "test_reductions",
-    "test_cuda",
-    "test_cuda_expandable_segments",
     "test_fx_backends",
     "test_linalg",
     "test_cpp_extensions_jit",
@@ -487,7 +487,12 @@ def run_test(
         os.close(log_fd)
 
     command = (launcher_cmd or []) + executable + argv
-    should_retry = "--subprocess" not in command and not RERUN_DISABLED_TESTS
+    should_retry = (
+        "--subprocess" not in command
+        and not RERUN_DISABLED_TESTS
+        and not is_cpp_test
+        and "-n" not in command
+    )
     is_slow = "slow" in os.environ.get("TEST_CONFIG", "") or "slow" in os.environ.get(
         "BUILD_ENVRIONMENT", ""
     )
