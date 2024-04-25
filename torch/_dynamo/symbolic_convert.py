@@ -1224,70 +1224,59 @@ class InstructionTranslatorBase(
 
     def FOR_ITER(self, inst: Instruction):
         it = self.pop().realize()
-        skip_rest = False
-        if config.convert_for_loops_to_functions and isinstance(
-            it, variables.RangeIteratorVariable
-        ):
-            try:
-                # Converts a loop to a function body, to benefit
-                # from function compilation caching.
-                assert inst.target is not None
-                op = RangeHigherOrderVariable.make_self(
-                    self,
-                    it,
-                    self.f_globals,
-                    self.f_code,
-                    self.instructions[
-                        self.instruction_pointer : self.indexof[inst.target]
-                    ],
-                    self.symbolic_locals,
-                )
 
-                new_locals = op.to_function(self)
-                for loc in new_locals:
-                    if isinstance(loc, torch.fx.Proxy):
-                        del loc.node.meta["example_value"]
-                args = [
-                    wrap_fx_proxy(self, loc) if isinstance(loc, torch.fx.Proxy) else loc
-                    for loc in new_locals
-                ]
-                for name, v in zip(self.f_code.co_varnames, args):
-                    if isinstance(v, RangeHigherOrderVariable.UnitializedVariable):
-                        continue
-                    self.symbolic_locals[name] = v
+        try:
+            if config.convert_for_loops_to_functions and isinstance(
+                it, variables.RangeIteratorVariable
+            ):
+                try:
+                    # Converts a loop to a function body, to benefit
+                    # from function compilation caching.
+                    assert inst.target is not None
+                    op = RangeHigherOrderVariable.make_self(
+                        self,
+                        it,
+                        self.f_globals,
+                        self.f_code,
+                        self.instructions[
+                            self.instruction_pointer : self.indexof[inst.target]
+                        ],
+                        self.symbolic_locals,
+                    )
 
-                # Skip the rest of the loop completely, now that we transformed it.
-                # Also pop off the iterator.
-                self.jump(inst)
-                skip_rest = True
-                # leave iterator upon exhaustion in 3.12
-                if sys.version_info >= (3, 12):
-                    # CPython 3.12 actually jumps to the instruction after the END_FOR
-                    # and performs the action of END_FOR as part of FOR_ITER. We jump
-                    # to the END_FOR and run it, so we need to make sure 2 values are
-                    # on the stack for it to pop.
-                    self.push(it)
-                    self.push(ConstantVariable.create(None))
-            except CannotConvertRangeToHigherOrder:
-                # Cannot convert - fall through to standard
-                # loop iteration.
-                pass
+                    new_locals = op.to_function(self)
+                    for loc in new_locals:
+                        if isinstance(loc, torch.fx.Proxy):
+                            del loc.node.meta["example_value"]
+                    args = [
+                        wrap_fx_proxy(self, loc) if isinstance(loc, torch.fx.Proxy) else loc
+                        for loc in new_locals
+                    ]
+                    for name, v in zip(self.f_code.co_varnames, args):
+                        if isinstance(v, RangeHigherOrderVariable.UnitializedVariable):
+                            continue
+                        self.symbolic_locals[name] = v
 
-        if not skip_rest:
-            try:
-                val = it.next_variable(self)
+                    # Skip the rest of the loop completely, now that we transformed it.
+                    # Also pop off the iterator.
+                    raise StopIteration
+                except CannotConvertRangeToHigherOrder:
+                    # Cannot convert - fall through and use standard
+                    # loop iteration.
+                    pass
+            val = it.next_variable(self)
+            self.push(it)
+            self.push(val)
+        except (StopIteration, exc.UserStopIteration):
+            # leave iterator upon exhaustion in 3.12
+            if sys.version_info >= (3, 12):
+                # CPython 3.12 actually jumps to the instruction after the END_FOR
+                # and performs the action of END_FOR as part of FOR_ITER. We jump
+                # to the END_FOR and run it, so we need to make sure 2 values are
+                # on the stack for it to pop.
                 self.push(it)
-                self.push(val)
-            except (StopIteration, exc.UserStopIteration):
-                # leave iterator upon exhaustion in 3.12
-                if sys.version_info >= (3, 12):
-                    # CPython 3.12 actually jumps to the instruction after the END_FOR
-                    # and performs the action of END_FOR as part of FOR_ITER. We jump
-                    # to the END_FOR and run it, so we need to make sure 2 values are
-                    # on the stack for it to pop.
-                    self.push(it)
-                    self.push(ConstantVariable.create(None))
-                self.jump(inst)
+                self.push(ConstantVariable.create(None))
+            self.jump(inst)
 
     def RAISE_VARARGS(self, inst):
         if inst.arg == 0:
