@@ -9217,6 +9217,8 @@ class foreach_inputs_sample_func:
             # unary
             if opinfo.ref in (torch.abs, torch.neg):
                 return False
+            if opinfo.ref_inplace in (torch.Tensor.zero_,):
+                return False
             return dtype in integral_types_and(torch.bool)
         if self.arity < 2 or rightmost_arg_type == ForeachRightmostArgType.Tensor:
             return None
@@ -9475,43 +9477,53 @@ foreach_unary_op_db: List[OpInfo] = [
         'exp',
         foreach_inputs_sample_func(1, False, False),
         backward_requires_result=True,
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
     ),
     ForeachFuncInfo(
         'acos',
         foreach_inputs_sample_func(1, False, False),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
     ),
     ForeachFuncInfo(
         'asin',
         foreach_inputs_sample_func(1, False, False),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
     ),
     ForeachFuncInfo(
         'atan',
         foreach_inputs_sample_func(1, False, False),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
     ),
     ForeachFuncInfo(
         'cos',
         foreach_inputs_sample_func(1, False, False),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
     ),
     ForeachFuncInfo(
         'cosh',
         foreach_inputs_sample_func(1, False, False),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
     ),
     ForeachFuncInfo(
         'log',
         foreach_inputs_sample_func(1, False, False),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
     ),
     ForeachFuncInfo(
         'log10',
         foreach_inputs_sample_func(1, False, False),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
     ),
     ForeachFuncInfo(
         'log2',
         foreach_inputs_sample_func(1, False, False),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
     ),
     ForeachFuncInfo(
         'tan',
         foreach_inputs_sample_func(1, False, False),
         backward_requires_result=True,
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
         decorators=(
             # due to https://github.com/pytorch/pytorch/pull/102427 enabling jiterator for complex
             DecorateInfo(
@@ -9530,6 +9542,7 @@ foreach_unary_op_db: List[OpInfo] = [
         'tanh',
         foreach_inputs_sample_func(1, False, False),
         backward_requires_result=True,
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
         decorators=(
             DecorateInfo(
                 toleranceOverride(
@@ -9544,10 +9557,12 @@ foreach_unary_op_db: List[OpInfo] = [
     ForeachFuncInfo(
         'sin',
         foreach_inputs_sample_func(1, False, False),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
     ),
     ForeachFuncInfo(
         'sinh',
         foreach_inputs_sample_func(1, False, False),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
     ),
     ForeachFuncInfo(
         'neg',
@@ -9849,6 +9864,7 @@ foreach_binary_op_db: List[OpInfo] = [
         "copy",
         foreach_inputs_sample_func(2, False, False),
         dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
+        dtypesIfCUDA=all_types_and_complex_and(torch.bfloat16, torch.half),
         supports_out=False,
         supports_forward_ad=False,
         supports_autograd=False,
