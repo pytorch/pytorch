@@ -35,7 +35,6 @@ from .codegen.triton import (
 from .codegen.triton_utils import config_of, signature_to_meta
 from .exc import CUDACompileError
 from .ir import ChoiceCaller, PrimitiveInfoType
-from .runtime.hints import DeviceProperties
 from .runtime.runtime_utils import do_bench
 from .utils import get_dtype_size, Placeholder, sympy_dot, sympy_product, unique
 from .virtualized import V
@@ -148,7 +147,8 @@ class TritonTemplateKernel(TritonKernel):
         argdefs, _, signature = self.args.python_argdefs()
         triton_meta = {
             "signature": signature_to_meta(signature, size_dtype=self.index_dtype),
-            "device": DeviceProperties.create(self.output_node.get_device()),
+            "device": self.output_node.get_device().index,
+            "device_type": self.output_node.get_device().type,
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
