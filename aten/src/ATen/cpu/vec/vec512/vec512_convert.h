@@ -117,75 +117,19 @@ struct VecConvert<int32_t, 1, uint8_t, 1> {
   }
 };
 
-template <typename dst_t>
+template <typename dst_t, typename src_t>
 struct VecConvert<
     dst_t,
-    1,
-    BFloat16,
-    1,
-    typename std::enable_if_t<
-        std::is_same_v<dst_t, unsigned char> ||
-            std::is_same_v<dst_t, signed char>,
-        void>> {
-  static inline VectorizedN<dst_t, 1> apply(
-      const VectorizedN<BFloat16, 1>& src) {
-    __m512 value;
-    cvtbf16_fp32(_mm512_castsi512_si256(src[0]), value);
-    return convert_float_to_int8<dst_t>(value);
-  }
-};
-
-template <typename src_t>
-struct VecConvert<
-    BFloat16,
     1,
     src_t,
     1,
     typename std::enable_if_t<
-        std::is_same_v<src_t, unsigned char> ||
-            std::is_same_v<src_t, signed char>,
+        (is_reduced_floating_point_v<dst_t> && is_bit8_v<src_t>) ||
+            (is_reduced_floating_point_v<src_t> && is_bit8_v<dst_t>),
         void>> {
-  static inline VectorizedN<BFloat16, 1> apply(
-      const VectorizedN<src_t, 1>& src) {
-    VectorizedN<float, 1> value = convert_int8_to_float<src_t>(src[0]);
-    VectorizedN<BFloat16, 1> result;
-    result[0] = _mm512_castsi256_si512(cvtfp32_bf16(value[0]));
-    return result;
-  }
-};
-
-template <typename dst_t>
-struct VecConvert<
-    dst_t,
-    1,
-    Half,
-    1,
-    typename std::enable_if_t<
-        std::is_same_v<dst_t, unsigned char> ||
-            std::is_same_v<dst_t, signed char>,
-        void>> {
-  static inline VectorizedN<dst_t, 1> apply(const VectorizedN<Half, 1>& src) {
-    __m512 value;
-    cvtfp16_fp32(_mm512_castsi512_si256(src[0]), value);
-    return convert_float_to_int8<dst_t>(value);
-  }
-};
-
-template <typename src_t>
-struct VecConvert<
-    Half,
-    1,
-    src_t,
-    1,
-    typename std::enable_if_t<
-        std::is_same_v<src_t, unsigned char> ||
-            std::is_same_v<src_t, signed char>,
-        void>> {
-  static inline VectorizedN<Half, 1> apply(const VectorizedN<src_t, 1>& src) {
-    VectorizedN<float, 1> value = convert_int8_to_float<src_t>(src[0]);
-    VectorizedN<Half, 1> result;
-    result[0] = _mm512_castsi256_si512(cvtfp32_fp16(value[0]));
-    return result;
+  static inline VectorizedN<dst_t, 1> apply(const VectorizedN<src_t, 1>& src) {
+    VectorizedN<float, 1> tmp_fp32 = VecConvert<float, 1, src_t, 1>::apply(src);
+    return VecConvert<dst_t, 1, float, 1>::apply(tmp_fp32);
   }
 };
 
