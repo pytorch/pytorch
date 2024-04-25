@@ -590,7 +590,7 @@ def any_is_symbolic(*args: Any) -> bool:
     return any(is_symbolic(a) for a in args)
 
 
-def has_incompatible_cudagraph_ops(gm):
+def get_first_incompatible_cudagraph_node(gm):
     from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
     forbidden_set = {
@@ -626,10 +626,14 @@ def has_incompatible_cudagraph_ops(gm):
         )
     for node in gm.graph.nodes:
         if str(node.target) in forbidden_set:
-            return True
+            return node
         if (val := node.meta.get("val")) is not None and free_unbacked_symbols(val):
-            return True
-    return False
+            return node
+    return None
+
+
+def has_incompatible_cudagraph_ops(gm):
+    return get_first_incompatible_cudagraph_node(gm) is not None
 
 
 def output_node(gm: torch.fx.GraphModule):
@@ -665,7 +669,8 @@ def fresh_inductor_cache(cache_entries=None):
     for obj in _registered_caches:
         obj.cache_clear()
 
-    with tempfile.TemporaryDirectory() as inductor_cache_dir:
+    inductor_cache_dir = tempfile.mkdtemp()
+    try:
         with mock.patch.dict(
             os.environ, {"TORCHINDUCTOR_CACHE_DIR": inductor_cache_dir}
         ):
@@ -683,6 +688,10 @@ def fresh_inductor_cache(cache_entries=None):
                                 if ".lock" not in f
                             }
                         )
+        shutil.rmtree(inductor_cache_dir)
+    except Exception:
+        log.warning("on error, temporary cache dir kept at %s", inductor_cache_dir)
+        raise
 
 
 def argsort(seq) -> List[int]:

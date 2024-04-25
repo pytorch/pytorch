@@ -16,7 +16,6 @@ import subprocess
 import random
 from random import randint
 import json
-
 import torch
 import torch.cuda
 from torch.cuda._memory_viz import profile_plot, _profile_to_snapshot
@@ -28,9 +27,13 @@ from torch.utils.checkpoint import checkpoint_sequential
 from torch.testing._internal.common_utils import TestCase, freeze_rng_state, run_tests, \
     NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_WINDOWS, \
     slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, TEST_CUDA, TEST_CUDA_GRAPH, TEST_WITH_ROCM, TEST_NUMPY, \
-    get_cycles_per_ms, parametrize, instantiate_parametrized_tests, subtest, IS_JETSON, gcIfJetson, NoTest, IS_LINUX, IS_ARM64
+    get_cycles_per_ms, parametrize, instantiate_parametrized_tests, subtest, IS_JETSON, gcIfJetson, NoTest, IS_LINUX, IS_ARM64, \
+    serialTest
 from torch.testing._internal.common_cuda import TEST_CUDNN, TEST_MULTIGPU, \
     _create_scaling_case, _get_torch_cuda_version
+from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCUDA
+from torch.testing._internal.common_optimizers import (
+    optim_db, optims)
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
 from torch.utils.viz._cycles import observe_tensor_cycles
 
@@ -172,6 +175,7 @@ class TestCuda(TestCase):
         self.assertTrue((tensor == 1).all())
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC or IS_JETSON, "Segmentation fault (core dumped)")
+    @serialTest()
     def test_out_of_memory_retry(self):
         torch.cuda.empty_cache()
         total_memory = torch.cuda.get_device_properties(0).total_memory
@@ -255,6 +259,7 @@ class TestCuda(TestCase):
         c.copy_(b, non_blocking=True)
         self.assertEqual(a, c, exact_dtype=False)
 
+    @serialTest()
     def test_to_non_blocking(self):
         stream = torch.cuda.current_stream()
 
@@ -781,6 +786,7 @@ except RuntimeError as e:
 
     @slowTest
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
+    @serialTest()
     def test_huge_index(self):
         src = torch.empty(15000000, 45, device='cuda', dtype=torch.long).random_(0, 2**22)
         idx = torch.randperm(src.shape[0], device='cuda')
@@ -850,6 +856,7 @@ except RuntimeError as e:
                 z = x + y
 
     @unittest.skipIf(not TEST_MEDIUM_TENSOR, "not enough memory")
+    @serialTest()
     def test_cuda_kernel_loop_overflow(self):
         # Issue #24309: In extreme cases, the loop variable could overflow and continue
         # the kernel loop with a negative index, causing a RuntimeError (invalid write):
@@ -861,6 +868,7 @@ except RuntimeError as e:
 
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
     @gcIfJetson
+    @serialTest()
     def test_cuda_kernel_loop_overflow_large(self):
         # Make sure input.numel() > INT_MAX is handled:
         x = torch.randn(1, 1, 1, 2**31, dtype=torch.float16, device="cuda")
@@ -1735,6 +1743,7 @@ torch.cuda.synchronize()
 
     @slowTest
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
+    @serialTest()
     def test_max_large_axis(self):
         x = torch.zeros(2**32, device='cuda', dtype=torch.int8)
         x[-1] = 1
@@ -2020,6 +2029,7 @@ exit(2)
                 torch.zeros(2 ** 40, device="cuda")
 
     @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
+    @serialTest()
     def test_repeat_graph_capture_cublas_workspace_memory(self):
         (x, y, z) = 1024, 512, 64
         a = torch.rand((x, y), device='cuda')
@@ -2606,6 +2616,7 @@ exit(2)
     # DropoutState's long-lived internal buffer. Calling code perceives this (correct) behavior
     # as a memory leak unless we skip the leak check.
     @skipCUDAMemoryLeakCheckIf(True)
+    @serialTest()
     def test_graph_cudnn_dropout(self):
         # Tests the interaction of cuda graph capture with DropoutState's syncs in ATen/native/cudnn/RNN.cpp.
         # In particular, if user runs a sequence of captured and noncaptured cudnn rnns, DropoutState should
@@ -2631,59 +2642,6 @@ exit(2)
         y = model(x)
 
     @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
-    def test_graph_grad_scaling(self):
-        for foreach, fused in ((False, False), (True, False), (False, True)):
-            self._test_graph_grad_scaling(foreach, fused)
-
-    def _test_graph_grad_scaling(self, foreach, fused):
-        torch.cuda.empty_cache()
-
-        scaler = torch.cuda.amp.GradScaler(init_scale=4.)
-        g = torch.cuda.CUDAGraph()
-        s = torch.cuda.Stream()
-
-        weight = torch.ones((100,), device="cuda", requires_grad=True)
-        opt = torch.optim.SGD([weight], lr=0.1, foreach=foreach, fused=fused)
-        static_input = torch.ones_like(weight)
-        static_grad = torch.ones_like(weight)
-
-        # warmup
-        s = torch.cuda.Stream()
-        s.wait_stream(torch.cuda.current_stream())
-        with torch.cuda.stream(s):
-            loss = (weight.half() * static_input).sum()
-            scaler.scale(loss).backward()
-        torch.cuda.current_stream().wait_stream(s)
-
-        opt.zero_grad(set_to_none=True)
-
-        # capture
-        with torch.cuda.stream(s):
-            g.capture_begin()
-            loss = (weight.half() * static_input).sum()
-            scaler.scale(loss).backward()
-            g.capture_end()
-
-        input_vals = [5, 20000, 5, 40000]
-        # If the scale gets updated properly, these are the scale, growth tracker,
-        # and grad values we expect.
-        expected_scales = [4, 2, 2, 1]
-        expected_growth_trackers = [1, 0, 1, 0]
-        expected_grad_vals = [5 * 4, float("inf"), 5 * 2, float("inf")]
-
-        for data, scale, growth_tracker, grad_val in zip(input_vals,
-                                                         expected_scales,
-                                                         expected_growth_trackers,
-                                                         expected_grad_vals):
-            static_input.fill_(data)
-            g.replay()
-            self.assertEqual(weight.grad, torch.full_like(weight.grad, grad_val))
-            scaler.step(opt)
-            scaler.update()
-            self.assertEqual(scaler._scale, scale)
-            self.assertEqual(scaler._growth_tracker, growth_tracker)
-
-    @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
     @parametrize(
         "with_amp,cache_enabled,allow_unused_input",
         [
@@ -2698,6 +2656,7 @@ exit(2)
             {True: "_allow_unused_input", False: "_not_allow_unused_input"}[z],
         ),
     )
+    @serialTest()
     def test_graph_make_graphed_callables(
         self, with_amp, cache_enabled, allow_unused_input
     ):
@@ -4147,9 +4106,68 @@ class TestBlockStateAbsorption(TestCase):
             cwd=os.path.dirname(os.path.realpath(__file__))).strip().decode('ascii')
         self.assertEqual(rc, "False", "Triton was imported when importing torch!")
 
+class TestCudaOptims(TestCase):
+    # These tests will be instantiate with instantiate_device_type_tests
+    # to apply the new OptimizerInfo structure.
+
+    @onlyCUDA
+    @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
+    @parametrize("foreach, fused", [(False, False), (True, False), (False, True)])
+    @optims(
+        [optim for optim in optim_db if "foreach" in optim.supported_impls and "fused" in optim.supported_impls],
+        dtypes=[torch.float32]
+    )
+    def test_graph_grad_scaling(self, device, dtype, optim_info, foreach, fused):
+        torch.cuda.empty_cache()
+
+        scaler = torch.cuda.amp.GradScaler(init_scale=4.)
+        g = torch.cuda.CUDAGraph()
+        s = torch.cuda.Stream()
+
+        weight = torch.ones((100,), device="cuda", requires_grad=True)
+        opt = optim_info.optim_cls([weight], lr=0.1, foreach=foreach, fused=fused)
+        static_input = torch.ones_like(weight)
+        static_grad = torch.ones_like(weight)
+
+        # warmup
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            loss = (weight.half() * static_input).sum()
+            scaler.scale(loss).backward()
+        torch.cuda.current_stream().wait_stream(s)
+
+        opt.zero_grad(set_to_none=True)
+
+        # capture
+        with torch.cuda.stream(s):
+            g.capture_begin()
+            loss = (weight.half() * static_input).sum()
+            scaler.scale(loss).backward()
+            g.capture_end()
+
+        input_vals = [5, 20000, 5, 40000]
+        # If the scale gets updated properly, these are the scale, growth tracker,
+        # and grad values we expect.
+        expected_scales = [4, 2, 2, 1]
+        expected_growth_trackers = [1, 0, 1, 0]
+        expected_grad_vals = [5 * 4, float("inf"), 5 * 2, float("inf")]
+
+        for data, scale, growth_tracker, grad_val in zip(input_vals,
+                                                         expected_scales,
+                                                         expected_growth_trackers,
+                                                         expected_grad_vals):
+            static_input.fill_(data)
+            g.replay()
+            self.assertEqual(weight.grad, torch.full_like(weight.grad, grad_val))
+            scaler.step(opt)
+            scaler.update()
+            self.assertEqual(scaler._scale, scale)
+            self.assertEqual(scaler._growth_tracker, growth_tracker)
 
 instantiate_parametrized_tests(TestCuda)
 instantiate_parametrized_tests(TestCudaMallocAsync)
+instantiate_device_type_tests(TestCudaOptims, globals())
 
 if __name__ == '__main__':
     run_tests()
