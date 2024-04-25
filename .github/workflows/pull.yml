@@ -37,7 +37,7 @@ jobs:
 
   get-workflow:
     name: Check if user is in arc_users.yml
-    uses: .github/workflows/check-user.yml
+    uses: ./.github/workflows/check-user.yml
     with:
       user_name: ${{ github.actor }}
       curr_branch: ${{ github.ref_name }}
@@ -84,10 +84,8 @@ jobs:
 
   linux-jammy-py3_8-gcc11-test-rg:
     name: linux-jammy-py3.8-gcc11
-    if: needs.get-workflow.outputs.workflow-type == 'rg'
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - get-workflow
       - linux-jammy-py3_8-gcc11-build-rg
       - target-determination
     with:
@@ -97,10 +95,8 @@ jobs:
 
   linux-jammy-py3_8-gcc11-test-label:
     name: linux-jammy-py3.8-gcc11
-    if: needs.get-workflow.outputs.workflow-type == 'label'
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - get-workflow
       - linux-jammy-py3_8-gcc11-build-label
       - target-determination
     with:
