@@ -182,7 +182,7 @@ class BasicEvaluation:
                 return event.start_ns()
             if hasattr(event, "start_time_ns"):
                 return event.start_time_ns
-            raise Exception("Unknown Event Type")
+            raise Exception("Unknown Event Type")  # noqa: TRY002
 
         queue_depth_list: List[Interval] = []
         all_events.sort(key=new_old_event_comparator)

@@ -14,6 +14,7 @@ from torch.distributed._tensor.placement_types import _Partial, Shard
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh, init_device_mesh
 
 from torch.distributed.distributed_c10d import (
+    _get_default_group,
     _world,
     get_global_rank,
     get_world_size,
@@ -143,6 +144,17 @@ class DeviceMeshTest(DTensorTestBase):
             )
             self.assertEqual(global_ranks, current_rank_expected_group_ranks)
 
+    @with_comms
+    def test_device_mesh_init_backend(self):
+        mesh = DeviceMesh(self.device_type, [1], _init_backend=False)
+
+        with self.assertRaisesRegex(RuntimeError, "process groups not initialized!"):
+            mesh.get_group()
+
+        # coordinates should always been populated when init_backend is False, as whenever
+        # we call init_backend we should make sure the default pg already created
+        mesh.get_coordinate()
+
     def test_fake_pg_device_mesh(self):
         fake_store = FakeStore()
         init_process_group("fake", store=fake_store, rank=0, world_size=self.world_size)
@@ -154,6 +166,19 @@ class DeviceMeshTest(DTensorTestBase):
             local_tensor, gather_dim=0, group=(mesh, 0)
         )
         self.assertEqual(global_tensor.shape, (self.world_size * 2, 8))
+
+    @with_comms
+    def test_from_group(self):
+        # Simple test: check `from_group` for a global PG vs. directly
+        # initializing via `init_device_mesh`
+        global_pg = _get_default_group()
+        ref_global_mesh = init_device_mesh("cuda", (self.world_size,))
+        global_mesh = DeviceMesh.from_group(global_pg, "cuda")
+        self.assertEqual(ref_global_mesh, global_mesh)
+        self.assertEqual(ref_global_mesh._dim_group_infos, global_mesh._dim_group_infos)
+        self.assertEqual(
+            ref_global_mesh._coordinate_on_dim, global_mesh._coordinate_on_dim
+        )
 
 
 class DeviceMeshTestNDim(DTensorTestBase):
@@ -194,6 +219,44 @@ class DeviceMeshTestNDim(DTensorTestBase):
         mesh3 = DeviceMesh(self.device_type, mesh_tensor_3d)
         self.assertNotEqual(hash(mesh), hash(mesh3))
         self.assertNotEqual(hash(mesh2), hash(mesh3))
+
+    @with_comms
+    def test_get_local_rank_3d(self):
+        """
+        If we have a 3D mesh and we want to apply dp, pp, tp to it,
+        mesh_dim_names = ["dp", "pp", "tp"], and the mesh tensor would be:
+        mesh_3d_tensor = [
+            [
+                [0, 1],
+                [2, 3],
+            ],
+            [
+                [4, 5],
+                [6, 7],
+            ]
+
+        ]
+        """
+        mesh_shape = (2, 2, 2)
+        mesh_3d = init_device_mesh(
+            self.device_type, mesh_shape, mesh_dim_names=("dp", "pp", "tp")
+        )
+
+        # tp_rank_0: [0, 2, 4, 6], tp_rank_1: [1, 3, 5, 7]
+        tp_rank = mesh_3d.get_local_rank("tp")
+        print(f"{self.rank=}, {tp_rank=}")
+        expected_tp_rank = self.rank % 2
+        self.assertEqual(tp_rank, expected_tp_rank)
+
+        # pp_rank_0: [0, 1, 4, 5], pp_rank_1: [2, 3, 6, 7]
+        pp_rank = mesh_3d.get_local_rank("pp")
+        expected_pp_rank = 0 if self.rank % 4 <= 1 else 1
+        self.assertEqual(pp_rank, expected_pp_rank)
+
+        # dp_rank_0: [0, 1, 2, 3], dp_rank_1: [4, 5, 6, 7]
+        dp_rank = mesh_3d.get_local_rank("dp")
+        expected_dp_rank = self.rank // 4
+        self.assertEqual(dp_rank, expected_dp_rank)
 
 
 class InitDeviceMeshTest(DTensorTestBase):
@@ -312,10 +375,10 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         dp_mesh_2 = mesh["dp"]
         self.assertEqual(ref_pg_count, _world.group_count)
 
-        # When we call the "tp" slice, it should create a new pg, as the "tp" slice is called
-        # for the first time.
+        # When we call the "tp" slice, it should not create a new pg, as the "tp" slice would
+        # just reuse the parent mesh pg.
         tp_mesh = mesh["tp"]
-        self.assertTrue(_world.group_count > ref_pg_count)
+        self.assertEqual(_world.group_count, ref_pg_count)
 
 
 class TestMeshEnv(DTensorTestBase):

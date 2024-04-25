@@ -653,8 +653,8 @@ inline DispatchKey computeDispatchKey(
 #undef DO_CASE
         case c10::DeviceType::FPGA:
           return DispatchKey::FPGA;
-        case c10::DeviceType::ORT:
-          return DispatchKey::ORT;
+        case c10::DeviceType::MAIA:
+          return DispatchKey::MAIA;
         case c10::DeviceType::Vulkan:
           return DispatchKey::Vulkan;
         case c10::DeviceType::Metal:
@@ -757,8 +757,8 @@ inline c10::DeviceType dispatchKeyToDeviceType(DispatchKey dispatch_key) {
     case DispatchKey::Vulkan:
       return c10::DeviceType::Vulkan;
 
-    case DispatchKey::ORT:
-      return c10::DeviceType::ORT;
+    case DispatchKey::MAIA:
+      return c10::DeviceType::MAIA;
     default:
       TORCH_CHECK(
           false,

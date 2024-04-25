@@ -22,6 +22,7 @@ from ..utils import (
     identity,
     is_tensor_base_attr_getter,
     proxy_args_kwargs,
+    set_example_value,
 )
 from .base import VariableTracker
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
@@ -501,7 +502,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             ),
             {},
         )
-        proxy.node.meta["example_value"] = out.value
+        set_example_value(proxy.node, out.value)
 
         return out
 
@@ -592,13 +593,13 @@ class GetAttrVariable(VariableTracker):
 
     def const_getattr(self, tx, name):
         if not isinstance(self.obj, variables.NNModuleVariable):
-            raise NotImplementedError()
+            raise NotImplementedError
         step1 = tx.output.get_submodule(self.obj.module_key)
         if self.name not in step1.__dict__:
-            raise NotImplementedError()
+            raise NotImplementedError
         step2 = inspect.getattr_static(step1, self.name)
         if name not in step2.__dict__:
-            raise NotImplementedError()
+            raise NotImplementedError
         return inspect.getattr_static(step2, name)
 
     def reconstruct(self, codegen):

@@ -335,6 +335,22 @@ class _TorchDynamoContext:
             new_mod.get_compiler_config = get_compiler_config
 
             return new_mod
+
+        if inspect.isclass(fn):
+            # User has wrapped the class with compile/disable decorator. Apply
+            # disable to init/call method.
+            cls_obj = fn
+            if isinstance(self, DisableContext):
+                # Disable on init is useful for reconstruction of bytecodes where we
+                # want to prevent Dynamo from tracing into the init function. Check
+                # test_reconstruction in test_model_output.py.
+                cls_obj.__init__ = self(cls_obj.__init__)
+            cls_obj.__call__ = self(cls_obj.__call__)
+            if issubclass(cls_obj, torch.nn.Module):
+                # NN module variable tracker directly inlines the _call_impl. Disable it.
+                cls_obj._call_impl = self(cls_obj._call_impl)
+            return cls_obj
+
         assert callable(fn)
 
         try:
@@ -750,7 +766,12 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
         if "tensor_dict" in self.current_node.meta:
             arg.node.meta["tensor_dict"] = self.current_node.meta["tensor_dict"]
         if "example_value" in self.current_node.meta:
+            # NB: intentionally do not use set_example_value
             arg.node.meta["example_value"] = self.current_node.meta["example_value"]
+        if "unbacked_bindings" in self.current_node.meta:
+            arg.node.meta["unbacked_bindings"] = self.current_node.meta[
+                "unbacked_bindings"
+            ]
         return arg
 
     def output(self, target, args, kwargs):
@@ -774,8 +795,13 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
         if "val" in self.current_node.meta:
             result_proxy.node.meta["val"] = self.current_node.meta["val"]
         if "example_value" in self.current_node.meta:
+            # NB: intentionally do not use set_example_value
             result_proxy.node.meta["example_value"] = self.current_node.meta[
                 "example_value"
+            ]
+        if "unbacked_bindings" in self.current_node.meta:
+            result_proxy.node.meta["unbacked_bindings"] = self.current_node.meta[
+                "unbacked_bindings"
             ]
         if self.current_node.op != "output":
             result_proxy.node._rename(
@@ -1162,7 +1188,18 @@ def export(
                     else fake_mode
                 )
 
-                with ambient_fake_mode, enable_python_dispatcher():
+                # We reran fake tensor propagation, but we didn't do
+                # anything with the resulting unbacked SymInts.  Drop them
+                # from the pending list.
+                # NB: this is wrong if graph_captured_result has
+                # data-dependent output size!
+                ignore_fresh_unbacked = null_context()
+                if shape_env := ambient_fake_mode.shape_env:
+                    ignore_fresh_unbacked = shape_env.ignore_fresh_unbacked_symbols()
+
+                with (
+                    ambient_fake_mode
+                ), enable_python_dispatcher(), ignore_fresh_unbacked:
                     params_and_buffers = {
                         **named_parameters,
                         **named_buffers,
