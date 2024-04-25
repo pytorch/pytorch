@@ -154,6 +154,8 @@ struct CustomBackendMetadata : public c10::BackendMeta {
 
 // we need to register two functions for serialization
 void for_serialization(const at::Tensor& t, std::unordered_map<std::string, bool>& m) {
+  std::cout << "for_serialization" << std::endl;
+
   if (t.unsafeGetTensorImpl()->get_backend_meta_intrusive_ptr() == nullptr) {
     return;
   }

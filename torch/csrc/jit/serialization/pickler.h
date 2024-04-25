@@ -4,6 +4,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <iostream>
 
 #include <ATen/Utils.h>
 #include <ATen/core/ivalue.h>
@@ -404,6 +405,13 @@ inline void setTensorMetadata(
   // registered.
   int device_type = static_cast<int>(t.device().type());
   const auto& BackendMetaSerialization = GetBackendMetaSerialization();
+  std::cout << t.device() << std::endl;
+  if (BackendMetaSerialization[device_type].has_value()) {
+    std::cout << "Yes" << std::endl;
+  }
+  else{
+    std::cout << "No" << std::endl;
+  }
   if (BackendMetaSerialization[device_type].has_value()) {
     // Pass the tensor and metadata map references as parameters to the custom
     // deserialization function.

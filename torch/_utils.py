@@ -204,6 +204,9 @@ def _rebuild_tensor_v2(
 ):
     tensor = _rebuild_tensor(storage, storage_offset, size, stride)
     tensor.requires_grad = requires_grad
+    print("*" * 100)
+    print("metadata", metadata)
+    print("-" * 100)
     if metadata:
         set_tensor_metadata(tensor, metadata)
 
