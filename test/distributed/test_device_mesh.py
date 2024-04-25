@@ -5,10 +5,7 @@ import os
 import torch
 import torch.distributed._functional_collectives as funcol
 from torch.distributed._tensor import DTensor
-from torch.distributed._tensor._collective_utils import (
-    mesh_broadcast,
-    mesh_scatter,
-)
+from torch.distributed._tensor._collective_utils import mesh_broadcast, mesh_scatter
 from torch.distributed._tensor.placement_types import _Partial, Shard
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh, init_device_mesh
 
