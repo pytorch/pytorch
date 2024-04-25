@@ -374,6 +374,13 @@ inline std::unordered_map<std::string, bool> getTensorMetadata(
   }
   // Only add BackendMetaData for custom backend if the function pointer is
   // registered.
+  std::cout << t.device() << std::endl;
+  if (BackendMetaSerialization[device_type].has_value()) {
+    std::cout << "GetTensorMetadata Yes" << std::endl;
+  }
+  else{
+    std::cout << "GetTensorMetadata No" << std::endl;
+  }
   int device_type = static_cast<int>(t.device().type());
   const auto& BackendMetaSerialization = GetBackendMetaSerialization();
   if (BackendMetaSerialization[device_type].has_value()) {
@@ -381,6 +388,7 @@ inline std::unordered_map<std::string, bool> getTensorMetadata(
     // serialization function.
     BackendMetaPtr fptr = BackendMetaSerialization[device_type].value().first;
     fptr(t, metadata);
+    std::cout << "do getTensorMetadata" << std::endl;
   }
   return metadata;
 }
@@ -407,16 +415,17 @@ inline void setTensorMetadata(
   const auto& BackendMetaSerialization = GetBackendMetaSerialization();
   std::cout << t.device() << std::endl;
   if (BackendMetaSerialization[device_type].has_value()) {
-    std::cout << "Yes" << std::endl;
+    std::cout << "setTensorMetadata Yes" << std::endl;
   }
   else{
-    std::cout << "No" << std::endl;
+    std::cout << "setTensorMetadata No" << std::endl;
   }
   if (BackendMetaSerialization[device_type].has_value()) {
     // Pass the tensor and metadata map references as parameters to the custom
     // deserialization function.
     BackendMetaPtr fptr = BackendMetaSerialization[device_type].value().second;
     fptr(t, metadata);
+    std::cout << "do setTensorMetadata" << std::endl;
   }
 }
 
