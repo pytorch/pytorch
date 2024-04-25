@@ -12,6 +12,7 @@ from typing_extensions import Self
 
 import torch
 import torch.autograd.profiler as prof
+from torch._C import _get_privateuse1_backend_name
 from torch._C._profiler import (
     _add_execution_trace_observer,
     _disable_execution_trace_observer,
@@ -130,8 +131,8 @@ class _KinetoProfile:
             self.use_device = "cuda"
         elif ProfilerActivity.XPU in self.activities:
             self.use_device = "xpu"
-        else:
-            self.use_device = "privateuseone"
+        elif ProfilerActivity.PrivateUse1 in self.activities:
+            self.use_device = _get_privateuse1_backend_name()
 
         # user-defined metadata to be amended to the trace
         self.preset_metadata: Dict[str, str] = dict()
