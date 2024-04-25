@@ -12,7 +12,7 @@ import torch
 
 import torch.testing._internal.common_utils as common
 import torch.utils.cpp_extension
-from torch.testing._internal.common_utils import IS_ARM64, TEST_CUDA
+from torch.testing._internal.common_utils import IS_ARM64, skipIfTorchDynamo, TEST_CUDA
 from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
 
 
@@ -314,6 +314,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         z3 = z3[0:3]
         self.assertTrue(self.module.custom_storageImpl_called())
 
+    @skipIfTorchDynamo("aten.is_pinned.default not support dynamo")
     def test_open_device_storage_pin_memory(self):
         # Check if the pin_memory is functioning properly on custom device
         cpu_tensor = torch.empty(3)
