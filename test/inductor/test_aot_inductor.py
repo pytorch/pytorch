@@ -2752,7 +2752,6 @@ def fail_non_abi_compatible_cuda(is_skip=False):
 # test_failures, xfail by default, set is_skip=True to skip
 CPU_TEST_FAILURES = {
     "test_add_complex": fail_stack_allocation(is_skip=True),
-    "test_bmm_multiple_dynamic": fail_with_and_without_stack_allocation(),
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_duplicate_constant_folding": fail_with_and_without_stack_allocation(
         is_skip=True
@@ -2995,7 +2994,6 @@ copy_tests(
     "non_abi_compatible_cpu",
     # test_failures, xfail by default, set is_skip=True to skip
     {
-        "test_bmm_multiple_dynamic": TestFailure(("non_abi_compatible_cpu",)),
         "test_duplicate_constant_folding": TestFailure(
             ("non_abi_compatible_cpu",), is_skip=True
         ),
