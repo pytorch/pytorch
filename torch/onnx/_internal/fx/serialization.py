@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ctypes
 import io
 import logging
 import os
@@ -13,6 +14,14 @@ if TYPE_CHECKING:
     import onnx
 
 log = logging.getLogger(__name__)
+
+
+def bfloat16_tobytes(tensor: torch.Tensor) -> bytes:
+    return bytes(
+        (ctypes.c_ubyte * tensor.element_size() * tensor.numel()).from_address(
+            tensor.data_ptr()
+        )
+    )
 
 
 @_beartype.beartype
@@ -95,7 +104,12 @@ def _create_tensor_proto_with_external_data(
         # No need to call "seek" because offset is 0.
         # data_file.seek(0)
         # Write tensor content to the file.
-        data_file.write(tensor.numpy(force=True).tobytes())
+
+        # TODO: Numpy does not support bfloat16 yet. https://github.com/pytorch/pytorch/issues/90574
+        if tensor.dtype == torch.bfloat16:
+            data_file.write(bfloat16_tobytes(tensor))
+        else:
+            data_file.write(tensor.numpy(force=True).tobytes())
 
     return tensor_proto
 

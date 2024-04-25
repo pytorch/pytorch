@@ -7,6 +7,7 @@ import tempfile
 
 from typing import Mapping, Tuple
 
+import numpy as np
 import onnx
 import onnx.inliner
 import pytorch_test_common
@@ -865,6 +866,26 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         input = torch.randn(2, 3)
         model = PrintModule()
         _ = torch.onnx.dynamo_export(model, input)
+
+    def test_bfloat16_serialization(self):
+        torch.manual_seed(0)
+        np.random.seed(0)
+
+        class MyLinear(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(10, 5, bias=False, dtype=torch.bfloat16)
+
+            def forward(self, tensor_x: torch.Tensor):
+                return self.fc1(tensor_x)
+
+        model = MyLinear()
+        tensor_x = torch.rand((3, 10), dtype=torch.bfloat16)
+        onnx_program = torch.onnx.dynamo_export(model, tensor_x)
+        with tempfile.NamedTemporaryFile(suffix=".onnx") as tmp_onnx_file:
+            onnx_program.save(
+                tmp_onnx_file.name, model_state=model.state_dict()
+            )  # serialization triggers the bug
 
 
 if __name__ == "__main__":
