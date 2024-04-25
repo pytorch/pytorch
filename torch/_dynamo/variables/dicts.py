@@ -887,18 +887,13 @@ class PythonSysModulesVariable(VariableTracker):
     def call_method(
         self, tx, name, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ):
-        from .builder import VariableBuilder
-
         if name == "__getitem__":
             return self.call_getitem(tx, *args, **kwargs)
         elif name == "get":
             return self.call_get(tx, *args, **kwargs)
         elif name == "__contains__":
             return self.call_contains(tx, *args, **kwargs)
-
-        # Fallback to dict implementation
-        real_dict = VariableBuilder(tx, self.source)(sys.modules)
-        return real_dict.call_method(tx, name, args, kwargs)
+        unimplemented(f"sys.modules.{name}(*{args}, **{kwargs})")
 
     def _contains_helper(self, tx, key: VariableTracker):
         k = key.as_python_constant()
