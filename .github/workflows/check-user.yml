@@ -29,7 +29,11 @@ jobs:
           COMMENTS=$(curl https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/issues/$ISSUE_NUMBER/comments)
           USER_LIST=$(echo "$COMMENTS" | tr -d '\r\n' | jq '.[0].body' -r)
 
-          if echo "$USER_LIST" | grep -q "${{ inputs.user_name }}"; then
+          if [[ ${USER_LIST:0:1} == "!" ]]; then
+            echo "workflow-type=label" >> $GITHUB_OUTPUT
+          elif [[ ${USER_LIST:0:1} == "*" ]]; then
+            echo "workflow-type=rg" >> $GITHUB_OUTPUT
+          elif echo "$USER_LIST" | grep -q "${{ inputs.user_name }}"; then
             echo "workflow-type=rg" >> $GITHUB_OUTPUT
           else
             echo "workflow-type=label" >> $GITHUB_OUTPUT
