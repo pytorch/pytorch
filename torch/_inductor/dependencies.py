@@ -143,6 +143,7 @@ class MemoryDep(Dep):
 @dataclasses.dataclass(frozen=True)
 class StarDep(Dep):
     name: str
+    mode: Optional[str] = None
 
     # depends on the entire buffer
     @property
@@ -154,7 +155,7 @@ class StarDep(Dep):
 
     def rename(self, renames: Dict[str, str]) -> "StarDep":
         if self.name in renames:
-            return StarDep(renames[self.name])
+            return StarDep(renames[self.name], self.mode)
         return self
 
     def numbytes_hint(self):

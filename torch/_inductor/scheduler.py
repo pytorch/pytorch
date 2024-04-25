@@ -1510,18 +1510,30 @@ class Scheduler:
                 ), f"{s} not in {unbacked_symbol_to_origin_node}"
                 node.add_fake_dep(StarDep(unbacked_symbol_to_origin_node[s].get_name()))
 
+            if (
+                len(node.read_writes.writes) == 1
+                and (dep := next(iter(node.read_writes.writes)))
+                and isinstance(dep, MemoryDep)
+            ):
+                node_mode = dep.mode
+            else:
+                node_mode = None
+
             # a node will mutate either 0 or 1 buffers
             assert len(node.get_mutations()) <= 1
             for alt_name in node.get_mutations():
                 alt_name = rename(alt_name)
                 # this node must run after the prior writer
                 add_user(alt_name, node)
-                node.add_mutation_dep(StarDep(alt_name))
+                node.add_mutation_dep(StarDep(alt_name, mode=node_mode))
                 for other_node in name_to_users[alt_name].items:
                     # this node must run after all prior readers
                     other_name = rename(other_node.get_name())
                     known_dep_node_names = dep_closure(node.get_name())
-                    if other_name not in known_dep_node_names:
+                    if (
+                        other_name != alt_name
+                        and other_name not in known_dep_node_names
+                    ):
                         # If this node already directly or indirectly depends on other_node,
                         # we don't need to insert an extra dep.
                         node.add_mutation_dep(WeakDep(other_name))
@@ -2160,17 +2172,11 @@ class Scheduler:
             read_name = self.mutation_renames.get(read.name, read.name)
             write_name = self.mutation_renames.get(write.name, write.name)
             if (
-                isinstance(read, MemoryDep)
+                isinstance(read, (MemoryDep, StarDep))
                 and isinstance(write, MemoryDep)
-                and read.mode is not None
-                and (read.mode == write.mode or read_name != write_name)
-            ):
-                return True
-            if (
-                isinstance(read, StarDep)
-                and isinstance(write, MemoryDep)
-                and read_name == write_name
+                and read.mode == write.mode
                 and write.mode is not None
+                and read_name == write_name
             ):
                 return True
             return (
