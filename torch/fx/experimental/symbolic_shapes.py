@@ -3624,8 +3624,11 @@ class ShapeEnv:
                 raise
 
         # First, issue all guards.
-        # There are no redundant guards, as we already use knowledge of previous guards inside _maybe_evaluate_static
+        # This removes all the checks that follow from bounds
+        # We could simply emit those and also the bounds 2 <= size when necessary
         for guard in self.guards:
+            if self._maybe_evaluate_static(guard.expr, axioms=()) is not None:
+                continue
             issue_guard(guard)
 
         # 3. Every symbol must be within its value range (this handles 0/1
