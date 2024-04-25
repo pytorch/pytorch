@@ -1013,6 +1013,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 [c for c in choices if hasattr(c, "precompile")],
                 timeout=precompilation_timeout_seconds,
             )
+            from triton.runtime.autotuner import OutOfResources
 
             @functools.lru_cache(None)
             def wait_on_futures():
@@ -1031,6 +1032,9 @@ class AlgorithmSelectorCache(PersistentCache):
                         f"Precompilation timed out after {precompilation_timeout_seconds} seconds."  # noqa: G004
                     )
                 except StopIteration:
+                    pass
+                except OutOfResources:
+                    # This config is invalid due to requiring too many resources
                     pass
 
                 executor.shutdown(wait=True)
