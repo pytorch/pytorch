@@ -1528,8 +1528,7 @@ def aoti_compile_with_persistent_cache(
                 same_signature=False,
             )
 
-            kernel_metadata_items = []
-            for input in flattened_inputs:
+            def abstract_input_metadata(input):
                 # TODO(Eikan): To add dynamic support
                 metadata: Dict[str, Any] = {}
                 metadata["is_dynamic"] = dynamic
@@ -1553,6 +1552,17 @@ def aoti_compile_with_persistent_cache(
                     metadata["strides"] = []
                     metadata["scalar_value"] = input
 
+                return metadata
+
+            kernel_metadata_items = []
+            # The order of the args in the function schema is the same as the order of the args in the args list
+            for arg_val in args:
+                kernel_metadata_items.append(abstract_input_metadata(arg_val))
+
+            # The kwargs is after the args in the function schema
+            for arg_name, arg_val in kwargs.items():
+                metadata = abstract_input_metadata(arg_val)
+                metadata["arg_name"] = arg_name
                 kernel_metadata_items.append(metadata)
 
             kernel_meta_info: Dict[str, Any] = {}
