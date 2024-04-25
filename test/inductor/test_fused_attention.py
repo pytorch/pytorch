@@ -65,8 +65,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                     x.requires_grad = training
 
             if not self.use_static_shapes:
-                for arg in args2:
-                    torch._dynamo.mark_dynamic(arg, 0)
+                torch._dynamo.mark_dynamic(args2[0], 0)
+                torch._dynamo.mark_dynamic(args2[1], 0)
+                torch._dynamo.mark_dynamic(args2[2], 0)
 
             dropout_arg = [training] if has_dropout else []
             torch.manual_seed(1234)
