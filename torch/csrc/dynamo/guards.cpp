@@ -40,6 +40,8 @@ typedef struct {
 
 #endif // IS_PYTHON_3_12_PLUS
 
+namespace torch::dynamo {
+
 // Macro to skip addition of duplicate guards like EQUALS_MATCH
 #define SKIP_IF_GUARD_ALREADY_PRESENT(name) \
   if (self.is_leaf_guard_present(name)) {   \
@@ -3754,3 +3756,5 @@ PyObject* torch_c_dynamo_guards_init() {
 
   return m;
 }
+
+} // namespace torch::dynamo
