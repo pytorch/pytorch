@@ -29,11 +29,7 @@ from torch._dynamo.utils import (
 from torch._functorch import config as functorch_config
 from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
 from torch._inductor.codecache import code_hash, CompiledFxGraph, FxGraphCache
-from torch._inductor.cudagraph_utils import (
-    BoxedDeviceIndex,
-    get_placeholders,
-    log_cudagraph_skip_and_bump_counter,
-)
+from torch._inductor.cudagraph_utils import BoxedDeviceIndex, get_placeholders
 
 from torch._inductor.debug import save_args_for_compile_fx_inner
 from torch._inductor.utils import BoxedBool, count_tangents
@@ -487,8 +483,9 @@ def compile_fx_inner(
     # check cudagraph disabling reasons from inductor lowering
     if cudagraphs and compiled_graph.disabled_cudagraphs_reason:
         if "cuda" in compiled_graph.device_types:
-            log_cudagraph_skip_and_bump_counter(
-                f"skipping cudagraphs due to {compiled_graph.disabled_cudagraphs_reason}"
+            perf_hint_log.warning(
+                "skipping cudagraphs due to %s",
+                compiled_graph.disabled_cudagraphs_reason,
             )
         BoxedBool.disable(cudagraphs)
 
@@ -599,12 +596,10 @@ def compile_fx_inner(
                 # prefer better disable_cudagraphs_reason bc stack trace
                 # TODO: migrate all disable reasons to stack trace, refactor
                 if compiled_graph.disabled_cudagraphs_reason:
-                    log_cudagraph_skip_and_bump_counter(
-                        compiled_graph.disabled_cudagraphs_reason
-                    )
+                    perf_hint_log.warning(compiled_graph.disabled_cudagraphs_reason)
                 else:
-                    log_cudagraph_skip_and_bump_counter(
-                        f"skipping cudagraphs due to {cudagraph_fail_reasons}"
+                    perf_hint_log.warning(
+                        "skipping cudagraphs due to %s", cudagraph_fail_reasons
                     )
 
     # cudagraphs does its own aligning of inputs
