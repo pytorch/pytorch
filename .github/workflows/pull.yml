@@ -37,7 +37,7 @@ jobs:
 
   get-workflow:
     name: Check if user is in arc_users.yml
-    uses: pytorch/pytorch/.github/workflows/check-user.yml@main
+    uses: .github/workflows/check-user.yml
     with:
       user_name: ${{ github.actor }}
       curr_branch: ${{ github.ref_name }}
