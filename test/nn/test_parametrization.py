@@ -1416,9 +1416,11 @@ class TestNNParametrization(NNTestCase):
 
     def test_register_parametrization_no_grad(self):
         r"""Test that it is possible to register a parametrization without gradient"""
+
         class SplitAndCat(nn.Module):
             def right_inverse(self, x):
-                return torch.split(x, 4)
+                # split the tensor in two halfs
+                return torch.split(x, x.shape[1] // 2)
 
             def forward(self, x0, x1):
                 return torch.cat([x0, x1])
@@ -1431,7 +1433,6 @@ class TestNNParametrization(NNTestCase):
         # making sure the decomposed Tensors both have requires_grad == False
         self.assertFalse(model.parametrizations.weight.original0.requires_grad)
         self.assertFalse(model.parametrizations.weight.original1.requires_grad)
-
 
     @swap([True, False])
     def test_new_spectral_norm_load_state_dict(self):
