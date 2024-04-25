@@ -515,7 +515,11 @@ def _export_non_strict(
     # otherwise aot_export_module will error out because it sees a mix of fake_modes.
     # And we want aot_export_module to use the fake_tensor mode in dynamo to keep the pipeline easy to reason about.
     with torch.nn.utils.stateless._reparametrize_module(
-        mod, fake_params_buffers
+        mod,
+        fake_params_buffers,
+        tie_weights=True,
+        strict=True,
+        stack_weights=True,
     ), grad_safe_guard, _ignore_backend_decomps(), _compiling_state_context():  # type: ignore[attr-defined]
         gm, graph_signature = transform(aot_export_module)(
             mod,
@@ -907,6 +911,7 @@ def _export(
     constant_attrs = _gather_constant_attrs(mod)
 
     flat_args, orig_in_spec = pytree.tree_flatten((args, kwargs))
+    original_state_dict = mod.state_dict(keep_vars=True)
 
     if not strict:
         out_spec = None
@@ -1069,7 +1074,7 @@ def _export(
             root=gm,
             graph=gm.graph,
             graph_signature=ep_non_strict.sig,
-            state_dict=mod.state_dict(keep_vars=True),
+            state_dict=original_state_dict,
             range_constraints=range_constraints,
             module_call_graph=_make_module_call_graph(
                 _EXPORT_MODULE_HIERARCHY, orig_in_spec, out_spec, module_call_signatures
@@ -1280,7 +1285,7 @@ def _export(
         root=gm,
         graph=gm.graph,
         graph_signature=export_graph_signature,
-        state_dict=mod.state_dict(keep_vars=True),
+        state_dict=original_state_dict,
         range_constraints=range_constraints,
         module_call_graph=_make_module_call_graph(
             _EXPORT_MODULE_HIERARCHY,

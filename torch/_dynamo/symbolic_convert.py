@@ -1420,6 +1420,10 @@ class InstructionTranslatorBase(
         val, obj, key = self.popn(3)
         result = obj.call_method(self, "__setitem__", [key, val], {})
 
+    def DELETE_SUBSCR(self, inst):
+        obj, key = self.popn(2)
+        obj.call_method(self, "__delitem__", [key], {})
+
     def BUILD_TUPLE(self, inst):
         items = self.popn(inst.argval)
         self.push(TupleVariable(items))
