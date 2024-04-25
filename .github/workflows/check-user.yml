@@ -26,7 +26,9 @@ jobs:
       - name: Check if user is in arc_users.yml
         id: set-condition
         run: |
-          if [[ "${{ inputs.curr_branch }}" == "nightly" || "${{ inputs.curr_branch }}" == "main" || "${{ inputs.curr_branch }}" == "release/"* || "${{ inputs.curr_branch }}" == "landchecks/"* ]]; then
+          curr_branch="${{ inputs.curr_branch }}"
+
+          if [[ "$curr_branch" == "nightly" || "$curr_branch" == "main" || "$curr_branch" == "release/"* || "$curr_branch" == "landchecks/"* ]]; then
             echo "workflow-type=label" >> $GITHUB_OUTPUT
           else
             REPO_OWNER="pytorch"
