@@ -3,10 +3,8 @@
 #include <torch/custom_class.h>
 #include <torch/script.h>
 
-#include <cstdint>
 #include <iostream>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 using namespace torch::jit;
@@ -128,8 +126,6 @@ struct PickleTester : torch::CustomClassHolder {
   std::vector<int64_t> vals;
 };
 
-using MapValue = std::variant<int64_t, at::Tensor, std::vector<at::Tensor>>;
-
 // Thread-safe Tensor Queue
 struct TensorQueue : torch::CustomClassHolder {
   explicit TensorQueue(at::Tensor t) : init_tensor_(t) {}
@@ -207,9 +203,9 @@ struct TensorQueue : torch::CustomClassHolder {
     return raw_queue;
   }
 
-  std::tuple<std::string, std::vector<at::Tensor>> __obj_flatten__() {
+  std::tuple<std::tuple<std::string, std::vector<at::Tensor>>> __obj_flatten__() {
     // for demostration purpose, we also return a size integer.
-    return std::tuple("queue", this->get_raw_queue());
+    return std::tuple(std::tuple("queue", this->get_raw_queue()));
   }
 
  private:
@@ -383,8 +379,8 @@ struct ContainsTensor : public torch::CustomClassHolder {
     return t_;
   }
 
-  std::tuple<std::string, at::Tensor> __obj_flatten__() {
-    return std::tuple("t", this->t_);
+  std::tuple<std::tuple<std::string, at::Tensor>> __obj_flatten__() {
+    return std::tuple(std::tuple("t", this->t_));
   }
 
   at::Tensor t_;

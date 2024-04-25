@@ -1412,6 +1412,10 @@ class OutputGraph:
             self.real_value_cache.pop(node, None)
 
         used_symbols: Set[sympy.Symbol] = set()
+
+        def update_used_symbols(used_symbols, fake: Union[torch.SymInt, torch.Tensor]):
+            used_symbols |= free_symbols(fake)
+
         recheck_placeholders = []
         for node in self.placeholders:
             binds_symbol = placeholder_binds_symbol(node) is not None
@@ -1430,14 +1434,21 @@ class OutputGraph:
                     if isinstance(arg, BackwardStateGraphArg):
                         continue
                     if isinstance(node.meta["grapharg"].example, torch.ScriptObject):
-                        # TODO: recursivelly look at the free symbols in
-                        # the guarded tensor attributes
+                        real_script_obj = node.meta["grapharg"].example
+                        fake_script_obj = node.meta["grapharg"].example_strong_ref
+                        flat_dict = dict(real_script_obj.__obj_flatten__())
+                        for attr in flat_dict.keys():
+                            fake_attr_val = getattr(fake_script_obj.wrapped_obj, attr)
+                            pytree.tree_map_only(
+                                (torch.SymInt, torch.Tensor),
+                                lambda t: update_used_symbols(used_symbols, t),
+                                fake_attr_val,
+                            )
                         continue
-                    continue
                     fake = (
                         arg.fake_tensor if arg.fake_tensor is not None else arg.example
                     )
-                    used_symbols |= free_symbols(fake)
+                    update_used_symbols(used_symbols, fake)
 
         # After removing unused graphargs, prune unused binds_symbol
         for node in recheck_placeholders:

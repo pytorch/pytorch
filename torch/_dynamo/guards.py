@@ -235,9 +235,6 @@ CLOSURE_VARS = {
     "___dict_contains": lambda a, b: a in b,
     "___tuple_iterator_len": tuple_iterator_len,
     "___tuple_iterator_getitem": tuple_iterator_getitem,
-    "___to_fake_script_obj": lambda obj: torch._library.fake_class_registry.to_fake_obj2(
-        obj
-    ),
     "__math_isnan": math.isnan,
     "__numpy_isnan": None if np is None else np.isnan,
     "inf": float("inf"),

@@ -63,13 +63,32 @@ class FakeClassRegistry:
 global_fake_class_registry = FakeClassRegistry()
 
 
+# TODO: add this check at compile time for __obj_flatten__.
+def _check_valid_flat_script_obj(flat_x):
+    if not isinstance(flat_x, tuple):
+        raise RuntimeError("Expect flat x to be a tuple.")
+
+    for tp in flat_x:
+        if not isinstance(tp, tuple):
+            raise RuntimeError("Expect flat x to be a tuple of tuples.")
+
+        if not len(tp) == 2 or not isinstance(tp[0], str):
+            raise RuntimeError(
+                "Expect element of flat x to be a tuple of two elements with first element being a string"
+            )
+
+
 def to_fake_obj(fake_mode, x: torch.ScriptObject) -> FakeScriptObject:
     import torch.utils._pytree as pytree
+
+    flat_x = x.__obj_flatten__()
+
+    _check_valid_flat_script_obj(flat_x)
 
     fake_flattened = pytree.tree_map_only(
         torch.Tensor,
         lambda t: fake_mode.from_tensor(t),
-        x.__obj_flatten__(),
+        flat_x,
     )
 
     fake_x = _find_fake_class_for_script_object(x).__obj_unflatten__(fake_flattened)

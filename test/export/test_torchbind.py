@@ -69,8 +69,7 @@ class TestExportTorchbind(TestCase):
 
             @classmethod
             def __obj_unflatten__(cls, flattened_ctx):
-                ctx = {flattened_ctx[0]: flattened_ctx[1]}
-                return cls(**ctx)
+                return cls(**dict(flattened_ctx))
 
             def push(self, x):
                 test.tq_push_counter += 1
@@ -832,8 +831,7 @@ class TestCompileTorchbind(TestCase):
 
             @classmethod
             def __obj_unflatten__(cls, flattened_ctx):
-                ctx = {flattened_ctx[0]: flattened_ctx[1]}
-                return cls(**ctx)
+                return cls(**dict(flattened_ctx))
 
             def push(self, x):
                 self.queue.append(x)
@@ -892,10 +890,10 @@ class TestCompileTorchbind(TestCase):
         _assertEqualSkipScriptObject(self, ret, eager_ret)
         self.assertEqual(ret[1].size(), eager_ret[1].size())
         self.assertEqual(ret[1].pop(), eager_ret[1].pop())
-        # Note: one notable difference is that dynamo captured graph
+        # Note that dynamo captured graph
         # does not return L_tq_ as output. This is because it's able
-        # to detect that L_tq_ is a input and therefore don't return
-        # it as graph output related logic is in dynamo.codegen.py
+        # to detect that L_tq_ is an input therefore don't return
+        # it as graph output. Related logic is in dynamo/codegen.py
         self.assertExpectedInline(
             backend.graphs[0].code.strip(),
             """\
@@ -1013,19 +1011,16 @@ def forward(self, L_tq_ : torch.ScriptObject, L_x_ : torch.Tensor):
         # No recompile
         self.assertEqual(cnt.frame_count, 3)
 
-        # TODO: enable this test. It seems automatic dynamic shape doesn't work with
-        # TORCHDYNAMO_CPP_GUARD_MANAGER=1 and it will cause a re-compile.
-        #
-        # tq4 = torch.classes._TorchScriptTesting._TensorQueue(
-        #     torch.empty(
-        #         0,
-        #     ).fill_(-1)
-        # )
-        # tq4.push(torch.randn(16, 4, requires_grad=False))
-        # torch.compile(mod, backend=cnt)(tq4, x)
-        # # Tensor in queue changes shape again won't cause re-compile
-        # # because _automatic_dynamic.
-        # self.assertEqual(cnt.frame_count, 3)
+        tq4 = torch.classes._TorchScriptTesting._TensorQueue(
+            torch.empty(
+                0,
+            ).fill_(-1)
+        )
+        tq4.push(torch.randn(16, 4, requires_grad=False))
+        torch.compile(mod, backend=cnt)(tq4, x)
+        # Tensor in queue changes shape again won't cause re-compile
+        # because _automatic_dynamic.
+        self.assertEqual(cnt.frame_count, 3)
 
         tq5 = torch.classes._TorchScriptTesting._TensorQueue(
             torch.empty(
