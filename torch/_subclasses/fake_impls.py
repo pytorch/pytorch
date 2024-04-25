@@ -285,8 +285,8 @@ def unique2(
             # symint cannot equal zero).  We could also unconditionally
             # allocate an unbacked SymInt and not refine its range,
             # but this seems more precise.
-            nnz = arg._nonzero_memo = 0
-            arg._nonzero_memo_vc = arg._version
+            nnz = arg._unique_memo = 0
+            arg._unique_memo_vc = arg._version
         else:
             nnz = fake_mode.shape_env.create_unbacked_symint()
 
