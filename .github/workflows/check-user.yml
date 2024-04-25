@@ -19,14 +19,17 @@ jobs:
     outputs:
       workflow-type: ${{ steps.set-condition.outputs.workflow-type }}
     steps:
-      - name: Download the latest arc_users.yml
-        run: |
-          wget https://raw.githubusercontent.com/pytorch/test-infra/44e046ac67dc0ff7be98025d39984ad2e4def044/.github/arc_users.yaml
-
       - name: Check if user is in arc_users.yml
         id: set-condition
         run: |
-          if grep -q "${{ inputs.user_name }}" arc_users.yaml; then
+          REPO_OWNER="pytorch"
+          REPO_NAME="test-infra"
+          ISSUE_NUMBER="5132"
+
+          COMMENTS=$(curl https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/issues/$ISSUE_NUMBER/comments)
+          USER_LIST=$(echo "$COMMENTS" | tr -d '\r\n' | jq '.[0].body' -r)
+
+          if echo "$USER_LIST" | grep -q "${{ inputs.user_name }}"; then
             echo "workflow-type=rg" >> $GITHUB_OUTPUT
           else
             echo "workflow-type=label" >> $GITHUB_OUTPUT
