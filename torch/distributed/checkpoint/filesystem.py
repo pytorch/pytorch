@@ -28,11 +28,11 @@ import torch
 from torch import Tensor
 from torch._utils import _get_available_device_type, _get_device_module
 from torch.distributed._shard._utils import narrow_tensor_by_index
-from torch.distributed._state_dict_utils import _offload_state_dict_to_cpu
 from torch.distributed.checkpoint.staging import BlockingAsyncStager
+
 from torch.futures import Future
 
-from .metadata import Metadata, MetadataIndex, STATE_DICT_TYPE
+from .metadata import Metadata, MetadataIndex
 from .planner import (
     LoadItemType,
     LoadPlan,
@@ -438,15 +438,6 @@ class _FileSystemWriter(StorageWriter):
         self.sync_files = sync_files
         self.thread_count = thread_count
         self.per_thread_copy_ahead = per_thread_copy_ahead
-
-    def stage(self, state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
-        return _offload_state_dict_to_cpu(state_dict)
-
-    def synchronize(self) -> None:
-        # TODO: create a version of `stage` which runs in it's own cuda stream,
-        # and then apply necessary synchronization here. (For example, call
-        # this method before optim.step())
-        pass
 
     def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
         if checkpoint_id:
