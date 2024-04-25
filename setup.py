@@ -245,7 +245,7 @@ BUILD_LIBTORCH_WHL = os.getenv("BUILD_LIBTORCH_WHL", "0") == "1"
 
 # set up appropriate env variables
 if BUILD_LIBTORCH_WHL:
-    # Set up environment variables for building libtorch.so
+    # Set up environment variables for ONLY building libtorch.so and not libtorch_python.so
     os.environ["BUILD_FUNCTORCH"] = "OFF"
     os.environ["BUILD_PYTHONLESS"] = "OFF"
 
@@ -356,7 +356,7 @@ cmake_python_include_dir = sysconfig.get_path("include")
 
 DEFAULT_PACKAGE_NAME = "torch" if not BUILD_LIBTORCH_WHL else "libtorch"
 
-package_name = os.getenv("TORCH_PACKAGE_NAME", "libtorch")
+package_name = os.getenv("TORCH_PACKAGE_NAME", DEFAULT_PACKAGE_NAME)
 package_type = os.getenv("PACKAGE_TYPE", "wheel")
 version = get_torch_version()
 report(f"Building wheel {package_name}-{version}")
@@ -1137,6 +1137,8 @@ def main():
         "fsspec",
         'mkl>=2021.1.1,<=2021.4.0; platform_system == "Windows"',
     ]
+    if not BUILD_LIBTORCH_WHL:
+        install_requires.append("libtorch")
 
     use_prioritized_text = str(os.getenv("USE_PRIORITIZED_TEXT_FOR_LD", ""))
     if (
