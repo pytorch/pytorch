@@ -40,6 +40,7 @@ jobs:
     uses: ./.github/workflows/check-user.yml
     with:
       user_name: ${{ github.actor }}
+      curr_branch: ${{ github.ref_name }}
 
   test-check-user:
     name: test step "check user"
