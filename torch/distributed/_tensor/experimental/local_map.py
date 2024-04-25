@@ -4,7 +4,11 @@ from typing import Callable, Optional, Sequence, Tuple, Union
 import torch
 from torch.distributed._tensor import DeviceMesh, DTensor
 from torch.distributed._tensor.placement_types import Placement
-from torch.utils._pytree import tree_flatten, tree_unflatten
+
+try:
+    from torch.utils import _cxx_pytree as pytree
+except ImportError:
+    from torch.utils import _pytree as pytree  # type: ignore[no-redef]
 
 
 PlacementType = Optional[Sequence[Placement]]
@@ -61,8 +65,9 @@ def local_map(
         mesh, or if they are placed on a different device mesh than the `device_mesh`
         argument passed in.
 
-        AssertionError: If the placements in `out_placements` for non-:class:`DTensor`
-        return value is not `None`.
+        AssertionError: For any non-:class:`DTensor` output, we require its corresponding
+        output placement in `out_placements` be `None`. An AssertionError will be raised
+        if this is not the case.
 
         ValueError: If `redistribute_inputs=False` but the input :class:`DTensor` needs
         a redistribution according to `in_placements`.
@@ -80,8 +85,8 @@ def local_map(
         >>> row_wise = [Shard(0)]  # row-wise sharding placements on 1-d mesh
         >>> col_wise = [Shard(1)]  # col-wise sharding placements on 1-d mesh
         >>>
-        >>> # d_mm_allreduce_forward is the function wrapped with DTensor/Tensor convertion
-        >>> d_mm_allreduce_forward = local_map(
+        >>> # local_mm_allreduce_forward is the function wrapped with DTensor/Tensor convertion
+        >>> local_mm_allreduce_forward = local_map(
         >>>     mm_allreduce_forward,
         >>>     out_placements=[Replicate()],
         >>>     in_placements=[col_wise, row_wise],
@@ -90,20 +95,23 @@ def local_map(
         >>>
         >>> W_dt = distribute_tensor(W, device_mesh, col_wise)  # col-wisely sharded W tensor
         >>> X_dt = distribute_tensor(X, device_mesh, row_wise)  # row-wisely sharded X tensor
-        >>> Y_dt = d_mm_allreduce_forward(W_dt, X_dt)  # apply d_mm_allreduce_forward to DTensors
+        >>> Y_dt = local_mm_allreduce_forward(W_dt, X_dt)  # apply local_mm_allreduce_forward to DTensors
 
     NOTE: This API is currently experimental and subject to change
     """
 
     def wrapped(*args, **kwargs):
         # process input args
-        flat_args, args_spec = tree_flatten(args)
+        flat_args, args_spec = pytree.tree_flatten(args)
 
         # we assume every DTensor object is placed on the same device mesh
         flat_local_args = []
         nonlocal device_mesh  # access var device_mesh from the outer scope
         for idx, arg in enumerate(flat_args):
             if isinstance(arg, DTensor):
+                # TODO: the current code doesn't consider the uneven sharding case
+                # Need to think about what the consequence is when the input DTensor
+                # is uneven sharded.
                 if device_mesh is None:  # infer device mesh from the DTensor arg
                     device_mesh = arg.device_mesh
 
@@ -141,12 +149,12 @@ def local_map(
             else:
                 flat_local_args.append(arg)
 
-        local_args = tree_unflatten(flat_local_args, args_spec)
+        local_args = pytree.tree_unflatten(flat_local_args, args_spec)
 
         out = func(device_mesh, *local_args, **kwargs)
 
         # process output
-        flat_out, out_spec = tree_flatten(out)
+        flat_out, out_spec = pytree.tree_flatten(out)
         flat_dist_out = []
         for idx, out in enumerate(flat_out):
             spec = (
@@ -164,11 +172,11 @@ def local_map(
                 )
             else:
                 assert (
-                    out is None
+                    spec is None
                 ), f"Non-tensor output {out} expects None placements but received {spec}!"
 
                 flat_dist_out.append(out)
 
-        return tree_unflatten(flat_dist_out, out_spec)
+        return pytree.tree_unflatten(flat_dist_out, out_spec)
 
     return wrapped
