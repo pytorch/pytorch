@@ -91,7 +91,7 @@ def insert_deferred_runtime_asserts(
             fvs = free_symbols(ra.expr)
             missing = fvs - symbol_to_proxy.keys()
             if missing:
-                i1 = sorted(missing, key=lambda x: str(x))[0]
+                i1 = min(missing, key=str)
                 # TODO: Remove relaxing assert on unbacked_symint https://github.com/pytorch/pytorch/issues/119689
                 # assert shape_env.is_unbacked_symint(i1), i1
                 ras_by_symbol.setdefault(i1, []).append(ra)
