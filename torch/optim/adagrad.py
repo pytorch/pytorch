@@ -421,6 +421,8 @@ def _multi_tensor_adagrad(
                 maximize=maximize,
                 differentiable=differentiable,
                 has_complex=has_complex,
+                grad_scale=grad_scale,
+                found_inf=found_inf,
             )
             continue
 
