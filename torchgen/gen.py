@@ -1399,7 +1399,9 @@ def get_grouped_by_view_native_functions(
             assert kind not in grouped_by_views[schema]
             grouped_by_views[schema][kind] = f
         else:
-            assert view_kind not in grouped_by_views[schema]
+            assert (
+                view_kind not in grouped_by_views[schema]
+            ), f"{view_kind} already in {grouped_by_views[schema].keys()}"
             grouped_by_views[schema][view_kind] = f
 
     return list(concatMap(maybe_create_view_group, grouped_by_views.values()))
