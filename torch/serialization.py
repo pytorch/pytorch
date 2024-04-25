@@ -128,7 +128,7 @@ def set_default_mmap_options(flags: int):
     in the future we might extend this to support more options.
 
     Args:
-        mmap_options: ``mmap.MAP_PRIVATE`` or ``mmap.MAP_SHARED``
+        flags: ``mmap.MAP_PRIVATE`` or ``mmap.MAP_SHARED``
     '''
     global _default_mmap_options
     if (flags != MAP_PRIVATE and flags != MAP_SHARED):
