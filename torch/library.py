@@ -123,7 +123,6 @@ class Library:
         if has_preexisting_packet:
             ns = getattr(torch.ops, self.ns)
             packet = getattr(ns, packet_name)
-            print("refreshing", ns, packet_name)
             torch._ops._refresh_packet(packet)
 
         self._op_defs.add(qualname)
