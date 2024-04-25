@@ -553,7 +553,6 @@ class TestProfiler(TestCase):
         self.assertTrue(found_cuda)
         self._check_stats(prof._stats())
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     def test_memory_profiler(self):
         def run_profiler(tensor_creation_fn):
             # collecting allocs / deallocs
