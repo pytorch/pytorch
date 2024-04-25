@@ -38,9 +38,18 @@ static void addc_mul_div_out_mps(const Tensor& self,
   };
 
   @autoreleasepool {
-    bool executeGatherOp =
-        (self.is_contiguous(MemoryFormat::Contiguous) || self.is_contiguous(MemoryFormat::ChannelsLast) ||
+    bool executeGatherOpOnSelf =
+        !(self.is_contiguous(MemoryFormat::Contiguous) || self.is_contiguous(MemoryFormat::ChannelsLast) ||
          self.is_contiguous(MemoryFormat::ChannelsLast3d));
+    Tensor output_ = at::empty_like(self, executeGatherOpOnSelf ? MemoryFormat::Contiguous : MemoryFormat::Preserve);
+
+    bool executeGatherOpOnFirstTensor =
+        !(tensor1.is_contiguous(MemoryFormat::Contiguous) || tensor1.is_contiguous(MemoryFormat::ChannelsLast) ||
+         tensor1.is_contiguous(MemoryFormat::ChannelsLast3d));
+
+    bool executeGatherOpOnSecondTensor =
+        !(tensor2.is_contiguous(MemoryFormat::Contiguous) || tensor2.is_contiguous(MemoryFormat::ChannelsLast) ||
+         tensor2.is_contiguous(MemoryFormat::ChannelsLast3d));
 
     string key = op_name + getTensorsStringKey({self, tensor1, tensor2});
 
@@ -76,10 +85,10 @@ static void addc_mul_div_out_mps(const Tensor& self,
     });
 
     // Inputs as placeholders
-    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor, self, nil, executeGatherOp);
-    Placeholder tensor1Placeholder = Placeholder(cachedGraph->firstTensor, tensor1, nil, executeGatherOp);
-    Placeholder tensor2Placeholder = Placeholder(cachedGraph->secondTensor, tensor2, nil, executeGatherOp);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, output, nil, executeGatherOp);
+    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor, self, nil, executeGatherOpOnSelf);
+    Placeholder tensor1Placeholder = Placeholder(cachedGraph->firstTensor, tensor1, nil, executeGatherOpOnFirstTensor);
+    Placeholder tensor2Placeholder = Placeholder(cachedGraph->secondTensor, tensor2, nil, executeGatherOpOnSecondTensor);
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, executeGatherOpOnSelf ? output_ : output, nil, false);
     MPSScalar value_scalar = getMPSScalar(value_opt, self.scalar_type());
 
     // Create dictionary of inputs and outputs
@@ -91,6 +100,10 @@ static void addc_mul_div_out_mps(const Tensor& self,
     };
 
     runMPSGraph(mpsStream, cachedGraph->graph(), feeds, outputPlaceholder);
+
+    if (executeGatherOpOnSelf) {
+      output.copy_(output_);
+    }
   }
 }
 

@@ -3277,13 +3277,44 @@ class TestMPS(TestCaseMPS):
         helper((2, 8, 4, 5), 0.2)
         helper((2, 3, 4, 5), 1.0)  # value of 1 should be ignored internally
 
-    def test_addcdiv_transpose(self):
+    def test_addcdiv_transpose_1(self):
         # Regression test for issue https://github.com/pytorch/pytorch/issues/118115
+        # Testing continuity of all input tensors
         x = torch.rand(2, 3, device="cpu").t()
         x_mps = x.detach().clone().to(device="mps")
         y = torch.rand(2, 3, device="cpu").t()
         y_mps = y.detach().clone().to(device="mps")
-        z = torch.rand_like(x)
+        z = torch.rand(2, 3, device="cpu").t()
+        z_mps = z.detach().clone().to(device="mps")
+
+        result_CPU = x.addcdiv_(y, z)
+        result_MPS = x_mps.addcdiv_(y_mps, z_mps)
+
+        self.assertEqual(result_CPU, result_MPS)
+
+    def test_addcdiv_transpose_2(self):
+        # Regression test for issue https://github.com/pytorch/pytorch/issues/118115
+        # Testing continuity of second and third input tensor
+        x = torch.rand(2, 3, device="cpu")
+        x_mps = x.detach().clone().to(device="mps")
+        y = torch.rand(3, 2, device="cpu").t()
+        y_mps = y.detach().clone().to(device="mps")
+        z = torch.rand(3, 2, device="cpu").t()
+        z_mps = z.detach().clone().to(device="mps")
+
+        result_CPU = x.addcdiv_(y, z)
+        result_MPS = x_mps.addcdiv_(y_mps, z_mps)
+
+        self.assertEqual(result_CPU, result_MPS)
+
+    def test_addcdiv_transpose_3(self):
+        # Regression test for issue https://github.com/pytorch/pytorch/issues/118115
+        # Testing continuity of third input tensor
+        x = torch.rand(2, 3, device="cpu")
+        x_mps = x.detach().clone().to(device="mps")
+        y = torch.rand(2, 3, device="cpu")
+        y_mps = y.detach().clone().to(device="mps")
+        z = torch.rand(3, 2, device="cpu").t()
         z_mps = z.detach().clone().to(device="mps")
 
         result_CPU = x.addcdiv_(y, z)
