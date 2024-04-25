@@ -1622,7 +1622,7 @@ class CPUReproTests(TestCase):
         finally:
             if pre_var:
                 os.environ["ATEN_CPU_CAPABILITY"] = pre_var
-            else:
+            elif os.getenv("ATEN_CPU_CAPABILITY"):
                 os.environ.pop("ATEN_CPU_CAPABILITY")
 
     @unittest.skipIf(
@@ -1688,7 +1688,7 @@ class CPUReproTests(TestCase):
         finally:
             if pre_var:
                 os.environ["ATEN_CPU_CAPABILITY"] = pre_var
-            else:
+            elif os.getenv("ATEN_CPU_CAPABILITY"):
                 os.environ.pop("ATEN_CPU_CAPABILITY")
 
     @unittest.skipIf(
@@ -1786,7 +1786,7 @@ class CPUReproTests(TestCase):
         finally:
             if pre_var:
                 os.environ["ATEN_CPU_CAPABILITY"] = pre_var
-            else:
+            elif os.getenv("ATEN_CPU_CAPABILITY"):
                 os.environ.pop("ATEN_CPU_CAPABILITY")
 
     @requires_vectorization
@@ -2795,19 +2795,22 @@ class CPUReproTests(TestCase):
             x = x.view(batchsize, -1, height, width)
             return x.contiguous(memory_format=torch.channels_last)
 
-        for simdlen in (None, 256, 1):
-            with config.patch({"cpp.simdlen": simdlen}):
-                torch._dynamo.reset()
-                metrics.reset()
-                x = torch.randn(64, 58, 28, 28)
-                self.common(channel_shuffle, (x, 2))
-                print("============================")
-                print("os env ATEN_CPU_CAPABILITY: ", os.getenv("ATEN_CPU_CAPABILITY"))
-                print("simdlen: ", simdlen)
-                print("supported isa: ", codecache.supported_vec_isa_list)
-                print("codecache.pick_vec_isa(): ", codecache.pick_vec_isa())
-                if simdlen != 1:
-                    check_metrics_vec_kernel_count(2)
+        pre_var = os.getenv("ATEN_CPU_CAPABILITY")
+        if pre_var:
+            os.environ.pop("ATEN_CPU_CAPABILITY")
+
+        try:
+            for simdlen in (None, 256, 1):
+                with config.patch({"cpp.simdlen": simdlen}):
+                    torch._dynamo.reset()
+                    metrics.reset()
+                    x = torch.randn(64, 58, 28, 28)
+                    self.common(channel_shuffle, (x, 2))
+                    if simdlen != 1:
+                        check_metrics_vec_kernel_count(2)
+        finally:
+            if pre_var:
+                os.environ["ATEN_CPU_CAPABILITY"] = pre_var
 
     @slowTest
     @requires_vectorization
