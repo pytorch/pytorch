@@ -53,7 +53,7 @@ def patch_init_py(path: Path, *, version: str) -> None:
     with open(path, "w") as f:
         f.write(orig)
 
-def get_rocm_version() -> str:
+def get_rocm_version(include_patch: bool = True) -> str:
     rocm_path = os.environ.get('ROCM_HOME') or os.environ.get('ROCM_PATH') or "/opt/rocm"
     rocm_version = "0.0.0"
     rocm_version_h = f"{rocm_path}/include/rocm-core/rocm_version.h"
@@ -76,7 +76,7 @@ def get_rocm_version() -> str:
             match = RE_PATCH.search(line)
             if match:
                 patch = int(match.group(1))
-        rocm_version = str(major)+"."+str(minor)+"."+str(patch)
+        rocm_version = str(major)+"."+str(minor)+("."+str(patch) if include_patch else "")
     return rocm_version
 
 def build_triton(
@@ -97,7 +97,8 @@ def build_triton(
     if not release:
         # Nightly binaries include the triton commit hash, i.e. 2.1.0+e6216047b8
         # while release build should only include the version, i.e. 2.1.0
-        version_suffix = f"+{commit_hash[:10]}"
+        rocm_version = get_rocm_version(include_patch=False)
+        version_suffix = f"+rocm{rocm_version}_{commit_hash[:10]}"
         version += version_suffix
 
     with TemporaryDirectory() as tmpdir:
@@ -194,7 +195,7 @@ def build_triton(
         shutil.copy(whl_path, Path.cwd())
 
         if build_rocm:
-            check_call("scripts/amd/fix_so.sh", cwd=triton_basedir, shell=True)
+            check_call(["scripts/amd/fix_so.sh", Path.cwd()], cwd=triton_basedir)
 
         return Path.cwd() / whl_path.name
 
