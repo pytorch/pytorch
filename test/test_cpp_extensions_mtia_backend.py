@@ -22,6 +22,7 @@ from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
 TEST_ROCM = TEST_CUDA and torch.version.hip is not None and ROCM_HOME is not None
 TEST_CUDA = TEST_CUDA and CUDA_HOME is not None
 
+
 def remove_build_path():
     if sys.platform == "win32":
         # Not wiping extensions build folder because Windows
