@@ -28,6 +28,8 @@ torch.fx.experimental.symbolic_shapes
     ShapeEnvSettings
     ConvertIntKey
     CallMethodKey
+    PropagateUnbackedSymInts
+    DivideByKey
 
     hint_int
     is_concrete_int
