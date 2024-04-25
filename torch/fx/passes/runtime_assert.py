@@ -51,6 +51,8 @@ def insert_deferred_runtime_asserts(
 
     from torch.fx.experimental.symbolic_shapes import (
         CallMethodKey,
+        cast_symbool_to_symint_guardless,
+        ConvertIntKey,
         DivideByKey,
         free_symbols,
     )
@@ -142,7 +144,6 @@ def insert_deferred_runtime_asserts(
                     ):
                         symbol_to_proxy[s] = fx.Proxy(cb())
                         log.debug("symbol_to_proxy[%s] = %s", s, symbol_to_proxy[s])
-                        defs.append(s)
 
                 match_symbol(example_value, lambda: node)
                 if isinstance(t := example_value, torch.Tensor):
@@ -191,6 +192,13 @@ def insert_deferred_runtime_asserts(
                             return go(
                                 graph.call_function(
                                     operator.getitem, (node, keypath[0].idx)
+                                ),
+                                keypath[1:],
+                            )
+                        elif isinstance(keypath[0], ConvertIntKey):
+                            return go(
+                                graph.call_function(
+                                    cast_symbool_to_symint_guardless, (node,)
                                 ),
                                 keypath[1:],
                             )
