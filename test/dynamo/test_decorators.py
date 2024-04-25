@@ -134,6 +134,55 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             all(node.target is not torch.sigmoid for node in gm1.graph.nodes)
         )
 
+    def test_disable_nn_module_with_class_decorator(self):
+        cnts = torch._dynamo.testing.CompileCounterWithBackend("eager")
+
+        @torch._dynamo.disable
+        class SimpleLinear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer0 = torch.nn.Linear(4, 4)
+
+            def forward(self, inp):
+                return self.layer0(torch.sigmoid(inp))
+
+        @torch.compile(backend=cnts)
+        class SimpleModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer0 = SimpleLinear()
+                self.layer1 = torch.nn.Linear(4, 4)
+
+            def forward(self, inp):
+                z = self.layer0(torch.sin(inp))
+                return self.layer1(z)
+
+        def hook(module, args):
+            inp = args[0].sigmoid()
+            return (inp,)
+
+        model = SimpleModel()
+        model.layer0.register_forward_pre_hook(hook)
+
+        model(torch.randn(4))
+
+        # check for no graph break
+        self.assertEqual(cnts.frame_count, 2)
+
+        gm0 = cnts.graphs[0]
+        # Check that the first graph has sin node, and no sigmoid
+        self.assertTrue(any(node.target is torch.sin for node in gm0.graph.nodes))
+        self.assertTrue(
+            all(node.target is not torch.sigmoid for node in gm0.graph.nodes)
+        )
+
+        gm1 = cnts.graphs[1]
+        # Check that the first graph does not have sigmoid. sigmoid is used in
+        # both hook and disabled module.
+        self.assertTrue(
+            all(node.target is not torch.sigmoid for node in gm1.graph.nodes)
+        )
+
     def test_allow_in_graph(self):
         cnts = torch._dynamo.testing.CompileCounter()
 

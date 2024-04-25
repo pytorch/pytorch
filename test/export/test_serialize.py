@@ -28,7 +28,7 @@ from torch._export.serde.serialize import (
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.export import Dim, export, load, save
-from torch.fx.experimental.symbolic_shapes import is_concrete_int
+from torch.fx.experimental.symbolic_shapes import is_concrete_int, ValueRanges
 from torch.testing._internal.common_utils import (
     find_library_location,
     instantiate_parametrized_tests,
@@ -49,16 +49,6 @@ def get_filtered_export_db_tests():
         for name, case in all_examples().items()
         if case.support_level == SupportLevel.SUPPORTED
     ]
-
-
-def cleanup_op(opname):
-    ns, name = opname.split("::")
-    if not hasattr(torch.ops, ns):
-        return
-    actual_ns = getattr(torch.ops, ns)
-    if not hasattr(actual_ns, name):
-        return
-    delattr(actual_ns, name)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
@@ -277,6 +267,29 @@ class TestSerialize(TestCase):
             self.assertNotIn(name, seen)
             seen.add(name)
 
+    def test_rational_ranges(self) -> None:
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x + x
+
+        ep = torch.export.export(
+            M(), (torch.randn(4),), dynamic_shapes=({0: Dim("temp")},)
+        )
+
+        range_constraints = list(ep.range_constraints.keys())
+        assert len(range_constraints) == 1
+        symint = range_constraints[0]
+
+        import sympy
+
+        upper_range = sympy.Rational(10, 3)
+        lower_range = sympy.Rational(10, 6)
+        ep.range_constraints[symint] = ValueRanges(lower=lower_range, upper=upper_range)
+
+        serialized = ExportedProgramSerializer().serialize(ep)
+        self.assertEqual(serialized.exported_program.range_constraints["s0"].min_val, 2)
+        self.assertEqual(serialized.exported_program.range_constraints["s0"].max_val, 3)
+
     def test_kwargs_default(self) -> None:
         """
         Tests that the kwargs default values are serialized even if they are not
@@ -470,9 +483,31 @@ class TestDeserialize(TestCase):
         else:
             _check_graph(pre_dispatch=False)
 
+    def test_optional_tuple(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor a, Tensor b, Tensor? c) -> (Tensor, Tensor?)",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            @torch.library.impl_abstract("mylib::foo")
+            def foo_impl(a, b, c):
+                res2 = None
+                if c is not None:
+                    res2 = c + a + b
+                return a + b, res2
+
+            class M(torch.nn.Module):
+                def forward(self, a, b, c):
+                    return torch.ops.mylib.foo(a, b, c)
+
+            self.check_graph(M(), (torch.randn(3), torch.randn(3), torch.randn(3)))
+
     def test_auto_functionalize(self):
-        try:
-            lib = torch.library.Library("mylib", "FRAGMENT")  # noqa: TOR901
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
                 "mylib::foo1",
                 "(Tensor(a!) x, Tensor[] y, Tensor(b!) z, SymInt w, Tensor n) -> Tensor",
@@ -527,10 +562,6 @@ class TestDeserialize(TestCase):
 
             # TODO Auto_functionalize is not supported on pre_dispatch IR
             self.check_graph(M(), orig_args, use_pre_dispatch=False)
-
-        finally:
-            cleanup_op("mylib::foo")
-            del lib
 
     def test_multi_return(self) -> None:
         """
@@ -674,10 +705,7 @@ class TestDeserialize(TestCase):
         self.check_graph(g, inputs, _check_meta=False)
 
     def test_tensor_tensor_list(self):
-        try:
-            from torch.library import Library
-
-            lib = Library("_export", "FRAGMENT")  # noqa: TOR901
+        with torch.library._scoped_library("_export", "FRAGMENT") as lib:
             lib.define(
                 "_test_tensor_tensor_list_output(Tensor x, Tensor y) -> (Tensor, Tensor[])",
                 tags=torch.Tag.pt2_compliant_tag,
@@ -705,10 +733,6 @@ class TestDeserialize(TestCase):
                     return a + b[0]
 
             self.check_graph(M(), (torch.rand(3, 2), torch.rand(3, 2)))
-
-        finally:
-            cleanup_op("_export::_test_tensor_tensor_list_output")
-            del lib
 
     def test_list_of_optional_tensors(self) -> None:
         class MyModule(torch.nn.Module):

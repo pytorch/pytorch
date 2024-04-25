@@ -9275,6 +9275,8 @@ class foreach_inputs_sample_func:
             # unary
             if opinfo.ref in (torch.abs, torch.neg):
                 return False
+            if opinfo.ref_inplace in (torch.Tensor.zero_,):
+                return False
             return dtype in integral_types_and(torch.bool)
         if self.arity < 2 or rightmost_arg_type == ForeachRightmostArgType.Tensor:
             return None
@@ -9533,43 +9535,53 @@ foreach_unary_op_db: List[OpInfo] = [
         'exp',
         foreach_inputs_sample_func(1, False, False),
         backward_requires_result=True,
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
     ),
     ForeachFuncInfo(
         'acos',
         foreach_inputs_sample_func(1, False, False),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
     ),
     ForeachFuncInfo(
         'asin',
         foreach_inputs_sample_func(1, False, False),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
     ),
     ForeachFuncInfo(
         'atan',
         foreach_inputs_sample_func(1, False, False),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
     ),
     ForeachFuncInfo(
         'cos',
         foreach_inputs_sample_func(1, False, False),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
     ),
     ForeachFuncInfo(
         'cosh',
         foreach_inputs_sample_func(1, False, False),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
     ),
     ForeachFuncInfo(
         'log',
         foreach_inputs_sample_func(1, False, False),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
     ),
     ForeachFuncInfo(
         'log10',
         foreach_inputs_sample_func(1, False, False),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
     ),
     ForeachFuncInfo(
         'log2',
         foreach_inputs_sample_func(1, False, False),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
     ),
     ForeachFuncInfo(
         'tan',
         foreach_inputs_sample_func(1, False, False),
         backward_requires_result=True,
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
         decorators=(
             # due to https://github.com/pytorch/pytorch/pull/102427 enabling jiterator for complex
             DecorateInfo(
@@ -9588,6 +9600,7 @@ foreach_unary_op_db: List[OpInfo] = [
         'tanh',
         foreach_inputs_sample_func(1, False, False),
         backward_requires_result=True,
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
         decorators=(
             DecorateInfo(
                 toleranceOverride(
@@ -9602,10 +9615,12 @@ foreach_unary_op_db: List[OpInfo] = [
     ForeachFuncInfo(
         'sin',
         foreach_inputs_sample_func(1, False, False),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
     ),
     ForeachFuncInfo(
         'sinh',
         foreach_inputs_sample_func(1, False, False),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
     ),
     ForeachFuncInfo(
         'neg',
@@ -9907,6 +9922,7 @@ foreach_binary_op_db: List[OpInfo] = [
         "copy",
         foreach_inputs_sample_func(2, False, False),
         dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
+        dtypesIfCUDA=all_types_and_complex_and(torch.bfloat16, torch.half),
         supports_out=False,
         supports_forward_ad=False,
         supports_autograd=False,
@@ -13067,8 +13083,7 @@ op_db: List[OpInfo] = [
            supports_out=False),
     OpInfo(
         "nn.functional.cross_entropy",
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_cross_entropy,
         supports_out=False,
         supports_forward_ad=True,
@@ -13091,6 +13106,9 @@ op_db: List[OpInfo] = [
                 "test_variant_consistency_jit",
                 device_type="cuda",
             ),
+            DecorateInfo(unittest.skip("FP16 corss_entropy cases have not been enabled on MPS yet"),
+                         dtypes=(torch.half,), device_type="mps"),
+
         )
     ),
     OpInfo('nn.functional.normalize',
@@ -19496,8 +19514,7 @@ op_db: List[OpInfo] = [
     ),
     OpInfo(
         "nn.functional.nll_loss",
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         sample_inputs_func=sample_inputs_nll_loss,
         supports_forward_ad=True,
@@ -19518,6 +19535,9 @@ op_db: List[OpInfo] = [
                 "test_cow_input",
                 device_type='cuda',
             ),
+            DecorateInfo(unittest.skip("FP16 nll_loss cases have not been enabled on MPS yet"),
+                         dtypes=(torch.half,), device_type="mps"),
+
         ),
     ),
     OpInfo(
