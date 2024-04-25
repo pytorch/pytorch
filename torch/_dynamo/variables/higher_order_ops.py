@@ -543,6 +543,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return TraceWrappedHigherOrderOperatorVariable(value, source, **kwargs)
         elif value.__name__ == "strict_mode":
             return StrictModeHigherOrderVariable(value, source, **kwargs)
+        elif value.__name__ == "associative_scan":
+            return AssociativeScanHigherOrderVariable(value, source, **kwargs)
         else:
             unimplemented(f"HigherOrderOperator {value.__name__}")
 
@@ -928,6 +930,106 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
 
+class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    @raise_hard_error_if_graph_break(
+        reason="associative_scan must be captured completely with torch.compile."
+    )
+    def call_function(
+        self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
+    ) -> VariableTracker:
+        from . import NestedUserFunctionVariable, UserFunctionVariable
+        from .builder import SourcelessBuilder, wrap_fx_proxy
+
+        args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
+
+        def arg_extractor(combine_fn, input, dim):
+            return combine_fn, input, dim
+
+        combine_fn, input, dim = arg_extractor(*args, **kwargs)
+
+        assert isinstance(
+            combine_fn,
+            (
+                UserFunctionVariable,
+                NestedUserFunctionVariable,
+            ),
+        )
+
+        if input.python_type() != torch.Tensor:
+            unimplemented(
+                f"Expected input to be a tensor but got {input.python_type()}",
+            )
+
+        # Trace the subgraph
+        # TODO: Fix these pointless new_empty calls appearing in the dynamo output graph.
+        null_shape = SourcelessBuilder.create(tx, ())
+        sub_args = [
+            input.call_method(tx, "new_empty", args=(null_shape,), kwargs={})
+            for _ in range(2)
+        ]
+        (
+            (combine_result, combine_treespec),
+            combine_graph,
+            combine_lifted_freevars,
+        ) = speculate_subgraph(
+            tx,
+            combine_fn,
+            sub_args,
+            sub_kwargs={},
+            description="scan_combine",
+            source_target=self.value,
+            set_subgraph_inputs="flatten_manual",
+        )
+
+        if combine_lifted_freevars:
+            unimplemented(
+                f"Combine fn had unexpected freevars: {combine_lifted_freevars}"
+            )
+
+        if combine_result.python_type() != torch.Tensor:
+            unimplemented(
+                f"Expected combine_fn to return a tensor but got {combine_result.python_type()}",
+            )
+
+        input_meta = input.as_proxy().node.meta["example_value"]
+        combine_result_meta = combine_result.as_proxy().node.meta["example_value"]
+
+        if combine_result_meta.device != input_meta.device:
+            unimplemented(
+                f"Expected combine_fn to return a tensor on device {input_meta.device} but "
+                + f"got {combine_result_meta.device}"
+            )
+        if combine_result_meta.dtype != input_meta.dtype:
+            unimplemented(
+                f"Expected combine_fn to return a tensor of {input_meta.dtype} but "
+                + f"got {combine_result_meta.dtype}"
+            )
+
+        if combine_result_meta.shape != ():
+            unimplemented(
+                f"Expected combine_fn to return a tensor with shape () but got {combine_result_meta.shape}"
+            )
+
+        combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
+        combine_fn_name = add_subgraph(tx, "scan_combine", combine_gm)
+
+        p_args = (
+            make_attr(tx, combine_fn_name),
+            input.as_proxy(),
+            dim.as_proxy(),
+        )
+
+        with tx.fake_mode:
+            out_meta = input_meta.clone()
+        return wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function", torch.ops.higher_order.associative_scan, p_args, {}
+            ),
+            example_value=out_meta,
+        )
+
+
 def non_single_tensor_return_unsupported(api, ret):
     from . import TensorVariable
 
@@ -1089,6 +1191,7 @@ class FunctorchHigherOrderVariable(UserFunctionVariable):
                 "jacrev": "jacrev",
                 "jacfwd": "jacfwd",
                 "hessian": "hessian",
+                "linearize": "linearize",
             }.get(name)
             assert name is not None
             unimplemented(

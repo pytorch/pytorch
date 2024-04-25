@@ -1005,7 +1005,9 @@ class GraphLowering(torch.fx.Interpreter):
                 # AOT Autograd tries to detect stride divergence of inductor from output metadata.
                 # Here, we try to avoid spurious divergence by matching insignificant strides such as
                 result_correct_strides.append(
-                    self.match_insignificant_strides(r, fx_node.meta["val"].stride())
+                    self.try_match_insignificant_strides(
+                        r, fx_node.meta["val"].stride()
+                    )
                 )
 
         self.graph_outputs = result_correct_strides
@@ -1054,11 +1056,18 @@ class GraphLowering(torch.fx.Interpreter):
         finally:
             self.current_node = old
 
-    def match_insignificant_strides(
+    def try_match_insignificant_strides(
         self,
         tensor,
         meta_strides_inp: Tuple[Union[int, torch.SymInt], ...],
     ) -> ir.TensorBox:
+        """
+        Tries to match the strides of the tensor to those in the meta_strides. Strides of insignificant
+        dimensions - size 0 or 1 - will be updated.
+
+        If there are real stride differences (NHWC vs NCHW) then the input will be returned.
+        """
+
         # should have already been realized
         assert torch._inductor.ir.is_storage_and_layout(tensor)
 
