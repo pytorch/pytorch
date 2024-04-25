@@ -67,6 +67,7 @@ class ConstantValueMap {
   static ShapeDataMap& GetInferredShapeData();
 
   static SymbolDimMap& GetSymbolDimMap();
+  static DimSymbolMap& GetDimSymbolMap();
 
   static void UpdateValueName(
       const std::string& old_name,
@@ -101,6 +102,7 @@ class ConstantValueMap {
   // during future node-level shape inference.
   ShapeDataMap inferredShapeData;
   SymbolDimMap symbolDimMap;
+  DimSymbolMap dimSymbolMap;
 };
 
 } // namespace jit

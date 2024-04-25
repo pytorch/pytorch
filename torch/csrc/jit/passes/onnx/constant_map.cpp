@@ -218,6 +218,10 @@ SymbolDimMap& ConstantValueMap::GetSymbolDimMap() {
   return ConstantValueMap::getInstance().symbolDimMap;
 }
 
+DimSymbolMap& ConstantValueMap::GetDimSymbolMap() {
+  return ConstantValueMap::getInstance().dimSymbolMap;
+}
+
 template <typename Map>
 void UpdateStrKey(
     Map& map,
@@ -262,6 +266,7 @@ void ConstantValueMap::ClearMaps() {
   ConstantValueMap::getInstance().shapeValueMap.clear();
   ConstantValueMap::getInstance().inferredShapeData.clear();
   ConstantValueMap::getInstance().symbolDimMap.clear();
+  ConstantValueMap::getInstance().dimSymbolMap.clear();
 }
 
 // For debug only.
@@ -343,6 +348,15 @@ void ConstantValueMap::PrintMaps() {
   std::cout << "SymbolDim Map:" << std::endl;
   count = 0;
   for (const auto& x : ConstantValueMap::getInstance().symbolDimMap) {
+    std::cout << "(" << x.first << ": " << x.second << "), ";
+    count++;
+    if (count % 10 == 0) {
+      std::cout << std::endl;
+    }
+  }
+  std::cout << "DimSymbol Map:" << std::endl;
+  count = 0;
+  for (const auto& x : ConstantValueMap::getInstance().dimSymbolMap) {
     std::cout << "(" << x.first << ": " << x.second << "), ";
     count++;
     if (count % 10 == 0) {
