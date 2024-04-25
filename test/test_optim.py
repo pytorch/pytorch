@@ -1695,6 +1695,7 @@ class TestOptimRenewed(TestCase):
                     optimizer_ctor=optim_cls, optimizer_kwargs=kwargs, separate_unscale=_separate_unscale)
 
     def _grad_scaling_autocast_fused_optimizers(self, optimizer_ctor, optimizer_kwargs, separate_unscale):
+        torch.manual_seed(20)
         (
             mod_control, mod_scaling, opt_control, opt_scaling, data, loss_fn, _,
         ) = _create_scaling_case(optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs, device='cpu')
@@ -1705,32 +1706,34 @@ class TestOptimRenewed(TestCase):
             kwargs['lr'] = 1.0
         opt_control = optimizer_ctor(mod_control.parameters(), **kwargs)
 
-        scaler_scaling = torch.cpu.amp.GradScaler(init_scale=128.0)
-        scaler_control = torch.cpu.amp.GradScaler(init_scale=128.0)
-
+        scaler = torch.cpu.amp.GradScaler(init_scale=128.0)
+        tracker = TensorTracker()
         for input, target in data:
             opt_control.zero_grad()
             with torch.autocast('cpu', dtype=torch.half):
                 output_control = mod_control(input)
                 loss_control = loss_fn(output_control, target)
-            scaler_control.scale(loss_control).backward()
-            scaler_control.step(opt_control)
-            scaler_control.update()
+            scaler.scale(loss_control).backward()
+            scaler.step(opt_control)
+            scaler.update()
 
             opt_scaling.zero_grad()
             with torch.autocast('cpu', dtype=torch.half):
                 output_scaling = mod_scaling(input)
                 loss_scaling = loss_fn(output_scaling, target)
-            scaler_scaling.scale(loss_scaling).backward()
+            scaler.scale(loss_scaling).backward()
             if separate_unscale:
-                scaler_scaling.unscale_(opt_scaling)
-            scaler_scaling.step(opt_scaling)
-            scaler_scaling.update()
+                scaler.unscale_(opt_scaling)
+            scaler.step(opt_scaling)
+            scaler.update()
 
-            self.assertEqual(loss_control, loss_scaling, )
+            tracker.add(loss_control)
+            tracker.pop_check_set(loss_scaling, self)
             for param_control, param_scaling in zip(mod_control.parameters(), mod_scaling.parameters()):
-                self.assertEqual(param_control.grad, param_scaling.grad,)
-                self.assertEqual(param_control, param_scaling,)
+                tracker.add(param_control.grad)
+                tracker.pop_check_set(param_scaling.grad, self)
+                tracker.add(param_control)
+                tracker.pop_check_set(param_scaling, self)
 
                 state_control, state_scaling = opt_control.state[param_control], opt_scaling.state[param_scaling]
 
@@ -1738,7 +1741,8 @@ class TestOptimRenewed(TestCase):
                     actual = state_scaling[k]
                     if k == "step":
                         actual = actual.squeeze()
-                    self.assertEqual(state_control[k], actual,)
+                    tracker.add(state_control[k])
+                    tracker.pop_check_set(actual, self)
 
     @onlyCUDA
     @optims([o for o in optim_db if "foreach" in o.supported_impls], dtypes=[torch.float32])
