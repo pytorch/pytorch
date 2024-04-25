@@ -3623,13 +3623,9 @@ class ShapeEnv:
                 self.log.warning("Failing guard allocated at: \n%s", ''.join(guard.stack.format()))
                 raise
 
-        # First, issue all the non-trivial guards.
-        previous_guards = ()
+        # First, issue all guards.
         for guard in self.guards:
-            if self._maybe_evaluate_static(guard.expr, axioms=previous_guards) is not None:
-                continue
             issue_guard(guard)
-            previous_guards += (guard.expr,)
 
         # 3. Every symbol must be within its value range (this handles 0/1
         # specialization too).
