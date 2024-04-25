@@ -97,7 +97,7 @@ __all__ = [
     "StatefulSymbolicContext", "SubclassSymbolicContext", "statically_known_true",
     "guard_size_oblivious", "check_consistent",
     "compute_unbacked_bindings", "ConvertIntKey",
-    "rebind_unbacked",
+    "rebind_unbacked", "resolve_unbacked_bindings",
 ]
 
 # FX node metadata keys for symbolic shape FX graph.
@@ -266,6 +266,14 @@ def check_consistent(new, old) -> None:
         assert isinstance(old, scalar_types) and not isinstance(old, bool), f"{old} != {new}"
         torch._check(old == new, lambda: f"{old} != {new} (old != new)")
 
+def resolve_unbacked_bindings(shape_env, bindings):
+    if bindings is None:
+        return None
+    return {
+        shape_env.unbacked_renamings.get(k, k): v
+        for k, v in bindings.items()
+    }
+
 def rebind_unbacked(shape_env, n: torch.fx.Node, result):
     """
     Suppose we are retracing a pre-existing FX graph that previously had
@@ -276,18 +284,45 @@ def rebind_unbacked(shape_env, n: torch.fx.Node, result):
     has the old binding information) and the new result (which we can extract the
     new unbacked SymInts out from).
     """
-    if bindings := n.meta.get("unbacked_bindings"):
+    from torch._dynamo.tensor_version_op import _tensor_version
+
+    # Inputs never need rebinding
+    if n.op == "placeholder":
+        return
+
+    if bindings := resolve_unbacked_bindings(shape_env, n.meta.get("unbacked_bindings")):
         for raw_u0, path in bindings.items():
             u1 = pytree.key_get(result, path)
-            # We should never have bindings for raw bools; instead they should
-            # have been converted to ints via ConvertIntKey
-            assert type(u1) is not bool
-            if isinstance(u1, (int, float)):
-                raw_u1 = sympy.sympify(u1)
-            else:
-                raw_u1 = u1.node.expr
-            # TODO: replace with rename unbacked to
-            shape_env.defer_runtime_assert(sympy.Eq(raw_u0, raw_u1), "")
+            # tensor_version ops get specialized after AOTAutograd, it's OK,
+            # we don't actually want to do asserts on them.  This is all a bit
+            # questionable though
+            if isinstance(u1, int) and n.target is _tensor_version:
+                log.info("rebind_unbacked: discard _tensor_version %s %s -> %s", raw_u0, path, u1)
+                continue
+            raw_u1 = u1.node.expr
+            # Simplify SymBool binding
+            if (
+                isinstance(raw_u1, sympy.Piecewise) and
+                len(raw_u1.args) == 2 and
+                raw_u1.args[0][0] == 1 and
+                isinstance(eq := raw_u1.args[0][1], sympy.Eq) and
+                isinstance(new_raw_u1 := eq.lhs, sympy.Symbol) and
+                shape_env.var_to_range[new_raw_u1].issubset(ValueRanges(0, 1)) and
+                eq.rhs == 1 and
+                raw_u1.args[1] == (0, True)
+            ):
+                # This is what the pattern match above is testing
+                repacked = _sympy_cast_symbool_to_symint_guardless(sympy.Eq(new_raw_u1, 1))
+                assert repacked == raw_u1, f"{repacked} != {raw_u1}"
+                # Cancel the to_int(to_bool(x)). This is sound because x in
+                # [0, 1]
+                raw_u1 = new_raw_u1
+            assert isinstance(raw_u1, sympy.Symbol)
+            # The old and new could be the same if you improperly hit the memo
+            # while retracing.  Make sure you updated FakeTensorMode.epoch
+            assert raw_u0 != raw_u1, f"{raw_u0} possible memo disaster"
+            # Reuse the OLD symbol name
+            shape_env._rename_unbacked_to(raw_u1, raw_u0)
 
 def canonicalize_bool_expr(expr: SympyBoolean) -> SympyBoolean:
     r""" Canonicalize a boolean expression by transforming it into a lt / le
@@ -449,7 +484,19 @@ class CallMethodKey:
         return getattr(o, self.name)()
 
 
-def compute_unbacked_bindings(shape_env, example_value):
+@dataclass(frozen=True)
+class DivideByKey:
+    divisor: int
+
+    def __str__(self) -> str:
+        return f".__floordiv__({self.divisor})"
+
+    def get(self, o: int) -> int:
+        """Divide object by divisor"""
+        return o // self.divisor
+
+
+def compute_unbacked_bindings(shape_env, example_value, old_example_value=None):
     """
     After having run fake tensor propagation and producing example_value
     result, traverse example_value looking for freshly bound unbacked
@@ -459,9 +506,13 @@ def compute_unbacked_bindings(shape_env, example_value):
     function, you must call this on the tuple of tensor output, you
     cannot wait!)
     """
-    pending = set(shape_env.pending_fresh_unbacked_symbols)
+    if shape_env._ignore_fresh_unbacked_symbols_tls():
+        return
+    fs = shape_env.pending_fresh_unbacked_symbols
+    pending = set(fs)
     if pending:
-        shape_env.pending_fresh_unbacked_symbols.clear()
+        log.info("compute_unbacked_bindings %s", fs)
+        fs.clear()
 
         def free_unbacked_symbols_with_path(
             a, path
@@ -500,6 +551,22 @@ def compute_unbacked_bindings(shape_env, example_value):
             ):
                 r[s] = path
                 pending.remove(s)
+            # When an unbacked SymInt is perfectly divisible by an integer
+            # constant, we replace it with the integer constant to improve
+            # reasoning capabilities.  However, in synthetic examples, it is
+            # then possible that the factor never is explicitly allocated.
+            # Fortunately, we can compute it by division.
+            elif (
+                isinstance(a, torch.SymInt)
+                and isinstance(s := a.node._expr, sympy.Mul)
+                and len(s.args) == 2
+                and isinstance(lhs := s.args[0], sympy.Integer)
+                and isinstance(rhs := s.args[1], sympy.Symbol)
+                and rhs in pending
+            ):
+                # TODO: DivideByKey needs to test divisibility at runtime!
+                r[s] = path + (DivideByKey(int(lhs)),)
+                pending.remove(rhs)
             # The annoyance here arises from the fact that SymBool is
             # allocated by allocating a SymInt and then testing if it's equal
             # to one.  So you have a complicated binding site logic for this.
@@ -517,7 +584,32 @@ def compute_unbacked_bindings(shape_env, example_value):
             return r
 
         symbol_to_path = free_unbacked_symbols_with_path(example_value, ())
-        assert not pending, f"pending {pending} not in {example_value}"
+        assert not pending, (
+            f"pending {pending} not in {example_value} " +
+            (
+                repr((example_value.stride(), example_value.storage_offset()))
+                if isinstance(example_value, torch.Tensor)
+                else ""
+            )
+        )
+        # TODO: This is pretty fragile
+        # Normally, the equality test is supposed to be a no-op here, because
+        # you've already called rebind_unbacked first which takes all the old
+        # binding sites and discovers how they are newly bound.  But this does
+        # not always work.  For example, if the original FX node wasn't a
+        # binding site because you had a memo hit, but post translation you
+        # aren't a memo hit anymore, there's now a new binding site... but we
+        # know (because it's the same FX node) that the value is actually the
+        # same, they're just not obviously equal anymore.  So we just insert
+        # a runtime assert in this case.
+        #
+        # This is very fragile, because u0 == u1 assertion does not generate
+        # a replacement.  Here, I think it might be acceptable to do a
+        # replacement, so long as we replace the newer thing with the older
+        # thing.  Fix this if it becomes an issue.
+        if old_example_value is not None:
+            for keypath in symbol_to_path.values():
+                torch._check(pytree.key_get(old_example_value, keypath) == pytree.key_get(example_value, keypath))
         return symbol_to_path
 
 def definitely_true(a):
@@ -633,10 +725,6 @@ def guard_scalar(a):
         raise AssertionError(f"unrecognized scalar {a}")
 
 
-def _constrain_symbol_range(shape_env, s: sympy.Symbol, compiler_min: int, compiler_max: int):
-    shape_env.constrain_symbol_range(s, compiler_min, compiler_max)
-
-
 def _advise_is_size(a):
     """
     Don't use this directly; use torch._check_is_size instead.
@@ -678,7 +766,6 @@ def _advise_is_size(a):
     ):
         _constrain_range_for_size(a)
 
-@record_shapeenv_event()
 def _constrain_range_for_size(a, min: Optional[int] = None, max: Optional[int] = None):
     """
     This function is NOT INTENDED to be used by itself.
@@ -690,27 +777,10 @@ def _constrain_range_for_size(a, min: Optional[int] = None, max: Optional[int] =
     assert isinstance(a, SymInt), "can only constrain range for SymInt"
     assert isinstance(a.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
 
-    if min is None:
-        min = 0
-    if max is None:
-        max = sys.maxsize - 1
-
-    if max < min:
-        raise ValueError(
-            "Maximum value to constrain_as_size can't be less than the specified min value, "
-            "received min={min} and max={max}"
-        )
-
-    a.node.shape_env.constrain_symbol_range(
-        a.node.expr,
-        compiler_min=min,
-        compiler_max=max,
-    )
-    a.node.shape_env.size_like.add(a.node.expr)
+    a.node.shape_env._constrain_range_for_size(a.node.expr, min, max)
 
 
 # inclusive both ways
-@record_shapeenv_event()
 def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
     """
     Applies a constraint that the passed in SymInt must lie between min-max
@@ -752,54 +822,24 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
             raise ValueError(f"Invalid value {a} for range [{min}:{max}]")
         return
 
-    if isinstance(a.node.expr, sympy.Integer):
-        if not (min <= int(a.node.expr) <= max):
-            raise ValueRangeError(f"Invalid value {int(a.node.expr)} for range [{min}:{max}]")
-        return
-    assert isinstance(a.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
+    a.node.shape_env._constrain_range(a.node.expr, min, max)
 
-    # TODO: Shouldn't we install a guard if the symbol is backed?  Or is the
-    # semantics that this is an "unchecked" assert (but it this actually
-    # something useful?  Might be better to restrict only for unbacked
-    # SymInt).
-    _constrain_symbol_range(
-        a.node.shape_env,
-        a.node.expr,
-        compiler_min=min,
-        compiler_max=max,
-    )
-
-
-@record_shapeenv_event()
-def constrain_unify(a, b):
+def constrain_unify(a: torch.SymInt, b: torch.SymInt) -> None:
     """
     Given two SymInts, constrain them so that they must be equal.  NB:
     this will not work with SymInts that represent nontrivial expressions
     (yet!)
     """
-    # TODO: this does not install a deferred runtime assert yet
-
-    # TODO: Maybe dedupe this with _maybe_guard_rel?
     if not isinstance(a, SymInt):
         if not isinstance(b, SymInt):
             assert a == b
+            return
         else:
-            assert isinstance(b.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
             shape_env = b.node.shape_env
-            shape_env.replacements[b.node.expr] = sympy.Integer(a)
     else:
-        # TODO: Actually, we can support this as long as one of them is a symbol.
-        # NB: We can't actually do "unification" as our operators are not
-        # injective
-        assert isinstance(a.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
         shape_env = a.node.shape_env
-        if not isinstance(b, SymInt):
-            shape_env.replacements[a.node.expr] = sympy.Integer(b)
-        else:
-            assert a.node.shape_env is b.node.shape_env
-            assert isinstance(b.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
-            new_var = shape_env._find(a.node.expr)
-            shape_env.replacements[b.node.expr] = new_var
+
+    shape_env._constrain_unify(a, b)
 
 # Assume that a boolean is true for the purposes of subsequent symbolic
 # reasoning.  This will keep track of corresponding runtime checks to verify
@@ -1251,8 +1291,12 @@ def _eval_is_non_overlapping_and_dense(sizes, strides):
     return True
 
 
+def _sympy_cast_symbool_to_symint_guardless(x: sympy.Expr) -> sympy.Expr:
+    return sympy.Piecewise((1, x), (0, True))
+
+
 def cast_symbool_to_symint_guardless(symbool: torch.SymBool) -> torch.SymInt:
-    int_sym = sympy.Piecewise((1, symbool.node.expr), (0, True))
+    int_sym = _sympy_cast_symbool_to_symint_guardless(symbool.node.expr)
     return symbool.node.shape_env.create_symintnode(int_sym, hint=int(symbool.node.require_hint()) if has_hint(symbool) else None)
 
 SYMPY_INTERP = {
@@ -2136,6 +2180,7 @@ class ShapeEnv:
         # Maps from sympy ints to expressions representing them
         # Populated from equality guards (i.e. a.shape[0] == b.shape[0])
         self.replacements: Dict[sympy.Symbol, sympy.Expr] = {}
+        self.unbacked_renamings: Dict[sympy.Symbol, sympy.Symbol] = {}
         # Set holds a % b expressions that evaluate to 0.
         self.divisible: Set[sympy.Expr] = set()
         # Set that holds "size-like" symbols.  When we perform
@@ -2356,6 +2401,117 @@ class ShapeEnv:
             yield
         finally:
             self.is_recording = False
+
+    # Unlike set_replacement, this records a shapeenv event
+    @record_shapeenv_event()
+    def _rename_unbacked_to(self, orig_s: sympy.Symbol, new_s: sympy.Symbol):
+        assert isinstance(orig_s, sympy.Symbol), orig_s
+        assert isinstance(new_s, sympy.Symbol), new_s
+        assert free_unbacked_symbols(new_s), new_s
+        assert free_unbacked_symbols(orig_s), orig_s
+        if self._ignore_fresh_unbacked_symbols_tls():
+            return
+        dest = self.replacements.get(orig_s)
+        assert not free_unbacked_symbols(dest), f"{orig_s} -> {dest}"
+        self._set_replacement(orig_s, new_s, "rename_unbacked_to")
+        self.unbacked_renamings[orig_s] = new_s
+        if dest is not None:
+            self._set_replacement(new_s, dest, "rename_unbacked_to_dest")
+
+    @record_shapeenv_event()
+    def _constrain_range_for_size(self, a: sympy.Symbol, min: Optional[int] = None, max: Optional[int] = None):
+        if min is None:
+            min = 0
+        if max is None:
+            max = sys.maxsize - 1
+
+        if max < min:
+            raise ValueError(
+                "Maximum value to constrain_as_size can't be less than the specified min value, "
+                "received min={min} and max={max}"
+            )
+
+        self.constrain_symbol_range(
+            a,
+            compiler_min=min,
+            compiler_max=max,
+        )
+        self.size_like.add(a)
+
+    @record_shapeenv_event()
+    def _constrain_range(self, a: sympy.Expr, min: int, max: int):
+        if isinstance(a, sympy.Integer):
+            if not (min <= int(a) <= max):
+                raise ValueRangeError(f"Invalid value {int(a)} for range [{min}:{max}]")
+            return
+        assert isinstance(a, sympy.Symbol), "constraining non-Symbols NYI"
+
+        # TODO: Shouldn't we install a guard if the symbol is backed?  Or is the
+        # semantics that this is an "unchecked" assert (but it this actually
+        # something useful?  Might be better to restrict only for unbacked
+        # SymInt).
+        self.constrain_symbol_range(
+            a,
+            compiler_min=min,
+            compiler_max=max,
+        )
+
+    @record_shapeenv_event()
+    def _constrain_unify(self, a, b):
+        """
+        Given two SymInts, constrain them so that they must be equal.  NB:
+        this will not work with SymInts that represent nontrivial expressions
+        (yet!)
+        """
+        # TODO: this does not install a deferred runtime assert yet
+
+        # TODO: Maybe dedupe this with _maybe_guard_rel?
+        # Update Feb 2024: this is extra important to do, this doesn't handle
+        # unbacked replacements properly nor does it generate deferred runtime
+        # asserts
+        if not isinstance(a, SymInt):
+            if not isinstance(b, SymInt):
+                assert a == b
+            else:
+                assert isinstance(b.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
+                assert b.node.shape_env is self
+                self.replacements[b.node.expr] = sympy.Integer(a)
+        else:
+            # TODO: Actually, we can support this as long as one of them is a symbol.
+            # NB: We can't actually do "unification" as our operators are not
+            # injective
+            assert isinstance(a.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
+            assert a.node.shape_env is self
+            if not isinstance(b, SymInt):
+                self.replacements[a.node.expr] = sympy.Integer(b)
+            else:
+                assert a.node.shape_env is b.node.shape_env
+                assert isinstance(b.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
+                new_var = self._find(a.node.expr)
+                self.replacements[b.node.expr] = new_var
+
+    def _ignore_fresh_unbacked_symbols_tls(self):
+        return getattr(TLS, "ignore_fresh_unbacked_symbols", False)
+
+    @record_shapeenv_event()
+    def _ignore_fresh_unbacked_symbols_enter(self):
+        TLS.ignore_fresh_unbacked_symbols = True
+
+    @record_shapeenv_event()
+    def _ignore_fresh_unbacked_symbols_exit(self):
+        TLS.ignore_fresh_unbacked_symbols = False
+
+    @contextmanager
+    def ignore_fresh_unbacked_symbols(self):
+        """
+        Indicates that the newly allocated unbacked SymInts are being
+        discarded
+        """
+        self._ignore_fresh_unbacked_symbols_enter()
+        try:
+            yield
+        finally:
+            self._ignore_fresh_unbacked_symbols_exit()
 
     @record_shapeenv_event()
     def freeze(self):
@@ -2784,7 +2940,8 @@ class ShapeEnv:
         """
         symbol: sympy.Symbol = sympy.Symbol(f"f{next(self.unbacked_symfloat_counter)}")
         self.counter["create_unbacked_symbol"] += 1
-        self.pending_fresh_unbacked_symbols.append(symbol)
+        if not self._ignore_fresh_unbacked_symbols_tls():
+            self.pending_fresh_unbacked_symbols.append(symbol)
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         vr = self.var_to_range[symbol] = ValueRanges.unknown()
 
@@ -2800,7 +2957,8 @@ class ShapeEnv:
         """Create a symbolic integer without a hint value
         """
         symbol: sympy.Symbol = sympy.Symbol(f"u{next(self.unbacked_symint_counter)}", integer=True)
-        self.pending_fresh_unbacked_symbols.append(symbol)
+        if not self._ignore_fresh_unbacked_symbols_tls():
+            self.pending_fresh_unbacked_symbols.append(symbol)
         self.counter["create_unbacked_symbol"] += 1
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         vr = self.var_to_range[symbol] = self._default_unspecified_value_range()
@@ -2823,7 +2981,8 @@ class ShapeEnv:
         """Create a symbolic boolean without a hint value
         """
         symbol: sympy.Symbol = sympy.Symbol(f"u{next(self.unbacked_symint_counter)}", integer=True)
-        self.pending_fresh_unbacked_symbols.append(symbol)
+        if not self._ignore_fresh_unbacked_symbols_tls():
+            self.pending_fresh_unbacked_symbols.append(symbol)
         self.counter["create_unbacked_symbol"] += 1
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         vr = self.var_to_range[symbol] = ValueRanges(0, 1)
@@ -4197,31 +4356,32 @@ class ShapeEnv:
                 floor_div_atoms = lhs.atoms(FloorDiv).union(rhs.atoms(FloorDiv))
                 if len(floor_div_atoms) > 0 and any(a.divisor != 1 for a in floor_div_atoms):
                     raise NotImplementedError
-                # short-circuit when no solving is needed
-
-                if isinstance(lhs, sympy.Symbol) and free_unbacked_symbols(lhs):
+                # Never replace unbacked symbols with other unbacked symbols.
+                # This is error prone because you can cause references to
+                # unbacked symbols to time travel backwards.  E.g.,
+                #
+                # u1 = x.item()
+                # ... use of u1 ...
+                # u2 = y.item()
+                # u3 = z.item()
+                # torch._check(u1 == u2 + u3)
+                #
+                # If you replace u1 with u2 + u3, then the use of u1 now
+                # references u2 and u3 prior to them actually being bound at
+                # runtime.  It's pretty inconvenient to setup control
+                # dependencies for substitutions, so ban it entirely.
+                if isinstance(lhs, sympy.Symbol) and free_unbacked_symbols(lhs) and not free_unbacked_symbols(rhs):
+                    # short-circuit when no solving is needed
                     self._set_replacement(lhs, self._find(rhs), "trivial_lhs")
-                elif isinstance(rhs, sympy.Symbol) and free_unbacked_symbols(rhs):
+                elif isinstance(rhs, sympy.Symbol) and free_unbacked_symbols(rhs) and not free_unbacked_symbols(lhs):
                     self._set_replacement(rhs, self._find(lhs), "trivial_rhs")
                 else:
                     r = try_solve(expr, free[0], floordiv_inequality=False)
                     if r is not None and all(t.is_integer for t in sympy.preorder_traversal(r[1])):
                         new_var = self._find(r[1])
-                        ok = False
-                        if self.is_unbacked_symint(free[0]):
-                            # If you have i0 + i1 + i2 = s0, don't substitute i2 =
-                            # s0 - i0 - i1.  Arguably this should be OK but the
-                            # runtime assert machinery is very delicate right now
-                            # so this causes things to fail e.g.,
-                            # test_split_unbacked_sizes
-                            ok = len(free_unbacked_symbols(new_var)) <= 1
-                            msg = "solve_unbacked"
-                        else:
-                            # Never substitute backed with unbacked
-                            ok = len(free_unbacked_symbols(new_var)) == 0
-                            msg = "solve_backed"
+                        ok = len(free_unbacked_symbols(new_var)) == 0
                         if ok:
-                            self._set_replacement(cast(sympy.Symbol, free[0]), new_var, msg)
+                            self._set_replacement(cast(sympy.Symbol, free[0]), new_var, "solve")
             except NotImplementedError:
                 pass
         if expr.has(Mod):
@@ -4697,3 +4857,14 @@ def _is_int(expr):
 # WARNING: This is legacy, DO NOT USE
 def _is_dim_dynamic(t, d):
     return hasattr(t, "_dynamo_dynamic_indices") and d in t._dynamo_dynamic_indices
+
+class PropagateUnbackedSymInts(torch.fx.Interpreter):
+    def run_node(self, n: torch.fx.Node):
+        """
+        Run an FX node, propagating unbacked Symbol bindings to the new fake tensor
+        """
+        from torch._guards import detect_fake_mode
+
+        result = super().run_node(n)
+        rebind_unbacked(detect_fake_mode().shape_env, n, result)
+        return result

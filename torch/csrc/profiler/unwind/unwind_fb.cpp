@@ -6,9 +6,9 @@
 #include <torch/csrc/profiler/unwind/unwind.h>
 
 namespace torch {
-namespace torch::unwind {
+namespace unwind {
 
-std::vector<Frame> symbolize(const std::vector<void*>& frames, Mode mode) {
+std::vector<Frame> symbolize(const std::vector<void*>& frames) {
   static std::mutex symbolize_mutex;
   static llvm::symbolize::LLVMSymbolizer symbolizer;
   static ska::flat_hash_map<void*, Frame> frame_map_;
@@ -38,7 +38,7 @@ std::vector<Frame> symbolize(const std::vector<void*>& frames, Mode mode) {
   return results;
 }
 
-} // namespace torch::unwind
+} // namespace unwind
 } // namespace torch
 
 #endif
