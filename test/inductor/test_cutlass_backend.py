@@ -520,7 +520,7 @@ class TestCutlassBackend(TestCase):
             Y = mm(a, b)
             torch.testing.assert_close(Y_compiled, Y)
 
-    @unittest.skipIf(not SM75OrLater, "need sm_75")
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_cutlass_backend_op_denylist(
@@ -568,7 +568,7 @@ class TestCutlassBackend(TestCase):
                             cuda_template_count += 1
                     assert cuda_template_count > 0, "No CUDATemplateCaller choices"
 
-    @unittest.skipIf(not SM75OrLater, "need sm_75")
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_cutlass_backend_op_allowlist(

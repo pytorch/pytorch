@@ -190,6 +190,7 @@ class CUDATemplateKernel(CUDAKernel):
         return DTYPE_TO_CPP.get(node.get_layout().dtype)
 
     def cutlass_dtype(self, node: IRNode, default_dtype="void") -> Optional[str]:
+        # Helper method, called into from CUTLASSGemmTemplate
         if node is None:
             return default_dtype
         from torch._inductor.codegen.cuda.cuda_template import CUTLASSTemplate
@@ -197,6 +198,7 @@ class CUDATemplateKernel(CUDAKernel):
         return CUTLASSTemplate._DTYPE_TO_CUTLASS[node.get_layout().dtype]
 
     def max_valid_index(self, node: IRNode, default=-1):
+        # Helper method, called into from CUTLASSGemmTemplate
         if node is None:
             return default
         max_valid_offset = 0

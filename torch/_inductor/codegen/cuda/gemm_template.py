@@ -41,8 +41,6 @@ extern "C" {
   using coord_t = cutlass::gemm::GemmCoord::Index;
   static cutlass::KernelHardwareInfo hw_info;
   if (hw_info.sm_count == 0) {
-    // @TODO kadeng: Add support for Multi-GPU machines with heterogeneous SM counts
-    // for now we just pick the SM count of the first GPU
     hw_info.sm_count = cutlass::KernelHardwareInfo::query_device_multiprocessor_count(0);
     CUTLASS_TRACE_HOST("Query result for SM count per device: " << hw_info.sm_count);
   }
@@ -624,7 +622,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         # we benchmarked is not the same as the op we render,
         # but there is no simple way to fix this in the autotuner, since that would
         # potentially disable other optimizations.
-        # @TODO kadeng: This is a workaround. Find a better way to solve the issue of dealing with FlexibleLayout during autotuning.
         a_layout = X.get_layout()
         b_layout = W.get_layout()
         c_layout = Bias.get_layout() if Bias is not None else None
