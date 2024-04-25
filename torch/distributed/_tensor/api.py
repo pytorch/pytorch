@@ -592,25 +592,42 @@ def distribute_tensor(
             f"`placements` must have the same length as `device_mesh.ndim`! "
             f"Found placements length: {len(placements)}, and device_mesh.ndim: {device_mesh.ndim}."
         )
+
+    parent_mesh: Optional[DeviceMesh] = None
     if isinstance(tensor, DTensor):
-        # if the tensor is already a DTensor, we need to check:
-        # 1. if the we can further shard this DTensor if the two device mesh belong to
-        #   the same parenet mesh and further sharding is possible.
-        # 2. check if device mesh and placements are the same
-        if tensor.device_mesh != device_mesh:
+        if tensor.device_mesh == device_mesh:
+            if tensor.placements != tuple(placements):
+                raise ValueError(
+                    f"Cannot distribute a DTensor with placements {tensor.placements} "
+                    f"to a different placements {placements}. do you want to call "
+                    f"`redistribute` instead?"
+                )
+            return tensor
+
+        if (
+            parent_mesh := _mesh_resources.get_parent_mesh(tensor.device_mesh)
+        ) == _mesh_resources.get_parent_mesh(device_mesh) and parent_mesh is not None:
+            if parent_mesh.ndim != 2:
+                raise ValueError(
+                    "Currently, distribute_tensor only supports 2D parent device mesh."
+                )
+            if (
+                _mesh_resources.get_parent_mesh_dim(tensor.device_mesh) == 0
+                and list(tensor.placements())[0].is_shard()
+                and placements[0].is_shard()
+            ):
+                raise ValueError(
+                    "The DTensor is already sharded on mesh dimension 0."
+                    "We could not shard on the other mesh dimensions."
+                )
+            local_tensor = tensor._local_tensor
+        else:
             raise ValueError(
                 f"Cannot distribute a DTensor with device mesh {tensor.device_mesh} "
-                f"to a different device mesh {device_mesh}."
+                f"to a different device mesh {device_mesh} without a common parent mesh."
             )
-        if tensor.placements != tuple(placements):
-            raise ValueError(
-                f"Cannot distribute a DTensor with placements {tensor.placements} "
-                f"to a different placements {placements}. do you want to call "
-                f"`redistribute` instead?"
-            )
-        return tensor
-
-    local_tensor = tensor
+    else:
+        local_tensor = tensor
 
     # distribute the tensor according to the placements.
     placements = list(placements)
@@ -630,6 +647,10 @@ def distribute_tensor(
                 f"Trying to distribute tensor with unsupported placements {placement} on device mesh dimension {idx}!"
             )
     placements = tuple(placements)
+
+    if parent_mesh:
+        device_mesh = parent_mesh
+        placements = list(placements) + list(tensor.placements)
 
     assert local_tensor is not None, "distributing a tensor should not be None"
     # detach the local tensor passed to DTensor since after the construction

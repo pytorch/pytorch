@@ -825,6 +825,72 @@ class TestDTensorPlacementTypes(DTensorTestBase):
                 ]
                 assert_array_equal(expected_is_tensor_empty, is_tensor_empty)
 
+    def _check_dtensor(
+        self, dtensor, mesh, placements, expected_size, expected_start_value
+    ):
+        local_tensor = dtensor._local_tensor
+        self.assertEqual(local_tensor.size(), expected_size)
+        self.assertEqual(mesh, dtensor.device_mesh)
+        self.assertEqual(placements, dtensor.placements)
+        self.assertEqual(
+            local_tensor,
+            torch.tensor(
+                [1.0 * (expected_start_value + i) for i in range(expected_size[0])],
+                device=self.device_type,
+            ),
+        )
+
+    @with_comms
+    def test_distribute_dtensor_fsdp_tp(self) -> None:
+        tensor = torch.tensor([1.0 * i for i in range(16)], device=self.device_type)
+        mesh = init_device_mesh(
+            self.device_type,
+            mesh_shape=(2, self.world_size // 2),
+            mesh_dim_names=("dp", "tp"),
+        )
+        # Mimic FSDP + TP
+        dtensor_tp = distribute_tensor(tensor, mesh["tp"], placements=[Shard(0)])
+        dtensor_dp_tp = distribute_tensor(
+            dtensor_tp,
+            mesh["dp"],
+            placements=[Shard(0)],
+        )
+        self._check_dtensor(
+            dtensor_dp_tp,
+            mesh,
+            [Shard(0), Shard(0)],
+            torch.Size((2,)),
+            (self.rank % 4 * 4 + 2 * (self.rank // 4)),
+        )
+
+    @with_comms
+    def test_distribute_dtensor_hsdp(self) -> None:
+        tensor = torch.tensor([1.0 * i for i in range(16)], device=self.device_type)
+        mesh = init_device_mesh(
+            self.device_type,
+            mesh_shape=(2, self.world_size // 2),
+            mesh_dim_names=("dp_replicate", "dp_shard"),
+        )
+        # Mimic HSDP
+        dtensor_tp = distribute_tensor(
+            tensor,
+            mesh["dp_shard"],
+            placements=[Shard(0)],
+        )
+        dtensor_dp_tp = distribute_tensor(
+            dtensor_tp,
+            mesh["dp_replicate"],
+            placements=[Replicate()],
+        )
+        self._check_dtensor(
+            dtensor_dp_tp,
+            mesh,
+            [Replicate(), Shard(0)],
+            torch.Size((4,)),
+            self.rank % 4 * 4,
+        )
+        # TODO: test HSDP + TP once nD submesh is supported
+
 
 if __name__ == "__main__":
     run_tests()
