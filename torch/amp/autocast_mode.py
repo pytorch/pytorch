@@ -6,7 +6,11 @@ from typing import Any, Optional
 import torch
 from torch.types import _dtype
 
-__all__ = ["autocast_decorator", "autocast"]
+__all__ = ["autocast_decorator", "autocast", "is_autocast_available"]
+
+
+def is_autocast_available(device_type: str):
+    return torch._C._is_autocast_available(device_type)
 
 
 def autocast_decorator(autocast_instance, func):
@@ -199,7 +203,7 @@ class autocast:
             assert dtype is not None
             return
         self.device = device_type
-        if not torch._C._is_autocast_available(self.device):
+        if not is_autocast_available(self.device):
             raise RuntimeError(
                 f"User specified an unsupported autocast device_type '{self.device}'"
             )
