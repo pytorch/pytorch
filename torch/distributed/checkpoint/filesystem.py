@@ -692,3 +692,10 @@ class FileSystemWriter(_FileSystemWriter, BlockingAsyncStager):
             per_thread_copy_ahead=per_thread_copy_ahead,
             cache_staged_state_dict=cache_staged_state_dict,
         )
+
+    def stage(self, state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
+        """Override of AsyncStager.stage"""
+        # in the async case, the state dict is already on CPU, so maintaining this
+        # buffer makes no sense
+        self.per_thread_copy_ahead = 0
+        return super().stage(state_dict)
