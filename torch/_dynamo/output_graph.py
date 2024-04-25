@@ -400,6 +400,8 @@ class OutputGraph:
             self.install_builtins_dict_in_fglobals()
         )
 
+        self.guard_on_key_order: Set[str] = set()
+
     def install_builtins_dict_in_fglobals(self):
         # f_globals["__builtins__"] can be a dict or a module. This is an
         # implemenation detail -
@@ -741,7 +743,7 @@ class OutputGraph:
         *names,
         **options,
     ):
-        if is_dynamic_nn_module(target):
+        if is_dynamic_nn_module(target, self.root_tx.export):
             return variables.UnspecializedNNModuleVariable(target, **options)
 
         options = dict(options)

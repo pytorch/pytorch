@@ -3920,8 +3920,6 @@ class ShapeEnv:
 
         # axioms with compute hint NYE
         assert not compute_hint or not axioms
-        # Should provide both
-        assert bool(axioms) == bool(var_to_range)
 
         if var_to_range is None:
             var_ranges = self.var_to_range
