@@ -229,11 +229,12 @@ def async_save(
         # buffer makes no sense
         storage_writer.per_thread_copy_ahead = 0
 
+    state_dict = _stateful_to_state_dict(state_dict)
     if isinstance(storage_writer, AsyncStager):
         staged_state_dict = storage_writer.stage(state_dict)
     else:  # provides bwc for storage_writers not implementing AsyncStager
         staged_state_dict = _offload_state_dict_to_cpu(
-            _stateful_to_state_dict(state_dict)
+            state_dict
         )
 
     executor = ThreadPoolExecutor(max_workers=1)
