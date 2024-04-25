@@ -4,7 +4,6 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/MemoryOverlap.h>
-#include <iostream>
 #include <ATen/native/ScatterGatherChecks.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/TensorIterator.h>
