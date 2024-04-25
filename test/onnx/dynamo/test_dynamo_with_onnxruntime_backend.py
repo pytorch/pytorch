@@ -54,6 +54,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.assertEqual(onnxruntime._get_ort_device_type("cuda"), onnxruntime.ORTC.OrtDevice.cuda())
         self.assertEqual(onnxruntime._get_ort_device_type("cpu"), onnxruntime.ORTC.OrtDevice.cpu())
         self.assertEqual(onnxruntime._get_ort_device_type("maia"), onnxruntime.ORTC.OrtDevice.npu())
+
     def test_torch_compile_backend_registration(self):
         self.assertIn("onnxrt", torch._dynamo.backends.registry.list_backends())
         backend = torch._dynamo.backends.registry.lookup_backend("onnxrt")
