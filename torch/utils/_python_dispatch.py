@@ -104,25 +104,24 @@ def _get_current_dispatch_mode():
     return None
 
 
-def _detect_infra_mode(key):
-    assert key in [torch._C._TorchDispatchModeKey.FUNCTIONAL, torch._C._TorchDispatchModeKey.PROXY]
+def _detect_functional_mode():
     from torch._ops import _get_dispatch_mode_pre_dispatch
 
-    pre_dispatch_mode = _get_dispatch_mode_pre_dispatch(
-        key
+    pre_dispatch_functional_mode = _get_dispatch_mode_pre_dispatch(
+        torch._C._TorchDispatchModeKey.FUNCTIONAL
     )
-    post_dispatch_mode = torch._C._get_dispatch_mode(
-        key
-    )
-
-    assert (pre_dispatch_mode is None) or (
-        post_dispatch_mode is None
+    post_dispatch_functional_mode = torch._C._get_dispatch_mode(
+        torch._C._TorchDispatchModeKey.FUNCTIONAL
     )
 
-    if pre_dispatch_mode is None:
-        return post_dispatch_mode
+    assert (pre_dispatch_functional_mode is None) or (
+        post_dispatch_functional_mode is None
+    )
 
-    return pre_dispatch_mode
+    if pre_dispatch_functional_mode is None:
+        return post_dispatch_functional_mode
+
+    return pre_dispatch_functional_mode
 
 
 def _unset_infra_mode(key):

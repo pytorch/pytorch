@@ -368,6 +368,11 @@ struct SchemaParser {
 std::variant<OperatorName, FunctionSchema> parseSchemaOrName(
     const std::string& schemaOrName,
     bool allow_typevars) {
+  // We're ignoring aten and prim for BC reasons
+  if (schemaOrName.rfind("aten::", 0) == 0 ||
+      schemaOrName.rfind("prim::", 0) == 0) {
+    allow_typevars = true;
+  }
   return SchemaParser(schemaOrName, allow_typevars)
       .parseExactlyOneDeclaration();
 }

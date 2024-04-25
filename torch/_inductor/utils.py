@@ -42,7 +42,6 @@ from typing import (
 from unittest import mock
 
 import sympy
-from filelock import FileLock
 from typing_extensions import Concatenate, ParamSpec
 
 import torch
@@ -1437,6 +1436,8 @@ def aoti_eager_cache_dir(namespace: str, device: str):
 
 
 def aoti_eager_op_conf_lock(op_func_name_with_overload: str):
+    from filelock import FileLock
+
     # Avoid circular import
     from torch._inductor.codecache import get_lock_dir, LOCK_TIMEOUT
 
