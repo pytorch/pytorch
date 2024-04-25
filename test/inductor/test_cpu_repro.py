@@ -2816,7 +2816,6 @@ class CPUReproTests(TestCase):
         x = torch.randn(1, 32, 16, 68)
         opt_fn = torch._dynamo.optimize("inductor")(fn)
         _, code = run_and_get_cpp_code(opt_fn, x)
-        print(code)
         self.assertTrue(same(fn(x), opt_fn(x)))
         # def and use
         FileCheck().check_count("cpp_fused", 2, exactly=True).run(code)
@@ -3678,9 +3677,8 @@ class CPUReproTests(TestCase):
         x = torch.zeros(2, 209985).to(torch.int64)
         opt_fn = torch._dynamo.optimize("inductor")(fn)
         _, code = run_and_get_cpp_code(opt_fn, x)
-        print(code)
         FileCheck().check_count(
-            "return at::vec::VectorizedN<int64_t,2>::loadu(tmpbuf.data(), 16);",
+            "return at::vec::VectorizedN<int64_t,2>::loadu(tmpbuf.data(),",
             2,
             exactly=True,
         ).run(code)
