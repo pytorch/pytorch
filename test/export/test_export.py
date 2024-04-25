@@ -1902,6 +1902,50 @@ class TestExport(TestCase):
             ):
                 _ = export(mod, inp, strict=True)
 
+    def test_device_to_static(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return x.to("cpu")
+
+        ep = export(Module(), (torch.tensor(1, device="cpu"),))
+        ops = []
+        for node in ep.graph.nodes:
+            if node.op == "call_function":
+                ops.append(node.target)
+        self.assertGreater(len(ops), 0)
+        for op in ops:
+            self.assertIn(op, (torch.ops.aten._to_copy.default,))
+
+    def test_device_to_dynamic(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return x.to("cpu")
+
+        ep = export(
+            Module(),
+            (torch.tensor([1, 2], device="cpu"),),
+            dynamic_shapes={"x": {0: Dim("i")}},
+        )
+        ops = []
+        for node in ep.graph.nodes:
+            if node.op == "call_function":
+                ops.append(node.target)
+        self.assertGreater(len(ops), 0)
+        for op in ops:
+            self.assertIn(op, (torch.ops.aten._to_copy.default,))
+
+    def test_device_to_mutation(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                y = x.to("cpu")
+                y.add_(1)
+                return y, x
+
+        with self.assertRaisesRegex(
+            RuntimeError, "cannot mutate tensors with frozen storage"
+        ):
+            export(Module(), (torch.tensor(1, device="cpu"),))
+
     def test_module(self):
         class MyLinear(torch.nn.Module):
             def __init__(self):
