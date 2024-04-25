@@ -2172,7 +2172,14 @@ class Scheduler:
             read_name = self.mutation_renames.get(read.name, read.name)
             write_name = self.mutation_renames.get(write.name, write.name)
             if (
-                isinstance(read, (MemoryDep, StarDep))
+                isinstance(read, MemoryDep)
+                and isinstance(write, MemoryDep)
+                and read.mode == write.mode
+                and write.mode is not None
+            ):
+                return True
+            if (
+                isinstance(read, StarDep)
                 and isinstance(write, MemoryDep)
                 and read.mode == write.mode
                 and write.mode is not None
