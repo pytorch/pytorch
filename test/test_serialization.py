@@ -16,13 +16,14 @@ import shutil
 import pathlib
 import platform
 from copy import deepcopy
+from mmap import MAP_SHARED, MAP_PRIVATE
 from itertools import product
 
 from torch._utils_internal import get_file_path_2
 from torch._utils import _rebuild_tensor
 from torch.utils._import_utils import import_dill
 from torch.serialization import check_module_version_greater_or_equal, get_default_load_endianness, \
-    set_default_load_endianness, LoadEndianness, MmapVisibility
+    set_default_load_endianness, LoadEndianness
 
 from torch.testing._internal.common_utils import (
     IS_FILESYSTEM_UTF8_ENCODING, TemporaryDirectoryName,
@@ -3954,7 +3955,7 @@ class TestSerialization(TestCase, SerializationMixin):
             for v in result.values():
                 self.assertTrue(v.is_cuda)
 
-    def test_serialization_mmap_loading_visibility(self):
+    def test_serialization_mmap_loading_options(self):
         m = torch.nn.Linear(3, 5)
         sd = m.state_dict()
         with tempfile.NamedTemporaryFile() as f:
@@ -3965,7 +3966,7 @@ class TestSerialization(TestCase, SerializationMixin):
             sd_loaded2 = torch.load(f.name, mmap=True)
             self.assertEqual(sd_loaded2['weight'], sd['weight'])
             # with MmapVisibility.MAP_SHARED, should be able to modify file
-            torch.serialization.set_default_mmap_visibility(MmapVisibility.MAP_SHARED)
+            torch.serialization.set_default_mmap_options(MAP_SHARED)
             try:
                 sd_loaded = torch.load(f.name, mmap=True)
                 sd_loaded['weight'][0][0] = 0
@@ -3974,7 +3975,7 @@ class TestSerialization(TestCase, SerializationMixin):
                 self.assertEqual(sd_loaded2['weight'][0][0].item(), 0)
                 self.assertEqual(sd_loaded2['weight'], sd_loaded['weight'])
             finally:
-                torch.serialization.set_default_mmap_visibility(MmapVisibility.MAP_PRIVATE)
+                torch.serialization.set_default_mmap_options(MAP_PRIVATE)
 
     @parametrize('dtype', (torch.float8_e5m2, torch.float8_e4m3fn, torch.complex32))
     @parametrize('weights_only', (True, False))
