@@ -408,6 +408,7 @@ class FunctionalTensorMode(TorchDispatchMode):
         # All we want to do here is re-use the existing C++ functionalization logic.
         # This requires swizzling our TLS dispatch keys so that the Functionalize key is active.
         with torch._C._ForceDispatchKeyGuard(include_to_set, exclude_to_set):
+            print(func)
             try:
                 # By default for python functionalization (for AOTAutograd), we reapply views.
                 old_apply_views = torch._functionalize_enable_reapply_views(True)  # type: ignore[attr-defined]
