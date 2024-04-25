@@ -403,6 +403,7 @@ class Tensor(torch._C.TensorBase):
             )
             return (torch._utils._rebuild_wrapper_subclass, arg_wrapper_subclass)
         else:
+            print("else" * 100)
             v3_dtypes = [
                 torch.float8_e5m2,
                 torch.float8_e4m3fn,
@@ -442,6 +443,7 @@ class Tensor(torch._C.TensorBase):
             metadata = torch._utils.get_tensor_metadata(self)
             if metadata:
                 args = args + (metadata,)  # type: ignore[assignment]
+            print("metadata", metadata)
 
             return (rebuild_func, args)
 

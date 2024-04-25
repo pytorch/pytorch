@@ -792,6 +792,10 @@ def _save(obj, zip_file, pickle_module, pickle_protocol, _disable_byteorder_reco
         # see
         # https://docs.python.org/2/library/pickle.html#pickling-and-unpickling-external-objects
         # https://github.com/python/cpython/blob/master/Lib/pickle.py#L527-L537
+        try:
+            print("obj=", obj)
+        except RuntimeError as e:
+            print("obj=", "storage")
         if isinstance(obj, torch.storage.TypedStorage) or torch.is_storage(obj):
 
             if isinstance(obj, torch.storage.TypedStorage):
