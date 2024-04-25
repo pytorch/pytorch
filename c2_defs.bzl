@@ -365,10 +365,6 @@ def c2_cxx_library(fbobjc_compiler_flags = [], **kwargs):
     args["fbobjc_compiler_flags"] = args.pop("fbobjc_compiler_flags", []) + fbobjc_compiler_flags
 
     fb_xplat_cxx_library(
-        labels = [
-            "supermodule:android/default/caffe2",
-            "supermodule:ios/default/public.caffe2",
-        ],
         feature = Msgr_Mobile_ProductInfra,
         **args
     )
