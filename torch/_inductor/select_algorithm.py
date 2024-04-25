@@ -941,7 +941,7 @@ class AlgorithmSelectorCache(PersistentCache):
         choices = [choice for choice in choices if choice is not None]
 
         if len(choices) == 0:
-            raise RuntimeError(
+            raise NoValidChoicesError(
                 "No choices to select, please consider adding ATEN into max_autotune_gemm_backends "
                 "config (defined in torch/_inductor/config.py) to allow at least one choice. "
             )
@@ -1106,7 +1106,18 @@ class AlgorithmSelectorCache(PersistentCache):
         if timings == {} or choices[0] not in timings:
             return choices[0].output_node()
 
-        selected_choice = builtins.min(timings, key=timings.__getitem__).output_node()
+        selected_key = builtins.min(timings, key=timings.__getitem__)
+        selected_time = timings[selected_key]
+        if (
+            (not isinstance(selected_time, float))
+            or (selected_time < 0.0)
+            or (not math.isfinite(selected_time))
+            or math.isnan(selected_time)
+        ):
+            raise NoValidChoicesError()
+        if return_selection_result_details:
+            return selected_key, timings
+        selected_choice = selected_key.output_node()
         log.debug("selected choice: %s", str(selected_choice))
         return selected_choice
 
@@ -1186,7 +1197,7 @@ class AlgorithmSelectorCache(PersistentCache):
             else:
                 # triton templates want the base pointer for sliced tensors
                 result = choice.benchmark(*example_inputs, out=out)
-            if VERIFY:
+            if VERIFY and expected is not None:
                 torch.testing.assert_close(out_extern, expected, **VERIFY)
             torch.cuda.synchronize()  # shake out any CUDA errors
             return result
@@ -1201,22 +1212,23 @@ class AlgorithmSelectorCache(PersistentCache):
                 try:
                     timing = benchmark_choice_in_current_process(choice, *inputs)
                 except CUDACompileError as e:
-                    log.warning(
-                        "CUDA compilation error: \n%s. \nIgnore this choice.", str(e)
+                    log.error(
+                        "CUDA compilation error during autotuning: \n%s. \nIgnoring this choice.",
+                        str(e),
                     )
                     timing = float("inf")
                 except RuntimeError as e:
                     msg = str(e)
                     if "invalid argument" in msg:
                         msg += "\n\nThis may mean this GPU is too small for max_autotune mode.\n\n"
-                        log.warning(msg)
-                        timing = float("inf")
                     else:
                         if "illegal memory access" in msg:
                             msg += "\n\nEither error in template or triton bug.\n"
-                        raise ErrorFromChoice(
-                            msg, choice, debug_str(example_inputs, out)
-                        ) from e
+                    log.error(
+                        "Runtime error during autotuning: \n%s. \nIgnoring this choice.",
+                        msg,
+                    )
+                    timing = float("inf")
                 except OutOfResources as e:
                     log.warning(e)
                     timing = float("inf")
