@@ -23,7 +23,6 @@ from torch.optim import (
     Adamax,
     AdamW,
     ASGD,
-    LBFGS,
     NAdam,
     RAdam,
     RMSprop,
@@ -41,6 +40,8 @@ from torch.testing._internal.common_optimizers import (
     optim_db,
     optims,
 )
+
+from torch.testing._internal.common_utils import parametrize
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA, has_triton
 from torch.testing._internal.triton_utils import requires_cuda
 
@@ -343,11 +344,16 @@ def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
 class CompiledOptimizerParityTests(TestCase):
     @skipCUDAIf(not has_triton(), "torch.compile with cuda requires triton")
     @optims(optim_db, dtypes=[torch.float32])
-    def test_correctness(self, device, dtype, optim_info):
+    @parametrize("use_closure", [True, False])
+    def test_correctness(self, device, dtype, optim_info, use_closure):
         optim_cls = optim_info.optim_cls
         all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
             device, dtype, optim_info, skip=("differentiable",)
         )
+
+        if optim_info.step_requires_closure and not use_closure:
+            return
+
         for optim_input in all_optim_inputs:
             kwargs = optim_input.kwargs
 
@@ -370,13 +376,16 @@ class CompiledOptimizerParityTests(TestCase):
             opt_compiled = optim_cls(model_compiled.parameters(), **kwargs)
             opt_eager = optim_cls(model_eager.parameters(), **kwargs)
 
-            if optim_cls is LBFGS:
+            if use_closure:
 
                 @torch.compile()
                 def fn():
                     def closure():
                         loss = model_compiled(input).sum()
                         loss.backward()
+                        if optim_info.only_supports_sparse_grads:
+                            for param in model_compiled.parameters():
+                                param.grad = param.grad.to_sparse()
                         return loss
 
                     opt_compiled.step(closure)
@@ -384,6 +393,10 @@ class CompiledOptimizerParityTests(TestCase):
                 def closure_eager():
                     loss = model_eager(input).sum()
                     loss.backward()
+                    if optim_info.only_supports_sparse_grads:
+                        for param in model_eager.parameters():
+                            param.grad = param.grad.to_sparse()
+
                     return loss
 
                 opt_eager.step(closure_eager)

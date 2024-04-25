@@ -5,12 +5,11 @@ from typing import Any, cast, Dict, List, NamedTuple, Optional, Set, Tuple, Unio
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-
 from torch.autograd.graph import Node
 from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicates
 from torch.utils._pytree import tree_flatten, tree_unflatten
 from torch.utils.hooks import RemovableHandle
-from ._fsdp_api import MixedPrecisionPolicy
+from ._fsdp_api import MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_collectives import (
     AllGatherResult,
     foreach_all_gather,
@@ -91,12 +90,19 @@ class FSDPParamGroup:
         post_forward_mesh_info: Optional[FSDPMeshInfo],
         device: torch.device,
         mp_policy: MixedPrecisionPolicy,
+        offload_policy: OffloadPolicy,
     ):
         self.module = module  # permit ref cycle because 1:1 lifetime
         param_module_infos = _get_param_module_infos(params, module)
         self.fsdp_params = [
             FSDPParam(
-                param, module_info, mesh_info, post_forward_mesh_info, device, mp_policy
+                param,
+                module_info,
+                mesh_info,
+                post_forward_mesh_info,
+                device,
+                mp_policy,
+                offload_policy,
             )
             for param, module_info in zip(params, param_module_infos)
         ]
@@ -128,6 +134,9 @@ class FSDPParamGroup:
         # `self.reduce_grads` is true, in which case setting this to false
         # means reduce-scatter but no all-reduce
         self.all_reduce_grads: bool = True
+        # Whether to reshard parameters after backward (only useful for
+        # gradient accumulation)
+        self.reshard_after_backward: bool = True
 
         # - CUDA events for stream synchronization
         # Holds the all-gather output buffer, sync objects, and metadata
@@ -309,7 +318,8 @@ class FSDPParamGroup:
         self._training_state = TrainingState.POST_BACKWARD
         with torch.profiler.record_function("FSDP::post_backward_reshard"):
             if not self.reduce_grads:
-                self.reshard()
+                if self.reshard_after_backward:
+                    self.reshard()
                 return
             # Save the autograd-computed gradients before resharding to only
             # access the unsharded parameters when their data is present
@@ -320,7 +330,8 @@ class FSDPParamGroup:
                     fsdp_params_with_grad.append(fsdp_param)
                     unsharded_grads.append(fsdp_param.unsharded_grad_data)
                     fsdp_param.unsharded_param.grad = None
-            self.reshard()
+            if self.reshard_after_backward:
+                self.reshard()
         if len(fsdp_params_with_grad) == 0:
             return
         with torch.profiler.record_function("FSDP::post_backward_reduce"):
@@ -343,6 +354,10 @@ class FSDPParamGroup:
         if self._post_reduce_view_out_event is not None:
             torch.cuda.current_stream().wait_event(self._post_reduce_view_out_event)
             self._post_reduce_view_out_event = None
+        for fsdp_param in self.fsdp_params:
+            if fsdp_param.grad_offload_event is not None:
+                fsdp_param.grad_offload_event.synchronize()
+                fsdp_param.grad_offload_event = None
         self._post_forward_indices.clear()
         self.all_forward_output_grad_fns.clear()
 
