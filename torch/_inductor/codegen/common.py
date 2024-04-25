@@ -1521,7 +1521,7 @@ class Kernel(CodeGen):
                             pos = var.bounds & ValueRanges(0, sympy.oo)
                             new_bounds = new_bounds | pos
 
-                    stm = ops.add(var, self.rename_indexing(size))
+                    stm = ops.add(var, ops.index_expr(size, torch.long))
                     # Mixed negative and non-negative
                     if var.bounds.upper >= 0:  # type: ignore[operator]
                         lt = ops.lt(var, 0)

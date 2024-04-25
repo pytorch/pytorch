@@ -1130,7 +1130,7 @@ class CommonTemplate:
         test(
             constant_propagation,
             (a,),
-            has_assert=False,
+            has_assert=ifdynstaticdefault(False, True),
             has_wrapping=False,
         )
 
@@ -1138,6 +1138,7 @@ class CommonTemplate:
             b = torch.tensor([-2], device=a.device)
             return a[b]
 
+        # In symbolic shapes, we know that we can access -2, so no assert is necessary!
         test(
             constant_propagation_neg,
             (a,),

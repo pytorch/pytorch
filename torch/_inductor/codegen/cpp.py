@@ -1869,7 +1869,7 @@ class CppKernel(Kernel):
         Convert an index expr to a string that can be used in cpp code.
         e.g. a sympy expression "s2" may actually appear as "ks1" in the cpp kernel.
         """
-        return cexpr(self.rename_indexing(index))
+        return cexpr_index(self.rename_indexing(index))
 
     def index_indirect_depends_on(self, index: sympy.Expr, itervar: sympy.Symbol):
         """
