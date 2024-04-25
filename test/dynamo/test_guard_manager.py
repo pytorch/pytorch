@@ -6,10 +6,12 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 from torch._C._dynamo import guards
+from torch._dynamo.convert_frame import GlobalStateGuard
 from torch.testing._internal.common_utils import set_default_dtype
 
 RootGuardManager = guards.RootGuardManager
 DictGuardManager = guards.DictGuardManager
+DictSubclassGuardManager = guards.DictSubclassGuardManager
 GetAttrGuardAccessor = guards.GetAttrGuardAccessor
 GetItemGuardAccessor = guards.GetItemGuardAccessor
 TypeGuardAccessor = guards.TypeGuardAccessor
@@ -66,14 +68,41 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(guard(None))
         with set_default_dtype(torch.double):
             self.assertFalse(guard(None))
+            self.assertExpectedInline(
+                str(guard.check_verbose(None)),
+                """\
+GuardDebugInfo(
+result=0,
+verbose_code_parts=['GLOBAL_STATE changed: default_dtype '],
+num_guards_executed=0)
+""",
+            )
         self.assertTrue(guard(None))
+        self.assertTrue(guard.check_verbose(None).result)
         _orig = torch.are_deterministic_algorithms_enabled()
         try:
             torch.use_deterministic_algorithms(not _orig)
             self.assertFalse(guard(None))
+            self.assertExpectedInline(
+                str(guard.check_verbose(None)),
+                """\
+GuardDebugInfo(
+result=0,
+verbose_code_parts=['GLOBAL_STATE changed: deterministic_algorithms '],
+num_guards_executed=0)
+""",
+            )
         finally:
             torch.use_deterministic_algorithms(_orig)
         self.assertTrue(guard(None))
+        self.assertTrue(guard.check_verbose(None).result)
+
+    def test_global_state_reason(self):
+        with torch.enable_grad():
+            guards = GlobalStateGuard()
+        with torch.no_grad():
+            self.assertIs(guards.check(), False)
+            self.assertEqual(guards.reason(), "grad_mode ")
 
     def test_python_lambda_leaf_guard(self):
         const_guard = guards.LAMBDA_GUARD(
@@ -658,6 +687,69 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         f_locals["d"].pop(100)
         # fails because of len check
         self.assertFalse(root.check(f_locals))
+
+    def test_dict_guard_manager2(self):
+        root = RootGuardManager()
+
+        f_locals = {
+            "d": {"a": 1, 100: torch.randn(4)},
+        }
+        dict_mgr = root.getitem_manager("d", "", f_locals["d"])
+        self.assertTrue(type(dict_mgr) is DictGuardManager)
+        self.assertTrue(root.check(f_locals))
+
+        # defaultdict
+        root = RootGuardManager()
+        from collections import defaultdict
+
+        f_locals = {}
+        f_locals["d"] = defaultdict()
+        f_locals["d"]["a"] = 1
+        f_locals["d"][100] = torch.randn(4)
+        dict_mgr = root.getitem_manager("d", "", f_locals["d"])
+        self.assertTrue(type(dict_mgr) is DictGuardManager)
+        self.assertTrue(root.check(f_locals))
+
+        # ordereddict
+        root = RootGuardManager()
+        from collections import OrderedDict
+
+        f_locals = {}
+        f_locals["d"] = OrderedDict()
+        f_locals["d"]["a"] = 1
+        f_locals["d"][100] = torch.randn(4)
+        dict_mgr = root.getitem_manager("d", "", f_locals["d"])
+        self.assertTrue(type(dict_mgr) is DictSubclassGuardManager)
+        self.assertTrue(root.check(f_locals))
+
+        # dict subclass - should be treated as a dict
+        root = RootGuardManager()
+
+        class MyDict(dict):
+            pass
+
+        f_locals = {}
+        f_locals["d"] = MyDict()
+        f_locals["d"]["a"] = 1
+        f_locals["d"][100] = torch.randn(4)
+        dict_mgr = root.getitem_manager("d", "", f_locals["d"])
+        self.assertTrue(type(dict_mgr) is DictGuardManager)
+        self.assertTrue(root.check(f_locals))
+
+        # dict subclass - with modified keys
+        root = RootGuardManager()
+
+        class ReversedDict(dict):
+            def keys(self):
+                return [10, 100]
+
+        f_locals = {}
+        f_locals["d"] = ReversedDict()
+        f_locals["d"][100] = torch.randn(4)
+        f_locals["d"][10] = torch.randn(4)
+        dict_mgr = root.getitem_manager("d", "", f_locals["d"])
+        self.assertTrue(type(dict_mgr) is DictSubclassGuardManager)
+        self.assertTrue(root.check(f_locals))
 
 
 if __name__ == "__main__":

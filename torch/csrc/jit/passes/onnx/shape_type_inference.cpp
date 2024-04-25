@@ -295,10 +295,8 @@ Node* CloneNodeToGraph(
     std::shared_ptr<Graph> n_graph,
     const ParamMap& params_dict,
     int opset_version) {
-  auto vals_to_params_map =
-      buildValueToParamsMap(n->owningGraph()->block(), params_dict);
   auto clone_node = n_graph->createClone(
-      n, [&n_graph, &vals_to_params_map, opset_version](Value* v) {
+      n, [&n_graph, &params_dict, opset_version](Value* v) {
         auto v_n = v->node();
         switch (v_n->kind()) {
           case ::c10::prim::Constant:
@@ -328,9 +326,10 @@ Node* CloneNodeToGraph(
             // If the input value is unknown, set it to graph input in the new
             // graph, and copy over metadata, such as datatype and shape.
             ::c10::optional<at::Tensor> val = ::c10::nullopt;
-            if (vals_to_params_map.find(v) != vals_to_params_map.end()) {
-              val = vals_to_params_map.find(v)->second.second.toTensor();
-            } else if (ConstantValueMap::HasValue(v->debugName())) {
+            auto v0 = params_dict.find(v->debugName());
+            if (v0 != params_dict.end()) {
+              val = v0->second.toTensor();
+            } else {
               val = ConstantValueMap::GetValue(v->debugName());
             }
 

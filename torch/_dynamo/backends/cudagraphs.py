@@ -11,7 +11,7 @@ from torch._dynamo.backends.debugging import boxed_nop
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
     check_multiple_devices_or_any_cpu_nodes,
-    get_mutation_stack_trace,
+    get_placeholders,
 )
 from torch._inductor.utils import (
     BoxedBool,
@@ -74,18 +74,7 @@ def get_device_node_mapping(gm: torch.fx.GraphModule):
     return device_node_mapping
 
 
-def check_for_mutation(aot_model: torch.fx.GraphModule, num_fixed) -> Optional[str]:
-    mutation_indices = find_input_mutations(aot_model.graph) - set(range(num_fixed))
-    if not mutation_indices:
-        return None
-
-    return get_mutation_stack_trace(aot_model, mutation_indices)
-
-
 def check_for_skip(aot_model: torch.fx.GraphModule, num_fixed) -> Optional[str]:
-    if mut_skip := check_for_mutation(aot_model, num_fixed):
-        return mut_skip
-
     if skip := check_multiple_devices_or_any_cpu_nodes(
         get_device_node_mapping(aot_model)
     ):
@@ -127,7 +116,6 @@ def cudagraphs(dynamo_model, dynamo_inputs):
             return interp
 
         boxed_device_index.set(get_device_index(aot_model))
-
         out = cudagraphify_impl(
             interp,
             aot_inputs,
@@ -136,6 +124,8 @@ def cudagraphs(dynamo_model, dynamo_inputs):
             is_backward=False,
             is_inference=False,
             stack_traces=get_stack_traces(aot_model),
+            placeholders=get_placeholders(aot_model.graph),
+            mutated_input_idxs=find_input_mutations(aot_model.graph),
         )
         out._boxed_call = True
         return out
@@ -170,6 +160,8 @@ def cudagraphs(dynamo_model, dynamo_inputs):
             is_backward=True,
             is_inference=False,
             stack_traces=get_stack_traces(aot_model),
+            placeholders=get_placeholders(aot_model.graph),
+            mutated_input_idxs=find_input_mutations(aot_model.graph),
         )
         out._boxed_call = True
         return out

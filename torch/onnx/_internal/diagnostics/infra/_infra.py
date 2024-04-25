@@ -264,7 +264,7 @@ class Invocation:
     # TODO: Implement this.
     # Tracks top level call arguments and diagnostic options.
     def __init__(self) -> None:
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 @dataclasses.dataclass
