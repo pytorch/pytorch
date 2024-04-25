@@ -921,7 +921,7 @@ class ops(_TestParametrizer):
             elif self.opinfo_dtypes == OpDTypes.unsupported:
                 dtypes = set(get_all_dtypes()).difference(op.supported_dtypes(device_cls.device_type))
             elif self.opinfo_dtypes == OpDTypes.supported:
-                dtypes = op.supported_dtypes(device_cls.device_type)
+                dtypes = set(op.supported_dtypes(device_cls.device_type))
             elif self.opinfo_dtypes == OpDTypes.any_one:
                 # Tries to pick a dtype that supports both forward or backward
                 supported = op.supported_dtypes(device_cls.device_type)
