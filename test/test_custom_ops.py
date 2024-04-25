@@ -598,6 +598,18 @@ class TestCustomOp(CustomOpTestCaseBase):
 
         self.assertExpectedInline(infer_schema(a), """(Tensor x) -> Tensor""")
 
+        def kwonly1(x: Tensor, *, y: int, z: float) -> Tensor:
+            return torch.empty([])
+
+        self.assertExpectedInline(
+            infer_schema(kwonly1), """(Tensor x, *, SymInt y, float z) -> Tensor"""
+        )
+
+        def kwonly2(*, y: Tensor) -> Tensor:
+            return torch.empty([])
+
+        self.assertExpectedInline(infer_schema(kwonly2), """(*, Tensor y) -> Tensor""")
+
         def b(
             x: Tensor,
             y: int,
@@ -1741,6 +1753,17 @@ dynamic shape operator: _torch_testing.numpy_nonzero.default
             res = torch._library.utils.is_functional_schema(schema)
             self.assertEqual(res, expected)
 
+    def test_incorrect_schema_types(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            with self.assertRaisesRegex(RuntimeError, "unknown type specifier"):
+                lib.define("foo12(Tensor a) -> asdfasdf")
+            with self.assertRaisesRegex(RuntimeError, "unknown type specifier"):
+                lib.define("foo12(asdf a) -> Tensor")
+            with self.assertRaisesRegex(RuntimeError, "Use `SymInt` or `int`"):
+                lib.define("foo12(int64_t a) -> Tensor")
+            with self.assertRaisesRegex(RuntimeError, "Use `float`"):
+                lib.define("foo12(double a) -> Tensor")
+
     def test_is_tensorlist_like_type(self):
         tensorlists = [
             # Tensor[]
@@ -2158,6 +2181,96 @@ class TestCustomOpAPI(TestCase):
         expected = x.sin()
         sin_(x)
         self.assertEqual(x, expected)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_kwarg_only_tensors(self):
+        with self.assertRaisesRegex(NotImplementedError, "kwarg-only Tensor args"):
+
+            @torch.library.custom_op("_torch_testing::foo", mutates_args=())
+            def foo(x: Tensor, *, y: int, z: Tensor) -> Tensor:
+                pass
+
+        with self.assertRaisesRegex(NotImplementedError, "kwarg-only Tensor args"):
+
+            @torch.library.custom_op("_torch_testing::foo", mutates_args=())
+            def foo2(x: Tensor, *, y: int, z: Optional[Tensor]) -> Tensor:
+                pass
+
+        with self.assertRaisesRegex(NotImplementedError, "kwarg-only Tensor args"):
+
+            @torch.library.custom_op("_torch_testing::foo", mutates_args=())
+            def foo3(x: Tensor, *, y: int, z: List[Tensor]) -> Tensor:
+                pass
+
+        with torch.library._scoped_library("_torch_testing", "FRAGMENT") as lib:
+            lib.define("foo(Tensor x, *, Tensor y) -> Tensor")
+            with self.assertRaisesRegex(NotImplementedError, "kwarg-only Tensor args"):
+                torch.library.register_autograd(
+                    "_torch_testing::foo",
+                    lambda grad: grad,
+                    setup_context=lambda ctx, inputs, keyword_only_inputs, output: None,
+                )
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_register_autograd_kwargonly_low_level(self):
+        with torch.library._scoped_library("_torch_testing", "FRAGMENT") as lib:
+            lib.define("foo(Tensor x, *, float y) -> Tensor")
+            called = False
+
+            def foo_impl(x, *, y):
+                return x * y
+
+            lib.impl("foo", foo_impl, "CPU")
+
+            def backward(ctx, grad):
+                nonlocal called
+                called = True
+                return grad * ctx.y
+
+            def setup_context(ctx, inputs, keyword_only_inputs, output):
+                assert tuple(keyword_only_inputs.keys()) == ("y",)
+                ctx.y = keyword_only_inputs["y"]
+
+            torch.library.register_autograd(
+                "_torch_testing::foo", backward, setup_context=setup_context, lib=lib
+            )
+
+            x = torch.randn(3, requires_grad=True)
+            torch.ops._torch_testing.foo(x, y=3.14).sum().backward()
+            self.assertTrue(called)
+            self.assertEqual(x.grad, torch.tensor([3.14, 3.14, 3.14]))
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_register_autograd_defaults(self):
+        with torch.library._scoped_library("_torch_testing", "FRAGMENT") as lib:
+            lib.define("foo(Tensor w, int x = 2, *, int y = 3, int z) -> Tensor")
+
+            def foo_impl(w, x=2, *, y=3, z):
+                return w * x * y * z
+
+            lib.impl("foo", foo_impl, "CPU")
+
+            called = False
+
+            def backward(ctx, grad):
+                nonlocal called
+                called = True
+                return grad * ctx.c
+
+            def setup_context(ctx, inputs, keyword_only_inputs, output):
+                assert len(inputs) == 2
+                assert inputs[1] == 2
+                assert keyword_only_inputs == {"y": 3, "z": 42}
+                ctx.c = keyword_only_inputs["y"] * keyword_only_inputs["z"] * inputs[1]
+
+            torch.library.register_autograd(
+                "_torch_testing::foo", backward, setup_context=setup_context, lib=lib
+            )
+
+            w = torch.randn(3, requires_grad=True)
+            torch.ops._torch_testing.foo(w, z=42).sum().backward()
+            self.assertTrue(called)
+            self.assertEqual(w.grad, torch.full_like(w, 2 * 3 * 42))
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_manual_schema_error(self):

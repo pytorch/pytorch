@@ -267,8 +267,8 @@ c10::intrusive_ptr<ProcessGroupMPI> ProcessGroupMPI::createProcessGroupMPI(
 
     // If no ranks are specified, assume we're creating the root group
     if (!ranks.empty()) {
-      MPI_Group worldGroup = nullptr;
-      MPI_Group ranksGroup = nullptr;
+      MPI_Group worldGroup{};
+      MPI_Group ranksGroup{};
       MPI_CHECK(MPI_Comm_group(MPI_COMM_WORLD, &worldGroup));
       MPI_CHECK(
           MPI_Group_incl(worldGroup, ranks.size(), ranks.data(), &ranksGroup));
