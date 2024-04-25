@@ -853,35 +853,38 @@ def opcheck(
 
     Example:
 
+        >>> def example():
+        >>>     @torch.library.custom_op("mylib::numpy_mul", mutates_args=())
+        >>>     def numpy_add(x: Tensor, y: float) -> Tensor:
+        >>>         x_np = x.numpy(force=True)
+        >>>         z_np = x_np + y
+        >>>         return torch.from_numpy(z_np).to(x.device)
+        >>>
+        >>>     @numpy_sin.register_fake
+        >>>     def _(x, y):
+        >>>         return torch.empty_like(x)
+        >>>
+        >>>     def setup_context(ctx, inputs, output):
+        >>>         y, = inputs
+        >>>         ctx.y = y
+        >>>
+        >>>     def backward(ctx, grad):
+        >>>         return grad * ctx.y, None
+        >>>
+        >>>     numpy_sin.register_autograd(backward, setup_context=setup_context)
+        >>>
+        >>>     sample_inputs = [
+        >>>         (torch.randn(3), 3.14),
+        >>>         (torch.randn(2, 3, device='cuda'), 2.718),
+        >>>         (torch.randn(1, 10, requires_grad=True), 1.234),
+        >>>         (torch.randn(64, 64, device='cuda', requires_grad=True), 90.18),
+        >>>     ]
+        >>>
+        >>>     for args in sample_inputs:
+        >>>         torch.library.opcheck(foo, args)
+        >>>
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
-        >>> @torch.library.custom_op("mylib::numpy_mul", mutates_args=())
-        >>> def numpy_add(x: Tensor, y: float) -> Tensor:
-        >>>     x_np = x.numpy(force=True)
-        >>>     z_np = x_np + y
-        >>>     return torch.from_numpy(z_np).to(x.device)
-        >>>
-        >>> @numpy_sin.register_fake
-        >>> def _(x, y):
-        >>>     return torch.empty_like(x)
-        >>>
-        >>> def setup_context(ctx, inputs, output):
-        >>>     y, = inputs
-        >>>     ctx.y = y
-        >>>
-        >>> def backward(ctx, grad):
-        >>>     return grad * ctx.y, None
-        >>>
-        >>> numpy_sin.register_autograd(backward, setup_context=setup_context)
-        >>>
-        >>> sample_inputs = [
-        >>>     (torch.randn(3), 3.14),
-        >>>     (torch.randn(2, 3, device='cuda'), 2.718),
-        >>>     (torch.randn(1, 10, requires_grad=True), 1.234),
-        >>>     (torch.randn(64, 64, device='cuda', requires_grad=True), 90.18),
-        >>> ]
-        >>>
-        >>> for args in sample_inputs:
-        >>>     torch.library.opcheck(foo, args)
+        >>> example()
 
     """
     import torch.testing._internal.optests as optests
