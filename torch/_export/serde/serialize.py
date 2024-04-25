@@ -1421,8 +1421,7 @@ class GraphModuleDeserializer(metaclass=Final):
                         self.shape_env.add_var_to_val(sym, hint)
 
                     if vr := self.symbol_name_to_range.get(val.expr_str):
-                        symbolic_shapes._constrain_symbol_range(
-                            self.shape_env,
+                        self.shape_env.constrain_symbol_range(
                             sym,
                             compiler_min=vr.lower,  # type: ignore[arg-type]
                             compiler_max=vr.upper,  # type: ignore[arg-type]
@@ -1437,8 +1436,7 @@ class GraphModuleDeserializer(metaclass=Final):
                         if s.name not in self.symbol_name_to_symbol:
                             self.symbol_name_to_symbol[s.name] = s
                         if vr := self.symbol_name_to_range.get(s.name):
-                            symbolic_shapes._constrain_symbol_range(
-                                self.shape_env,
+                            self.shape_env.constrain_symbol_range(
                                 s,
                                 compiler_min=vr.lower,  # type: ignore[arg-type]
                                 compiler_max=vr.upper,  # type: ignore[arg-type]
