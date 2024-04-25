@@ -2546,6 +2546,24 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             # Merge symbolic_globals back if parent and child are in the same namespace
             parent.symbolic_globals.update(tracer.symbolic_globals)
 
+        # Guard on the ID of the inlined function. If user patches the function,
+        # this will force a recompile.
+        # To prevent overguarding, do not guard on functions from "torch.nn."
+        # namespace like _call_impl from nn.Module. Users mostly patch `forward`
+        # method.
+        if isinstance(func, UserFunctionVariable) and not func.fn.__module__.startswith(
+            ("torch.nn", "torch.ao")
+        ):
+            fn_source_to_guard = func.source
+            if isinstance(func, UserMethodVariable):
+                # methods go through descriptor and can give different IDs every
+                # time. Get the static object by accessing __func__.
+
+                # TODO(anijain2305) - Use PyMethod_Function to speedup guard
+                # accessor.
+                fn_source_to_guard = AttrSource(fn_source_to_guard, "__func__")
+            install_guard(fn_source_to_guard.make_guard(GuardBuilder.ID_MATCH))
+
         parent.inconsistent_side_effects |= tracer.inconsistent_side_effects
 
         log.debug("DONE INLINING %s", code)

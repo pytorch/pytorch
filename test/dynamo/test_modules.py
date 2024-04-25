@@ -2435,6 +2435,38 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(model.x, compiled_model.x)
 
+    def test_monkeypatching_forward(self):
+        class FakeModule(torch.nn.Module):
+            def forward(self, x):
+                return torch.sin(x)
+
+        class MyModule(torch.nn.Module):
+            def __init__(self, x):
+                super().__init__()
+
+            def forward(self, x):
+                return torch.cos(x)
+
+        mod = MyModule(3)
+
+        def fn(x):
+            return mod(x)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt)(fn)
+        x = torch.randn(10)
+
+        opt_fn(x)
+        opt_fn(x)
+        self.assertEqual(cnt.frame_count, 1)
+
+        # Monkeypatch forward
+        mod.forward = types.MethodType(FakeModule.forward, mod)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnt.frame_count, 2)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

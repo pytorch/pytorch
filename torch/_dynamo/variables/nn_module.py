@@ -320,6 +320,14 @@ class NNModuleVariable(VariableTracker):
                     # End of fn, this bubbles up and restarts tracing.
                     self.convert_to_unspecialized(tx)
 
+                # Guard on the id of forward method. Though its uncommon, there
+                # are cases where users monkeypatch the forward method after the
+                # model has already been torch.compile'd.
+                forward_method_source = AttrSource(
+                    AttrSource(self.source, "forward"), "__func__"
+                )
+                install_guard(forward_method_source.make_guard(GuardBuilder.ID_MATCH))
+
                 from .builder import wrap_fx_proxy
 
                 return wrap_fx_proxy(
