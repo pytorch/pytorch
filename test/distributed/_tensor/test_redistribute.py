@@ -365,10 +365,18 @@ class RedistributeTest(DTensorTestBase):
                 local_out_dt = out_dt.to_local()
                 local_expected_dt = expected_dt.to_local()
                 self.assertEqual(out_dt.to_local(), expected_dt.to_local())
-                self.assertEqual(
-                    comm_mode.get_comm_counts()[torch.ops._dtensor.shard_dim_alltoall],
-                    1,
-                )
+                if self.device_type == "cuda":
+                    self.assertEqual(
+                        comm_mode.get_comm_counts()[
+                            torch.ops._dtensor.shard_dim_alltoall
+                        ],
+                        1,
+                    )
+                else:
+                    self.assertEqual(
+                        comm_mode.get_comm_counts()[funcol.all_gather_into_tensor],
+                        1,
+                    )
 
         # test 2d device mesh
         mesh_2d = DeviceMesh(
