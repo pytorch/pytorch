@@ -93,41 +93,6 @@ extern "C" {
 }
 """
 
-# Jinja template for Cutlass 2.x GEMM Kernel arguments, used by the CUTLASSGemmTemplate class below.
-GEMM_ARGS_CUTLASS_2X = r"""
-  int64_t batch_stride_x = {{kernel.stride(X, -3)}};
-  int64_t row_stride_x = {{kernel.row_or_column_stride(X)}};
-  int64_t batch_stride_w = {{kernel.stride(W, -3)}};
-  int64_t row_stride_w = {{kernel.row_or_column_stride(W)}};
-  int64_t batch_stride_bias = {{kernel.stride(Bias, -3)}};
-  int64_t row_stride_bias = {{kernel.row_or_column_stride(Bias)}};
-  int64_t batch_stride_y = {{kernel.stride(Y, -3)}};
-  int64_t row_stride_y = {{kernel.row_or_column_stride(Y)}};
-  // Initialize GemmUniversalInstance arguments.
-  arguments = {
-    {{template.gemm_mode()}},  // GemmUniversalMode mode
-    {
-      static_cast<coord_t>(M),
-      static_cast<coord_t>(N),
-      static_cast<coord_t>(K)
-    },  // GemmCoord problem_size
-    {{split_k if split_k > 1 else 'B'}},  // int batch_count
-    {ElementComputeEpilogue({{alpha}}), ElementComputeEpilogue({{beta}})},  // typename EpilogueOutputOp::Params epilogue
-    {{template.cutlass_type_cast(X, kernel.ptr(X))}},  // void const * ptr_A
-    {{template.cutlass_type_cast(W, kernel.ptr(W))}},  // void const * ptr_B
-    {{template.cutlass_type_cast(Bias, kernel.ptr(Bias))}},  // void const * ptr_C
-    {{template.cutlass_type_cast(Y, kernel.ptr(Y))}},  // void * ptr_D
-    batch_stride_x,  // int64_t batch_stride_A
-    batch_stride_w,  // int64_t batch_stride_B
-    batch_stride_bias,  // int64_t batch_stride_C
-    batch_stride_y,  // int64_t batch_stride_D
-    row_stride_x,  // typename LayoutA::Stride::LongIndex lda
-    row_stride_w,  // typename LayoutB::Stride::LongIndex ldb
-    row_stride_bias,  // typename LayoutC::Stride::LongIndex ldc
-    row_stride_y,  // typename LayoutC::Stride::LongIndex ldd
-  };
-"""
-
 # Jinja template for Cutlass 3.x GEMM Kernel arguments, used by the CUTLASSGemmTemplate class below.
 GEMM_ARGS_CUTLASS_3X = r"""
   // Initialize GemmUniversal3xInstance arguments.
