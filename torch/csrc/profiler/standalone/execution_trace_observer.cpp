@@ -28,7 +28,32 @@
 #include <torch/csrc/profiler/standalone/execution_trace_observer.h>
 #include <torch/csrc/profiler/util.h>
 
+#ifdef USE_DISTRIBUTED
+#ifdef USE_C10D
+#include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
+#endif // USE_C10D
+#endif // USE_DISTRIBUTED
+
 using namespace at;
+
+// Collective property attributes
+// https://github.com/pytorch/pytorch/issues/124674
+#ifdef USE_DISTRIBUTED
+#ifdef USE_C10D
+constexpr auto kETCommsName = "collective_name";
+constexpr auto kETInMsgNelems = "in_msg_nelems";
+constexpr auto kETOutMsgNelems = "out_msg_nelems";
+constexpr auto kETInSplit = "in_split_size";
+constexpr auto kETOutSplit = "out_split_size";
+constexpr auto kETGlobalRankStart = "global_rank_start";
+constexpr auto kETGlobalRankStride = "global_rank_stride";
+constexpr auto kETGroupSize = "pg_size";
+constexpr auto kETGroupRanks = "pg_ranks";
+constexpr auto kETProcessGroupName = "pg_name";
+constexpr auto kETProcessGroupDesc = "pg_desc";
+
+#endif // USE_C10D
+#endif // USE_DISTRIBUTED
 
 namespace torch {
 namespace profiler {
@@ -256,6 +281,16 @@ static std::ofstream openOutputFile(const std::string& name) {
   return stream;
 }
 
+static inline std::string getAttrJson(
+    const std::string& name,
+    const std::string& type,
+    const std::string& value) {
+  // note name and type are not quoted but value should be if it is a string.
+  return fmt::format(R"JSON(
+  {{"name": "{}", "type": "{}", "value": {}}})JSON",
+      name, type, value);
+}
+
 static void writeJsonNode(
     std::ofstream& out,
     const std::string& name,
@@ -273,14 +308,15 @@ static void writeJsonNode(
     const std::string& outputs = "[]",
     const std::string& output_shapes = "[]",
     const std::string& output_types = "[]",
-    const std::string& operator_schema = "") {
+    const std::string& operator_schema = "",
+    const std::string& additiona_attrs = "") {
   out << fmt::format(
       R"JSON(
     {{
       "id": {}, "name": "{}", "ctrl_deps": {},
       "inputs": {{"values": {}, "shapes": {}, "types": {}}},
       "outputs": {{"values": {}, "shapes": {}, "types": {}}},
-      "attrs": [{{"name": "rf_id", "type": "uint64", "value": {}}}, {{"name": "fw_parent", "type": "uint64", "value": {}}}, {{"name": "seq_id", "type": "int64", "value": {}}}, {{"name": "scope", "type": "uint64", "value": {}}}, {{"name": "tid", "type": "uint64", "value": {}}}, {{"name": "fw_tid", "type": "uint64", "value": {}}}, {{"name": "op_schema", "type": "string", "value": "{}"}}]
+      "attrs": [{{"name": "rf_id", "type": "uint64", "value": {}}}, {{"name": "fw_parent", "type": "uint64", "value": {}}}, {{"name": "seq_id", "type": "int64", "value": {}}}, {{"name": "scope", "type": "uint64", "value": {}}}, {{"name": "tid", "type": "uint64", "value": {}}}, {{"name": "fw_tid", "type": "uint64", "value": {}}}, {{"name": "op_schema", "type": "string", "value": "{}"}}{}]
     }})JSON",
       id,
       name,
@@ -297,7 +333,8 @@ static void writeJsonNode(
       scope,
       tid,
       fw_tid,
-      operator_schema);
+      operator_schema,
+      additiona_attrs);
 }
 
 inline std::string timeString(const std::time_t timepoint) {
@@ -440,6 +477,63 @@ inline void appendValueInfo(
   values.push_back(convertIValue(ob, val));
   types.push_back(getValueType(val));
   shapes.push_back(getValueShape(val));
+}
+
+// Additional attributes for commounication collectives
+inline std::string getCommsNodeAttrs(const RecordFunction& fn) {
+  std::vector<std::string> attrs;
+
+#ifdef USE_DISTRIBUTED
+#ifdef USE_C10D
+  // We reply on paramcommsdebug object that is available in thread local info
+  auto debugInfo = dynamic_cast<ParamCommsDebugInfo*>(
+      c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PARAM_COMMS_INFO));
+  if (debugInfo == nullptr) {
+    LOG(WARNING) << "ParamCommsDebugInfo not available for function: "
+                 << fn.name();
+    return ", " + getAttrJson("debug", "string", "\"missing comms info\"");
+  }
+
+  // get NcclMeta from record function, this used ParamCommsDebugInfo above
+  auto meta = saveNcclMeta(fn, false /*truncate*/);
+
+  auto addAttr = [&](
+      const char* commsMetaName,
+      const char* etMetaName,
+      const char* type) {
+    auto it = meta.find(commsMetaName);
+    if (it != meta.end()) {
+      attrs.push_back(
+          getAttrJson(etMetaName, type, it->second));
+    }
+  };
+
+  addAttr(kCommsName, kETCommsName, "string");
+  addAttr(kDtype, kDtype, "string");
+
+  addAttr(kInMsgNelems, kETInMsgNelems, "uint64");
+  addAttr(kOutMsgNelems, kOutMsgNelems, "uint64");
+
+  // following two metadata are lists.
+  addAttr(kInSplit, kETInSplit, "string");
+  addAttr(kOutSplit, kETOutSplit, "string");
+
+  addAttr(kGlobalRankStart, kETGlobalRankStart, "uint64");
+  addAttr(kGlobalRankStride, kETGlobalRankStride, "uint64");
+
+  // pg_name is a string.
+  addAttr(kProcessGroupName, kETProcessGroupName, "string");
+  addAttr(kProcessGroupDesc, kETProcessGroupDesc, "string");
+
+  addAttr(kGroupSize, kETGroupSize, "uint64");
+  // TODO do we need group ranks?
+  // addAttr(kGroupRanks, kETGroupRanks, "string");
+
+#endif // USE_C10D
+#endif // USE_DISTRIBUTED
+
+  // XXX consider using as string stream?
+  return attrs.size() == 0 ? "" : fmt::format(", {}", fmt::join(attrs, ", "));
 }
 
 static void recordOperatorStart(
@@ -598,6 +692,12 @@ static void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
         op_schema_str = json_str_escape(c10::toString(op_schema.value()));
       }
 
+      std::string additiona_attrs = "";
+      /// XXX turn to constant
+      if (fn.isNcclMeta()) {
+        additiona_attrs = getCommsNodeAttrs(fn);
+      }
+
       writeJsonNode(
           ob->out,
           fc.name,
@@ -615,7 +715,8 @@ static void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
           vectorToString(output_values),
           vectorToString(output_shapes),
           vectorToString(output_types),
-          op_schema_str);
+          op_schema_str,
+          additiona_attrs);
       ob->out << ",";
     } catch (const std::exception& e) {
       LOG(WARNING) << "Exception in execution trace observer: [" << fc.name
