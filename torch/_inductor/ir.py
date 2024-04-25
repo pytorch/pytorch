@@ -1948,10 +1948,12 @@ class ExpandView(BaseView):
             elif old_size[i] is None or old_size[i] == 1:
                 pass
             else:
-                # Expect broadcast compatibility
-                assert V.graph.sizevars.statically_known_equals(
-                    new_size[i], old_size[i]
-                ), f"{new_size[i]} != {old_size[i]}"
+                # NB: new_size[i] == old_size[i] is known because the meta
+                # formula was expected to have taught us this equality.
+                # We can't conveniently check it right now because
+                # statically_known_equals doesn't know to consult preexisting
+                # guards
+                pass
         return new_size
 
     @classmethod

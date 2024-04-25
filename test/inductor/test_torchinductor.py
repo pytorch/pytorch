@@ -4424,6 +4424,8 @@ class CommonTemplate:
         )
 
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    # NB: refinement means there are no dynamic variables
+    @expectedFailureCodegenDynamic
     def test_nonzero_unbacked_refinement(self):
         def fn(x):
             z = x.nonzero()

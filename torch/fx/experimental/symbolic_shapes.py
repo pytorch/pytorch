@@ -592,24 +592,35 @@ def compute_unbacked_bindings(shape_env, example_value, old_example_value=None):
                 else ""
             )
         )
-        # TODO: This is pretty fragile
-        # Normally, the equality test is supposed to be a no-op here, because
-        # you've already called rebind_unbacked first which takes all the old
-        # binding sites and discovers how they are newly bound.  But this does
-        # not always work.  For example, if the original FX node wasn't a
-        # binding site because you had a memo hit, but post translation you
-        # aren't a memo hit anymore, there's now a new binding site... but we
-        # know (because it's the same FX node) that the value is actually the
-        # same, they're just not obviously equal anymore.  So we just insert
-        # a runtime assert in this case.
+        # Why do we have to do some rebinding here?  If the original FX node
+        # wasn't a binding site because you had a memo hit, but post
+        # translation you aren't a memo hit anymore, there's now a new binding
+        # site... but we know (because it's the same FX node) that the value
+        # is actually the same, they're just not obviously equal anymore.
         #
-        # This is very fragile, because u0 == u1 assertion does not generate
-        # a replacement.  Here, I think it might be acceptable to do a
-        # replacement, so long as we replace the newer thing with the older
-        # thing.  Fix this if it becomes an issue.
+        # The logic here is written carefully, because unlike the
+        # bind_unbacked case, we are not guaranteed to have a symbol for
+        # old_sym.  If we have a symbol, do regular rename unbacked to; but if
+        # we don't, we need to specially eliminate the fresh unbacked symbol
+        # (NB: we are /trusting/ that the memoization is correct, and that we
+        # don't need to generate a new runtime assert.  This is load bearing,
+        # as repropagation can happen after we've frozen runtime asserts.)
         if old_example_value is not None:
             for keypath in symbol_to_path.values():
-                torch._check(pytree.key_get(old_example_value, keypath) == pytree.key_get(example_value, keypath))
+                old_sym = pytree.key_get(old_example_value, keypath)
+                new_sym = pytree.key_get(example_value, keypath)
+                if (
+                    isinstance(new_sym, SymTypes) and
+                    isinstance(new_s := new_sym.node.expr, sympy.Symbol)
+                ):
+                    if isinstance(old_sym, SymTypes) and (old_s := old_sym.node.expr) != new_s:
+                        if isinstance(old_s, sympy.Symbol):
+                            shape_env._rename_unbacked_to(new_s, old_s)
+                        else:
+                            shape_env._eliminate_unbacked(new_s, old_s)
+                    elif not isinstance(old_sym, SymTypes):
+                        shape_env._eliminate_unbacked(new_s, sympy.sympify(old_sym))
+
         return symbol_to_path
 
 def definitely_true(a):
@@ -2429,6 +2440,10 @@ class ShapeEnv:
             yield
         finally:
             self.is_recording = False
+
+    @record_shapeenv_event()
+    def _eliminate_unbacked(self, orig_s: sympy.Symbol, new_s: sympy.Expr):
+        self._set_replacement(orig_s, new_s, "eliminate_unbacked")
 
     # Unlike set_replacement, this records a shapeenv event
     @record_shapeenv_event()
