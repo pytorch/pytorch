@@ -987,6 +987,7 @@ init_command = [
 [[linter]]
 code = 'UFMT'
 include_patterns = [
+    '.github/**/*.py',
     '**/*.py',
     '**/*.pyi',
 ]
