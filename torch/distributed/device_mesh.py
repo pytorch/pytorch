@@ -37,6 +37,7 @@ else:
         _find_pg_by_ranks_and_tag,
         _get_default_group,
         _get_group_tag,
+        get_process_group_ranks,
         get_rank,
         get_world_size,
         init_process_group,
@@ -214,7 +215,7 @@ else:
             if isinstance(mesh, torch.Tensor) and mesh.device.type != "cpu":
                 raise ValueError(f"`mesh` must be a CPU tensor, got {mesh}")
             self.mesh = (
-                mesh.detach().to(device="cpu", dtype=torch.int)
+                mesh.detach().to(dtype=torch.int)
                 if isinstance(mesh, torch.Tensor)
                 else torch.tensor(mesh, dtype=torch.int)
             )
@@ -438,6 +439,23 @@ else:
                     )
                 return dim_groups
 
+        @staticmethod
+        def from_group(group: ProcessGroup, device_type: str) -> "DeviceMesh":
+            """
+            Contstructs a :class:`DeviceMesh` with ``device_type`` from an
+            existing :class:`ProcessGroup`.
+
+            The constructed device mesh is assumed to be 1D.
+            """
+            # Manually define `_dim_group_infos` instead of relying on the
+            # normal logic since we already have the PG
+            group_ranks = get_process_group_ranks(group)
+            mesh = DeviceMesh(device_type, group_ranks, _init_backend=False)
+            mesh._dim_group_infos = [
+                (_get_group_tag(group), group_ranks, group.group_name)
+            ]
+            return mesh
+
         def size(self, mesh_dim: Optional[int] = None) -> int:
             return self.mesh.numel() if mesh_dim is None else self.mesh.size(mesh_dim)
 
@@ -557,7 +575,10 @@ else:
                     f"Found len(mesh_dim_names): {len(mesh_dim_names)} and len(mesh_shape):{len(mesh_shape)}.",
                 )
 
-        mesh = torch.arange(math.prod(mesh_shape), dtype=torch.int).view(mesh_shape)
+        # Always initialize the mesh's tensor on CPU, regardless of what the
+        # external device type has been set to be (e.g. meta)
+        with torch.device("cpu"):
+            mesh = torch.arange(math.prod(mesh_shape), dtype=torch.int).view(mesh_shape)
         device_mesh = DeviceMesh(
             device_type=device_type,
             mesh=mesh,

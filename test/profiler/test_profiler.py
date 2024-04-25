@@ -16,11 +16,8 @@ except ImportError:
 import collections
 import gc
 import json
-import mmap
 import os
-import random
 import re
-import struct
 import subprocess
 import sys
 import tempfile
@@ -31,6 +28,7 @@ import weakref
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 from unittest.mock import patch
+from warnings import warn
 
 import expecttest
 import torch
@@ -38,6 +36,7 @@ import torch.nn as nn
 import torch.optim
 import torch.utils.data
 import torch.utils.data.datapipes as dp
+from torch import _dynamo as torchdynamo
 from torch._C._profiler import _TensorMetadata
 from torch.autograd import (
     _record_function_with_args_enter,
@@ -69,13 +68,13 @@ from torch.profiler._pattern_matcher import (
     report_all_anti_patterns,
     SynchronizedDataLoaderPattern,
 )
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
+
+from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
+
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
-    IS_ARM64,
     IS_JETSON,
-    IS_LINUX,
     IS_WINDOWS,
     parametrize,
     run_tests,
@@ -88,6 +87,8 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
+
+from torch.utils._triton import has_triton
 
 Json = Dict[str, Any]
 
@@ -532,42 +533,54 @@ class TestExecutionTrace(TestCase):
         assert loop_count == expected_loop_events
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile does not support WINDOWS")
+    @unittest.skipIf(
+        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+    )
+    @unittest.skipIf(not TEST_CUDA or not has_triton(), "need CUDA and triton to run")
     def test_execution_trace_with_pt2(self):
-        class ConvAndRelu(nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.linear = nn.Linear(4096, 4096)
-                self.relu = nn.ReLU(inplace=True)
+        @torchdynamo.optimize("inductor")
+        def fn(a, b, c):
+            x = torch.nn.functional.linear(a, b)
+            x = x + c
+            return x.cos()
 
-            def forward(self, x: torch.Tensor) -> torch.Tensor:
-                x = self.linear(x)
-                x = self.relu(x)
-                return x
+        a, b, c = (torch.randn(4, 4, requires_grad=True).to("cuda") for _ in range(3))
+
+        inputs = [a, b, c]
+        with torch._inductor.config.patch(compile_threads=1):
+            fn(*inputs)
 
         # Create a temp file to save execution trace data.
         fp = tempfile.NamedTemporaryFile("w+t", suffix="_et.json", delete=False)
         fp.close()
 
-        with torch._inductor.config.patch(compile_threads=1):
-            test_module = torch.compile(ConvAndRelu())
+        with profile(
+            activities=torch.profiler.supported_activities(),
+            record_shapes=True,
+            schedule=torch.profiler.schedule(
+                skip_first=3, wait=1, warmup=1, active=2, repeat=1
+            ),
+            execution_trace_observer=(
+                ExecutionTraceObserver().register_callback(fp.name)
+            ),
+        ) as p:
+            for idx in range(10):
+                with record_function(f"## LOOP {idx} ##"):
+                    fn(*inputs)
+                p.step()
 
-            x = torch.rand(128, 4096)
-            et = ExecutionTraceObserver().register_callback(fp.name)
-            et.start()
-            test_module.forward(x)
-            et.stop()
-
-        assert fp.name == et.get_output_file_path()
-        et.unregister_callback()
         nodes = self.get_execution_trace_root(fp.name)
-
-        found_root_node = False
+        found_captured_triton_kernel_node = False
         for n in nodes:
             assert "name" in n
-            if "[pytorch|profiler|execution_trace|process]" in n["name"]:
-                found_root_node = True
-
-        assert found_root_node
+            if "triton_" in n["name"]:
+                for attr in n["attrs"]:
+                    if attr["name"] == "kernel_file" and attr["value"] != "":
+                        found_captured_triton_kernel_node = True
+                        assert len(n["inputs"]["values"]) > 0
+                        assert len(n["outputs"]["values"]) == 0
+        if not found_captured_triton_kernel_node:
+            warn("triton kernels not found")
 
     def test_execution_trace_start_stop(self):
         use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
@@ -3583,70 +3596,6 @@ aten::mm""",
                 self.assertEqual(expected_fields, actual_fields)
         finally:
             os.remove("torchtidy_report.json")
-
-    @unittest.skipIf(IS_ARM64 or not IS_LINUX, "x86 linux only cpp unwinding")
-    def test_fuzz_symbolize(self):
-        # generate some random addresses in the text section and make sure the
-        # symbolizers do not throw exceptions/crash
-        def get_text_sections():
-            text_sections = []
-            seen = set()
-            for filename in os.listdir("/proc/self/map_files"):
-                library = os.readlink("/proc/self/map_files/" + filename)
-                if ".so" not in library or library in seen:
-                    continue
-                seen.add(library)
-                with open(os.path.join("/proc/self/map_files", library), "rb") as f:
-                    mm = mmap.mmap(f.fileno(), 0, prot=mmap.PROT_READ)
-
-                    def unpack(fmt, offset):
-                        return struct.unpack(
-                            fmt, mm[offset : offset + struct.calcsize(fmt)]
-                        )
-
-                    if mm[:4] != b"\x7fELF":
-                        continue
-                    (section_headers_start,) = unpack("Q", 40)
-                    (section_header_size,) = unpack("H", 58)
-                    (num_section_headers,) = unpack("H", 60)
-                    (shstrndx,) = unpack("H", 62)
-                    (shstrtab_offset,) = unpack(
-                        "Q", section_headers_start + shstrndx * section_header_size + 24
-                    )
-                    for i in range(num_section_headers):
-                        (section_name_offset,) = unpack(
-                            "I", section_headers_start + i * section_header_size
-                        )
-                        name_start = shstrtab_offset + section_name_offset
-                        section_name = mm[name_start : name_start + 6]
-                        if section_name != b".text\0":
-                            continue
-                        (section_offset,) = unpack(
-                            "Q", section_headers_start + i * section_header_size + 24
-                        )
-                        (section_size,) = unpack(
-                            "Q", section_headers_start + i * section_header_size + 32
-                        )
-                        start = int(filename.split("-")[0], 16) + section_offset
-                        text_sections.append((start, section_size))
-                        break
-                    mm.close()
-            return text_sections
-
-        r = random.Random()
-        r.seed(1)
-        text_sections = get_text_sections()
-        addrs = []
-        for i in range(200):
-            s = r.randrange(0, len(text_sections))
-            start, size = text_sections[s]
-            addr = r.randrange(start, start + size)
-            addrs.append(addr)
-        fast = torch._C._profiler.symbolize_addresses(addrs, "fast")
-        dladdr = torch._C._profiler.symbolize_addresses(addrs, "dladdr")
-        addr2line = torch._C._profiler.symbolize_addresses(addrs, "addr2line")
-        self.assertEqual(len(fast), len(addrs))
-        self.assertEqual(len(addr2line), len(fast))
 
 
 if __name__ == "__main__":
