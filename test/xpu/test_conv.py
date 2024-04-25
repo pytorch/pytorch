@@ -13,8 +13,8 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import tf32_is_not_fp32
 from torch.testing._internal.common_device_type import (
     dtypes,
-    onlyXPU,
     instantiate_device_type_tests,
+    onlyXPU,
 )
 from torch.testing._internal.common_dtype import floating_types_and
 from torch.testing._internal.common_nn import _test_module_empty_input, NNTestCase
@@ -1260,9 +1260,8 @@ class TestConvolutionNNDeviceType(NNTestCase):
             # input NHWC, output NCHW
             assert_size_stride(out, (2, 512, 7, 7), (25088, 49, 7, 1))
         else:
-        # input NHWC, output NHWC
+            # input NHWC, output NHWC
             assert_size_stride(out, (2, 512, 7, 7), (25088, 1, 3584, 512))
-
 
 
 instantiate_device_type_tests(TestConvolutionNNDeviceType, globals(), only_for="xpu")
