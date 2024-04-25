@@ -4350,8 +4350,7 @@ class TestSparseMeta(TestCase):
             )
 
         printed = []
-        printed.append("########## {}/{}/size={}+{}+{}+{} ##########".format(
-            dtype, index_dtype, batchsize, sparsesize, blocksize, densesize))
+        printed.append(f"########## {dtype}/{index_dtype}/size={batchsize}+{sparsesize}+{blocksize}+{densesize} ##########")
         printed.append("# sparse meta tensor")
         printed.append(str(x))
 
@@ -4445,6 +4444,28 @@ class TestSparseMeta(TestCase):
             with no_dispatch():
                 result = torch.zeros_like(f, device=f.fake_device)
             self.assertEqual(result, expected)
+
+    @all_sparse_layouts('layout', include_strided=False)
+    @parametrize("dtype", [torch.float64])
+    def test_sum_meta(self, dtype, layout):
+        device = 'cpu'
+        index_dtype = torch.int64
+        for t in self.generate_simple_inputs(layout, device=device, dtype=dtype, index_dtype=index_dtype):
+            m = t.to(device='meta')
+            r = torch.sum(m)
+            self.assertEqual(r.layout, torch.strided)
+            self.assertTrue(r.is_meta)
+            self.assertEqual(r.shape, ())
+
+    @all_sparse_layouts('layout', include_strided=False)
+    @parametrize("dtype", [torch.float64])
+    def test_add_meta(self, dtype, layout):
+        device = 'cpu'
+        index_dtype = torch.int64
+        for t in self.generate_simple_inputs(layout, device=device, dtype=dtype, index_dtype=index_dtype):
+            m = t.to(device='meta')
+            r = torch.add(m, m)
+            self.assertEqual(r, m)
 
 
 class _SparseDataset(torch.utils.data.Dataset):

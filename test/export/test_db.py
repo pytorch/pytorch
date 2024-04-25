@@ -12,11 +12,12 @@ from torch._export.db.examples import (
 from torch.export import export
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_WINDOWS,
     parametrize,
     run_tests,
     TestCase,
-    IS_WINDOWS
 )
+
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
@@ -60,7 +61,9 @@ class ExampleTests(TestCase):
     def test_exportdb_not_supported(self, name: str, case: ExportCase) -> None:
         model = case.model
         # pyre-ignore
-        with self.assertRaises((torchdynamo.exc.Unsupported, AssertionError, RuntimeError)):
+        with self.assertRaises(
+            (torchdynamo.exc.Unsupported, AssertionError, RuntimeError)
+        ):
             inputs = normalize_inputs(case.example_inputs)
             exported_model = export(
                 model,
@@ -77,6 +80,7 @@ class ExampleTests(TestCase):
         for rewrite_case in get_rewrite_cases(case)
     ]
     if exportdb_not_supported_rewrite_cases:
+
         @parametrize(
             "name,rewrite_case",
             exportdb_not_supported_rewrite_cases,

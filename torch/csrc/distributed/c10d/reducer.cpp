@@ -20,6 +20,7 @@
 #include <torch/csrc/autograd/utils/lambda_post_hook.h>
 #include <torch/csrc/distributed/c10d/comm.hpp>
 #include <torch/csrc/distributed/c10d/logger.hpp>
+#include <utility>
 
 namespace c10d {
 namespace {
@@ -89,7 +90,7 @@ std::vector<at::Tensor> extractTensors(const c10::IValue& result) {
 Reducer::Reducer(
     std::vector<at::Tensor> params,
     std::vector<std::vector<size_t>> bucket_indices,
-    std::vector<size_t> per_bucket_size_limits,
+    const std::vector<size_t>& per_bucket_size_limits,
     c10::intrusive_ptr<c10d::ProcessGroup> process_group,
     std::vector<bool> expect_sparse_gradients,
     int64_t bucket_bytes_cap,
@@ -449,7 +450,7 @@ void Reducer::mark_variable_ready_sparse(size_t variable_index) {
     if (sparse_metadata_) {
       grad = grad.coalesce();
       REDUCER_CHECK(
-          param_names_.size() != 0, logger_, "No parameter names were found");
+          !param_names_.empty(), logger_, "No parameter names were found");
       std::string& param_name = param_names_[variable_index];
       auto iter = sparse_metadata_->find(param_name);
       REDUCER_CHECK(
@@ -632,7 +633,7 @@ void Reducer::delay_all_reduce() {
 }
 
 void Reducer::set_logger(std::weak_ptr<c10d::Logger> logger) {
-  logger_ = logger;
+  logger_ = std::move(logger);
 }
 
 // The function `autograd_hook` is called after the gradient for a

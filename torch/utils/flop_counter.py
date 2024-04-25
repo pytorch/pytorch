@@ -24,8 +24,8 @@ flop_registry: Dict[Any, Any] = {}
 
 def shape_wrapper(f):
     @wraps(f)
-    def nf(*args, out=None, **kwargs):
-        args, kwargs, out_shape = tree_map(get_shape, (args, kwargs, out))
+    def nf(*args, out_val=None, **kwargs):
+        args, kwargs, out_shape = tree_map(get_shape, (args, kwargs, out_val))
         return f(*args, out_shape=out_shape, **kwargs)
     return nf
 
@@ -542,7 +542,7 @@ class FlopCounterMode(TorchDispatchMode):
         func_packet = func._overloadpacket
         if func_packet in self.flop_registry:
             flop_count_func = self.flop_registry[func_packet]
-            flop_count = flop_count_func(*args, **kwargs, out=out)  # type: ignore[operator]
+            flop_count = flop_count_func(*args, **kwargs, out_val=out)  # type: ignore[operator]
             if len(set(self.parents)) != len(self.parents):
                 print(
                     "The module hierarchy tracking seems to be messed up."

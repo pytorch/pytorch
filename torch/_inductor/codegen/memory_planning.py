@@ -134,15 +134,15 @@ class AllocationTreeNode:
 
     def get_live_ranges(self) -> LiveRanges:
         """Aggregate LiveRanges for all objects below this in tree"""
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def get_size_hint(self) -> int:
         """Number of bytes used for example inputs"""
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def get_symbolic_size(self) -> sympy.Expr:
         """Number of bytes needed at runtime"""
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def finalize(self, pool, offset) -> AllocationTreeNode:
         """Called after all allocations have been made"""
