@@ -47,7 +47,7 @@ from user code:
     def test_internal_error_suppress_errors(self, records):
         def fn001(x):
             def f(ctx):
-                raise AssertionError()
+                raise AssertionError
 
             comptime(f)
 
@@ -62,7 +62,7 @@ WON'T CONVERT fn001 test_exc.py line N
 ========== TorchDynamo Stack Trace ==========
 Traceback (most recent call last):
   File "test_exc.py", line N, in f
-    raise AssertionError()
+    raise AssertionError
 AssertionError:
 
 from user code:
@@ -84,7 +84,7 @@ from user code:
     def test_not_implemented_error(self, records):
         def fn001(x):
             def f(ctx):
-                raise NotImplementedError()
+                raise NotImplementedError
 
             # Ensure graph break is not possible
             for i in range(3):
@@ -101,7 +101,7 @@ WON'T CONVERT fn001 test_exc.py line N
 due to:
 Traceback (most recent call last):
   File "test_exc.py", line N, in f
-    raise NotImplementedError()
+    raise NotImplementedError
 torch._dynamo.exc.InternalTorchDynamoError:
 
 from user code:
@@ -128,7 +128,7 @@ from user code:
             # NB: avoid decorator, as 3.11 changed the line number attributed
             # in this situation
             def f(ctx):
-                raise AssertionError()
+                raise AssertionError
 
             comptime(f)
 

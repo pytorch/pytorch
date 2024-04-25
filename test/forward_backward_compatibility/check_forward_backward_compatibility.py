@@ -46,6 +46,7 @@ ALLOW_LIST = [
     ("prim::ModuleDictIndex", datetime.date(9999, 1, 1)),
     ("prim::MKLDNNRelu6", datetime.date(9999, 1, 1)),
     ("prim::MKLDNNRelu6_", datetime.date(9999, 1, 1)),
+    ("prim::is_ort", datetime.date(9999, 1, 1)),
     ("prim::Concat", datetime.date(9999, 1, 1)),
     ("aten::_NestedTensor_GeneralizedBMM", datetime.date(9999, 1, 1)),
     # Internal, profiler-specific ops
@@ -134,7 +135,6 @@ ALLOW_LIST = [
     ("aten::batch_norm_backward_elemt", datetime.date(2023, 12, 31)),
     ("aten::sym_constrain_range", datetime.date(2023, 12, 31)),
     ("aten::_efficient_attention_forward", datetime.date(2024, 1, 15)),
-    ("aten::_sparse_semi_structured_linear", datetime.date(2024, 1, 15)),
     ("onednn::qconv1d_pointwise", datetime.date(2023, 12, 31)),
     ("onednn::qconv2d_pointwise", datetime.date(2023, 12, 31)),
     ("onednn::qconv3d_pointwise", datetime.date(2023, 12, 31)),
