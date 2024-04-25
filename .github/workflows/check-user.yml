@@ -6,7 +6,7 @@ on:
       user_name:
         required: true
         type: string
-        description: The name of the workflow owner
+        description: The name of the workflow owner.
 
     outputs:
       workflow-type:
