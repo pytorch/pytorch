@@ -199,12 +199,6 @@ class CachingAutotuner(KernelInterface):
                         c, warm_cache_only
                     )
                 except OutOfResources as e:
-                    if len(self.configs) == 1:
-                        raise RuntimeError(
-                            f"Failed to compile triton config: {c}. "
-                            f"Report a fatal compilation error. "
-                            f"{e}"
-                        )
                     # Skip the config if we run out of resource
                     continue
                 self.launchers.append(launcher)
