@@ -10,7 +10,7 @@ import io
 import logging
 import sys
 
-from typing import Any, Callable, Optional, Tuple
+from typing import Any, Callable, Optional, Tuple, Union
 
 import torch
 import torch.fx
@@ -32,8 +32,10 @@ class PackageInfo:
         )
 
     @classmethod
-    def from_python_class(cls, python_class: type) -> PackageInfo:
-        package_name = python_class.__module__.split(".")[0]
+    def from_python_class(cls, python_class_name: Union[type, str]) -> PackageInfo:
+        if isinstance(python_class_name, type):
+            python_class_name = python_class_name.__module__
+        package_name = python_class_name.split(".")[0]
         package = __import__(package_name)
         version = getattr(package, "__version__", None)
         # TODO: Figure out how to retrieve commit hash.

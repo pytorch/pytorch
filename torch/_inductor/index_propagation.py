@@ -187,8 +187,11 @@ class IndexPropagation:
         def upper_bound(v):
             return bound_sympy(v).upper if isinstance(v, sympy.Expr) else v
 
+        var_to_range = {
+            k: ValueRanges(0, upper_bound(v) - 1) for k, v in iter_ranges.items()
+        }
         self.var_to_range = tuple(
-            (k, ValueRanges(0, upper_bound(v) - 1)) for k, v in iter_ranges.items()
+            itertools.chain(self.shape_env.var_to_range.items(), var_to_range.items())
         )
 
         axioms = []
@@ -286,7 +289,9 @@ class IndexPropagation:
 
     def statically_true(self, e):
         evaluated = self.shape_env._maybe_evaluate_static(
-            e, axioms=self.axioms, var_to_range=self.var_to_range
+            e,
+            axioms=self.axioms + self.shape_env._get_axioms(tuple(e.free_symbols)),
+            var_to_range=self.var_to_range,
         )
         return bool(evaluated)
 

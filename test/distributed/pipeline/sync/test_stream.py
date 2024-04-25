@@ -23,7 +23,9 @@ from torch.distributed.pipeline.sync.stream import (
 )
 from torch.testing._internal.common_utils import run_tests
 
-skip_if_no_cuda = pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda required")
+skip_if_no_cuda = pytest.mark.skipif(
+    not torch.cuda.is_available(), reason="cuda required"
+)
 
 
 class TestNewStream:
