@@ -5,6 +5,7 @@ from bisect import bisect_right
 from collections import Counter
 from functools import partial
 from typing import Optional, Sequence
+from weakref import ref
 
 from torch import inf, Tensor
 
@@ -82,15 +83,17 @@ class LRScheduler:
             opt._wrapped_step = True
 
             def wrap_step(step_fn):
+                opt_ref = ref(self.optimizer)
+                step_ref = ref(step_fn)
+                func = step_fn.__func__
+
                 def wrapper(*args, **kwargs):
-                    step_fn.__self__._opt_called = True
-                    return step_fn(*args, **kwargs)
+                    opt = opt_ref()
+                    opt._opt_called = True
+                    return func.__get__(opt, opt.__class__)(*args, **kwargs)
 
                 # Include this for BC (see where it is used below)
                 wrapper._with_counter = True
-                import functools
-
-                functools.update_wrapper(wrapper, step_fn)
                 return wrapper
 
             opt.step = wrap_step(opt.step)
