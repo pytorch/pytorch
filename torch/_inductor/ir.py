@@ -54,6 +54,7 @@ from torch.fx.experimental.symbolic_shapes import (
     DivideByKey,
     free_unbacked_symbols,
     rebind_unbacked,
+    resolve_unbacked_bindings,
     SymTypes,
 )
 from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
@@ -5229,7 +5230,9 @@ class FallbackKernel(ExternKernelAlloc):
         if not hasattr(self, "unbacked_bindings"):
             return
 
-        unbacked_bindings = self.unbacked_bindings
+        unbacked_bindings = resolve_unbacked_bindings(
+            V.graph.sizevars.shape_env, self.unbacked_bindings
+        )
 
         if not unbacked_bindings:
             return
@@ -5279,7 +5282,9 @@ class FallbackKernel(ExternKernelAlloc):
 
     def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
         if unbacked_bindings := getattr(self, "unbacked_bindings", None):
-            return unbacked_bindings.keys()
+            return resolve_unbacked_bindings(
+                V.graph.sizevars.shape_env, unbacked_bindings
+            ).keys()
         else:
             return set()
 
