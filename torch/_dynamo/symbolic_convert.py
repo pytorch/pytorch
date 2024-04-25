@@ -2551,8 +2551,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         # To prevent overguarding, do not guard on functions from "torch.nn."
         # namespace like _call_impl from nn.Module. Users mostly patch `forward`
         # method.
-        if isinstance(func, UserFunctionVariable) and not func.fn.__module__.startswith(
-            ("torch.nn", "torch.ao")
+        if (
+            isinstance(func, UserFunctionVariable)
+            and func.source
+            and not func.fn.__module__.startswith(("torch.nn", "torch.ao"))
         ):
             fn_source_to_guard = func.source
             if isinstance(func, UserMethodVariable):
