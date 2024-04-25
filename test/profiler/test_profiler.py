@@ -17,10 +17,10 @@ import collections
 import gc
 import json
 import os
+import pickle
 import re
 import subprocess
 import sys
-import pickle
 import threading
 import unittest
 from dataclasses import dataclass, field
@@ -553,11 +553,14 @@ class TestProfiler(TestCase):
         self.assertTrue(found_cuda)
         self._check_stats(prof._stats())
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     def test_memory_profiler(self):
         def run_profiler(tensor_creation_fn):
             # collecting allocs / deallocs
             with _profile(
-                profile_memory=True, record_shapes=True, use_kineto=kineto_available()
+                profile_memory=True,
+                record_shapes=True,
+                use_kineto=kineto_available(),
             ) as prof:
                 x = None
                 with record_function("test_user_scope_alloc"):
@@ -568,16 +571,22 @@ class TestProfiler(TestCase):
 
         def check_metrics(stats, metric, allocs=None, deallocs=None):
             stat_metrics = {}
+            # print(stats)
             for stat in stats:
                 stat_metrics[stat.key] = getattr(stat, metric)
+            # print(stat_metrics)
             if allocs is not None:
                 for alloc_fn in allocs:
                     self.assertTrue(alloc_fn in stat_metrics)
-                    self.assertTrue(stat_metrics[alloc_fn] > 0)
+                    self.assertGreater(
+                        stat_metrics[alloc_fn], 0, f"alloc_fn = {alloc_fn}"
+                    )
             if deallocs is not None:
                 for dealloc_fn in deallocs:
                     self.assertTrue(dealloc_fn in stat_metrics)
-                    self.assertTrue(stat_metrics[dealloc_fn] < 0)
+                    self.assertLess(
+                        stat_metrics[dealloc_fn], 0, f"alloc_fn = {dealloc_fn}"
+                    )
 
         def create_cpu_tensor():
             return torch.rand(10, 10)
@@ -591,7 +600,7 @@ class TestProfiler(TestCase):
         stats = run_profiler(create_cpu_tensor)
         check_metrics(
             stats,
-            "device_memory_usage",
+            "cpu_memory_usage",
             allocs=[
                 "aten::empty",
                 "aten::rand",
@@ -648,7 +657,7 @@ class TestProfiler(TestCase):
             )
             check_metrics(
                 stats,
-                "device_memory_usage",
+                "cpu_memory_usage",
                 allocs=[
                     "aten::rand",
                     "aten::empty",
@@ -660,7 +669,7 @@ class TestProfiler(TestCase):
             stats = run_profiler(create_mkldnn_tensor)
             check_metrics(
                 stats,
-                "device_memory_usage",
+                "cpu_memory_usage",
                 allocs=[
                     "test_user_scope_alloc",
                     "aten::rand",
@@ -683,7 +692,7 @@ class TestProfiler(TestCase):
         stats = prof.key_averages(group_by_input_shape=True)
         check_metrics(
             stats,
-            "device_memory_usage",
+            "cpu_memory_usage",
             allocs=["aten::rand", "aten::empty"],
             deallocs=["[memory]"],
         )

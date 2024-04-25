@@ -14,11 +14,10 @@ except ImportError:
     pass
 
 import json
-import tempfile
 import sys
+import tempfile
 import unittest
 from typing import Any, Dict, List
-from warnings import warn
 
 import torch
 import torch.nn as nn
@@ -33,14 +32,14 @@ from torch.profiler import (
     record_function,
     supported_activities,
 )
+
+from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     run_tests,
     skipIfTorchDynamo,
     TestCase,
 )
-
-from torch.testing._internal.common_cuda import TEST_CUDA
 
 from torch.utils._triton import has_triton
 
