@@ -250,13 +250,13 @@ class TestMaxAutotune(TestCase):
             def __init__(self, key, is_autotune=False):
                 pass
 
-            def get(self, filename):
+            def get(self, filenames):
                 nonlocal cache
                 nonlocal num_get
-                if filename not in cache:
-                    return None
-                ret = json.loads(cache[filename])
-                num_get += 1
+                ret = {
+                    file: json.loads(cache[file]) for file in filenames if file in cache
+                }
+                num_get += len(ret)
                 return ret
 
             def put(self, filename, data):

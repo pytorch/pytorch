@@ -112,8 +112,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         if name == "__name__":
             return ConstantVariable.create(self.value.__name__)
-        elif name == "__qualname__":
-            return ConstantVariable.create(self.value.__qualname__)
 
         source = AttrSource(self.source, name) if self.source is not None else None
         try:
