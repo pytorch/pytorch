@@ -3636,9 +3636,11 @@ class ShapeEnv:
                 self.log.warning("Failing guard allocated at: \n%s", ''.join(guard.stack.format()))
                 raise
 
-        # First, issue all the non-trivial guards.
+        # First, issue all guards.
+        # This removes all the checks that follow from bounds
+        # We could simply emit those and also the bounds 2 <= size when necessary
         for guard in self.guards:
-            if self._maybe_evaluate_static(guard.expr) is not None:
+            if self._maybe_evaluate_static(guard.expr, axioms=()) is not None:
                 continue
             issue_guard(guard)
 
@@ -3843,7 +3845,7 @@ class ShapeEnv:
 
     def get_nontrivial_guards(self):
         """Returns a list of guard expressions that aren't statically known (i.e. not trivial)"""
-        return [self.simplify(guard.expr) for guard in self.guards if self._maybe_evaluate_static(guard.expr) is None]
+        return [self.simplify(guard.expr) for guard in self.guards if self._maybe_evaluate_static(guard.expr, axioms=()) is None]
 
     def format_guards(self, verbose=False):
         """Format this shape env's guard expressions with optional traceback info if verbose"""
@@ -3865,9 +3867,56 @@ class ShapeEnv:
         return bound_sympy(expr, var_to_range)
 
     @_lru_cache
+    def get_axioms(self, symbols: Optional[Tuple["sympy.Symbol"]] = None) -> Tuple["sympy.Expr"]:
+        """
+        Given the symbols in an expression, it returns all the runtime asserts that have those symbols
+        concatenated with all the guards.
+        If symbols is None, it returns all the runtime asserts (and all the guards)
+        """
+        if symbols is None:
+            runtime_asserts = (r.expr
+                               for rs in self.deferred_runtime_asserts.values()
+                               for r in rs)
+        else:
+            runtime_asserts = (r.expr
+                               for s in symbols if s not in self.var_to_val
+                               for r in self.deferred_runtime_asserts.get(s, ()))
+        guards = (g.expr for g in self.guards)
+        return tuple(itertools.chain(guards, runtime_asserts))
+
+    @_lru_cache
+    def get_implications(self,
+                         e: "sympy.Expr",
+                         compute_hint: bool) -> Tuple[Tuple["sympy.Expr", 'sympy.logic.boolalg.BooleanAtom']]:
+        """ Given a expression, it returns a list of predicates that follow from it """
+        equiv = {}
+
+        def add_expr(expr):
+            # Expr and negation
+            equiv[canonicalize_bool_expr(expr)] = sympy.true
+            equiv[canonicalize_bool_expr(sympy.Not(expr))] = sympy.false
+            if isinstance(expr, sympy.Rel):
+                # multiplying by -1 changes the direction of the inequality
+                dual = type(expr)(-expr.rhs, -expr.lhs)
+                equiv[canonicalize_bool_expr(dual)] = sympy.true
+                equiv[canonicalize_bool_expr(sympy.Not(dual))] = sympy.false
+
+        if compute_hint:
+            e = canonicalize_bool_expr(e.xreplace(self.var_to_val))
+        add_expr(e)
+        # Other relational expressions this expression implies
+        if isinstance(e, sympy.Eq):
+            add_expr(sympy.Le(e.lhs, e.rhs))
+            add_expr(sympy.Ge(e.lhs, e.rhs))
+        elif isinstance(e, sympy.Lt):
+            add_expr(sympy.Le(e.lhs, e.rhs))
+            add_expr(sympy.Ne(e.lhs, e.rhs))
+        return tuple(equiv.items())
+
+    @_lru_cache
     def _maybe_evaluate_static(
         self, expr: "sympy.Expr", *, unbacked_only: bool = False, compute_hint: bool = False,
-        expect_rational=True, size_oblivious: bool = False
+        expect_rational=True, size_oblivious: bool = False, axioms: Optional[Tuple[sympy.Expr]] = None
     ) -> "Optional[sympy.Expr]":
         """
         Tries to evaluate expr without introducing guards
@@ -3881,6 +3930,9 @@ class ShapeEnv:
         hint for the particular hint values of backed SymInts, e.g., if
         s0 happens to be 3 this run, compute_hint will subsitute s0 with 3.
         """
+        # axioms with compute hint NYE
+        assert not compute_hint or not axioms
+
         expr = self.simplify(expr)
 
         if compute_hint:
@@ -3888,53 +3940,14 @@ class ShapeEnv:
 
         expr = canonicalize_bool_expr(expr)
 
-        symbols = list(expr.free_symbols)
-
-        # Apply known runtime asserts
-        guards_exprs = []
-        for g in self.guards:
-            e = self.simplify(g.expr)
-            if compute_hint:
-                e = canonicalize_bool_expr(e.xreplace(self.var_to_val))
-            guards_exprs.append(e)
-
-        symbols_unbacked = symbols - self.var_to_val.keys()
-        defra_exprs = {}
-        for s in symbols_unbacked:
-            defras = self.deferred_runtime_asserts.get(s, ())
-            l = []
-            for defra in defras:
-                e = self.simplify(defra.expr)
-                if compute_hint:
-                    e = canonicalize_bool_expr(e.xreplace(self.var_to_val))
-                l.append(e)
-            defra_exprs[s] = l
-
-
+        # Pattern matching
+        symbols = tuple(expr.free_symbols)
+        if axioms is None:
+            axioms = self.get_axioms(symbols)
         subst = {}
-        for s in symbols_unbacked:
+        for e in axioms:
+            subst.update(dict(self.get_implications(e, compute_hint=compute_hint)))
 
-            def add_expr(expr):
-                # Expr and negation
-                subst[canonicalize_bool_expr(expr)] = sympy.true
-                subst[canonicalize_bool_expr(sympy.Not(expr))] = sympy.false
-                if isinstance(expr, sympy.Rel):
-                    # multiplying by -1 changes the direction of the inequality
-                    dual = type(expr)(-expr.rhs, -expr.lhs)
-                    subst[canonicalize_bool_expr(dual)] = sympy.true
-                    subst[canonicalize_bool_expr(sympy.Not(dual))] = sympy.false
-
-            for e in itertools.chain(guards_exprs, defra_exprs[s]):
-                add_expr(e)
-                # Other relational expressions this expression implies
-                if isinstance(e, sympy.Eq):
-                    add_expr(sympy.Le(e.lhs, e.rhs))
-                    add_expr(sympy.Ge(e.lhs, e.rhs))
-                elif isinstance(e, sympy.Lt):
-                    add_expr(sympy.Le(e.lhs, e.rhs))
-                    add_expr(sympy.Ne(e.lhs, e.rhs))
-
-        # NB: this helps us deal with And/Or connectives
         expr = expr.xreplace(subst)
 
         # Simplify making use of value range lower bound
@@ -4648,7 +4661,6 @@ class ShapeEnv:
             if not self._suppress_guards_tls():
                 stack = CapturedTraceback.extract(skip=1)
                 guard = ShapeGuard(g, stack)
-                # TODO: deal with duplicate guards somehow
                 self.guards.append(guard)
         except Exception:
             if fresh:
