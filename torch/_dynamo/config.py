@@ -341,7 +341,7 @@ numpy_default_int = "int64"
 use_numpy_random_stream = False
 
 # Use C++ guard manager
-enable_cpp_guard_manager = os.environ.get("TORCHDYNAMO_CPP_GUARD_MANAGER", "0") == "1"
+enable_cpp_guard_manager = os.environ.get("TORCHDYNAMO_CPP_GUARD_MANAGER", "1") == "1"
 
 # Inline inbuilt nn modules
 inline_inbuilt_nn_modules = (
@@ -383,6 +383,9 @@ _save_config_ignore = {
 # or replayed in aot_autograd epilogue. default is False because mutation on inputs
 # can prevent cudagraphing.
 cudagraph_backend_keep_input_mutation = False
+
+# enable cudagraph support for mutated inputs from prior cudagraph pool
+cudagraph_backend_support_input_mutation = False
 
 # When True, only ops that have the torch.Tag.pt2_compliant tag
 # will be allowed into the graph; all other ops will be disallowed
