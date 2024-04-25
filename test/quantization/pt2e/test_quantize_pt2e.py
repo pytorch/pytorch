@@ -53,6 +53,8 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     TemporaryFileName,
+    TEST_CUDA,
+    TEST_WITH_ROCM,
 )
 
 
@@ -1826,8 +1828,13 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
     def test_move_exported_model_dropout_inplace(self):
         self._test_move_exported_model_dropout(inplace=True)
 
-    def _get_bn_train_eval_ops(self, is_cuda: bool):
-        if is_cuda:
+    def _get_bn_train_eval_ops(self):
+        if TEST_WITH_ROCM:
+            return (
+                torch.ops.aten.miopen_batch_norm.default,
+                torch.ops.aten.miopen_batch_norm.default,
+            )
+        elif TEST_CUDA:
             return (
                 torch.ops.aten.cudnn_batch_norm.default,
                 torch.ops.aten.cudnn_batch_norm.default,
@@ -1852,14 +1859,13 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             def forward(self, x):
                 return self.bn(x)
 
-        is_cuda = torch.cuda.is_available()
-        if is_cuda:
+        if TEST_CUDA:
             m = M().train().cuda()
             example_inputs = (torch.randn(1, 3, 3, 3).cuda(),)
         else:
             m = M().train()
             example_inputs = (torch.randn(1, 3, 3, 3),)
-        bn_train_op, bn_eval_op = self._get_bn_train_eval_ops(is_cuda)
+        bn_train_op, bn_eval_op = self._get_bn_train_eval_ops()
         m = capture_pre_autograd_graph(m, example_inputs)
 
         # Assert that batch norm op exists and is in train mode
@@ -1924,14 +1930,13 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                 x = self.dropout(x)
                 return x
 
-        is_cuda = torch.cuda.is_available()
-        if is_cuda:
+        if TEST_CUDA:
             m = M().train().cuda()
             example_inputs = (torch.randn(1, 3, 3, 3).cuda(),)
         else:
             m = M().train()
             example_inputs = (torch.randn(1, 3, 3, 3),)
-        bn_train_op, bn_eval_op = self._get_bn_train_eval_ops(is_cuda)
+        bn_train_op, bn_eval_op = self._get_bn_train_eval_ops()
         m = capture_pre_autograd_graph(m, example_inputs)
 
         def _assert_ops_are_correct(m: torch.fx.GraphModule, train: bool):
@@ -1939,7 +1944,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             bn_op = bn_train_op if train else bn_eval_op
             bn_node = self._get_node(m, bn_op)
             self.assertTrue(bn_node is not None)
-            if is_cuda:
+            if TEST_CUDA:
                 self.assertEqual(bn_node.args[5], train)
             dropout_node = self._get_node(m, torch.ops.aten.dropout.default)
             self.assertEqual(dropout_node.args[2], train)

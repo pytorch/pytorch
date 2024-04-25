@@ -79,7 +79,8 @@ PyTypeObject THPCapturedTracebackType = {
     nullptr, /* tp_new */
 };
 
-namespace pybind11::detail {
+namespace pybind11 {
+namespace detail {
 
 template <>
 struct type_caster<std::shared_ptr<torch::CapturedTraceback>> {
@@ -106,9 +107,11 @@ struct type_caster<std::shared_ptr<torch::CapturedTraceback>> {
   }
 };
 
-} // namespace pybind11::detail
+} // namespace detail
+} // namespace pybind11
 
-namespace torch::profiler {
+namespace torch {
+namespace profiler {
 
 /* [NOTE: RecordFunctionFast]
  * This is an alternate way to call record_function from python.
@@ -322,7 +325,8 @@ void initPythonBindings(PyObject* module) {
       .value("CPU", ActivityType::CPU)
       .value("XPU", ActivityType::XPU)
       .value("MTIA", ActivityType::MTIA)
-      .value("CUDA", ActivityType::CUDA);
+      .value("CUDA", ActivityType::CUDA)
+      .value("PrivateUse1", ActivityType::PrivateUse1);
 
   py::class_<ExperimentalConfig>(m, "_ExperimentalConfig")
       .def(
@@ -603,33 +607,6 @@ void initPythonBindings(PyObject* module) {
     }
     return py_symbolize(tb_ptrs);
   });
-  // directly convert address pointers to frames, used for testing symbolize
-  m.def(
-      "symbolize_addresses",
-      [](const std::vector<uint64_t>& frames, const std::string& mode_s) {
-        std::vector<std::tuple<std::string, int64_t, std::string>> frames_out;
-        torch::unwind::Mode mode = torch::unwind::Mode::addr2line;
-        if (mode_s == "fast") {
-          mode = torch::unwind::Mode::fast;
-        } else if (mode_s == "addr2line") {
-          mode = torch::unwind::Mode::addr2line;
-        } else if (mode_s == "dladdr") {
-          mode = torch::unwind::Mode::dladdr;
-        } else {
-          TORCH_CHECK(false, "unexpected mode ", mode_s);
-        }
-        std::vector<void*> frames_p;
-        frames_p.reserve(frames.size());
-        for (auto f : frames) {
-          frames_p.push_back((void*)f); // NOLINT
-        }
-        auto frame_objects = unwind::symbolize(frames_p, mode);
-        frames_out.reserve(frame_objects.size());
-        for (auto& frame : frame_objects) {
-          frames_out.emplace_back(frame.filename, frame.lineno, frame.funcname);
-        }
-        return frames_out;
-      });
   installCapturedTracebackPython();
 
   // NOLINTNEXTLINE(*-c-arrays*)
@@ -663,4 +640,5 @@ void initPythonBindings(PyObject* module) {
     throw python_error();
   }
 }
-} // namespace torch::profiler
+} // namespace profiler
+} // namespace torch
