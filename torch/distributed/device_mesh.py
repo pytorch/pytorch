@@ -37,6 +37,7 @@ else:
         _find_pg_by_ranks_and_tag,
         _get_default_group,
         _get_group_tag,
+        get_process_group_ranks,
         get_rank,
         get_world_size,
         init_process_group,
@@ -89,6 +90,7 @@ else:
                     device_mesh.device_type,
                     mesh_1d,
                     mesh_dim_names=(mesh_dim_name,),
+                    _init_backend=False,
                 )
                 if cur_rank in mesh_1d:
                     res_sub_mesh = sub_mesh
@@ -207,12 +209,13 @@ else:
             mesh: Union[torch.Tensor, "ArrayLike"],
             *,
             mesh_dim_names: Optional[Tuple[str, ...]] = None,
+            _init_backend: bool = True,
         ) -> None:
             self.device_type = device_type
             if isinstance(mesh, torch.Tensor) and mesh.device.type != "cpu":
                 raise ValueError(f"`mesh` must be a CPU tensor, got {mesh}")
             self.mesh = (
-                mesh.detach().to(device="cpu", dtype=torch.int)
+                mesh.detach().to(dtype=torch.int)
                 if isinstance(mesh, torch.Tensor)
                 else torch.tensor(mesh, dtype=torch.int)
             )
@@ -222,14 +225,22 @@ else:
             self._flatten_mesh_list = tuple(self.mesh.flatten().tolist())
             self._hash = hash((self._flatten_mesh_list, self.mesh.shape, id(self)))
 
-            # Skip process group initialization if xla device.
+            # Skip process group initialization if xla device or init backend is False
             # TODO(yeounoh) implement DeviceMesh backend and register XLA backend.
             if device_type != "xla":
                 # always try to create default (world) pg, even if it is not initialized
                 # already. The world pg is used for device mesh identity (rank) on each
                 # process (we need to know if the current global rank is in the mesh or not).
-                self._get_or_create_default_group()
-                self._init_process_groups()
+                if _init_backend:
+                    self._get_or_create_default_group()
+                    self._init_process_groups()
+
+                # calculate the coordinates of the current global rank on the mesh
+                rank_coords = (self.mesh == get_rank()).nonzero()
+                assert rank_coords.size(0) in (0, 1)
+                self._coordinate_on_dim: Optional[List[int]] = (
+                    rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
+                )
 
         def _get_or_create_default_group(self):
             default_initialized = is_initialized()
@@ -258,12 +269,6 @@ else:
                     )
                 device_handle.set_device(get_rank() % num_devices_per_host)
 
-            # calculate the coordinates of the current global rank on the mesh
-            rank_coords = (self.mesh == get_rank()).nonzero()
-            assert rank_coords.size(0) in (0, 1)
-            self._coordinate_on_dim: Optional[List[int]] = (
-                rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
-            )
             return _get_default_group()
 
         def _init_process_groups(self):
@@ -434,6 +439,23 @@ else:
                     )
                 return dim_groups
 
+        @staticmethod
+        def from_group(group: ProcessGroup, device_type: str) -> "DeviceMesh":
+            """
+            Contstructs a :class:`DeviceMesh` with ``device_type`` from an
+            existing :class:`ProcessGroup`.
+
+            The constructed device mesh is assumed to be 1D.
+            """
+            # Manually define `_dim_group_infos` instead of relying on the
+            # normal logic since we already have the PG
+            group_ranks = get_process_group_ranks(group)
+            mesh = DeviceMesh(device_type, group_ranks, _init_backend=False)
+            mesh._dim_group_infos = [
+                (_get_group_tag(group), group_ranks, group.group_name)
+            ]
+            return mesh
+
         def size(self, mesh_dim: Optional[int] = None) -> int:
             return self.mesh.numel() if mesh_dim is None else self.mesh.size(mesh_dim)
 
@@ -553,7 +575,10 @@ else:
                     f"Found len(mesh_dim_names): {len(mesh_dim_names)} and len(mesh_shape):{len(mesh_shape)}.",
                 )
 
-        mesh = torch.arange(math.prod(mesh_shape), dtype=torch.int).view(mesh_shape)
+        # Always initialize the mesh's tensor on CPU, regardless of what the
+        # external device type has been set to be (e.g. meta)
+        with torch.device("cpu"):
+            mesh = torch.arange(math.prod(mesh_shape), dtype=torch.int).view(mesh_shape)
         device_mesh = DeviceMesh(
             device_type=device_type,
             mesh=mesh,
