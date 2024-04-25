@@ -1299,6 +1299,8 @@ class TestOptimRenewed(TestCase):
             return closure_loss if optim_info.step_requires_closure else None
 
         for optim_input in cpu_optim_inputs:
+            if "fused" in optim_input.kwargs and optim_input.kwargs["fused"]:
+                self.skipTest(f"cuda is not supported for fused on {optim_cls.__name__}")
             params = [Parameter(torch.randn(2, 3, device="cpu", dtype=dtype)) for _ in range(2)]
             for p in params:
                 p.grad = torch.randn_like(p)
@@ -1697,9 +1699,9 @@ class TestOptimRenewed(TestCase):
             kwargs["fused"] = True
             for _separate_unscale in (True, False):
                 self._grad_scaling_autocast_fused_optimizers(
-                    optimizer_ctor=optim_cls, optimizer_kwargs=kwargs, separate_unscale=_separate_unscale)
+                    device=device, optimizer_ctor=optim_cls, optimizer_kwargs=kwargs, separate_unscale=_separate_unscale)
 
-    def _grad_scaling_autocast_fused_optimizers(self, optimizer_ctor, optimizer_kwargs, separate_unscale):
+    def _grad_scaling_autocast_fused_optimizers(self, device, optimizer_ctor, optimizer_kwargs, separate_unscale):
         torch.manual_seed(20)
         (
             mod_control, mod_scaling, opt_control, opt_scaling, data, loss_fn, _,
@@ -1711,26 +1713,27 @@ class TestOptimRenewed(TestCase):
             kwargs['lr'] = 1.0
         opt_control = optimizer_ctor(mod_control.parameters(), **kwargs)
 
-        scaler = torch.cpu.amp.GradScaler(init_scale=128.0)
+        scaler_scaling = torch.cpu.amp.GradScaler(init_scale=128.0)
+        scaler_control = torch.cpu.amp.GradScaler(init_scale=128.0)
         tracker = TensorTracker()
         for input, target in data:
             opt_control.zero_grad()
-            with torch.autocast('cpu', dtype=torch.half):
+            with torch.autocast(device_type=device, dtype=torch.half):
                 output_control = mod_control(input)
                 loss_control = loss_fn(output_control, target)
-            scaler.scale(loss_control).backward()
-            scaler.step(opt_control)
-            scaler.update()
+            scaler_control.scale(loss_control).backward()
+            scaler_control.step(opt_control)
+            scaler_control.update()
 
             opt_scaling.zero_grad()
-            with torch.autocast('cpu', dtype=torch.half):
+            with torch.autocast(device_type=device, dtype=torch.half):
                 output_scaling = mod_scaling(input)
                 loss_scaling = loss_fn(output_scaling, target)
-            scaler.scale(loss_scaling).backward()
+            scaler_scaling.scale(loss_scaling).backward()
             if separate_unscale:
-                scaler.unscale_(opt_scaling)
-            scaler.step(opt_scaling)
-            scaler.update()
+                scaler_scaling.unscale_(opt_scaling)
+            scaler_scaling.step(opt_scaling)
+            scaler_scaling.update()
 
             tracker.add(loss_control)
             tracker.pop_check_set(loss_scaling, self)
