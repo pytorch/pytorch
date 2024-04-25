@@ -3,6 +3,8 @@
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
 
+namespace torch::dynamo {
+
 PyObject* torch_c_dynamo_guards_init();
 
 // interfaces for extra_state and eval_frame.c because RootGuardManager class is
@@ -73,3 +75,5 @@ class TensorCheck {
   // Not strictly required for dense tensors, but nested tensors need it.
   int64_t dim_;
 };
+
+} // namespace torch::dynamo

@@ -922,7 +922,6 @@ class CommonTemplate:
 
             qualified_op_name = f"{namespace_name}::{op_name}"
             _, overload_names = torch._C._jit_get_operation(qualified_op_name)
-            print(overload_names)
             for overload_name in overload_names:
                 try:
                     reg_op_name = qualified_op_name

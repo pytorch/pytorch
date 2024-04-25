@@ -111,7 +111,7 @@ bool unpack_tensors(
   return true;
 }
 
-std::vector<size_t> get_tensor_paramter_index(
+std::vector<size_t> get_tensor_parameter_index(
     const std::vector<c10::Argument>& arguments,
     const torch::jit::Stack& stack) {
   std::vector<size_t> tensor_parameter_index;
@@ -197,7 +197,7 @@ bool AOTIPythonKernelHolder::cache_lookup(
       "std::optional<at::Tensor>, std::vector<std::optional<at::Tensor>>.");
 
   auto tensor_parameter_index =
-      get_tensor_paramter_index(op.schema().arguments(), *stack);
+      get_tensor_parameter_index(op.schema().arguments(), *stack);
   TORCH_INTERNAL_ASSERT(tensor_parameter_index.size() == inputs.size());
   auto inputs_metadata = get_inputs_metadata(
       inputs, op.schema().arguments(), tensor_parameter_index);
@@ -210,7 +210,7 @@ bool AOTIPythonKernelHolder::cache_lookup(
     return false;
   }
 
-  LocalState local_state;
+  torch::dynamo::LocalState local_state;
   local_state.overrideDispatchKeySet(c10::DispatchKeySet(dispatch_key_));
 
   for (size_t i = 0; i < inputs.size(); ++i) {
@@ -325,10 +325,10 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
     // Access the meta_info list
     auto inputs_metadata = item_dict["meta_info"].cast<py::list>();
 
-    std::vector<TensorCheck> tensor_checks;
+    std::vector<torch::dynamo::TensorCheck> tensor_checks;
     std::vector<TensorMetadata> tensor_metadata_list;
 
-    LocalState state;
+    torch::dynamo::LocalState state;
     // Loop over the meta_info list
     for (auto item : inputs_metadata) {
       // Convert the handle to a dict

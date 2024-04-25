@@ -16,7 +16,7 @@ namespace torch::inductor {
 
 struct AOTIKernelState {
   std::shared_ptr<AOTIModelContainerRunner> kernel_runner_;
-  std::vector<TensorCheck> tensor_checks_;
+  std::vector<torch::dynamo::TensorCheck> tensor_checks_;
 };
 
 // The AOTIPythonKernelHolder class uses the AOT Inductor to generate a kernel
