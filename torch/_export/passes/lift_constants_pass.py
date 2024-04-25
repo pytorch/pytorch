@@ -244,10 +244,8 @@ def lift_constants_pass(
 def rewrite_script_object_meta(
     gm: torch.fx.GraphModule,
 ) -> Dict[str, Union[torch.Tensor, FakeScriptObject],]:
-    """When tracing, we produce a graph with FakeScriptObject in the
-    meta["val"].
-
-    For now, we rewrie meta["val"] to be a placeholder CustomObjArgument
+    """When tracing, we produce a graph with an FakeScriptObject in the
+    meta["val"]. We rewrie it to be a placeholder CustomObjArgument.
     """
     constants: Dict[
         str,

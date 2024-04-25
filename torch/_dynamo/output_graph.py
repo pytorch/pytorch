@@ -1411,7 +1411,7 @@ class OutputGraph:
             self.remove_node(node)
             self.real_value_cache.pop(node, None)
 
-        used_symbols = set()
+        used_symbols: Set[sympy.Symbol] = set()
         recheck_placeholders = []
         for node in self.placeholders:
             binds_symbol = placeholder_binds_symbol(node) is not None
@@ -1429,6 +1429,11 @@ class OutputGraph:
                     arg = node.meta["grapharg"]
                     if isinstance(arg, BackwardStateGraphArg):
                         continue
+                    if isinstance(node.meta["grapharg"].example, torch.ScriptObject):
+                        # TODO: recursivelly look at the free symbols in
+                        # the guarded tensor attributes
+                        continue
+                    continue
                     fake = (
                         arg.fake_tensor if arg.fake_tensor is not None else arg.example
                     )

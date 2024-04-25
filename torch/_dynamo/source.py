@@ -303,6 +303,21 @@ class ConvertIntSource(ChainedSource):
 
 
 @dataclasses.dataclass(frozen=True)
+class ConvertScriptObjectSource(ChainedSource):
+    def __post_init__(self):
+        assert self.base is not None
+
+    def reconstruct(self, codegen):
+        self.base.reconstruct(codegen)
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return f"{self.base.name()}.__obj_flatten__()"
+
+
+@dataclasses.dataclass(frozen=True)
 class DefaultsSource(ChainedSource):
     idx_key: Union[int, str]
     is_kw: bool = False

@@ -24,6 +24,7 @@ from .source import AttrSource, Source
 from .utils import is_safe_constant, rot_n_helper
 from .variables.base import VariableTracker
 from .variables.nn_module import NNModuleVariable
+from .variables.script_object import TorchScriptObjectVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
     SymNodeVariable,
@@ -143,6 +144,7 @@ class PyCodegen:
                 SymNodeVariable,
                 UnspecializedPythonVariable,
                 NumpyNdarrayVariable,
+                TorchScriptObjectVariable,
             ),
         ):
             graph_outputs_key = self.add_graph_output(value)

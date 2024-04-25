@@ -3,8 +3,10 @@
 #include <torch/custom_class.h>
 #include <torch/script.h>
 
+#include <cstdint>
 #include <iostream>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 using namespace torch::jit;
@@ -58,6 +60,10 @@ struct Foo : torch::CustomClassHolder {
   }
   bool eq(c10::intrusive_ptr<Foo> other) {
     return this->x == other->x && this->y == other->y;
+  }
+  std::tuple<std::tuple<std::string, int64_t>, std::tuple<std::string, int64_t>>
+  __obj_flatten__() {
+    return std::tuple(std::tuple("x", this->x), std::tuple("y", this->y));
   }
 };
 
@@ -121,6 +127,8 @@ struct PickleTester : torch::CustomClassHolder {
   PickleTester(std::vector<int64_t> vals) : vals(std::move(vals)) {}
   std::vector<int64_t> vals;
 };
+
+using MapValue = std::variant<int64_t, at::Tensor, std::vector<at::Tensor>>;
 
 // Thread-safe Tensor Queue
 struct TensorQueue : torch::CustomClassHolder {
@@ -197,6 +205,11 @@ struct TensorQueue : torch::CustomClassHolder {
   std::vector<at::Tensor> get_raw_queue() {
     std::vector<at::Tensor> raw_queue(queue_.begin(), queue_.end());
     return raw_queue;
+  }
+
+  std::tuple<std::string, std::vector<at::Tensor>> __obj_flatten__() {
+    // for demostration purpose, we also return a size integer.
+    return std::tuple("queue", this->get_raw_queue());
   }
 
  private:
@@ -370,6 +383,10 @@ struct ContainsTensor : public torch::CustomClassHolder {
     return t_;
   }
 
+  std::tuple<std::string, at::Tensor> __obj_flatten__() {
+    return std::tuple("t", this->t_);
+  }
+
   at::Tensor t_;
 };
 
@@ -417,6 +434,7 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
       .def("add_tensor", &Foo::add_tensor)
       .def("__eq__", &Foo::eq)
       .def("combine", &Foo::combine)
+      .def("__obj_flatten__", &Foo::__obj_flatten__)
       .def_pickle(
           [](c10::intrusive_ptr<Foo> self) { // __getstate__
             return std::vector<int64_t>{self->x, self->y};
@@ -551,6 +569,7 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
   m.class_<ContainsTensor>("_ContainsTensor")
       .def(torch::init<at::Tensor>())
       .def("get", &ContainsTensor::get)
+      .def("__obj_flatten__", &ContainsTensor::__obj_flatten__)
       .def_pickle(
           // __getstate__
           [](const c10::intrusive_ptr<ContainsTensor>& self) -> at::Tensor {
@@ -568,6 +587,7 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
       .def("size", &TensorQueue::size)
       .def("clone_queue", &TensorQueue::clone_queue)
       .def("get_raw_queue", &TensorQueue::get_raw_queue)
+      .def("__obj_flatten__", &TensorQueue::__obj_flatten__)
       .def_pickle(
           // __getstate__
           [](const c10::intrusive_ptr<TensorQueue>& self)

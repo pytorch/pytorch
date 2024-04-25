@@ -77,9 +77,8 @@ def register_fake_classes():
             self.y = y
 
         @classmethod
-        def from_real(cls, foo):
-            (x, y), _ = foo.__getstate__()
-            return cls(x, y)
+        def __obj_unflatten__(cls, flattend_foo):
+            return cls(**dict(flattend_foo))
 
         def add_tensor(self, z):
             return (self.x + self.y) * z
@@ -90,9 +89,8 @@ def register_fake_classes():
             self.x = x
 
         @classmethod
-        def from_real(cls, foo):
-            ctx = torch.library.get_ctx()
-            return cls(ctx.to_fake_tensor(foo.get()))
+        def __obj_unflatten__(cls, flattend_foo):
+            return cls(**dict(flattend_foo))
 
         def get(self):
             return self.x

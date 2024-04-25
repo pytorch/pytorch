@@ -60,6 +60,7 @@ from .source import (
     AttrSource,
     ChainedSource,
     ConstDictKeySource,
+    ConvertScriptObjectSource,
     DefaultsSource,
     FSDPNNModuleSource,
     GetItemSource,
@@ -234,6 +235,9 @@ CLOSURE_VARS = {
     "___dict_contains": lambda a, b: a in b,
     "___tuple_iterator_len": tuple_iterator_len,
     "___tuple_iterator_getitem": tuple_iterator_getitem,
+    "___to_fake_script_obj": lambda obj: torch._library.fake_class_registry.to_fake_obj2(
+        obj
+    ),
     "__math_isnan": math.isnan,
     "__numpy_isnan": None if np is None else np.isnan,
     "inf": float("inf"),
@@ -671,6 +675,13 @@ class GuardBuilder(GuardBuilderBase):
             assert base_guard_manager  # to make mypy happy
             return base_guard_manager.lambda_manager(
                 python_lambda=from_numpy,
+                source=source_name,
+                example_value=example_value,
+            )
+        elif istype(source, ConvertScriptObjectSource):
+            assert base_guard_manager  # to make mypy happy
+            return base_guard_manager.lambda_manager(
+                python_lambda=lambda x: x.__obj_flatten__(),
                 source=source_name,
                 example_value=example_value,
             )
