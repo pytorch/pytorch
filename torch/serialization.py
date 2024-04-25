@@ -10,7 +10,6 @@ import tempfile
 import warnings
 from contextlib import closing, contextmanager
 from enum import Enum
-from mmap import MAP_SHARED, MAP_PRIVATE
 from ._utils import _import_dotted_name
 from torch._sources import get_source_lines_and_file
 from torch.types import Storage
@@ -105,36 +104,6 @@ def set_default_load_endianness(endianness):
     if not isinstance(endianness, LoadEndianness) and endianness is not None:
         raise TypeError("Invalid argument type in function set_default_load_endianness")
     _default_load_endian = endianness
-
-
-_default_mmap_options: int = MAP_PRIVATE
-
-def get_default_mmap_options() -> int:
-    '''
-    Get default mmap options for :func:`torch.load` with ``mmap=True``.
-
-    Defaults to ``mmap.MAP_PRIVATE``.
-
-    Returns:
-        default_mmap_options: int
-    '''
-    return _default_mmap_options
-
-def set_default_mmap_options(flags: int):
-    '''
-    Set default mmap options for :func:`torch.load` with ``mmap=True`` to flags.
-
-    For now, only either ``mmap.MAP_PRIVATE`` or ``mmap.MAP_SHARED`` are supported,
-    in the future we might extend this to support more options.
-
-    Args:
-        flags: ``mmap.MAP_PRIVATE`` or ``mmap.MAP_SHARED``
-    '''
-    global _default_mmap_options
-    if (flags != MAP_PRIVATE and flags != MAP_SHARED):
-        raise ValueError("Invalid argument in function set_default_mmap_options, "
-                         f"expected mmap.MAP_PRIVATE or mmap.MAP_SHARED, but got {flags}")
-    _default_mmap_options = flags
 
 def _is_zipfile(f) -> bool:
     # This is a stricter implementation than zipfile.is_zipfile().
@@ -1043,8 +1012,7 @@ def load(
                     if not _is_path(f):
                         raise ValueError("f must be a file path in order to use the mmap argument")
                     size = os.path.getsize(f)
-                    shared = get_default_mmap_options() == MAP_SHARED
-                    overall_storage = torch.UntypedStorage.from_file(os.fspath(f), shared, size)
+                    overall_storage = torch.UntypedStorage.from_file(os.fspath(f), False, size)
                 if weights_only:
                     try:
                         return _load(opened_zipfile,
