@@ -3911,6 +3911,10 @@ class ShapeEnv:
         elif isinstance(e, sympy.Lt):
             add_expr(sympy.Le(e.lhs, e.rhs))
             add_expr(sympy.Ne(e.lhs, e.rhs))
+            if e.lhs.is_integer and e.rhs.is_integer:
+                add_expr(sympy.Le(e.lhs, e.rhs - 1))
+        elif isinstance(e, sympy.Le):
+            add_expr(sympy.Lt(e.lhs, e.rhs + 1))
         return tuple(equiv.items())
 
     @_lru_cache
