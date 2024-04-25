@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import torch
 
@@ -48,7 +48,7 @@ def format_default_skip_message(reason: str) -> str:
 
 
 def get_mutation_stack_trace(
-    placeholders: List[torch.fx.Node], mutation_indices: Iterable[int]
+    placeholders: List[torch.fx.Node], mutation_indices: List[int]
 ) -> str:
     stack_trace: Optional[str] = ""
 
@@ -57,11 +57,13 @@ def get_mutation_stack_trace(
         if stack_trace := get_mutating_use_stack_trace(placeholder):
             break
 
+    msg = format_default_skip_message(
+        f"mutated inputs ({len(mutation_indices)} instances)"
+    )
     if stack_trace:
-        msg = f"skipping cudagraphs due to mutation on input. Found from : \n {stack_trace}"
-        return msg
+        return f"{msg}. Found from : \n {stack_trace}"
 
-    return format_default_skip_message("mutated inputs")
+    return msg
 
 
 def check_for_mutation(
@@ -69,8 +71,6 @@ def check_for_mutation(
     inputs: List[torch.Tensor],
     is_cuda_graph_recorded_tensor: Callable[[torch.Tensor], bool],
 ) -> Optional[str]:
-    default_msg = format_default_skip_message("mutated inputs")
-
     # doesnt work for non-trees because the warmup run would apply mutation twice
     if torch._inductor.config.triton.cudagraph_trees:
         # checking if mutation is only on parameters/static inputs
@@ -82,15 +82,14 @@ def check_for_mutation(
                 or is_cuda_graph_recorded_tensor(inputs[idx])
             )
         ]
-        has_mutation = len(mutation_indices) != 0
-        if not has_mutation:
-            return None
-
-        return get_mutation_stack_trace(func.placeholders, mutation_indices)
-
     else:
-        has_mutation = len(func.mutated_input_idxs) != 0
-        return None if not has_mutation else default_msg
+        mutation_indices = func.mutated_input_idxs
+
+    return (
+        get_mutation_stack_trace(func.placeholders, mutation_indices)
+        if mutation_indices
+        else None
+    )
 
 
 def get_use_stack_trace(node) -> Optional[str]:
@@ -104,12 +103,11 @@ def check_multiple_devices_or_any_cpu_nodes(
     device_node_mapping: Dict[torch.device, torch.fx.Node]
 ) -> Optional[str]:
     if cpu_node := device_node_mapping.get(torch.device("cpu")):
+        msg = f"cpu device ({cpu_node.name})"
         if stack_trace := get_use_stack_trace(cpu_node):
-            return format_default_skip_message(
-                f"cpu device. Found from : \n {stack_trace}"
-            )
+            return format_default_skip_message(f"{msg}. Found from : \n {stack_trace}")
 
-        return format_default_skip_message("cpu device")
+        return format_default_skip_message(msg)
 
     if (
         len(device_node_mapping) == 1
