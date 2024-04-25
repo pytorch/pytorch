@@ -1430,7 +1430,7 @@ class TestNNParametrization(NNTestCase):
         model.weight.requires_grad = False
         parametrize.register_parametrization(model, "weight", SplitAndCat())
         # making sure the parameterized and decomposed Tensors both have requires_grad == False
-        self.assertFalse(model.parametrizations.weight.requires_grad)
+        self.assertFalse(model.weight.requires_grad)
         self.assertFalse(model.parametrizations.weight.original0.requires_grad)
         self.assertFalse(model.parametrizations.weight.original1.requires_grad)
 
