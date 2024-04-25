@@ -5,8 +5,12 @@ import torch._dynamo
 import torch._dynamo.test_case
 
 import torch._functorch._aot_autograd
-from torch._functorch._aot_autograd.autograd_cache import autograd_cache_hash, BypassAOTAutogradCache
+from torch._functorch._aot_autograd.autograd_cache import (
+    autograd_cache_hash,
+    BypassAOTAutogradCache,
+)
 from torch._functorch._aot_autograd.schemas import AOTConfig
+
 
 class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
     def default_config(self):
@@ -95,7 +99,6 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         c2 = self.gen_cache_key(fn, config2)
         self.assertNotEqual(c1, c2)
 
-
     def test_incompatible_function(self):
         @torch._dynamo.allow_in_graph
         class AllowInGraphFunc(torch.autograd.Function):
@@ -108,7 +111,10 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             return AllowInGraphFunc.apply(x)
 
         config = self.default_config()
-        self.assertRaises(BypassAOTAutogradCache, lambda: self.gen_cache_key(fn, config))
+        self.assertRaises(
+            BypassAOTAutogradCache, lambda: self.gen_cache_key(fn, config)
+        )
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

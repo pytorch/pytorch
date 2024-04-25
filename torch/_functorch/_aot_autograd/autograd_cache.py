@@ -40,7 +40,8 @@ def check_node_safe(node: Node):
         # TODO: is this the right check?
         return name.startswith("torch.")
 
-    def is_tensor(target: Node):
+    def is_tensor(target):
+        # Tensors always have example values in meta field
         return "example_value" in target.meta
 
     # I'd love to use a match statement here, but it wasn't introduced until py3.10
@@ -56,10 +57,10 @@ def check_node_safe(node: Node):
         if not is_tensor(method_target):
             # We support only method calls on tensors and symints
             raise BypassAOTAutogradCache(
-                f"Unsupported call_method target {node.target}"
+                f"Unsupported call_method target {method_target}"
             )
     # Cache safe
-    elif node.op in  ("placeholder", "call_module", "get_attr",  "output"):
+    elif node.op in ("placeholder", "call_module", "get_attr", "output"):
         # TODO: not all call_modules may be safe
         pass
     else:
