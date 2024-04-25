@@ -314,8 +314,8 @@ inline void assertSingleElementOutput(
 inline void assertRootRank(
     const std::function<void(const std::string&)>& fn,
     int64_t rank,
-    size_t size) {
-  if (rank < 0 || static_cast<size_t>(rank) >= size) {
+    int64_t size) {
+  if (rank < 0 || rank >= size) {
     fn("invalid root rank: " + std::to_string(rank));
   }
 }
@@ -323,8 +323,8 @@ inline void assertRootRank(
 inline void assertRootTensor(
     const std::function<void(const std::string&)>& fn,
     int64_t rank,
-    size_t size) {
-  if (rank < 0 || static_cast<size_t>(rank) >= size) {
+    int64_t size) {
+  if (rank < 0 || rank >= size) {
     fn("invalid root tensor: " + std::to_string(rank));
   }
 }

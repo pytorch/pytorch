@@ -653,7 +653,7 @@ void Reducer::autograd_hook(size_t index) {
     return;
   }
 
-  grad_ready_order_indices_.push_back(index);
+  grad_ready_order_indices_.push_back(static_cast<int64_t>(index));
 
   // See Note [Skip allreducing local_used_map_dev]
   if (dynamic_graph_find_unused() || static_graph_first_iteration()) {
