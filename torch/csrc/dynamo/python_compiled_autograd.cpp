@@ -298,6 +298,14 @@ struct ClosingTHPObjectPtr : public THPObjectPtr {
   }
 };
 
+bool is_verbose_logging_enabled(PyObject* py_compiler) {
+  PyObject* is_verbose_logging_enabled_method =
+      PyObject_GetAttrString(py_compiler, "is_verbose_logging_enabled");
+  THPObjectPtr pybool(
+      check(PyObject_CallNoArgs(is_verbose_logging_enabled_method)));
+  return pybool.get() == Py_True;
+}
+
 // Only call this function while holding GIL
 CacheNode* _compiled_autograd_impl(
     const std::shared_ptr<Node>& graph_root,
@@ -366,12 +374,14 @@ CacheNode* _compiled_autograd_impl(
     // cache miss, need to capture FX graph
     ClosingTHPObjectPtr py_compiler(
         check(PyObject_CallNoArgs((the_autograd_compiler))));
+    bool verbose_python_logs = is_verbose_logging_enabled(py_compiler.get());
+
     TraceState state = call_begin_capture(
         py_compiler, *cache, compiler_call, output_edges.size());
     InputBuffers input_buffers;
 
-    for (NodeCall* call_ptr : calls) {
-      NodeCall& call = *call_ptr;
+    for (size_t i = 0; i < calls.size(); i++) {
+      NodeCall& call = *calls[i];
       // TODO(jansel): consider adding some of this stuff:
       // guard(local_graph_task); NodeGuard ndguard(task.fn_); const auto
       // opt_parent_stream = (*func).stream(c10::DeviceType::CUDA);
@@ -415,6 +425,16 @@ CacheNode* _compiled_autograd_impl(
               py_compiler.get(), "pre_hook", "Oi", pyinputs.get(), hook));
         }
         inputs = THPVariable_UnpackList(pyinputs);
+      }
+
+      if (verbose_python_logs) {
+        std::string _node_name = call.node->name();
+        THPObjectPtr node_name(PyUnicode_FromString(_node_name.data()));
+        TORCH_INTERNAL_ASSERT(node_name != nullptr);
+        THPObjectPtr set_node_origin(
+            PyObject_GetAttrString(py_compiler.get(), "set_node_origin"));
+        check(PyObject_CallFunction(
+            set_node_origin, "OI", node_name.get(), i, nullptr));
       }
 
       SwapSavedVariables saved(compiler_call, state, py_compiler.get(), call);
