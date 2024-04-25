@@ -194,7 +194,6 @@ class CachingAutotuner(KernelInterface):
             compiled_binaries = []
             if not self.configs:
                 raise RuntimeError("No triton configs are available")
-
             for c in self.configs:
                 try:
                     compiled_binary, launcher = self._precompile_config(
@@ -202,11 +201,8 @@ class CachingAutotuner(KernelInterface):
                     )
                 except OutOfResources as e:
                     if len(self.configs) == 1:
-                        raise RuntimeError(
-                            f"Failed to compile triton config: {c}. "
-                            f"Report a fatal compilation error. "
-                            f"{e}"
-                        )
+                        # There are no valid Triton configs
+                        raise e
                     # Skip the config if we run out of resource
                     continue
                 self.launchers.append(launcher)
