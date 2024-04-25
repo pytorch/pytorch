@@ -543,6 +543,11 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         Helper method to determine whether we should do an explicit transpose by switching the order of the
         matmul operands. This might be neccessary when we can't otherwise arrive at the right memory
         layout for the given Bias operand.
+
+        Note: This method is a workaround for CUDA Errors that seemingly non-deterministically
+        occurred in practice in some CUTLASS GEMM Kernels with Linear epilogues that have a bias term.
+        it might make sense to check on newer Cutlass releases whether it makes sense to keep
+        returning True in certain cases or whether it becomes unneccessary.
         """
         # If bias is row major, swap all M and N dimensions
         if (
