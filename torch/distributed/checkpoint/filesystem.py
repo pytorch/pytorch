@@ -669,6 +669,21 @@ class FileSystemWriter(_FileSystemWriter, BlockingAsyncStager):
         per_thread_copy_ahead: int = 10_000_000,
         cache_staged_state_dict: bool = False,
     ) -> None:
+        """
+        Initialize the writer pointing to `path`.
+
+        Args:
+            path: directory where the checkpoint will be written to.
+            single_file_per_rank: Produce one file per rank instead of one file per tensor/blob. Default to True.
+            sync_files : force files to be synced to permanent storage. Default to True.
+            thread_count: Number of IO threads to use to write. Default to 1.
+            per_thread_copy_ahead: How many bytes to copy from the GPU ahead of saving then. Default 10Mb.
+            cache_staged_state_dict: Whether to cache the staged state_dict. This option decreases staging latency
+                at the cost of increases memory usage. Additionally, if this parameter is set to True, it's the expectation
+                that the stager is maintained and re-used for multiple dcp.async_save calls. Default to False.
+
+        N. B. If sync_files is disabled, there's no guarantee that the checkpoint will be consistent in the case of a failure.
+        """
         super().__init__(
             path=path,
             single_file_per_rank=single_file_per_rank,

@@ -82,19 +82,20 @@ class BlockingAsyncStager(AsyncStager):
     def __init__(
         self,
         cache_staged_state_dict: bool = False,
+        type_check: bool = False,
     ):
         """
         Initializes the BlockingAsyncStager.
 
         Args:
             cache_staged_state_dict: Whether to cache the staged state_dict. This option decreases staging latency
-                at the cost of increases memory usage. Additionally, if this method is set to True, it's the expectation
-                that the writer is maintained and re-used for multiple dcp.async_save calls Default to False.
-
-            TODO: example
+                at the cost of increases memory usage. Additionally, if this parameter is set to True, it's the expectation
+                that the stager is maintained and re-used for multiple dcp.async_save calls. Default to False.
+            type_check: Whether to perform a type check during cpu_offload. Defaults to False.
 
         """
-        self.cache_staged_state_dict = True
+        self.cache_staged_state_dict = cache_staged_state_dict
+        self.type_check = type_check
         self.state_dict_cache: Optional[STATE_DICT_TYPE] = None
 
     def stage(self, state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
@@ -103,7 +104,7 @@ class BlockingAsyncStager(AsyncStager):
         """
 
         if not self.cache_staged_state_dict:
-            return _offload_state_dict_to_cpu(state_dict)
+            return _offload_state_dict_to_cpu(state_dict, type_check=self.type_check)
 
         if self.state_dict_cache is None:
             self.state_dict_cache = _create_cpu_state_dict(state_dict, pin_memory=True)
