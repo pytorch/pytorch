@@ -2,7 +2,7 @@
 
 import os
 import sys
-from functools import wraps, partial
+from functools import partial, wraps
 
 import torch
 import torch.distributed as dist
@@ -11,22 +11,20 @@ if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
-from torch.testing._internal.common_distributed import (
-    MultiProcessTestCase,
-    TEST_SKIPS
-)
+from torch.testing._internal.common_distributed import MultiProcessTestCase, TEST_SKIPS
 
-from torch.testing._internal.common_utils import (
-    run_tests,
-    TEST_WITH_DEV_DBG_ASAN,
-)
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 
 if TEST_WITH_DEV_DBG_ASAN:
-    print("Skip dev-asan as torch + multiprocessing spawn have known issues", file=sys.stderr)
+    print(
+        "Skip dev-asan as torch + multiprocessing spawn have known issues",
+        file=sys.stderr,
+    )
     sys.exit(0)
 
 BACKEND = dist.Backend.NCCL if torch.cuda.is_available() else dist.Backend.GLOO
 WORLD_SIZE = min(4, max(2, torch.cuda.device_count()))
+
 
 def with_comms(func=None):
     if func is None:
@@ -41,7 +39,9 @@ def with_comms(func=None):
         self.dist_init()
         func(self)
         self.destroy_comms()
+
     return wrapper
+
 
 class TestObjectCollectives(MultiProcessTestCase):
     def setUp(self):
@@ -52,8 +52,11 @@ class TestObjectCollectives(MultiProcessTestCase):
 
     @property
     def device(self):
-        return torch.device(self.rank) if BACKEND == dist.Backend.NCCL \
+        return (
+            torch.device(self.rank)
+            if BACKEND == dist.Backend.NCCL
             else torch.device("cpu")
+        )
 
     @property
     def world_size(self):
@@ -83,9 +86,7 @@ class TestObjectCollectives(MultiProcessTestCase):
     @with_comms()
     def test_all_gather_object(self):
         output = [None] * dist.get_world_size()
-        dist.all_gather_object(
-            object_list=output,
-            obj=self.rank)
+        dist.all_gather_object(object_list=output, obj=self.rank)
 
         for i, v in enumerate(output):
             self.assertEqual(i, v, f"rank: {self.rank}")
@@ -93,14 +94,11 @@ class TestObjectCollectives(MultiProcessTestCase):
     @with_comms()
     def test_gather_object(self):
         output = [None] * dist.get_world_size() if self.rank == 0 else None
-        dist.gather_object(
-            obj=self.rank,
-            object_gather_list=output)
+        dist.gather_object(obj=self.rank, object_gather_list=output)
 
         if self.rank == 0:
             for i, v in enumerate(output):
                 self.assertEqual(i, v, f"rank: {self.rank}")
-
 
     @with_comms()
     def test_broadcast_object_list(self):
@@ -116,8 +114,8 @@ class TestObjectCollectives(MultiProcessTestCase):
         input_list = list(range(dist.get_world_size())) if self.rank == 0 else None
         output_list = [None]
         dist.scatter_object_list(
-            scatter_object_output_list=output_list,
-            scatter_object_input_list=input_list)
+            scatter_object_output_list=output_list, scatter_object_input_list=input_list
+        )
 
         self.assertEqual(self.rank, output_list[0])
 
@@ -160,6 +158,7 @@ class TestObjectCollectives(MultiProcessTestCase):
             out_list[0] = rank
         dist.broadcast_object_list(out_list, src=ranks[0], group=my_pg)
         self.assertEqual(ranks[0], out_list[0])
+
 
 if __name__ == "__main__":
     run_tests()

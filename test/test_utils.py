@@ -1081,7 +1081,7 @@ class TestTraceback(TestCase):
         source = '''\
 def f(x):
     def g(x):
-        raise RuntimeError()  # HEYA
+        raise RuntimeError  # HEYA
 
     x = x * 3
     return g(x) + 1
@@ -1099,7 +1099,7 @@ def f(x):
 
     def test_format_traceback_short(self):
         try:
-            raise RuntimeError()
+            raise RuntimeError
         except RuntimeError as e:
             self.assertRegex(format_traceback_short(e.__traceback__), r'.*test_utils.py:\d+ in test_format_traceback_short')
 

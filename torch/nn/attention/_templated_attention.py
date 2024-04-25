@@ -1,6 +1,6 @@
 """This module implements the user facing API for templated attention in PyTorch."""
 import functools
-from typing import Callable
+from typing import Callable, Tuple
 
 import torch
 from torch._higher_order_ops.templated_attention import (
@@ -31,7 +31,7 @@ def _templated_attention(
     key: torch.Tensor,
     value: torch.Tensor,
     score_mod: _score_mod_signature,
-) -> torch.Tensor:
+) -> Tuple[torch.Tensor, torch.Tensor]:
     r"""This function implements scaled dot product attention with an arbitrary attention score modification function.
 
     This function computes the scaled dot product attention between query, key, and value tensors with a user-defined
@@ -86,4 +86,64 @@ def _templated_attention(
         raise ValueError(
             "NYI: The target sequence length (L) of the query tensor must match the source sequence length (S) of the key tensor."
         )
-    return templated_attention_hop(query, key, value, score_mod)
+    out, _ = templated_attention_hop(query, key, value, score_mod)
+
+    # Drop the logsumexp value since this is only needed for backwards
+    return out
+
+
+"""Some common used score_mod functions for templated attention in PyTorch."""
+
+
+def _identity(
+    score: torch.Tensor,
+    batch: torch.Tensor,
+    head: torch.Tensor,
+    token_q: torch.Tensor,
+    token_kv: torch.Tensor,
+) -> torch.Tensor:
+    return score
+
+
+def _causal(
+    score: torch.Tensor,
+    batch: torch.Tensor,
+    head: torch.Tensor,
+    token_q: torch.Tensor,
+    token_kv: torch.Tensor,
+) -> torch.Tensor:
+    return torch.where(token_q >= token_kv, score, float("-inf"))
+
+
+def _rel_bias(
+    score: torch.Tensor,
+    batch: torch.Tensor,
+    head: torch.Tensor,
+    token_q: torch.Tensor,
+    token_kv: torch.Tensor,
+) -> torch.Tensor:
+    return score + (token_q - token_kv)
+
+
+def _rel_causal(
+    score: torch.Tensor,
+    batch: torch.Tensor,
+    head: torch.Tensor,
+    token_q: torch.Tensor,
+    token_kv: torch.Tensor,
+) -> torch.Tensor:
+    return torch.where(token_q <= token_kv, score + (token_q - token_kv), float("-inf"))
+
+
+def _generate_alibi_bias(num_heads: int):
+    def _alibi_bias(
+        score: torch.Tensor,
+        batch: torch.Tensor,
+        head: torch.Tensor,
+        token_q: torch.Tensor,
+        token_kv: torch.Tensor,
+    ) -> torch.Tensor:
+        scale = torch.exp2(-((head + 1) * 8.0 / num_heads))
+        return score + (token_kv - token_q) * scale
+
+    return _alibi_bias

@@ -60,7 +60,7 @@ def make_cpp_wrapper_test(orig_test, **extra_args):
         # the kernel with cpp_wrapper enabled.
         from torch._inductor import codecache
 
-        codecache.PyCodeCache.clear()
+        codecache.PyCodeCache.cache_clear()
         return orig_test(self, **extra_args)
 
     return fn

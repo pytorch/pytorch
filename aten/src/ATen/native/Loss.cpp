@@ -273,27 +273,30 @@ Tensor& binary_cross_entropy_out_cpu(const Tensor& input, const Tensor& target, 
       .add_owned_const_input(at::squeeze(target))
       .build();
 
-    AT_DISPATCH_FLOATING_TYPES(loss.scalar_type(), "binary_cross_entropy", [&] {
-        at::native::cpu_kernel(
-            iter,
-            [] (scalar_t input_val, scalar_t target_val) {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        ScalarType::Half,
+        ScalarType::BFloat16,
+        loss.scalar_type(),
+        "binary_cross_entropy",
+        [&] {
+          at::native::cpu_kernel(
+              iter, [](scalar_t input_val, scalar_t target_val) {
                 TORCH_CHECK(
                     (input_val >= 0) && (input_val <= 1),
-                    "all elements of input should be between 0 and 1"
-                );
+                    "all elements of input should be between 0 and 1");
                 TORCH_CHECK(
                     (target_val >= 0) && (target_val <= 1),
-                    "all elements of target should be between 0 and 1"
-                );
+                    "all elements of target should be between 0 and 1");
 
                 // Binary cross entropy tensor is defined by the equation:
                 // L = -w (y ln(x) + (1-y) ln(1-x))
-                return (target_val - scalar_t(1))
-                    * std::max(scalar_t(std::log1p(-input_val)), scalar_t(-100))
-                    - target_val * std::max(scalar_t(std::log(input_val)), scalar_t(-100));
-            }
-        );
-    });
+                return (target_val - scalar_t(1)) *
+                    std::max(scalar_t(std::log1p(-input_val)), scalar_t(-100)) -
+                    target_val *
+                    std::max(scalar_t(std::log(input_val)), scalar_t(-100));
+              });
+        });
+
     if (weight.defined()) {
         loss.mul_(weight);
     }
@@ -328,21 +331,25 @@ Tensor& binary_cross_entropy_backward_out_cpu(const Tensor& grad, const Tensor& 
       .add_owned_const_input(at::squeeze(target))
       .build();
 
-    AT_DISPATCH_FLOATING_TYPES(grad_input.scalar_type(), "binary_cross_entropy_backward", [&] {
-        at::native::cpu_kernel(
-            iter,
-            [] (scalar_t grad_val, scalar_t input_val, scalar_t target_val) {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        ScalarType::Half,
+        ScalarType::BFloat16,
+        grad_input.scalar_type(),
+        "binary_cross_entropy_backward",
+        [&] {
+          at::native::cpu_kernel(
+              iter,
+              [](scalar_t grad_val, scalar_t input_val, scalar_t target_val) {
                 // The gradient is the partial derivative of BCELoss
                 // with respect to x
                 // d(L)/d(x) = -w (y - x) / (x - x^2)
-                return grad_val * (input_val - target_val)
-                    / (scalar_t(std::max(
+                return grad_val * (input_val - target_val) /
+                    (scalar_t(std::max(
                         (scalar_t(1) - input_val) * input_val,
-                        scalar_t(EPSILON)
-                    )));
-            }
-        );
-    });
+                        scalar_t(EPSILON))));
+              });
+        });
+
     if (weight.defined()) {
         grad_input.mul_(weight);
     }

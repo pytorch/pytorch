@@ -1569,11 +1569,9 @@ NvrtcFunction jit_pwise_function(
   if (compilation_result != NVRTC_SUCCESS) {
     size_t logsize;
     AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcGetProgramLogSize(program, &logsize));
-    std::vector<char> log(logsize);
-    AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcGetProgramLog(program, log.data()));
-    std::stringstream cu;
-    cu << log.data();
-    throw std::runtime_error(code + cu.str());
+    std::string log(logsize, '\0');
+    AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcGetProgramLog(program, &log[0]));
+    throw std::runtime_error(code + log);
   }
 
   size_t ptx_size = 0;

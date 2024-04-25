@@ -174,7 +174,7 @@ def maybe_copy_to(out, result, promote_scalar_result=False):
             maybe_copy_to(o, r, promote_scalar_result) for o, r in zip(out, result)
         )
     else:
-        raise AssertionError()  # We should never hit this path
+        raise AssertionError  # We should never hit this path
 
 
 def wrap_tensors(result):
