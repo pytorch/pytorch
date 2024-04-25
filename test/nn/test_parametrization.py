@@ -1418,7 +1418,7 @@ class TestNNParametrization(NNTestCase):
         r"""Test that it is possible to register a parametrization without gradient"""
         class SplitAndCat(nn.Module):
             def right_inverse(self, x):
-                return x[0], x[1]
+                return torch.split(x, 4)
 
             def forward(self, x0, x1):
                 return torch.cat([x0, x1])
