@@ -1,3 +1,5 @@
+import logging
+
 import torch
 
 from .. import ir
@@ -7,11 +9,19 @@ from ..select_algorithm import (
     ExternKernelChoice,
     TritonTemplate,
 )
-from ..utils import ceildiv as cdiv, use_aten_gemm_kernels, use_triton_template
+from ..utils import (
+    ceildiv as cdiv,
+    use_aten_gemm_kernels,
+    use_cutlass_template,
+    use_triton_template,
+)
 from ..virtualized import V
+
+from .mm import _is_static_problem
 
 from .mm_common import addmm_epilogue, mm_args, mm_configs, mm_options
 
+log = logging.getLogger(__name__)
 aten = torch.ops.aten
 
 
@@ -133,6 +143,15 @@ def tuned_bmm(mat1, mat2, *, layout=None):
                 layout=layout,
                 **mm_options(config, m, n, k, layout),
             )
+    static_shape, is_nonzero = _is_static_problem([mat1, mat2], layout)
+    if static_shape and is_nonzero and use_cutlass_template(layout, m, n, k):
+        from ..codegen.cuda.gemm_template import CUTLASSGemmTemplate
+
+        CUTLASSGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])
+
+    if len(choices) == 0:
+        log.warning("No choices for GEMM, using ATen backend as fallback")
+        choices.append(aten_bmm.bind((mat1, mat2), layout))
 
     return autotune_select_algorithm("bmm", choices, [mat1, mat2], layout)
 
