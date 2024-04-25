@@ -29,7 +29,11 @@ from torch._dynamo.utils import (
 from torch._functorch import config as functorch_config
 from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
 from torch._inductor.codecache import code_hash, CompiledFxGraph, FxGraphCache
-from torch._inductor.cudagraph_utils import BoxedDeviceIndex, get_placeholders
+from torch._inductor.cudagraph_utils import (
+    BoxedDeviceIndex,
+    get_placeholders,
+    log_cudagraph_skip_and_bump_counter,
+)
 
 from torch._inductor.debug import save_args_for_compile_fx_inner
 from torch._inductor.utils import BoxedBool, count_tangents
@@ -483,9 +487,8 @@ def compile_fx_inner(
     # check cudagraph disabling reasons from inductor lowering
     if cudagraphs and compiled_graph.disabled_cudagraphs_reason:
         if "cuda" in compiled_graph.device_types:
-            perf_hint_log.warning(
-                "skipping cudagraphs due to %s",
-                compiled_graph.disabled_cudagraphs_reason,
+            log_cudagraph_skip_and_bump_counter(
+                f"skipping cudagraphs due to {compiled_graph.disabled_cudagraphs_reason}"
             )
         BoxedBool.disable(cudagraphs)
 
@@ -513,7 +516,25 @@ def compile_fx_inner(
             if isinstance(t, torch.Tensor)
         )
 
+        if not config.triton.cudagraph_support_input_mutation:
+            # Skip supports for cudagraph-managed tensors
+            from torch._inductor.cudagraph_utils import (
+                check_for_mutation_ignore_cuda_graph_managed_tensor,
+            )
+
+            has_mutation_str = check_for_mutation_ignore_cuda_graph_managed_tensor(
+                gm, compiled_graph, num_fixed
+            )
+            has_mutation = has_mutation_str is not None
+
+            if has_mutation:
+                compiled_graph.disabled_cudagraphs_reason = has_mutation_str
+        else:
+            # Check mutation later to support cudagraph-managed tensors
+            has_mutation = None
+
         cudagraph_tests = [
+            (not has_mutation, "mutated inputs"),
             (not has_incompatible_cudagraph_ops(gm), "incompatible ops"),
             (not complex_memory_overlap_inputs, "complex memory overlap"),
             (
@@ -578,10 +599,12 @@ def compile_fx_inner(
                 # prefer better disable_cudagraphs_reason bc stack trace
                 # TODO: migrate all disable reasons to stack trace, refactor
                 if compiled_graph.disabled_cudagraphs_reason:
-                    perf_hint_log.warning(compiled_graph.disabled_cudagraphs_reason)
+                    log_cudagraph_skip_and_bump_counter(
+                        compiled_graph.disabled_cudagraphs_reason
+                    )
                 else:
-                    perf_hint_log.warning(
-                        "skipping cudagraphs due to %s", cudagraph_fail_reasons
+                    log_cudagraph_skip_and_bump_counter(
+                        f"skipping cudagraphs due to {cudagraph_fail_reasons}"
                     )
 
     # cudagraphs does its own aligning of inputs
