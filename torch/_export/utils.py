@@ -562,3 +562,81 @@ def placeholder_naming_pass(
             ):
                 constants[new_name] = constant
                 del constants[name]
+
+
+def _convert_to_dynamo_name(original_module: torch.nn.Module, name: str) -> str:
+    """
+    What we think we understand about dynamo naming for params & buffers:
+
+    1. Any tensor is the result of nested getattr calls
+        e.g. self.linear.bias = getattr(getattr(L['self'], 'linear'), 'bias')
+
+    2. The top-level module, for export purposes, is either "L['self']" or "fn"
+        - "fn" is used if the module filepath is torch/nn/modules/*.py
+            i.e. a native pytorch module, e.g. nn.BatchNorm2d, nn.Linear, ...
+        - L['self'] is used otherwise, this is the case for most modules
+
+    3. getattr(a,b) call names may resolve to a.b, depending on multiple conditions:
+        a. if the call originated from a plain "a.b" attribute assignment -> a.b
+        b. register_module/buffer/parameter() calls may have an attribute name b
+            that is not "proper python", meaning "a.b = ..." cannot be plainly executed.
+            Examples are names like "foo:bar", "23", "$$@**" that are valid with register_*().
+            In this case, the name resolves to a.b if the attribute is "proper",
+            and remains as getattr(a,b) otherwise.
+        c. ModuleList, Sequential, ParameterList:
+            in this case b is an index, and resolves to a.b.
+        d. ModuleDict, ParameterDict:
+            in this case b is a key, and resolves to a.b regardless of if b is "proper".
+
+    4. Finally, (almost) all non-alphanumeric & non-underscore symbols turn into underscores.
+        It seems like attributes on native pytorch modules don't, but this is fine.
+        We convert all to underscores for matching purposes anyways.
+
+    Examples:
+        m = nn.BatchNorm2d(32); m.buffer -> fn.buffer
+
+        class Foo(nn.Module):
+            def __init__(self):
+                bias = torch.randn(4)
+                c = C(); bar.register_buffer("$$", bias)
+                b = B(); b.c = c
+                a = A(); a.register_module("2*0", b)
+                self.a = a
+
+        bias -> getattr(getattr(L['self'].a, '2*0').c, '$$')
+        -> getattr_getattr_L__self___a___2_0___c_______
+    """
+    is_native_torch_module = (
+        re.match(
+            r".*/torch/nn/modules/.*.py",
+            inspect.getsourcefile(original_module.forward) or "",
+        )
+        is not None
+    )
+    parts = name.split(".")
+    base = "fn" if is_native_torch_module else "L['self']"
+    mod = original_module
+    for part in parts:
+        # check if resolves
+        # this regex checks for "proper" names, matching on a letter or underscore
+        # followed by any number of alphanumeric or underscore characters
+        is_proper = re.fullmatch(r"[a-zA-Z_]([a-zA-Z0-9_])*", part)
+        if (
+            isinstance(
+                mod,
+                (
+                    torch.nn.ModuleList,
+                    torch.nn.Sequential,
+                    torch.nn.ParameterList,
+                    torch.nn.ModuleDict,
+                    torch.nn.ParameterDict,
+                ),
+            )
+            or is_proper
+        ):
+            base = f"{base}.{part}"
+        else:
+            base = f"getattr({base}, '{part}')"
+        # get submodule
+        mod = getattr(mod, part)
+    return base

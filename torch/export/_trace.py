@@ -29,7 +29,11 @@ from torch._export.passes.lift_constants_pass import (
     lift_constants_pass,
     rewrite_script_object_meta,
 )
-from torch._export.utils import placeholder_naming_pass, placeholder_prefixes
+from torch._export.utils import (
+    _convert_to_dynamo_name,
+    placeholder_naming_pass,
+    placeholder_prefixes,
+)
 from torch._export.verifier import SpecViolationError
 from torch._export.wrappers import _wrap_submodules
 from torch._functorch.aot_autograd import aot_export_module
@@ -234,12 +238,65 @@ def _get_param_buffer_mapping(
     of a traced module to what the original module contains.
     """
 
-    param_lookup: Dict[int, List[str]] = {}
-    buffer_lookup: Dict[int, List[str]] = {}
+    def _match_dynamo_name(
+        original_module: torch.nn.Module, lookup: Set[str], dynamo_name: str
+    ) -> str:
+        """
+        Given a set of FQN names (from .named_parameters() or .named_buffers()),
+        finds a match for dynamo-named <dynamo_name>.
+        Raises an error if weight-sharing occurs, and a match is not found.
+
+        This seems overly complicated, but is necessary to handle weight-sharing and aliasing.
+        Niche cases can arise where parameters are aliased but some aliases are unused.
+        For example:
+
+            class Foo(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.bias = torch.nn.Parameter(torch.randn(4))
+                    self.m = torch.nn.Linear(4, 4)
+                    self.m.bias = self.bias  # self.bias is unused, aliasing should be handled
+                def forward(self, x):
+                    return self.m(x)
+
+        In this scenario m.bias and bias exist as aliases, and both will show up in
+        original_module.named_parameters(remove_duplicate=False).
+        However, dynamo will only trace the one used occurrence (m.bias), and produce a dynamo name
+        (e.g L__self___m_bias), and based on this we need to be able to restore the correct FQN.
+
+        Restoring the correct FQN is important in unflattening: the exported program will only store
+        one instance of the parameter, and unflattening will only use the restored FQN. If this FQN
+        is incorrect, unflattening's _sink_params() routine will fail to sink/unlift the correct
+        parameter attribute into a getattr node, and fail during the unflattened module's forward pass,
+        expecting additional inputs for placeholder nodes.
+
+        One alternative is for exported programs/unflattener to track and restore unused parameters &
+        modules during tracing. This the case for non-strict mode, which doesn't require this routine.
+        For strict mode, that seems like a large re-design of how things are done, so we go with this
+        FQN resolution route for now.
+        """
+
+        match = None
+        if len(lookup) == 1:  # no weight sharing, simple return
+            match = next(iter(lookup))
+        else:  # weight sharing
+            for name in lookup:
+                converted_name = _convert_to_dynamo_name(original_module, name)
+                converted_name = re.sub(r"[^a-zA-Z0-9]", "_", converted_name)
+                dynamo_name = re.sub(r"[^a-zA-Z0-9]", "_", dynamo_name)
+                if converted_name == dynamo_name:
+                    match = name
+            if match is None:
+                raise RuntimeError(f"Could not find a match for {dynamo_name}")
+        lookup.remove(match)  # type: ignore[arg-type]
+        return match
+
+    param_lookup: Dict[int, Set[str]] = {}
+    buffer_lookup: Dict[int, Set[str]] = {}
     for name, param in original_module.named_parameters(remove_duplicate=False):
-        param_lookup.setdefault(id(param), []).append(name)
+        param_lookup.setdefault(id(param), set()).add(name)
     for name, buffer in original_module.named_buffers(remove_duplicate=False):
-        buffer_lookup.setdefault(id(buffer), []).append(name)
+        buffer_lookup.setdefault(id(buffer), set()).add(name)
 
     param_buffer_table: Dict[str, str] = {}
     for dynamo_name, dynamo_param in traced_module.named_parameters(
@@ -247,14 +304,22 @@ def _get_param_buffer_mapping(
     ):
         assert dynamo_name not in param_buffer_table
         if id(dynamo_param) in param_lookup:
-            param_buffer_table[dynamo_name] = param_lookup[id(dynamo_param)].pop()
+            param_buffer_table[dynamo_name] = _match_dynamo_name(
+                original_module,
+                param_lookup[id(dynamo_param)],
+                dynamo_name,
+            )
 
     for dynamo_name, dynamo_buffer in traced_module.named_buffers(
         remove_duplicate=False
     ):
         assert dynamo_name not in param_buffer_table
         if id(dynamo_buffer) in buffer_lookup:
-            param_buffer_table[dynamo_name] = buffer_lookup[id(dynamo_buffer)].pop()
+            param_buffer_table[dynamo_name] = _match_dynamo_name(
+                original_module,
+                buffer_lookup[id(dynamo_buffer)],
+                dynamo_name,
+            )
 
     return param_buffer_table
 

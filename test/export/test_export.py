@@ -1868,6 +1868,54 @@ class TestExport(TestCase):
         self.assertEqual(buffer[1].shape, torch.Size([100]))  # running_var
         self.assertEqual(buffer[2].shape, torch.Size([]))  # num_batches_tracked
 
+    def test_fqn_matching(self):
+        from torch.export.graph_signature import InputKind
+
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("$buffer", torch.randn(4))
+
+        class Basic(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bar = Bar()
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_module("***", Basic())
+                buf = getattr(getattr(self, "***").bar, "$buffer")
+                getattr(self, "***").register_buffer("a:b", buf)  # aliasing
+                self.register_buffer("C", buf)  # aliasing
+
+            def forward(self, x):
+                b = getattr(getattr(self, "***"), "a:b")
+                return x + b
+
+        # test that aliasing + unused aliases resolves FQN & unflattens successfully
+        mod = Foo()
+        inps = (torch.randn(4, 4),)
+        ep = export(mod, inps)
+        # assert that correct FQN is assigned
+        buf_specs = [
+            spec
+            for spec in ep.graph_signature.input_specs
+            if spec.kind == InputKind.BUFFER
+        ]
+        if len(buf_specs) == 1:  # strict mode, only used buffer is traced
+            target = buf_specs[0].target
+        else:  # non-strict, all buffers are traced
+            self.assertEqual(len(buf_specs), 3)
+            target = [
+                spec for spec in buf_specs
+                if spec.arg.name == "b_____a_b"
+            ][0].target
+        self.assertEqual(target, "***.a:b")
+        # unflatten
+        unflattened = unflatten(ep)
+        self.assertEqual(mod(*inps), unflattened(*inps))
+
     def test_export_dynamo_config(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
