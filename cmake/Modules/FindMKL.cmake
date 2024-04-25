@@ -56,8 +56,6 @@ ELSE (WIN32)
   endif()
 ENDIF (WIN32)
 
-message("!!!!! DEFAULT_INTEL_MKL_DIR: ${DEFAULT_INTEL_MKL_DIR}")
-
 # Intel Compiler Suite
 SET(INTEL_COMPILER_DIR "${DEFAULT_INTEL_COMPILER_DIR}" CACHE STRING
   "Root directory of the Intel Compiler Suite (contains ipp, mkl, etc.)")
@@ -66,8 +64,6 @@ SET(INTEL_MKL_DIR "${DEFAULT_INTEL_MKL_DIR}" CACHE STRING
 SET(INTEL_OMP_DIR "${DEFAULT_INTEL_MKL_DIR}" CACHE STRING
   "Root directory of the Intel OpenMP (standalone)")
 SET(MKL_THREADING "OMP" CACHE STRING "MKL flavor: SEQ, TBB or OMP (default)")
-
-message("!!!!! INTEL_MKL_DIR: ${INTEL_MKL_DIR}")
 
 IF (NOT "${MKL_THREADING}" STREQUAL "SEQ" AND
     NOT "${MKL_THREADING}" STREQUAL "TBB" AND
@@ -398,14 +394,11 @@ IF (NOT MKL_LIBRARIES)
     "mkl;guide;pthread;m" "")
 ENDIF (NOT MKL_LIBRARIES)
 
-message("!!!!!!! MKL_INCLUDE_DIR: ${MKL_INCLUDE_DIR}")
 # Include files
 IF (MKL_LIBRARIES)
   FIND_PATH(MKL_INCLUDE_DIR NAMES "mkl_cblas.h" PATHS "/usr/include/mkl")
   MARK_AS_ADVANCED(MKL_INCLUDE_DIR)
 ENDIF (MKL_LIBRARIES)
-
-message("!!!!!!! MKL_INCLUDE_DIR: ${MKL_INCLUDE_DIR}")
 
 # Other libraries
 IF (MKL_LIBRARIES)
@@ -465,9 +458,6 @@ IF(NOT MKL_FIND_QUIETLY)
     MESSAGE(STATUS "MKL library not found")
   ENDIF(MKL_FOUND)
 ENDIF(NOT MKL_FIND_QUIETLY)
-
-message("!!!!!!! MKL_LIBRARIES: ${MKL_LIBRARIES}")
-message("!!!!! INTEL_MKL_DIR: ${INTEL_MKL_DIR}")
 
 # Do nothing if MKL_FOUND was set before!
 ENDIF (NOT MKL_FOUND)
