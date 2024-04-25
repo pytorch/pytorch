@@ -3624,6 +3624,7 @@ class ShapeEnv:
                 raise
 
         # First, issue all guards.
+        # There are no redundant guards, as we already use knowledge of previous guards inside _maybe_evaluate_static
         for guard in self.guards:
             issue_guard(guard)
 
@@ -3854,6 +3855,7 @@ class ShapeEnv:
         """
         Given the symbols in an expression, it returns all the runtime asserts that have those symbols
         concatenated with all the guards.
+        If symbols is None, it returns all the runtime asserts (and all the guards)
         """
         if symbols is None:
             runtime_asserts = (r.expr
