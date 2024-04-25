@@ -166,7 +166,7 @@ bool AOTIPythonKernelHolder::cache_lookup(
     return false;
   }
 
-  LocalState local_state;
+  torch::dynamo::LocalState local_state;
   local_state.overrideDispatchKeySet(c10::DispatchKeySet(dispatch_key_));
 
   for (size_t i = 0; i < inputs.size(); ++i) {
@@ -250,10 +250,10 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
     // Access the meta_info list
     auto inputs_metadata = item_dict["meta_info"].cast<py::list>();
 
-    std::vector<TensorCheck> tensor_checks;
+    std::vector<torch::dynamo::TensorCheck> tensor_checks;
     std::vector<TensorMetadata> tensor_metadata_list;
 
-    LocalState state;
+    torch::dynamo::LocalState state;
     // Loop over the meta_info list
     for (auto item : inputs_metadata) {
       // Convert the handle to a dict
