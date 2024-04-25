@@ -14,6 +14,7 @@ from torch._dynamo import compiled_autograd
 from torch._dynamo.utils import counters
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.logging_utils import logs_to_string
 
 # note: these tests are not run on windows due to inductor_utils.HAS_CPU
 
@@ -1341,6 +1342,89 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent, m) {
 
             out = compiled_fn(activations)
             self.assertTrue(len(activations) == 0)
+
+    def test_verbose_logs_graph(self):
+        torch._logging.set_logs(compiled_autograd_verbose=True)
+
+        def fn():
+            model = torch.nn.Sequential(
+                torch.nn.Linear(4, 4),
+                torch.nn.ReLU(),
+                torch.nn.Linear(4, 4),
+                torch.nn.ReLU(),
+            )
+            x = torch.randn([2, 4])
+            result = model(x).sum()
+            result.backward()
+            yield model[0].weight.grad
+            yield model[0].bias.grad
+            yield model[2].weight.grad
+            yield model[2].bias.grad
+
+        logs, ctx = logs_to_string(
+            torch._dynamo.compiled_autograd.__name__, "compiled_autograd_verbose"
+        )
+        with ctx():
+            self.check_output_and_recompiles(fn)
+
+        expected_logs = [
+            "SumBackward0 (NodeCall 1)",
+            "ReluBackward0 (NodeCall 2)",
+            "AddmmBackward0 (NodeCall 3)",
+            "TBackward0 (NodeCall 4)",
+            "torch::autograd::AccumulateGrad (NodeCall 5)",
+            "ReluBackward0 (NodeCall 6)",
+            "AddmmBackward0 (NodeCall 7)",
+            "TBackward0 (NodeCall 8)",
+            "torch::autograd::AccumulateGrad (NodeCall 9)",
+            "torch::autograd::AccumulateGrad (NodeCall 10)",
+            "torch::autograd::AccumulateGrad (NodeCall 11)",
+        ]
+
+        self.assertEqual(
+            sum(1 for e in expected_logs if e in logs.getvalue()), len(expected_logs)
+        )
+
+    def test_verbose_logs_snapshot(self):
+        def fn():
+            model = torch.nn.Sequential(
+                torch.nn.Linear(4, 4),
+                torch.nn.ReLU(),
+                torch.nn.Linear(4, 4),
+                torch.nn.ReLU(),
+            )
+            x = torch.randn([2, 4])
+            result = model(x).sum()
+            result.backward()
+            yield model[0].weight.grad
+            yield model[0].bias.grad
+            yield model[2].weight.grad
+            yield model[2].bias.grad
+
+        logs, ctx = logs_to_string(
+            torch._dynamo.compiled_autograd.__name__, "compiled_autograd_verbose"
+        )
+        with ctx():
+            with compiled_autograd.enable(compiler_fn):
+                # unused, verbose level already snapshot with contextmanager
+                torch._logging.set_logs(compiled_autograd_verbose=True)
+                fn()
+
+        unexpected_logs = [
+            "SumBackward0 (NodeCall 1)",
+            "ReluBackward0 (NodeCall 2)",
+            "AddmmBackward0 (NodeCall 3)",
+            "TBackward0 (NodeCall 4)",
+            "torch::autograd::AccumulateGrad (NodeCall 5)",
+            "ReluBackward0 (NodeCall 6)",
+            "AddmmBackward0 (NodeCall 7)",
+            "TBackward0 (NodeCall 8)",
+            "torch::autograd::AccumulateGrad (NodeCall 9)",
+            "torch::autograd::AccumulateGrad (NodeCall 10)",
+            "torch::autograd::AccumulateGrad (NodeCall 11)",
+        ]
+
+        self.assertEqual(sum(1 for e in unexpected_logs if e in logs.getvalue()), 0)
 
 
 def load_test_module(name):
