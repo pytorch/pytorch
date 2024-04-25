@@ -24,14 +24,21 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     run_tests,
     TEST_WITH_TSAN,
-    TestCase
+    TestCase,
 )
 
 
 def _create_c10d_store_mp(is_server, server_addr, port, world_size, wait_for_workers):
-    store = create_c10d_store(is_server, server_addr, port, world_size, wait_for_workers=wait_for_workers, timeout=2)
+    store = create_c10d_store(
+        is_server,
+        server_addr,
+        port,
+        world_size,
+        wait_for_workers=wait_for_workers,
+        timeout=2,
+    )
     if store is None:
-        raise AssertionError()
+        raise AssertionError
 
     store.set(f"test_key/{os.getpid()}", b"test_value")
 

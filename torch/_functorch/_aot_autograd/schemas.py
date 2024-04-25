@@ -17,7 +17,7 @@ from torch._subclasses.fake_tensor import is_fake
 
 from .. import config
 
-from .functional_utils import _check_if_mutation_can_be_in_graph
+from .functional_utils import _check_if_mutation_can_be_in_graph, has_same_metadata
 from .utils import strict_zip
 
 zip = strict_zip
@@ -54,6 +54,27 @@ OutputType = Enum(
 )
 
 
+# Wrapper around a FunctionalTensorWrapper for comparing only the resulting metadata
+# after applying all the ViewMeta operations.
+class FunctionalTensorMetadataEq:
+    def __init__(self, tensor: torch.Tensor) -> None:
+        assert torch._is_functional_tensor(tensor)
+        self.tensor = tensor
+
+    def __eq__(self, other: object) -> bool:
+        # If other is None, then it probably means that we weren't able to recreate
+        # the FunctionalTensorMetadataEq. One of this cases is when we update the
+        # view metadata by calling: create_synthetic_base_metadata.
+        if other is None:
+            return True
+
+        # Comparison agains any other type is not implemented.
+        if not isinstance(other, FunctionalTensorMetadataEq):
+            return NotImplemented
+
+        return has_same_metadata(self.tensor, other.tensor)
+
+
 # This class stores info about every user output.
 @dataclass(frozen=True)
 class OutputAliasInfo:
@@ -84,6 +105,15 @@ class OutputAliasInfo:
     dynamic_dims: Optional[Set[int]]
     # requires_grad
     requires_grad: bool
+    # FunctionalTensorWrapper that represents this output.
+    #
+    # Provides us the means to replay views from it.
+    #
+    # We need to wrap the actual FunctionalTensorWrapper with this class so that
+    # we only compare the tensor's metadata. That's because with the transformations
+    # of the model throughout AOTAutograd, the sequence of ViewMeta and the base
+    # tensor might change.
+    functional_tensor: Optional[FunctionalTensorMetadataEq] = None
 
 
 class MutationType(Enum):
@@ -123,6 +153,7 @@ class InputAliasInfo:
             self.mutates_metadata,
             self.mutations_hidden_from_autograd,
             self.mutations_under_no_grad_or_inference_mode,
+            self.mutates_storage_metadata,
             self.requires_grad,
         ):
             return MutationType.MUTATED_IN_GRAPH
@@ -473,7 +504,7 @@ class SubclassMeta:
     # in case we made incorrect assumptions about the subclass-ness of our grad_outputs
     #
     # Optional field because we don't compute for inference graphs
-    grad_input_metas: Optional[List[Union[int, SubclassCreationMeta]]]
+    grad_input_metas: Optional[List[Union[int, SubclassCreationMeta]]] = None
 
     def __init__(self):
         # The fields in this class get set after its construction.

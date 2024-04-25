@@ -345,6 +345,9 @@ static SparseCsrTensor new_compressed_tensor(const TensorOptions& options) {
   case kMeta:
     dispatch_key = DispatchKey::SparseCsrMeta;
     break;
+  case kPrivateUse1:
+    dispatch_key = DispatchKey::SparseCsrPrivateUse1;
+    break;
   default:
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Could not run 'new_compressed_tensor' from the '", options.device(), "' device.)");
   }

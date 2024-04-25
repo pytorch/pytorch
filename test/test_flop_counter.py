@@ -21,7 +21,7 @@ def FlopCounterMode(*args, **kwargs):
     return torch.utils.flop_counter.FlopCounterMode(*args, **kwargs, display=False)
 
 def get_total_flops(mode):
-    return str(sum([v for _, v in mode.flop_counts["Global"].items()]))
+    return str(sum(v for _, v in mode.flop_counts["Global"].items()))
 
 def T(*shape, requires_grad=False):
     return torch.randn(*shape, requires_grad=requires_grad)
@@ -248,8 +248,8 @@ class TestFlopCounter(TestCase):
 
         self.assertExpectedInline(get_total_flops(mode), """5""")
 
-        def count(*args, out):
-            return out.numel()
+        def count(*args, out_val):
+            return out_val.numel()
         count._get_raw = True
 
         mode = FlopCounterMode(custom_mapping={torch.ops.aten.add: count})
@@ -327,6 +327,17 @@ class TestFlopCounter(TestCase):
         flops_fw_bw_math, flops_fw_bw_efficient = flops
         self.assertExpectedInline(str(flops_fw_bw_math), """805306368""")
         self.assertExpectedInline(str(flops_fw_bw_efficient), """939524096""")
+
+    def test_addmm_out(self):
+        def f(x):
+            y = torch.zeros(10, 10)
+            return torch.mm(x, x, out=y)
+
+        mode = FlopCounterMode()
+        with mode:
+            f(torch.randn(10, 10))
+
+        self.assertExpectedInline(get_total_flops(mode), """2000""")
 
     def test_hook_registration(self):
         model = torch.nn.Linear(100, 100)

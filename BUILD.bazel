@@ -1762,12 +1762,10 @@ py_library(
     visibility = ["//visibility:public"],
     srcs = glob(["torch/**/*.py"], exclude = ["torch/version.py"]) + [":torch/version.py"] + glob(["functorch/**/*.py"]),
     deps = [
-        rules.requirement("future"),
         rules.requirement("numpy"),
         rules.requirement("pyyaml"),
         rules.requirement("requests"),
         rules.requirement("setuptools"),
-        rules.requirement("six"),
         rules.requirement("sympy"),
         rules.requirement("typing_extensions"),
         "//torchgen",

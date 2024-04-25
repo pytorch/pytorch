@@ -21,14 +21,10 @@ typedef SSIZE_T ssize_t;
 
 #include <sys/types.h>
 
-#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <functional>
-#include <limits>
 #include <string>
-#include <system_error>
-#include <tuple>
 #include <vector>
 
 namespace c10d {

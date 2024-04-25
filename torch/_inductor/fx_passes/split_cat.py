@@ -54,6 +54,8 @@ pass_names = [
     "mutate_cat_pass",
     "split_cat_pass",
     "unbind_stack_pass",
+    # must be the last pass
+    "decompose_mm_pass",
 ]
 
 for pass_name in pass_names:
@@ -61,10 +63,16 @@ for pass_name in pass_names:
     # they do not use pattern matcher
     if pass_name in PRE_GRAD_FUSIONS or pass_name in POST_GRAD_FUSIONS:
         continue
-    PRE_GRAD_PATTERNS[pass_name] = PatternMatcherPass(
-        prevent_match_across_mutations=True,
-        pass_name=pass_name,
-    )
+    if pass_name != "decompose_mm_pass":
+        PRE_GRAD_PATTERNS[pass_name] = PatternMatcherPass(
+            prevent_match_across_mutations=True,
+            pass_name=pass_name,
+        )
+    else:
+        POST_GRAD_PATTERNS[pass_name] = PatternMatcherPass(
+            prevent_match_across_mutations=True,
+            pass_name=pass_name,
+        )
 
 
 def construct_pattern_matcher_pass(pass_name: str) -> PatternMatcherPass:
@@ -84,17 +92,17 @@ def construct_pattern_matcher_pass(pass_name: str) -> PatternMatcherPass:
         )
 
 
-def get_config_flag(pass_name: str, flag="split_cat_fx_passes", pre_grad=True):
+def get_config_flag(pass_name: str, flag="split_cat_fx_passes"):
     def flag_check(match):
         # TODO: remove the flag config check after we have the front end change
         # currently, pre_grad_fusion_options and post_grad_fusion_options are only have batch fusion
         # options controlled by the batch_fusion flag, after we extend it to indluce other fusions,
         # we can only check if the pass_name is in the config
-        if pre_grad:
-            # not to disturb models without the config flag is turned off
-            return getattr(config, flag)
-        else:
-            return getattr(config, flag)
+        return (
+            getattr(config, flag)
+            or pass_name in config.pre_grad_fusion_options
+            or pass_name in config.post_grad_fusion_options
+        )
 
     return flag_check
 
