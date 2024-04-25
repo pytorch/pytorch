@@ -2254,26 +2254,30 @@ class TestPatternMatcher(TestPatternMatcherBase):
             def forward(self, x, weight, scales):
                 return torch.nn.functional.linear(x, weight.to(dtype=x.dtype)) * scales
 
-        torch.manual_seed(1234)
         mod = M().eval()
         x_shape = (1, 1, 256)
         w_shape = (12, 256)
         s_shape = 12
-        x = torch.randn(x_shape, dtype=torch.bfloat16)
-        w = torch.randint(-128, 127, w_shape, dtype=torch.int8)
-        s = torch.randn(s_shape, dtype=torch.bfloat16)
+        x_strides = [
+            (256, 256, 1),  # linear dispatching to mm
+            (256, 32, 1),  # linear dispatching to bmm
+        ]
+        for x_stride in x_strides:
+            x = torch.randn(x_shape, dtype=torch.bfloat16).as_strided(x_shape, x_stride)
+            w = torch.randint(-128, 127, w_shape, dtype=torch.int8)
+            s = torch.randn(s_shape, dtype=torch.bfloat16)
 
-        def matcher_check_fn():
-            self.assertEqual(counters["inductor"]["woq_matcher_count"], 1)
+            def matcher_check_fn():
+                self.assertEqual(counters["inductor"]["woq_matcher_count"], 1)
 
-        self._test_common(
-            mod,
-            (x, w, s),
-            matcher_check_fn=matcher_check_fn,
-            check_quantization=False,
-            atol=0.001,
-            rtol=0.07,
-        )
+            self._test_common(
+                mod,
+                (x, w, s),
+                matcher_check_fn=matcher_check_fn,
+                check_quantization=False,
+                atol=0.001,
+                rtol=0.07,
+            )
 
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})

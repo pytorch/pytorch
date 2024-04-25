@@ -102,6 +102,23 @@ class PyProcessGroup : public ProcessGroup {
         opts);
   }
 
+  c10::intrusive_ptr<Work> alltoall_base(
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      std::vector<int64_t>& outputSplitSizes,
+      std::vector<int64_t>& inputSplitSizes,
+      const AllToAllOptions& opts = AllToAllOptions()) override {
+    PYBIND11_OVERRIDE(
+        c10::intrusive_ptr<Work>, /* Return type */
+        ProcessGroup, /* Parent class */
+        alltoall_base, /* Name of function in C++ */
+        outputBuffer,
+        inputBuffer,
+        outputSplitSizes,
+        inputSplitSizes,
+        opts);
+  }
+
   c10::intrusive_ptr<Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override {
     PYBIND11_OVERRIDE(

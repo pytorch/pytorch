@@ -6,7 +6,6 @@
 #include <deque>
 #include <mutex>
 #include <thread>
-#include <unordered_map>
 #include <vector>
 
 #include <gloo/algorithm.h>
@@ -147,7 +146,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
         const std::vector<std::string>& keys) override {
       std::vector<std::vector<char>> res;
       for (auto& value : store_->multiGet(keys)) {
-        res.emplace_back(std::vector<char>(value.begin(), value.end()));
+        res.emplace_back(value.begin(), value.end());
       }
       return res;
     }
@@ -156,8 +155,9 @@ class TORCH_API ProcessGroupGloo : public Backend {
         const std::vector<std::string>& keys,
         const std::vector<std::vector<char>>& values) override {
       std::vector<std::vector<uint8_t>> u_values;
+      u_values.reserve(values.size());
       for (auto& value : values) {
-        u_values.emplace_back(std::vector<uint8_t>(value.begin(), value.end()));
+        u_values.emplace_back(value.begin(), value.end());
       }
       store_->multiSet(keys, u_values);
     }
