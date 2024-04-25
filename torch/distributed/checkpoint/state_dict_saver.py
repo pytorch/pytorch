@@ -164,9 +164,6 @@ def async_save(
     storage_writer: Optional[StorageWriter] = None,
     planner: Optional[SavePlanner] = None,
     process_group: Optional[dist.ProcessGroup] = None,
-    executor: Optional[
-        ThreadPoolExecutor
-    ] = None,  # would be 'ThreadPoolExecutor-like', see comments below
 ) -> Future:
     """Asynchronous version of ``save``. This code first de-stages the state_dict on CPU, and then calls
     `save` in a separate thread.
@@ -233,9 +230,7 @@ def async_save(
     if isinstance(storage_writer, AsyncStager):
         staged_state_dict = storage_writer.stage(state_dict)
     else:  # provides bwc for storage_writers not implementing AsyncStager
-        staged_state_dict = _offload_state_dict_to_cpu(
-            state_dict
-        )
+        staged_state_dict = _offload_state_dict_to_cpu(state_dict)
 
     executor = ThreadPoolExecutor(max_workers=1)
     f: Future = executor.submit(
