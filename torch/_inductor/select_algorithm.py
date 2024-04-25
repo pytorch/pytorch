@@ -3,6 +3,8 @@ import functools
 import inspect
 import itertools
 import logging
+
+import math
 import operator
 import sys
 import textwrap
@@ -1114,9 +1116,7 @@ class AlgorithmSelectorCache(PersistentCache):
             or (not math.isfinite(selected_time))
             or math.isnan(selected_time)
         ):
-            raise NoValidChoicesError()
-        if return_selection_result_details:
-            return selected_key, timings
+            raise NoValidChoicesError
         selected_choice = selected_key.output_node()
         log.debug("selected choice: %s", str(selected_choice))
         return selected_choice
