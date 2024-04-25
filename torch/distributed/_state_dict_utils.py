@@ -1,3 +1,4 @@
+import copy
 import io
 import math
 from typing import Any, Callable, Dict, Optional, Tuple, TYPE_CHECKING
@@ -145,7 +146,7 @@ def _iterate_state_dict(
             not isinstance(companion_obj, (list, tuple))
             or len(companion_obj) != len(iter_object)
         ):
-            raise CompanionMismatch()
+            raise CompanionMismatch
 
         ret = [
             _iterate_state_dict(
@@ -166,7 +167,7 @@ def _iterate_state_dict(
         if isinstance(iter_object, tuple):
             ret = tuple(ret)
     elif not type_check:
-        ret = iter_object
+        ret = copy.deepcopy(iter_object)
     else:
         raise ValueError(f"Unexpected value type {type(iter_object)}")
 
@@ -436,7 +437,7 @@ def _check_state_dict_similarity(
         companion_obj: Any,
     ) -> torch.Tensor:
         if companion_obj.dtype != obj.dtype or companion_obj.size() != obj.size():
-            raise CompanionMismatch()
+            raise CompanionMismatch
         return obj
 
     try:

@@ -280,7 +280,7 @@ inline void tinygemm_kernel(
         // when BLOCK_N = 32, handle each row at a time
         if constexpr (col == 0) {
           __m256i mask = _mm256_set1_epi32(0xF);
-          __m128i b4 = _mm_load_si128((__m128i*)(B + k * ldb));
+          __m128i b4 = _mm_loadu_si128((__m128i*)(B + k * ldb));
           if (k + PREFETCH_SIZE_K < K) {
             _mm_prefetch(B + (k + PREFETCH_SIZE_K) * ldb, _MM_HINT_T0);
           }
@@ -339,22 +339,102 @@ inline void tinygemm_kernel(
 
 #endif
 
-inline float convert_int4_to_float(uint8_t a, bool is_even) {
+#if !defined(C10_MOBILE) && defined(__aarch64__)
+#include <arm_neon.h>
+template <int BLOCK_M, int BLOCK_N>
+inline void tinygemm_kernel(
+    const Half* RESTRICT A,
+    const uint8_t* RESTRICT B,
+    const Half* RESTRICT ScaleAndZeros,
+    Half* RESTRICT C,
+    int lda,
+    int ldb,
+    int ldc,
+    int K,
+    int BLOCK_K) {
+  int16_t shift_vals[4] = {0, -4, -8, -12};
+  int16x4_t shifts = vld1_s16(shift_vals);
+  int16x4_t offs = vdup_n_s16(8);
+  uint16x4_t mask = vdup_n_u16(0x0F);
+  for (const auto m : c10::irange(BLOCK_M)) {
+    for (int n = 0; n < BLOCK_N; n+= 16) {
+      float32x4_t c_val[4];
+      float32x4_t scales[4], zeros[4];
+      c10::ForcedUnroll<4>{}([&](auto i) {
+          c_val[i] = vdupq_n_f32(0.0);
+      });
+      for (const auto k : c10::irange(K)) {
+        const auto a_val = vdupq_n_f32(static_cast<float>(A[m * lda + k]));
+        if (is_block_start(k, BLOCK_K)) {
+          int kb = k / BLOCK_K;
+          c10::ForcedUnroll<4>{}([&](auto i) {
+            auto scales_and_zeros = vld2_f16(reinterpret_cast<const float16_t*>(ScaleAndZeros + kb * ldc * 2 + n * 2 + i * 8));
+            scales[i] = vcvt_f32_f16(scales_and_zeros.val[0]);
+            zeros[i] = vcvt_f32_f16(scales_and_zeros.val[1]);
+          });
+        }
+        c10::ForcedUnroll<4>{}([&](auto i) {
+          uint16_t b_pack = reinterpret_cast<const uint16_t*>(B + k * ldb + n / 2)[i];
+          uint16x4_t b_masked = vand_u16(vshl_u16(vdup_n_u16(b_pack), shifts), mask);
+          int16x4_t b_ints = vsub_s16(vreinterpret_s16_u16(b_masked), offs);
+          float32x4_t b_vals = vcvtq_f32_s32(vmovl_s16(b_ints));
+          b_vals = vaddq_f32(zeros[i], vmulq_f32(scales[i], b_vals));
+          c_val[i] = vfmaq_f32(c_val[i], b_vals, a_val);
+        });
+      }
+      c10::ForcedUnroll<4>{}([&](auto i) {
+        vst1_f16(reinterpret_cast<float16_t*>(C + m * ldc + n + i * 4), vcvt_f16_f32(c_val[i]));
+      });
+    }
+  }
+}
+#endif
+
+template<int BLOCK_N>
+inline float convert_int4_to_float(const uint8_t* b, int n) {
   static constexpr float lut[16] = {
     -8.0f, -7.0f, -6.0f, -5.0f,
     -4.0f, -3.0f, -2.0f, -1.0f,
     0.0f, 1.0f, 2.0f, 3.0f,
     4.0f, 5.0f, 6.0f, 7.0f
   };
-
-  int index = is_even ? (a & 0x0F) : (a >> 4);
+  int index;
+#if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
+  if constexpr (BLOCK_N == 64) {
+    const int nb = n/BLOCK_N;
+    n -= nb*BLOCK_N;
+    if (n < 32) {
+      auto val = b[nb * BLOCK_N / 2 + n];
+      index = val & 0x0f;
+    } else {
+      auto val = b[nb * BLOCK_N / 2 + (n - 32)];
+      index = val >> 4;
+    }
+  } else
+#elif defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+  if constexpr (BLOCK_N == 32) {
+    const int nb = n/BLOCK_N;
+    n -= nb*BLOCK_N;
+    if (n < 16) {
+      auto val = b[nb * BLOCK_N / 2 + n];
+      index = val & 0x0f;
+    } else {
+      auto val = b[nb * BLOCK_N / 2 + (n - 16)];
+      index = val >> 4;
+    }
+  } else
+#endif
+  {
+    const auto is_even = (n & 1) == 0;
+    auto val = b[n/2];
+    index = is_even ? (val & 0x0F) : (val >> 4);
+  }
   return lut[index];
 }
 
 // non-vectorized version
 template <int BLOCK_M, int BLOCK_N, typename T>
-inline
-std::enable_if_t<std::is_same_v<T, Half> || std::is_same_v<T, BFloat16>, void> tinygemm_kernel(
+inline void tinygemm_kernel(
     const T* RESTRICT A,
     const uint8_t* RESTRICT B,
     const T* RESTRICT ScaleAndZeros,
@@ -373,9 +453,7 @@ std::enable_if_t<std::is_same_v<T, Half> || std::is_same_v<T, BFloat16>, void> t
         const auto scale = static_cast<float>(ScaleAndZeros[kb * ldc * 2 + n * 2]);
         const auto zero = static_cast<float>(ScaleAndZeros[kb * ldc * 2 + n * 2 + 1]);
         const auto a_val = static_cast<float>(A[m * lda + k]);
-        uint8_t b_pack = B[k * ldb + n / 2];
-        // range [-8, 7]: B_val = (bf16(B_int4_val) * scale) + zero
-        float b_val = convert_int4_to_float(b_pack, n % 2 == 0);
+        float b_val = convert_int4_to_float<BLOCK_N>(B + k *ldb, n);
         b_val = b_val * scale + zero;
 
         c_val += a_val * b_val;
@@ -456,7 +534,7 @@ void weight_to_int4pack_kernel(
   auto weight_packed_data = reinterpret_cast<uint8_t*>(weight_packed.data_ptr());
   const auto weight_data = weight.data_ptr<int32_t>();
 
-  // 64 for avx512 and 64 for avx2/non-vectorized
+  // 64 for avx512 and 32 for avx2/non-vectorized
   constexpr int BLOCK_N = vec::Vectorized<float>::size() * 4;
   const int NB =  (N + BLOCK_N - 1) / BLOCK_N;
 
@@ -596,11 +674,13 @@ void int4pack_mm_kernel(
     int qGroupSize,
     const Tensor& qScaleAndZeros,
     int N, int K) {
- if (C.scalar_type() == kBFloat16) {
-   int4pack_mm_kernel_<BFloat16>(C, A, B, qGroupSize, qScaleAndZeros, N, K);
- } else {
-   int4pack_mm_kernel_<Half>(C, A, B, qGroupSize, qScaleAndZeros, N, K);
- }
+  if (C.scalar_type() == kBFloat16) {
+    int4pack_mm_kernel_<BFloat16>(C, A, B, qGroupSize, qScaleAndZeros, N, K);
+  } else if (C.scalar_type() == kHalf) {
+    int4pack_mm_kernel_<Half>(C, A, B, qGroupSize, qScaleAndZeros, N, K);
+  } else {
+    int4pack_mm_kernel_<float>(C, A, B, qGroupSize, qScaleAndZeros, N, K);
+  }
 }
 
 } // anonymous namespace

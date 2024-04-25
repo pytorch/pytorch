@@ -164,7 +164,7 @@ from user code:
         import torch._inductor.lowering
 
         def throw(x):
-            raise AssertionError()
+            raise AssertionError
 
         # inject an error in the lowerings
         dict_entries = {}
@@ -189,7 +189,7 @@ WON'T CONVERT inductor_error_fn test_logging.py line N
 due to:
 Traceback (most recent call last):
   File "test_logging.py", line N, in throw
-    raise AssertionError()
+    raise AssertionError
 torch._dynamo.exc.BackendCompilerFailed: backend='inductor' raised:
 LoweringException: AssertionError:
   target: aten.round.default

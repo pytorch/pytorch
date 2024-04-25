@@ -963,7 +963,7 @@ class _PatchedFn(NamedTuple):
     orig_fn: Any
 
     def revert(self):
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 class _PatchedFnSetItem(_PatchedFn):
