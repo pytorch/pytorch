@@ -42,15 +42,6 @@ jobs:
       user_name: ${{ github.actor }}
       curr_branch: ${{ github.ref_name }}
 
-  test-check-user:
-    name: test step "check user"
-    runs-on: linux.4xlarge
-    needs: get-workflow
-    steps:
-      - name: check output
-        run: |
-          echo ${{ needs.get-workflow.outputs.workflow-type }}
-
   linux-jammy-py3_8-gcc11-build-rg:
     name: linux-jammy-py3.8-gcc11 (arc-lf-linux.2xlarge)
     needs: get-workflow
