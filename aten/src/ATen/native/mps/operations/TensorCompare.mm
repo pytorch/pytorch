@@ -10,9 +10,9 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/clamp_max_native.h>
-#include <ATen/ops/isin_native.h>
 #include <ATen/ops/clamp_min_native.h>
 #include <ATen/ops/clamp_native.h>
+#include <ATen/ops/isin_native.h>
 #include <ATen/ops/nan_to_num_native.h>
 #include <ATen/ops/where_native.h>
 #endif
@@ -275,53 +275,44 @@ static void isin_Tensor_Tensor_out_mps(const Tensor& elements,
                                        bool invert,
                                        const Tensor& out,
                                        string op_name) {
-    if(elements.numel()==0){
-        return;
-    }
+  if (elements.numel() == 0) {
+    return;
+  }
 
-    @autoreleasepool {
-        string key = op_name + getTensorsStringKey({elements}) + getTensorsStringKey({test_elements}) 
-                    + std::to_string(invert);
+  @autoreleasepool {
+    string key =
+        op_name + getTensorsStringKey({elements}) + getTensorsStringKey({test_elements}) + std::to_string(invert);
 
-        auto cachedGraph = LookUpOrCreateCachedGraph<MPSBinaryCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-            MPSGraphTensor* inputTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(elements.scalar_type()));        
-            MPSGraphTensor* otherTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(test_elements.scalar_type()));
-            
-            newCachedGraph->inputTensor_ = inputTensor;
-            newCachedGraph->otherTensor_ = otherTensor; 
+    auto cachedGraph = LookUpOrCreateCachedGraph<MPSBinaryCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      MPSGraphTensor* inputTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(elements.scalar_type()));
+      MPSGraphTensor* otherTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(test_elements.scalar_type()));
 
-            MPSShape* outputShape = getMPSShape(out);
+      newCachedGraph->inputTensor_ = inputTensor;
+      newCachedGraph->otherTensor_ = otherTensor;
 
-            MPSGraphTensor* input_flattened = [mpsGraph reshapeTensor:inputTensor
-                                            withShape:@[@-1, @1]
-                                                 name:nil];
-            MPSGraphTensor* other_flattened = [mpsGraph reshapeTensor:otherTensor
-                                            withShape:@[@1, @-1]
-                                                 name:nil];
-            MPSGraphTensor* isInTensor = [mpsGraph equalWithPrimaryTensor:input_flattened
-                                                   secondaryTensor:other_flattened
-                                                              name:nil]; 
-            MPSGraphTensor* output = [mpsGraph reductionOrWithTensor:isInTensor 
-                                                                axis:1 
-                                                                name:nil];
-            output = [mpsGraph reshapeTensor:output
-                                   withShape:outputShape
-                                        name:nil];
+      MPSShape* outputShape = getMPSShape(out);
 
-            if(invert) {
-                output = [mpsGraph notWithTensor:output
-                                            name:nil];
-            }
-            newCachedGraph->outputTensor_ = output;
-        });
-        
-        auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, elements);
-        auto otherPlaceholder = Placeholder(cachedGraph->otherTensor_, test_elements);
-        auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, out);
+      MPSGraphTensor* input_flattened = [mpsGraph reshapeTensor:inputTensor withShape:@[ @-1, @1 ] name:nil];
+      MPSGraphTensor* other_flattened = [mpsGraph reshapeTensor:otherTensor withShape:@[ @1, @-1 ] name:nil];
+      MPSGraphTensor* isInTensor = [mpsGraph equalWithPrimaryTensor:input_flattened
+                                                    secondaryTensor:other_flattened
+                                                               name:nil];
+      MPSGraphTensor* output = [mpsGraph reductionOrWithTensor:isInTensor axis:1 name:nil];
+      output = [mpsGraph reshapeTensor:output withShape:outputShape name:nil];
 
-        auto feeds = dictionaryFromPlaceholders(inputPlaceholder, otherPlaceholder);
-        runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
-    }
+      if (invert) {
+        output = [mpsGraph notWithTensor:output name:nil];
+      }
+      newCachedGraph->outputTensor_ = output;
+    });
+
+    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, elements);
+    auto otherPlaceholder = Placeholder(cachedGraph->otherTensor_, test_elements);
+    auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, out);
+
+    auto feeds = dictionaryFromPlaceholders(inputPlaceholder, otherPlaceholder);
+    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
+  }
 }
 
 } // namespace mps
