@@ -3850,7 +3850,11 @@ class ShapeEnv:
         return bound_sympy(expr, var_to_range)
 
     @_lru_cache
-    def _get_axioms(self, symbols: Optional[Tuple["sympy.Symbol"]] = None) -> Tuple["sympy.Expr"]:
+    def get_axioms(self, symbols: Optional[Tuple["sympy.Symbol"]] = None) -> Tuple["sympy.Expr"]:
+        """
+        Given the symbols in an expression, it returns all the runtime asserts that have those symbols
+        concatenated with all the guards.
+        """
         if symbols is None:
             runtime_asserts = (r.expr
                                for rs in self.deferred_runtime_asserts.values()
@@ -3863,9 +3867,9 @@ class ShapeEnv:
         return tuple(itertools.chain(guards, runtime_asserts))
 
     @_lru_cache
-    def _get_implications(self,
-                          e: "sympy.Expr",
-                          compute_hint: bool) -> Tuple[Tuple["sympy.Expr", 'sympy.logic.boolalg.BooleanAtom']]:
+    def get_implications(self,
+                         e: "sympy.Expr",
+                         compute_hint: bool) -> Tuple[Tuple["sympy.Expr", 'sympy.logic.boolalg.BooleanAtom']]:
         """ Given a expression, it returns a list of predicates that follow from it """
         equiv = {}
 
@@ -3921,10 +3925,10 @@ class ShapeEnv:
         # Pattern matching
         symbols = tuple(expr.free_symbols)
         if axioms is None:
-            axioms = self._get_axioms(symbols)
+            axioms = self.get_axioms(symbols)
         subst = {}
         for e in axioms:
-            subst.update(dict(self._get_implications(e, compute_hint=compute_hint)))
+            subst.update(dict(self.get_implications(e, compute_hint=compute_hint)))
 
         expr = expr.xreplace(subst)
 
