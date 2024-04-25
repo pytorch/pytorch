@@ -59,7 +59,7 @@ struct C10_API SafePyObject {
 // represents a specific type. Note that `T` is only used as a tag and isn't
 // actually used for any true purpose.
 template <typename T>
-struct C10_API SafePyObjectT : private SafePyObject {
+struct SafePyObjectT : private SafePyObject {
   SafePyObjectT(PyObject* data, c10::impl::PyInterpreter* pyinterpreter)
       : SafePyObject(data, pyinterpreter) {}
   SafePyObjectT(SafePyObjectT&& other) noexcept : SafePyObject(other) {}
