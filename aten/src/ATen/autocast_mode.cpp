@@ -239,7 +239,19 @@ Explicit registration for out-of-place ops
   _(pdist)                            \
   _(cdist)                            \
   _(renorm)                           \
-  _(logsumexp)
+  _(logsumexp)                        \
+  _(upsample_nearest1d)               \
+  _(_upsample_nearest_exact1d)        \
+  _(upsample_nearest2d)               \
+  _(_upsample_nearest_exact2d)        \
+  _(upsample_nearest3d)               \
+  _(_upsample_nearest_exact3d)        \
+  _(upsample_linear1d)                \
+  _(upsample_bilinear2d)              \
+  _(_upsample_bilinear2d_aa)          \
+  _(upsample_trilinear3d)             \
+  _(upsample_bicubic2d)               \
+  _(_upsample_bicubic2d_aa)
 
 #define AT_FORALL_FP32_SET_OPT_DTYPE(_) \
   _(prod)                               \
