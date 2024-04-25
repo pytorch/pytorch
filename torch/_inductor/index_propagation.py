@@ -198,7 +198,7 @@ class IndexPropagation:
         for x, s in iter_ranges.items():
             axioms.append(0 <= x)
             axioms.append(x < s)
-        self.axioms = tuple(axioms)
+        self.axioms = tuple(axioms) + self.shape_env._get_axioms()
 
     def materialize_expr(self, expr: sympy.Expr, dtype: torch.dtype) -> Any:
         # Construct a new constant/index_expr from the SymPy expression
@@ -290,7 +290,7 @@ class IndexPropagation:
     def statically_true(self, e):
         evaluated = self.shape_env._maybe_evaluate_static(
             e,
-            axioms=self.axioms + self.shape_env._get_axioms(tuple(e.free_symbols)),
+            axioms=self.axioms,
             var_to_range=self.var_to_range,
         )
         return bool(evaluated)
