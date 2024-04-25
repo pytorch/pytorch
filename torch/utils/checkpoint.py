@@ -470,7 +470,8 @@ def checkpoint(
             "if use_reentrant is not passed. use_reentrant=False is "
             "recommended, but if you need to preserve the current default "
             "behavior, you can pass use_reentrant=True. Refer to docs for more "
-            "details on the differences between the two variants."
+            "details on the differences between the two variants.",
+            stacklevel=2
         )
         use_reentrant = True
 
@@ -1084,7 +1085,7 @@ class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
             if target_frame.early_stop and target_frame.recomp_counter[gid] == len(
                 target_frame.weak_holders
             ):
-                raise _StopRecomputationError()
+                raise _StopRecomputationError
             # See Rule 6: [ retain_graph is True ] above
             return x.detach()
 

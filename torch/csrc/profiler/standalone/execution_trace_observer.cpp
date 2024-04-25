@@ -86,7 +86,7 @@ inline std::string getValueShape(
   if (val.isTensor()) {
     auto& tensor = val.toTensor();
     if (tensor.defined() &&
-        !tensor.unsafeGetTensorImpl()->has_symbolic_sizes_strides()) {
+        tensor.unsafeGetTensorImpl()->does_not_have_symbolic_sizes_strides()) {
       return vectorToString(tensor.sizes().vec());
     }
   } else if (val.isTuple()) {
@@ -326,7 +326,7 @@ static bool initExecutionTraceStart(ExecutionTraceObserver& ob) {
 
   ob.out << fmt::format(
       R"JSON({{
-  "schema": "1.0.2-chakra.0.0.4", "pid": {}, "time": "{}", "start_ts": {},
+  "schema": "1.0.3-chakra.0.0.4", "pid": {}, "time": "{}", "start_ts": {},
   "nodes": [)JSON",
       ob.pid,
       ob.record_time,
@@ -390,7 +390,7 @@ inline std::string convertIValue(
     size_t itemsize = 0;
     std::string device_str = "";
     // symbolic sizes/strides implies t->storage_offset() will fail
-    if (t->has_storage() && !t->has_symbolic_sizes_strides()) {
+    if (t->has_storage() && t->does_not_have_symbolic_sizes_strides()) {
       auto& t_storage = t->storage();
       storage_id = getObjectID(ob, t_storage.data());
       offset = t->storage_offset();

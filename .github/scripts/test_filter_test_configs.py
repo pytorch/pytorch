@@ -639,6 +639,7 @@ class TestConfigFilter(TestCase):
             ci_verbose_test_logs: bool = False,
             ci_no_test_timeout: bool = False,
             ci_no_td: bool = False,
+            ci_td_distributed: bool = False,
             is_unstable: bool = False,
             reenabled_issues: str = "",
         ) -> str:
@@ -647,6 +648,7 @@ class TestConfigFilter(TestCase):
                 f"ci-verbose-test-logs={ci_verbose_test_logs}\n"
                 f"ci-no-test-timeout={ci_no_test_timeout}\n"
                 f"ci-no-td={ci_no_td}\n"
+                f"ci-td-distributed={ci_td_distributed}\n"
                 f"is-unstable={is_unstable}\n"
                 f"reenabled-issues={reenabled_issues}\n"
             )

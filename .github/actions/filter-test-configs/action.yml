@@ -40,6 +40,9 @@ outputs:
   ci-no-td:
     description: True if ci-no-td label was on PR or [ci-no-td] in PR body.
     value: ${{ steps.filter.outputs.ci-no-td }}
+  ci-td-distributed:
+    description: True if ci-td-distributed label was on PR or [ci-td-distributed] in PR body.
+    value: ${{ steps.filter.outputs.ci-td-distributed }}
 
 runs:
   using: composite

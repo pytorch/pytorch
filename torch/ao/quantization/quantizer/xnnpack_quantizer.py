@@ -267,6 +267,8 @@ class XNNPACKQuantizer(Quantizer):
     STATIC_QAT_ONLY_OPS = [
         "conv_bn_relu",
         "conv_bn",
+        "conv_transpose_bn_relu",
+        "conv_transpose_bn",
     ]
 
     # static quantization ops (both PTQ and QAT)
@@ -276,6 +278,7 @@ class XNNPACKQuantizer(Quantizer):
         "linear",
         "conv_relu",
         "conv",
+        "conv_transpose_relu",
         "adaptive_avg_pool2d",
         # TODO: move this to BoltNNQuantizer?
         "gru_io_only",
@@ -302,9 +305,9 @@ class XNNPACKQuantizer(Quantizer):
 
     @classmethod
     def get_supported_quantization_configs(cls) -> List[QuantizationConfig]:
-        op_configs: Set[QuantizationConfig] = set({})
-        for spec, _ in cls.supported_config_and_operators:
-            op_configs.add(spec)
+        op_configs: Set[QuantizationConfig] = {
+            spec for spec, _ in cls.supported_config_and_operators
+        }
         return list(op_configs)
 
     @classmethod

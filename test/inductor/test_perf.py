@@ -1,6 +1,5 @@
 # Owner(s): ["module: inductor"]
 import contextlib
-import sys
 from unittest.mock import patch
 
 import functorch
@@ -41,9 +40,8 @@ def count_bytes_inductor(gm, example_inputs):
     return compile_fx(gm, example_inputs, inner_compile=count_bytes_inner)
 
 
-# We don't support torch.compile() on
-# Windows and Python 3.12+
-if not IS_WINDOWS and sys.version_info < (3, 12):
+# We don't support torch.compile() on Windows
+if not IS_WINDOWS:
 
     @torch._dynamo.optimize(count_bytes_inductor)
     def f(x):
@@ -911,7 +909,7 @@ class InplacingTests(TestCase):
             return output
 
         inp = (T(10), T(10))
-        self.assertExpectedInline(count_numel(f, *inp), """80""")
+        self.assertExpectedInline(count_numel(f, *inp), """60""")
 
     @requires_cuda
     @skipIfRocm
@@ -941,7 +939,7 @@ class InplacingTests(TestCase):
             return output
 
         inp = (T(10), T(10))
-        self.assertExpectedInline(count_numel(f, *inp), """80""")
+        self.assertExpectedInline(count_numel(f, *inp), """60""")
 
     @requires_cuda
     @skipIfRocm

@@ -261,7 +261,7 @@ void cpu_adaptive_avg_pool_backward(
   auto grad_output = grad_output_.contiguous();
   auto grad_input = grad_input_.contiguous();
 
-  auto grad_output_data = grad_output.data_ptr<scalar_t>();
+  auto grad_output_data = grad_output.const_data_ptr<scalar_t>();
   auto grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
 
   int64_t ndim = grad_output.ndimension();
@@ -276,7 +276,7 @@ void cpu_adaptive_avg_pool_backward(
   at::parallel_for(0, channels, 0, [&](int64_t begin, int64_t end) {
     for (const auto c : c10::irange(begin, end)) {
       scalar_t* grad_input_ptr = grad_input_data + c * input_height * input_width;
-      scalar_t* grad_output_ptr = grad_output_data + c * output_height * output_width;
+      const scalar_t* grad_output_ptr = grad_output_data + c * output_height * output_width;
 
       for (const auto oh : c10::irange(output_height)) {
         int64_t ih0 = start_index(oh, output_height, input_height);
@@ -313,7 +313,7 @@ void cpu_adaptive_avg_pool_backward_channels_last(
   auto grad_output = grad_output_.contiguous(memory_format);
 
   auto grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
-  auto grad_output_data = grad_output.data_ptr<scalar_t>();
+  auto grad_output_data = grad_output.const_data_ptr<scalar_t>();
 
   int64_t nbatch = grad_input.size(0);
   int64_t channels = grad_input.size(1);
@@ -327,7 +327,7 @@ void cpu_adaptive_avg_pool_backward_channels_last(
   at::parallel_for(0, nbatch, 0, [&](int64_t begin, int64_t end) {
     for (const auto n : c10::irange(begin, end)) {
       scalar_t* grad_input_ptr = grad_input_data + n * input_height * input_width * channels;
-      scalar_t* grad_output_ptr = grad_output_data + n * output_height * output_width * channels;
+      const scalar_t* grad_output_ptr = grad_output_data + n * output_height * output_width * channels;
 
       for (const auto oh : c10::irange(output_height)) {
         int64_t ih0 = start_index(oh, output_height, input_height);
@@ -339,7 +339,7 @@ void cpu_adaptive_avg_pool_backward_channels_last(
           int64_t iw1 = end_index(ow, output_width, input_width);
           int64_t kw = iw1 - iw0;
 
-          scalar_t* gout = grad_output_ptr + oh * output_width * channels + ow * channels;
+          const scalar_t* gout = grad_output_ptr + oh * output_width * channels + ow * channels;
           int64_t size = channels;
           for (const auto ih : c10::irange(ih0, ih1)) {
             for (const auto iw : c10::irange(iw0, iw1)) {

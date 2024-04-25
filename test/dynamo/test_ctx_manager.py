@@ -358,6 +358,45 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref0, res0)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_event_method_create_stream_outside_of_compile(self):
+        def fn(x, cur_stream, new_stream):
+            x = torch.mul(x, 1)
+            x = torch.add(x, 2)
+
+            x = torch.add(x, 3)
+
+            event = cur_stream.record_event()
+            is_idle = event.query()
+
+            new_stream.wait_event(event)
+            with torch.cuda.stream(new_stream):
+                x = torch.add(x, 4)
+
+            new_event = torch.cuda.Event()
+            new_event.record(new_stream)
+
+            new_event.wait(cur_stream)
+            x = torch.add(x, 5)
+
+            # use new event to sync
+            new_event.synchronize()
+
+            x = torch.relu(x)
+            x = torch.cos(x)
+            return x
+
+        x = torch.randn((2, 2), device="cuda")
+        cur_stream = torch.cuda.current_stream()
+        new_stream = torch.cuda.Stream()
+        ref = fn(x, cur_stream, new_stream)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        res = opt_fn(x, cur_stream, new_stream)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 19)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_event_method(self):
         def fn(x):
             x = torch.mul(x, 1)

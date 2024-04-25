@@ -1,31 +1,42 @@
 import itertools
 import math
-from copy import deepcopy
 import warnings
+from copy import deepcopy
+from typing import Any, Callable, cast, Dict, Iterable, List, Optional, Tuple, Union
 
 import torch
+from torch import Tensor
 from torch.nn import Module
 from torch.optim.lr_scheduler import LRScheduler
 from torch.utils._foreach_utils import _get_foreach_kernels_supported_devices
+from .optimizer import Optimizer
 
 __all__ = [
-    'AveragedModel',
-    'update_bn',
-    'SWALR',
-    'get_ema_multi_avg_fn',
-    'get_swa_multi_avg_fn',
-    'get_ema_avg_fn',
-    'get_swa_avg_fn'
+    "AveragedModel",
+    "update_bn",
+    "SWALR",
+    "get_ema_multi_avg_fn",
+    "get_swa_multi_avg_fn",
+    "get_ema_avg_fn",
+    "get_swa_avg_fn",
 ]
 
-from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
+from torch.utils._foreach_utils import (
+    _group_tensors_by_device_and_dtype,
+    Indices,
+    TensorListList,
+)
+
+PARAM_LIST = Union[Tuple[Tensor, ...], List[Tensor]]
 
 
 def get_ema_multi_avg_fn(decay=0.999):
     @torch.no_grad()
-    def ema_update(ema_param_list, current_param_list, _):
+    def ema_update(ema_param_list: PARAM_LIST, current_param_list: PARAM_LIST, _):
         # foreach lerp only handles float and complex
-        if torch.is_floating_point(ema_param_list[0]) or torch.is_complex(ema_param_list[0]):
+        if torch.is_floating_point(ema_param_list[0]) or torch.is_complex(
+            ema_param_list[0]
+        ):
             torch._foreach_lerp_(ema_param_list, current_param_list, 1 - decay)
         else:
             for p_ema, p_model in zip(ema_param_list, current_param_list):
@@ -36,20 +47,37 @@ def get_ema_multi_avg_fn(decay=0.999):
 
 def get_swa_multi_avg_fn():
     @torch.no_grad()
-    def swa_update(averaged_param_list, current_param_list, num_averaged):
+    def swa_update(
+        averaged_param_list: PARAM_LIST,
+        current_param_list: PARAM_LIST,
+        num_averaged: Union[Tensor, int],
+    ):
         # foreach lerp only handles float and complex
-        if torch.is_floating_point(averaged_param_list[0]) or torch.is_complex(averaged_param_list[0]):
-            torch._foreach_lerp_(averaged_param_list, current_param_list, 1 / (num_averaged + 1))
+        if torch.is_floating_point(averaged_param_list[0]) or torch.is_complex(
+            averaged_param_list[0]
+        ):
+            torch._foreach_lerp_(
+                averaged_param_list, current_param_list, 1 / (num_averaged + 1)
+            )
         else:
             diffs = torch._foreach_sub(current_param_list, averaged_param_list)
-            torch._foreach_addcdiv_(averaged_param_list, diffs, [num_averaged + 1] * len(averaged_param_list))
+            if isinstance(num_averaged, Tensor):
+                torch._foreach_addcdiv_(
+                    averaged_param_list,
+                    diffs,
+                    [num_averaged + 1] * len(averaged_param_list),
+                )
+            else:
+                torch._foreach_add_(
+                    averaged_param_list, diffs, alpha=1.0 / (num_averaged + 1)
+                )
 
     return swa_update
 
 
 def get_ema_avg_fn(decay=0.999):
     @torch.no_grad()
-    def ema_update(ema_param, current_param, num_averaged):
+    def ema_update(ema_param: Tensor, current_param: Tensor, num_averaged):
         return decay * ema_param + (1 - decay) * current_param
 
     return ema_update
@@ -57,7 +85,9 @@ def get_ema_avg_fn(decay=0.999):
 
 def get_swa_avg_fn():
     @torch.no_grad()
-    def swa_update(averaged_param, current_param, num_averaged):
+    def swa_update(
+        averaged_param: Tensor, current_param: Tensor, num_averaged: Union[Tensor, int]
+    ):
         return averaged_param + (current_param - averaged_param) / (num_averaged + 1)
 
     return swa_update
@@ -162,14 +192,27 @@ class AveragedModel(Module):
     .. _Polyak averaging:
         https://paperswithcode.com/method/polyak-averaging
     """
-    def __init__(self, model, device=None, avg_fn=None, multi_avg_fn=None, use_buffers=False):
+
+    def __init__(
+        self,
+        model: Module,
+        device: Optional[Union[int, torch.device]] = None,
+        avg_fn: Optional[Callable[[Tensor, Tensor, Union[Tensor, int]], Tensor]] = None,
+        multi_avg_fn: Optional[
+            Callable[[PARAM_LIST, PARAM_LIST, Union[Tensor, int]], None]
+        ] = None,
+        use_buffers=False,
+    ):
         super().__init__()
-        assert avg_fn is None or multi_avg_fn is None, 'Only one of avg_fn and multi_avg_fn should be provided'
+        assert (
+            avg_fn is None or multi_avg_fn is None
+        ), "Only one of avg_fn and multi_avg_fn should be provided"
         self.module = deepcopy(model)
         if device is not None:
             self.module = self.module.to(device)
-        self.register_buffer('n_averaged',
-                             torch.tensor(0, dtype=torch.long, device=device))
+        self.register_buffer(
+            "n_averaged", torch.tensor(0, dtype=torch.long, device=device)
+        )
         self.avg_fn = avg_fn
         self.multi_avg_fn = multi_avg_fn
         self.use_buffers = use_buffers
@@ -177,14 +220,16 @@ class AveragedModel(Module):
     def forward(self, *args, **kwargs):
         return self.module(*args, **kwargs)
 
-    def update_parameters(self, model):
+    def update_parameters(self, model: Module):
         self_param = (
             itertools.chain(self.module.parameters(), self.module.buffers())
-            if self.use_buffers else self.parameters()
+            if self.use_buffers
+            else self.parameters()
         )
         model_param = (
             itertools.chain(model.parameters(), model.buffers())
-            if self.use_buffers else model.parameters()
+            if self.use_buffers
+            else model.parameters()
         )
         self_param_detached = []
         model_param_detached = []
@@ -197,22 +242,42 @@ class AveragedModel(Module):
 
         if self.n_averaged > 0:
             if self.multi_avg_fn is not None or self.avg_fn is None:
-                grouped_tensors = _group_tensors_by_device_and_dtype([self_param_detached, model_param_detached])
-                for ((device, _), ([self_params, model_params], _)) in grouped_tensors.items():
+                grouped_tensors = _group_tensors_by_device_and_dtype(
+                    cast(TensorListList, [self_param_detached, model_param_detached])
+                )
+                grouped_tensors = cast(
+                    Dict[
+                        Tuple[torch.device, torch.dtype],
+                        Tuple[List[List[Tensor]], Indices],
+                    ],
+                    grouped_tensors,
+                )
+                for (device, _), (
+                    [self_params, model_params],
+                    _,
+                ) in grouped_tensors.items():
                     if self.multi_avg_fn:
-                        self.multi_avg_fn(self_params, model_params, self.n_averaged.to(device))
+                        self.multi_avg_fn(
+                            self_params, model_params, self.n_averaged.to(device)
+                        )
                     elif device.type in _get_foreach_kernels_supported_devices():
                         multi_avg_fn = get_swa_multi_avg_fn()
-                        multi_avg_fn(self_params, model_params, self.n_averaged.to(device))
+                        multi_avg_fn(
+                            self_params, model_params, self.n_averaged.to(device)
+                        )
                     else:
                         avg_fn = get_swa_avg_fn()
                         n_averaged = self.n_averaged.to(device)
                         for p_averaged, p_model in zip(self_params, model_params):
                             p_averaged.copy_(avg_fn(p_averaged, p_model, n_averaged))
             else:
-                for p_averaged, p_model in zip(self_param_detached, model_param_detached):
+                for p_averaged, p_model in zip(
+                    self_param_detached, model_param_detached
+                ):
                     n_averaged = self.n_averaged.to(p_averaged.device)
-                    p_averaged.detach().copy_(self.avg_fn(p_averaged.detach(), p_model, n_averaged))
+                    p_averaged.detach().copy_(
+                        self.avg_fn(p_averaged.detach(), p_model, n_averaged)
+                    )
 
         if not self.use_buffers:
             # If not apply running averages to the buffers,
@@ -223,7 +288,11 @@ class AveragedModel(Module):
 
 
 @torch.no_grad()
-def update_bn(loader, model, device=None):
+def update_bn(
+    loader: Iterable[Any],
+    model: Module,
+    device: Optional[Union[int, torch.device]] = None,
+):
     r"""Updates BatchNorm running_mean, running_var buffers in the model.
 
     It performs one pass over data in `loader` to estimate the activation
@@ -319,19 +388,31 @@ class SWALR(LRScheduler):
     .. _Averaging Weights Leads to Wider Optima and Better Generalization:
         https://arxiv.org/abs/1803.05407
     """
-    def __init__(self, optimizer, swa_lr, anneal_epochs=10, anneal_strategy='cos', last_epoch=-1):
+
+    def __init__(
+        self,
+        optimizer: Optimizer,
+        swa_lr: float,
+        anneal_epochs=10,
+        anneal_strategy="cos",
+        last_epoch=-1,
+    ):
         swa_lrs = self._format_param(optimizer, swa_lr)
         for swa_lr, group in zip(swa_lrs, optimizer.param_groups):
-            group['swa_lr'] = swa_lr
-        if anneal_strategy not in ['cos', 'linear']:
-            raise ValueError("anneal_strategy must by one of 'cos' or 'linear', "
-                             f"instead got {anneal_strategy}")
-        elif anneal_strategy == 'cos':
+            group["swa_lr"] = swa_lr
+        if anneal_strategy not in ["cos", "linear"]:
+            raise ValueError(
+                "anneal_strategy must by one of 'cos' or 'linear', "
+                f"instead got {anneal_strategy}"
+            )
+        elif anneal_strategy == "cos":
             self.anneal_func = self._cosine_anneal
-        elif anneal_strategy == 'linear':
+        elif anneal_strategy == "linear":
             self.anneal_func = self._linear_anneal
         if not isinstance(anneal_epochs, int) or anneal_epochs < 0:
-            raise ValueError(f"anneal_epochs must be equal or greater than 0, got {anneal_epochs}")
+            raise ValueError(
+                f"anneal_epochs must be equal or greater than 0, got {anneal_epochs}"
+            )
         self.anneal_epochs = anneal_epochs
         super().__init__(optimizer, last_epoch)
 
@@ -339,9 +420,11 @@ class SWALR(LRScheduler):
     def _format_param(optimizer, swa_lrs):
         if isinstance(swa_lrs, (list, tuple)):
             if len(swa_lrs) != len(optimizer.param_groups):
-                raise ValueError("swa_lr must have the same length as "
-                                 f"optimizer.param_groups: swa_lr has {len(swa_lrs)}, "
-                                 f"optimizer.param_groups has {len(optimizer.param_groups)}")
+                raise ValueError(
+                    "swa_lr must have the same length as "
+                    f"optimizer.param_groups: swa_lr has {len(swa_lrs)}, "
+                    f"optimizer.param_groups has {len(optimizer.param_groups)}"
+                )
             return swa_lrs
         else:
             return [swa_lrs] * len(optimizer.param_groups)
@@ -361,17 +444,27 @@ class SWALR(LRScheduler):
         return (lr - alpha * swa_lr) / (1 - alpha)
 
     def get_lr(self):
-        if not self._get_lr_called_within_step:
-            warnings.warn("To get the last learning rate computed by the scheduler, "
-                          "please use `get_last_lr()`.", UserWarning)
-        step = self._step_count - 1
+        # `_get_lr_called_within_step` is only available `_enable_get_lr_call`,
+        # so we ignore the type error here. See `LRScheduler.step()` for more details.
+        if not self._get_lr_called_within_step:  # type: ignore[attr-defined]
+            warnings.warn(
+                "To get the last learning rate computed by the scheduler, "
+                "please use `get_last_lr()`.",
+                UserWarning,
+            )
+        # Set in `LRScheduler._initial_step()`
+        step = self._step_count - 1  # type: ignore[attr-defined]
         if self.anneal_epochs == 0:
             step = max(1, step)
         prev_t = max(0, min(1, (step - 1) / max(1, self.anneal_epochs)))
         prev_alpha = self.anneal_func(prev_t)
-        prev_lrs = [self._get_initial_lr(group['lr'], group['swa_lr'], prev_alpha)
-                    for group in self.optimizer.param_groups]
+        prev_lrs = [
+            self._get_initial_lr(group["lr"], group["swa_lr"], prev_alpha)
+            for group in self.optimizer.param_groups
+        ]
         t = max(0, min(1, step / max(1, self.anneal_epochs)))
         alpha = self.anneal_func(t)
-        return [group['swa_lr'] * alpha + lr * (1 - alpha)
-                for group, lr in zip(self.optimizer.param_groups, prev_lrs)]
+        return [
+            group["swa_lr"] * alpha + lr * (1 - alpha)
+            for group, lr in zip(self.optimizer.param_groups, prev_lrs)
+        ]

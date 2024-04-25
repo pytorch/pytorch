@@ -27,6 +27,7 @@ from torch._prims_common import (
 )
 
 from . import config, inductor_prims
+from .utils import needs_fallback_due_to_atomic_add_limitations, use_scatter_fallback
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -81,6 +82,7 @@ decompositions = {**core_aten_decompositions(), **inductor_decompositions}
 decomps_to_exclude = [
     aten._unsafe_index,
     aten._scaled_dot_product_flash_attention_for_cpu.default,  # See comments in torch/_decomp/decompositions.py
+    aten._softmax_backward_data,
     aten.clamp_max,
     aten.clamp_min,
     aten.glu,  # inductor lowers this directly
@@ -133,7 +135,7 @@ def full(size, fill_value, **kwargs):
     dtype = kwargs.get("dtype")
     if dtype is None:
         kwargs["dtype"] = type_to_dtype(type(fill_value))
-        return aten.full(size, fill_value, **kwargs)
+        return torch.full(size, fill_value, **kwargs)
     return NotImplemented
 
 
@@ -687,3 +689,67 @@ def put(self, index, source, accumulate=False):
 def put_(self, index, source, accumulate=False):
     out = aten.put(self, index, source, accumulate=accumulate)
     return self.copy_(out)
+
+
+@register_decomposition(aten._softmax_backward_data.default)
+@pw_cast_for_opmath
+def _softmax_backward_data(grad_output, output, dim, input_dtype):
+    new_grad_output = grad_output * output
+    sum_new_grad = torch.sum(new_grad_output, dim=dim, keepdim=True)
+    # grad_input = new_grad_output - output * sum_new_grad
+    grad_input = inductor_prims.fma(-output, sum_new_grad, new_grad_output)
+
+    # CPU kernel doesn't respect input_dtype, but following check doesn't work for meta tensor
+    # if grad_output.device == torch.device("cpu"):
+    #     return grad_input.contiguous()
+
+    if grad_output.dtype != input_dtype:
+        grad_input = grad_input.to(input_dtype)
+    return grad_input.contiguous()
+
+
+@register_decomposition(aten.index_reduce)
+def index_reduce(
+    self, dim: int, index, src, reduction_type: str, *, include_self: bool = True
+):
+    if reduction_type == "mean" and not needs_fallback_due_to_atomic_add_limitations(
+        self.dtype
+    ):
+        true_division = self.dtype.is_floating_point or self.dtype.is_complex
+        ones = torch.ones_like(src)
+        if include_self:
+            out = self
+            counts = torch.ones_like(self).index_add(dim, index, ones)
+        else:
+            out = self.index_fill(dim, index, 0)
+            counts = torch.zeros_like(self).index_add(dim, index, ones)
+            counts = counts.masked_fill(counts < 1, 1)
+        out = out.index_add(dim, index, src)
+        return out / counts if true_division else out // counts
+
+    if use_scatter_fallback(
+        aten.scatter_reduce_.two,
+        reduction_type,
+        self.dtype,
+        src.dtype,
+        src.device.type,
+        True,
+    ):
+        return NotImplemented
+
+    repeats = self.shape[dim + 1 :].numel() * self.shape[:dim].numel()
+    index_shape = (index.numel(), *self.shape[dim + 1 :], *self.shape[:dim])
+    perm = (*range(self.ndim - dim, self.ndim), 0, *range(1, self.ndim - dim))
+    scatter_index = (
+        index.to(torch.int64)
+        .repeat_interleave(repeats)
+        .reshape(index_shape)
+        .permute(perm)
+    )
+    return self.scatter_reduce(
+        dim,
+        scatter_index,
+        src,
+        reduction_type,
+        include_self=include_self,
+    )

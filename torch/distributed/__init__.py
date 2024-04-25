@@ -86,7 +86,16 @@ if is_available():
                 f"Type 'up' to get to the frame that called dist.breakpoint(rank={rank})\n"
             )
             pdb.set_trace()
-        barrier()
+        # If Meta/Python keys are in the TLS, we want to make sure that we ignore them
+        # and hit the (default) CPU/CUDA implementation of barrier.
+        meta_in_tls = torch._C._meta_in_tls_dispatch_include()
+        guard = torch._C._DisableTorchDispatch()  # type: ignore[attr-defined]
+        torch._C._set_meta_in_tls_dispatch_include(False)
+        try:
+            barrier()
+        finally:
+            torch._C._set_meta_in_tls_dispatch_include(meta_in_tls)
+            del guard
 
     if sys.platform != "win32":
         from torch._C._distributed_c10d import (
@@ -108,6 +117,7 @@ if is_available():
         _coalescing_manager,
         _CoalescingManager,
         _get_process_group_name,
+        get_node_local_rank,
     )
 
     from .rendezvous import (

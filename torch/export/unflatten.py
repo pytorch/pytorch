@@ -237,6 +237,12 @@ class UnflattenedModule(torch.nn.Module):
             fqn_order.keys()
         )
 
+    def _print_graph(self):
+        for fqn, mod in self.named_modules():
+            print(fqn + ":")
+            if hasattr(mod, "graph") and isinstance(mod.graph, torch.fx.Graph):
+                print(mod.graph)
+
     def forward(self, *args, **kwargs):
         signature = self.module_call_graph[0].signature
 
