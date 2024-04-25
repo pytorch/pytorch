@@ -1,3 +1,4 @@
+#include <ATen/DeviceAccelerator.h>
 #include <c10/util/Optional.h>
 #include <fmt/core.h>
 #include <sys/types.h>
@@ -16,10 +17,12 @@
 #include <ATen/Parallel.h>
 #include <ATen/Utils.h>
 #include <ATen/core/Vitals.h>
+#include <ATen/detail/AcceleratorHooksInterface.h>
 #include <ATen/dlpack.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/ForeachUtils.h>
 #include <ATen/native/Normalization.h>
+#include <c10/core/Device.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/util/AbortHandler.h>
 #include <c10/util/Backtrace.h>
@@ -40,6 +43,7 @@
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/DynamicTypes.h>
+#include <torch/csrc/Event.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/MemoryFormat.h>
@@ -71,6 +75,7 @@
 #include <torch/csrc/lazy/python/init.h>
 #include <torch/csrc/monitor/python_init.h>
 #include <torch/csrc/mps/Module.h>
+#include <torch/csrc/mtia/Module.h>
 #include <torch/csrc/multiprocessing/init.h>
 #include <torch/csrc/onnx/init.h>
 #include <torch/csrc/profiler/python/init.h>
@@ -163,14 +168,12 @@ static PyObject* THPModule_initExtension(
     PyObject* shm_manager_path) {
   HANDLE_TH_ERRORS
 #if !defined(FBCODE_CAFFE2)
-  if (torch::get_cpp_stacktraces_enabled()) {
+  if (torch::get_cpp_stacktraces_enabled() && !torch::get_disable_addr2line()) {
     c10::SetStackTraceFetcher([]() -> std::string {
       auto tb = torch::CapturedTraceback::gather(false, false, true);
-      if (torch::get_symbolize_mode() == torch::unwind::Mode::addr2line) {
-        LOG(WARNING)
-            << "symbolizing C++ stack trace for exception; if this hangs, rerun with TORCH_DISABLE_ADDR2LINE=1..."
-            << std::endl;
-      }
+      LOG(WARNING)
+          << "symbolizing C++ stack trace for exception; if this hangs, rerun with TORCH_DISABLE_ADDR2LINE=1..."
+          << std::endl;
       auto s_tbs = torch::symbolize({tb.get()});
       std::stringstream oss;
       oss << "C++ CapturedTraceback:" << std::endl;
@@ -1606,6 +1609,7 @@ PyObject* initModule() {
   THPQScheme_init(module);
   THPDevice_init(module);
   THPStream_init(module);
+  THPEvent_init(module);
   ASSERT_TRUE(THPVariable_initModule(module));
   ASSERT_TRUE(THPFunction_initModule(module));
   ASSERT_TRUE(THPEngine_initModule(module));
@@ -1641,6 +1645,7 @@ PyObject* initModule() {
 #ifdef USE_XPU
   torch::xpu::initModule(module);
 #endif
+  torch::mtia::initModule(module);
   torch::cpu::initModule(module);
   torch::initVerboseBindings(module);
   ASSERT_TRUE(THPStorage_init(module));
@@ -1974,6 +1979,70 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def("_is_key_in_tls", [](const std::string& key) -> bool {
     return at::impl::ThreadLocalPythonObjects::get_state().contains(key);
   });
+
+  py_module.def("_accelerator_hooks_device_count", []() {
+    auto device_type = at::getAccelerator();
+    if (device_type.has_value()) {
+      return at::globalContext()
+          .getAcceleratorHooksInterface(device_type.value())
+          .deviceCount();
+    }
+    return c10::DeviceIndex(-1);
+  });
+
+  py_module.def(
+      "_accelerator_hooks_set_current_device",
+      [](c10::DeviceIndex device_index) {
+        auto device_type = at::getAccelerator();
+        if (device_type.has_value()) {
+          at::globalContext()
+              .getAcceleratorHooksInterface(device_type.value())
+              .setCurrentDevice(device_index);
+        }
+      });
+
+  py_module.def("_accelerator_hooks_get_current_device", []() {
+    auto device_type = at::getAccelerator();
+    if (device_type.has_value()) {
+      return at::globalContext()
+          .getAcceleratorHooksInterface(device_type.value())
+          .getCurrentDevice();
+    }
+    return c10::DeviceIndex(-1);
+  });
+
+  py_module.def(
+      "_accelerator_hooks_exchange_device", [](c10::DeviceIndex device_index) {
+        auto device_type = at::getAccelerator();
+        if (device_type.has_value()) {
+          return at::globalContext()
+              .getAcceleratorHooksInterface(device_type.value())
+              .exchangeDevice(device_index);
+        }
+        return c10::DeviceIndex(-1);
+      });
+
+  py_module.def(
+      "_accelerator_hooks_maybe_exchange_device",
+      [](c10::DeviceIndex device_index) {
+        auto device_type = at::getAccelerator();
+        if (device_type.has_value()) {
+          return at::globalContext()
+              .getAcceleratorHooksInterface(device_type.value())
+              .maybeExchangeDevice(device_index);
+        }
+        return c10::DeviceIndex(-1);
+      });
+
+  py_module.def(
+      "_get_accelerator",
+      [](c10::optional<bool> check = c10::nullopt) {
+        return c10::Device(
+            at::getAccelerator(check.value_or(false))
+                .value_or(c10::DeviceType::CPU),
+            -1);
+      },
+      py::arg("check") = nullptr);
 
 #ifdef USE_CUDA
   PyObject* has_cuda = Py_True;
