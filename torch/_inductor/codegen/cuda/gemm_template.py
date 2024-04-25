@@ -887,10 +887,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         Note:
             All inputs and their corresponding buffer addresses and names take precedence over previously
             passed inputs to the template at construction time. However, they should be layout compatible.
-
-            The "template_buffer_node" and "epilogue_nodes" are optional and only required if epilogue fusions
-            are to be applied. They are usually not present in the first stages of autotuning
-            ( when the GEMM op is benchmarked in isolation ).
         """
 
         assert cutlass_utils.try_import_cutlass()
@@ -918,8 +914,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             # operand
             op.C.element = op.A.element
 
-        # Define Kernel call signature, including potentially auxiliary input nodes
-        # required for the fused epilogue nodes
+        # Define Kernel call signature
         # Important: This step also populates Kernel name to node mapping data structures,
         # which are required further below ( for example by CutlassEVTEpilogueArgumentFormatter and
         # the template renderer )
@@ -936,7 +931,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         test_call_statement = self.test_call_statement(kernel, inputs, names_str)
         # The layouts might have changed between autotuning and this call if they were FlexibleLayout
         # we need to adapt, which might lead to suboptimal performance.
-        # Also there might be a Bias / additional input node which was not present during autotuning
 
         op = self.fix_op_layout(op, X, W, Bias, Y)
         epilogue_template: str = GEMM_ARGS_CUTLASS_3X_EPILOGUE
