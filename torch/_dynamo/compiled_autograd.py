@@ -29,6 +29,12 @@ compiled_autograd_log = getArtifactLogger(__name__, "compiled_autograd")
 verbose_log = getArtifactLogger(__name__, "compiled_autograd_verbose")
 
 
+def snapshot_verbose_logging_enabled():
+    return torch._logging._internal.log_state.is_artifact_enabled(
+        "compiled_autograd_verbose"
+    )
+
+
 def maybe_clone(x):
     if x is not None:
         return clone_preserve_strides(x)
@@ -260,11 +266,6 @@ class AutogradCompilerInstance:
         )
         set_stack_trace(new_stack_trace)
 
-    def is_verbose_logging_enabled(self):
-        return torch._logging._internal.log_state.is_artifact_enabled(
-            "compiled_autograd_verbose"
-        )
-
 
 compiled_autograd_enabled = False
 
@@ -288,6 +289,9 @@ compiled_autograd_enabled_count = 0
 def enable(compiler_fn):
     prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
         functools.partial(AutogradCompilerInstance, compiler_fn)
+    )
+    torch._C._dynamo.compiled_autograd.set_verbose_logging(
+        snapshot_verbose_logging_enabled()
     )
     global compiled_autograd_enabled, compiled_autograd_enabled_count
     compiled_autograd_enabled = True

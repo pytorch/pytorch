@@ -237,11 +237,23 @@ static PyObject* is_cache_empty(PyObject* dummy, PyObject* args) {
   END_HANDLE_TH_ERRORS;
 }
 
+// snapshot of python verbose logging toggle
+static bool is_verbose_logging_enabled;
+static PyObject* set_verbose_logging(PyObject* dummy, PyObject* args) {
+  HANDLE_TH_ERRORS;
+  if (!PyArg_ParseTuple(args, "p", &is_verbose_logging_enabled)) {
+    Py_RETURN_FALSE;
+  }
+  Py_RETURN_TRUE;
+  END_HANDLE_TH_ERRORS;
+}
+
 // NOLINTNEXTLINE(*array*)
 static PyMethodDef _methods[] = {
     {"set_autograd_compiler", set_autograd_compiler, METH_VARARGS, nullptr},
     {"clear_cache", clear_cache, METH_NOARGS, nullptr},
     {"is_cache_empty", is_cache_empty, METH_NOARGS, nullptr},
+    {"set_verbose_logging", set_verbose_logging, METH_VARARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 static struct PyModuleDef _module = {
@@ -297,14 +309,6 @@ struct ClosingTHPObjectPtr : public THPObjectPtr {
     }
   }
 };
-
-bool is_verbose_logging_enabled(PyObject* py_compiler) {
-  PyObject* is_verbose_logging_enabled_method =
-      PyObject_GetAttrString(py_compiler, "is_verbose_logging_enabled");
-  THPObjectPtr pybool(
-      check(PyObject_CallNoArgs(is_verbose_logging_enabled_method)));
-  return pybool.get() == Py_True;
-}
 
 // Only call this function while holding GIL
 CacheNode* _compiled_autograd_impl(
@@ -374,7 +378,6 @@ CacheNode* _compiled_autograd_impl(
     // cache miss, need to capture FX graph
     ClosingTHPObjectPtr py_compiler(
         check(PyObject_CallNoArgs((the_autograd_compiler))));
-    bool verbose_python_logs = is_verbose_logging_enabled(py_compiler.get());
 
     TraceState state = call_begin_capture(
         py_compiler, *cache, compiler_call, output_edges.size());
@@ -427,7 +430,7 @@ CacheNode* _compiled_autograd_impl(
         inputs = THPVariable_UnpackList(pyinputs);
       }
 
-      if (verbose_python_logs) {
+      if (is_verbose_logging_enabled) {
         std::string _node_name = call.node->name();
         THPObjectPtr node_name(PyUnicode_FromString(_node_name.data()));
         TORCH_INTERNAL_ASSERT(node_name != nullptr);
