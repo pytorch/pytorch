@@ -57,7 +57,8 @@ from torch.testing._internal.common_cuda import (
     _create_scaling_case, _create_scaling_models_optimizers)
 from torch.testing._internal.common_mkldnn import bf32_on_and_off
 from torch.testing._internal.common_dtype import (
-    floating_types_and, get_all_math_dtypes, all_types_and_complex_and, all_types_and, floating_types, floating_and_complex_types, integral_types_and,
+    floating_types_and, get_all_math_dtypes, all_types_and_complex_and, all_types_and, floating_types,
+    floating_and_complex_types, integral_types_and,
     get_all_qint_dtypes,
 )
 from torch.testing._internal.two_tensor import TwoTensor
