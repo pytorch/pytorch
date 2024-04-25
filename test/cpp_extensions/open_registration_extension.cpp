@@ -3,6 +3,7 @@
 #include <c10/core/Allocator.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/ArrayRef.h>
+#include <iostream>
 
 #include <torch/csrc/Device.h>
 #include <torch/csrc/jit/serialization/pickler.h>
@@ -174,6 +175,10 @@ void for_deserialization(const at::Tensor& t, std::unordered_map<std::string, bo
   if (m.find("format_number") != m.end()) {
     format_number = 29;
   }
+
+  std::cout << "for_deserialization" << std::endl;
+  std::cout << backend_version_format << " " << format_number << std::endl;
+
   c10::intrusive_ptr<c10::BackendMeta> new_tmeta{std::unique_ptr<c10::BackendMeta>(
       new CustomBackendMetadata(backend_version_format, format_number))};
   t.unsafeGetTensorImpl()->set_backend_meta(new_tmeta);
@@ -189,13 +194,17 @@ void custom_serialization_registry() {
 
 //check if BackendMeta serialization correctly
 bool check_backend_meta(const at::Tensor& t) {
+  std::cout << "check_backend_meta" << std::endl;
   if (t.unsafeGetTensorImpl()->get_backend_meta_intrusive_ptr()) {
     CustomBackendMetadata* tmeta = dynamic_cast<CustomBackendMetadata*>(
         t.unsafeGetTensorImpl()->get_backend_meta());
+    std::cout << "tmeta->backend_version_format_:" << tmeta->backend_version_format_ << " tmeta->format_number_:" << tmeta->format_number_ << std::endl;
     if (tmeta->backend_version_format_==1 && tmeta->format_number_==29) {
       return true;
     }
   }
+  std::cout << "no backend meta" << std::endl;
+
   return false;
 }
 
