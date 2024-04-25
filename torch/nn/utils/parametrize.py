@@ -440,7 +440,7 @@ def register_parametrization(
         ``parametrizations`` are implemented with ``ModuleDict`` mapping from tensor_name to a
         ``ParametrizationList`` (a subclass of ``ModuleList``), so each ``parametrization`` will be a ``ModuleList``
         when the model calls ``self.weight`` in forward, instead of returnning the original weight, it
-        will return the ``parametrization``\ s (`ModuleList`) that's registered for the weight (for the first
+        will return the list of ``parametrization`` (`ModuleList`) that's registered for the weight (for the first
         parametrization, the weight might be "decomposed" into multiple tensors stored as ``original0``,
         ``original1``, ``original2`` etc. depending on the specific parametrization),
         and it will run the forward method for each of the module (parametrization) one by one, taking
