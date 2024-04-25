@@ -33,7 +33,9 @@ from torch.testing._internal.common_cuda import TEST_CUDNN, TEST_MULTIGPU, \
     _create_scaling_case, _get_torch_cuda_version
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
 from torch.utils.viz._cycles import observe_tensor_cycles
-from torch.testing._internal.common_optimizers import (optim_db,optims)
+from torch.testing._internal.common_optimizers import (optim_db,optims,
+                                                       _get_optim_inputs_including_global_cliquey_kwargs,
+                                                       OptimizerErrorEnum)
 from torch.testing._internal.common_device_type import(
         expectedFailureMeta,
         expectedFailureXLA,
@@ -2931,7 +2933,7 @@ exit(2)
 
         for optimizer_ctor, kwargs in cases:
             with self.subTest(optimizer_ctor=optimizer_ctor, kwargs=kwargs):
-                print(optimizer_ctor,kwargs)
+                #print(optimizer_ctor,kwargs)
                 self._test_graphed_optimizer(3, 2, optimizer_ctor, kwargs)
 
     @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
@@ -3003,6 +3005,7 @@ exit(2)
         steps_train = 2
 
         for OptClass, kwargs in cases:
+            #print(OptClass,kwargs)
             has_capturable_arg = OptClass in (torch.optim.Adam, torch.optim.AdamW)
             for actually_do_graphs in (True, False) if has_capturable_arg else (True,):
                 params = [torch.randn((i + 5, i + 5), device="cuda") for i in range(2)]
@@ -4170,13 +4173,16 @@ class TestCudaOptims(TestCase):
             
             grads =[[torch.randn_like(p) for p in params] for _ in range(steps_warmup+steps_train)]
 
-            #Control 
+            #Control (capturable=False)
+
             opt = optimizer_ctor(params_control,capturable=False,**kwargs)
 
             for i in range(steps_warmup+steps_train):
                 for j, p in enumerate(params_control):
                     p.grad = grads[i][j]
                 opt.step()
+
+            # capturable=True
 
             opt = optimizer_ctor(params_graphed,capturable=True,**kwargs)
             
@@ -4196,6 +4202,8 @@ class TestCudaOptims(TestCase):
                         p.grad.copy_(grads[i+steps_warmup][j])
                     g.replay()
                 else:
+                    # Passing capturable=True to the constructor and running without graphs should still be 
+                    # numerically correct, even if it's not ideal for performance. 
                     for j, p in enumerate(params_graphed):
                         p.grad = grads[i+steps_warmup][j]
                     opt.step()
@@ -4227,7 +4235,7 @@ class TestCudaOptims(TestCase):
                                        for amsgrad in (False,True))],
                     torch.optim.AdamW:[({"lr":0.1,"betas":(0.8,0.7),"foreach":foreach,"amsgrad":amsgrad}
                                         for foreach,amsgrad in product((False,True),(False,True))),
-                                       ({"lr":0.1,"betas":(0.8,0.7),"fused":True,"amsgrad":amsgrad}
+                                       ({"lr":0.1,"betas":(0.8,0.7),"fused":True,"amsgrad":amsgrad} 
                                         for amsgrad in (False,True))],
                     torch.optim.Adamax:[({"lr":0.1,"foreach":foreach,"maximize":maximize,"weight_decay":weight_decay}
                                          for foreach,maximize,weight_decay in product((False,True),(False,True),
@@ -4243,12 +4251,113 @@ class TestCudaOptims(TestCase):
                                                                                        (0,0.1)))],
 
                     }
-       #optim_inputs = optim_info.optim_inputs_func(device=device)
+       all_optim_inputs =_get_optim_inputs_including_global_cliquey_kwargs(device,dtype,optim_info,
+                        skip=("differentiable",))
+       #print(optim_cls)
+       #has_betas = any("betas" in error_inp.optimizer_error_input.kwargs for error_inp in optim_info.optim_error_inputs_func(device="cpu",dtype=dtype))
+       #print(optim_cls,has_betas)
+       #for optim_input in all_optim_inputs:
+           #kwargs = optim_input.kwargs
+           #if "lr" in kwargs:
+               #del kwargs["lr"]
+           #kwargs["lr"]=0.1
+           #if has_betas and optim_cls != torch.optim.Adamax:
+               #kwargs["betas"] = (0.8,0.7)
+           #if "capturable" in kwargs:
+               #continue
+           #print(kwargs)
        for kwargs in optKwargs[optim_cls]:
            for kwarg in kwargs:
                with self.subTest(optimizer_ctor=optim_cls,kwargs=kwarg):
-                   print(optim_cls,kwarg)
+                   #print(optim_cls,kwarg)
                    self._test_graphed_optims(3,2,optim_cls,kwarg)
+   
+    @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
+    @optims([optim for optim in optim_db if optim.optim_cls in [torch.optim.Adam,torch.optim.AdamW,torch.optim.SGD]])
+    def test_new_graph_scaling_fused_optimizers(self,device,dtype,optim_info):
+        optim_cls=optim_info.optim_cls
+        optKwargs = {
+                torch.optim.Adam: [({"lr":0.1,"betas":(0.8,0.7),"fused":True,"amsgrad":amsgrad}
+                              for amsgrad in (False,True))],
+                torch.optim.AdamW: [({"lr":0.1,"betas":(0.8,0.7),"fused":True,"amsgrad":amsgrad}
+                                     for amsgrad in (False,True))],
+                torch.optim.SGD: [({"lr":0.1,"momentum":0.0,"dampening":d, "weight_decay":w, "nesterov":n,"fused":True}
+                                   for d,w, n in product((0.0,0.5),(0.0,0.5),(False,))),
+                                  ({"lr":0.1,"momentum":0.5,"dampening":d,"weight_decay":w,"nesterov":n,"fused":True}
+                                   for d,w,n in product((0.0,),(0.0,0.5),(True,False)))]
+                }
+        steps_warmup = 3
+        steps_train = 2 
+
+        for kwargs in optKwargs[optim_cls]:
+            for kwarg in kwargs: 
+                #print(optim_cls,kwarg)
+                has_capturable_arg = optim_cls in (torch.optim.Adam, torch.optim.AdamW)
+                for actually_do_graphs in (True,False) if has_capturable_arg else (True,):
+                    params = [torch.randn((i+5,i+5),device="cuda") for i in range(2)]
+                    params_control = [p.clone().requires_grad_() for p in params]
+                    params_graphed = [p.clone().requires_grad_() for p in params]
+
+                    # `GradScaler` in-place updates gradients thus it's necessary to duplicate gradients. 
+                    grads = [[torch.randn_like(p) for p in params] for _ in range(steps_warmup+steps_train)]
+                    with torch.no_grad():
+                        grads_control = [[g.clone() for g in gs] for gs in grads]
+                        grads_graphed = [[g.clone() for g in gs] for gs in grads]
+
+                    #Gradient Scaler
+                    scaler_for_control = torch.cuda.amp.GradScaler(init_scale=128.0)
+                    with torch.no_grad():
+                        scaler_for_control._lazy_init_scale_growth_tracker(torch.device("cuda"))
+
+                    scaler_for_graphed = torch.cuda.amp.GradScaler()
+                    scaler_for_graphed.load_state_dict(scaler_for_control.state_dict())
+                    with torch.no_grad():
+                        scaler_for_graphed._lazy_init_scale_growth_tracker(torch.device("cuda"))
+
+                    # Control (capturable=False)
+                    if has_capturable_arg:
+                        kwarg["capturable"]=False
+                    opt = optim_cls(params_control,**kwarg)
+
+                    for i in range(steps_warmup + steps_train):
+                        for j, p in enumerate(params_control):
+                            p.grad = grads_control[i][j]
+                        scaler_for_control.step(opt)
+                        scaler_for_control.update()
+
+                    #capturable=True
+                    if has_capturable_arg:
+                        kwarg["capturable"] = True
+                    opt = optim_cls(params_graphed, **kwarg)
+
+                    for i in range(steps_warmup):
+                        for j, p in enumerate(params_graphed):
+                            p.grad = grads_graphed[i][j]
+                        scaler_for_graphed.step(opt)
+                        scaler_for_graphed.update()
+
+                    if actually_do_graphs:
+                        g = torch.cuda.CUDAGraph()
+                        with torch.cuda.graph(g):
+                            scaler_for_graphed.step(opt)
+                            scaler_for_graphed.update()
+                    
+                    for i in range(steps_train):
+                        if actually_do_graphs:
+                            for j, p in enumerate(params_graphed):
+                                p.grad.copy_(grads_graphed[i+steps_warmup][j])
+                            g.replay()
+                        else: 
+                            # Passing capturable=True to the constructor and running without graphs should still be 
+                            # numerically correct, even if it's not ideal for performance. 
+                            for j, p in enumerate(params_graphed):
+                                p.grad = grads_graphed[i + steps_warmup][j]
+                            scaler_for_graphed.step(opt)
+                            scaler_for_graphed.update()
+
+                    for p_control, p_graphed in zip(params_control, params_graphed):
+                        self.assertEqual(p_control, p_graphed)
+
 instantiate_parametrized_tests(TestCuda)
 instantiate_parametrized_tests(TestCudaMallocAsync)
 instantiate_device_type_tests(TestCudaOptims,globals(),only_for='cuda')
