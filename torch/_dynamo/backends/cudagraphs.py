@@ -15,7 +15,6 @@ from torch._inductor.cudagraph_utils import (
     format_default_skip_message,
     get_mutation_stack_trace,
     get_placeholders,
-    log_cudagraph_skip_and_bump_counter,
 )
 from torch._inductor.utils import (
     BoxedBool,
@@ -27,6 +26,8 @@ from torch._inductor.utils import (
 
 from torch.multiprocessing.reductions import StorageWeakRef
 from .registry import register_backend
+
+perf_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 
 
 def find_input_mutations(g):
@@ -131,9 +132,7 @@ def cudagraphs(dynamo_model, dynamo_inputs):
         fixed = num_fw_fixed_arguments(len(dynamo_inputs), len(aot_inputs))
         if skip_msg := check_for_skip(aot_model, fixed):
             BoxedBool.disable(do_cudagraphs)
-            log_cudagraph_skip_and_bump_counter(
-                f"skipping cudagraphs due to {skip_msg}"
-            )
+            perf_log.warning("skipping cudagraphs due to %s", skip_msg)
             return interp
 
         boxed_device_index.set(get_device_index(aot_model))
@@ -158,9 +157,7 @@ def cudagraphs(dynamo_model, dynamo_inputs):
 
         fixed = count_tangents(aot_model)
         if skip_msg := check_for_skip(aot_model, fixed):
-            log_cudagraph_skip_and_bump_counter(
-                "skipping cudagraphs due to %s", skip_msg
-            )
+            perf_log.warning("skipping cudagraphs due to %s", skip_msg)
 
             # See [Backward Generation Handling]
             manager = torch._inductor.cudagraph_trees.get_manager(
