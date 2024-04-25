@@ -427,6 +427,29 @@ class TestInductorDynamic(TestCase):
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
+    def test_unbacked_cat_backwards_save_data_dependent(self, device):
+        def f(x, w):
+            device = w.device
+            a, b = x.tolist()
+            ta = torch.ones(a, device=device)
+            tb = torch.ones(b, device=device)
+            pa = ta * w  # make it require gradients
+            pb = tb * w
+            r = torch.cat([pa, pb])
+            return r
+
+        x = torch.tensor([4, 9])
+        w = torch.randn(1, requires_grad=True)
+        f(x, w).sum().backward()
+        orig_w = w.grad
+        w.grad = None
+
+        torch.compile(fullgraph=True)(f)(x, w).sum().backward()
+        self.assertEqual(orig_w, w.grad)
+
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_dynamic_stride_nobreak(self, device):
         @torch.library.custom_op("test::foo", mutates_args=())
