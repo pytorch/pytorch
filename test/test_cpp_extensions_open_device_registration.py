@@ -187,7 +187,6 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             default_gen.device.type == torch._C._get_privateuse1_backend_name()
         )
 
-    @unittest.skip("Test is temporary disabled")
     def test_open_device_dispatchstub(self):
         # test kernels could be reused by privateuse1 backend through dispatchstub
         input_data = torch.randn(2, 2, 3, dtype=torch.float32, device="cpu")
@@ -314,7 +313,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         z3 = z3[0:3]
         self.assertTrue(self.module.custom_storageImpl_called())
 
-    @skipIfTorchDynamo("aten.is_pinned.default not support dynamo")
+    @skipIfTorchDynamo("unsupported aten.is_pinned.default")
     def test_open_device_storage_pin_memory(self):
         # Check if the pin_memory is functioning properly on custom device
         cpu_tensor = torch.empty(3)
@@ -390,7 +389,6 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         ):
             cpu_untyped_storage.pin_memory(invalid_device)
 
-    @unittest.skip("Test is temporary disabled")
     def test_open_device_serialization(self):
         self.module.set_custom_device_index(-1)
         storage = torch.UntypedStorage(4, device=torch.device("foo"))
@@ -473,7 +471,6 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         finally:
             torch.foo.FloatStorage = None
 
-    @unittest.skip("Test is temporary disabled")
     def test_open_device_faketensor(self):
         with torch._subclasses.fake_tensor.FakeTensorMode.push():
             a = torch.empty(1, device="foo")
@@ -500,7 +497,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
 
     # Not an open registration test - this file is just very convenient
     # for testing torch.compile on custom C++ operators
-    @unittest.skip("Test is temporary disabled")
+    @skipIfTorchDynamo("Temporary disabled due to torch._ops.OpOverloadPacket")
     def test_compile_autograd_function_aliasing(self):
         x_ref = torch.randn(4, requires_grad=True)
         out_ref = torch.ops._test_funcs.custom_autograd_fn_aliasing(x_ref)
@@ -514,7 +511,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         self.assertEqual(out_ref, out_test)
         self.assertEqual(x_ref.grad, x_test.grad)
 
-    @unittest.skip("Test is temporary disabled")
+    @unittest.skip("Temporary disabled due to unsupported triu_indices")
     def test_open_device_scalar_type_fallback(self):
         z_cpu = torch.Tensor([[0, 0, 0, 1, 1, 2], [0, 1, 2, 1, 2, 2]]).to(torch.int64)
         z = torch.triu_indices(3, 3, device="foo")
