@@ -235,6 +235,7 @@ class _ReversibleFunction(torch.autograd.Function):
                 all_hidden_states.append(hidden_states)
 
             attn_output = layer(attn_output)
+            all_buckets = all_buckets + (attn_output,)
 
         # Add last layer
         if output_hidden_states is True:
@@ -256,45 +257,8 @@ class _ReversibleFunction(torch.autograd.Function):
             grad_hidden_states, 2, dim=-1
         )
 
-        # retrieve params from ctx for backward
-        attn_output, hidden_states = ctx.saved_tensors
-
-        # create tuple
-        output = ReformerBackwardOutput(
-            attn_output=attn_output,
-            hidden_states=hidden_states,
-            grad_attn_output=grad_attn_output,
-            grad_hidden_states=grad_hidden_states,
-        )
-
         # free memory
-        del grad_attn_output, grad_hidden_states, attn_output, hidden_states
-
-        layers = ctx.layers
-        all_buckets = ctx.all_buckets
-        head_mask = ctx.head_mask
-        attention_mask = ctx.attention_mask
-
-        for idx, layer in enumerate(layers[::-1]):
-            # pop last buckets from stack
-            buckets = all_buckets[-1]
-            all_buckets = all_buckets[:-1]
-
-            # backprop
-            output = layer.backward_pass(
-                next_attn_output=output.attn_output,
-                hidden_states=output.hidden_states,
-                grad_attn_output=output.grad_attn_output,
-                grad_hidden_states=output.grad_hidden_states,
-                head_mask=head_mask[len(layers) - idx - 1],
-                attention_mask=attention_mask,
-                buckets=buckets,
-            )
-
-        assert all_buckets == (), "buckets have to be empty after backpropagation"
-        grad_hidden_states = torch.cat(
-            [output.grad_attn_output, output.grad_hidden_states], dim=-1
-        )
+        del grad_attn_output
 
         # num of return vars has to match num of forward() args
         # return gradient for hidden_states arg and None for other args
@@ -396,12 +360,12 @@ class ListConfig:
             if self.resolve:
                 x = x._dereference_node()
                 if x._is_missing():
-                    raise AssertionError()
+                    raise AssertionError
 
             self.index = self.index + 1
             if isinstance(x, ListConfig.ValueNode):
                 return x._value()
-            raise AssertionError()
+            raise AssertionError
 
     def __iter__(self):
         return self._iter_ex(True)
@@ -410,7 +374,7 @@ class ListConfig:
         try:
             return ListConfig.ListIterator(self, resolve)
         except Exception:
-            raise AssertionError()
+            raise AssertionError
 
     def __init__(self):
         self._content = [
@@ -545,7 +509,7 @@ def apply_chunking_to_forward(forward_fn, *input_tensors):
     assert all(input_tensor.shape[1] == tensor_shape for input_tensor in input_tensors)
     num_args_in_forward_chunk_fn = len(inspect.signature(forward_fn).parameters)
     if num_args_in_forward_chunk_fn != len(input_tensors):
-        raise ValueError()
+        raise ValueError
 
     return forward_fn(*input_tensors)
 
@@ -848,7 +812,7 @@ def _merge_criteria_processor_list(default_list, custom_list):
     for default in default_list:
         for custom in custom_list:
             if type(custom) is type(default):
-                raise ValueError()
+                raise ValueError
     default_list.extend(custom_list)
     return default_list
 
@@ -1160,11 +1124,11 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             cnt = self._reformer(nopython=False)
         # cant inline torch.autograd.Function means graph break
         if torch._dynamo.config.assume_static_by_default:
-            self.assertExpectedInline(cnt.frame_count, """3""")
-            self.assertExpectedInline(cnt.op_count, """10""")
+            self.assertExpectedInline(cnt.frame_count, """1""")
+            self.assertExpectedInline(cnt.op_count, """5""")
         else:
-            self.assertExpectedInline(cnt.frame_count, """3""")
-            self.assertExpectedInline(cnt.op_count, """10""")
+            self.assertExpectedInline(cnt.frame_count, """1""")
+            self.assertExpectedInline(cnt.op_count, """5""")
 
     @disable_translation_validation_if_dynamic_shapes
     def test_longformer_chunk(self):
@@ -2573,7 +2537,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 if self.i < 3:
                     self.i += 1
                     return self.i
-                raise StopIteration()
+                raise StopIteration
 
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
@@ -4776,6 +4740,29 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
         global_fn = new_fn
         self.assertEqual(opt(x, y), foo(x, y))
+
+    # ref https://github.com/pytorch/pytorch/issues/123974
+    def test_list_reverse(self):
+        def ladder(x):
+            trail = x.size(-1)
+            assert trail > 2
+            weights = []
+            for s in [trail, trail - 1, trail - 2]:
+                weights.append(torch.ones(s, s - 1))
+
+            for w in weights:
+                x = x @ w
+
+            weights.reverse()
+
+            for w in weights:
+                x = x @ w.t()
+
+            return x
+
+        data = torch.randn(3, 4)
+        opt_ladder = torch.compile(ladder, fullgraph=True, backend="eager")
+        self.assertEqual(opt_ladder(data), ladder(data))
 
 
 instantiate_parametrized_tests(ReproTests)
