@@ -1256,7 +1256,7 @@ def emit_body(
                 if a.name == derivative_var_name:
                     break
             else:
-                raise AssertionError()
+                raise AssertionError
             return f"grad_fn->should_compute_output({edge_off})"
 
         if is_inplace_foreach:

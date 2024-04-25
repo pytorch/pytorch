@@ -82,7 +82,9 @@ default_quantizable_ops = propagation_quantizable_ops | {
 
 # A superset of default_quantizable_ops includes operators support the int8 data type
 # but not enabled by default recipe of X86InductorQuantizer.
-quantizable_ops = default_quantizable_ops
+quantizable_ops = default_quantizable_ops | {
+    torch.ops.aten.matmul.default,
+}
 
 QUANT_ANNOTATION_KEY = "quantization_annotation"
 
@@ -109,6 +111,12 @@ def _map_module_function_to_aten_operator_type():
                 torch.flatten,
             ],
             torch.ops.aten.flatten.using_ints,
+        ),
+        (
+            [
+                torch.matmul,
+            ],
+            torch.ops.aten.matmul.default,
         ),
     )
     for map_item in map_list:
@@ -286,9 +294,9 @@ class X86InductorQuantizer(Quantizer):
 
     @classmethod
     def get_supported_quantization_configs(cls) -> List[QuantizationConfig]:
-        op_configs: Set[QuantizationConfig] = set({})
-        for spec, _ in cls.supported_config_and_operators:
-            op_configs.add(spec)
+        op_configs: Set[QuantizationConfig] = {
+            spec for spec, _ in cls.supported_config_and_operators
+        }
         return list(op_configs)
 
     @classmethod
@@ -309,6 +317,14 @@ class X86InductorQuantizer(Quantizer):
     def set_global(self, quantization_config: QuantizationConfig):
         self.global_config = quantization_config
         return self
+
+    def get_global_quantization_config(self):
+        if not isinstance(self.global_config, QuantizationConfig):
+            warnings.warn(
+                "The global_config for X86InductorQuantizer is currently invalid. \
+                Please ensure that you use set_global to establish the global quantization configuration."
+            )
+        return self.global_config
 
     def set_function_type_qconfig(
         self,
@@ -499,6 +515,7 @@ class X86InductorQuantizer(Quantizer):
         # Step1: Recipe of fusion patterns like conv/linear.
         self._annotate_conv2d_fusion_pattern(model)
         self._annotate_linear_fusion_pattern(model)
+        self._annotate_matmul(model)
 
         # Step2: Recipe to propagate annotation for patterns beside conv/linear.
         # Go through all the nodes from start to end.
@@ -751,6 +768,24 @@ class X86InductorQuantizer(Quantizer):
                 # <TODO> Weiwen: Dynamic Quant of linear unary will be supported in next step
                 self._annotate_linear_unary(model, config)
             self._annotate_linear(model, config)
+
+    def _annotate_matmul(self, model: torch.fx.GraphModule):
+        if config := self._get_aten_operator_qconfig(torch.ops.aten.matmul.default):
+            for node in model.graph.nodes:
+                if node.target == torch.ops.aten.matmul.default and not _is_annotated(
+                    [node]
+                ):
+                    input_qspec_map = {}
+                    matmul_node = node
+                    for input_node in matmul_node.args:
+                        input_qspec_map[input_node] = get_input_act_qspec(config)
+                    matmul_node.meta[
+                        QUANT_ANNOTATION_KEY
+                    ] = _X86InductorQuantizationAnnotation(
+                        input_qspec_map=input_qspec_map,
+                        _annotated=True,
+                        _is_output_of_quantized_pattern=True,
+                    )
 
     def _annotate_conv2d_binary_unary(
         self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
