@@ -16,6 +16,7 @@ import subprocess
 import random
 from random import randint
 import json
+
 import torch
 import torch.cuda
 from torch.cuda._memory_viz import profile_plot, _profile_to_snapshot
