@@ -22,7 +22,7 @@ ParamCommsDebugInfo::ParamCommsDebugInfo(
     : pgName_(pgName),
       rank_(rank),
       worldSize_(worldSize),
-      collectiveName_(std::move(collName)),
+      collectiveName_(collName),
       inMessageNelems_(inNelems),
       outMessageNelems_(outNelems),
       dType_(dType),

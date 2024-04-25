@@ -465,7 +465,7 @@ allreduce_sparse_cuda_(
                   ->allreduce_sparse(
                       tensor_vec,
                       AllreduceOptions{
-                          *reduce_op,
+                          *reduce_op.get(),
                           std::chrono::milliseconds(timeout),
                           sparse_indices});
 

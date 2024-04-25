@@ -35,7 +35,6 @@ from torch.utils._sympy.singleton_int import SingletonInt
 from .. import codecache, config, ir
 from ..ir import ReinterpretView
 from ..runtime import triton_heuristics
-from ..runtime.hints import DeviceProperties
 from ..utils import (
     cache_on_self,
     get_benchmark_name,
@@ -687,22 +686,15 @@ class WrapperCodeGen(CodeGen):
         )
 
     def generate_scatter_fallback(
-        self,
-        output,
-        inputs,
-        cpp_kernel_name,
-        python_kernel_name,
-        src_is_tensor,
-        reduce,
-        kwargs,
+        self, output, inputs, kernel, python_kernel_name, src_is_tensor, reduce, kwargs
     ):
-        line = f"{python_kernel_name}({','.join(map(str, inputs))}"
-        if python_kernel_name.startswith("aten.scatter_reduce"):
-            line += ", ".join([""] + kwargs)
-        else:
+        line = f"{kernel}({','.join(map(str, inputs))}"
+        if kernel == "aten.scatter_":
             if reduce:
                 line += f", reduce={repr(reduce)}"
-        line += ")"
+        else:
+            line += ", ".join([""] + kwargs)
+        line += f"){self.ending}"
         self.writeline(line)
 
     def generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
@@ -1096,7 +1088,8 @@ class WrapperCodeGen(CodeGen):
                 size_dtype=index_dtype,
                 indices=non_constant_indices,
             ),
-            "device": DeviceProperties.create(V.graph.scheduler.current_device),
+            "device": V.graph.scheduler.current_device.index,
+            "device_type": V.graph.scheduler.current_device.type,
             # Triton compiler includes equal_to_1 args into constants even
             # when they are not constexpr. otherwise there may be a segfault
             # during launching the Inductor-compiled Triton kernel.

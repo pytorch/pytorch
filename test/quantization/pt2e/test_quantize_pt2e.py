@@ -49,11 +49,7 @@ from torch.testing._internal.common_quantization import (
     skipIfNoQNNPACK,
     TestHelperModules,
 )
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-    TemporaryFileName,
-)
+from torch.testing._internal.common_utils import TemporaryFileName
 
 
 @skipIfNoQNNPACK
@@ -1179,15 +1175,14 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         self.assertIsNot(observers[0], observers[2])
         self.assertIsNot(observers[1], observers[2])
 
-    @parametrize("dtype", (torch.int16, torch.float8_e5m2, torch.float8_e4m3fn))
-    def test_quantization_dtype(self, dtype):
-        class DtypeActQuantizer(Quantizer):
+    def test_int16(self):
+        class Int16ActQuantizer(Quantizer):
             def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
-                info_fun = torch.iinfo if dtype == torch.int16 else torch.finfo
-                activate_qspec = QuantizationSpec(
-                    dtype=dtype,
-                    quant_min=int(info_fun(dtype).min),
-                    quant_max=int(info_fun(dtype).max),
+                # using int32 to simulate int16
+                int16_qspec = QuantizationSpec(
+                    dtype=torch.int16,
+                    quant_min=-(2**15),
+                    quant_max=2**15 - 1,
                     qscheme=torch.per_tensor_affine,
                     is_dynamic=False,
                     observer_or_fake_quant_ctr=observer.default_observer,
@@ -1201,10 +1196,10 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                     observer_or_fake_quant_ctr=observer.default_weight_observer,
                 )
                 quantization_config = QuantizationConfig(
-                    input_activation=activate_qspec,
+                    input_activation=int16_qspec,
                     weight=int8_qspec,
                     bias=None,
-                    output_activation=activate_qspec,
+                    output_activation=int16_qspec,
                 )
                 OP_TO_ANNOTATOR["conv"](model, quantization_config)
 
@@ -1219,7 +1214,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             def forward(self, x):
                 return self.conv(x)
 
-        quantizer = DtypeActQuantizer()
+        quantizer = Int16ActQuantizer()
         node_occurrence = {
             # one for input of the first conv, one for output for the first conv
             torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
@@ -1235,7 +1230,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         self._test_quantizer(
             M().eval(),
             example_inputs,
-            quantizer,
+            Int16ActQuantizer(),
             node_occurrence,
             node_list,
         )
@@ -2253,6 +2248,3 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             node_occurrence,
             node_list,
         )
-
-
-instantiate_parametrized_tests(TestQuantizePT2E)
