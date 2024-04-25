@@ -57,10 +57,9 @@ cse = True
 # eventually: either default this config to false completely
 # once XLA pin update works,
 # or default config to true and fix relevant bugs
-def _is_fbcode():
-    return not hasattr(torch.version, "git_version")
+from torch._inductor.config import is_fbcode
 
-view_replay_for_aliased_outputs = not _is_fbcode()
+view_replay_for_aliased_outputs = not is_fbcode()
 
 # Restricts the amount of computation AOTAutograd can do.
 # NB: We have essentially disabled this heuristic now. However, this is kept
