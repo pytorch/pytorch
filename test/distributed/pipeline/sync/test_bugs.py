@@ -63,7 +63,7 @@ def test_exception_no_hang(setup_rpc):
 
     class Raise(nn.Module):
         def forward(self, x):
-            raise ExpectedException()
+            raise ExpectedException
 
     model = nn.Sequential(Pass(), Pass(), Raise())
     model = Pipe(model, chunks=3)

@@ -168,7 +168,7 @@ inductor_skips["cpu"] = {
     "linalg.ldl_factor": {f32, f64},  # flaky
     "nn.functional.cosine_embedding_loss": {b8},  # flaky
     ("index_reduce", "prod"): {f16},  # flaky
-    ("index_reduce", "mean"): {f16, f64},  # flaky
+    ("index_reduce", "mean"): {f16},  # flaky
 }
 
 if IS_MACOS and IS_X86:

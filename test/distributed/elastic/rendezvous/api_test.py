@@ -197,7 +197,7 @@ class _DummyRendezvousHandler(RendezvousHandler):
         return "dummy_backend"
 
     def next_rendezvous(self) -> Tuple[Store, int, int]:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def is_closed(self) -> bool:
         return False
