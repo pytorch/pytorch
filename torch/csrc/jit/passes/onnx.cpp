@@ -208,6 +208,13 @@ std::unordered_map<Value*, Value*> BlockToONNX(
     }
   }
 
+  // Determine if all inputs are static. This is used for each node to
+  // determine whether or not to propagate shapes.
+  if (!is_sub_block) {
+    bool static_input_shape = AllGraphInputsStatic(ctx.block->owningGraph());
+    ConstantValueMap::SetAllGraphInputsStatic(static_input_shape);
+  }
+
   // Finally, visit all nodes in the graph
   for (auto node : old_block->nodes()) {
     NodeToONNX(node, ctx.block, operator_export_type, env);

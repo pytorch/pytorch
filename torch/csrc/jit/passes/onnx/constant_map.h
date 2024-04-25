@@ -26,6 +26,9 @@ class ConstantValueMap {
   static bool HasRank(const std::string& tensorName);
   static c10::optional<size_t> GetRank(const std::string& tensorName);
 
+  static void SetAllGraphInputsStatic(bool all_static);
+  static c10::optional<bool> GetAllGraphInputsStatic();
+
   static void SetShape(
       const std::string& tensorName,
       const c10::SymbolicShape& shapeValue);
@@ -101,6 +104,8 @@ class ConstantValueMap {
   // during future node-level shape inference.
   ShapeDataMap inferredShapeData;
   SymbolDimMap symbolDimMap;
+  // Stores if all graph-level inputs have static shape
+  c10::optional<bool> allGraphInputsStatic;
 };
 
 } // namespace jit
