@@ -10,6 +10,7 @@ import numpy as np
 from torch.testing._internal.autograd_function_db import (
     sample_inputs_numpy_cube,
     sample_inputs_numpy_mul,
+    sample_inputs_numpy_mul_scalar,
     sample_inputs_numpy_sort,
     sample_inputs_numpy_take,
 )
@@ -67,6 +68,23 @@ def numpy_mul_backward(ctx, grad_out):
     return grad_x, grad_y
 
 numpy_mul.register_autograd(numpy_mul_backward, setup_context=numpy_mul_setup_context)
+
+@torch.library.custom_op("_torch_testing::numpy_mul_scalar", mutates_args=())
+def numpy_mul_scalar(x: Tensor, *, scalar: float) -> Tensor:
+    return torch.tensor(to_numpy(x) * scalar, device=x.device)
+
+@numpy_mul_scalar.register_fake
+def _(x, *, scalar):
+    return (x * scalar).contiguous()
+
+def numpy_mul_scalar_setup_context(ctx, inputs, keyword_only_inputs, output):
+    ctx.scalar = keyword_only_inputs["scalar"]
+
+def numpy_mul_scalar_backward(ctx, grad_out):
+    grad_x = grad_out * ctx.scalar
+    return grad_x
+
+numpy_mul_scalar.register_autograd(numpy_mul_scalar_backward, setup_context=numpy_mul_scalar_setup_context)
 
 @torch.library.custom_op("_torch_testing::numpy_sort", mutates_args=())
 def numpy_sort(x: Tensor, dim: int) -> Tuple[Tensor, Tensor, Tensor]:
@@ -337,6 +355,13 @@ custom_op_db = [
         'NumpyMulCustomOp',
         op=numpy_mul._opoverload,
         sample_inputs_func=sample_inputs_numpy_mul,
+        dtypes=all_types_and(torch.bool, torch.half),
+        supports_out=False,
+    ),
+    OpInfo(
+        'NumpyMulScalarCustomOp',
+        op=numpy_mul_scalar._opoverload,
+        sample_inputs_func=sample_inputs_numpy_mul_scalar,
         dtypes=all_types_and(torch.bool, torch.half),
         supports_out=False,
     ),
