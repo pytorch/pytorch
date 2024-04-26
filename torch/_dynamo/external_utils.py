@@ -1,7 +1,6 @@
 # This module contains functions that *will be allowed* by dynamo
 
 import functools
-import types
 
 import torch
 import torch.utils._pytree as pytree
@@ -27,24 +26,6 @@ def is_compiling() -> bool:
     return torch.compiler.is_compiling()
 
 
-def create_new_fn(fn):
-    from .bytecode_transformation import transform_code_object
-
-    def nothing(*args):
-        pass
-
-    new_code = transform_code_object(fn.__code__, nothing)
-    new_fn = types.FunctionType(
-        new_code,
-        fn.__globals__,
-        fn.__name__,
-        fn.__defaults__,
-        fn.__closure__,
-    )
-    new_fn.__kwdefaults__ = fn.__kwdefaults__
-    return new_fn
-
-
 def wrap_inline(fn):
     """
     Create an extra frame around fn that is not in skipfiles
@@ -54,9 +35,7 @@ def wrap_inline(fn):
     def inner(*args, **kwargs):
         return fn(*args, **kwargs)
 
-    # Create a new function dynamically to avoid Dynamo cache collisions on the
-    # same fn.__code__ object.
-    return create_new_fn(inner)
+    return inner
 
 
 def call_hook(hook, *args):
