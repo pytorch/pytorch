@@ -563,7 +563,7 @@ class TestUnflatten(TestCase):
 
     @skipIfTorchDynamo("custom objects not supported in dynamo yet")
     def test_unflatten_constant_obj(self):
-        load_torchbind_test_lib()
+        init_torchbind_implementations()
 
         @torch._library.register_fake_class("_TorchScriptTesting::_Foo")
         class FakeFoo:
