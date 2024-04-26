@@ -2014,9 +2014,18 @@ class CppKernel(Kernel):
     def codegen_loops_impl(self, loop_nest, code, worksharing):
         threads = parallel_num_threads()
         assert self.call_ranges is not None
-        par_depth = self.decide_parallel_depth(
-            self.call_ranges[: loop_nest.max_parallel_depth()], threads
-        )
+        kernels = loop_nest.get_kernels()
+        if any(isinstance(kernel, OuterLoopFusedKernel) for kernel in kernels):
+            assert len(kernels) == 1
+            assert isinstance(kernels[0], OuterLoopFusedKernel)
+            par_depth = kernels[0].decide_parallel_depth(
+                loop_nest.max_parallel_depth(), threads
+            )
+        else:
+            par_depth = self.decide_parallel_depth(
+                loop_nest.max_parallel_depth(), threads
+            )
+
         with contextlib.ExitStack() as stack:
             if par_depth:
                 if loop_nest.is_reduction_only():
@@ -2149,7 +2158,9 @@ class CppKernel(Kernel):
         else:
             return "TORCH_CHECK"
 
-    def decide_parallel_depth(self, ranges, threads):
+    def decide_parallel_depth(self, max_parallel_depth, threads):
+        assert self.call_ranges is not None
+        ranges = self.call_ranges[:max_parallel_depth]
         seq = self.size_hint()
         par = 1
         depth = 0
@@ -3543,6 +3554,25 @@ class OuterLoopFusedKernel(CppKernel):
         super().__init__(kernel_group.args, kernel_group.ws.num_threads)
         self.inner: List["LoopLevel"] = []
 
+    def decide_parallel_depth(self, max_parallel_depth, threads) -> int:
+        kernels_parallel_depth = []
+        nested_kernels: List[List[CppKernel]] = [
+            loop.get_kernels() for loop in self.inner
+        ]
+        for kernels in nested_kernels:
+            # For any ScalarKernel, VecKernel, or Tile2DKernel,
+            # they should all have the same call_ranges
+            call_ranges = kernels[0].call_ranges
+            assert call_ranges is not None
+            assert all(kernel.call_ranges == call_ranges for kernel in kernels)
+            kernels_parallel_depth.append(
+                kernels[0].decide_parallel_depth(len(call_ranges), threads)
+            )
+        return min(
+            max_parallel_depth,
+            max(kernels_parallel_depth),
+        )
+
 
 class ReasonFusedNodes(Enum):
     SAME_VARS_REDUCE = "same_vars_reduce"
@@ -4268,3 +4298,13 @@ class LoopNestWithSplit:
         if depth == 0:
             self.root = split_loops
         return split_loops
+
+    def get_kernels(self) -> List[CppKernel]:
+        """Get all kernel objects under this loop nest"""
+        if self.kernel:
+            return [self.kernel]
+        kernels: List[CppKernel] = []
+        assert self.root is not None
+        for loop in self.root:
+            kernels += loop.get_kernels()
+        return kernels

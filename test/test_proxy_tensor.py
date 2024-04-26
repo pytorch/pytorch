@@ -1449,6 +1449,12 @@ def forward(self, x_1, y_1):
     add = torch.ops.aten.add.Tensor(y_1, 2);  y_1 = None
     return add""")  # noqa: B950
 
+    # This is due to https://github.com/pytorch/pytorch/pull/124316 which bans
+    # i0 = i1 refinement.  To work around it, you should assert i1 = s0 by
+    # hand.  This particular example the refinement is OK because i0 is always
+    # available when i1 and vice versa, but it is difficult to tell if it
+    # is safe in general.
+    @unittest.expectedFailure
     def test_unbacked_unify_guard_transitivity(self):
         def f(x1, x2, y):
             z1 = torch.zeros(x1.item())
@@ -1460,15 +1466,7 @@ def forward(self, x_1, y_1):
             else:
                 return y + 2
 
-        r = str(make_fx(f, tracing_mode="symbolic")(torch.tensor(10), torch.tensor(10), torch.randn(10)).code).strip()
-        self.assertExpectedInline(r, """\
-def forward(self, x1_1, x2_1, y_1):
-    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x1_1);  x1_1 = None
-    zeros = torch.ops.aten.zeros.default([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
-    _local_scalar_dense_1 = torch.ops.aten._local_scalar_dense.default(x2_1);  x2_1 = None
-    zeros_1 = torch.ops.aten.zeros.default([_local_scalar_dense_1], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense_1 = None
-    add = torch.ops.aten.add.Tensor(y_1, 2);  y_1 = None
-    return add""")  # noqa: B950
+        make_fx(f, tracing_mode="symbolic")(torch.tensor(10), torch.tensor(10), torch.randn(10))
 
     def test_split_unbacked_sizes(self):
         def f(lengths, values):
@@ -1905,9 +1903,7 @@ symbolic_tensor_failures = {
     xfail('nn.functional.binary_cross_entropy', ''),  # aten.new_empty.default - couldn't find symbolic meta function/decom...
     xfail('nn.functional.cross_entropy', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.ctc_loss'),  # aten._ctc_loss.Tensor - couldn't find symbolic meta function/decomposition
-    xfail('nn.functional.fractional_max_pool3d', ''),  # argument 'size' must be tuple of ints, but found element of t...
     xfail('quantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
-    xfail('resize_as_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('unique_consecutive', ''),  # aten.unique_consecutive.default - couldn't find symbolic meta function/decomposition
     xfail('unique', ''),  # aten._unique2.default - couldn't find symbolic meta function/decomposition
 
@@ -1958,29 +1954,17 @@ out_symbolic_tensor_failures = {
     xfail('angle', ''),
     xfail('argmax', ''),
     xfail('argmin', ''),
-    xfail('bmm', ''),
     xfail('fft.fft2', ''),
     xfail('fft.fftn', ''),
     xfail('fft.ifft2', ''),
     xfail('fft.ifftn', ''),
     xfail('gather', ''),
-    xfail('linalg.cholesky', ''),
-    xfail('linalg.cholesky_ex', ''),
-    xfail('linalg.det', ''),
-    xfail('linalg.det', 'singular'),
-    xfail('linalg.inv', ''),
-    xfail('linalg.inv_ex', ''),
     xfail('linalg.pinv', ''),
     xfail('linalg.pinv', 'hermitian'),
-    xfail('linalg.svdvals', ''),
     xfail('lu', ''),
-    xfail('max', 'reduction_with_dim'),
-    xfail('min', 'reduction_with_dim'),
-    xfail('nn.functional.avg_pool2d', ''),
     xfail('scatter_add', ''),
     xfail('scatter', ''),
     xfail('take_along_dim', ''),
-    xfail('topk', ''),
     xfail('triangular_solve', ''),
     xfail('view_copy', ''),
 

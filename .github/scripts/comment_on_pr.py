@@ -23,8 +23,10 @@ def main() -> None:
 
     job_link = f"[job]({run_url})" if run_url is not None else "job"
     msg = (
-        f"The {args.action} {job_link} was canceled. If you believe this is a mistake,"
-        + f" then you can re trigger it through [pytorch-bot]({BOT_COMMANDS_WIKI})."
+        f"The {args.action} {job_link} was canceled or timed out. This most often happen if two merge requests were issued"
+        + " for the same PR, or if merge job was waiting for more than 6 hours for tests to finish."
+        + " In later case, please do not hesitate to reissue the merge command\n"
+        + f" For more information see [pytorch-bot wiki]({BOT_COMMANDS_WIKI})."
     )
 
     gh_post_pr_comment(org, project, args.pr_num, msg)
