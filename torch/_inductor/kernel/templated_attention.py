@@ -284,6 +284,7 @@ def templated_attention(*args, **kwargs):
                     (128, 128, 4, 3),
                     (128, 128, 8, 2),
                     (64, 128, 4, 3),
+                    (64, 64, 4, 3),
                 ]
             # Note, we don't need to pass in the captured buffers explicitly
             # because they're implicitly added by the score_mod function

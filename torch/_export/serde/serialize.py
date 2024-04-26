@@ -600,14 +600,14 @@ class GraphModuleSerializer(metaclass=Final):
                 serialized_args.append(
                     NamedArgument(
                         name=schema_arg.name,
-                        arg=self.serialize_input(kwargs[schema_arg.name]),
+                        arg=self.serialize_input(kwargs[schema_arg.name], schema_arg.type),
                     )
                 )
             elif not schema_arg.kwarg_only and i < len(args):
                 serialized_args.append(
                     NamedArgument(
                         name=schema_arg.name,
-                        arg=self.serialize_input(args[i]),
+                        arg=self.serialize_input(args[i], schema_arg.type),
                     )
                 )
             else:
@@ -648,7 +648,9 @@ class GraphModuleSerializer(metaclass=Final):
             and arg.name in self.graph_state.sym_bool_values
         )
 
-    def serialize_input(self, arg) -> Argument:
+    def serialize_input(
+        self, arg, arg_type: Optional[torch._C.Argument] = None
+    ) -> Argument:
         import torch._inductor.ir as inductor_ir
 
         inductor_tensor_buffers = (
@@ -716,6 +718,39 @@ class GraphModuleSerializer(metaclass=Final):
         elif arg is None:
             return Argument.create(as_none=())
         elif isinstance(arg, (list, tuple)):
+            if len(arg) == 0:
+                if arg_type is not None:
+                    if isinstance(arg_type, torch.OptionalType):
+                        arg_type = arg_type.getElementType()  # type: ignore[assignment]
+                    assert isinstance(arg_type, torch.ListType)
+                    elem_type = arg_type.getElementType()
+                    if isinstance(elem_type, torch.OptionalType):
+                        elem_type = elem_type.getElementType()
+
+                    if isinstance(elem_type, torch.BoolType):
+                        return Argument.create(as_bools=[])
+                    elif isinstance(elem_type, torch.IntType):
+                        return Argument.create(as_ints=[])
+                    elif isinstance(elem_type, torch.FloatType):
+                        return Argument.create(as_floats=[])
+                    elif isinstance(elem_type, torch.StringType):
+                        return Argument.create(as_strings=[])
+                    elif isinstance(elem_type, torch.TensorType):
+                        return Argument.create(as_tensors=[])
+                    else:
+                        # I believe empty symint lists default to ints, but
+                        # please file an issue if this is not the case
+                        raise SerializeError(f"Empty list with type {elem_type} nyi.")
+                else:
+                    # We could serialize this by default to a tensor list. This
+                    # is needed in the HOO case
+                    log.warning(
+                        "Unsure how to serialize the given empty list, "
+                        "as we don't know what is the type of this argument. "
+                        "Serializing it as a tensor list by default."
+                    )
+                    return Argument.create(as_tensors=[])
+
             # Must check bool first, as bool is also treated as int
             if all(isinstance(a, bool) for a in arg):
                 return Argument.create(as_bools=list(arg))
@@ -1097,7 +1132,7 @@ class GraphModuleSerializer(metaclass=Final):
                 # undefined Tensor which will be implicitly converted to None in Python.
                 output_arguments.append(Argument.create(as_none=()))
             elif isinstance(meta, FakeTensor):
-                assert isinstance(return_schema.real_type, torch.TensorType)
+                assert isinstance(return_schema.real_type, (torch.OptionalType, torch.TensorType))
                 user_node = _output_node_at_index(node, idx)
                 name = (
                     user_node.name
@@ -1421,8 +1456,7 @@ class GraphModuleDeserializer(metaclass=Final):
                         self.shape_env.add_var_to_val(sym, hint)
 
                     if vr := self.symbol_name_to_range.get(val.expr_str):
-                        symbolic_shapes._constrain_symbol_range(
-                            self.shape_env,
+                        self.shape_env.constrain_symbol_range(
                             sym,
                             compiler_min=vr.lower,  # type: ignore[arg-type]
                             compiler_max=vr.upper,  # type: ignore[arg-type]
@@ -1437,8 +1471,7 @@ class GraphModuleDeserializer(metaclass=Final):
                         if s.name not in self.symbol_name_to_symbol:
                             self.symbol_name_to_symbol[s.name] = s
                         if vr := self.symbol_name_to_range.get(s.name):
-                            symbolic_shapes._constrain_symbol_range(
-                                self.shape_env,
+                            self.shape_env.constrain_symbol_range(
                                 s,
                                 compiler_min=vr.lower,  # type: ignore[arg-type]
                                 compiler_max=vr.upper,  # type: ignore[arg-type]
