@@ -1713,8 +1713,8 @@ class TestOptimRenewed(TestCase):
             kwargs['lr'] = 1.0
         opt_control = optimizer_ctor(mod_control.parameters(), **kwargs)
 
-        scaler_scaling = torch.cpu.amp.GradScaler(init_scale=128.0)
-        scaler_control = torch.cpu.amp.GradScaler(init_scale=128.0)
+        scaler_scaling = torch.amp.GradScaler(device, init_scale=128.0)
+        scaler_control = torch.amp.GradScaler(device, init_scale=128.0)
         tracker = TensorTracker()
         for input, target in data:
             opt_control.zero_grad()
