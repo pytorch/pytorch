@@ -544,7 +544,7 @@ class OptimizeForInferenceTemplate(TestCase):
         self.assertEqual(out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2)
 
     @torch._inductor.config.patch(layout_optimization=False)
-    def test_folded_conv_bn_with_multi_bn_share_conv(self):
+    def test_conv_bn_with_multi_bn_share_conv(self):
         mod = (
             ConvMultiBN(32, 32, bias=True, kernel_size=3, stride=2)
             .to(self.device)
@@ -570,7 +570,7 @@ class OptimizeForInferenceTemplate(TestCase):
         self.assertEqual(out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2)
 
     @torch._inductor.config.patch(layout_optimization=False)
-    def test_folded_conv_functional_bn_with_multi_bn_share_conv(self):
+    def test_conv_functional_bn_with_multi_bn_share_conv(self):
         x = torch.rand(3, 32, 32, 32).to(self.device).to(torch.float32)
         running_mean = torch.mean(x, dim=(0, 2, 3)).to(self.device)
         running_var = torch.var(x, dim=(0, 2, 3)).to(self.device)
