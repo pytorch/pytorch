@@ -90,8 +90,6 @@ def _get_output_names(gm: torch.fx.GraphModule) -> List[str]:
 
 
 class ModelsWithScriptObjectAttr:
-    init_torchbind_implementations()
-
     class Simple(torch.nn.Module):
         def __init__(self):
             super().__init__()
