@@ -1277,6 +1277,13 @@ class Exporter:
                     "ONNXScript optimizer is not available. Skipping optimization. "
                     "Please `pip install onnxscript -U` to enable post-export optimization."
                 )
+            except Exception as e:
+                # TODO: Maybe remove this once optimization is stable?
+                warnings.warn(
+                    "ONNXScript optimizer failed. Skipping optimization. "
+                    "\n\nPLEASE REPORT A BUG AT https://github.com/microsoft/onnxscript/issues "
+                    f"\n\nDetail:\n{e}"
+                )
 
             return torch.onnx.ONNXProgram(
                 onnx_model,

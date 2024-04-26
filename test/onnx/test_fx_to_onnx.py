@@ -866,6 +866,31 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         model = PrintModule()
         _ = torch.onnx.dynamo_export(model, input)
 
+    def test_fail_optimize(self):
+        # Monkey patching onnxscript's optimizer
+        import onnxscript
+
+        def monkey_optimize(
+            model,
+            num_iterations=2,
+            *,
+            onnx_shape_inference=True,
+            stop_if_no_change=True,
+            external_data_folder="",
+            **kwargs,
+        ):
+            raise RuntimeError("It's tough to be a bug!")
+
+        onnxscript.optimizer.optimize = monkey_optimize
+
+        class MyModel(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        input = torch.randn(2, 3)
+        model = MyModel()
+        _ = torch.onnx.dynamo_export(model, input)
+
 
 if __name__ == "__main__":
     common_utils.run_tests()
