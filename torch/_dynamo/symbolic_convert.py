@@ -964,22 +964,6 @@ class InstructionTranslatorBase(
     def LOAD_CONST(self, inst):
         self.push(self._load_const(inst))
 
-    def get_global_source(self, name):
-        source: Source
-        if self.output.global_scope is self.f_globals:
-            source = GlobalSource(name)
-        else:
-            if "__name__" in self.f_globals:
-                source = AttrSource(
-                    self.import_source(self.f_globals["__name__"]), name
-                )
-            else:
-                mangled_name = self.output.install_global_by_id(
-                    "___unnamed_scope", self.f_globals
-                )
-                source = GetItemSource(GlobalSource(mangled_name), name)
-        return source
-
     def LOAD_GLOBAL(self, inst):
         if sys.version_info >= (3, 11):
             if inst.arg % 2:
@@ -1007,13 +991,13 @@ class InstructionTranslatorBase(
         except KeyError:
             return self.load_builtin(inst)
 
-        source = self.get_global_source(name)
+        source = GlobalSource(name)
         self.push(VariableBuilder(self, source)(value))
 
     def STORE_GLOBAL(self, inst):
         value = self.pop()
         name = inst.argval
-        source = self.get_global_source(name)
+        source = GlobalSource(name)
         if name not in self.symbolic_globals:
             self.symbolic_globals[name] = object()  # type: ignore[assignment]  # sentinel object
         variable = self.output.side_effects.track_global_existing(
@@ -2701,7 +2685,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         return fglobals_value, fglobals_vt, global_source
 
     def LOAD_GLOBAL(self, inst):
-        if self.f_globals is self.parent.f_globals:
+        if self.output.global_scope is self.f_globals:
             super().LOAD_GLOBAL(inst)
         else:
             if sys.version_info >= (3, 11):
@@ -2728,6 +2712,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             super().STORE_GLOBAL(inst)
         else:
             value = self.pop()
+            if isinstance(value, RemovableHandleVariable):
+                unimplemented("Storing handles in globals - NYI")
             name = inst.argval
             fglobals_value, fglobals_vt, _ = self.get_globals_source_and_value(name)
             fglobals_vt = self.output.side_effects.track_object_existing(
