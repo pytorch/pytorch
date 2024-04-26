@@ -91,14 +91,14 @@ template <typename T>
 constexpr bool is_reduced_floating_point_v = is_reduced_floating_point<T>::value;
 
 template <typename T>
-struct is_bit8:
+struct is_8bit_integer:
     std::integral_constant<bool,
       std::is_same_v<T, unsigned char> ||
       std::is_same_v<T, signed char>> {
 };
 
 template <typename T>
-constexpr bool is_bit8_v = is_bit8<T>::value;
+constexpr bool is_8bit_integer_v = is_8bit_integer<T>::value;
 
 template<size_t n> struct int_of_size;
 

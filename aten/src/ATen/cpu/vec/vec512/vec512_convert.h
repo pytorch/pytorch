@@ -124,8 +124,8 @@ struct VecConvert<
     src_t,
     1,
     typename std::enable_if_t<
-        (is_reduced_floating_point_v<dst_t> && is_bit8_v<src_t>) ||
-            (is_reduced_floating_point_v<src_t> && is_bit8_v<dst_t>),
+        (is_reduced_floating_point_v<dst_t> && is_8bit_integer_v<src_t>) ||
+            (is_reduced_floating_point_v<src_t> && is_8bit_integer_v<dst_t>),
         void>> {
   static inline VectorizedN<dst_t, 1> apply(const VectorizedN<src_t, 1>& src) {
     VectorizedN<float, 1> tmp_fp32 = VecConvert<float, 1, src_t, 1>::apply(src);
@@ -139,9 +139,7 @@ struct VecConvert<
     1,
     float,
     1,
-    typename std::enable_if_t<
-        std::is_same_v<dst_t, unsigned char> ||
-            std::is_same_v<dst_t, signed char>,
+    typename std::enable_if_t<is_8bit_integer_v<dst_t>,
         void>> {
   static inline VectorizedN<dst_t, 1> apply(const VectorizedN<float, 1>& src) {
     return convert_float_to_int8<dst_t>(src[0]);
@@ -154,9 +152,7 @@ struct VecConvert<
     1,
     src_t,
     1,
-    typename std::enable_if_t<
-        std::is_same_v<src_t, unsigned char> ||
-            std::is_same_v<src_t, signed char>,
+    typename std::enable_if_t<is_8bit_integer_v<src_t>,
         void>> {
   static inline VectorizedN<float, 1> apply(const VectorizedN<src_t, 1>& src) {
     return convert_int8_to_float<src_t>(src[0]);
