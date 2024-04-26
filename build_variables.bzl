@@ -795,6 +795,7 @@ libtorch_python_core_sources = [
     "torch/csrc/StorageMethods.cpp",
     "torch/csrc/StorageSharing.cpp",
     "torch/csrc/Stream.cpp",
+    "torch/csrc/Event.cpp",
     "torch/csrc/TypeInfo.cpp",
     "torch/csrc/api/src/python/init.cpp",
     "torch/csrc/autograd/functions/init.cpp",
@@ -1167,6 +1168,7 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/SparseFactories.cpp",
     "aten/src/ATen/native/quantized/cpu/kernels/QuantizedOpKernels.cpp",
     "aten/src/ATen/native/cpu/FusedAdamKernel.cpp",
+    "aten/src/ATen/native/cpu/FusedSGDKernel.cpp",
 ]
 
 # This aten native source file list will not go through aten codegen process
@@ -1402,6 +1404,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/xnnpack/RegisterOpContextClass.cpp",
     "aten/src/ATen/native/xnnpack/Shim.cpp",
     "aten/src/ATen/native/FusedAdam.cpp",
+    "aten/src/ATen/native/FusedSGD.cpp",
     # Files not in native, but depends on native symbols
     # "aten/src/ATen/TensorIndexing.cpp",
     "aten/src/ATen/TensorIterator.cpp",
