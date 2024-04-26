@@ -1,10 +1,12 @@
 # Owner(s): ["oncall: distributed"]
 
+import copy
 import itertools
 import unittest
 from typing import List
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable import replicate
 from torch.distributed._composable.fsdp import fully_shard
@@ -14,7 +16,13 @@ from torch.distributed._composable.fsdp._fsdp_init import (
 )
 from torch.distributed._composable.fsdp._fsdp_param import ParamModuleInfo
 from torch.distributed._composable.fsdp._fsdp_param_group import _get_param_module_infos
-from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
+from torch.distributed._tensor import (
+    DeviceMesh,
+    distribute_tensor,
+    DTensor,
+    Replicate,
+    Shard,
+)
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
@@ -24,6 +32,11 @@ from torch.distributed.tensor.parallel import (
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_fsdp import FSDPTestMultiThread, MLP
 from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.distributed._tensor.common_dtensor import (
+    ModelArgs,
+    Transformer,
+    TransformerBlock,
+)
 
 
 class TestFullyShardDeviceTensor(FSDPTestMultiThread):
@@ -475,6 +488,19 @@ class TestFullyShardMetaDeviceInit(FSDPTestMultiThread):
                 self.assertEqual(param.device, torch.device("meta"))
             self._test_to_empty_and_reset_parameters(model, mesh, mlp_dim)
 
+        # Test that we can call `fully_shard` under meta-device context and
+        # that `init_device_mesh` call still works
+        mlp_dim = 8
+        with torch.device("meta"):
+            model = nn.Sequential(MLP(mlp_dim, with_buffer=True), MLP(mlp_dim))
+            for param in model.parameters():
+                self.assertEqual(param.device, torch.device("meta"))
+            for module in (model[0], model[1], model):
+                fully_shard(module)
+        for param in model.parameters():
+            self.assertEqual(param.device, torch.device("meta"))
+        self._test_to_empty_and_reset_parameters(model, mesh, mlp_dim)
+
     @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_meta_device_2d_init(self):
         assert self.world_size >= 4, f"{self.world_size}"
@@ -553,6 +579,150 @@ class TestFullyShardMetaDeviceInit(FSDPTestMultiThread):
         )
         with self.assertRaisesRegex(RuntimeError, error_regex):
             model(inp)
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_rank0_broadcast_meta_device_init(self):
+        model_args = ModelArgs(dropout_p=0.0)
+        # Assume we have a CPU full state dict on rank 0
+        if self.rank == 0:
+            torch.manual_seed(42)
+            ref_model = Transformer(model_args)
+            full_sd = ref_model.state_dict()
+            for param in full_sd.values():
+                self.assertEqual(param.device, torch.device("cpu"))
+
+        # Initialize the sharded model on meta device
+        fsdp_mesh = init_device_mesh("cuda", (self.world_size,))
+        with torch.device("meta"):
+            model = Transformer(model_args)
+        for module in model.modules():
+            if isinstance(module, TransformerBlock):
+                fully_shard(module, mesh=fsdp_mesh)
+        fully_shard(model, mesh=fsdp_mesh)
+        for param in model.parameters():
+            self.assertEqual(param.device, torch.device("meta"))
+
+        # Construct a sharded state dict from the rank 0 full state dict by
+        # broadcasting and sharding
+        meta_sharded_sd = model.state_dict()
+        sharded_sd = {}
+        if self.rank == 0:
+            self.assertEqual(len(meta_sharded_sd), len(full_sd))
+            self.assertEqual(list(meta_sharded_sd.keys()), list(full_sd.keys()))
+            for (param_name, full_param), sharded_meta_param in zip(
+                full_sd.items(), meta_sharded_sd.values()
+            ):
+                full_param = full_param.detach().cuda()
+                mesh = sharded_meta_param.device_mesh
+                dist.broadcast(full_param, src=0, group=mesh.get_group(0))
+                sharded_tensor = distribute_tensor(
+                    full_param, mesh, sharded_meta_param.placements
+                )
+                sharded_sd[param_name] = nn.Parameter(sharded_tensor)
+        else:
+            for param_name, sharded_meta_param in meta_sharded_sd.items():
+                full_tensor = torch.empty(
+                    sharded_meta_param.size(),
+                    device="cuda",
+                    dtype=sharded_meta_param.dtype,
+                )
+                mesh = sharded_meta_param.device_mesh
+                dist.broadcast(full_tensor, src=0, group=mesh.get_group(0))
+                sharded_tensor = distribute_tensor(
+                    full_tensor, mesh, sharded_meta_param.placements
+                )
+                sharded_sd[param_name] = nn.Parameter(sharded_tensor)
+
+        model.load_state_dict(sharded_sd, assign=True)
+        for param in model.parameters():
+            self.assertIsInstance(param, DTensor)
+            self.assertEqual(param.device.type, "cuda")
+
+        # Construct the reference model on nonzero ranks by broadcasting the
+        # unsharded model from rank 0 and sharding on all ranks
+        if self.rank != 0:
+            ref_model = Transformer(model_args)
+        for param in ref_model.parameters():
+            torch.distributed.broadcast(param.detach(), src=0)
+        for module in ref_model.modules():
+            if isinstance(module, TransformerBlock):
+                fully_shard(module, mesh=fsdp_mesh)
+        fully_shard(ref_model, mesh=fsdp_mesh)
+
+        for (param_name, param), (ref_param_name, ref_param) in zip(
+            model.named_parameters(), ref_model.named_parameters()
+        ):
+            self.assertEqual(param_name, ref_param_name)
+            self.assertEqual(param, ref_param)
+
+        # Check one forward/backward for parity
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device="cuda")
+        loss = model(inp).sum()
+        loss.backward()
+        ref_loss = ref_model(inp).sum()
+        ref_loss.backward()
+        self.assertEqual(loss, ref_loss)
+        for param, ref_param in zip(model.parameters(), ref_model.parameters()):
+            self.assertEqual(param.grad, ref_param.grad)
+
+
+class TestFullyShardProcessGroupInit(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 4
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_process_group_init(self):
+        assert self.world_size == 4, f"{self.world_size}"
+        # For convenience, use device mesh's infra to construct the DP PG
+        # (in practice, the trainer would do it manually via `new_group()`)
+        dp_size = 2
+        global_mesh = init_device_mesh(
+            "cuda", (dp_size, self.world_size // dp_size), mesh_dim_names=("dp", "tp")
+        )
+        ref_dp_mesh, tp_mesh = global_mesh["dp"], global_mesh["tp"]
+        dp_pg = ref_dp_mesh.get_group(0)
+
+        # Check the `from_group()` API for correctness
+        dp_mesh = DeviceMesh.from_group(dp_pg, "cuda")
+        self.assertEqual(dp_mesh.mesh, ref_dp_mesh.mesh)
+        self.assertEqual(dp_mesh, ref_dp_mesh)
+        # self.assertFalse(hasattr(dp_mesh, "_coordinate_on_dim"))
+        self.assertEqual(dp_mesh._coordinate_on_dim, ref_dp_mesh._coordinate_on_dim)
+        self.assertEqual(dp_mesh._dim_group_infos, ref_dp_mesh._dim_group_infos)
+
+        # Check 1D FSDP forward/backward parity over the DP mesh
+        # NOTE: We cannot use 2D DTensor-based training here because the DP
+        # mesh from `from_group` does not respect the parent mesh.
+        torch.manual_seed(42)
+        mlp_dim = 8
+        ref_model = MLP(mlp_dim)
+        for param in ref_model.parameters():
+            dist.broadcast(param.detach(), src=0)
+        model = copy.deepcopy(ref_model)
+
+        # Parallelize the test model with the ref DP mesh
+        for module in (ref_model.in_proj, ref_model.out_proj, ref_model):
+            fully_shard(module, mesh=ref_dp_mesh)
+        # Parallelize the test model with the new DP mesh from the PG
+        for module in (model.in_proj, model.out_proj, model):
+            fully_shard(module, mesh=dp_mesh)
+
+        # Ensure that TP ranks have the same input
+        inp = torch.randn((4, mlp_dim), device="cuda")
+        if self.rank in (0, 1):
+            dist.broadcast(inp, src=0, group=tp_mesh.get_group(0))
+        elif self.rank in (2, 3):
+            dist.broadcast(inp, src=2, group=tp_mesh.get_group(0))
+
+        ref_loss = ref_model(inp).sum()
+        ref_loss.backward()
+        loss = model(inp).sum()
+        loss.backward()
+        self.assertEqual(loss, ref_loss)
+        for param, ref_param in zip(model.parameters(), ref_model.parameters()):
+            self.assertEqual(param, ref_param)
+            self.assertEqual(param.grad, ref_param.grad)
 
 
 if __name__ == "__main__":
