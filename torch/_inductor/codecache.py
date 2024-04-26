@@ -51,7 +51,6 @@ from typing import (
 )
 
 import torch
-
 from torch._dynamo.device_interface import (
     get_interface_for_device,
     get_registered_device_interfaces,
@@ -59,7 +58,10 @@ from torch._dynamo.device_interface import (
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
-from torch._inductor.utils import cache_dir, clear_on_fresh_inductor_cache, is_linux
+from torch._inductor.runtime.runtime_utils import cache_dir
+from torch._inductor.utils import clear_on_fresh_inductor_cache, is_linux
+
+from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import (
     extract_tensor_metadata,
     FakeTensor,
@@ -106,6 +108,8 @@ else:
 output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
 
 LOCK_TIMEOUT = 600
+
+_IS_WINDOWS = sys.platform == "win32"
 
 # timing metrics for time spent in the compilation
 _cumulative_compile_time = 0.0
@@ -213,12 +217,10 @@ class CacheBase:
 
     def update_local_cache(self, local_cache: Dict[str, Any]) -> None:
         local_cache_path = self.get_local_cache_path()
-        if not os.path.exists(local_cache_path.parent):
-            os.makedirs(local_cache_path.parent, exist_ok=True)
-
         write_atomic(
             str(local_cache_path),
             json.dumps({"system": self.system, "cache": local_cache}, indent=4),
+            make_dirs=True,
         )
 
 
@@ -391,20 +393,22 @@ def write(
     # spaces.
     key: str = get_hash(content.strip(), extra, hash_type)
     basename, subdir, path = get_path(key, extension, specified_dir)
-    if not os.path.exists(subdir):
-        os.makedirs(subdir, exist_ok=True)
     if not os.path.exists(path):
-        write_atomic(path, content)
+        write_atomic(path, content, make_dirs=True)
     return basename, path
 
 
-def write_atomic(path: str, content: Union[str, bytes]) -> None:
+def write_atomic(
+    path: str, content: Union[str, bytes], make_dirs: bool = False
+) -> None:
     # Write into temporary file first to avoid conflicts between threads
     # Avoid using a named temporary file, as those have restricted permissions
     assert isinstance(
         content, (str, bytes)
     ), "Only strings and byte arrays can be saved in the cache"
     path = pathlib.Path(path)
+    if make_dirs:
+        path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.parent / f".{os.getpid()}.{threading.get_ident()}.tmp"
     write_mode = "w" if isinstance(content, str) else "wb"
     with tmp_path.open(write_mode) as f:
@@ -771,7 +775,7 @@ class FxGraphCache:
         artifact_path = get_path(graph.cache_key, "py")[2]
         if not os.path.exists(artifact_path):
             counters["inductor"]["fxgraph_lookup_write_file"] += 1
-            write_atomic(artifact_path, graph.source_code)
+            write_atomic(artifact_path, graph.source_code, make_dirs=True)
         try:
             graph.current_callable = PyCodeCache.load_by_key_path(
                 graph.cache_key,
@@ -834,14 +838,12 @@ class FxGraphCache:
             return
 
         subdir = FxGraphCache._get_tmp_dir_for_key(key)
-        if not os.path.exists(subdir):
-            os.makedirs(subdir, exist_ok=True)
 
         # Use a hash of the serialized CompiledFxGraph to get a unique file
         # name. The specific name doesn't matter since a lookup involves
         # iterating over all entries in the parent subdir.
         path = os.path.join(subdir, sha256_hash(content))
-        write_atomic(path, content)
+        write_atomic(path, content, make_dirs=True)
 
     @staticmethod
     def _check_can_cache(gm: torch.fx.GraphModule):
@@ -1049,6 +1051,40 @@ def is_clang() -> bool:
     return bool(re.search(r"(clang|clang\+\+)", cpp_compiler()))
 
 
+def get_compiler_version_info(compiler):
+    SUBPROCESS_DECODE_ARGS = ("oem",) if _IS_WINDOWS else ()
+    env = os.environ.copy()
+    env["LC_ALL"] = "C"  # Don't localize output
+    try:
+        version_string = subprocess.check_output(
+            [compiler, "-v"], stderr=subprocess.STDOUT, env=env
+        ).decode(*SUBPROCESS_DECODE_ARGS)
+    except Exception as e:
+        try:
+            version_string = subprocess.check_output(
+                [compiler, "--version"], stderr=subprocess.STDOUT, env=env
+            ).decode(*SUBPROCESS_DECODE_ARGS)
+        except Exception as e:
+            return ""
+    # Mutiple lines to one line string.
+    version_string = version_string.replace("\r", "_")
+    version_string = version_string.replace("\n", "_")
+    return version_string
+
+
+def _get_isa_dry_compile_fingerprint(isa_flags: str) -> str:
+    # ISA dry compile will cost about 1 sec time each startup time.
+    # Please check the issue: https://github.com/pytorch/pytorch/issues/100378
+    # Actually, dry compile is checking compile capability for ISA.
+    # We just record the compiler version, isa options and pytorch version info,
+    # and generated them to output binary hash path.
+    # It would optimize and skip compile existing binary.
+    compiler_info = get_compiler_version_info(cpp_compiler())
+    torch_version = torch.__version__
+    fingerprint = f"{compiler_info}={isa_flags}={torch_version}"
+    return fingerprint
+
+
 class VecISA:
     _bit_width: int
     _macro: str
@@ -1114,7 +1150,11 @@ cdll.LoadLibrary("__lib_path__")
         if config.is_fbcode():
             return True
 
-        key, input_path = write(VecISA._avx_code, "cpp")
+        key, input_path = write(
+            VecISA._avx_code,
+            "cpp",
+            extra=_get_isa_dry_compile_fingerprint(self._arch_flags),
+        )
         from filelock import FileLock
 
         lock_dir = get_lock_dir()
@@ -1127,8 +1167,11 @@ cdll.LoadLibrary("__lib_path__")
                 )
             )
             try:
+                # Check if the output file exist, and compile when not.
+                if not os.path.isfile(output_path):
+                    compile_file(input_path, output_path, build_cmd)
+
                 # Check build result
-                compile_file(input_path, output_path, build_cmd)
                 subprocess.check_call(
                     [
                         sys.executable,
@@ -1720,6 +1763,15 @@ class AotCodeCompiler:
             specified_dir=specified_output_path,
         )
         output_code_log.info("Output code written to: %s", input_path)
+        trace_structured(
+            "graph_dump",
+            lambda: {
+                "name": "inductor_aot_code",
+                "type": "cpp",
+                "filename": input_path,
+            },
+            payload_fn=lambda: source_code,
+        )
 
         def _compile_consts_linux(consts: bytes) -> str:
             _, consts_path = write(
@@ -1744,6 +1796,7 @@ class AotCodeCompiler:
             cmd = (
                 f"{objcopy_command} --rename-section"
                 " .data=.ldata"
+                " --set-section-alignment .data=64"  # following the gAlignment of CPU in c10/core/alignment.h
                 f" {consts_o} {consts_o}"
             )
             log.debug("aot constant rename section command: %s", cmd)
