@@ -849,11 +849,11 @@ def opcheck(
         >>> def _(x, y):
         >>>     return torch.empty_like(x)
         >>>
-        >>> def setup_context(ctx, inputs, output)
+        >>> def setup_context(ctx, inputs, output):
         >>>     y, = inputs
         >>>     ctx.y = y
         >>>
-        >>> def backward(ctx, grad)
+        >>> def backward(ctx, grad):
         >>>     return grad * ctx.y, None
         >>>
         >>> numpy_sin.register_autograd(backward, setup_context=setup_context)
