@@ -725,9 +725,10 @@ class TestIndexing(TestCase):
         v = torch.randn(5, 7, 3, device=device)
         mask = torch.ByteTensor([1, 0, 1, 1, 0]).to(device)
         with warnings.catch_warnings(record=True) as w:
-            self.assertEqual(v[mask].shape, (3, 7, 3))
-            self.assertEqual(v[mask], torch.stack([v[0], v[2], v[3]]))
-            self.assertEqual(len(w), 2)
+            res = v[mask]
+            self.assertEqual(res.shape, (3, 7, 3))
+            self.assertEqual(res, torch.stack([v[0], v[2], v[3]]))
+            self.assertEqual(len(w), 1)
 
         v = torch.tensor([1.], device=device)
         self.assertEqual(v[v == 0], torch.tensor([], device=device))
