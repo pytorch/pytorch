@@ -375,14 +375,14 @@ inline std::unordered_map<std::string, bool> getTensorMetadata(
   // Only add BackendMetaData for custom backend if the function pointer is
   // registered.
   std::cout << t.device() << std::endl;
+  int device_type = static_cast<int>(t.device().type());
+  const auto& BackendMetaSerialization = GetBackendMetaSerialization();
   if (BackendMetaSerialization[device_type].has_value()) {
     std::cout << "GetTensorMetadata Yes" << std::endl;
   }
   else{
     std::cout << "GetTensorMetadata No" << std::endl;
   }
-  int device_type = static_cast<int>(t.device().type());
-  const auto& BackendMetaSerialization = GetBackendMetaSerialization();
   if (BackendMetaSerialization[device_type].has_value()) {
     // Pass the tensor and metadata map references as parameters to the custom
     // serialization function.
