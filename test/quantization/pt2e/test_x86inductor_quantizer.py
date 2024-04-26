@@ -1433,7 +1433,8 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         linear_pos_list = [NodePosType.left, NodePosType.right, NodePosType.both]
         # TODO test for inplace add after refactoring of capture_pre_autograd_graph
         inplace_add_list = [False]
-        inplace_relu_list = [False, True]
+        # TODO test for inplace relu after refactoring of capture_pre_autograd_graph
+        inplace_relu_list = [False]
         example_inputs = (torch.randn(2, 16),)
         quantizer = X86InductorQuantizer().set_global(
             xiq.get_default_x86_inductor_quantization_config()
