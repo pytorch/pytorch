@@ -2683,6 +2683,23 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         self.instruction_pointer = None
         raise ReturnValueOp
 
+    def get_globals_source_and_value(self, name):
+        if "__name__" in self.f_globals:
+            module_name = self.f_globals["__name__"]
+            module_source = self.import_source(module_name)
+            fglobals_value = importlib.import_module(module_name)  # type: ignore[assignment]
+            fglobals_vt = VariableBuilder(self, module_source)(fglobals_value)
+            global_source = AttrSource(module_source, name)
+        else:
+            globals_name = self.output.install_global_by_id(
+                "___unnamed_scope", self.f_globals
+            )
+            globals_source = GlobalSource(globals_name)
+            fglobals_value = self.f_globals  # type: ignore[assignment]
+            fglobals_vt = VariableBuilder(self, globals_source)(fglobals_value)
+            global_source = GetItemSource(globals_source, name)  # type: ignore[assignment]
+        return fglobals_value, fglobals_vt, global_source
+
     def LOAD_GLOBAL(self, inst):
         if self.f_globals is self.parent.f_globals:
             super().LOAD_GLOBAL(inst)
@@ -2695,23 +2712,16 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             if inst.argval == "AssertionError":
                 unimplemented("assert with non-string message")
 
-            assert "__name__" in self.f_globals
-
-            module_name = self.f_globals["__name__"]
-            module_source = self.import_source(module_name)
-            module_value = importlib.import_module(module_name)
-            module_vt = VariableBuilder(self, module_source)(module_value)
-
-            if self.output.side_effects.is_attribute_mutation(module_vt):
-                self.push(self.output.side_effects.load_attr(module_vt, name))
+            _, fglobals_vt, global_source = self.get_globals_source_and_value(name)
+            if self.output.side_effects.is_attribute_mutation(fglobals_vt):
+                self.push(self.output.side_effects.load_attr(fglobals_vt, name))
             else:
-                source = AttrSource(module_source, name)
                 try:
                     value = self.f_globals[name]
                 except KeyError:
                     return self.load_builtin(inst)
 
-                self.push(VariableBuilder(self, source)(value))
+                self.push(VariableBuilder(self, global_source)(value))
 
     def STORE_GLOBAL(self, inst):
         if self.f_globals is self.parent.f_globals:
@@ -2719,16 +2729,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         else:
             value = self.pop()
             name = inst.argval
-            assert "__name__" in self.f_globals
-
-            module_name = self.f_globals["__name__"]
-            module_source = self.import_source(module_name)
-            module_value = importlib.import_module(module_name)
-            module_vt = VariableBuilder(self, module_source)(module_value)
-            module_vt = self.output.side_effects.track_object_existing(
-                module_value, module_vt
+            fglobals_value, fglobals_vt, _ = self.get_globals_source_and_value(name)
+            fglobals_vt = self.output.side_effects.track_object_existing(
+                fglobals_value, fglobals_vt
             )
-            self.output.side_effects.store_attr(module_vt, name, value)
+            self.output.side_effects.store_attr(fglobals_vt, name, value)
 
 
 class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
