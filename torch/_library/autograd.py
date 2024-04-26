@@ -36,6 +36,18 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
             saved_keyword_only_args = None
             result = op.redispatch(keyset & _C._after_autograd_keyset, *args, **kwargs)
             if info._setup_context_fn:
+                # The Dispatcher will remove args that are equal to their default
+                # values from (args, kwargs). We're going to add it back so that
+                # the user can access them.
+                #
+                # This is OK to do: The Dispatcher removed the args for serialization
+                # FC/BC reasons (that is, a graph will not store args that are equal
+                # to their default values), but that doesn't matter here. If the user
+                # adds a new default arg, then they must update
+                # their setup_context (along with the rest of their operator
+                # registrations)
+                args, kwargs = utils.fill_defaults(op._schema, args, kwargs)
+
                 if has_kwarg_only_args:
                     info._setup_context_fn(
                         ctx=ctx, inputs=args, keyword_only_inputs=kwargs, output=result
