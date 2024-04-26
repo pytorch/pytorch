@@ -1097,7 +1097,7 @@ class GraphModuleSerializer(metaclass=Final):
                 # undefined Tensor which will be implicitly converted to None in Python.
                 output_arguments.append(Argument.create(as_none=()))
             elif isinstance(meta, FakeTensor):
-                assert isinstance(return_schema.real_type, torch.TensorType)
+                assert isinstance(return_schema.real_type, (torch.OptionalType, torch.TensorType))
                 user_node = _output_node_at_index(node, idx)
                 name = (
                     user_node.name
@@ -1421,8 +1421,7 @@ class GraphModuleDeserializer(metaclass=Final):
                         self.shape_env.add_var_to_val(sym, hint)
 
                     if vr := self.symbol_name_to_range.get(val.expr_str):
-                        symbolic_shapes._constrain_symbol_range(
-                            self.shape_env,
+                        self.shape_env.constrain_symbol_range(
                             sym,
                             compiler_min=vr.lower,  # type: ignore[arg-type]
                             compiler_max=vr.upper,  # type: ignore[arg-type]
@@ -1437,8 +1436,7 @@ class GraphModuleDeserializer(metaclass=Final):
                         if s.name not in self.symbol_name_to_symbol:
                             self.symbol_name_to_symbol[s.name] = s
                         if vr := self.symbol_name_to_range.get(s.name):
-                            symbolic_shapes._constrain_symbol_range(
-                                self.shape_env,
+                            self.shape_env.constrain_symbol_range(
                                 s,
                                 compiler_min=vr.lower,  # type: ignore[arg-type]
                                 compiler_max=vr.upper,  # type: ignore[arg-type]
