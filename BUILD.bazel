@@ -536,29 +536,6 @@ cc_library(
     ],
 )
 
-py_binary(
-    name = "gen_op",
-    srcs = ["caffe2/contrib/aten/gen_op.py"],
-    deps = ["//torchgen"],
-)
-
-genrule(
-    name = "generated_caffe2_aten_op_headers",
-    srcs = [
-        "caffe2/contrib/aten/aten_op_template.h",
-        "aten/src/ATen/Declarations.yaml",
-    ],
-    outs = ["caffe2/caffe2/contrib/aten/gen_aten_op.h"],
-    cmd = """
-    $(location :gen_op) \
-        --output_prefix gen_ \
-        --install_dir $(@D) \
-        --aten_root `dirname $(location aten/src/ATen/Declarations.yaml)`/../.. \
-        --template_dir `dirname $(location caffe2/contrib/aten/aten_op_template.h)` \
-        --yaml_dir `dirname $(location aten/src/ATen/Declarations.yaml)`""",
-    tools = [":gen_op"],
-)
-
 cc_library(
     name = "caffe2_headers",
     hdrs = glob(
@@ -588,7 +565,7 @@ cc_library(
     ) + if_cuda(glob([
         "caffe2/**/*.cuh",
         "caffe2/image/*.h",
-    ])) + [":generated_caffe2_aten_op_headers"],
+    ])),
     copts = CAFFE2_COPTS,
     includes = [
         "caffe2/core/nomnigraph/include",
