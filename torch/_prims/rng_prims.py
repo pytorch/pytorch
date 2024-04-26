@@ -1,7 +1,6 @@
 from typing import Optional, Tuple
 
 import torch
-import torch.library
 import torch.utils._pytree as pytree
 from torch import _prims
 from torch._C import DispatchKey
