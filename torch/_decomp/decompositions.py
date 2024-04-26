@@ -2057,13 +2057,6 @@ def _fused_dropout_decomposition(input, p, generator=None):
     return (res, mask)
 
 
-def device_hint(tensor):
-    if isinstance(tensor, torch._subclasses.FakeTensor):
-        return tensor.fake_device
-    else:
-        return None
-
-
 @register_decomposition(aten._to_copy)
 @out_wrapper()
 def _to_copy(
@@ -2081,7 +2074,6 @@ def _to_copy(
     if device is None and dtype is None and memory_format is None:
         return x.clone()
     dtype_converted = False
-    common_device = device_hint(x)
 
     if device is not None and device != x.device:
         # avoid conversions on cpu
