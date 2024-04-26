@@ -351,21 +351,9 @@ cmake = CMake()
 
 def get_submodule_folders():
     git_modules_path = os.path.join(cwd, ".gitmodules")
-    default_modules_path = [
-        os.path.join(third_party_path, name)
-        for name in [
-            "gloo",
-            "cpuinfo",
-            "tbb",
-            "onnx",
-            "foxi",
-            "QNNPACK",
-            "fbgemm",
-            "cutlass",
-        ]
-    ]
     if not os.path.exists(git_modules_path):
-        return default_modules_path
+        report(f"Could not find the file: {git_modules_path}")
+        sys.exit(1)
     with open(git_modules_path) as f:
         return [
             os.path.join(cwd, line.split("=", 1)[1].strip())
@@ -381,28 +369,24 @@ def check_submodules():
             report("Did you run 'git submodule update --init --recursive'?")
             sys.exit(1)
 
-    def not_exists_or_empty(folder):
-        return not os.path.exists(folder) or (
-            os.path.isdir(folder) and len(os.listdir(folder)) == 0
-        )
-
     if bool(os.getenv("USE_SYSTEM_LIBS", False)):
         return
+
     folders = get_submodule_folders()
-    # If none of the submodule folders exists, try to initialize them
-    if all(not_exists_or_empty(folder) for folder in folders):
-        try:
-            print(" --- Trying to initialize submodules")
-            start = time.time()
-            subprocess.check_call(
-                ["git", "submodule", "update", "--init", "--recursive"], cwd=cwd
-            )
-            end = time.time()
-            print(f" --- Submodule initialization took {end - start:.2f} sec")
-        except Exception:
-            print(" --- Submodule initalization failed")
-            print("Please run:\n\tgit submodule update --init --recursive")
-            sys.exit(1)
+    try:
+        report(" --- Trying to initialize/update submodules")
+        start = time.time()
+        subprocess.check_call(["git", "submodule", "sync"], cwd=cwd)
+        subprocess.check_call(
+            ["git", "submodule", "update", "--init", "--recursive"], cwd=cwd
+        )
+        end = time.time()
+        report(f" --- Submodule initialization/updation took {end - start:.2f} sec")
+    except Exception:
+        report(" --- Submodule initalization failed")
+        report("Please run:\n\tgit submodule update --init --recursive")
+        sys.exit(1)
+
     for folder in folders:
         check_for_files(
             folder,
@@ -1100,10 +1084,10 @@ build_update_message = """
 def print_box(msg):
     lines = msg.split("\n")
     size = max(len(l) + 1 for l in lines)
-    print("-" * (size + 2))
+    report("-" * (size + 2))
     for l in lines:
-        print("|{}{}|".format(l, " " * (size - len(l))))
-    print("-" * (size + 2))
+        report("|{}{}|".format(l, " " * (size - len(l))))
+    report("-" * (size + 2))
 
 
 def main():
@@ -1151,7 +1135,7 @@ def main():
     try:
         dist.parse_command_line()
     except setuptools.distutils.errors.DistutilsArgError as e:
-        print(e)
+        report(e)
         sys.exit(1)
 
     mirror_files_into_torchgen()
