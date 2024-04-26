@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pythoncapi_compat.h>
+#include <iostream>
 #include <sstream>
 #include <vector>
 
@@ -49,6 +50,14 @@ Notes:
 namespace torch::dynamo::autograd {
 using c10::SymInt;
 
+// snapshot of python verbose logging toggle
+static bool is_verbose_logging_enabled;
+static constexpr std::string_view VLOG_PREFIX =
+    "[python_compiled_autograd.cpp] ";
+std::ostream& vcout() {
+  return std::cout << VLOG_PREFIX;
+}
+
 static PyObject* wrap_int_list(const std::vector<int64_t>& inputs) {
   PyObject* pyinput = PyTuple_New(static_cast<Py_ssize_t>(inputs.size()));
   for (const auto i : c10::irange(inputs.size())) {
@@ -90,9 +99,11 @@ struct CacheNode {
     return &_root;
   }
 
-  CacheNode* lookup(const CacheKey& key) {
+  CacheNode* lookup(const CacheKey& key, bool create = true) {
     auto it = next.find(key);
     if (it == next.end()) {
+      if (!create)
+        return nullptr;
       // caller's key is in temporary memory, must copy it
       CacheKeyBuffer buffer(key.key, key.key_size);
       CacheKey key_with_storage(key.node_type, buffer.get(), key.key_size);
@@ -145,12 +156,20 @@ struct CacheNode {
     TORCH_INTERNAL_ASSERT(expected_sizes.size() == call.all_size_inputs.size());
     for (const auto i : c10::irange(len)) {
       auto& expected = expected_sizes[i];
-      if (expected.dyn_type == SizeInput::DYNAMIC ||
-          expected.value != data[i].value) {
-        cache_hit = cache_hit && expected.dyn_type == SizeInput::DYNAMIC;
-        if (expected.value != data[i].value) {
-          expected = SizeInput(SizeInput::DYNAMIC, data[i].value);
+      bool was_dynamic = expected.dyn_type == SizeInput::DYNAMIC;
+      bool changed_value = expected.value != data[i].value;
+      if (changed_value) {
+        if (!was_dynamic) {
+          cache_hit = false;
+          if (is_verbose_logging_enabled) {
+            vcout() << "cache miss: marking sizes[" << i << "] as dynamic"
+                    << std::endl;
+          }
         }
+        expected = SizeInput(SizeInput::DYNAMIC, data[i].value);
+      }
+
+      if (changed_value || was_dynamic) {
         if (call.dyn_size_inputs.empty()) {
           call.dyn_size_inputs.reserve(len);
         }
@@ -166,7 +185,7 @@ struct CacheNode {
     return cache_hit;
   }
 
-  PyObject* wrap_dynamic_inputs() {
+  PyObject* wrap_dynamic_inputs() const {
     size_t dynamic_count = 0;
     size_t idx = 0;
     for (const auto& i : expected_sizes) {
@@ -184,7 +203,8 @@ struct CacheNode {
     return pyinput;
   }
 
-  std::vector<c10::optional<SymInt>> unwrap_dynamic_inputs(PyObject* pyresult) {
+  std::vector<c10::optional<SymInt>> unwrap_dynamic_inputs(
+      PyObject* pyresult) const {
     TORCH_INTERNAL_ASSERT(PyList_CheckExact(pyresult));
     size_t idx = 0;
     size_t result_len = PyList_GET_SIZE(pyresult);
@@ -237,8 +257,6 @@ static PyObject* is_cache_empty(PyObject* dummy, PyObject* args) {
   END_HANDLE_TH_ERRORS;
 }
 
-// snapshot of python verbose logging toggle
-static bool is_verbose_logging_enabled;
 static PyObject* set_verbose_logging(PyObject* dummy, PyObject* args) {
   HANDLE_TH_ERRORS;
   if (!PyArg_ParseTuple(args, "p", &is_verbose_logging_enabled)) {
@@ -348,7 +366,13 @@ CacheNode* _compiled_autograd_impl(
         fn->compiled_args(node_args);
         node_args.collect(call.node->next_edges());
       }
-      cache = cache->lookup(node_args.key());
+      CacheKey key = node_args.key();
+      if (is_verbose_logging_enabled &&
+          cache->lookup(key, /*create=*/false) == nullptr) {
+        vcout() << "Creating cache entry for " << fn->name()
+                << ", with key of size " << key.key_size << std::endl;
+      }
+      cache = cache->lookup(key);
     }
 
     for (const auto& edge : fn->next_edges()) {
