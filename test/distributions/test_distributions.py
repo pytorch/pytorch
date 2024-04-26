@@ -3752,11 +3752,11 @@ class TestDistributions(DistributionsTestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_dirichlet_log_prob_zero(self):
-        # Specifically test the special case where x=0 and α=1.  The PDF is
-        # proportional to x**(α-1), which in this case works out to 0**0=1.
+        # Specifically test the special case where x=0 and alpha=1.  The PDF is
+        # proportional to x**(alpha-1), which in this case works out to 0**0=1.
         # The log PDF of this term should therefore be 0.  However, it's easy
         # to accidentally introduce NaNs by calculating log(x) without regard
-        # for the value of α-1.
+        # for the value of alpha-1.
         alpha = torch.tensor([1, 2])
         dist = Dirichlet(alpha)
         x = torch.tensor([0, 1])
