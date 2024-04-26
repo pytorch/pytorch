@@ -741,6 +741,7 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        "@fbgemm//:fbgemm_src_headers",
         ":torch_headers",
         "//caffe2/proto:torch_cc_proto",
         "@kineto",
