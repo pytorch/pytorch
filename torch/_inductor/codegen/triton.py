@@ -1974,7 +1974,10 @@ class TritonKernel(Kernel):
                 line = f"tl.load({var} + ({original_index}))"
                 append_broadcast = indexing.expand_str
             else:
-                line = f"tl.load({var} + ({indexing.index_str}), {indexing.mask_str}{ep}{other})"
+                if torch.version.hip is not None:
+                    line = f"tl.load({var} + ({indexing.index_str}), {indexing.mask_str}.to(tl.int1){ep}{other})"
+                else:
+                    line = f"tl.load({var} + ({indexing.index_str}), {indexing.mask_str}{ep}{other})"
 
             dtype = V.graph.get_dtype(name)
             if dtype in (torch.float16, torch.bfloat16):
