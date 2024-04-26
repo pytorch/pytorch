@@ -34,6 +34,7 @@ from . import (
     Dataset,)
 
 from torch.utils.data.datapipes.datapipe import _IterDataPipeSerializationWrapper, _MapDataPipeSerializationWrapper
+from torch.utils.backend_registration import _get_custom_mod_func
 
 from . import _utils
 
@@ -178,7 +179,8 @@ class DataLoader(Generic[T_co]):
             the worker processes after a dataset has been consumed once. This allows to
             maintain the workers `Dataset` instances alive. (default: ``False``)
         pin_memory_device (str, optional): the device to :attr:`pin_memory` to if ``pin_memory`` is
-            ``True``.
+            ``True``. If not set and ``pin_memory`` is ``True``, available device/CUDA will be
+            selected automatically and CUDA is the first choice.
 
 
     .. warning:: If the ``spawn`` start method is used, :attr:`worker_init_fn`
@@ -580,19 +582,27 @@ class _BaseDataLoaderIter:
         ws, rank = _get_distributed_settings()
         self._world_size = ws
         self._rank = rank
-        # for other backends, pin_memory_device need to set. if not set
-        # default behaviour is CUDA device. if pin_memory_device is selected
-        # and pin_memory is not set, the default behaviour false.
-        if (len(loader.pin_memory_device) == 0):
-            self._pin_memory = loader.pin_memory and torch.cuda.is_available()
-            self._pin_memory_device = None
+        # if pin_memory_device not set, first find CUDA device, if not then
+        # try to get 3rd party device, otherwise disable pin memory.
+        # if pin_memory_device is selected and pin_memory is not set, the
+        # default behaviour false.
+        self._pin_memory = loader.pin_memory
+        self._pin_memory_device: Union[str, None] = None
+        if len(loader.pin_memory_device) == 0:
+            if loader.pin_memory:
+                if torch.cuda.is_available():
+                    self._pin_memory_device = "cuda"
+                elif hasattr(torch, torch._C._get_privateuse1_backend_name()) and \
+                        _get_custom_mod_func("is_available")():
+                    self._pin_memory_device = torch._C._get_privateuse1_backend_name()
+                else:
+                    warnings.warn("pin_memory is set as true but no CUDA/device is found, then device pinned memory won't be used.")
+                    self._pin_memory = False
         else:
             if not loader.pin_memory:
-                warn_msg = ("pin memory device is set and pin_memory flag is not used then device pinned memory won't be used"
-                            "please set pin_memory to true, if you need to use the device pin memory")
+                warn_msg = ("pin_memory_device is set but pin_memory flag is not used, then device pinned memory won't be used. "
+                            "Please set pin_memory as true, if you need to use the device pin memory.")
                 warnings.warn(warn_msg)
-
-            self._pin_memory = loader.pin_memory
             self._pin_memory_device = loader.pin_memory_device
         self._timeout = loader.timeout
         self._collate_fn = loader.collate_fn
