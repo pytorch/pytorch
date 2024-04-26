@@ -10172,7 +10172,7 @@ fn
                     self.fc_ref = fc
 
                 def forward(self, x):
-                    return self.fc_ref(x)
+                    return self.fc_ref(x[0])
 
             # return fc to keep it alive in _test_compile_model_free
             return Mod(), (torch.randn(100, 100), fc)
@@ -10190,7 +10190,7 @@ fn
                     self.param = param
 
                 def forward(self, x):
-                    return self.param * x
+                    return self.param * x[0]
 
             # return param to keep it alive in _test_compile_model_free
             return Mod(), (torch.randn(100, 100), param)
