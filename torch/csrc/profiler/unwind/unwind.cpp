@@ -120,8 +120,8 @@ static const char* process_name() {
 }
 
 struct Version {
-  uint64_t adds_ = LONG_LONG_MAX;
-  uint64_t subs_ = LONG_LONG_MAX;
+  uint64_t adds_ = LLONG_MAX;
+  uint64_t subs_ = LLONG_MAX;
 };
 
 struct UnwindCache {
