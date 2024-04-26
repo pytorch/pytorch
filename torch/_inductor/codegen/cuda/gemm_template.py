@@ -1158,6 +1158,8 @@ class CKGemmTemplate(CKTemplate):
 
         op_instances = self._parse_instances(grep_result.stdout.strip().split("\n"))
 
+        log.debug(f"ck instances from library: {len(op_instances)}")
+
         schedulers = [
             "BlockGemmPipelineScheduler::Intrawave",
             "BlockGemmPipelineScheduler::Interwave",
@@ -1191,17 +1193,21 @@ class CKGemmTemplate(CKTemplate):
                     )
 
         filtered_instances = list(filter(lambda op: self.filter_op(op), substitute_instances))
+        log.debug(f"ck instances filtered: {len(filtered_instances)}")
         # chosen_instances = filtered_instances[:config.rocm.n_max_profiling_configs]
         # NB: when using a fixed list order, most likely we will pick the subset of instances
         # which are very similar to each other. Randomizing the choice seems to solve this.
         random.seed(-11)
-        chosen_instances = random.sample(filtered_instances, config.rocm.n_max_profiling_configs)
+        chosen_instances = random.sample(filtered_instances, config.rocm.n_max_profiling_configs) if config.rocm.n_max_profiling_configs else filtered_instances
         log.debug(f"generated {len(chosen_instances)} ck instances: {chosen_instances}")
 
         return chosen_instances
 
     def _gen_ops_preselected(self):
-        return self._parse_instances(self.preselected_instances.split('\n'))
+        unfiltered_instances = self._parse_instances(self.preselected_instances.split('\n'))
+        filtered_instances = list(filter(lambda op: self.filter_op(op), unfiltered_instances))
+        log.debug(f"ck instances filtered: {len(filtered_instances)}")
+        return filtered_instances
 
     def gen_ops(self):
         return self._gen_ops_preselected() if config.rocm.use_preselected_instances else self._gen_ops_library()
@@ -1223,6 +1229,7 @@ class CKGemmTemplate(CKTemplate):
             input_reorder=input_reorder,
         )
         ops = template.gen_ops()
+        log.debug(f"ck instance choices: {ops}")
         for op in ops:
             template.maybe_append_choice(
                 choices,

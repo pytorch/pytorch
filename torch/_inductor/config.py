@@ -835,7 +835,7 @@ class rocm:
     # Number of op instance choices
     n_max_profiling_configs: Optional[int] = None
 
-    use_preselected_instances: bool = True
+    use_preselected_instances: bool = False
 
 
 # create a directory containing lots of debug information
