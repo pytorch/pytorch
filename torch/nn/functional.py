@@ -856,6 +856,36 @@ def max_pool3d_with_indices(
         stride = torch.jit.annotate(List[int], [])
     return torch._C._nn.max_pool3d_with_indices(input, kernel_size, stride, padding, dilation, ceil_mode)
 
+def deterministic_max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, deterministic=False):
+    """
+    A version of the max_pool3d operation that can optionally be made deterministic.
+
+    Args:
+        input (Tensor): The input tensor.
+        kernel_size (int or tuple): Size of the pooling window.
+        stride (int or tuple, optional): Stride of the pooling window. Default: None (same as kernel_size).
+        padding (int or tuple, optional): Zero-padding added to both sides of the input. Default: 0.
+        dilation (int or tuple, optional): A parameter that controls the stride of elements in the window. Default: 1.
+        ceil_mode (bool, optional): Whether to use ceil instead of floor to compute the output shape. Default: False.
+        deterministic (bool, optional): Whether to enforce deterministic behavior. Default: False.
+
+    Returns:
+        Tensor: The pooled tensor.
+    """
+    if deterministic:
+        # Set torch to use deterministic algorithms (where available)
+        torch.use_deterministic_algorithms(True)
+
+    # Call the regular max_pool3d function
+    output = torch.nn.functional.max_pool3d(
+        input, kernel_size, stride, padding, dilation, ceil_mode
+    )
+
+    if deterministic:
+        # Reset to original state if necessary
+        torch.use_deterministic_algorithms(False)
+
+    return output
 
 def _max_pool3d(
     input: Tensor, kernel_size: BroadcastingList3[int],
