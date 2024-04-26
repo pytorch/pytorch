@@ -399,7 +399,7 @@ class TestAutograd(TestCase):
         @staticmethod
         @once_differentiable
         def backward(ctx, input):
-            raise Exception("Simulate error on backward pass")
+            raise Exception("Simulate error on backward pass")  # noqa: TRY002
 
     def test_custom_function_exception(self):
         t1 = torch.rand((3, 3), requires_grad=True)
@@ -4628,11 +4628,11 @@ Done""",
         self.assertEqual(avg.count, 4)
         self.assertEqual(avg.cpu_time_total, 30)
         self.assertEqual(avg.self_cpu_time_total, 30)
-        self.assertEqual(avg.cuda_time_total, 0)
+        self.assertEqual(avg.device_time_total, 0)
 
         # average stats
         self.assertEqual(avg.cpu_time, 7.5)
-        self.assertEqual(avg.cuda_time_total, 0)
+        self.assertEqual(avg.device_time_total, 0)
 
     def test_profiler_shapes(self):
         print("")
@@ -4696,9 +4696,7 @@ Done""",
         )  # make it us which is profiler default
         print("Total time based on python measurements: ", _format_time(total_time_us))
         print(
-            "CPU time measurement python side overhead: {:.2f}%".format(
-                (total_time_us / prof.self_cpu_time_total - 1.0) * 100.0
-            )
+            f"CPU time measurement python side overhead: {(total_time_us / prof.self_cpu_time_total - 1.0) * 100.0:.2f}%"
         )
 
         if sys.platform != "win32":

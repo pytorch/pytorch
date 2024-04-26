@@ -8046,7 +8046,7 @@ class TestTorch(TestCase):
             assert_with_filename(fname)
 
         if IS_FILESYSTEM_UTF8_ENCODING:
-            with TemporaryDirectoryName(suffix='中文') as dname, TemporaryFileName(dir=dname) as fname:
+            with TemporaryDirectoryName(suffix='\u4e2d\u6587') as dname, TemporaryFileName(dir=dname) as fname:
                 assert_with_filename(fname)
 
     def test_torch_from_file(self):
@@ -8077,7 +8077,7 @@ class TestTorch(TestCase):
             assert_with_filename(fname)
 
         if IS_FILESYSTEM_UTF8_ENCODING:
-            with TemporaryDirectoryName(suffix='中文') as dname, TemporaryFileName(dir=dname) as fname:
+            with TemporaryDirectoryName(suffix='\u4e2d\u6587') as dname, TemporaryFileName(dir=dname) as fname:
                 assert_with_filename(fname)
 
     def test_print(self):
@@ -8847,7 +8847,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         out = torch.empty(4, 3, 16, 16, device='meta', dtype=torch.double)
         self.assertExpectedRaisesInline(
             RuntimeError, lambda: torch._C._nn.upsample_nearest2d(x, (16, 16), out=out),
-            """Expected out tensor to have dtype float, but got double instead"""
+            """Expected out tensor to have dtype torch.float32 but got torch.float64 instead"""
         )
 
         # Complain if out device mismatch
@@ -8857,7 +8857,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         if not TEST_WITH_TORCHINDUCTOR:
             self.assertExpectedRaisesInline(
                 RuntimeError, lambda: torch._C._nn.upsample_nearest2d(x, (16, 16), out=out),
-                """Expected out tensor to have device meta, but got cpu instead"""
+                """Attempting to copy from device meta to device cpu, but cross-device copies are not allowed!"""
             )
 
     def test_add_meta_scalar(self):
@@ -9126,8 +9126,8 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         for seed, expected_initial_seed in test_cases:
             torch.manual_seed(seed)
             actual_initial_seed = torch.initial_seed()
-            msg = "expected initial_seed() = {:x} after calling manual_seed({:x}), but got {:x} instead".format(
-                expected_initial_seed, seed, actual_initial_seed)
+            msg = (f"expected initial_seed() = {expected_initial_seed:x} "
+                   f"after calling manual_seed({seed:x}), but got {actual_initial_seed:x} instead")
             self.assertEqual(expected_initial_seed, actual_initial_seed, msg=msg)
         for invalid_seed in [min_int64 - 1, max_uint64 + 1]:
             with self.assertRaisesRegex(RuntimeError, r'Overflow when unpacking long'):
@@ -9523,8 +9523,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
         device_set = {'cpu', 'cpu:0', 'cuda', 'cuda:0', 'cuda:1', 'cuda:10', 'cuda:100'}
         device_hash_set = set()
-        for device in device_set:
-            device_hash_set.add(hash(torch.device(device)))
+        device_hash_set.update(hash(torch.device(device)) for device in device_set)
         self.assertEqual(len(device_set), len(device_hash_set))
 
         def get_expected_device_repr(device):

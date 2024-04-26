@@ -586,8 +586,7 @@ class NamedTupleVariable(TupleVariable):
         return self.items[fields.index(name)]
 
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
-        fields = namedtuple_fields(self.tuple_cls)
-        return variables.ConstantVariable.create(name in fields)
+        return variables.ConstantVariable.create(hasattr(self.tuple_cls, name))
 
 
 class SliceVariable(BaseListVariable):

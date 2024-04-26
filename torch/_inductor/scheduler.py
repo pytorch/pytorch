@@ -26,7 +26,7 @@ from typing import (
 import sympy
 
 import torch
-from torch._dynamo.utils import dynamo_timed
+from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.utils._triton import has_triton
 
@@ -35,6 +35,7 @@ from .codegen.common import get_scheduling_for_device, Kernel
 from .comm_analysis import estimate_nccl_collective_runtime
 from .dependencies import Dep, MemoryDep, StarDep, WeakDep
 from .ir import ComputedBuffer, MultiOutput, MultiOutputLayout
+from .runtime.runtime_utils import green_text, red_text
 from .sizevars import SimplifyIndexing
 from .utils import (
     cache_on_self,
@@ -44,11 +45,9 @@ from .utils import (
     get_device_tflops,
     get_dtype_size,
     get_gpu_dram_gbps,
-    green_text,
     is_collective,
     is_gpu,
     is_wait,
-    red_text,
     sympy_product,
 )
 from .virtualized import V
@@ -355,7 +354,11 @@ class BaseSchedulerNode:
                 input_node: Optional[
                     BaseSchedulerNode
                 ] = self.scheduler.name_to_node.get(read.name)
-                if input_node and V.graph.wrapper_code.can_reuse(input_node, self):
+                if (
+                    input_node
+                    and V.graph.wrapper_code.can_reuse(input_node, self)
+                    and not isinstance(input_node, NopKernelSchedulerNode)
+                ):
                     assert input_node.users is not None
                     remaining_uses = [
                         x
@@ -614,9 +617,15 @@ class BaseSchedulerNode:
                 from torch._subclasses.fake_tensor import FakeTensorMode
                 from torch.utils.flop_counter import FlopCounterMode
 
-                with FakeTensorMode(), FlopCounterMode(
+                assert self.node.fx_node is not None
+                with FakeTensorMode() as fake_mode, FlopCounterMode(
                     display=False
-                ) as flop_counter_mode:
+                ) as flop_counter_mode, V.set_current_node(
+                    self.node.fx_node
+                ), V.set_fake_mode(
+                    fake_mode
+                ):
+                    assert V.current_node is not None
                     from .ir import ir_node_to_tensor
 
                     fake_inputs = [
@@ -1480,6 +1489,13 @@ class Scheduler:
 
         unbacked_symbol_to_origin_node = {}
 
+        # NB: None means that the dependency is on an input.  Don't actually
+        # generate a dependency because if we do, Inductor will start trying
+        # to free the unbacked int but that's pointless
+        for name, val in V.graph.graph_inputs.items():
+            if isinstance(val, sympy.Symbol):
+                unbacked_symbol_to_origin_node[val] = None
+
         for node in self.nodes:
             log.debug("scheduling %s", node.node)
 
@@ -1494,7 +1510,7 @@ class Scheduler:
                 # because if a MultiOutputLayout buffer propagates an unbacked
                 # symint to multiple outputs, they will all claim to def it.
                 if s not in unbacked_symbol_to_origin_node:
-                    unbacked_symbol_to_origin_node[s] = node
+                    unbacked_symbol_to_origin_node[s] = node.get_name()
 
             unbacked_symbol_uses = sorted(
                 node.node.get_unbacked_symbol_uses(), key=lambda x: x.name
@@ -1504,7 +1520,8 @@ class Scheduler:
                 assert (
                     s in unbacked_symbol_to_origin_node
                 ), f"{s} not in {unbacked_symbol_to_origin_node}"
-                node.add_fake_dep(StarDep(unbacked_symbol_to_origin_node[s].get_name()))
+                if (r := unbacked_symbol_to_origin_node[s]) is not None:
+                    node.add_fake_dep(StarDep(r))
 
             # a node will mutate either 0 or 1 buffers
             assert len(node.get_mutations()) <= 1
@@ -1549,9 +1566,11 @@ class Scheduler:
                 assert (
                     s in unbacked_symbol_to_origin_node
                 ), f"{s} not in {unbacked_symbol_to_origin_node.keys()}"
-                node_name = unbacked_symbol_to_origin_node[s].node.name
-                log.debug("scheduling output %s for unbacked symint %s", node_name, s)
-                add_user(node_name, OutputNode(StarDep(node_name)))
+                if (node_name := unbacked_symbol_to_origin_node[s]) is not None:
+                    log.debug(
+                        "scheduling output %s for unbacked symint %s", node_name, s
+                    )
+                    add_user(node_name, OutputNode(StarDep(node_name)))
 
         # make sure input mutation isn't dead-code-eliminated
         for name in self.mutation_renames:
@@ -2269,10 +2288,10 @@ class Scheduler:
                 possible_fusions_group_by_priority[fusion_pair_priority].append(
                     (node1, node2)
                 )
-        # Sorted by fusion_pair_priority and return the possible fusions with highest priority
-        possible_fusions_with_highest_priority = sorted(
+        # return the possible fusions with highest priority
+        possible_fusions_with_highest_priority = min(
             possible_fusions_group_by_priority.items(), key=lambda item: item[0]
-        )[0][1]
+        )[1]
         assert len(possible_fusions_with_highest_priority) > 0
         return possible_fusions_with_highest_priority
 
@@ -2288,9 +2307,7 @@ class Scheduler:
         Populate node.last_usage recursively (also for the nodes within a FusedSchedulerNode)
         """
 
-        future_used_buffers = set()
-        for node_name in V.graph.get_output_names():
-            future_used_buffers.add(node_name)
+        future_used_buffers = set(V.graph.get_output_names())
 
         for node in reversed(self.nodes):
             node.set_last_usage(future_used_buffers, self.mutation_real_name)
@@ -2380,6 +2397,7 @@ class Scheduler:
         # the current kernel from where 'allocate' retrieve those decisions.
         # We have to make sure there is a non-NULL kernel handler to store
         # those inplace update decisions.
+        counters["inductor"]["extern_calls"] += 1
         with V.set_kernel_handler(Kernel(increase_kernel_count=False)):
             scheduler_node.decide_inplace_update()
             scheduler_node.allocate()

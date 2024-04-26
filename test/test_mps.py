@@ -1089,6 +1089,7 @@ if not torch.backends.mps.is_available():
     NNTestCase = NoTest  # noqa: F811
 
 product_version = float('.'.join(platform.mac_ver()[0].split('.')[:2]) or -1)
+total_memory = int(subprocess.check_output(["sysctl", "-n", "hw.memsize"]))
 
 # Determine whether to enable MPS memory leak check (uses same code as CUDA).
 TEST_MPS_MEM_LEAK_CHECK = os.getenv('PYTORCH_TEST_MPS_MEM_LEAK_CHECK', '0') == '1'
@@ -1158,19 +1159,17 @@ class MpsMemoryLeakCheck:
         if caching_allocator_discrepancy and not driver_discrepancy:
             # Just raises a warning if the leak is not validated by the driver API
             msg = ("MPS caching allocator reports a memory leak not "
-                   "verified by the driver API in {}! "
-                   "Caching allocator allocated memory was {} and is now reported as {}. "
-                   "MPS driver allocated memory was {} and is now {}.").format(
-                self.name, self.caching_allocator_before,
-                caching_allocator_mem_allocated, self.driver_before, driver_mem_allocated)
+                   f"verified by the driver API in {self.name}! "
+                   f"Caching allocator allocated memory was {self.caching_allocator_before} "
+                   f"and is now reported as {caching_allocator_mem_allocated}. "
+                   f"MPS driver allocated memory was {self.driver_before} and is now {driver_mem_allocated}.")
             warnings.warn(msg)
         elif caching_allocator_discrepancy and driver_discrepancy:
             # A caching allocator discrepancy validated by the driver API is a failure
-            msg = ("MPS driver API confirmed a leak in {}! "
-                   "Caching allocator allocated memory was {} and is now reported as {}. "
-                   "MPS driver allocated memory was {} and is now {}.").format(
-                self.name, self.caching_allocator_before, caching_allocator_mem_allocated,
-                self.driver_before, driver_mem_allocated)
+            msg = (f"MPS driver API confirmed a leak in {self.name}! "
+                   f"Caching allocator allocated memory was {self.caching_allocator_before} "
+                   f"and is now reported as {caching_allocator_mem_allocated}. "
+                   f"MPS driver allocated memory was {self.driver_before} and is now {driver_mem_allocated}.")
 
             raise RuntimeError(msg)
 
@@ -1961,6 +1960,25 @@ class TestMPS(TestCaseMPS):
 
         helper(())
         helper((2, 4))
+
+    def test_linear_errors(self):
+        # Mixed CPU<->MPS tensors
+        size = (3, 3)
+
+        # Unsupported dtypes
+        with self.assertRaisesRegex(RuntimeError, "does not support linear for non-float weights"):
+            torch.nn.functional.linear(torch.rand(size, device='mps'),
+                                       torch.randint(-10, 10, size, dtype=torch.int8, device='mps'))
+
+        # Weigths on wrong device
+        with self.assertRaisesRegex(RuntimeError, "argument weight is on cpu but expected on mps"):
+            torch.nn.functional.linear(torch.rand(size, device='mps'),
+                                       torch.rand(size, device='cpu'))
+
+        # Input on wrong device
+        with self.assertRaisesRegex(RuntimeError, "argument input is on cpu but expected on mps"):
+            torch.nn.functional.linear(torch.rand(size, device='cpu'),
+                                       torch.rand(size, device='mps'))
 
     def _linear_helper(self, in_features, out_features, shape, bias=True, backward_pass=False):
         cpu_linear = torch.nn.Linear(in_features=in_features, out_features=out_features, device="cpu", bias=bias)
@@ -7014,6 +7032,16 @@ class TestMPS(TestCaseMPS):
         if product_version >= 14.0:
             # Test bfloat16 mm
             compare_mm(1024, 1, 32769, torch.bfloat16)
+
+    @unittest.skipIf(total_memory < 12_000_000_000, "Needs at least 12Gb RAM to run the test")
+    @unittest.skipIf(product_version < 14.0, "Can't allocate 4Gb tensor on MacOS 13")
+    def test_copy_large(self):
+        """ Test that copy of 4Gb+ tensors works """
+        x = torch.ones((2**30 + 11,), dtype=torch.float32)
+        y = x.to(device="mps")
+        self.assertTrue(torch.all(y == torch.tensor(1.0, device="mps")))
+        del y
+        del x
 
     # Test flip
     def test_flip(self):
