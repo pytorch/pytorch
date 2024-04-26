@@ -19,6 +19,7 @@ _bind_nn_parameter = _make_prim(
     ),
     impl_aten=lambda self, placeholder: placeholder.set_(self),
     doc=doc,
+    returns_alias=True,
 )
 torch.fx.node.has_side_effect(_bind_nn_parameter)
 

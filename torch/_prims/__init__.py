@@ -1226,6 +1226,7 @@ as_strided = _make_prim(
     impl_aten=_as_strided_aten,
     return_type=RETURN_TYPE.VIEW,
     doc=_as_strided_doc,
+    returns_alias=True,
 )
 
 
@@ -1594,6 +1595,7 @@ slice = _make_prim(
     impl_aten=_slice_aten,
     return_type=RETURN_TYPE.VIEW,
     doc=_slice_doc,
+    returns_alias=True,
 )
 
 
