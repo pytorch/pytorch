@@ -1619,10 +1619,6 @@ at::Tensor _convolution(
 #endif
       break;
     case ConvBackend::Overrideable:
-      input = input.contiguous(backend_memory_format);
-      weight = weight.contiguous(backend_memory_format);
-      bias = bias.defined() ? bias.contiguous() : bias;
-
       output = at::convolution_overrideable(
           input, weight, bias, params.stride, params.padding, params.dilation, params.transposed,
           params.output_padding, params.groups);
