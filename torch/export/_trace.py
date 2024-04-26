@@ -622,7 +622,7 @@ def _export_non_strict(
     constants = rewrite_script_object_meta(gm)
     constants.update(lift_constants_pass(gm, export_graph_signature, constant_attrs))
 
-    # FIXME(ycao): Skipping this because traced modules do not have signature yet
+    # HACK: Skipping this because traced modules do not have signature yet
     if not _is_torch_jit_trace:
         # prettify names for placeholder nodes
         placeholder_naming_pass(
@@ -1070,6 +1070,7 @@ def _export(
         _rewrite_non_persistent_buffers(mod, ep_non_strict.sig, ep_non_strict.constants)
         _verify_nn_module_stack(gm)
         _verify_stack_trace(gm)
+        # HACK: because jit modules do not have signature so we can't get the placeholder names
         if not _is_torch_jit_trace:
             _verify_placeholder_names(gm, ep_non_strict.sig)
         exported_program = ExportedProgram(
