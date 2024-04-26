@@ -11,9 +11,6 @@ on:
         required: true
         type: string
         description: Current branch.
-      github-token:
-        description: GITHUB_TOKEN
-        required: true
 
     outputs:
       workflow-type:
@@ -26,7 +23,7 @@ jobs:
     outputs:
       workflow-type: ${{ steps.set-condition.outputs.workflow-type }}
     env:
-      GITHUB_TOKEN: ${{ inputs.github-token }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Check if user is in arc_users.yml
         id: set-condition
