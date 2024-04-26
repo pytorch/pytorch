@@ -260,7 +260,7 @@ class CapabilityBasedPartitioner:
         for id, partition in partitions_by_id.items():
             logger.debug("partition #%s: %s", id, [node.name for node in partition.nodes])
 
-        return [partition for partition in partitions_by_id.values() if partition.size() > 0]
+        return list(partitions_by_id.values())
 
     def fuse_partitions(self, partitions: List[Partition]) -> GraphModule:
         logger.debug("Fusing partitions...")

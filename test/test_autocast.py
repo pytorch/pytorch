@@ -340,6 +340,8 @@ class TestTorchAutocast(TestCase):
         with self.assertRaisesRegex(RuntimeError, msg):
             with torch.autocast(device_type=dev):
                 _ = torch.tensor(1)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            assert torch.amp.is_autocast_available(device_type=dev)
 
 
 if __name__ == "__main__":
