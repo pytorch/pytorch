@@ -568,9 +568,6 @@ class TestOperators(TestCase):
                 xfail(
                     "NumpyExpMarkDirtyAutogradFunction"
                 ),  # TODO: https://github.com/pytorch/pytorch/issues/91280
-                # https://github.com/pytorch/pytorch/issues/96560
-                # ROCm: NotImplementedError
-                decorate("nn.functional.batch_norm", decorator=skipIfRocm),
                 # ROCm: NotImplementedError
                 decorate("nn.functional.instance_norm", decorator=skipIfRocm),
                 # --- Non-Contiguous Failures! ---
