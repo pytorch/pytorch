@@ -103,7 +103,7 @@ def reduce_to_scalar_loss(out):
     """Reduce the output of a model to get scalar loss"""
     if isinstance(out, torch.Tensor):
         # Mean does not work on integer tensors
-        return out.sum() / torch.tensor(out.numel(), device=out.device)
+        return out.sum() / out.numel()
     elif isinstance(out, (list, tuple)):
         return sum(reduce_to_scalar_loss(x) for x in out) / len(out)
     elif type(out).__name__ in (
