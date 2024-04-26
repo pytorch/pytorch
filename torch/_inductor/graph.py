@@ -74,6 +74,8 @@ from .utils import (
     gather_origins,
     get_cloned_parameter_buffer_name,
     get_sympy_Expr_dtype,
+    maybe_get_suppress_shape_guards_ctx,
+    should_assume_input_aligned,
 )
 from .virtualized import V
 
@@ -397,6 +399,8 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.effectful_ops: Dict[_EffectType, ir.Buffer] = {}
 
+        self.aligned_inputs: Set[str] = set()
+
     @staticmethod
     def decide_layout_opt(gm, *, is_inference) -> bool:
         """
@@ -711,6 +715,7 @@ class GraphLowering(torch.fx.Interpreter):
             and buffer.get_device() is not None
         ):
             self.add_device_info(buffer.get_device())
+
         return name
 
     def register_list(self, buffer_names: List[str]):
@@ -864,6 +869,22 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_inputs[target] = tensor
         self.graph_inputs_original[target] = tensor.data.data
         self.add_device_info(example.device)
+
+        # Note: [Input Alignment handling in Inductor]
+        # Alignment matters for generating efficient code. Some operations,
+        # e.g. vectorized loads, can only be performed on aligned inputs.
+        #
+        # But if we codegen assuming aligned inputs and then get unaligned
+        # inputs at runtime, then we are forced to clone - which is bad for
+        # both perf and memory usage.
+        #
+        # One option would be to guard on storage_offset%ALIGNMENT, and then
+        # codegen based on this. But storage_offset guards turned out to be
+        # expensive and cause recompiles; Instead, we're generating code
+        # based on the alignment of the example input without guarding.
+        with maybe_get_suppress_shape_guards_ctx():
+            if should_assume_input_aligned(example):
+                self.aligned_inputs.add(target)
         return tensor
 
     def call_function(self, target, args, kwargs):
@@ -1006,7 +1027,9 @@ class GraphLowering(torch.fx.Interpreter):
                 # AOT Autograd tries to detect stride divergence of inductor from output metadata.
                 # Here, we try to avoid spurious divergence by matching insignificant strides such as
                 result_correct_strides.append(
-                    self.match_insignificant_strides(r, fx_node.meta["val"].stride())
+                    self.try_match_insignificant_strides(
+                        r, fx_node.meta["val"].stride()
+                    )
                 )
 
         self.graph_outputs = result_correct_strides
@@ -1055,11 +1078,18 @@ class GraphLowering(torch.fx.Interpreter):
         finally:
             self.current_node = old
 
-    def match_insignificant_strides(
+    def try_match_insignificant_strides(
         self,
         tensor,
         meta_strides_inp: Tuple[Union[int, torch.SymInt], ...],
     ) -> ir.TensorBox:
+        """
+        Tries to match the strides of the tensor to those in the meta_strides. Strides of insignificant
+        dimensions - size 0 or 1 - will be updated.
+
+        If there are real stride differences (NHWC vs NCHW) then the input will be returned.
+        """
+
         # should have already been realized
         assert torch._inductor.ir.is_storage_and_layout(tensor)
 
