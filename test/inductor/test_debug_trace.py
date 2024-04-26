@@ -94,9 +94,9 @@ class buf1_loop_body:
 
 
 buf2: ExternKernelSchedulerNode(ExternKernelOut)
-buf2.writes = [StarDep(name='buf2')]
-buf2.unmet_dependencies = [StarDep(name='buf1')]
-buf2.met_dependencies = [StarDep(name='arg1_1')]
+buf2.writes = [StarDep(name='buf2', mode=None)]
+buf2.unmet_dependencies = [StarDep(name='buf1', mode=None)]
+buf2.met_dependencies = [StarDep(name='arg1_1', mode=None)]
 buf2.users = [NodeUser(node=OUTPUT, can_inplace=False, is_weak=False)]
 buf2.node.kernel = extern_kernels.mm""",
         )
@@ -151,9 +151,9 @@ buf0_buf1.users = []
 
 
 buf2: ExternKernelSchedulerNode(ExternKernelOut)
-buf2.writes = [StarDep(name='buf2')]
-buf2.unmet_dependencies = [StarDep(name='buf1')]
-buf2.met_dependencies = [StarDep(name='arg1_1')]
+buf2.writes = [StarDep(name='buf2', mode=None)]
+buf2.unmet_dependencies = [StarDep(name='buf1', mode=None)]
+buf2.met_dependencies = [StarDep(name='arg1_1', mode=None)]
 buf2.users = [NodeUser(node=OUTPUT, can_inplace=False, is_weak=False)]
 buf2.node.kernel = extern_kernels.mm""",
         )
