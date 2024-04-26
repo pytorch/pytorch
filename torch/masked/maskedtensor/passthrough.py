@@ -30,6 +30,8 @@ PASSTHROUGH_FNS = [
     torch.ops.aten._reshape_alias,
     torch.ops.aten.cat,
     torch.ops.aten.unsqueeze,
+    torch.ops.aten.unfold,
+    torch.ops.aten.unfold_backward,
 ]
 
 
