@@ -1475,6 +1475,7 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         self, tx, query: "VariableTracker", score_function: "VariableTracker"
     ):
         from torch._dynamo.symbolic_convert import InstructionTranslator
+        from torch._higher_order_ops.templated_attention import TransformGetItemToIndex
         from .builder import SourcelessBuilder
 
         tx: InstructionTranslator = tx
@@ -1499,19 +1500,21 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         bhmn = [create_scalar() for _ in range(4)]
         new_args = [score, *bhmn]
-        (
-            (body_output, body_treespec),
-            body_graph,
-            body_lifted_freevars,
-        ) = speculate_subgraph(
-            tx,
-            score_function,
-            new_args,
-            {},  # expect only args no kwargs for now
-            description="templated_attention",
-            source_target=self.value,
-            set_subgraph_inputs="flatten_manual",
-        )
+
+        with TransformGetItemToIndex():
+            (
+                (body_output, body_treespec),
+                body_graph,
+                body_lifted_freevars,
+            ) = speculate_subgraph(
+                tx,
+                score_function,
+                new_args,
+                {},  # expect only args no kwargs for now
+                description="templated_attention",
+                source_target=self.value,
+                set_subgraph_inputs="flatten_manual",
+            )
 
         body_name = add_subgraph(
             tx,
