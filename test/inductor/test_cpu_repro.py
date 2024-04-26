@@ -65,7 +65,8 @@ aten = torch.ops.aten
 check_model = test_torchinductor.check_model
 
 requires_vectorization = unittest.skipUnless(
-    codecache.valid_vec_isa_list(), "Does not support vectorization"
+    codecache.valid_vec_isa_list() and os.getenv("ATEN_CPU_CAPABILITY") != "default",
+    "Does not support vectorization",
 )
 
 
@@ -3481,6 +3482,7 @@ class CPUReproTests(TestCase):
             self.common(m, (idx, x))
             check_metrics_vec_kernel_count(1)
 
+    @requires_vectorization
     def test_embedding_vec_bf16(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -3765,7 +3767,7 @@ class CPUReproTests(TestCase):
         x = torch.randint(0, 100, (819,), dtype=torch.int64)
         metrics.reset()
         self.common(fn, (x,))
-        assert metrics.generated_cpp_vec_kernel_count == 1
+        check_metrics_vec_kernel_count(1)
 
     @config.patch({"cpp.dynamic_threads": True})
     def test_reduction_with_dynamic_threads(self):
