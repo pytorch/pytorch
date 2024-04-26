@@ -186,7 +186,7 @@ static inline std::vector<int64_t> get_split_base_addrs(
     const at::Tensor& tensor,
     at::IntArrayRef split_sizes,
     int64_t dim) {
-  const auto* data_ptr = static_cast<char*>(tensor.data_ptr());
+  const auto* data_ptr = static_cast<const char*>(tensor.const_data_ptr());
   const auto strides = tensor.strides();
   const auto element_sz = tensor.element_size();
   int64_t off = 0;

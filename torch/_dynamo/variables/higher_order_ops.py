@@ -1475,6 +1475,7 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         self, tx, query: "VariableTracker", score_function: "VariableTracker"
     ):
         from torch._dynamo.symbolic_convert import InstructionTranslator
+        from torch._higher_order_ops.templated_attention import TransformGetItemToIndex
         from .builder import SourcelessBuilder
 
         tx: InstructionTranslator = tx
@@ -1499,19 +1500,21 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         bhmn = [create_scalar() for _ in range(4)]
         new_args = [score, *bhmn]
-        (
-            (body_output, body_treespec),
-            body_graph,
-            body_lifted_freevars,
-        ) = speculate_subgraph(
-            tx,
-            score_function,
-            new_args,
-            {},  # expect only args no kwargs for now
-            description="templated_attention",
-            source_target=self.value,
-            set_subgraph_inputs="flatten_manual",
-        )
+
+        with TransformGetItemToIndex():
+            (
+                (body_output, body_treespec),
+                body_graph,
+                body_lifted_freevars,
+            ) = speculate_subgraph(
+                tx,
+                score_function,
+                new_args,
+                {},  # expect only args no kwargs for now
+                description="templated_attention",
+                source_target=self.value,
+                set_subgraph_inputs="flatten_manual",
+            )
 
         body_name = add_subgraph(
             tx,
@@ -1536,12 +1539,10 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ) -> "VariableTracker":
         from .builder import wrap_fx_proxy
 
-        query, key, value, score_mod, *other_buffers = self.normalize_to_args(
-            args, kwargs
-        )
+        query, key, value, score_mod = self.normalize_to_args(args, kwargs)
 
         p_args, p_kwargs = self.create_wrapped_node(tx, query, score_mod)
-        proxied_args = [query, key, value, *other_buffers]
+        proxied_args = [query, key, value]
 
         # Store the invocation as a call
         # Norm_kwargs contains the score_function and we dont want to proxy this because
