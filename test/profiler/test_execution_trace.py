@@ -21,7 +21,6 @@ from typing import Any, Dict, List
 
 import torch
 import torch.nn as nn
-import warn
 from torch import _dynamo as torchdynamo
 from torch.autograd import (
     _record_function_with_args_enter,
@@ -276,7 +275,7 @@ class TestExecutionTrace(TestCase):
                         assert len(n["inputs"]["values"]) > 0
                         assert len(n["outputs"]["values"]) == 0
         if not found_captured_triton_kernel_node:
-            warn("triton kernels not found")
+            print("triton kernels not found")
 
     def test_execution_trace_start_stop(self):
         use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
