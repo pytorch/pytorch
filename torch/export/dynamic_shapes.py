@@ -5,10 +5,9 @@ import math
 import sys
 import weakref
 from collections import defaultdict
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
-from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._pytree import SUPPORTED_NODES
 
 from .exported_program import ExportedProgram
@@ -560,7 +559,6 @@ def _process_dynamic_shapes(
     kwargs: Optional[Dict[str, Any]] = None,
     dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
 ) -> Optional[List[Constraint]]:
-    from collections import defaultdict
     from collections.abc import Mapping, Sequence
 
     from torch._dynamo.exc import UserError, UserErrorType
@@ -810,106 +808,3 @@ def _process_dynamic_shapes(
                 constraints.append(primary)
 
     return constraints  # type: ignore[return-value]
-
-
-def _process_constraints(
-    fake_mode,
-    graph_module: torch.fx.GraphModule,
-    num_lifted_params_buffers: int,
-    example_inputs: List[torch.Tensor],
-) -> Dict:
-    """
-    Process the constraints stored in the graph module to return something more readable.
-
-    Args:
-        graph_module (torch.fx.GraphModule): GraphModule returned from
-            dynamo.export, which contains the "input_shape_constraints" and
-            "inline_constraints" metadata
-
-        example_inputs: Flattened list of example inputs used to export the graph module
-
-    Returns:
-        range_constraints (Dict[sympy.Symbol, ValueRanges]): Mapping of
-            symbols (from SymInts) appearing in the fake tensors in
-            node.meta["val"] to their range constraints, which are a tuple
-            containing (lower, upper) constraints.
-    """
-    from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
-        InputDim,
-    )
-
-    # Import sympy locally
-    from torch.fx.experimental.symbolic_shapes import SymInt
-    from torch.utils._sympy.value_ranges import ValueRanges
-
-    input_shape_constraints = graph_module.meta.get("input_shape_constraints", [])
-    inline_constraints = graph_module.meta.get("inline_constraints", [])
-
-    # Create dict mapping tensor_id to node names
-    tensor_id_to_nodes: Dict[int, List[str]] = defaultdict(list)
-    # Create dict mapping placeholder node names to their nodes
-    placeholder_nodes: Dict[str, torch.fx.Node] = {}
-    for i, node in enumerate(graph_module.graph.nodes):
-        if node.op != "placeholder":
-            # All placeholder nodes should be together in the beginning of the
-            # graph
-            break
-        if i >= num_lifted_params_buffers:
-            example_input = example_inputs[i - num_lifted_params_buffers]
-            tensor_id_to_nodes[id(example_input)].append(node.name)
-            placeholder_nodes[node.name] = node
-
-    # Create dict mapping (node name, dim) a list of range (lower, upper)
-    # constraints
-    multi_range_constraints: Dict[InputDim, List[ValueRanges]] = defaultdict(list)
-    for constraint in input_shape_constraints:
-        for node in tensor_id_to_nodes[constraint["t_id"]]:
-            # skip static shape constraints
-            if constraint["min"] == constraint["max"]:
-                continue
-            node_dim = InputDim(node, constraint["dim"])
-
-            # Accumulate range constraints
-            multi_range_constraints[node_dim].append(
-                ValueRanges(constraint["min"], constraint["max"])
-            )
-
-    # Create dict mapping symbol to a singular range (lower, upper)
-    range_constraints: Dict[Any, ValueRanges] = {}
-
-    # Add inline constraints to range_constraints
-    range_constraints = {
-        symbol: inline_constraints[symbol] for symbol in inline_constraints
-    }
-
-    free_symbols: Set["Symbol"] = set()
-    # Add input range constraints to range_constraints
-    for input_dim, multi_range_constraint in multi_range_constraints.items():  # type: ignore[assignment]
-        # Simplify the range constraints into a single range constraint
-        # Ex. ranges [2, 10] and [3, 11] would get merged to [3, 10]
-        min_vals = [rc.lower for rc in multi_range_constraint]
-        max_vals = [rc.upper for rc in multi_range_constraint]
-        min_val = max(min_vals)  # type: ignore[type-var]
-        max_val = min(max_vals)  # type: ignore[type-var]
-        assert min_val <= max_val  # type: ignore[operator]
-
-        # Add input node range constraints
-        val = placeholder_nodes[input_dim.input_name].meta["val"]
-        assert isinstance(val, FakeTensor)
-        symint = val.shape[input_dim.dim]
-        assert isinstance(
-            symint, SymInt
-        ), f"Expected SymInt but got {symint}: {type(symint)}"
-        symbol = symint.node.expr
-        range_constraints[symbol] = ValueRanges(min_val, max_val)
-        free_symbols.update(symbol.free_symbols)
-
-    for symbol in free_symbols:
-        if symbol not in range_constraints:
-            # Placeholders can have symbolic shapes that are derived expressions.
-            # The above code will record direct range constraints for them
-            # so that we can do runtime assertions. In addition, for serde checks
-            # we want to record range constraints for their root symbols.
-            range_constraints[symbol] = fake_mode.shape_env.var_to_range[symbol]
-
-    return range_constraints

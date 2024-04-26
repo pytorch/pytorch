@@ -579,6 +579,9 @@ class OpOverload(OperatorBase):
         op.__module__ = overloadpacket.__module__
         self.__qualname__ = self._name
         self.__annotations__ = {}
+        # Only compute the OperatorHandle when we need it. Not all OpOverloads have
+        # OperatorHandles (the TorchScript ones don't...)
+        self._lazy_handle = None
 
         # If the OpOverload was constructed from a Library.def in Python.
         self._defined_in_python = self.__qualname__ in torch.library._defs
@@ -596,6 +599,22 @@ class OpOverload(OperatorBase):
                 is_write = a.alias_info.is_write or is_write
         self.is_view = is_write is not None and not is_write
 
+    @property
+    def _namespace(self):
+        return self._schema.name.split("::")[0]
+
+    @property
+    def _opname(self):
+        return self._schema.name.split("::")[1]
+
+    @property
+    def _handle(self):
+        if self._lazy_handle is None:
+            self._lazy_handle = torch._C._dispatch_find_schema_or_throw(
+                self._schema.name, self._schema.overload_name
+            )
+        return self._lazy_handle
+
     # it's a no-op since OpOverload object is immutable and must be unique for a given op overload.
     def __deepcopy__(self, memo=None):
         return self
@@ -609,6 +628,11 @@ class OpOverload(OperatorBase):
         # use `self_` to avoid naming collide with aten ops arguments that
         # are named "self". This way, all the aten ops can be called by kwargs.
         return self_._op(*args, **kwargs)
+
+    def redispatch(self_, keyset, *args, **kwargs):  # noqa: B902
+        # use `self_` to avoid naming collide with aten ops arguments that
+        # are named "self". This way, all the aten ops can be called by kwargs.
+        return self_._handle.redispatch_boxed(keyset, *args, **kwargs)
 
     def __hash__(self):
         return hash(self._op)
@@ -630,11 +654,6 @@ class OpOverload(OperatorBase):
     @property
     def namespace(self):
         return self._schema.name.split("::")[0]
-
-    def _handle(self):
-        return torch._C._dispatch_find_schema_or_throw(
-            self._schema.name, self._schema.overload_name
-        )
 
     def decompose(self, *args, **kwargs):
         dk = torch._C.DispatchKey.CompositeImplicitAutograd
@@ -1225,4 +1244,4 @@ class _Ops(types.ModuleType):
 
 
 # The ops "namespace"
-ops = _Ops()
+ops: _Ops = _Ops()

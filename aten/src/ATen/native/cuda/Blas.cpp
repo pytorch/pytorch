@@ -6,6 +6,7 @@
 #include <ATen/OpMathType.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/cuda/CUDABlas.h>
+#include <ATen/cuda/tunable/Tunable.h>
 #include <ATen/native/Resize.h>
 #include <c10/util/MaybeOwned.h>
 
@@ -174,6 +175,12 @@ cuda::blas::GEMMAndBiasActivationEpilogue activation_to_gemm_and_blas_arg(Activa
 static bool getDisableAddmmCudaLt() {
     static const char* env_value = std::getenv("DISABLE_ADDMM_CUDA_LT");
 #ifdef USE_ROCM
+    // if we enable tunable op, it'll take priority over just hipblaslt (heuristics)
+    // note the current tunable op is not the hipblaslt path (gemm_and_bias)
+    auto tuning_ctx = at::cuda::tunable::getTuningContext();
+    if (tuning_ctx->IsTunableOpEnabled()) {
+      return true;
+    }
     // allow both CUDA and HIP env var names for ROCm builds
     // also, current default for ROCm builds is disable by default
     if (env_value == nullptr) {
@@ -740,7 +747,7 @@ Tensor& _int_mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result)
 
   TORCH_CHECK(result.is_contiguous(), "Expected result to be contiguous.");
 
-#if !defined(USE_ROCM) && !defined(_MSC_VER) && defined(CUDA_VERSION) && CUDA_VERSION >= 11070
+#if (!defined(USE_ROCM) && !defined(_MSC_VER) && defined(CUDA_VERSION) && CUDA_VERSION >= 11070) || (defined(USE_ROCM) && ROCM_VERSION >= 60000)
   cublasCommonArgs args(self, mat2, result);
 
   at::cuda::blas::int8_gemm(
