@@ -16,6 +16,7 @@ import shutil
 import pathlib
 import platform
 from copy import deepcopy
+from mmap import MAP_SHARED, MAP_PRIVATE
 from itertools import product
 
 from torch._utils_internal import get_file_path_2
@@ -3914,12 +3915,12 @@ class TestSerialization(TestCase, SerializationMixin):
             def forward(self, input):
                 return self.fc2(self.fc1(input))
 
-        with tempfile.NamedTemporaryFile() as f:
-            f_name = f.name
+        with TemporaryFileName() as f:
+            f = path_type(f)
             state_dict = DummyModel().state_dict()
-            torch.save(state_dict, f_name)
-            result = torch.load(f_name, mmap=True, weights_only=weights_only)
-            result_non_mmap = torch.load(f_name, mmap=False, weights_only=weights_only)
+            torch.save(state_dict, f)
+            result = torch.load(f, mmap=True, weights_only=weights_only)
+            result_non_mmap = torch.load(f, mmap=False, weights_only=weights_only)
 
         model_mmap_state_dict = DummyModel()
         model_mmap_state_dict.load_state_dict(result)
@@ -3928,7 +3929,8 @@ class TestSerialization(TestCase, SerializationMixin):
         input = torch.randn(4, 3)
         self.assertEqual(model_mmap_state_dict(input), model_non_mmap_state_dict(input.clone()))
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @unittest.skipIf(not torch.cuda.is_available(),
+                     "CUDA is unavailable")
     def test_serialization_mmap_loading_with_map_location(self):
         class DummyModel(torch.nn.Module):
             def __init__(self):
@@ -3943,15 +3945,36 @@ class TestSerialization(TestCase, SerializationMixin):
         # zipfile will first be mmap-ed on CPU and storages are extracted using
         # overall_storage[start_offset:end_offset] before running
         # _{device}_deserialize, which moves the storage to device
-        with tempfile.NamedTemporaryFile() as f:
-            f_name = f.name
+        with TemporaryFileName() as f:
             with torch.device('cuda'):
                 m = DummyModel()
             state_dict = m.state_dict()
-            torch.save(state_dict, f_name)
-            result = torch.load(f_name, mmap=True)
+            torch.save(state_dict, f)
+            result = torch.load(f, mmap=True)
             for v in result.values():
                 self.assertTrue(v.is_cuda)
+
+    def test_serialization_mmap_loading_options(self):
+        m = torch.nn.Linear(3, 5)
+        sd = m.state_dict()
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(sd, f)
+            # with MmapVisibility.MAP_PRIVATE, should not be able to modify file
+            sd_loaded = torch.load(f.name, mmap=True)
+            sd_loaded['weight'][0][0] = 0
+            sd_loaded2 = torch.load(f.name, mmap=True)
+            self.assertEqual(sd_loaded2['weight'], sd['weight'])
+            # with MmapVisibility.MAP_SHARED, should be able to modify file
+            torch.serialization.set_default_mmap_options(MAP_SHARED)
+            try:
+                sd_loaded = torch.load(f.name, mmap=True)
+                sd_loaded['weight'][0][0] = 0
+                sd_loaded2 = torch.load(f.name, mmap=True)
+                self.assertNotEqual(sd_loaded2['weight'], sd['weight'])
+                self.assertEqual(sd_loaded2['weight'][0][0].item(), 0)
+                self.assertEqual(sd_loaded2['weight'], sd_loaded['weight'])
+            finally:
+                torch.serialization.set_default_mmap_options(MAP_PRIVATE)
 
     @parametrize('dtype', (torch.float8_e5m2, torch.float8_e4m3fn, torch.complex32))
     @parametrize('weights_only', (True, False))
