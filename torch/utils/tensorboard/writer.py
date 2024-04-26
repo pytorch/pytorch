@@ -846,7 +846,7 @@ class SummaryWriter:
         retval = rawstr
         retval = retval.replace("%", f"%{ord('%'):02x}")
         retval = retval.replace("/", f"%{ord('/'):02x}")
-        retval = retval.replace("\\", "%%%02x" % (ord("\\")))
+        retval = retval.replace("\\", "%{:02x}".format(ord("\\")))
         return retval
 
     def add_embedding(
