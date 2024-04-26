@@ -519,6 +519,7 @@ def create_script_class(obj):
     Arguments:
         obj: A Python object.
     """
+    
     qualified_class_name = _jit_internal._qualified_name(type(obj))
     rcb = _jit_internal.createResolutionCallbackForClassMethods(type(obj))
     # Script the type of obj if it hasn't already been scripted.
@@ -553,6 +554,11 @@ def create_script_module(nn_module, stubs_fn, share_types=True, is_tracing=False
     assert not isinstance(nn_module, torch.jit.RecursiveScriptModule)
     check_module_initialized(nn_module)
     concrete_type = get_module_concrete_type(nn_module, share_types)
+
+    if "torch.distributions" in str(nn_module.__class__.__module__):
+        warnings.warn(
+            f"Usage of non-scriptable component '{nn_module.__class__.__name__}' detected. Consider using torch.jit.trace instead."
+        )
     if not is_tracing:
         AttributeTypeIsSupportedChecker().check(nn_module)
     return create_script_module_impl(nn_module, concrete_type, stubs_fn)
