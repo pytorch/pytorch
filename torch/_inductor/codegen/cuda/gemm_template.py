@@ -856,6 +856,31 @@ class CKGemmTemplate(CKTemplate):
     } // extern C
     """
 
+    preselected_instances = r"""
+    # Compute-friendly, 7 instances
+    DeviceGemm_Xdl_CShuffleV3<Row, Col, Row, F16, F16, F16, F32, F16, PassThrough, PassThrough, PassThrough, GemmSpecialization::MNKPadding, 256, 224, 256, 64, 8, 8, 16, 16, 7, 8, S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0, S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0, 1, 2, S<1, 32, 1, 8>, 8, BlockGemmPipelineScheduler::Intrawave, BlockGemmPipelineVersion::v3>,
+    DeviceGemm_Xdl_CShuffleV3<Row, Col, Row, F16, F16, F16, F32, F16, PassThrough, PassThrough, PassThrough, GemmSpecialization::MNKPadding, 256, 128, 128, 64, 8, 8, 32, 32, 2, 2, S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0, S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0, 1, 1, S<1, 32, 1, 8>, 8, BlockGemmPipelineScheduler::Intrawave, BlockGemmPipelineVersion::v3>,
+    DeviceGemm_Xdl_CShuffleV3<Row, Col, Row, F16, F16, F16, F32, F16, PassThrough, PassThrough, PassThrough, GemmSpecialization::MNKPadding, 256, 128, 128, 64, 8, 8, 32, 32, 2, 2, S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0, S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0, 1, 1, S<1, 32, 1, 8>, 8, BlockGemmPipelineScheduler::Intrawave, BlockGemmPipelineVersion::v4>,
+    DeviceGemm_Xdl_CShuffleV3<Row, Col, Row, F16, F16, F16, F32, F16, PassThrough, PassThrough, PassThrough, GemmSpecialization::MNKPadding, 256, 128, 128, 64, 8, 8, 32, 32, 2, 2, S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0, S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0, 1, 1, S<1, 32, 1, 8>, 8, BlockGemmPipelineScheduler::Intrawave, BlockGemmPipelineVersion::v5>,
+    DeviceGemm_Xdl_CShuffleV3<Row, Col, Row, F16, F16, F16, F32, F16, PassThrough, PassThrough, PassThrough, GemmSpecialization::Default,    256, 128, 128, 64, 8, 8, 32, 32, 2, 2, S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0, S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0, 1, 1, S<1, 32, 1, 8>, 8, BlockGemmPipelineScheduler::Intrawave, BlockGemmPipelineVersion::v3>,
+    DeviceGemm_Xdl_CShuffleV3<Row, Col, Row, F16, F16, F16, F32, F16, PassThrough, PassThrough, PassThrough, GemmSpecialization::Default,    256, 128, 128, 64, 8, 8, 32, 32, 2, 2, S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0, S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0, 1, 1, S<1, 32, 1, 8>, 8, BlockGemmPipelineScheduler::Intrawave, BlockGemmPipelineVersion::v4>,
+    DeviceGemm_Xdl_CShuffleV3<Row, Col, Row, F16, F16, F16, F32, F16, PassThrough, PassThrough, PassThrough, GemmSpecialization::Default,    256, 128, 128, 64, 8, 8, 32, 32, 2, 2, S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0, S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0, 1, 1, S<1, 32, 1, 8>, 8, BlockGemmPipelineScheduler::Intrawave, BlockGemmPipelineVersion::v5>,
+    # Memory-friendly, 10 instances
+    DeviceGemm_Xdl_CShuffleV3<Row, Col, Row, F16, F16, F16, F32, F16, PassThrough, PassThrough, PassThrough, GemmSpecialization::Default,    128, 16,  32,  64, 8, 8, 16, 16, 1, 1, S<8, 16, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0, S<8, 16, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0, 1, 1, S<1, 16, 1, 8>, 4, BlockGemmPipelineScheduler::Interwave, BlockGemmPipelineVersion::v2>,
+    DeviceGemm_Xdl_CShuffleV3<Row, Col, Row, F16, F16, F16, F32, F16, PassThrough, PassThrough, PassThrough, GemmSpecialization::MNKPadding, 128, 16,  32,  64, 8, 8, 16, 16, 1, 1, S<8, 16, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0, S<8, 16, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0, 1, 1, S<1, 16, 1, 8>, 4, BlockGemmPipelineScheduler::Interwave, BlockGemmPipelineVersion::v2>,
+    DeviceGemm_Xdl_CShuffleV3<Row, Col, Row, F16, F16, F16, F32, F16, PassThrough, PassThrough, PassThrough, GemmSpecialization::MNKPadding, 128, 16,  64,  64, 8, 8, 16, 16, 1, 2, S<8, 16, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0, S<8, 16, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0, 1, 2, S<1, 16, 1, 8>, 8, BlockGemmPipelineScheduler::Interwave, BlockGemmPipelineVersion::v2>,
+    DeviceGemm_Xdl_CShuffleV3<Row, Col, Row, F16, F16, F16, F32, F16, PassThrough, PassThrough, PassThrough, GemmSpecialization::MNKPadding, 128, 32,  64,  64, 8, 8, 32, 32, 1, 1, S<8, 16, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0, S<8, 16, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0, 1, 1, S<1, 16, 1, 8>, 8, BlockGemmPipelineScheduler::Interwave, BlockGemmPipelineVersion::v2>,
+    DeviceGemm_Xdl_CShuffleV3<Row, Col, Row, F16, F16, F16, F32, F16, PassThrough, PassThrough, PassThrough, GemmSpecialization::MNKPadding, 128, 32,  128, 64, 8, 8, 32, 32, 1, 2, S<8, 16, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0, S<8, 16, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0, 1, 1, S<1, 16, 1, 8>, 8, BlockGemmPipelineScheduler::Interwave, BlockGemmPipelineVersion::v2>,
+    DeviceGemm_Xdl_CShuffleV3<Row, Col, Row, F16, F16, F16, F32, F16, PassThrough, PassThrough, PassThrough, GemmSpecialization::Default,    128, 32,  16,  64, 8, 8, 16, 16, 1, 1, S<8, 16, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0, S<8, 16, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0, 1, 1, S<1, 32, 1, 4>, 4, BlockGemmPipelineScheduler::Interwave, BlockGemmPipelineVersion::v2>,
+    DeviceGemm_Xdl_CShuffleV3<Row, Col, Row, F16, F16, F16, F32, F16, PassThrough, PassThrough, PassThrough, GemmSpecialization::MNKPadding, 128, 32,  16,  64, 8, 8, 16, 16, 1, 1, S<8, 16, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0, S<8, 16, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0, 1, 1, S<1, 32, 1, 4>, 4, BlockGemmPipelineScheduler::Interwave, BlockGemmPipelineVersion::v2>,
+    DeviceGemm_Xdl_CShuffleV3<Row, Col, Row, F16, F16, F16, F32, F16, PassThrough, PassThrough, PassThrough, GemmSpecialization::MNKPadding, 128, 64,  16,  64, 8, 8, 16, 16, 2, 1, S<8, 16, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0, S<8, 16, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0, 2, 1, S<1, 64, 1, 2>, 8, BlockGemmPipelineScheduler::Interwave, BlockGemmPipelineVersion::v2>,
+    DeviceGemm_Xdl_CShuffleV3<Row, Col, Row, F16, F16, F16, F32, F16, PassThrough, PassThrough, PassThrough, GemmSpecialization::MNKPadding, 128, 64,  32,  64, 8, 8, 32, 32, 1, 1, S<8, 16, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0, S<8, 16, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0, 1, 1, S<1, 32, 1, 4>, 8, BlockGemmPipelineScheduler::Interwave, BlockGemmPipelineVersion::v2>,
+    DeviceGemm_Xdl_CShuffleV3<Row, Col, Row, F16, F16, F16, F32, F16, PassThrough, PassThrough, PassThrough, GemmSpecialization::MNKPadding, 128, 128, 32,  64, 8, 8, 32, 32, 2, 1, S<8, 16, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0, S<8, 16, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0, 2, 1, S<1, 32, 1, 4>, 8, BlockGemmPipelineScheduler::Interwave, BlockGemmPipelineVersion::v2>,
+    # Latency-friendly, 2 instances
+    DeviceGemm_Xdl_CShuffleV3<Row, Col, Row, F16, F16, F16, F32, F16, PassThrough, PassThrough, PassThrough, GemmSpecialization::Default,    128, 16, 32,   64, 8, 8, 16, 16, 1, 1, S<8, 16, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0, S<8, 16, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0, 1, 1, S<1, 16, 1, 8>, 4, BlockGemmPipelineScheduler::Intrawave, BlockGemmPipelineVersion::v1>,
+    DeviceGemm_Xdl_CShuffleV3<Row, Col, Row, F16, F16, F16, F32, F16, PassThrough, PassThrough, PassThrough, GemmSpecialization::Default,    128, 32, 16,   64, 8, 8, 16, 16, 1, 1, S<8, 16, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0, S<8, 16, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0, 1, 1, S<1, 32, 1, 4>, 4, BlockGemmPipelineScheduler::Intrawave, BlockGemmPipelineVersion::v1>,
+    """
+
     def __init__(
         self,
         input_nodes: List[Buffer],
@@ -1018,11 +1043,62 @@ class CKGemmTemplate(CKTemplate):
             c_layout=op.c_layout,
         )
 
-    def gen_ops(self):
+    def _parse_instances(self, str_instances: List[str]):
+        def maybe_int(s):
+            try:
+                return int(s)
+            except ValueError:
+                return s
         op_instances = []
-        # all string attributes must be either type aliases or global constants in C++
+        for line in str_instances:
+            s_template_args = line.split("DeviceGemm_Xdl_CShuffleV3")[-1].strip("<>, ")
+            template_args = []
+            i_current = 0
+            while i_current < len(s_template_args):
+                if s_template_args[i_current] == " ":
+                    # skip whitespace
+                    i_current += 1
+                    continue
+                elif s_template_args[i_current : i_current + 2] == "S<":
+                    # parse template S<Index...>
+                    i_next = s_template_args.find(">", i_current)
+                    template_args.append(
+                        tuple(
+                            map(int, s_template_args[i_current + 2 : i_next].split(","))
+                        )
+                    )
+                    i_current = i_next + 2
+                else:
+                    # all string attributes must be either type aliases or global constants in C++
+                    i_next = s_template_args.find(",", i_current)
+                    template_args.append(
+                        maybe_int(
+                            s_template_args[
+                                i_current : i_next if i_next != -1 else None
+                            ]
+                        )
+                    )
+                    if i_next != -1:
+                        i_current = i_next + 1
+                if i_next == -1:
+                    break
+            new_instance = CKGemmOperation(
+                *template_args,
+                *((None,) * (len(fields(CKGemmOperation)) - len(template_args))),
+            )
+            if new_instance.a_compute_dtype is None:
+                new_instance.a_compute_dtype = new_instance.c_element_dtype
+            if new_instance.b_compute_dtype is None:
+                new_instance.b_compute_dtype = new_instance.c_element_dtype
+
+            op_instances.append(new_instance)
+        return op_instances
+
+    def _default_instances(self):
         # fallback: known working op instance for problem size M=2240 K=256 N=2048
-        default_instances = [CKGemmOperation(
+        # all string attributes must be either type aliases or global constants in C++
+
+        return [CKGemmOperation(
             a_layout="Row",
             b_layout="Row",
             c_layout="Row",
@@ -1068,6 +1144,7 @@ class CKGemmTemplate(CKTemplate):
             block_gemm_pipeline_scheduler="BlockGemmPipelineScheduler::Intrawave",
             block_gemm_pipeline_version="BlockGemmPipelineVersion::v3")]
 
+    def gen_ops(self):
         grep_result = subprocess.run(
             [
                 "grep",
@@ -1079,78 +1156,38 @@ class CKGemmTemplate(CKTemplate):
             text=True,
         )
 
-        def maybe_int(s):
-            try:
-                return int(s)
-            except ValueError:
-                return s
+        op_instances = self._parse_instances(grep_result.stdout.strip().split("\n"))
 
-        for line in grep_result.stdout.strip().split("\n"):
-            s_template_args = line.split("DeviceGemm_Xdl_CShuffleV3")[-1].strip("<>, ")
-            template_args = []
-            i_current = 0
-            while i_current < len(s_template_args):
-                if s_template_args[i_current] == " ":
-                    i_current += 1
-                    continue
-                elif s_template_args[i_current : i_current + 2] == "S<":
-                    i_next = s_template_args.find(">", i_current)
-                    template_args.append(
-                        tuple(
-                            map(int, s_template_args[i_current + 2 : i_next].split(","))
-                        )
-                    )
-                    i_current = i_next + 2
-                else:
-                    i_next = s_template_args.find(",", i_current)
-                    template_args.append(
-                        maybe_int(
-                            s_template_args[
-                                i_current : i_next if i_next != -1 else None
-                            ]
-                        )
-                    )
-                    if i_next != -1:
-                        i_current = i_next + 1
-                if i_next == -1:
-                    break
-            new_instance = CKGemmOperation(
-                *template_args,
-                *((None,) * (len(fields(CKGemmOperation)) - len(template_args))),
-            )
-            if new_instance.a_compute_dtype is None:
-                new_instance.a_compute_dtype = new_instance.c_element_dtype
-            if new_instance.b_compute_dtype is None:
-                new_instance.b_compute_dtype = new_instance.c_element_dtype
+        schedulers = [
+            "BlockGemmPipelineScheduler::Intrawave",
+            "BlockGemmPipelineScheduler::Interwave",
+        ]
+        gemm_specs = [
+            "GemmSpecialization::Default",
+            "GemmSpecialization::MPadding",
+            "GemmSpecialization::NPadding",
+            "GemmSpecialization::KPadding",
+            "GemmSpecialization::MNPadding",
+            "GemmSpecialization::MKPadding",
+            "GemmSpecialization::NKPadding",
+            "GemmSpecialization::MNKPadding",
+        ]
 
-            schedulers = [
-                "BlockGemmPipelineScheduler::Intrawave",
-                "BlockGemmPipelineScheduler::Interwave",
-            ]
-            gemm_specs = [
-                "GemmSpecialization::Default",
-                "GemmSpecialization::MPadding",
-                "GemmSpecialization::NPadding",
-                "GemmSpecialization::KPadding",
-                "GemmSpecialization::MNPadding",
-                "GemmSpecialization::MKPadding",
-                "GemmSpecialization::NKPadding",
-                "GemmSpecialization::MNKPadding",
-            ]
-            if new_instance.block_gemm_pipeline_scheduler == "BlkGemmPipeSched":
-                for scheduler in schedulers:
-                    for spec in gemm_specs:
-                        op_instances.append(
-                            dataclasses.replace(
-                                new_instance,
-                                block_gemm_pipeline_scheduler=scheduler,
-                                gemm_specialization=spec,
-                            )
+        # substitute templated args by looping through their domains
+        substitute_instances = []
+        for instance in op_instances:
+            sub_scheduler = (instance.block_gemm_pipeline_scheduler == "BlkGemmPipeSched")
+            sub_spec = (instance.gemm_specialization == "GemmSpec")
+            schedulers_range = schedulers if sub_scheduler else [instance.block_gemm_pipeline_scheduler]
+            spec_range = gemm_specs if sub_spec else [instance.gemm_specialization]
+            for scheduler in schedulers_range:
+                for spec in spec_range:
+                    substitute_instances.append(
+                        dataclasses.replace(
+                            instance,
+                            block_gemm_pipeline_scheduler=scheduler,
+                            gemm_specialization=spec,
                         )
-            else:
-                for spec in gemm_specs:
-                    op_instances.append(
-                        dataclasses.replace(new_instance, gemm_specialization=spec)
                     )
 
         filtered_instances = list(filter(lambda op: self.filter_op(op), op_instances))
