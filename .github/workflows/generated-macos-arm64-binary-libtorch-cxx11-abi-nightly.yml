@@ -63,7 +63,9 @@ jobs:
           # shellcheck disable=SC2129
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           # shellcheck disable=SC2129
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts/wheel" >> "${GITHUB_ENV}"
+          # shellcheck disable=SC2129
+          echo "LIBTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts/libtorch" >> "${GITHUB_ENV}"
           # shellcheck disable=SC2129
           echo "MAC_PACKAGE_WORK_DIR=${RUNNER_TEMP}" >> "${GITHUB_ENV}"
       - name: Install conda and dependencies
@@ -131,6 +133,22 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
+        - name: Build LibTorch binary
+          if: always()
+          run:
+            python "${PYTORCH_ROOT}/.github/scripts/extract_libtorch.py --whl ${{ env.PYTORCH_FINAL_PACKAGE_DIR }} --out ${{ env.LIBTORCH_FINAL_PACKAGE_DIR}}"
+            echo "${PYTORCH_BUILD_VERSION}" > ${{ env.LIBTORCH_FINAL_PACKAGE_DIR}}/build-version
+            echo "${PYTORCH_BUILD_VERSION}" > ${{ env.LIBTORCH_FINAL_PACKAGE_DIR}}/build-version
+            zip -r "${{ env.LIBTORCH_FINAL_PACKAGE_DIR}}.zip" "${{ env.LIBTORCH_FINAL_PACKAGE_DIR}}"
+            rm -rf "${{ env.LIBTORCH_FINAL_PACKAGE_DIR}}"
+        - uses: actions/upload-artifact@v3
+          if: always()
+          with:
+            name: libtorch-cpu-shared-with-deps-cxx11-abi
+            retention-days: 14
+            if-no-files-found: error
+            path: "${{ env.LIBTORCH_FINAL_PACKAGE_DIR }}.zip"
+      
   libtorch-cpu-shared-with-deps-cxx11-abi-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:

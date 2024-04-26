@@ -113,20 +113,22 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Build LibTorch binary
-        if: always()
-        run:
-          python "${PYTORCH_ROOT}/.github/scripts/extract_libtorch.py --whl ${{ env.PYTORCH_FINAL_PACKAGE_DIR }} --out ${{ env.LIBTORCH_FINAL_PACKAGE_DIR}}"
-          echo "${PYTORCH_BUILD_VERSION}" > ${{ env.LIBTORCH_FINAL_PACKAGE_DIR}}/build-version
-          echo "${PYTORCH_BUILD_VERSION}" > ${{ env.LIBTORCH_FINAL_PACKAGE_DIR}}/build-version
-          zip -r "${{ env.LIBTORCH_FINAL_PACKAGE_DIR}}.zip" "${{ env.LIBTORCH_FINAL_PACKAGE_DIR}}"
-          rm -rf "${{ env.LIBTORCH_FINAL_PACKAGE_DIR}}"
-      - uses: actions/upload-artifact@v3
-        if: always()
-        with:
-          name: !{{ config["build_name"] }}
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.LIBTORCH_FINAL_PACKAGE_DIR }}.zip"
+      {%- if loop.last %}
+        - name: Build LibTorch binary
+          if: always()
+          run:
+            python "${PYTORCH_ROOT}/.github/scripts/extract_libtorch.py --whl ${{ env.PYTORCH_FINAL_PACKAGE_DIR }} --out ${{ env.LIBTORCH_FINAL_PACKAGE_DIR}}"
+            echo "${PYTORCH_BUILD_VERSION}" > ${{ env.LIBTORCH_FINAL_PACKAGE_DIR}}/build-version
+            echo "${PYTORCH_BUILD_VERSION}" > ${{ env.LIBTORCH_FINAL_PACKAGE_DIR}}/build-version
+            zip -r "${{ env.LIBTORCH_FINAL_PACKAGE_DIR}}.zip" "${{ env.LIBTORCH_FINAL_PACKAGE_DIR}}"
+            rm -rf "${{ env.LIBTORCH_FINAL_PACKAGE_DIR}}"
+        - uses: actions/upload-artifact@v3
+          if: always()
+          with:
+            name: !{{ config["build_name"] }}
+            retention-days: 14
+            if-no-files-found: error
+            path: "${{ env.LIBTORCH_FINAL_PACKAGE_DIR }}.zip"
+      {% endif %}
   !{{ upload.upload_binaries(config, has_test=False, use_s3=False) }}
 {%- endfor %}
