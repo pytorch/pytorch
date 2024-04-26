@@ -34,12 +34,9 @@ from torch.utils._triton import has_triton
 def get_snode_runtime_for_reorder_compute_test(snode):
     # NOTE: custom cost model to show that the compute reordering algorithm is working
     # Collective kernels
-    if isinstance(snode.node, ir.CollectiveKernel):
-        if isinstance(snode.node, ir.AllReduce):
-            return 100
-        else:
-            return 100
-    elif isinstance(snode.node, ir.Wait):
+    if isinstance(snode.node, ir._CollectiveKernel):
+        return 100
+    elif isinstance(snode.node, ir._WaitKernel):
         return 0
     # High-arithmetic-intensity compute kernels
     elif isinstance(snode.node, ir.ExternKernel):
@@ -232,11 +229,6 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
         [
             "reorder_compute_for_overlap",
         ],
-    )
-    @patch.object(
-        torch._inductor.config,
-        "estimate_op_runtime",
-        get_snode_runtime_for_reorder_compute_test,
     )
     def test_reorder_compute_for_overlap_custom_runtime_estimation(self):
         def func(a, *, tag, ranks, group_size):

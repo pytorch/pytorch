@@ -332,14 +332,7 @@ class BaseSchedulerNode:
             return
 
         if (
-            (
-                isinstance(self, (SchedulerNode,))
-                # o what have i done.  lets make this an api
-                or (
-                    isinstance(self, ExternKernelSchedulerNode)
-                    and isinstance(self.node, (ir.AllReduce, ir.InPlaceHint))
-                )
-            )
+            isinstance(self, (SchedulerNode,))
             and config.inplace_buffers
             and (
                 not isinstance(V.kernel, torch._inductor.codegen.triton.TritonKernel)
@@ -671,11 +664,6 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
         if read_dep.name not in self.scheduler.name_to_node:
             # don't allow reuse of an 'input' buffer, we don't own it
             # (would this have been fixed if I tracked mutations properly above?)
-            return False
-        if not isinstance(
-            self.node, (torch._inductor.ir.AllReduce, torch._inductor.ir.InPlaceHint)
-        ):
-            # TODO make this a property of the IR
             return False
 
         if len(self.read_writes.writes) == 1:
