@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import torch.fx
 import torch.utils._pytree as pytree
@@ -99,11 +99,30 @@ def aot_compile(
         }
     )
 
-    return compile_fx_aot(
+    so_path = compile_fx_aot(
         gm,
         list(flat_example_inputs),
         config_patches=options,
     )
+
+    if options.get("aot_inductor.package", False):
+        from .package import save_package
+
+        archive_path = save_package(so_path=so_path)
+        return archive_path
+
+    else:
+        return so_path
+
+
+def _aot_load(path: str, device: str) -> Callable:
+    """
+    Loads the packaged artifact created by inductor.aot_compile with config
+    `aot_inductor.package=True`
+    """
+    from .package import load_package
+
+    return load_package(path, device)
 
 
 def list_mode_options(
