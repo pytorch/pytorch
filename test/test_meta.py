@@ -1646,6 +1646,20 @@ class TestMeta(TestCase):
             self.assertEqual(res.dtype, torch.float32)
             self.assertEqual(res.untyped_storage().data_ptr(), 0)
 
+    def test_segment_reduce_backward(self):
+        grad = torch.ones(16, dtype=torch.float)
+        output = torch.ones(16, dtype=torch.float)
+        data = torch.ones(16, dtype=torch.float)
+        reduce_str='max'
+        lengths = torch.ones(16, dtype=torch.long)
+
+        out = torch.ops.aten._segment_reduce_backward(grad, output, data, reduce_str, lengths=lengths)
+        out_meta = torch.ops.aten._segment_reduce_backward(grad.to(device='meta'), output.to(device='meta'), data.to(device='meta'), reduce_str, lengths=lengths.to(device='meta'))
+        self.assertEqual(out.shape, out_meta.shape)
+        self.assertEqual(out.stride(), out_meta.stride())
+        self.assertEqual(out.dtype, out_meta.dtype)
+        self.assertEqual(out.layout, out_meta.layout)
+
     def test_index_select_out(self):
         def f():
             input = torch.randn([8, 16], device='meta')
