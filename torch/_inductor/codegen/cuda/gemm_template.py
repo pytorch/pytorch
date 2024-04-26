@@ -1190,7 +1190,7 @@ class CKGemmTemplate(CKTemplate):
                         )
                     )
 
-        filtered_instances = list(filter(lambda op: self.filter_op(op), op_instances))
+        filtered_instances = list(filter(lambda op: self.filter_op(op), substitute_instances))
         # chosen_instances = filtered_instances[:config.rocm.n_max_profiling_configs]
         # NB: when using a fixed list order, most likely we will pick the subset of instances
         # which are very similar to each other. Randomizing the choice seems to solve this.
