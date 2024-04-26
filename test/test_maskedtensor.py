@@ -192,6 +192,21 @@ class TestBasics(TestCase):
         _compare_mt_t(mx.grad, x.grad)
         _compare_mt_t(my.grad, y.grad)
 
+    def test_unfold(self):
+        data = torch.rand(5, 5)
+        mask = torch.rand(5, 5) > 0.5
+
+        mt = masked_tensor(data, mask, requires_grad=True)
+        masked_res = mt.unfold(1, 2, 2)
+        masked_res.sum().backward()
+
+        t = data.masked_fill(~mask, float("-inf")).detach().clone().requires_grad_()
+        tensor_res = t.unfold(1, 2, 2)
+        tensor_res.sum().backward()
+
+        _compare_mt_t(masked_res, tensor_res)
+        _compare_mt_t(mt.grad, t.grad, atol=1e-06)
+
     def test_to_sparse(self, device):
         for sample in _generate_sample_data(device=device):
             data = sample.input
