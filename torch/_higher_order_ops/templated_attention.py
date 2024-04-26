@@ -1,4 +1,4 @@
-from typing import Callable, Tuple
+from typing import Any, Callable, Tuple
 
 import torch
 import torch.utils._pytree as pytree
@@ -15,6 +15,29 @@ from torch.fx.experimental.proxy_tensor import (
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
+
+from torch.overrides import TorchFunctionMode
+
+
+def transform_getitem_args(x: torch.Tensor, index_args) -> Tuple[Any, ...]:
+    if isinstance(index_args, tuple):
+        return (x, list(index_args))
+    elif not isinstance(index_args, (list, tuple)):
+        return (x, [index_args])
+    return (x, index_args)
+
+
+class TransformGetItemToIndex(TorchFunctionMode):
+    # This is needed since we want to support calling
+    # A[q_idx], where q_idx is a scalar tensor in score_mod.
+    # Today, when q_idx is a scalar tensor, we implicitly convert it to a python
+    # scalar and create a view. We do not want that behavior in this case, so we
+    # use this torchfunctionmode to override that behavior for score_mod
+    # wherever we're running it.
+    def __torch_function__(self, func, types, args, kwargs=None):
+        if func == torch.Tensor.__getitem__:
+            return torch.ops.aten.index(*transform_getitem_args(*args))
+        return func(*args, **(kwargs or {}))
 
 
 class TemplatedAttentionHOP(HigherOrderOperator):
@@ -73,7 +96,10 @@ def math_attention(
     score_mod = torch.vmap(score_mod, in_dims=(0, None, 0, None, None) + in_dim_buffers)
     score_mod = torch.vmap(score_mod, in_dims=(0, 0, None, None, None) + in_dim_buffers)
 
-    scores = score_mod(scores, b, h, m, n, *other_buffers).to(torch.float32)
+    # todo: We wouldn't need these overrides in this file if Dynamo always did the
+    # rewriting.
+    with TransformGetItemToIndex():
+        scores = score_mod(scores, b, h, m, n, *other_buffers).to(torch.float32)
 
     # TODO Unconditionally return logsumexp for backwards
     # if any(t.requires_grad for t in (query, key, value)):
@@ -122,7 +148,8 @@ def trace_templated_attention(
     example_vals = [
         torch.zeros((), dtype=query.dtype, requires_grad=query.requires_grad)
     ] + [torch.zeros((), dtype=torch.int) for _ in range(4)]
-    score_graph = make_fx(score_mod)(*example_vals, *other_buffers)
+    with TransformGetItemToIndex():
+        score_graph = make_fx(score_mod)(*example_vals, *other_buffers)
     proxy_mode.tracer.root.register_module("sdpa_score", score_graph)
     node_args = (query, key, value, score_graph, *other_buffers)
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)
@@ -187,9 +214,10 @@ def templated_attention_functionalize(
     with ctx.redispatch_to_next() as m:
         functional_score_mod = ctx.functionalize(score_mod)
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
-        mutates = _has_potential_branch_input_mutation(
-            functional_score_mod, example_vals, pre_dispatch
-        )
+        with TransformGetItemToIndex():
+            mutates = _has_potential_branch_input_mutation(
+                functional_score_mod, example_vals, pre_dispatch
+            )
         # The only care about mutations of existing buffers since we can't replay these.
         # However, we can just error if anything is detected
         if mutates:
