@@ -680,7 +680,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return x + 1
         else:
             return x - 1
-    
+
     @make_test
     def test_tensor_is_complex(x):
         if x.is_complex():
