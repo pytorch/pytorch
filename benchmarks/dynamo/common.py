@@ -1956,9 +1956,6 @@ def get_dynamo_stats():
             "autograd_compiles": torch._dynamo.utils.counters["compiled_autograd"][
                 "compiles"
             ],
-            "cudagraph_skips": torch._dynamo.utils.counters["inductor"][
-                "cudagraph_skips"
-            ],
         }
     )
 
