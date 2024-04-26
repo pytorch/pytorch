@@ -780,11 +780,7 @@ class Reduction(Loops):
             if split == 1:
                 # No need to split.
                 return ReductionHint.INNER, split
-            if (
-                all(r == 1 for r in ranges)
-                and input_node is not None
-                and isinstance(input_node, TensorBox)
-            ):
+            if input_node is not None and isinstance(input_node, TensorBox):
                 new_ranges, new_reduction_ranges = extract_input_node_reduction_ranges(
                     input_node
                 )
@@ -1164,7 +1160,7 @@ class Reduction(Loops):
     ):
         assert all(
             r == 1 for r in original_ranges
-        ), f"{original_ranges=} is not all ones"
+        ), f"Only enabled for numel_hint == 1, found {original_ranges=}"
         reindex = View.dynamic_reshape_indexer(
             original_reduction_ranges,
             tuple(original_ranges) + tuple(new_ranges) + tuple(new_reduction_ranges),
