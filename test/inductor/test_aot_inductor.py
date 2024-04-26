@@ -1520,6 +1520,27 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(4, 4, 4, 4).to(self.device),)
         self.check_model(Model(), example_inputs)
 
+    # This exercises _eliminate_unbacked path in ShapeEnv
+    @unittest.skipIf(IS_FBCODE, "Not runnable in fbcode")
+    def test_dup_unbacked_sym_decl_with_refinement(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                abs_1 = torch.ops.aten.abs.default(x)
+                lt = torch.ops.aten.lt.Scalar(abs_1, 0.001)
+                eq = torch.ops.aten.eq.Scalar(lt, 0)
+                index_1 = torch.ops.aten.index.Tensor(x, [eq])
+                torch._check(index_1.size(0) == 4**4)
+                sin = torch.ops.aten.sin.default(index_1)
+                index_2 = torch.ops.aten.index.Tensor(x, [eq])
+                div_3 = torch.ops.aten.div.Tensor(sin, index_2)
+                return div_3
+
+        example_inputs = (torch.ones(4, 4, 4, 4).to(self.device),)
+        self.check_model(Model(), example_inputs)
+
     def test_run_with_grad_enabled(self):
         class Model(torch.nn.Module):
             def forward(self, x, weight, bias):
@@ -2762,6 +2783,7 @@ CPU_TEST_FAILURES = {
         is_skip=True
     ),
     "test_dup_unbacked_sym_decl": fail_with_and_without_stack_allocation(),
+    "test_dup_unbacked_sym_decl_with_refinement": fail_with_and_without_stack_allocation(),
     "test_dynamic_cat": fail_minimal_arrayref_interface(),
     # https://github.com/pytorch/pytorch/issues/122978
     "test_dynamic_scalar": fail_stack_allocation(is_skip=True),
@@ -2839,6 +2861,7 @@ CPU_TEST_FAILURES = {
 CUDA_TEST_FAILURES = {
     # test_failures, xfail by default, set is_skip=True to skip
     "test_dup_unbacked_sym_decl": fail_abi_compatible_cuda(),
+    "test_dup_unbacked_sym_decl_with_refinement": fail_abi_compatible_cuda(),
     "test_normal_functional": fail_abi_compatible_cuda(),
     # There is a double-free issue which will be fixed in another PR
     # no ABI shim fn for torch.sort; remove this when adding one
@@ -2857,6 +2880,7 @@ if TEST_WITH_ROCM:
     CUDA_TEST_FAILURES.update(
         {
             "test_dup_unbacked_sym_decl": fail_cuda(is_skip=True),
+            "test_dup_unbacked_sym_decl_with_refinement": fail_cuda(is_skip=True),
             "test_addmm_multiple_dynamic": fail_cuda(is_skip=True),
             "test_bmm_multiple_dynamic": fail_cuda(is_skip=True),
             "test_convolution": fail_cuda(is_skip=True),

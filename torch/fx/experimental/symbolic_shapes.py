@@ -592,24 +592,35 @@ def compute_unbacked_bindings(shape_env, example_value, old_example_value=None):
                 else ""
             )
         )
-        # TODO: This is pretty fragile
-        # Normally, the equality test is supposed to be a no-op here, because
-        # you've already called rebind_unbacked first which takes all the old
-        # binding sites and discovers how they are newly bound.  But this does
-        # not always work.  For example, if the original FX node wasn't a
-        # binding site because you had a memo hit, but post translation you
-        # aren't a memo hit anymore, there's now a new binding site... but we
-        # know (because it's the same FX node) that the value is actually the
-        # same, they're just not obviously equal anymore.  So we just insert
-        # a runtime assert in this case.
+        # Why do we have to do some rebinding here?  If the original FX node
+        # wasn't a binding site because you had a memo hit, but post
+        # translation you aren't a memo hit anymore, there's now a new binding
+        # site... but we know (because it's the same FX node) that the value
+        # is actually the same, they're just not obviously equal anymore.
         #
-        # This is very fragile, because u0 == u1 assertion does not generate
-        # a replacement.  Here, I think it might be acceptable to do a
-        # replacement, so long as we replace the newer thing with the older
-        # thing.  Fix this if it becomes an issue.
+        # The logic here is written carefully, because unlike the
+        # bind_unbacked case, we are not guaranteed to have a symbol for
+        # old_sym.  If we have a symbol, do regular rename unbacked to; but if
+        # we don't, we need to specially eliminate the fresh unbacked symbol
+        # (NB: we are /trusting/ that the memoization is correct, and that we
+        # don't need to generate a new runtime assert.  This is load bearing,
+        # as repropagation can happen after we've frozen runtime asserts.)
         if old_example_value is not None:
             for keypath in symbol_to_path.values():
-                torch._check(pytree.key_get(old_example_value, keypath) == pytree.key_get(example_value, keypath))
+                old_sym = pytree.key_get(old_example_value, keypath)
+                new_sym = pytree.key_get(example_value, keypath)
+                if (
+                    isinstance(new_sym, SymTypes) and
+                    isinstance(new_s := new_sym.node.expr, sympy.Symbol)
+                ):
+                    if isinstance(old_sym, SymTypes) and (old_s := old_sym.node.expr) != new_s:
+                        if isinstance(old_s, sympy.Symbol):
+                            shape_env._rename_unbacked_to(new_s, old_s)
+                        else:
+                            shape_env._eliminate_unbacked(new_s, old_s)
+                    elif not isinstance(old_sym, SymTypes):
+                        shape_env._eliminate_unbacked(new_s, sympy.sympify(old_sym))
+
         return symbol_to_path
 
 def definitely_true(a):
@@ -1296,6 +1307,8 @@ def _sympy_cast_symbool_to_symint_guardless(x: sympy.Expr) -> sympy.Expr:
 
 
 def cast_symbool_to_symint_guardless(symbool: torch.SymBool) -> torch.SymInt:
+    if isinstance(symbool, bool):
+        return 1 if symbool else 0
     int_sym = _sympy_cast_symbool_to_symint_guardless(symbool.node.expr)
     return symbool.node.shape_env.create_symintnode(int_sym, hint=int(symbool.node.require_hint()) if has_hint(symbool) else None)
 
@@ -2229,6 +2242,7 @@ class ShapeEnv:
         self.log = log
         self.log.debug("create_env")
         self.frozen = False
+        self.runtime_asserts_frozen = False
         self.dim_constraints: Optional[DimConstraints] = None
         self.counter = collections.Counter()
         # Mapping from sympy.Symbol to the number of guards which mention this
@@ -2270,6 +2284,33 @@ class ShapeEnv:
         # duplicated nodes.
         self.fx_node_cache: Dict[Tuple[Callable, Tuple[Any, ...]], torch.fx.Node] = {}
         self.source_to_symbol: Dict[str, sympy.Symbol] = {}
+
+        # Suppose you want to replace an unbacked symbol with another
+        # unbacked symbol.  This is error prone because you can cause
+        # references to unbacked symbols to time travel backwards.  E.g.,
+        #
+        # u1 = x.item()
+        # ... use of u1 ...
+        # u2 = y.item()
+        # u3 = z.item()
+        # torch._check(u1 == u2 + u3)
+        #
+        # If you replace u1 with u2 + u3, then the use of u1 now
+        # references u2 and u3 prior to them actually being bound at
+        # runtime.
+        #
+        # To control for this, we track the order unbacked symbols
+        # were allocated, and only allow substitutions if they respect
+        # the dependency from this order; an unbacked symbol can only
+        # be substituted with unbacked symbols that come before it in the
+        # order.
+        #
+        # This also imposes an ordering on the unbacked symbol binding
+        # sites themselves: you are not allowed to reorder unbacked symbol
+        # bindings.  At the moment, this is not tracked, but we potentially
+        # could track this at the IR level using a higher order operator
+        # with something like effect token tracking.
+        self.unbacked_alloc_order: Dict[sympy.Symbol, int] = {}
 
         from torch.fx.experimental.validator import translation_validation_enabled
         self._translation_validation_enabled = translation_validation_enabled()
@@ -2402,6 +2443,10 @@ class ShapeEnv:
         finally:
             self.is_recording = False
 
+    @record_shapeenv_event()
+    def _eliminate_unbacked(self, orig_s: sympy.Symbol, new_s: sympy.Expr):
+        self._set_replacement(orig_s, new_s, "eliminate_unbacked")
+
     # Unlike set_replacement, this records a shapeenv event
     @record_shapeenv_event()
     def _rename_unbacked_to(self, orig_s: sympy.Symbol, new_s: sympy.Symbol):
@@ -2521,6 +2566,17 @@ class ShapeEnv:
         only emit a warning which may lead to accuracy problems.
         """
         self.frozen = True
+
+    @record_shapeenv_event()
+    def freeze_runtime_asserts(self):
+        """Freeze this ShapeEnv to stop adding deferred runtime asserts.
+
+        We will error if you try to install a new runtime assert when it is
+        frozen.  This would indicate a lowering violation, or perhaps something
+        we know statically is already True but we are checking it again in a way
+        that is not clearly dischargeable.
+        """
+        self.runtime_asserts_frozen = True
 
     def _create_symbol_for_source(self, source: Source) -> Optional[sympy.Symbol]:
         if not self._translation_validation_enabled:
@@ -4742,6 +4798,10 @@ class ShapeEnv:
             return self.evaluate_expr(new_expr, fx_node=fx_node)
         # NB: Don't use new_expr as expr; it could contain gunk like shape0
         # which we don't want to guard on
+
+        # If you're here because of this assert, read Note [Backwards runtime asserts]
+        # in torch/_inductor/graph.py
+        assert not self.runtime_asserts_frozen, expr
 
         # OK, we're definitely doing a runtime assert now
         if (
