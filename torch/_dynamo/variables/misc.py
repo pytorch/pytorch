@@ -357,18 +357,19 @@ class AutogradFunctionVariable(VariableTracker):
             and torch.is_grad_enabled()
             and config.capture_autograd_function
         ):
-            from torch.autograd.function import is_setup_context_defined
+            from torch._functorch.autograd_function import (
+                autograd_function_forward_rewritten,
+            )
+            from torch.autograd.function import _is_setup_context_defined
 
             forward_fn = self.fn_cls.forward
 
-            is_setup_ctx_defined = is_setup_context_defined(self.fn_cls.setup_context)
+            is_setup_ctx_defined = _is_setup_context_defined(self.fn_cls.setup_context)
             if is_setup_ctx_defined:
                 # If setup_context is defined, we generate a new forward function which includes
                 # the original forward and setup_context function, and trace the new forward function.
-                forward_fn = (
-                    torch.autograd.function.autograd_function_forward_rewritten(
-                        self.fn_cls.forward, self.fn_cls.setup_context
-                    )
+                forward_fn = autograd_function_forward_rewritten(
+                    self.fn_cls.forward, self.fn_cls.setup_context
                 )
 
             vjp_fn = self.fn_cls.vjp  # type: ignore[attr-defined]
