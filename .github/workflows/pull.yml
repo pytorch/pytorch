@@ -35,7 +35,7 @@ jobs:
       id-token: write
       contents: read
 
-  get-workflow:
+  get-workflow-type:
     name: Check if user is in arc_users.yml
     uses: ./.github/workflows/_check-user.yml
     with:
@@ -45,8 +45,8 @@ jobs:
 
   linux-jammy-py3_8-gcc11-build-rg:
     name: linux-jammy-py3.8-gcc11 (arc-lf-linux.2xlarge)
-    needs: get-workflow
-    if: needs.get-workflow.outputs.workflow-type == 'rg'
+    needs: get-workflow-type
+    if: needs.get-workflow-type.outputs.workflow-type == 'rg'
     uses: ./.github/workflows/_linux-build-rg.yml
     with:
       build-environment: linux-jammy-py3.8-gcc11
@@ -65,8 +65,8 @@ jobs:
 
   linux-jammy-py3_8-gcc11-build-label:
     name: linux-jammy-py3.8-gcc11 (linux.2xlarge)
-    needs: get-workflow
-    if: needs.get-workflow.outputs.workflow-type == 'label'
+    needs: get-workflow-type
+    if: needs.get-workflow-type.outputs.workflow-type == 'label'
     uses: ./.github/workflows/_linux-build-label.yml
     with:
       build-environment: linux-jammy-py3.8-gcc11
