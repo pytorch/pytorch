@@ -28,6 +28,8 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         )
 
     def _get_dynamo_output(self, fn, *args, **kwargs):
+        # Reset dynamo between runs
+        torch._dynamo.reset()
         fx_graph = None
 
         def compiler(gm, inputs, **kwargs):
