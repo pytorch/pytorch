@@ -21,11 +21,11 @@ from typing import Any, Dict, List
 
 import torch
 import torch.nn as nn
+from torch import _dynamo as torchdynamo
 from torch.autograd import (
     _record_function_with_args_enter,
     _record_function_with_args_exit,
 )
-from torch import _dynamo as torchdynamo
 from torch.profiler import (
     ExecutionTraceObserver,
     kineto_available,
@@ -368,6 +368,7 @@ class TestExecutionTrace(TestCase):
 
         def fn(nt):
             return nt.sin().cos()
+
         with torch.profiler.profile(execution_trace_observer=observer) as prof:
             for i in range(3):
                 values = torch.rand((8 + i, 4 + i))
