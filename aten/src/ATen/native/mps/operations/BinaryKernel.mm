@@ -6,6 +6,8 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/operations/BinaryKernel.h>
+// For MTLLanguageVersion_3_1
+#include <ATen/native/mps/MPSGraphSonomaOps.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -193,7 +195,9 @@ kernel void nextafter_kernel(constant void  * input_       [[buffer(0)]],
   device   T* out   = (device   T*)((device uint8_t*)out_ + offsets[tid].x);
   constant T* input = (constant T*)((constant uint8_t*)input_ + offsets[tid].y);
   constant T* other = (constant T*)((constant uint8_t*)other_ + offsets[tid].z);
-
+#if __METAL_VERSION__ >= 310
+  *out = nextafter(*input, *other);
+#else
   if (*input == *other)
   {
     *out = *other;
@@ -205,9 +209,12 @@ kernel void nextafter_kernel(constant void  * input_       [[buffer(0)]],
   else
   {
     U bits = as_type<U>(*input);
-    bits = bits + ((*other > *input) ? 1 : -1);
+    U other_bits = as_type<U>(*other);
+
+    bits = bits + ((other_bits > bits) ? 1 : -1);
     *out = as_type<T>(bits);
   }
+#endif
 }
 
 #define REGISTER_NEXTAFTER_OP(DTYPE, UTYPE)  \
@@ -261,7 +268,8 @@ static id<MTLLibrary> compileBinaryOpsLibrary(id<MTLDevice> device) {
 
   NSError* error = nil;
   MTLCompileOptions* options = [[MTLCompileOptions new] autorelease];
-  [options setLanguageVersion:MTLLanguageVersion2_3];
+  [options setLanguageVersion:is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS) ? MTLLanguageVersion3_1
+                                                                                      : MTLLanguageVersion2_3];
   binaryLibrary = [device newLibraryWithSource:[NSString stringWithCString:METAL_BINARY encoding:NSASCIIStringEncoding]
                                        options:options
                                          error:&error];
