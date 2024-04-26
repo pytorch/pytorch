@@ -4,6 +4,8 @@
 From https://docs.google.com/spreadsheets/d/12R3nCOLskxPYjjiNkdqy4OdQ65eQp_htebXGODsjSeA/edit#gid=0
 Try to keep this list in sync with that.
 """
+import operator
+
 top_torch = [
     ("t", 6837449),
     ("tensor", 585786),
@@ -618,7 +620,7 @@ def get_nn_functional_top_list():
             top_nn_functional_[functional_name] += count
 
     top_nn_functional_ = list(top_nn_functional_.items())
-    top_nn_functional_.sort(key=lambda x: x[1], reverse=True)
+    top_nn_functional_.sort(key=operator.itemgetter(1), reverse=True)
     return top_nn_functional_
 
 

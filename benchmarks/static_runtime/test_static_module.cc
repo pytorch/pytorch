@@ -37,6 +37,12 @@ bool testCanEnableStaticRuntime(const std::string& jit_script) {
   return canEnableStaticRuntime(graph);
 }
 
+bool testCanEnableStaticRuntimeWithIR(const std::string& ir) {
+  auto graph = std::make_shared<Graph>();
+  parseIR(ir, graph.get(), {});
+  return canEnableStaticRuntime(graph);
+}
+
 bool testModuleHasOp(const std::string& jit_script, const char* op_name) {
   script::Module module("module");
   module.define(jit_script);
@@ -345,6 +351,15 @@ TEST(StaticRuntime, CanEnableStaticRuntime) {
   EXPECT_TRUE(testCanEnableStaticRuntime(is_script_none));
   EXPECT_FALSE(testCanEnableStaticRuntime(is_not_script_tensors));
   EXPECT_TRUE(testCanEnableStaticRuntime(is_not_script_none));
+
+}
+TEST(StaticRuntime, CanEnableStaticRuntimeCallMethod) {
+  const auto call_method = R"IR(
+      graph(%x : Tensor):
+          %1 : Tensor = prim::CallMethod[name="offsets"](%x)
+          return (%1)
+  )IR";
+  EXPECT_FALSE(testCanEnableStaticRuntimeWithIR(call_method));
 }
 
 TEST(StaticRuntime, CanEnableStaticRuntimeSubBlocks) {
