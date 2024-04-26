@@ -1216,7 +1216,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     timing = float("inf")
                 except RuntimeError as e:
                     msg = str(e)
-                    if "invalid argument" in msg:
+                    if "invalid argument" in msg or "out of resource: shared memory" in msg:
                         msg += "\n\nThis may mean this GPU is too small for max_autotune mode.\n\n"
                         log.warning(msg)
                         timing = float("inf")

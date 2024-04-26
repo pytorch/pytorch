@@ -46,6 +46,8 @@ def conv_grid(n, c, h, w, meta):
 
 # List of dictionaries to store the kernel configs. Configs that evaluate to true
 # will be utilised on the target platform
+is_amd_platform = torch.version.hip is not None
+
 kernel_configs = [
     # "BLOCK_M", "BLOCK_N", "BLOCK_K", "num_stages", "num_warps"
     {"config": (64, 256, 16, 2, 4), "cond": True},
@@ -55,6 +57,13 @@ kernel_configs = [
     {"config": (64, 64, 32, 2, 4), "cond": True},
     {"config": (64, 256, 32, 2, 8), "cond": True},
     {"config": (256, 64, 32, 2, 8), "cond": True},
+    
+    # AMD specific configs
+    {"config": (32, 32, 32, 0, 8), "cond": is_amd_platform},
+    {"config": (64, 32, 32, 0, 8), "cond": is_amd_platform},
+    {"config": (64, 16, 32, 0, 8), "cond": is_amd_platform},
+    {"config": (32, 64, 32, 0, 4), "cond": is_amd_platform},
+    {"config": (128, 32, 32, 0, 4), "cond": is_amd_platform},
 ]
 
 # Create filtered list of configs based on conv
@@ -67,7 +76,7 @@ platform_configs = tuple(
 # On ROCm convert num_stages to 1 as pipelining provides no benefit
 if torch.version.hip:
     platform_configs = tuple(
-        (config[0], config[1], config[2], 1, config[4]) for config in platform_configs
+        (config[0], config[1], config[2], 0, config[4]) for config in platform_configs
     )
 
 conv_configs = functools.partial(

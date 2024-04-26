@@ -67,39 +67,21 @@ def filtered_configs(
         # each warp computes 16x16 tile = 256
         num_warps = min(num_warps, block_m * block_n // 256)
         if torch.version.hip:
-            for matrix_instr_nonkdim in [0, 16]:
-                if matrix_instr_nonkdim != 0 and (
-                    block_m % matrix_instr_nonkdim != 0
-                    or block_n % matrix_instr_nonkdim != 0
-                ):
-                    #  block_m and block_n must be a multiple of matrix_instr_nonkdim
-                    continue
-                if (
-                    block_m,
-                    block_n,
-                    block_k,
-                    num_stages,
-                    num_warps,
-                    matrix_instr_nonkdim,
-                ) not in used:
-                    used.add(
-                        (
-                            block_m,
-                            block_n,
-                            block_k,
-                            num_stages,
-                            num_warps,
-                            matrix_instr_nonkdim,
-                        )
-                    )
-                    yield triton_config(
-                        BLOCK_M=block_m,
-                        BLOCK_N=block_n,
-                        BLOCK_K=block_k,
-                        num_stages=num_stages,
-                        num_warps=num_warps,
-                        matrix_instr_nonkdim=matrix_instr_nonkdim,
-                    )
+            matrix_instr_nonkdim = 16
+            if (
+                block_m % matrix_instr_nonkdim != 0
+                or block_n % matrix_instr_nonkdim != 0
+            ):
+                #  block_m and block_n must be a multiple of matrix_instr_nonkdim, else set to 0.
+                matrix_instr_nonkdim = 0
+            yield triton_config(
+                BLOCK_M=block_m,
+                BLOCK_N=block_n,
+                BLOCK_K=block_k,
+                num_stages=num_stages,
+                num_warps=num_warps,
+                matrix_instr_nonkdim=matrix_instr_nonkdim,
+            )
         else:
             if (block_m, block_n, block_k, num_stages, num_warps, 0) not in used:
                 used.add((block_m, block_n, block_k, num_stages, num_warps, 0))
@@ -114,42 +96,70 @@ def filtered_configs(
 
 # List of dictionaries to store the kernel configs. Configs that evaluate to true
 # will be utilised on the target platform
+is_amd_platform = torch.version.hip is not None
+
 mm_kernel_configs = [
     # "BLOCK_M", "BLOCK_N", "BLOCK_K", "num_stages", "num_warps"
-    {"config": (64, 64, 32, 2, 4), "cond": True},
-    {"config": (64, 128, 32, 3, 4), "cond": True},
-    {"config": (128, 64, 32, 3, 4), "cond": True},
-    {"config": (64, 128, 32, 4, 8), "cond": True},
-    {"config": (128, 64, 32, 4, 8), "cond": True},
-    {"config": (64, 32, 32, 5, 8), "cond": True},
-    {"config": (32, 64, 32, 5, 8), "cond": True},
-    {"config": (128, 128, 32, 2, 8), "cond": True},
-    {"config": (64, 64, 64, 3, 8), "cond": True},
-    {"config": (32, 32, 128, 2, 4), "cond": torch.version.hip is None},
-    {"config": (64, 64, 16, 2, 4), "cond": True},
-    {"config": (32, 32, 16, 1, 2), "cond": True},
+    {"config": (64, 64, 32, 2, 4), "cond": not is_amd_platform},
+    {"config": (64, 128, 32, 3, 4), "cond": not is_amd_platform},
+    {"config": (128, 64, 32, 3, 4), "cond": not is_amd_platform},
+    {"config": (64, 128, 32, 4, 8), "cond": not is_amd_platform},
+    {"config": (128, 64, 32, 4, 8), "cond": not is_amd_platform},
+    {"config": (64, 32, 32, 5, 8), "cond": not is_amd_platform},
+    {"config": (32, 64, 32, 5, 8), "cond": not is_amd_platform},
+    {"config": (128, 128, 32, 2, 8), "cond": not is_amd_platform},
+    {"config": (64, 64, 64, 3, 8), "cond": not is_amd_platform},
+    {"config": (32, 32, 128, 2, 4), "cond": not is_amd_platform},
+    {"config": (64, 64, 16, 2, 4), "cond": not is_amd_platform},
+    {"config": (32, 32, 16, 1, 2), "cond": not is_amd_platform},
+
+    # AMD specific
+    {"config": (128, 128, 64, 0, 8), "cond": is_amd_platform},
+    {"config": (128, 256, 64, 0, 4), "cond": is_amd_platform},
+    {"config": (64, 256, 32, 0, 4), "cond": is_amd_platform},
+    {"config": (128, 128, 32, 0, 4), "cond": is_amd_platform},
+    {"config": (128, 64, 32, 0, 4), "cond": is_amd_platform},
+    {"config": (64, 128, 32, 0, 4), "cond": is_amd_platform},
+    {"config": (128, 32, 32, 0, 4), "cond": is_amd_platform},
+    {"config": (64, 32, 32, 0, 2), "cond": is_amd_platform},
+    {"config": (32, 64, 32, 0, 2), "cond": is_amd_platform},
+    {"config": (32, 32, 64, 0, 2), "cond": is_amd_platform},
+    {"config": (32, 32, 64, 0, 2), "cond": is_amd_platform},
+    {"config": (32, 32, 64, 0, 4), "cond": is_amd_platform},
+    {"config": (32, 32, 64, 0, 1), "cond": is_amd_platform},
 ]
 
 int8_mm_kernel_configs = [
-    {"config": (64, 64, 32, 2, 4), "cond": True},
-    {"config": (64, 128, 32, 3, 4), "cond": True},
-    {"config": (128, 64, 32, 3, 4), "cond": True},
-    {"config": (64, 128, 32, 4, 8), "cond": True},
-    {"config": (128, 64, 32, 4, 8), "cond": True},
-    {"config": (64, 32, 32, 5, 8), "cond": True},
-    {"config": (32, 64, 32, 5, 8), "cond": True},
-    {"config": (128, 128, 32, 2, 8), "cond": True},
-    {"config": (64, 64, 64, 3, 8), "cond": True},
-    # {"config": (32, 32, 128, 2, 4), "cond": True},
-    # {"config": (64, 64, 16, 2, 4), "cond": True},
-    # {"config": (32, 32, 16, 1, 2), "cond": True},
-    {"config": (128, 256, 128, 3, 8), "cond": torch.version.hip is None},
-    {"config": (256, 128, 128, 3, 8), "cond": torch.version.hip is None},
+    # "BLOCK_M", "BLOCK_N", "BLOCK_K", "num_stages", "num_warps"
+    {"config": (64, 64, 32, 2, 4), "cond": not is_amd_platform},
+    {"config": (64, 128, 32, 3, 4), "cond": not is_amd_platform},
+    {"config": (128, 64, 32, 3, 4), "cond": not is_amd_platform},
+    {"config": (64, 128, 32, 4, 8), "cond": not is_amd_platform},
+    {"config": (128, 64, 32, 4, 8), "cond": not is_amd_platform},
+    {"config": (64, 32, 32, 5, 8), "cond": not is_amd_platform},
+    {"config": (32, 64, 32, 5, 8), "cond": not is_amd_platform},
+    {"config": (128, 128, 32, 2, 8), "cond": not is_amd_platform},
+    {"config": (64, 64, 64, 3, 8), "cond": not is_amd_platform},
+    {"config": (128, 256, 128, 3, 8), "cond": not is_amd_platform},
+    {"config": (256, 128, 128, 3, 8), "cond": not is_amd_platform},
+
+    # AMD specific
+    {"config": (128, 128, 64, 0, 8), "cond": is_amd_platform},
+    {"config": (128, 256, 64, 0, 4), "cond": is_amd_platform},
+    {"config": (64, 256, 32, 0, 4), "cond": is_amd_platform},
+    {"config": (128, 128, 32, 0, 4), "cond": is_amd_platform},
+    {"config": (128, 64, 32, 0, 4), "cond": is_amd_platform},
+    {"config": (64, 128, 32, 0, 4), "cond": is_amd_platform},
+    {"config": (128, 32, 32, 0, 4), "cond": is_amd_platform},
+    {"config": (64, 32, 32, 0, 2), "cond": is_amd_platform},
+    {"config": (32, 64, 32, 0, 2), "cond": is_amd_platform},
+    {"config": (32, 32, 64, 0, 2), "cond": is_amd_platform},
+    {"config": (32, 32, 64, 0, 2), "cond": is_amd_platform},
+    {"config": (32, 32, 64, 0, 4), "cond": is_amd_platform},
+    {"config": (32, 32, 64, 0, 1), "cond": is_amd_platform},
 ]
 
 # Create filtered list of configs based on cond evaluation
-
-
 mm_platform_configs = tuple(
     cast(Tuple[int, int, int, int, int], config["config"])
     for config in mm_kernel_configs
@@ -160,17 +170,6 @@ int8_platform_configs = tuple(
     for config in int8_mm_kernel_configs
     if config["cond"]
 )
-
-# On ROCm convert num_stages to 1 as pipelining provides no benefit
-if torch.version.hip:
-    mm_platform_configs = tuple(
-        (config[0], config[1], config[2], 1, config[4])
-        for config in mm_platform_configs
-    )
-    int8_platform_configs = tuple(
-        (config[0], config[1], config[2], 1, config[4])
-        for config in mm_platform_configs
-    )
 
 mm_configs = functools.partial(
     filtered_configs,

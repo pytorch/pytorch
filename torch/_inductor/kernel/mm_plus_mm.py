@@ -172,7 +172,7 @@ def mm_configs():
     # On ROCm convert num_stages to 1 as pipelining provides no benefit
     if torch.version.hip:
         filtered_configs = [
-            triton.Config(c["config"], num_stages=1, num_warps=c["num_warps"])
+            triton.Config(c["config"], num_stages=0, num_warps=c["num_warps"])
             for c in mm_triton_configs
             if c["cond"]
         ]
