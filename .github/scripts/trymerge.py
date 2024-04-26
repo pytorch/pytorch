@@ -1645,6 +1645,11 @@ def is_unstable(
     name = check.name
     job_id = check.job_id
 
+    # The job name has the unstable keyword. This is the original way to mark a job
+    # as unstable on HUD, Dr.CI, and trymerge
+    if "unstable" in name:
+        return True
+
     # Consult the list of unstable failures from Dr.CI
     return any(
         (name == unstable["name"] or (job_id and job_id == unstable["id"]))
