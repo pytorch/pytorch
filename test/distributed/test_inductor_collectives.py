@@ -559,7 +559,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             .check("buf3 = torch.ops._c10d_functional.wait_tensor.default(buf0")
             .check("buf5 = empty_strided")
             .check(".run(buf5, 16")
-            .check("return (buf3, buf5")
+            .check("return (buf0, buf5")
             .run(code)
         )
         out = compiled(inputs, **self.get_world_trs())
