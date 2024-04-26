@@ -332,6 +332,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
     if (at::hasMTIA()) {
       activities.insert(torch::profiler::impl::ActivityType::MTIA);
     }
+    if (c10::get_privateuse1_backend() != "privateuseone") {
+      activities.insert(torch::profiler::impl::ActivityType::PrivateUse1);
+    }
 #endif
     return activities;
   });
@@ -1094,11 +1097,13 @@ static PyObject* push_on_torch_dispatch_stack(
     if (maybe_mode_key_obj) {
       mode_key = py::cast<c10::impl::TorchDispatchModeKey>(maybe_mode_key_obj);
       c10::impl::TorchDispatchModeTLS::set_mode(
-          std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()),
+          std::make_shared<c10::impl::PyObject_TorchDispatchMode>(
+              arg, getPyInterpreter()),
           mode_key.value());
     } else {
       c10::impl::TorchDispatchModeTLS::push_non_infra_mode_onto_stack(
-          std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()));
+          std::make_shared<c10::impl::PyObject_TorchDispatchMode>(
+              arg, getPyInterpreter()));
     }
     Py_INCREF(arg);
   }
@@ -1162,7 +1167,9 @@ static PyObject* set_dispatch_mode(PyObject* _unused, PyObject* mode) {
 
   Py_INCREF(mode);
   c10::impl::TorchDispatchModeTLS::set_mode(
-      std::make_shared<c10::SafePyObject>(mode, getPyInterpreter()), mode_key);
+      std::make_shared<c10::impl::PyObject_TorchDispatchMode>(
+          mode, getPyInterpreter()),
+      mode_key);
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
