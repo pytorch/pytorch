@@ -14,6 +14,7 @@ def make_prim(
     impl_aten,
     return_type=_prims.RETURN_TYPE.NEW,
     doc: str = "",
+    mutates_args: Sequence[str] = (),
     tags: Optional[Sequence[torch.Tag]] = None,
 ):
     def meta(*args, **kwargs):
@@ -25,6 +26,7 @@ def make_prim(
         meta=meta,
         impl_aten=impl_aten,
         doc=doc,
+        mutates_args=mutates_args,
         tags=tags,
     )
 
@@ -87,6 +89,7 @@ _unsafe_index_put_ = make_prim(
         self, indices, values, accumulate
     ),
     doc="Unsafe index_put_ (doesn't issue device asserts)",
+    mutates_args=("self",),
 )
 fma = make_prim(
     "fma(Tensor a, Tensor b, Tensor c) -> Tensor",

@@ -33,6 +33,12 @@ from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.overrides import handle_torch_function, has_torch_function
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
+prim = torch.library.Library("prims", "DEF")
+prim_impl = torch.library.Library("prims", "IMPL", "CompositeExplicitAutograd")
+prim_backend_select_impl = torch.library.Library("prims", "IMPL", "BackendSelect")
+prim_autograd_impl = torch.library.Library("prims", "IMPL", "Autograd")
+prim_meta_impl = torch.library.Library("prims", "IMPL", "Meta")
+
 # Experimental module containing prototype "primitive" operations.
 
 __all__ = [
@@ -265,6 +271,7 @@ def _make_prim(
     impl_aten: Callable,
     doc: str,
     mutates_args: Sequence[str] = (),
+    returns_alias: bool = False,
     tags: Optional[Sequence[torch.Tag]] = None,
 ):
     """
@@ -297,13 +304,22 @@ def _make_prim(
     name = schema.split("(")[0]
     schema = schema[len(name) :]
 
-    prim_def = torch.library.custom_op(
-        "prims::" + name,
-        _prim_impl,
-        mutates_args=mutates_args,
-        schema=schema,
-    )
-    prim_def.register_fake(meta)
+    # if op returns views/aliases of inputs or other returns, we need to use the
+    # old custom ops API
+
+    if returns_alias:
+        prim.define(name + schema, tags=torch.Tag.pt2_compliant_tag)
+        prim_impl.impl(name, _prim_impl)
+        prim_autograd_impl.impl(name, _autograd_impl)
+        prim_meta_impl.impl(name, meta)
+    else:
+        prim_def = torch.library.custom_op(
+            "prims::" + name,
+            _prim_impl,
+            mutates_args=mutates_args,
+            schema=schema,
+        )
+        prim_def.register_fake(meta)
 
     _prim_packet = getattr(torch._ops.ops.prims, name)
     _prim = _prim_packet.default
@@ -318,7 +334,7 @@ def _make_prim(
         # See https://github.com/pytorch/pytorch/issues/103532
         "prims.device_put.default"
     ]:
-        prim_def.register_kernel("backend_select", _backend_select_impl)
+        prim_backend_select_impl.impl(name, _backend_select_impl)
 
     for p in (_prim_packet, _prim):
         p.__doc__ = doc
@@ -1276,7 +1292,7 @@ def _broadcast_in_dim_aten(a, shape, broadcast_dimensions):
     for broadcast_dimension in broadcast_dimensions:
         s[broadcast_dimension] = -1
 
-    v = a.clone()
+    v = a
     for idx, x in enumerate(s):
         if x != -1:
             v = v.unsqueeze(idx)
@@ -1301,6 +1317,7 @@ broadcast_in_dim = _make_prim(
     impl_aten=_broadcast_in_dim_aten,
     return_type=RETURN_TYPE.VIEW,
     doc=_broadcast_in_dim_doc,
+    returns_alias=True,
 )
 
 
@@ -1400,7 +1417,7 @@ def _collapse_view_meta(a: TensorLikeType, start: int, end: int) -> TensorLikeTy
 
 def _collapse_view_aten(a: Tensor, start: int, end: int) -> Tensor:
     new_shape = _collapsed_shape(a.shape, start, end)
-    return a.clone().view(new_shape)
+    return a.view(new_shape)
 
 
 _collapse_view_doc = """
@@ -1426,6 +1443,7 @@ collapse_view = _make_prim(
     impl_aten=_collapse_view_aten,
     return_type=RETURN_TYPE.VIEW,
     doc=_collapse_view_doc,
+    returns_alias=True,
 )
 
 
@@ -1688,7 +1706,7 @@ def _split_dim_aten(a: Tensor, dim: int, outer_length: int) -> Tensor:
     inner_length = a.shape[dim] // outer_length
     new_shape = a.shape[0:dim] + (outer_length, inner_length) + a.shape[dim + 1 :]
 
-    return a.clone().view(new_shape)
+    return a.view(new_shape)
 
 
 _split_dim_doc = """
@@ -1705,6 +1723,7 @@ split_dim = _make_prim(
     impl_aten=_split_dim_aten,
     return_type=RETURN_TYPE.VIEW,
     doc=_split_dim_doc,
+    returns_alias=True,
 )
 
 
@@ -1762,7 +1781,7 @@ def _transpose_meta(a: TensorLikeType, permutation: DimsSequenceType) -> TensorL
 
 
 def _transpose_aten(a: Tensor, permutation: DimsSequenceType) -> Tensor:
-    return torch.permute(a, permutation).clone()
+    return torch.permute(a, permutation)
 
 
 _transpose_doc = """
@@ -1779,6 +1798,7 @@ transpose = _make_prim(
     impl_aten=_transpose_aten,
     return_type=RETURN_TYPE.VIEW,
     doc=_transpose_doc,
+    returns_alias=True,
 )
 
 
@@ -1968,7 +1988,7 @@ def _reshape_meta(a: TensorLikeType, shape: ShapeType):
 
 
 def _reshape_aten(a: Tensor, shape: ShapeType) -> Tensor:
-    return a.reshape(shape).contiguous().clone()
+    return a.reshape(shape).contiguous()
 
 
 _reshape_doc = """
@@ -2219,7 +2239,7 @@ def _copy_to_meta(a: TensorLikeType, b: TensorLikeType):
 
 
 def _copy_to_aten(a: Tensor, b: Tensor) -> Tensor:
-    return a.copy_(b).clone()
+    return a.copy_(b)
 
 
 _copy_to_doc = """
@@ -2234,6 +2254,7 @@ copy_to = _make_prim(
     impl_aten=_copy_to_aten,
     return_type=RETURN_TYPE.INPLACE,
     doc=_copy_to_doc,
+    returns_alias=True,
 )
 
 
@@ -2318,7 +2339,7 @@ def _reduction_meta(inp, dims, *, output_dtype=None):
     )
 
 
-def _var_reduction_meta(inp, dims, *, correction):
+def _var_reduction_meta(inp, dims, correction):
     if utils.is_complex_dtype(inp.dtype):
         output_dtype = utils.corresponding_real_dtype(inp.dtype)
     else:
