@@ -2697,7 +2697,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 unimplemented("assert with non-string message")
 
             _, fglobals_vt, global_source = self.get_globals_source_and_value(name)
-            if self.output.side_effects.is_attribute_mutation(fglobals_vt):
+            if self.output.side_effects.has_pending_mutation_of_attr(fglobals_vt, name):
                 self.push(self.output.side_effects.load_attr(fglobals_vt, name))
             else:
                 try:
