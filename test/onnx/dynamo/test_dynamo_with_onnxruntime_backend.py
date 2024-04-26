@@ -52,13 +52,16 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
 
     def test_get_ort_device_type(self):
         self.assertEqual(
-            onnxruntime._get_ort_device_type("cuda"), onnxruntime.ORTC.OrtDevice.cuda()
+            torch.onnx._internal.onnxruntime._get_ort_device_type("cuda"),
+            onnxruntime.ORTC.OrtDevice.cuda(),
         )
         self.assertEqual(
-            onnxruntime._get_ort_device_type("cpu"), onnxruntime.ORTC.OrtDevice.cpu()
+            torch.onnx._internal.onnxruntime._get_ort_device_type("cpu"),
+            onnxruntime.ORTC.OrtDevice.cpu(),
         )
         self.assertEqual(
-            onnxruntime._get_ort_device_type("maia"), onnxruntime.ORTC.OrtDevice.npu()
+            torch.onnx._internal.onnxruntime._get_ort_device_type("maia"),
+            onnxruntime.ORTC.OrtDevice.npu(),
         )
 
     def test_torch_compile_backend_registration(self):
