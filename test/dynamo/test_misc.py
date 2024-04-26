@@ -43,6 +43,7 @@ from torch._dynamo.testing import (
     expectedFailureDynamic,
     same,
     skipIfNotPy311,
+    xfailIfPy312,
     unsupported,
 )
 from torch._dynamo.utils import CompileProfiler, counters, ifdynstaticdefault
@@ -10155,6 +10156,10 @@ fn
             lambda mod: mod,
         )
 
+    # The following 2 tests fail due to https://github.com/python/cpython/issues/118013.
+    # Tracked by https://github.com/pytorch/pytorch/issues/124302.
+    # The xfails can be removed once Python 3.12 is updated on CI.
+    @xfailIfPy312
     def test_outside_linear_module_free(self):
         # Compared to test_linear_module_free, the linear
         # layer is not the code object that is directly compiled.
@@ -10167,14 +10172,14 @@ fn
                     self.fc_ref = fc
 
                 def forward(self, x):
-                    return fc(x[0])
+                    return self.fc_ref(x)
 
             # return fc to keep it alive in _test_compile_model_free
             return Mod(), (torch.randn(100, 100), fc)
 
         self._test_compile_model_free(model_inp_ctr, lambda mod: mod.fc_ref)
 
-    @unittest.skipIf(sys.version_info >= (3, 12), "leaks in 3.12+")
+    @xfailIfPy312
     def test_parameter_free(self):
         def model_inp_ctr():
             param = torch.nn.Parameter(torch.randn(100, 100))
@@ -10185,7 +10190,7 @@ fn
                     self.param = param
 
                 def forward(self, x):
-                    return self.param * x[0]
+                    return self.param * x
 
             # return param to keep it alive in _test_compile_model_free
             return Mod(), (torch.randn(100, 100), param)
