@@ -494,12 +494,8 @@ class FusionTests(TestCase):
         expected_numel = (
             1 + hidden_size * 2 + 4 * 2048 * hidden_size * 2 + 4 * 2048 * 2 + 1
         )
-        self.assertExpectedInline(
-            count_numel(f, *inp, True), str(expected_numel)
-        )
-        self.assertExpectedInline(
-            count_numel(f, *inp, False), str(expected_numel)
-        )
+        self.assertExpectedInline(count_numel(f, *inp, True), str(expected_numel))
+        self.assertExpectedInline(count_numel(f, *inp, False), str(expected_numel))
 
     def test_pointwise_multi_level_reduction(self):
         # TODO: this can be optimized by having the first pointwise kernel leveraging block sizes

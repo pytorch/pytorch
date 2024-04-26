@@ -1174,8 +1174,8 @@ class Reduction(Loops):
         )
 
         def wrapper_fn(merged_index, new_reduction_index):
-            original_idx = merged_index[:len(original_ranges)]
-            new_index = merged_index[len(original_ranges):]
+            original_idx = merged_index[: len(original_ranges)]
+            new_index = merged_index[len(original_ranges) :]
             return loader(
                 original_idx,
                 reindex(tuple(new_index) + tuple(new_reduction_index)),
