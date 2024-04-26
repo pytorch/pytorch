@@ -418,7 +418,9 @@ def impl_abstract(qualname, func=None, *, lib=None, _stacklevel=1):
                   "we will remove torch.library.impl_abstract in a future "
                   "version of PyTorch.",
                   DeprecationWarning, stacklevel=2)
-    return register_fake(qualname, func, lib=lib, _stacklevel=_stacklevel + 1)
+    if func is not None:
+        _stacklevel = _stacklevel + 1
+    return register_fake(qualname, func, lib=lib, _stacklevel=_stacklevel)
 
 
 _op_identifier = Union[str, "torch._ops.OpOverload", "torch._library.custom_ops.CustomOpDef"]
@@ -592,7 +594,7 @@ def register_fake(
             _keep_alive.append(use_lib)
         else:
             use_lib = lib
-        use_lib._register_fake(op_name, func, _stacklevel=stacklevel)
+        use_lib._register_fake(op_name, func, _stacklevel=stacklevel + 1)
         return func
 
     if func is None:
