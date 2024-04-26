@@ -50,6 +50,7 @@ from .utils import (
     is_wait,
     sympy_product,
 )
+from .codecache import write_text
 from .virtualized import V
 
 
@@ -2131,6 +2132,21 @@ class Scheduler:
         if no_shared_data and (
             not config.aggressive_fusion or node1.is_reduction() or node2.is_reduction()
         ):
+            if is_metric_table_enabled("fusion_failure_due_to_loop_ordering"):
+                common_buf_names = node1.read_writes.buffer_names() & node2.read_writes.buffer_names()
+                if len(common_buf_names) > 0:
+                    get_metric_table("fusion_failure_due_to_loop_ordering").add_row(
+                        lambda: {
+                            "node1_name": node1.get_name(),
+                            "node2_name": node2.get_name(),
+                            "node1_debug_str": write_text(node1.debug_str()),
+                            "node2_debug_str": write_text(node2.debug_str()),
+                            "common_buffer_names": list(common_buf_names),
+                        }
+                    )
+
+                    why("no shared data due to loop ordering mismatch")
+                    return False
             why("no shared data")
             return False  # heuristic not needed for correctness
 

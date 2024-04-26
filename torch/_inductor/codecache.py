@@ -398,6 +398,11 @@ def write(
         write_atomic(path, content)
     return basename, path
 
+def write_text(text):
+    """
+    Write the `text` to a file and return the path computed based on the hash.
+    """
+    return write(text, "txt")[1]
 
 def write_atomic(path: str, content: Union[str, bytes]) -> None:
     # Write into temporary file first to avoid conflicts between threads

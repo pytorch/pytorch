@@ -225,6 +225,18 @@ MetricTable.register_table(
     ],
 )
 
+# Log the fusion failures due to mismatch loop orderings.
+MetricTable.register_table(
+    "fusion_failure_due_to_loop_ordering",
+    [
+        "node1_name",
+        "node2_name",
+        "node1_debug_str",
+        "node2_debug_str",
+        "common_buffer_names",
+    ],
+)
+
 # Log metadata for pointwise/reduction kernels. E.g., model name, kernel path, numel, rnumel, reduction hint
 MetricTable.register_table(
     "kernel_metadata",

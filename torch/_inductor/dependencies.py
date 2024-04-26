@@ -245,6 +245,18 @@ class ReadWrites:
     def reads_and_writes(self):
         return itertools.chain(self.reads, self.writes)
 
+    def buffer_names(self, ignore_integer_index=True):
+        """
+        Integer index is used for load_seed.
+        """
+        names = set()
+        for dep in self.reads_and_writes():
+            if not isinstance(dep, MemoryDep):
+                continue
+            if not ignore_integer_index or not isinstance(dep.index, (int, sympy.Integer)):
+                names.add(dep.name)
+        return names
+
 
 class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
     def __init__(self, var_ranges: VarRanges, normalize: bool):
