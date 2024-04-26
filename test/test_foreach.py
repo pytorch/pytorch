@@ -164,20 +164,22 @@ class TestForeach(TestCase):
         wrapped_op, _, inplace_op, _ = self._get_funcs(op)
 
         for sample in op.sample_zero_size_inputs(device, dtype):
-            if op.supports_out:
+            if op.method_variant is not None:
                 wrapped_op(
                     (sample.input, *sample.args),
                     is_cuda=self.is_cuda,
                     expect_fastpath=True,
                     zero_size=True,
                 )
-            with InplaceForeachVersionBumpCheck(self, sample.input):
-                inplace_op(
-                    (sample.input, *sample.args),
-                    is_cuda=self.is_cuda,
-                    expect_fastpath=True,
-                    zero_size=True,
-                )
+
+            if op.inplace_variant is not None:
+                with InplaceForeachVersionBumpCheck(self, sample.input):
+                    inplace_op(
+                        (sample.input, *sample.args),
+                        is_cuda=self.is_cuda,
+                        expect_fastpath=True,
+                        zero_size=True,
+                    )
 
     @skipIfRocmVersionLessThan((6, 0))
     @ops(
