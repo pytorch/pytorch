@@ -113,7 +113,7 @@ runs:
       run: |
         set +x
 
-        max_attempts=6
+        max_attempts=30
         delay=10
         attempt=1
 
