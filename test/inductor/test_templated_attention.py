@@ -346,8 +346,8 @@ class TestTemplatedSDPA(InductorTestCase):
         # this means that the base for the LSE computed by ref is e while for the compiled
         # version it is 2. To compare we use the change of base formula
         # log_2(x_compiled) = log_e(x_ref) * log_2(e) where
-        # x_ref      = ∑_i e^(scores[i])
-        # x_compiled = ∑_i 2^(log2(e) * scores[i])
+        # x_ref      = sum(_i e^(scores[i]))
+        # x_compiled = sum(_i 2^(log2(e) * scores[i]))
 
         self.assertTrue(ref_lse.dtype == torch.float32)
         self.assertTrue(compiled_lse.dtype == torch.float32)
