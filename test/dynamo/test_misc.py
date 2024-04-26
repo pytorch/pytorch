@@ -7803,7 +7803,7 @@ def fn():
 
         # Not an exhaustive test of dynamic shapes behavior, but some sanity
         if torch._dynamo.config.assume_static_by_default:
-            base_checker().check("Recompile Reasons").check("'forward'").check(
+            base_checker().check("Recompile Reasons").check("'inner'").check(
                 "cache_size_limit to 1"
             ).run(prof.report())
         else:
@@ -7812,10 +7812,10 @@ def fn():
         new_shape_input = torch.rand((4, 3, 4))
         _ = compiled(new_shape_input)
 
-        base_checker().check("Recompile Reasons").check("'forward'").check(
-            "tensor 'L['input']' size mismatch at index 0. expected 2, actual 3"
+        base_checker().check("Recompile Reasons").check("'inner'").check(
+            "tensor 'L['args'][0]' size mismatch at index 0. expected 2, actual 3"
         ).check(
-            "tensor 'L['input']' size mismatch at index 0. expected 3, actual 4"
+            "tensor 'L['args'][0]' size mismatch at index 0. expected 3, actual 4"
         ).run(
             prof.report()
         )
@@ -10144,6 +10144,9 @@ fn
     def test_outside_linear_module_free(self):
         # Compared to test_linear_module_free, the linear
         # layer is not the code object that is directly compiled.
+
+        # functools.lru_cache causes the static test to fail. Removing it passes.
+        # Dynamic still fails.
         def model_inp_ctr():
             fc = torch.nn.Linear(100, 100)
 

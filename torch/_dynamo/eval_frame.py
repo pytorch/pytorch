@@ -137,15 +137,18 @@ class OptimizedModule(torch.nn.Module):
 
     def _initialize(self):
         # Do this stuff in constructor to lower overhead slightly
-        if isinstance(self._orig_mod.forward, types.MethodType) and trace_rules.check(
-            self._orig_mod.forward
+
+        if trace_rules.should_wrap_top_module() or (
+            isinstance(self._orig_mod.forward, types.MethodType)
+            and trace_rules.check(self._orig_mod.forward)
         ):
-            # This may be a torch.nn.* instance in trace_rules.py which
-            # won't trigger a frame evaluation workaround to add an extra
-            # frame we can capture
+            # TODO(export-team) - the second part of the or condition is
+            # required for export tests. We should fix them and remove it.
             self.forward = self.dynamo_ctx(external_utils.wrap_inline(self._orig_mod))
         else:
             # Invoke hooks outside of dynamo then pickup the inner frame
+            # TODO(export-team/compiled-autograd) - This is because of test
+            # failures for export and compiled-autograd.
             self.forward = self.dynamo_ctx(self._orig_mod.__call__)
 
         if hasattr(self._orig_mod, "_initialize_hook"):
@@ -1215,7 +1218,13 @@ def export(
             automatic_dynamic_shapes=False,
             capture_dynamic_output_shape_ops=True,
             capture_scalar_outputs=True,
-        ):
+        ), trace_rules.dont_wrap_top_module():
+            # TODO(export-team) - discrepancy between torch.compile and
+            # torch.export because torch.compile is planning to inline the
+            # _call_impl (one level above forward) to inline hooks. But doing
+            # that for export breaks many tests because (1) tests are hardcoded
+            # to assume that tracing starts from forward, and (2) some
+            # discrepancies between strict and non strict mode.
             opt_f = optimize_assert(
                 dynamo_normalization_capturing_compiler,
                 hooks=Hooks(

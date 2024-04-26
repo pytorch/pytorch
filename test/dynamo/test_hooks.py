@@ -674,7 +674,10 @@ class HooksTests(torch._dynamo.test_case.TestCase):
 
             comp_out = comp_mod(x1)
 
-            self.assertEqual(cnts.frame_count, 1)
+            # Now the forward graph is recompiled because of this guard failure
+            # ___check_obj_id(L['fn'].forward.__closure__[0].cell_contents.__code__, 139779879079008)
+            # which is basically id(my_hook)
+            self.assertEqual(cnts.frame_count, 2)
             comp_out[0].backward(torch.ones(4))
             self.assertEqual(x0.grad, x1.grad)
 

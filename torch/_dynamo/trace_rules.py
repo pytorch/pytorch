@@ -32,6 +32,7 @@ import typing
 import unittest
 import weakref
 from collections import defaultdict
+from contextlib import contextmanager
 from typing import Any, Callable, cast, Dict, List, Optional, Set, Union
 
 np: Optional[types.ModuleType] = None
@@ -127,6 +128,24 @@ If you are removing an existing torch level API:
 
 
 """
+
+_TLS = threading.local()
+
+
+@contextmanager
+def dont_wrap_top_module():
+    old = getattr(_TLS, "wrap_top_module", True)
+    _TLS.wrap_top_module = False
+    try:
+        yield False
+    finally:
+        _TLS.wrap_top_module = old
+
+
+def should_wrap_top_module():
+    return getattr(_TLS, "wrap_top_module", True)
+
+
 manual_torch_name_rule_map = {
     "torch.onnx.is_in_onnx_export": TorchInGraphFunctionVariable,
     "torch.onnx.operators.shape_as_tensor": TorchInGraphFunctionVariable,
