@@ -388,10 +388,8 @@ def register_onednn_fusion_ops():
                             input_indices=[0, 2],
                         )
 
-                assert isinstance(packed_w.data, ir.StorageBox)
-                assert isinstance(packed_w.data.data, ir.ConstantBuffer)
-                assert isinstance(orig_w.data, ir.StorageBox)
-                assert isinstance(orig_w.data.data, ir.ConstantBuffer)
+                assert packed_w.get_name() in V.graph.constants
+                assert orig_w.get_name() in V.graph.constants
                 input_gen_fns = {
                     1: lambda x: V.graph.constants[x.get_name()],
                     2: lambda x: V.graph.constants[x.get_name()],

@@ -98,16 +98,11 @@ class CppTemplate(KernelTemplate):
 
     def header(self) -> IndentedBuffer:
         res = IndentedBuffer()
-        res.splice(
-            """
-                #include <exception>
-                #include <iostream>
-                #include <memory>
-                #include <random>
-                #include <vector>
-            """
-        )
         res.writeline(codecache.cpp_prefix())
+        headers = r"""
+#include "c10/util/Unroll.h"
+"""
+        res.splice(headers)
         return res
 
     def render(self, **kwargs) -> str:

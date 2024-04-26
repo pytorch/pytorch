@@ -1,11 +1,14 @@
 import itertools
-from typing import Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import sympy
+from sympy.parsing.sympy_parser import parse_expr
 
 import torch
 
 from torch._inductor.autotune_process import CppBenchmarkRequest
+from torch._inductor.utils import sympy_index_symbol
+from .. import lowering as L
 from ..ir import (
     Buffer,
     ChoiceCaller,
@@ -13,11 +16,23 @@ from ..ir import (
     IRNode,
     Layout,
     PrimitiveInfoType,
+    ReinterpretView,
     TensorBox,
+    View,
 )
 from ..virtualized import V
 from .common import Kernel, OpOverrides
 from .cpp import cexpr_index
+
+
+def parse_expr_with_index_symbols(expr_str: str) -> sympy.Expr:
+    expr = parse_expr(expr_str)
+    int_symbols = {sym: sympy_index_symbol(sym.name) for sym in expr.free_symbols}
+    return expr.subs(int_symbols)
+
+
+def wrap_with_tensorbox(node) -> TensorBox:
+    return TensorBox.create(node) if isinstance(node, Buffer) else TensorBox(node)
 
 
 class CppTemplateKernel(Kernel):
@@ -93,11 +108,31 @@ class CppTemplateKernel(Kernel):
     def size(self, node: Buffer, dim: int) -> str:
         return str(self.rename_indexing(node.get_size()[dim]))
 
-    def index(self, node: Buffer, indices: List[str]) -> str:
+    def stride(self, node: Buffer, dim: int) -> str:
+        return str(self.rename_indexing(node.get_stride()[dim]))
+
+    def index(self, node: Buffer, indices: List[Any]) -> str:
         indexer = node.make_indexer()
-        index = indexer([sympy.Symbol(idx) for idx in indices])
+        index = indexer([sympy.Symbol(str(idx), integer=True) for idx in indices])
         index = self.rename_indexing(index)
         return f"{self.args.input(node.get_name())}[{cexpr_index(index)}]"
+
+    def slice_nd(self, node, ranges: List[Tuple[Any]]) -> ReinterpretView:
+        assert len(ranges) == len(node.get_size())
+        sliced = wrap_with_tensorbox(node)
+        for dim, _range in enumerate(ranges):
+            if len(_range) == 0:
+                continue
+            assert len(_range) == 2
+            start, end = (parse_expr_with_index_symbols(str(r)) for r in _range)
+            sliced = L.slice_(sliced, dim, start, end, clamp=False)
+        assert isinstance(sliced.data, ReinterpretView)
+        return sliced.data
+
+    def view(self, node, sizes: List[Any]) -> View:
+        node = wrap_with_tensorbox(node)
+        sizes = [parse_expr_with_index_symbols(str(s)) for s in sizes]
+        return L.view(node, sizes).data
 
 
 class CppTemplateCaller(ChoiceCaller):
