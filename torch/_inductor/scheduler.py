@@ -727,6 +727,10 @@ class SchedulerNode(BaseSchedulerNode):
             f"{name}.group.iteration = {self.group[1]}",
             f"{name}.sizes = {self._sizes}",
         ]
+        for dep in self.read_writes.reads_and_writes():
+            buf_name = dep.name
+            buf = V.graph.get_buffer(buf_name)
+            lines.append(f"{buf_name}_layout = {pformat(buf.layout)}")
         if self.get_aliases():
             lines.append(f"{name}.aliases = {pformat(self.get_aliases())}")
         if self.get_mutations():
@@ -2063,6 +2067,27 @@ class Scheduler:
         )
         return proximity_score > 64
 
+    def decide_fusion_fail_reason(self, node1, node2, common_buf_names):
+        """
+        Try to decide reasons why fusion fail due to no shared memory even though
+        there are common buffers.
+        """
+        reasons = {}
+        node1_name2dep = {dep.name: dep for dep in node1.read_writes.reads_and_writes()}
+        node2_name2dep = {dep.name: dep for dep in node2.read_writes.reads_and_writes()}
+
+        for buf_name in common_buf_names:
+            lhs_dep = node1_name2dep[buf_name]
+            rhs_dep = node2_name2dep[buf_name]
+
+            if lhs_dep.get_numel() != rhs_dep.get_numel():
+                reasons[buf_name] = "different numel" 
+                continue
+
+            # Add more rules here
+
+        return str(reasons)
+
     def can_fuse(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode):
         """
         Determine if it is possible to combine node1 and node2 into a
@@ -2132,16 +2157,19 @@ class Scheduler:
         if no_shared_data and (
             not config.aggressive_fusion or node1.is_reduction() or node2.is_reduction()
         ):
-            if is_metric_table_enabled("fusion_failure_due_to_loop_ordering"):
+            if is_metric_table_enabled("fusion_failure_due_to_indexing_mismatch"):
                 common_buf_names = node1.read_writes.buffer_names() & node2.read_writes.buffer_names()
                 if len(common_buf_names) > 0:
-                    get_metric_table("fusion_failure_due_to_loop_ordering").add_row(
+                    get_metric_table("fusion_failure_due_to_indexing_mismatch").add_row(
                         lambda: {
+                            "pre_grad_graph_id": V.graph.graph_id,
+                            "post_grad_graph_id": V.graph.post_grad_graph_id,
                             "node1_name": node1.get_name(),
                             "node2_name": node2.get_name(),
                             "node1_debug_str": write_text(node1.debug_str()),
                             "node2_debug_str": write_text(node2.debug_str()),
                             "common_buffer_names": list(common_buf_names),
+                            "failure_reason": self.decide_fusion_fail_reason(node1, node2, common_buf_names),
                         }
                     )
 
