@@ -39,11 +39,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
-from torch.testing._internal.torchbind_impls import (
-    load_torchbind_test_lib,
-    register_fake_classes,
-    register_fake_operators,
-)
+from torch.testing._internal.torchbind_impls import init_torchbind_implementations
 
 
 def get_filtered_export_db_tests():
@@ -327,9 +323,7 @@ class TestSerialize(TestCase):
 class TestDeserialize(TestCase):
     def setUp(self):
         super().setUp()
-        load_torchbind_test_lib()
-        register_fake_classes()
-        register_fake_operators()
+        init_torchbind_implementations()
 
     def _check_graph_nodes(self, gm1, gm2, _check_meta=True):
         # TODO: The _check_meta flag bypasses checking for
@@ -1020,9 +1014,7 @@ class TestSaveLoad(TestCase):
 class TestSerializeCustomClass(TestCase):
     def setUp(self):
         super().setUp()
-        load_torchbind_test_lib()
-        register_fake_classes()
-        register_fake_operators()
+        init_torchbind_implementations()
 
     def test_custom_class(self):
         custom_obj = torch.classes._TorchScriptTesting._PickleTester([3, 4])

@@ -10,11 +10,11 @@ log = logging.getLogger(__name__)
 
 
 class FakeScriptObject:
-    def __init__(self, wrapped_obj: Any, qualified_name: str):
+    def __init__(self, wrapped_obj: Any, script_class_name: str):
         self.wrapped_obj = wrapped_obj
 
         # The fully qualified name of the class of original script object
-        self._qualified_name = qualified_name
+        self.script_class_name = script_class_name
 
 
 class HasStaticMethodFromReal(Protocol):

@@ -55,11 +55,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TestCase,
 )
-from torch.testing._internal.torchbind_impls import (
-    load_torchbind_test_lib,
-    register_fake_classes,
-    register_fake_operators,
-)
+from torch.testing._internal.torchbind_impls import init_torchbind_implementations
 from torch.utils import _pytree as pytree
 
 
@@ -94,7 +90,7 @@ def _get_output_names(gm: torch.fx.GraphModule) -> List[str]:
 
 
 class ModelsWithScriptObjectAttr:
-    load_torchbind_test_lib()
+    init_torchbind_implementations()
 
     class Simple(torch.nn.Module):
         def __init__(self):
@@ -268,9 +264,7 @@ class TestPasses(TestCase):
         self.SEQUENTIAL_SPLIT_INLINE_TESTS = _sequential_split_inline_tests()
         self.SET_GRAD_ENABLED_TESTS = _set_grad_enabled_tests()
 
-        load_torchbind_test_lib()
-        register_fake_classes()
-        register_fake_operators()
+        init_torchbind_implementations()
 
     def tearDown(self):
         self.SEQUENTIAL_SPLIT_INLINE_TESTS.clear()
@@ -503,7 +497,25 @@ class TestPasses(TestCase):
                 self.assertEqual(len(fake_constant_attrs), len(constant_attrs))
                 for fake_obj, fqn in fake_constant_attrs.items():
                     self.assertEqual(constant_attrs[fake_to_real[fake_obj]], fqn)
-                _gather_constant_attrs(patched_mod)
+
+    # TODO: _gather_constants doesn't recursively look into the pytree containers.
+    @unittest.expectedFailure
+    def test_fakify_script_objects_properly_handle_containers(self):
+        m = ModelsWithScriptObjectAttr.SimpleWithAttrInContainer()
+        constant_attrs = _gather_constant_attrs(m)
+        fake_mode = FakeTensorMode(
+            shape_env=ShapeEnv(tracked_fakes=[]),
+            allow_non_fake_inputs=True,
+        )
+        with _fakify_script_objects(m, tuple(), {}, fake_mode) as (
+            patched_mod,
+            _,
+            _,
+            fake_constant_attrs,
+            fake_to_real,
+        ):
+            self.assertTrue("attr" in fake_constant_attrs.values())
+            self.assertTrue("pytree_attr2" in fake_constant_attrs.values())
 
     def test_runtime_assert_inline_constraints_for_item(self) -> None:
         class M(torch.nn.Module):

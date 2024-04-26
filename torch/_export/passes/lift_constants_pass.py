@@ -210,7 +210,7 @@ def lift_constants_pass(
                         name=const_placeholder_node.name, class_fqn=class_fqn
                     )
                 elif isinstance(constant_val, FakeScriptObject):
-                    class_fqn = constant_val._qualified_name
+                    class_fqn = constant_val.script_class_name
                     const_placeholder_node.meta["val"] = CustomObjArgument(
                         constant_fqn, class_fqn
                     )
@@ -267,7 +267,7 @@ def rewrite_script_object_meta(
             FakeScriptObject,
         ):
             old_meta = node.meta["val"]
-            class_fqn = old_meta._qualified_name  # type: ignore[attr-defined]
+            class_fqn = old_meta.script_class_name  # type: ignore[attr-defined]
             new_meta = CustomObjArgument(node.name, class_fqn)
             constants[node.name] = old_meta
             node.meta["val"] = new_meta
