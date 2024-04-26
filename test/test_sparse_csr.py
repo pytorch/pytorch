@@ -433,8 +433,7 @@ class TestSparseCompressed(TestCase):
                         basesize = size[batch_ndim:batch_ndim + base_ndim]
                         densesize = size[batch_ndim + base_ndim:]
                         assert len(densesize) == dense_ndim
-                        printed.append("########## {}/{}/size={}+{}+{} ##########".format(
-                            dtype, index_dtype, batchsize, basesize, densesize))
+                        printed.append(f"########## {dtype}/{index_dtype}/size={batchsize}+{basesize}+{densesize} ##########")
                         x = torch.sparse_compressed_tensor(compressed_indices,
                                                            plain_indices,
                                                            values, size, dtype=dtype, layout=layout, device=device)

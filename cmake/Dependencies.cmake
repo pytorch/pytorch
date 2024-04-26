@@ -1156,6 +1156,16 @@ if(APPLE)
   target_link_options(pybind::pybind11 INTERFACE -undefined dynamic_lookup)
 endif()
 
+# ---[ OpenTelemetry API headers
+find_package(OpenTelemetryApi)
+if(NOT OpenTelemetryApi_FOUND)
+  message(STATUS "Using third_party/opentelemetry-cpp.")
+  set(OpenTelemetryApi_INCLUDE_DIRS ${CMAKE_CURRENT_LIST_DIR}/../third_party/opentelemetry-cpp/api/include)
+endif()
+message(STATUS "opentelemetry api include dirs: " "${OpenTelemetryApi_INCLUDE_DIRS}")
+add_library(opentelemetry::api INTERFACE IMPORTED)
+target_include_directories(opentelemetry::api SYSTEM INTERFACE ${OpenTelemetryApi_INCLUDE_DIRS})
+
 # ---[ MPI
 if(USE_MPI)
   find_package(MPI)
@@ -1303,6 +1313,9 @@ if(USE_ROCM)
        list(APPEND HIP_CXX_FLAGS -O0)
        list(APPEND HIP_HIPCC_FLAGS -fdebug-info-for-profiling)
     endif(CMAKE_BUILD_TYPE MATCHES Debug)
+
+    # needed for compat with newer versions of hip-clang that introduced C++20 mangling rules
+    list(APPEND HIP_HIPCC_FLAGS -fclang-abi-compat=17)
 
     set(HIP_CLANG_FLAGS ${HIP_CXX_FLAGS})
     # Ask hcc to generate device code during compilation so we can use
@@ -1977,7 +1990,7 @@ if(USE_KINETO)
     set_property(TARGET kineto PROPERTY POSITION_INDEPENDENT_CODE ON)
   endif()
   list(APPEND Caffe2_DEPENDENCY_LIBS kineto)
-  string(APPEND CMAKE_CXX_FLAGS " -DUSE_KINETO" " -DTMP_LIBKINETO_NANOSECOND")
+  string(APPEND CMAKE_CXX_FLAGS " -DUSE_KINETO")
   if(LIBKINETO_NOCUPTI)
     string(APPEND CMAKE_CXX_FLAGS " -DLIBKINETO_NOCUPTI")
   endif()
