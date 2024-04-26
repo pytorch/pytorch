@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pythoncapi_compat.h>
+#include <iostream>
 #include <sstream>
 #include <vector>
 
