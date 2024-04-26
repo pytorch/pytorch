@@ -41,11 +41,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
-from torch.testing._internal.torchbind_impls import (
-    load_torchbind_test_lib,
-    register_fake_classes,
-    register_fake_operators,
-)
+from torch.testing._internal.torchbind_impls import init_torchbind_implementations
 from torch.utils._pytree import (
     LeafSpec,
     tree_flatten,

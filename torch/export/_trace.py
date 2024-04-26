@@ -555,7 +555,7 @@ def _export_non_strict(
         elif isinstance(val, torch.SymInt):
             return SymIntArgument(name=node.name)
         elif isinstance(val, FakeScriptObject):
-            return CustomObjArgument(name=node.name, class_fqn=val._qualified_name)
+            return CustomObjArgument(name=node.name, class_fqn=val.script_class_name)
         else:
             # TODO: this branch is likely wrong, all permissible ConstantArgument type
             # should have been handled already
