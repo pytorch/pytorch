@@ -612,7 +612,7 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
       array_of<at::ScalarType>(at::kHalf, at::kFloat);
 #ifdef USE_ROCM
   constexpr auto aotriton_mem_efficient_dtypes =
-      array_of<at::ScalarType>(at::kHalf, at::kBFloat16);
+      array_of<at::ScalarType>(at::kHalf, at::kFloat, at::kBFloat16);
 #endif
 
   //  Define gate functions that determine if a mem efficient kernel can be ran

@@ -12,7 +12,7 @@ if(NOT __AOTRITON_INCLUDED)
   else()
     ExternalProject_Add(aotriton_external
       GIT_REPOSITORY https://github.com/ROCm/aotriton.git
-      GIT_TAG 205d5a09555992bb230358f93be186a5a790b3a4
+      GIT_TAG 04b5df8c8123f90cba3ede7e971e6fbc6040d506
       SOURCE_DIR ${__AOTRITON_SOURCE_DIR}
       BINARY_DIR ${__AOTRITON_BUILD_DIR}
       PREFIX ${__AOTRITON_INSTALL_DIR}

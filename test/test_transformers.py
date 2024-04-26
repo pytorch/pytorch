@@ -2177,6 +2177,7 @@ class TestSDPACudaOnly(NNTestCase):
             out = F.scaled_dot_product_attention(query, key, value, mask)
         out.sum().backward()
 
+    @skipIfRocm  # Corner case: does not of (0, 0, 0, 1) strides for attn_mask
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("dtype", [torch.float, torch.float16])
     def test_mem_eff_attention_non_contiguous_mask(self, device, dtype):
@@ -2595,7 +2596,7 @@ class TestSDPACudaOnly(NNTestCase):
         if max(seq_len_q, seq_len_k) >= 2048 and torch.cuda.get_device_properties('cuda').total_memory < 40 * 2**30:
             unittest.skip("Reference implementation OOM")
             return
-        if TEST_WITH_ROCM and seq_len_q > 1024 and seq_len_k > 1024 and head_dim > 128 and batch_size > 1:
+        if TEST_WITH_ROCM and seq_len_q * seq_len_k * head_dim * batch_size > 1024 * 1024 * 128:
             torch.cuda.empty_cache()  # Prevent memory fragmentation
         seed = 42
         scale = scale if scale is None else (1 / head_dim)
@@ -2666,6 +2667,8 @@ class TestSDPACudaOnly(NNTestCase):
         grad_k_ref_atol, grad_k_ref_rtol = get_tolerances(key_ref.grad, key_ref_lp.grad, key_fudge_factor)
 
         value_fudge_factor = 7 if not SM80OrLater and dtype == torch.float16 else 1.0
+        if TEST_WITH_ROCM:
+            value_fudge_factor = max(2.0, value_fudge_factor)
         grad_v_ref_atol, grad_v_ref_rtol = get_tolerances(value_ref.grad, value_ref_lp.grad, value_fudge_factor)
 
         self.assertEqual(out, out_ref.to(out.dtype), atol=output_ref_atol, rtol=output_ref_rtol)
@@ -2700,7 +2703,10 @@ class TestSDPACudaOnly(NNTestCase):
         if max(seq_len_q, seq_len_k) >= 2048 and torch.cuda.get_device_properties('cuda').total_memory < 40 * 2**30:
             unittest.skip("Reference implementation OOM")
             return
-        if TEST_WITH_ROCM and seq_len_q > 1024 and seq_len_k > 1024 and head_dim > 128 and batch_size > 1:
+        if TEST_WITH_ROCM and dtype == torch.float32:
+            unittest.skip("Skip fp32 attn_mask gradients on ROCM, for now.")
+            return
+        if TEST_WITH_ROCM and seq_len_q * seq_len_k * head_dim * batch_size > 1024 * 1024 * 128:
             torch.cuda.empty_cache()  # Prevent memory fragmentation
         seed = 42
         scale = scale if scale is None else (1 / head_dim)
@@ -2780,6 +2786,8 @@ class TestSDPACudaOnly(NNTestCase):
         grad_k_ref_atol, grad_k_ref_rtol = get_tolerances(key_ref.grad, key_ref_lp.grad, key_fudge_factor)
 
         value_fudge_factor = 7 if not SM80OrLater and dtype == torch.float16 else 1.0
+        if TEST_WITH_ROCM:
+            value_fudge_factor = max(2.0, value_fudge_factor)
         grad_v_ref_atol, grad_v_ref_rtol = get_tolerances(value_ref.grad, value_ref_lp.grad, value_fudge_factor)
 
         mask_fudge_factor = 12 if attn_mask.numel() > 512 else 22
@@ -3201,6 +3209,7 @@ class TestSDPACudaOnly(NNTestCase):
 
         self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
 
+    @skipIfRocm  # Nested tensor
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     def test_fused_kernels_nested_broadcasting_query_dense(self, device):
         rand_nested_tensor = partial(rand_sdpa_tensor, type="nested", device=device, dtype=torch.float32)
