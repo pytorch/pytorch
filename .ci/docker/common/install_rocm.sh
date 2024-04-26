@@ -59,7 +59,8 @@ install_ubuntu() {
                    rocm-libs \
                    rccl \
                    rocprofiler-dev \
-                   roctracer-dev
+                   roctracer-dev \
+                   rocm-llvm-dev
 
     # precompiled miopen kernels added in ROCm 3.5, renamed in ROCm 5.5
     # search for all unversioned packages
