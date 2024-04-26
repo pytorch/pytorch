@@ -1,4 +1,5 @@
 import os
+from os.path import abspath, dirname
 import platform
 import shutil
 from glob import glob
@@ -78,6 +79,7 @@ def build_caffe2(
     rerun_cmake: bool,
     cmake_only: bool,
     cmake: CMake,
+    include_static_files: bool = False,
 ) -> None:
     my_env = _create_build_env()
     build_test = not check_negative_env_flag("BUILD_TEST")
@@ -92,3 +94,12 @@ def build_caffe2(
         for proto_file in glob(os.path.join(caffe2_proto_dir, "*.py")):
             if proto_file != os.path.join(caffe2_proto_dir, "__init__.py"):
                 shutil.copy(proto_file, os.path.join("caffe2", "proto"))
+
+    # clean up static files as we do not need to distribute them
+    if not include_static_files:
+        pytorch_root = dirname(dirname(abspath(__file__)))
+        lib_path = os.path.join(pytorch_root, "build", "lib")
+        for pattern in ("*.a", "*.dll"):
+            files = glob(os.path.join(lib_path, pattern))
+            for file in files:
+                os.remove(file)
