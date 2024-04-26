@@ -9475,62 +9475,62 @@ class foreach_pointwise_sample_func(foreach_inputs_sample_func):
 foreach_unary_op_db: List[OpInfo] = [
     ForeachFuncInfo(
         'exp',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         backward_requires_result=True,
         dtypes=floating_and_complex_types(),
         dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
     ),
     ForeachFuncInfo(
         'acos',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=floating_and_complex_types(),
         dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
     ),
     ForeachFuncInfo(
         'asin',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=floating_and_complex_types(),
         dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
     ),
     ForeachFuncInfo(
         'atan',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=floating_and_complex_types(),
         dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
     ),
     ForeachFuncInfo(
         'cos',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=floating_and_complex_types(),
         dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
     ),
     ForeachFuncInfo(
         'cosh',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=floating_and_complex_types(),
         dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
     ),
     ForeachFuncInfo(
         'log',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=floating_and_complex_types(),
         dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
     ),
     ForeachFuncInfo(
         'log10',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=floating_and_complex_types(),
         dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
     ),
     ForeachFuncInfo(
         'log2',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=floating_and_complex_types(),
         dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
     ),
     ForeachFuncInfo(
         'tan',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         backward_requires_result=True,
         dtypes=floating_and_complex_types(),
         dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
@@ -9550,7 +9550,7 @@ foreach_unary_op_db: List[OpInfo] = [
     ),
     ForeachFuncInfo(
         'tanh',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         backward_requires_result=True,
         dtypes=floating_and_complex_types(),
         dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
@@ -9567,101 +9567,101 @@ foreach_unary_op_db: List[OpInfo] = [
     ),
     ForeachFuncInfo(
         'sin',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=floating_and_complex_types(),
         dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
     ),
     ForeachFuncInfo(
         'sinh',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=floating_and_complex_types(),
         dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
     ),
     ForeachFuncInfo(
         'neg',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=all_types_and_complex(),
         dtypesIfCUDA=all_types_and_complex(),
     ),
     ForeachFuncInfo(
         'sqrt',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=floating_and_complex_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_and_complex_types_and(torch.half),
         backward_requires_result=True,
     ),
     ForeachFuncInfo(
         'ceil',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
     ),
     ForeachFuncInfo(
         'erf',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
     ),
     ForeachFuncInfo(
         'erfc',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
     ),
     ForeachFuncInfo(
         'expm1',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=floating_and_complex_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
         backward_requires_result=True,
     ),
     ForeachFuncInfo(
         'floor',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
     ),
     ForeachFuncInfo(
         'log1p',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=floating_and_complex_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_and_complex_types_and(torch.half),
     ),
     ForeachFuncInfo(
         'round',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
     ),
     ForeachFuncInfo(
         'frac',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
     ),
     ForeachFuncInfo(
         'reciprocal',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.half),
         backward_requires_result=True,
     ),
     ForeachFuncInfo(
         'sigmoid',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.half),
         backward_requires_result=True,
     ),
     ForeachFuncInfo(
         'trunc',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
     ),
     ForeachFuncInfo(
         'abs',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
         dtypesIfCUDA=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
         supports_fwgrad_bwgrad=True,
@@ -9676,20 +9676,20 @@ foreach_unary_op_db: List[OpInfo] = [
     ),
     ForeachFuncInfo(
         'zero',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
         dtypesIfCUDA=all_types_and_complex_and(torch.bfloat16, torch.half),
         supports_out=False,
     ),
     ForeachFuncInfo(
         'sign',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=floating_types_and(torch.bool, torch.bfloat16, torch.half),
         dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
     ),
     ForeachFuncInfo(
         'lgamma',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.half),
         dtypesIfCUDA=all_types_and(torch.bool, torch.float16),
         skips=(
@@ -9706,7 +9706,7 @@ foreach_unary_op_db: List[OpInfo] = [
 foreach_binary_op_db: List[OpInfo] = [
     ForeachFuncInfo(
         "add",
-        foreach_inputs_sample_func(2, True, True, True),
+        sample_inputs_func=foreach_inputs_sample_func(2, True, True, True),
         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         supports_alpha_param=True,
@@ -9725,7 +9725,7 @@ foreach_binary_op_db: List[OpInfo] = [
     ),
     ForeachFuncInfo(
         "sub",
-        foreach_inputs_sample_func(2, True, True),
+        sample_inputs_func=foreach_inputs_sample_func(2, True, True),
         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         supports_alpha_param=True,
@@ -9785,7 +9785,7 @@ foreach_binary_op_db: List[OpInfo] = [
     ),
     ForeachFuncInfo(
         "clamp_min",
-        foreach_inputs_sample_func(2, True, True),
+        sample_inputs_func=foreach_inputs_sample_func(2, True, True),
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
         skips=(
@@ -9801,7 +9801,7 @@ foreach_binary_op_db: List[OpInfo] = [
     ),
     ForeachFuncInfo(
         "clamp_max",
-        foreach_inputs_sample_func(2, True, True),
+        sample_inputs_func=foreach_inputs_sample_func(2, True, True),
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
         skips=(
@@ -9818,7 +9818,7 @@ foreach_binary_op_db: List[OpInfo] = [
     # note(crcrpar): forward ad not implemented.
     ForeachFuncInfo(
         "minimum",
-        foreach_inputs_sample_func(2, True, True),
+        sample_inputs_func=foreach_inputs_sample_func(2, True, True),
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
         supports_forward_ad=False,
@@ -9837,7 +9837,7 @@ foreach_binary_op_db: List[OpInfo] = [
     # note(crcrpar): forward ad not implemented.
     ForeachFuncInfo(
         "maximum",
-        foreach_inputs_sample_func(2, True, True),
+        sample_inputs_func=foreach_inputs_sample_func(2, True, True),
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
         supports_forward_ad=False,
@@ -9876,7 +9876,7 @@ foreach_binary_op_db: List[OpInfo] = [
     ),
     ForeachFuncInfo(
         "copy",
-        foreach_inputs_sample_func(2, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(2, False, False),
         dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
         dtypesIfCUDA=all_types_and_complex_and(torch.bfloat16, torch.half),
         supports_out=False,
@@ -9888,7 +9888,7 @@ foreach_binary_op_db: List[OpInfo] = [
 foreach_pointwise_op_db: List[ForeachFuncInfo] = [
     ForeachFuncInfo(
         "addcmul",
-        foreach_pointwise_sample_func(4, True, True),
+        sample_inputs_func=foreach_pointwise_sample_func(4, True, True),
         dtypes=all_types_and_complex(),
         dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
         skips=(
@@ -9934,7 +9934,7 @@ foreach_pointwise_op_db: List[ForeachFuncInfo] = [
 foreach_reduce_op_db: List[ForeachFuncInfo] = [
     ForeachFuncInfo(
         "norm",
-        foreach_norm_sample_func(1, False, False),
+        sample_inputs_func=foreach_norm_sample_func(1, False, False),
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         skips=(
@@ -9949,7 +9949,7 @@ foreach_reduce_op_db: List[ForeachFuncInfo] = [
 foreach_other_op_db: List[ForeachFuncInfo] = [
     ForeachFuncInfo(
         "lerp",
-        foreach_lerp_sample_func(3, True, False),
+        sample_inputs_func=foreach_lerp_sample_func(3, True, False),
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
         dtypesIfROCM=floating_and_complex_types_and(torch.half, torch.bfloat16),
