@@ -2,28 +2,19 @@ import argparse
 import os
 import sys
 import xml.etree.ElementTree as ET
+from multiprocessing import cpu_count, Pool
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
+from tools.stats.test_dashboard import upload_additional_info
 from tools.stats.upload_stats_lib import (
     download_gha_artifacts,
     download_s3_artifacts,
+    get_job_id,
     unzip,
     upload_workflow_stats_to_s3,
 )
-
-
-def get_job_id(report: Path) -> Optional[int]:
-    # [Job id in artifacts]
-    # Retrieve the job id from the report path. In our GHA workflows, we append
-    # the job id to the end of the report name, so `report` looks like:
-    #     unzipped-test-reports-foo_5596745227/test/test-reports/foo/TEST-foo.xml
-    # and we want to get `5596745227` out of it.
-    try:
-        return int(report.parts[0].rpartition("_")[2])
-    except ValueError:
-        return None
 
 
 def parse_xml_report(
@@ -140,17 +131,24 @@ def get_tests(workflow_run_id: int, workflow_run_attempt: int) -> List[Dict[str,
 
         # Parse the reports and transform them to JSON
         test_cases = []
+        mp = Pool(cpu_count())
         for xml_report in Path(".").glob("**/*.xml"):
-            test_cases.extend(
-                parse_xml_report(
-                    "testcase",
-                    xml_report,
-                    workflow_run_id,
-                    workflow_run_attempt,
+            test_cases.append(
+                mp.apply_async(
+                    parse_xml_report,
+                    args=(
+                        "testcase",
+                        xml_report,
+                        workflow_run_id,
+                        workflow_run_attempt,
+                    ),
                 )
             )
-
-        return test_cases
+        mp.close()
+        mp.join()
+        test_cases = [tc.get() for tc in test_cases]
+        flattened = [item for sublist in test_cases for item in sublist]
+        return flattened
 
 
 def get_tests_for_circleci(
@@ -296,3 +294,5 @@ if __name__ == "__main__":
         upload_workflow_stats_to_s3(
             args.workflow_run_id, args.workflow_run_attempt, "test_run", test_cases
         )
+
+    upload_additional_info(args.workflow_run_id, args.workflow_run_attempt, test_cases)
