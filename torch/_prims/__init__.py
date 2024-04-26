@@ -272,7 +272,6 @@ def _make_prim(
     meta: Callable,
     impl_aten: Callable,
     doc: str,
-    mutates_args: Sequence[str] = (),
     tags: Optional[Sequence[torch.Tag]] = None,
 ):
     """
@@ -306,17 +305,21 @@ def _make_prim(
     schema = schema[len(name) :]
 
     # register non-functional ops with old custom ops API
-    if not is_functional_schema(torch._C.parse_schema(name + schema)):
+    cpp_schema = torch._C.parse_schema(name + schema)
+    if not is_functional_schema(cpp_schema):
         prim.define(name + schema, tags=torch.Tag.pt2_compliant_tag)
         prim_impl.impl(name, _prim_impl)
         prim_autograd_impl.impl(name, _autograd_impl)
         prim_meta_impl.impl(name, meta)
     else:
-        # breakpoint()
+        mutates_args = []
+        for arg in cpp_schema.arguments:
+            if arg.alias_info is not None and arg.alias_info.is_write:
+                mutates_args.append(arg.name)
         prim_def = torch.library.custom_op(
             "prims::" + name,
             _prim_impl,
-            mutates_args=mutates_args,
+            mutates_args=tuple(mutates_args),
             schema=schema,
         )
         prim_def.register_fake(meta)
@@ -1221,7 +1224,6 @@ _as_strided_doc = """
 
 as_strided = _make_prim(
     schema="as_strided(Tensor(a!) a, SymInt[] size, SymInt[] stride, SymInt storage_offset) -> Tensor(a!)",
-    mutates_args=("a",),
     meta=_as_strided_meta,
     impl_aten=_as_strided_aten,
     return_type=RETURN_TYPE.VIEW,
@@ -2245,7 +2247,6 @@ _copy_to_doc = """
 # TODO: Remove safe casting and implement on reference instead
 copy_to = _make_prim(
     schema="copy_to(Tensor(a!) a, Tensor b) -> Tensor(a!)",
-    mutates_args=("a",),
     meta=_copy_to_meta,
     impl_aten=_copy_to_aten,
     return_type=RETURN_TYPE.INPLACE,
@@ -2309,7 +2310,6 @@ _resize_doc = """
 # TODO: review support arbitrary resizes
 resize = _make_prim(
     schema="resize(Tensor(a!) a, SymInt[] shape) -> Tensor(a!)",
-    mutates_args=("a",),
     meta=_resize_meta,
     impl_aten=_resize_aten,
     return_type=RETURN_TYPE.INPLACE,
