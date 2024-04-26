@@ -25,6 +25,7 @@ from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
     free_unbacked_symbols,
     has_free_symbols,
+    resolve_unbacked_bindings,
     ShapeEnv,
     SymTypes,
 )
@@ -73,6 +74,8 @@ from .utils import (
     gather_origins,
     get_cloned_parameter_buffer_name,
     get_sympy_Expr_dtype,
+    maybe_get_suppress_shape_guards_ctx,
+    should_assume_input_aligned,
 )
 from .virtualized import V
 
@@ -396,6 +399,8 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.effectful_ops: Dict[_EffectType, ir.Buffer] = {}
 
+        self.aligned_inputs: Set[str] = set()
+
     @staticmethod
     def decide_layout_opt(gm, *, is_inference) -> bool:
         """
@@ -710,6 +715,7 @@ class GraphLowering(torch.fx.Interpreter):
             and buffer.get_device() is not None
         ):
             self.add_device_info(buffer.get_device())
+
         return name
 
     def register_list(self, buffer_names: List[str]):
@@ -863,6 +869,22 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_inputs[target] = tensor
         self.graph_inputs_original[target] = tensor.data.data
         self.add_device_info(example.device)
+
+        # Note: [Input Alignment handling in Inductor]
+        # Alignment matters for generating efficient code. Some operations,
+        # e.g. vectorized loads, can only be performed on aligned inputs.
+        #
+        # But if we codegen assuming aligned inputs and then get unaligned
+        # inputs at runtime, then we are forced to clone - which is bad for
+        # both perf and memory usage.
+        #
+        # One option would be to guard on storage_offset%ALIGNMENT, and then
+        # codegen based on this. But storage_offset guards turned out to be
+        # expensive and cause recompiles; Instead, we're generating code
+        # based on the alignment of the example input without guarding.
+        with maybe_get_suppress_shape_guards_ctx():
+            if should_assume_input_aligned(example):
+                self.aligned_inputs.add(target)
         return tensor
 
     def call_function(self, target, args, kwargs):
@@ -1005,7 +1027,9 @@ class GraphLowering(torch.fx.Interpreter):
                 # AOT Autograd tries to detect stride divergence of inductor from output metadata.
                 # Here, we try to avoid spurious divergence by matching insignificant strides such as
                 result_correct_strides.append(
-                    self.match_insignificant_strides(r, fx_node.meta["val"].stride())
+                    self.try_match_insignificant_strides(
+                        r, fx_node.meta["val"].stride()
+                    )
                 )
 
         self.graph_outputs = result_correct_strides
@@ -1054,11 +1078,18 @@ class GraphLowering(torch.fx.Interpreter):
         finally:
             self.current_node = old
 
-    def match_insignificant_strides(
+    def try_match_insignificant_strides(
         self,
         tensor,
         meta_strides_inp: Tuple[Union[int, torch.SymInt], ...],
     ) -> ir.TensorBox:
+        """
+        Tries to match the strides of the tensor to those in the meta_strides. Strides of insignificant
+        dimensions - size 0 or 1 - will be updated.
+
+        If there are real stride differences (NHWC vs NCHW) then the input will be returned.
+        """
+
         # should have already been realized
         assert torch._inductor.ir.is_storage_and_layout(tensor)
 
@@ -1105,6 +1136,8 @@ class GraphLowering(torch.fx.Interpreter):
     def run_node(self, n: torch.fx.Node):
         def debug(msg):
             log.debug("lowering %s %s", LazyString(n.format_node), msg)
+
+        buffer_watermark = len(self.buffers)
 
         origins = {n}
         if n.op == "call_function":
@@ -1309,6 +1342,46 @@ class GraphLowering(torch.fx.Interpreter):
                         result.data.data.inputs[0].origin_node = n
 
         self.register_users_of(result)
+
+        new_unbacked_defs = set()
+        for i in range(buffer_watermark, len(self.buffers)):
+            new_unbacked_defs |= self.buffers[i].get_unbacked_symbol_defs()
+
+        def format_buffers():
+            r = []
+            for b in self.buffers[buffer_watermark:]:
+                r.append(
+                    f"unbacked_symbol_defs={b.get_unbacked_symbol_defs()} in:\n{b}\n"
+                )
+            return "***\n".join(r)
+
+        if n.op != "placeholder":
+            unbacked_bindings = resolve_unbacked_bindings(
+                V.graph.sizevars.shape_env, n.meta.get("unbacked_bindings", {})
+            )
+            # When we do lowering, it is possible we reallocate unbacked SymInts.
+            # So we need to line up the unbacked SymInts when performing the test
+            # here
+            #
+            # In principle, we could permit lowering to introduce MORE unbacked
+            # SymInts: as long as all the old unbacked ones are accounted for,
+            # it's fine for inductor to introduce extra calls to item()/unbacked()
+            # whatever.  This actually happens in practice when an unbacked SymInt
+            # gets memoized away; naively, when Inductor reprocesses a kernel, it
+            # doesn't know that the memo still applies, and ends up allocating a
+            # new symbol.  However, this is generally a bad thing: we may still
+            # end up needing to test equalities on the symbols, and a fresh
+            # symbol is likely to hit lots of GuardOnDataDependent errors that
+            # we already know facts for.
+            renamed_unbacked_bindings = {
+                V.fake_mode.shape_env.unbacked_renamings.get(s, s)
+                for s in unbacked_bindings.keys()
+            }
+            assert new_unbacked_defs >= renamed_unbacked_bindings, (
+                f"failed {new_unbacked_defs} >= {renamed_unbacked_bindings} (inductor >= fx)\n"
+                f"fx node is: {n.format_node()}\n"
+                f"new buffers are:\n\n{format_buffers()}"
+            )
 
         return result
 
