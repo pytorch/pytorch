@@ -23,6 +23,7 @@
 #include <c10/util/generic_math.h>
 #include <c10/util/Half.h>
 #include <c10/util/TypeCast.h>
+#include <memory>
 
 #if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_NEON)
 #define INDUCTOR_USE_VECTOR_TYPES() 1
@@ -46,6 +47,7 @@ struct Welford {
   T mean = T(0);
   T m2 = T(0);
   T weight = T(0);
+  int64_t index = 0;
 };
 
 
@@ -56,6 +58,19 @@ struct IsVecType: std::false_type {};
 template <typename T>
 struct IsVecType<at::vec::Vectorized<T>>: std::true_type {};
 #endif
+
+template <typename T, typename std::enable_if_t<IsVecType<T>::value, int> = 0>
+struct WeightRecp {
+  using scalar_t = typename T::value_type;
+  int64_t N;
+  std::vector<T> weight_recps;
+  WeightRecp(int64_t N): N(N){
+		for (const auto i : c10::irange(N))
+    {
+      weight_recps.push_back(T(scalar_t(1) / static_cast<scalar_t>(i + 1)));
+    }
+	}
+};
 
 template <typename T>
 Welford<T> welford_combine(const Welford<T> &a, const Welford<T> &b) {
@@ -77,7 +92,8 @@ Welford<T> welford_combine(const Welford<T> &a, const Welford<T> &b) {
   auto result = Welford<T>{
     a.mean + delta * wb_over_w,
     a.m2 + b.m2 + delta * delta * a.weight * wb_over_w,
-    new_weight
+    new_weight,
+    a.index + b.index,
   };
   return result;
 }
@@ -85,6 +101,7 @@ Welford<T> welford_combine(const Welford<T> &a, const Welford<T> &b) {
 template <typename T>
 Welford<T> welford_combine(const Welford<T> &acc, T data) {
   // Add a single data point
+  int64_t index = acc.index + 1;
   auto delta = data - acc.mean;
   auto new_weight = acc.weight + T(1);
   auto new_mean = acc.mean + delta / new_weight;
@@ -92,7 +109,25 @@ Welford<T> welford_combine(const Welford<T> &acc, T data) {
   auto result = Welford<T>{
     new_mean,
     acc.m2 + delta * new_delta,
-    new_weight
+    new_weight,
+    index
+  };
+  return result;
+}
+
+template <typename T>
+Welford<T> welford_combine(const Welford<T> &acc, T data, const WeightRecp<T>& w) {
+  // Add a single data point
+  int64_t index = acc.index + 1;
+  auto delta = data - acc.mean;
+  auto new_weight = T(index);
+  auto new_mean = acc.mean + delta * w.weight_recps[acc.index];
+  auto new_delta = data - new_mean;
+  auto result = Welford<T>{
+    new_mean,
+    acc.m2 + delta * new_delta,
+    new_weight,
+    index
   };
   return result;
 }
@@ -146,6 +181,28 @@ inline at::vec::Vectorized<float> vec_shuffle_down(at::vec::Vectorized<float> x,
     return vec_t(_mm256_permute_ps(x, SHUFFLE_MASK(2, 2, 2, 2)));
   case 4:
     return vec_t(_mm256_permute2f128_ps(x, x, SHUFFLE_MASK(1, 1, 1, 1)));
+  }
+  TORCH_CHECK(false, "Unhandled vec_shuffle_down value ", n);
+}
+#endif
+
+#ifdef CPU_CAPABILITY_AVX512
+inline at::vec::Vectorized<float> vec_shuffle_down(at::vec::Vectorized<float> x, size_t n) {
+  using vec_t = at::vec::Vectorized<float>;
+#define SHUFFLE_MASK(z, y, x, w) ((z << 6) | (y << 4) | (x << 2) | w)
+  switch (n) {
+  case 1:
+    return vec_t(_mm512_permute_ps(x, SHUFFLE_MASK(1, 1, 3, 3)));
+  case 2:
+    return vec_t(_mm512_permute_ps(x, SHUFFLE_MASK(2, 2, 2, 2)));
+  case 4:
+    return vec_t(_mm512_permutexvar_ps(
+        _mm512_set_epi32(
+            12, 12, 12, 12, 12, 12, 12, 12, 4, 4, 4, 4, 4, 4, 4, 4),
+        x));
+  case 8:
+    return vec_t(_mm512_permutexvar_ps(
+        _mm512_set_epi32(8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8), x));
   }
   TORCH_CHECK(false, "Unhandled vec_shuffle_down value ", n);
 }
