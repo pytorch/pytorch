@@ -223,8 +223,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                     # optimization for cleaner codegen
                     result[name] = var
                 elif self.source:
-                    from ..trace_rules import _module_dir
-                    from .builder import SourcelessBuilder, VariableBuilder
+                    from .builder import VariableBuilder
 
                     side_effects = parent.output.side_effects
                     if cell in side_effects:
@@ -237,20 +236,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                             closure_cell, "cell_contents"
                         )
                         try:
-                            # This is a hack solution to skip adding guards for the rewritten forward function's __closure__.
-                            if self.fn.__code__.co_filename == _module_dir(
-                                torch
-                            ) + "autograd/function.py" and self.fn.__code__.co_freevars == (
-                                "original_forward",
-                                "original_setup_context",
-                            ):
-                                contents_var = SourcelessBuilder.create(
-                                    tx, cell.cell_contents
-                                )
-                            else:
-                                contents_var = VariableBuilder(
-                                    parent, closure_cell_contents
-                                )(cell.cell_contents)
+                            contents_var = VariableBuilder(
+                                parent, closure_cell_contents
+                            )(cell.cell_contents)
                         except ValueError:
                             # Cell has not yet been assigned
                             contents_var = variables.DeletedVariable()
