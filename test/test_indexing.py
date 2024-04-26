@@ -701,10 +701,12 @@ class TestIndexing(TestCase):
         boolIndices = torch.tensor([True, False, False], dtype=torch.bool, device=device)
         uint8Indices = torch.tensor([1, 0, 0], dtype=torch.uint8, device=device)
         with warnings.catch_warnings(record=True) as w:
-            self.assertEqual(v[boolIndices].shape, v[uint8Indices].shape)
-            self.assertEqual(v[boolIndices], v[uint8Indices])
+            v1 = v[boolIndices]
+            v2 = v[uint8Indices]
+            self.assertEqual(v1.shape, v2.shape)
+            self.assertEqual(v1, v2)
             self.assertEqual(v[boolIndices], tensor([True], dtype=torch.bool, device=device))
-            self.assertEqual(len(w), 2)
+            self.assertEqual(len(w), 1)
 
     def test_bool_indices_accumulate(self, device):
         mask = torch.zeros(size=(10, ), dtype=torch.bool, device=device)
