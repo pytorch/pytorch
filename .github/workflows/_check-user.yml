@@ -11,6 +11,9 @@ on:
         required: true
         type: string
         description: Current branch.
+      github-token:
+        description: GITHUB_TOKEN
+        required: true
 
     outputs:
       workflow-type:
@@ -22,6 +25,8 @@ jobs:
     runs-on: linux.4xlarge
     outputs:
       workflow-type: ${{ steps.set-condition.outputs.workflow-type }}
+    env:
+      GITHUB_TOKEN: ${{ inputs.github-token }}
     steps:
       - name: Check if user is in arc_users.yml
         id: set-condition
@@ -35,7 +40,7 @@ jobs:
             REPO_NAME="test-infra"
             ISSUE_NUMBER="5132"
 
-            COMMENTS=$(curl https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/issues/$ISSUE_NUMBER/comments)
+            COMMENTS=$(curl -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/issues/$ISSUE_NUMBER/comments)
             USER_LIST=$(echo "$COMMENTS" | tr -d '\r\n' | jq '.[0].body' -r)
 
             if [[ ${USER_LIST:0:1} == "!" ]]; then

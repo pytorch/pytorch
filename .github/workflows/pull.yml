@@ -41,6 +41,7 @@ jobs:
     with:
       user_name: ${{ github.actor }}
       curr_branch: ${{ github.ref_name }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
 
   linux-jammy-py3_8-gcc11-build-rg:
     name: linux-jammy-py3.8-gcc11 (arc-lf-linux.2xlarge)
