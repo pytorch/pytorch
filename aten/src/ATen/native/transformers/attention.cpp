@@ -647,7 +647,7 @@ Tensor scaled_dot_product_attention(
     double dropout_p,
     bool is_causal,
     c10::optional<double> scale) {
-  validate_sdpa_input(query_, key, value, attn_mask_, dropout_p, is_causal, scale);
+  validate_sdpa_input(query_, key, value, attn_mask_, dropout_p, bool(is_casual), scale);
   int64_t choice_int = static_cast<int64_t>(sdp::SDPBackend::math);
   if (query_.device().type() == DeviceType::CUDA
       || query_.device().type() == DeviceType::CPU
@@ -655,10 +655,10 @@ Tensor scaled_dot_product_attention(
       || query_.device().type() == DeviceType::PrivateUse1){
     if (query_.device().type() == DeviceType::PrivateUse1){
       choice_int = handle_private_use(
-          query_, key, value, attn_mask_, dropout_p, is_causal, scale);
+          query_, key, value, attn_mask_, dropout_p, bool(is_casual), scale);
     } else {
       choice_int = _fused_sdp_choice_stub(query_.device().type(),
-          query_, key, value, attn_mask_, dropout_p, is_causal, scale);
+          query_, key, value, attn_mask_, dropout_p, bool(is_casual), scale);
     }
   }
   sdp::SDPBackend backend = static_cast<sdp::SDPBackend>(choice_int);
@@ -669,7 +669,7 @@ Tensor scaled_dot_product_attention(
           (query_.requires_grad() || key.requires_grad() ||
            value.requires_grad());
       auto out_lse_softmax = at::_scaled_dot_product_cudnn_attention(
-          query_, key, value, dropout_p, is_causal, compute_logsumexp, scale);
+          query_, key, value, dropout_p, bool(is_casual), compute_logsumexp, scale);
       return std::get<0>(out_lse_softmax);
     }
     case sdp::SDPBackend::flash_attention: {
@@ -681,12 +681,12 @@ Tensor scaled_dot_product_attention(
         // We need to calculate the scale based off the OG head dim size
         auto og_scale = sdp::calculate_scale(query_, scale);
         auto out_lse_softmax = at::_scaled_dot_product_flash_attention(
-            query_padded, key_padded, value_padded, dropout_p, is_causal, false /*return_debug_mask*/, og_scale.as_float_unchecked());
+            query_padded, key_padded, value_padded, dropout_p, bool(is_casual), false /*return_debug_mask*/, og_scale.as_float_unchecked());
         return post_process_flash_output(std::get<0>(out_lse_softmax), og_size);
       }
       // For the CPU case we do not need to pad the last dim
       return std::get<0>(at::_scaled_dot_product_flash_attention_for_cpu(
-          query_, key, value, dropout_p, is_causal, attn_mask, scale));
+          query_, key, value, dropout_p, bool(is_casual), attn_mask, scale));
     }
     case sdp::SDPBackend::efficient_attention: {
       bool compute_logsumexp =
@@ -696,7 +696,7 @@ Tensor scaled_dot_product_attention(
         attn_mask.value() = preprocess_mask(attn_mask.value(), query_, key, value);;
       }
       auto out_and_lse = at::_scaled_dot_product_efficient_attention(
-          query_, key, value, attn_mask, compute_logsumexp, dropout_p, is_causal, scale);
+          query_, key, value, attn_mask, compute_logsumexp, dropout_p, bool(is_casual), scale);
       return std::get<0>(out_and_lse);
     }
     case sdp::SDPBackend::math:
@@ -706,7 +706,7 @@ Tensor scaled_dot_product_attention(
           value,
           attn_mask,
           dropout_p,
-          is_causal,
+          bool(is_casual),
           c10::nullopt, /*dropout_mask*/
           scale));
     default:
@@ -719,7 +719,7 @@ Tensor scaled_dot_product_attention(
 
 std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
         const Tensor& query_, const Tensor& key, const Tensor& value,
-        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal,
+        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool bool(is_casual),
         const c10::optional<Tensor>& dropout_mask, c10::optional<double> scale) {
   C10_LOG_API_USAGE_ONCE("torch.sdpa.math_fallback");
   if (query_.is_nested() || key.is_nested() || value.is_nested()) {
