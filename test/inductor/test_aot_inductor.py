@@ -10,6 +10,7 @@ from unittest import skip
 
 import torch
 import torch._inductor
+import torch.nn as nn
 from torch._dynamo.testing import rand_strided, same
 from torch._dynamo.utils import counters
 from torch._inductor import config
@@ -2668,6 +2669,29 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(16, 16, 16, device=self.device),)
         self.check_model(Model(), example_inputs)
 
+    def test_misc_1(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mlp = nn.Sequential(
+                    nn.Linear(128, 64), nn.ReLU(), nn.Linear(64, 32), nn.Sigmoid()
+                )
+                self.emb = nn.EmbeddingBag(num_embeddings=128, embedding_dim=32)
+                self.over_arch = nn.Sequential(
+                    nn.Linear(64, 32), nn.ReLU(), nn.Linear(32, 32), nn.Sigmoid()
+                )
+
+            def forward(self, x, y):
+                mlp_output = self.mlp(x)
+                emb_output = self.emb(y)
+                return self.over_arch(torch.concat([mlp_output, emb_output], dim=1))
+
+        example_inputs = (
+            torch.randn(16, 128, device=self.device),
+            torch.randint(0, 128, (16, 10), device=self.device),
+        )
+        self.check_model(Model(), example_inputs)
+
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
 
@@ -2733,7 +2757,6 @@ def fail_non_abi_compatible_cuda(is_skip=False):
 # test_failures, xfail by default, set is_skip=True to skip
 CPU_TEST_FAILURES = {
     "test_add_complex": fail_stack_allocation(is_skip=True),
-    "test_bmm_multiple_dynamic": fail_with_and_without_stack_allocation(),
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_duplicate_constant_folding": fail_with_and_without_stack_allocation(
         is_skip=True
@@ -2875,6 +2898,7 @@ if not IS_FBCODE:
             "test_empty_graph": fail_minimal_arrayref_interface(is_skip=True),
             "test_large": fail_minimal_arrayref_interface(is_skip=True),
             "test_large_mmaped_weights": fail_minimal_arrayref_interface(is_skip=True),
+            "test_misc_1": fail_minimal_arrayref_interface(is_skip=True),
             "test_missing_output": fail_minimal_arrayref_interface(is_skip=True),
             "test_model_modified_weights": fail_minimal_arrayref_interface(
                 is_skip=True
@@ -2976,7 +3000,6 @@ copy_tests(
     "non_abi_compatible_cpu",
     # test_failures, xfail by default, set is_skip=True to skip
     {
-        "test_bmm_multiple_dynamic": TestFailure(("non_abi_compatible_cpu",)),
         "test_duplicate_constant_folding": TestFailure(
             ("non_abi_compatible_cpu",), is_skip=True
         ),
