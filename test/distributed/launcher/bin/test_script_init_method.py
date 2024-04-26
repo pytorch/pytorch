@@ -72,6 +72,7 @@ def main():
             f"Wrong world size derived. Expected: {world_size}, Got: {derived_world_size}"
         )
 
+    dist.destroy_process_group()
     print("Done")
 
 
