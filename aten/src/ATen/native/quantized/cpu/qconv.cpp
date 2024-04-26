@@ -647,7 +647,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl_xnnp(
     // create an empty tensor for packing the weights
     const at::Tensor weight_contig =
         orig_weight.contiguous(c10::MemoryFormat::ChannelsLast);
-    const float* w_scales_data = w_scales.data_ptr<float>();
+    const float* w_scales_data = w_scales.const_data_ptr<float>();
     underlying_t w_zp = 0;
     at::Tensor weight_tensor;
 
