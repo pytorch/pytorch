@@ -1974,8 +1974,8 @@ class TritonKernel(Kernel):
                 line = f"tl.load({var} + ({original_index}))"
                 append_broadcast = indexing.expand_str
             else:
-                if torch.version.hip is not None:
-                    line = f"tl.load({var} + ({indexing.index_str}), {indexing.mask_str}.to(tl.int1){ep}{other})"
+                if torch.version.hip is not None and indexing.mask_str != "None":
+                    line = f"tl.load({var} + ({indexing.index_str}), ({indexing.mask_str}).to(tl.int1){ep}{other})"
                 else:
                     line = f"tl.load({var} + ({indexing.index_str}), {indexing.mask_str}{ep}{other})"
 
