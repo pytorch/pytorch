@@ -1117,7 +1117,7 @@ def forward(self, y_1, x_1):
         self.assertExpectedInline(
             r, """\
 def forward(self, x_1):
-    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x_1);  x_1 = None
+    _local_scalar_dense = torch.ops.higher_order.bind_unbacked(0, torch.ops.aten._local_scalar_dense.default, x_1);  x_1 = None
     randn = torch.ops.aten.randn.default([3, _local_scalar_dense, 3], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
     cumsum = torch.ops.aten.cumsum.default(randn, 0);  randn = None
     return cumsum"""  # noqa: B950
@@ -1134,7 +1134,7 @@ def forward(self, x_1):
             r, """\
 def forward(self, x_1, y_1):
     sum_1 = torch.ops.aten.sum.default(x_1)
-    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(sum_1);  sum_1 = None
+    _local_scalar_dense = torch.ops.higher_order.bind_unbacked(0, torch.ops.aten._local_scalar_dense.default, sum_1);  sum_1 = None
     repeat_interleave = torch.ops.aten.repeat_interleave.Tensor(x_1, output_size = _local_scalar_dense);  x_1 = _local_scalar_dense = None
     index_select = torch.ops.aten.index_select.default(y_1, 0, repeat_interleave);  y_1 = repeat_interleave = None
     return index_select"""  # noqa: B950
@@ -1148,7 +1148,7 @@ def forward(self, x_1, y_1):
         self.assertExpectedInline(
             r, """\
 def forward(self, x_1):
-    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x_1);  x_1 = None
+    _local_scalar_dense = torch.ops.higher_order.bind_unbacked(0, torch.ops.aten._local_scalar_dense.default, x_1);  x_1 = None
     arange = torch.ops.aten.arange.start(0, _local_scalar_dense, device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
     return arange"""  # noqa: B950
         )
@@ -1402,7 +1402,7 @@ def forward(self, a_1):
         r = str(make_fx(f, tracing_mode="symbolic")(torch.tensor(10), torch.randn(10)).code).strip()
         self.assertExpectedInline(r, """\
 def forward(self, x_1, y_1):
-    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x_1);  x_1 = None
+    _local_scalar_dense = torch.ops.higher_order.bind_unbacked(0, torch.ops.aten._local_scalar_dense.default, x_1);  x_1 = None
     zeros = torch.ops.aten.zeros.default([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
     add = torch.ops.aten.add.Tensor(zeros, y_1);  zeros = y_1 = None
     return add""")  # noqa: B950
@@ -1445,7 +1445,7 @@ def forward(self, x_1, y_1):
         r = str(make_fx(f, tracing_mode="symbolic")(torch.tensor(10), torch.randn(10)).code).strip()
         self.assertExpectedInline(r, """\
 def forward(self, x_1, y_1):
-    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x_1);  x_1 = None
+    _local_scalar_dense = torch.ops.higher_order.bind_unbacked(0, torch.ops.aten._local_scalar_dense.default, x_1);  x_1 = None
     zeros = torch.ops.aten.zeros.default([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
     add = torch.ops.aten.add.Tensor(y_1, 2);  y_1 = None
     return add""")  # noqa: B950
@@ -1508,11 +1508,11 @@ def forward(self, x_1, y_1):
         self.assertExpectedInline(r, """\
 def forward(self, lengths_1, values_1):
     select = torch.ops.aten.select.int(lengths_1, 0, 0)
-    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(select);  select = None
+    _local_scalar_dense = torch.ops.higher_order.bind_unbacked(0, torch.ops.aten._local_scalar_dense.default, select);  select = None
     select_1 = torch.ops.aten.select.int(lengths_1, 0, 1)
-    _local_scalar_dense_1 = torch.ops.aten._local_scalar_dense.default(select_1);  select_1 = None
+    _local_scalar_dense_1 = torch.ops.higher_order.bind_unbacked(1, torch.ops.aten._local_scalar_dense.default, select_1);  select_1 = None
     select_2 = torch.ops.aten.select.int(lengths_1, 0, 2);  lengths_1 = None
-    _local_scalar_dense_2 = torch.ops.aten._local_scalar_dense.default(select_2);  select_2 = None
+    _local_scalar_dense_2 = torch.ops.higher_order.bind_unbacked(2, torch.ops.aten._local_scalar_dense.default, select_2);  select_2 = None
     sym_constrain_range_for_size = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense)
     sym_constrain_range_for_size_1 = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense_1)
     sym_constrain_range_for_size_2 = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense_2)

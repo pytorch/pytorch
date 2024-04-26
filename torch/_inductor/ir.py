@@ -4036,7 +4036,7 @@ class ExternKernel(InputsKernel):
 
     @classmethod
     def process_kernel(
-        cls, kernel, *args, **kwargs
+        cls, kernel, *args, **kwargs, bind_unbacked: Optional[int] = None
     ) -> Tuple[
         Any,
         List[Any],
@@ -4096,13 +4096,6 @@ class ExternKernel(InputsKernel):
 
         new_args, new_kwargs = unflatten_args(example_args, non_tensor_args)
         example_output = kernel(*new_args, **new_kwargs)
-
-        unbacked_bindings: Optional[Dict[sympy.Symbol, pytree.KeyPath]] = None
-        if shape_env := V.fake_mode.shape_env:
-            rebind_unbacked(shape_env, V.current_node, example_output)
-            unbacked_bindings = compute_unbacked_bindings(
-                shape_env, example_output, V.current_node.meta.get("val")
-            )
 
         example_out_li = (
             [example_output]
@@ -5601,7 +5594,7 @@ class FallbackKernel(ExternKernelAlloc):
         )
 
     @classmethod
-    def create(cls, kernel, *args, **kwargs):
+    def create(cls, kernel, *args, **kwargs, bind_unbacked: Optional[int] = None):
         fake_incorrect_kernels = (aten._fused_moving_avg_obs_fq_helper_functional,)
         context = (
             V.graph.fake_mode if kernel not in fake_incorrect_kernels else nullcontext()
@@ -5613,7 +5606,7 @@ class FallbackKernel(ExternKernelAlloc):
                 non_tensor_args,
                 unflatten_args,
                 unbacked_bindings,
-            ) = cls.process_kernel(kernel, *args, **kwargs)
+            ) = cls.process_kernel(kernel, *args, **kwargs, bind_unbacked: Optional[int] = None)
 
         if example_output is None:
             packed = cls(

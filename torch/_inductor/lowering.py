@@ -16,6 +16,7 @@ import torch.ao.quantization.fx._decomposed
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo.create_parameter_op import _bind_nn_parameter
+from torch._higher_order_ops.bind_unbacked import bind_unbacked
 from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.triton_kernel_wrap import (
     triton_kernel_wrapper_functional,
@@ -2348,10 +2349,20 @@ def long_tensor(data):
     return tensor(data, dtype=torch.int64)
 
 
+# NB: If you need to actually bind an unbacked SymInt, the operator must have
+# been wrapped in bind_unbacked
+# NB: This is currently impossible to hit, but it will become hittable if we
+# ever start memoizing _local_scalar_dense
 @register_lowering(aten._local_scalar_dense)
-def _local_scalar_dense(data):
-    from torch.fx.experimental.symbolic_shapes import resolve_unbacked_bindings
+def _local_scalar_dense_non_binding(data):
+    val = V.graph.current_node.meta["val"]
+    if isinstance(val, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+        return val.node.expr
+    else:
+        return sympy.sympify(val)
 
+
+def _local_scalar_dense_binding(unbacked_bindings, data):
     # This is interesting!  Most lowerings return tensors, so you can just
     # return the buffer you allocated and it will get used (or not used, if
     # it's dead.)  But _local_scalar_dense (aka item) returns an int,
@@ -2362,10 +2373,7 @@ def _local_scalar_dense(data):
     # solely responsible for generating this .item().  The buffer is
     # not used for anything (notice we discard it); at codegen time,
     # the "buffer" just gets assigned None.
-    unbacked_bindings = resolve_unbacked_bindings(
-        V.graph.sizevars.shape_env, V.graph.current_node.meta["unbacked_bindings"]
-    )
-    assert len(unbacked_bindings) == 1, unbacked_bindings
+
     # NB: Have to be very careful here.  V.graph.current_node.meta["val"]
     # seemingly also contains a symbol which you want to do binding for,
     # but it actually isn't.  In particular, if we have later performed
@@ -2384,13 +2392,7 @@ def _local_scalar_dense(data):
     binding_sym, keypath = next(iter(unbacked_bindings.items()))
     buffer = ir.DynamicScalar(binding_sym, keypath, data)
     buffer.name = V.graph.register_buffer(buffer)
-    # NB: the replaced expr is OK to use directly downstream, we want
-    # simplifications in this case!
-    val = V.graph.current_node.meta["val"]
-    if isinstance(val, (torch.SymInt, torch.SymFloat, torch.SymBool)):
-        return val.node.expr
-    else:
-        return sympy.sympify(val)
+    return _local_scalar_dense_non_binding(data)
 
 
 @register_lowering(aten._assert_scalar)
@@ -5635,6 +5637,17 @@ def triton_kernel_wrap(
         grid=grid,
         kwargs=new_kwargs,
     )
+
+
+@register_lowering(torch.ops.higher_order.bind_unbacked)
+def bind_unbacked(binding_idx, op, *args, **kwargs):
+    if op is aten._local_scalar_dense.default:
+        return _local_scalar_dense_binding(V.graph.sizevars.shape_env.get_unbacked_bindings(binding_idx), *args, **kwargs)
+    else:
+        # data dependent ops are always done via fallback
+        return pytree.tree_map(
+            TensorBox.create, ir.FallbackKernel.create(kernel, *args, **kwargs, bind_unbacked=binding_idx)
+        )
 
 
 @register_lowering(torch.ops.higher_order.cond)

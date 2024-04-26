@@ -164,7 +164,18 @@ def insert_deferred_runtime_asserts(
 
             defs = []
 
-            if unbacked_bindings := node.meta.get("unbacked_bindings"):
+            # TODO: Maybe useful helper function to factor out
+            def get_unbacked_bindings(node):
+                from torch._higher_order_ops.bind_unbacked import bind_unbacked
+
+                # This case happens for make_fx produced graphs
+                if node.target is bind_unbacked:
+                    return shape_env.get_unbacked_bindings(node.args[0])
+                # This case happens for Dynamo produced graphs
+                else:
+                    return node.meta.get("unbacked_bindings")
+
+            if unbacked_bindings := get_unbacked_bindings(node):
                 for s, keypath in unbacked_bindings.items():
                     defs.append(s)
 

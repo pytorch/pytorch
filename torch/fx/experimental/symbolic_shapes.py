@@ -274,7 +274,7 @@ def resolve_unbacked_bindings(shape_env, bindings):
         for k, v in bindings.items()
     }
 
-def rebind_unbacked(shape_env, n: torch.fx.Node, result):
+def rebind_unbacked(shape_env, bindings, result):
     """
     Suppose we are retracing a pre-existing FX graph that previously had
     fake tensor propagation (and therefore unbacked SymInts).  When we retrace,
@@ -286,11 +286,7 @@ def rebind_unbacked(shape_env, n: torch.fx.Node, result):
     """
     from torch._dynamo.tensor_version_op import _tensor_version
 
-    # Inputs never need rebinding
-    if n.op == "placeholder":
-        return
-
-    if bindings := resolve_unbacked_bindings(shape_env, n.meta.get("unbacked_bindings")):
+    if bindings := resolve_unbacked_bindings(shape_env, bindings):
         for raw_u0, path in bindings.items():
             u1 = pytree.key_get(result, path)
             # tensor_version ops get specialized after AOTAutograd, it's OK,
@@ -2311,6 +2307,9 @@ class ShapeEnv:
         # could track this at the IR level using a higher order operator
         # with something like effect token tracking.
         self.unbacked_alloc_order: Dict[sympy.Symbol, int] = {}
+
+        # Side table for bind_unbacked_eager
+        self.binding_table: Dict[int, Dict[sympy.Symbol, pytree.KeyPath]] = {}
 
         from torch.fx.experimental.validator import translation_validation_enabled
         self._translation_validation_enabled = translation_validation_enabled()
@@ -4771,6 +4770,10 @@ class ShapeEnv:
             for ra in ras:
                 ra.stack.cleanup()
 
+    def get_unbacked_bindings(self, binding_idx: int):
+        """Retrieve the unbacked binding dict for binding_idx"""
+        return resolve_unbacked_bindings(self, self.binding_table[binding_idx])
+
     @record_shapeenv_event(save_tracked_fakes=True)
     def defer_runtime_assert(self, orig_expr: "sympy.Expr", msg, fx_node=None):
         """Create an assert that is checked at runtime
@@ -4926,5 +4929,5 @@ class PropagateUnbackedSymInts(torch.fx.Interpreter):
         from torch._guards import detect_fake_mode
 
         result = super().run_node(n)
-        rebind_unbacked(detect_fake_mode().shape_env, n, result)
+        rebind_unbacked(detect_fake_mode().shape_env, n.meta.get("unbacked_bindings"), result)
         return result

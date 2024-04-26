@@ -437,13 +437,39 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
     if func is torch.ops.aten.lift_fresh.default:
         func = torch.ops.aten.lift_fresh_copy.default
 
-    proxy_out = proxy_mode.tracer.create_proxy(
-        "call_function",
-        func,
-        proxy_args,
-        proxy_kwargs,
-        name=proxy_mode.tracer.graph._target_to_str(func.overloadpacket.__name__),
+    out = func(*args, **kwargs)
+
+    from .symbolic_shapes import compute_unbacked_bindings
+    # Can't use detect_fake_mode here,
+    #
+    # python test/distributed/_tensor/test_dtensor_compile.py -k
+    # test_tp_compile_fullgraph_is_seq_parallel_False
+    #
+    # will fail.  Very strange, it probably isn't right for them to be using
+    # two fake modes there...
+    fake_mode = torch._C._get_dispatch_mode(
+        torch._C._TorchDispatchModeKey.FAKE
     )
+    if fake_mode and (shape_env := fake_mode.shape_env) and (symbol_to_path := compute_unbacked_bindings(shape_env, out)):
+        from torch._higher_order_ops.bind_unbacked import bind_unbacked
+
+        binding_idx = len(shape_env.binding_table)
+        shape_env.binding_table[binding_idx] = symbol_to_path
+        proxy_out = proxy_mode.tracer.create_proxy(
+            "call_function",
+            bind_unbacked,
+            (binding_idx, func) + proxy_args,
+            proxy_kwargs,
+            name=proxy_mode.tracer.graph._target_to_str(func.overloadpacket.__name__),
+        )
+    else:
+        proxy_out = proxy_mode.tracer.create_proxy(
+            "call_function",
+            func,
+            proxy_args,
+            proxy_kwargs,
+            name=proxy_mode.tracer.graph._target_to_str(func.overloadpacket.__name__),
+        )
 
     # This makes DCE marginally less likely to DCE inplace operations.
     # It is not strictly necessary
@@ -459,8 +485,6 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
                 a.proxy = proxy_out[0][i]
         else:
             args[0].proxy = proxy_out
-
-    out = func(*args, **kwargs)
 
     # In some circumstances, we will be tracing in a situation where a tensor
     # is *statically* known to be a constant (currently, this only happens if
@@ -520,21 +544,6 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
             constant = func(*const_args, **const_kwargs)
     else:
         constant = None
-
-    from .symbolic_shapes import compute_unbacked_bindings
-    # Can't use detect_fake_mode here,
-    #
-    # python test/distributed/_tensor/test_dtensor_compile.py -k
-    # test_tp_compile_fullgraph_is_seq_parallel_False
-    #
-    # will fail.  Very strange, it probably isn't right for them to be using
-    # two fake modes there...
-    fake_mode = torch._C._get_dispatch_mode(
-        torch._C._TorchDispatchModeKey.FAKE
-    )
-    if fake_mode and fake_mode.shape_env:
-        if symbol_to_path := compute_unbacked_bindings(fake_mode.shape_env, out):
-            proxy_out.node.meta["unbacked_bindings"] = symbol_to_path
 
     track_tensor_tree(out, proxy_out, constant=constant, tracer=tracer)
     return out
