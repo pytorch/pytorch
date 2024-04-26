@@ -1436,7 +1436,7 @@ class OutputGraph:
                     if isinstance(node.meta["grapharg"].example, torch.ScriptObject):
                         real_script_obj = node.meta["grapharg"].example
                         fake_script_obj = node.meta["grapharg"].example_strong_ref
-                        flat_dict = dict(real_script_obj.__obj_flatten__())
+                        flat_dict = dict(real_script_obj.__obj_flatten__())  # type: ignore[attr-defined]
                         for attr in flat_dict.keys():
                             fake_attr_val = getattr(fake_script_obj.wrapped_obj, attr)
                             pytree.tree_map_only(

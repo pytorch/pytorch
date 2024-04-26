@@ -811,9 +811,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
 class TestCompileTorchbind(TestCase):
     def setUp(self):
-        load_torchbind_test_lib()
-        register_fake_classes()
-        register_fake_operators()
+        init_torchbind_implementations()
 
         @torch._library.register_fake_class("_TorchScriptTesting::_TensorQueue")
         class FakeTensorQueue:
@@ -992,25 +990,14 @@ def forward(self, L_tq_ : torch.ScriptObject, L_x_ : torch.Tensor):
         # Tensor in queue changes shape causes re-compile
         self.assertEqual(cnt.frame_count, 3)
 
-        tq31 = torch.classes._TorchScriptTesting._TensorQueue(
-            torch.empty(
-                0,
-            ).fill_(-1)
-        )
-        tq31.push(torch.randn(2, 3, requires_grad=False))
-        torch.compile(mod, backend=cnt)(tq31, x)
-        # No recompile
-        self.assertEqual(cnt.frame_count, 3)
-
         tq4 = torch.classes._TorchScriptTesting._TensorQueue(
             torch.empty(
                 0,
             ).fill_(-1)
         )
-        tq4.push(torch.randn(16, 4, requires_grad=False))
+        tq4.push(torch.randn(2, 3, requires_grad=False))
         torch.compile(mod, backend=cnt)(tq4, x)
-        # Tensor in queue changes shape again won't cause re-compile
-        # because _automatic_dynamic.
+        # No recompile
         self.assertEqual(cnt.frame_count, 3)
 
         tq5 = torch.classes._TorchScriptTesting._TensorQueue(
@@ -1032,6 +1019,64 @@ def forward(self, L_tq_ : torch.ScriptObject, L_x_ : torch.Tensor):
         torch.compile(mod, backend=cnt)(tq6, x)
         # Tensor in queue changes dtype causes re-compile
         self.assertEqual(cnt.frame_count, 5)
+
+    def test_compile_script_object_input_automatic_dynamic_shape(self):
+        from torch._dynamo.testing import EagerAndRecordGraphs
+
+        backend = EagerAndRecordGraphs()
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.check_tq_is_fake = True
+
+            def forward(self, tq, x):
+                tq.push(x.cos())
+                tq.push(x.sin())
+                x_sin = tq.pop() - tq.size()
+                return x_sin, tq
+
+        mod = Model()
+        cnt = torch._dynamo.testing.CompileCounter()
+        x = torch.randn(2, 3)
+
+        tq1 = torch.classes._TorchScriptTesting._TensorQueue(
+            torch.empty(
+                0,
+            ).fill_(-1)
+        )
+        tq1.push(torch.randn(2, 3, requires_grad=False))
+        torch.compile(mod, backend=cnt)(tq1, x)
+
+        tq2 = torch.classes._TorchScriptTesting._TensorQueue(
+            torch.empty(
+                0,
+            ).fill_(-1)
+        )
+        # make first tensor's secon dim dynamic
+        tq2.push(torch.randn(2, 4, requires_grad=False))
+        torch.compile(mod, backend=cnt)(tq2, x)
+
+        tq3 = torch.classes._TorchScriptTesting._TensorQueue(
+            torch.empty(
+                0,
+            ).fill_(-1)
+        )
+        tq3.push(torch.randn(2, 5, requires_grad=False))
+        # should have no-recompilation
+        torch.compile(mod, backend=cnt)(tq3, x)
+
+    def test_recompile_obj_type(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.check_tq_is_fake = True
+
+            def forward(self, tq, x):
+                tq.push(x.cos())
+                tq.push(x.sin())
+                x_sin = tq.pop() - tq.size()
+                return x_sin, tq
 
 
 @skipIfTorchDynamo("torchbind not supported with dynamo yet")

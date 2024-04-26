@@ -572,9 +572,8 @@ class TestUnflatten(TestCase):
                 self.y = y
 
             @classmethod
-            def from_real(cls, foo):
-                (x, y), _ = foo.__getstate__()
-                return cls(x, y)
+            def __obj_unflatten__(cls, flat_ctx):
+                return cls(**dict(flat_ctx))
 
             def add_tensor(self, z):
                 return (self.x + self.y) * z

@@ -438,6 +438,25 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
           [](std::vector<int64_t> state) { // __setstate__
             return c10::make_intrusive<Foo>(state[0], state[1]);
           });
+
+  // this class is a duplicate of _Foo for testing purpose.
+  m.class_<Foo>("_Foo2")
+      .def(torch::init<int64_t, int64_t>())
+      // .def(torch::init<>())
+      .def("info", &Foo::info)
+      .def("increment", &Foo::increment)
+      .def("add", &Foo::add)
+      .def("add_tensor", &Foo::add_tensor)
+      .def("__eq__", &Foo::eq)
+      .def("combine", &Foo::combine)
+      .def("__obj_flatten__", &Foo::__obj_flatten__)
+      .def_pickle(
+          [](c10::intrusive_ptr<Foo> self) { // __getstate__
+            return std::vector<int64_t>{self->x, self->y};
+          },
+          [](std::vector<int64_t> state) { // __setstate__
+            return c10::make_intrusive<Foo>(state[0], state[1]);
+          });
   m.def(
       "takes_foo(__torch__.torch.classes._TorchScriptTesting._Foo foo, Tensor x) -> Tensor");
   m.def(
