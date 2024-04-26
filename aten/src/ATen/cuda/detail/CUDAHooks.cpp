@@ -184,6 +184,16 @@ bool CUDAHooks::hasCuSOLVER() const {
 #endif
 }
 
+bool CUDAHooks::hasCuBLASLt() const {
+#if defined(CUDART_VERSION)
+  return true;
+#elif AT_ROCM_ENABLED() && defined(ROCM_VERSION) && ROCM_VERSION >= 50700
+  return true;
+#else
+  return false;
+#endif
+}
+
 bool CUDAHooks::hasROCM() const {
   // Currently, this is same as `compiledWithMIOpen`.
   // But in future if there are ROCm builds without MIOpen,
