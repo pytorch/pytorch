@@ -2241,6 +2241,38 @@ class TestCustomOpAPI(TestCase):
             self.assertEqual(x.grad, torch.tensor([3.14, 3.14, 3.14]))
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_register_autograd_defaults(self):
+        with torch.library._scoped_library("_torch_testing", "FRAGMENT") as lib:
+            lib.define("foo(Tensor w, int x = 2, *, int y = 3, int z) -> Tensor")
+
+            def foo_impl(w, x=2, *, y=3, z):
+                return w * x * y * z
+
+            lib.impl("foo", foo_impl, "CPU")
+
+            called = False
+
+            def backward(ctx, grad):
+                nonlocal called
+                called = True
+                return grad * ctx.c
+
+            def setup_context(ctx, inputs, keyword_only_inputs, output):
+                assert len(inputs) == 2
+                assert inputs[1] == 2
+                assert keyword_only_inputs == {"y": 3, "z": 42}
+                ctx.c = keyword_only_inputs["y"] * keyword_only_inputs["z"] * inputs[1]
+
+            torch.library.register_autograd(
+                "_torch_testing::foo", backward, setup_context=setup_context, lib=lib
+            )
+
+            w = torch.randn(3, requires_grad=True)
+            torch.ops._torch_testing.foo(w, z=42).sum().backward()
+            self.assertTrue(called)
+            self.assertEqual(w.grad, torch.full_like(w, 2 * 3 * 42))
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_manual_schema_error(self):
         with self.assertRaisesRegex(ValueError, "the op mutates {'x'}"):
 

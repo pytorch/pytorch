@@ -18,6 +18,7 @@ from torch._export.non_strict_utils import (
     make_constraints,
     make_fake_inputs,
     make_fake_params_buffers,
+    produce_guards_and_solve_constraints,
 )
 from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
     _AddRuntimeAssertionsForInlineConstraintsPass,
@@ -50,7 +51,6 @@ from torch.utils._sympy.value_ranges import ValueRangeError
 
 from ._safeguard import AutogradStateOpsFailSafeguard
 
-from .dynamic_shapes import _process_constraints
 from .exported_program import (
     _disable_prexisiting_fake_mode,
     ExportedProgram,
@@ -515,7 +515,11 @@ def _export_non_strict(
     # otherwise aot_export_module will error out because it sees a mix of fake_modes.
     # And we want aot_export_module to use the fake_tensor mode in dynamo to keep the pipeline easy to reason about.
     with torch.nn.utils.stateless._reparametrize_module(
-        mod, fake_params_buffers
+        mod,
+        fake_params_buffers,
+        tie_weights=True,
+        strict=True,
+        stack_weights=True,
     ), grad_safe_guard, _ignore_backend_decomps(), _compiling_state_context():  # type: ignore[attr-defined]
         gm, graph_signature = transform(aot_export_module)(
             mod,
@@ -907,6 +911,7 @@ def _export(
     constant_attrs = _gather_constant_attrs(mod)
 
     flat_args, orig_in_spec = pytree.tree_flatten((args, kwargs))
+    original_state_dict = mod.state_dict(keep_vars=True)
 
     if not strict:
         out_spec = None
@@ -1005,17 +1010,29 @@ def _export(
             for k, v in fake_mode.shape_env.var_to_range.items()
             if free_unbacked_symbols(k)
         }
+        num_lifted = len(
+            [
+                spec
+                for spec in ep_non_strict.sig.input_specs
+                if spec.kind != InputKind.USER_INPUT
+            ]
+        )
         try:
-            range_constraints = make_constraints(
+            produce_guards_and_solve_constraints(
                 fake_mode,
-                equalities_inputs,
-                dynamic_shapes if dynamic_shapes else [],
-                ep_non_strict.sig.input_specs,
-                original_signature,
                 ep_non_strict.gm,
+                equalities_inputs,
+                original_signature,
             )
         except (ConstraintViolationError, ValueRangeError) as e:
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: TRY200
+
+        range_constraints = make_constraints(
+            fake_mode,
+            ep_non_strict.gm,
+            dynamic_shapes,
+            num_lifted,
+        )
 
         assert out_spec is not None
 
@@ -1057,7 +1074,7 @@ def _export(
             root=gm,
             graph=gm.graph,
             graph_signature=ep_non_strict.sig,
-            state_dict=mod.state_dict(keep_vars=True),
+            state_dict=original_state_dict,
             range_constraints=range_constraints,
             module_call_graph=_make_module_call_graph(
                 _EXPORT_MODULE_HIERARCHY, orig_in_spec, out_spec, module_call_signatures
@@ -1216,11 +1233,11 @@ def _export(
         ),
         len(export_graph_signature.input_specs),
     )
-    range_constraints = _process_constraints(
+    range_constraints = make_constraints(
         dynamo_fake_mode,
         gm,
+        dynamic_shapes,
         num_lifted,
-        flat_args,
     )
 
     # Do some cleanups on the graph module to restore the state dict to the
@@ -1268,7 +1285,7 @@ def _export(
         root=gm,
         graph=gm.graph,
         graph_signature=export_graph_signature,
-        state_dict=mod.state_dict(keep_vars=True),
+        state_dict=original_state_dict,
         range_constraints=range_constraints,
         module_call_graph=_make_module_call_graph(
             _EXPORT_MODULE_HIERARCHY,
