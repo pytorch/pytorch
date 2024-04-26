@@ -936,7 +936,7 @@ class ops(_TestParametrizer):
                     dtypes = {}
             elif self.opinfo_dtypes == OpDTypes.any_common_cpu_cuda_one:
                 # Tries to pick a dtype that supports both CPU and CUDA
-                supported = op.dtypes.intersection(op.dtypesIfCUDA)
+                supported = set(op.dtypes).intersection(op.dtypesIfCUDA)
                 if supported:
                     dtypes = {next(dtype for dtype in ANY_DTYPE_ORDER if dtype in supported)}
                 else:
