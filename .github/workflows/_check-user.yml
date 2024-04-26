@@ -34,22 +34,22 @@ jobs:
           curr_branch="${{ inputs.curr_branch }}"
 
           if [[ "$curr_branch" == "nightly" || "$curr_branch" == "main" || "$curr_branch" == "release/"* || "$curr_branch" == "landchecks/"* ]]; then
-            echo "workflow-type=label" >> $GITHUB_OUTPUT
+            echo "workflow-type=label" >> "$GITHUB_OUTPUT"
           else
             REPO_OWNER="pytorch"
             REPO_NAME="test-infra"
             ISSUE_NUMBER="5132"
 
-            COMMENTS=$(curl -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/issues/$ISSUE_NUMBER/comments)
+            COMMENTS=$(curl -H "Authorization: token $GITHUB_TOKEN" "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/issues/$ISSUE_NUMBER/comments")
             USER_LIST=$(echo "$COMMENTS" | tr -d '\r\n' | jq '.[0].body' -r)
 
             if [[ ${USER_LIST:0:1} == "!" ]]; then
-              echo "workflow-type=label" >> $GITHUB_OUTPUT
+              echo "workflow-type=label" >> "$GITHUB_OUTPUT"
             elif [[ ${USER_LIST:0:1} == "*" ]]; then
-              echo "workflow-type=rg" >> $GITHUB_OUTPUT
+              echo "workflow-type=rg" >> "$GITHUB_OUTPUT"
             elif echo "$USER_LIST" | grep -q "${{ inputs.user_name }}"; then
-              echo "workflow-type=rg" >> $GITHUB_OUTPUT
+              echo "workflow-type=rg" >> "$GITHUB_OUTPUT"
             else
-              echo "workflow-type=label" >> $GITHUB_OUTPUT
+              echo "workflow-type=label" >> "$GITHUB_OUTPUT"
             fi
           fi
