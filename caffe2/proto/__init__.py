@@ -16,8 +16,3 @@ try:
 except ImportError:
     warnings.warn('Caffe2 support is no longer present in PyTorch.')
     raise
-
-try:
-    from caffe2.caffe2.fb.session.proto import session_pb2
-except ImportError:
-    pass
