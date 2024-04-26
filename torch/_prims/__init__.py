@@ -12,6 +12,8 @@ import torch._prims_common as utils
 import torch.library
 from torch import sym_float, Tensor, TypedStorage
 from torch._C import _get_default_device
+from torch._library.infer_schema import infer_schema
+from torch._library.utils import is_functional_schema
 from torch._prims.debug_prims import register_debug_prims
 from torch._prims.rng_prims import register_rng_prims
 from torch._prims_common import (
@@ -271,7 +273,6 @@ def _make_prim(
     impl_aten: Callable,
     doc: str,
     mutates_args: Sequence[str] = (),
-    returns_alias: bool = False,
     tags: Optional[Sequence[torch.Tag]] = None,
 ):
     """
@@ -304,15 +305,14 @@ def _make_prim(
     name = schema.split("(")[0]
     schema = schema[len(name) :]
 
-    # if op returns views/aliases of inputs or other returns, we need to use the
-    # old custom ops API
-
-    if returns_alias:
+    # register non-functional ops with old custom ops API
+    if not is_functional_schema(torch._C.parse_schema(name + schema)):
         prim.define(name + schema, tags=torch.Tag.pt2_compliant_tag)
         prim_impl.impl(name, _prim_impl)
         prim_autograd_impl.impl(name, _autograd_impl)
         prim_meta_impl.impl(name, meta)
     else:
+        # breakpoint()
         prim_def = torch.library.custom_op(
             "prims::" + name,
             _prim_impl,
@@ -1226,7 +1226,6 @@ as_strided = _make_prim(
     impl_aten=_as_strided_aten,
     return_type=RETURN_TYPE.VIEW,
     doc=_as_strided_doc,
-    returns_alias=True,
 )
 
 
@@ -1318,7 +1317,6 @@ broadcast_in_dim = _make_prim(
     impl_aten=_broadcast_in_dim_aten,
     return_type=RETURN_TYPE.VIEW,
     doc=_broadcast_in_dim_doc,
-    returns_alias=True,
 )
 
 
@@ -1444,7 +1442,6 @@ collapse_view = _make_prim(
     impl_aten=_collapse_view_aten,
     return_type=RETURN_TYPE.VIEW,
     doc=_collapse_view_doc,
-    returns_alias=True,
 )
 
 
@@ -1595,7 +1592,6 @@ slice = _make_prim(
     impl_aten=_slice_aten,
     return_type=RETURN_TYPE.VIEW,
     doc=_slice_doc,
-    returns_alias=True,
 )
 
 
@@ -1725,7 +1721,6 @@ split_dim = _make_prim(
     impl_aten=_split_dim_aten,
     return_type=RETURN_TYPE.VIEW,
     doc=_split_dim_doc,
-    returns_alias=True,
 )
 
 
@@ -1800,7 +1795,6 @@ transpose = _make_prim(
     impl_aten=_transpose_aten,
     return_type=RETURN_TYPE.VIEW,
     doc=_transpose_doc,
-    returns_alias=True,
 )
 
 
@@ -1990,7 +1984,7 @@ def _reshape_meta(a: TensorLikeType, shape: ShapeType):
 
 
 def _reshape_aten(a: Tensor, shape: ShapeType) -> Tensor:
-    return a.reshape(shape).contiguous()
+    return a.reshape(shape).contiguous().clone()
 
 
 _reshape_doc = """
@@ -2256,7 +2250,6 @@ copy_to = _make_prim(
     impl_aten=_copy_to_aten,
     return_type=RETURN_TYPE.INPLACE,
     doc=_copy_to_doc,
-    returns_alias=True,
 )
 
 
