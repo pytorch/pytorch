@@ -330,6 +330,7 @@ TORCH_API inline void TensorBackendMetaRegistry(
     c10::DeviceType t,
     const BackendMetaPtr& get_fptr,
     const BackendMetaPtr& set_fptr) {
+  std::cout << "Enter TensorBackendMetaRegistry" << std::endl;
   // allowlist verification
   // Only if the devicetype is in the allowlist,
   // we allow the serialization extension to be registered for backendmeta data.
@@ -351,12 +352,21 @@ TORCH_API inline void TensorBackendMetaRegistry(
   BackendMetaSerialization[device_type] =
       c10::optional<std::pair<BackendMetaPtr, BackendMetaPtr>>(
           std::make_pair(get_fptr, set_fptr));
+
+  printf("BackendMetaSerialization is %p\n", (void*)&BackendMetaSerialization);
+  for (int i = 0; i < at::COMPILE_TIME_MAX_DEVICE_TYPES; i++) {
+    if (BackendMetaSerialization[i].has_value()) {
+      std::cout << static_cast<DeviceType>(i) << std::endl;
+    }
+  }
+  std::cout << "Exit TensorBackendMetaRegistry" << std::endl;
 }
 
 // Return a map of Tensor Metadata which including BackendMetaData for
 // serialization. For now, it only takes care of `conj` and `neg` bit.
 inline std::unordered_map<std::string, bool> getTensorMetadata(
     const at::Tensor& t) {
+  std::cout << "Enter getTensroMetadata" << std::endl;
   // We don't support serializing `ZeroTensor` as it is not public
   // facing yet.
   TORCH_CHECK(
@@ -374,9 +384,16 @@ inline std::unordered_map<std::string, bool> getTensorMetadata(
   }
   // Only add BackendMetaData for custom backend if the function pointer is
   // registered.
-  std::cout << t.device() << std::endl;
+  std::cout << "Device:" << t.device() << std::endl;
+  std::cout << "DeviceType:" << t.device().type() << std::endl;
   int device_type = static_cast<int>(t.device().type());
   const auto& BackendMetaSerialization = GetBackendMetaSerialization();
+  printf("BackendMetaSerialization is %p\n", (void*)&BackendMetaSerialization);
+  for (int i = 0; i < at::COMPILE_TIME_MAX_DEVICE_TYPES; i++) {
+    if (BackendMetaSerialization[i].has_value()) {
+      std::cout << static_cast<DeviceType>(i) << std::endl;
+    }
+  }
   if (BackendMetaSerialization[device_type].has_value()) {
     std::cout << "GetTensorMetadata Yes" << std::endl;
   }
@@ -390,6 +407,7 @@ inline std::unordered_map<std::string, bool> getTensorMetadata(
     fptr(t, metadata);
     std::cout << "do getTensorMetadata" << std::endl;
   }
+  std::cout << "Exit getTensroMetadata" << std::endl;
   return metadata;
 }
 
@@ -398,6 +416,7 @@ inline std::unordered_map<std::string, bool> getTensorMetadata(
 inline void setTensorMetadata(
     const at::Tensor& t,
     std::unordered_map<std::string, bool> metadata) {
+  std::cout << "Enter setTensroMetadata" << std::endl;
   auto iter_end = metadata.end();
   auto iter_temp = metadata.find("conj");
   if (iter_temp != iter_end) {
@@ -411,9 +430,16 @@ inline void setTensorMetadata(
   }
   // Only set BackendMetaData for custom backend if the function pointer is
   // registered.
+  std::cout << "Device:" << t.device() << std::endl;
+  std::cout << "DeviceType:" << t.device().type() << std::endl;
   int device_type = static_cast<int>(t.device().type());
   const auto& BackendMetaSerialization = GetBackendMetaSerialization();
-  std::cout << t.device() << std::endl;
+  printf("BackendMetaSerialization is %p\n", (void*)&BackendMetaSerialization);
+  for (int i = 0; i < at::COMPILE_TIME_MAX_DEVICE_TYPES; i++) {
+    if (BackendMetaSerialization[i].has_value()) {
+      std::cout << static_cast<DeviceType>(i) << std::endl;
+    }
+  }
   if (BackendMetaSerialization[device_type].has_value()) {
     std::cout << "setTensorMetadata Yes" << std::endl;
   }
@@ -427,6 +453,7 @@ inline void setTensorMetadata(
     fptr(t, metadata);
     std::cout << "do setTensorMetadata" << std::endl;
   }
+  std::cout << "Exit setTensroMetadata" << std::endl;
 }
 
 // set Tensor metadata based on the map.
