@@ -25,6 +25,7 @@ from torch.autograd import (
     _record_function_with_args_enter,
     _record_function_with_args_exit,
 )
+from torch import _dynamo as torchdynamo
 from torch.profiler import (
     ExecutionTraceObserver,
     kineto_available,
@@ -198,6 +199,7 @@ class TestExecutionTrace(TestCase):
         expected_loop_events = 0
 
         et = ExecutionTraceObserver().register_callback(fp.name)
+
         et.start()
         for idx in range(5):
             expected_loop_events += 1
@@ -281,8 +283,7 @@ class TestExecutionTrace(TestCase):
         fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
         fp.close()
         expected_loop_events = 0
-        et = ExecutionTraceObserver()
-        et.register_callback(fp.name)
+        et = ExecutionTraceObserver().register_callback(fp.name)
         for idx in range(10):
             if idx == 3:
                 et.start()
@@ -322,8 +323,7 @@ class TestExecutionTrace(TestCase):
                 fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
                 fp.close()
                 output_files.append(fp.name)
-                et = ExecutionTraceObserver()
-                et.register_callback(fp.name)
+                et = ExecutionTraceObserver().register_callback(fp.name)
                 et.start()
             with record_function(f"## LOOP {idx} ##"):
                 self.payload(use_cuda=use_cuda)
@@ -348,8 +348,7 @@ class TestExecutionTrace(TestCase):
     def test_execution_trace_no_capture(self):
         fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
         fp.close()
-        et = ExecutionTraceObserver()
-        et.register_callback(fp.name)
+        et = ExecutionTraceObserver().register_callback(fp.name)
 
         assert fp.name == et.get_output_file_path()
         et.unregister_callback()
@@ -365,12 +364,10 @@ class TestExecutionTrace(TestCase):
         fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
         fp.close()
 
-        et = ExecutionTraceObserver()
-        observer = et.register_callback(fp.name)
+        observer = ExecutionTraceObserver().register_callback(fp.name)
 
         def fn(nt):
             return nt.sin().cos()
-
         with torch.profiler.profile(execution_trace_observer=observer) as prof:
             for i in range(3):
                 values = torch.rand((8 + i, 4 + i))
