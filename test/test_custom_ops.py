@@ -2429,7 +2429,7 @@ class TestCustomOpAPI(TestCase):
         op = getattr(torch.ops._torch_testing, opname).default
         entry = torch._library.simple_registry.singleton.find(op._name)
         source = entry.abstract_impl.kernel.source
-        print(source)
+        assert source is not None
         self.assertTrue("custom_op_db.py" in source)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
