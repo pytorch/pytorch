@@ -417,6 +417,19 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         self,
         op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
     ) -> "cutlass_library.gemm_op.GemmOperation":  # type: ignore[name-defined]  # noqa: F821
+        """
+        Helper method:
+
+        Determines whether a given Cutlass GEMM op definition is suitable for the current
+        input / output of the operation that this template is supposed to implement.
+
+        Takes memory layout, dtype and support for EVT operations into account,
+        and filters potentially problematic ops.
+
+        Returns None if the op is not suitable, otherwise returns the op to be used, which might
+        have been mutated.
+        """
+
         assert cutlass_utils.try_import_cutlass()
         import cutlass_library.library as cutlass_lib
 
@@ -429,7 +442,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
         # Only keep GemmUniversal kernels
         if op.gemm_kind not in {
-            cutlass_lib.GemmKind.Universal,
             cutlass_lib.GemmKind.Universal3x,
         }:
             return None
@@ -475,7 +487,16 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         # Set epilogue.
         # TODO: update epilogue functor according to epilogues.
         op.element_epilogue = op.accumulator_type()
-
+        if inductor_cuda_config.cutlass_op_allowlist_regex is not None:
+            if not re.search(
+                inductor_cuda_config.cutlass_op_allowlist_regex, op.configuration_name()
+            ):
+                return None
+        if inductor_cuda_config.cutlass_op_denylist_regex is not None:
+            if re.search(
+                inductor_cuda_config.cutlass_op_denylist_regex, op.configuration_name()
+            ):
+                return None
         # Set bias layout and alignment.
         if len(self.input_nodes) >= 3 and self.input_nodes[2] is not None:
             Bias = self.input_nodes[2]
@@ -497,8 +518,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         if (self.can_fuse_epilogue is not None) and (
             self.can_fuse_epilogue != supports_evt
         ):
-            return None
-        if inductor_cuda_config.cutlass_only_evt_capable_ops and not supports_evt:
             return None
         return op
 
