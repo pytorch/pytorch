@@ -1144,7 +1144,7 @@ class CKGemmTemplate(CKTemplate):
             block_gemm_pipeline_scheduler="BlockGemmPipelineScheduler::Intrawave",
             block_gemm_pipeline_version="BlockGemmPipelineVersion::v3")]
 
-    def gen_ops(self):
+    def _gen_ops_library(self):
         grep_result = subprocess.run(
             [
                 "grep",
@@ -1199,6 +1199,12 @@ class CKGemmTemplate(CKTemplate):
         log.debug(f"generated {len(chosen_instances)} ck instances: {chosen_instances}")
 
         return chosen_instances
+
+    def _gen_ops_preselected(self):
+        return self._parse_instances(self.preselected_instances.split('\n'))
+
+    def gen_ops(self):
+        return self._gen_ops_preselected() if config.rocm.use_preselected_instances else self._gen_ops_library()
 
     @staticmethod
     def add_ck_gemm_choices(
