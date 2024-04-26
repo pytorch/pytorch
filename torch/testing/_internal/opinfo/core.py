@@ -2730,6 +2730,7 @@ class ForeachFuncInfo(OpInfo):
             foreach_method = foreach_method_inplace
             torch_ref_method = torch_ref_inplace
 
+        self.op = foreach_method
         self.method_variant = foreach_method
         self.ref = torch_ref_method
         self.inplace_variant = foreach_method_inplace
