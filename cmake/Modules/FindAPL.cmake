@@ -1,5 +1,5 @@
 SET(APL_INCLUDE_SEARCH_PATHS
-$ENV{ARMPL_DIR}/include_lp64
+$ENV{ARMPL_DIR}/include
 )
 
 SET(APL_LIB_SEARCH_PATHS
@@ -7,9 +7,8 @@ $ENV{ARMPL_DIR}/lib
  )
 
 FIND_PATH(APL_INCLUDE_DIR NAMES armpl.h PATHS ${APL_INCLUDE_SEARCH_PATHS})
-FIND_LIBRARY(APL_LIB NAMES armpl_lp64 PATHS ${APL_LIB_SEARCH_PATHS})
-FIND_LIBRARY(APL_FortranRuntime NAMES FortranRuntime PATHS ${APL_LIB_SEARCH_PATHS})
-FIND_LIBRARY(APL_FortranDecimal NAMES FortranDecimal PATHS ${APL_LIB_SEARCH_PATHS})
+FIND_LIBRARY(APL_LIB NAMES armpl_lp64.dll.lib PATHS ${APL_LIB_SEARCH_PATHS})
+FIND_LIBRARY(APL_MATH NAMES amath.dll.lib PATHS ${APL_LIB_SEARCH_PATHS})
 
 SET(APL_FOUND ON)
 
@@ -25,24 +24,16 @@ IF(NOT APL_LIB)
     MESSAGE(STATUS "Could not find APL lib. Turning APL_FOUND off")
 ENDIF()
 
-#    Check FortranRuntime
-IF(NOT APL_FortranRuntime)
-    SET(APL_LIB OFF)
-    MESSAGE(STATUS "Could not find FortranRuntime lib. Turning APL_FOUND off")
-ENDIF()
-
-#    Check FortranDecimal
-IF(NOT APL_FortranDecimal)
-    SET(APL_LIB OFF)
-    MESSAGE(STATUS "Could not find FortranDecimal lib. Turning APL_FOUND off")
+IF(NOT APL_MATH)
+    SET(APL_FOUND OFF)
+    MESSAGE(STATUS "Could not find APL_MATH lib. Turning APL_FOUND off")
 ENDIF()
 
 IF (APL_FOUND)
     MESSAGE(STATUS "Found APL header: ${APL_INCLUDE_DIR}")
     MESSAGE(STATUS "Found APL library: ${APL_LIB}")
-    MESSAGE(STATUS "Found FortranRuntime dependency: ${APL_FortranRuntime}")
-    MESSAGE(STATUS "Found FortranDecimal dependency: ${APL_FortranDecimal}")
-    SET(APL_LIBRARIES ${APL_LIB} ${APL_FortranRuntime} ${APL_FortranDecimal})
+    MESSAGE(STATUS "Found APL MATH: ${APL_MATH}")
+    SET(APL_LIBRARIES ${APL_LIB} ${APL_MATH})
     SET(CMAKE_REQUIRED_LIBRARIES ${APL_LIBRARIES})
   CHECK_C_SOURCE_RUNS("
 #include <stdlib.h>
