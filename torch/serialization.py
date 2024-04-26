@@ -124,8 +124,8 @@ def set_default_mmap_options(flags: int):
     '''
     Set default mmap options for :func:`torch.load` with ``mmap=True`` to flags.
 
-    For now, only either ``mmap.MAP_PRIVATE`` or ``mmap.MAP_SHARED`` are supported,
-    in the future we might extend this to support more options.
+    For now, only either ``mmap.MAP_PRIVATE`` or ``mmap.MAP_SHARED`` are supported.
+    Please open an issue if you need any other option to be added here.
 
     Args:
         flags: ``mmap.MAP_PRIVATE`` or ``mmap.MAP_SHARED``
