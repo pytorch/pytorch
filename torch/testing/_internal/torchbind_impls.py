@@ -17,18 +17,6 @@ def init_torchbind_implementations():
     _TORCHBIND_IMPLS_INITIALIZED = True
 
 
-def register_if_not(qualname):
-    entry = torch._library.simple_registry.singleton.find(qualname)
-    if entry.abstract_impl.kernel is None:
-        return torch.library.register_fake(qualname)
-    else:
-
-        def dummy_wrapper(fn):
-            return fn
-
-        return dummy_wrapper
-
-
 # put these under a function because the corresponding library might not be loaded yet.
 def register_fake_operators():
     @torch.library.register_fake("_TorchScriptTesting::takes_foo_python_meta")
