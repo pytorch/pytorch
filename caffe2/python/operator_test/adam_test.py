@@ -10,6 +10,10 @@ from hypothesis import given
 import hypothesis.strategies as st
 import numpy as np
 import unittest
+import torch
+import torch.utils.data
+from functools import partial
+
 
 from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
@@ -531,6 +535,33 @@ class TestAdam(hu.HypothesisTestCase):
                 ref_row_wise_sparse_output_grad,
                 beta1=beta1, beta2=beta2, epsilon=epsilon, output_grad=True),
             input_device_options=input_device_options)
+    
+    # @onlyNativeDeviceTypes
+    def test_grad_scaling_state_dict(self, device):
+        device = torch.device(device)
+        GradScaler = partial(torch.GradScaler, device=device.type)
+        for lazy_init_scale in True, False:
+            s0 = GradScaler(init_scale=3., growth_factor=4., backoff_factor=.5, growth_interval=2)
+            s1 = GradScaler(init_scale=6., growth_factor=7., backoff_factor=.8, growth_interval=1)
+
+            # sets a random value for load_state_dict to overwrite
+            s1._init_growth_tracker = 7
+
+            if lazy_init_scale:
+                # Dummy scale() call to ensure the scale tensor is lazily initialized.
+                s1.scale(torch.full((1,), 4.0, dtype=torch.float32, device=device))
+                if "cuda" == device.type:
+                    self.assertTrue(isinstance(s1._scale, torch.cuda.FloatTensor))
+                else:
+                    self.assertTrue(isinstance(s1._scale, torch.FloatTensor))
+
+            s1.load_state_dict(s0.state_dict())
+
+            self.assertEqual(s1.get_scale(), 3.)
+            self.assertEqual(s1.get_growth_factor(), 4.)
+            self.assertEqual(s1.get_backoff_factor(), .5)
+            self.assertEqual(s1.get_growth_interval(), 2)
+            self.assertEqual(s1._init_growth_tracker, 0)
 
 
 if __name__ == "__main__":
