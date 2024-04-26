@@ -16,20 +16,13 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TestCase,
 )
-from torch.testing._internal.torchbind_impls import (
-    _register_py_impl_temporarily,
-    load_torchbind_test_lib,
-    register_fake_classes,
-    register_fake_operators,
-)
+from torch.testing._internal.torchbind_impls import init_torchbind_implementations
 
 
 @skipIfTorchDynamo("torchbind not supported with dynamo yet")
 class TestExportTorchbind(TestCase):
     def setUp(self):
-        load_torchbind_test_lib()
-        register_fake_classes()
-        register_fake_operators()
+        init_torchbind_implementations()
 
         test = self
         test.tq_push_counter = 0
@@ -296,17 +289,15 @@ def forward(self, x, cc):
                 pre_dispatch=pre_dispatch,
             )
 
-        with _register_py_impl_temporarily(
-            torch.ops._TorchScriptTesting.takes_foo.default,
-            torch._C.DispatchKey.Meta,
-            lambda cc, x: cc.add_tensor(x),
-        ):
-            ep = self._test_export_same_as_eager(
-                MyModule(),
-                (torch.ones(2, 3), cc),
-                strict=False,
-                pre_dispatch=pre_dispatch,
-            )
+        torch.ops._TorchScriptTesting.takes_foo.default.py_impl(
+            torch._C.DispatchKey.Meta
+        )(lambda cc, x: cc.add_tensor(x))
+        ep = self._test_export_same_as_eager(
+            MyModule(),
+            (torch.ones(2, 3), cc),
+            strict=False,
+            pre_dispatch=pre_dispatch,
+        )
 
         self.assertExpectedInline(
             ep.module().code.strip(),
@@ -822,7 +813,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 @skipIfTorchDynamo("torchbind not supported with dynamo yet")
 class TestRegisterFakeClass(TestCase):
     def setUp(self):
-        load_torchbind_test_lib()
+        init_torchbind_implementations()
 
     def tearDown(self):
         torch._library.fake_class_registry.global_fake_class_registry.clear()
