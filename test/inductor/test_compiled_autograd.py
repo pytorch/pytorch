@@ -1400,34 +1400,50 @@ def main():
         torch.nn.Linear(4, 4),
         torch.nn.ReLU(),
     )
-    x = torch.randn([2, 4])
-    result = model(x).sum()
-    with torch._dynamo.compiled_autograd.enable(compiler_fn):
-        result.backward()
+
+    for i in range(10, 100):
+        x = torch.randn([i, 4])
+        result = model(x).sum()
+        with torch._dynamo.compiled_autograd.enable(compiler_fn):
+            result.backward()
 
 main()
 """
         stdout, _ = self.run_process_no_exception(script)
         stdout = stdout.decode("utf-8")
 
-        expected_logs = [
-            "[python_compiled_autograd.cpp] Creating cache entry for torch::autograd::GraphRoot, with key of size",
-            "[python_compiled_autograd.cpp] Creating cache entry for SumBackward0, with key of size",
-            "[python_compiled_autograd.cpp] Creating cache entry for ReluBackward0, with key of size",
-            "[python_compiled_autograd.cpp] Creating cache entry for AddmmBackward0, with key of size",
-            "[python_compiled_autograd.cpp] Creating cache entry for TBackward0, with key of size",
-            "[python_compiled_autograd.cpp] Creating cache entry for torch::autograd::AccumulateGrad, with key of size",
-            "[python_compiled_autograd.cpp] Creating cache entry for ReluBackward0, with key of size",
-            "[python_compiled_autograd.cpp] Creating cache entry for AddmmBackward0, with key of size",
-            "[python_compiled_autograd.cpp] Creating cache entry for TBackward0, with key of size",
-            "[python_compiled_autograd.cpp] Creating cache entry for torch::autograd::AccumulateGrad, with key of size",
-            "[python_compiled_autograd.cpp] Creating cache entry for torch::autograd::AccumulateGrad, with key of size",
-            "[python_compiled_autograd.cpp] Creating cache entry for torch::autograd::AccumulateGrad, with key of size",
+        patterns = [
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for SumBackward0, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for ReluBackward0, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for AddmmBackward0, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for TBackward0, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for ReluBackward0, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for AddmmBackward0, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for TBackward0, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for ReluBackward0, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for AddmmBackward0, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for TBackward0, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
+            r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
+            r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
+            r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
+            r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
+            r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
+            r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
         ]
 
-        self.assertEqual(
-            sum(1 for e in expected_logs if e in stdout), len(expected_logs)
-        )
+        pattern = r"".join(patterns)
+        matches = re.findall(pattern, stdout)
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(len(matches[0]), len(patterns))
 
     def test_snapshot_verbose_logs_flag(self):
         def fn():
