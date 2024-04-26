@@ -2683,6 +2683,53 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         self.instruction_pointer = None
         raise ReturnValueOp
 
+    def LOAD_GLOBAL(self, inst):
+        if self.f_globals is self.parent.f_globals:
+            super().LOAD_GLOBAL(inst)
+        else:
+            if sys.version_info >= (3, 11):
+                if inst.arg % 2:
+                    self.PUSH_NULL(inst)
+
+            name = inst.argval
+            if inst.argval == "AssertionError":
+                unimplemented("assert with non-string message")
+
+            assert "__name__" in self.f_globals
+
+            module_name = self.f_globals["__name__"]
+            module_source = self.import_source(module_name)
+            module_value = importlib.import_module(module_name)
+            module_vt = VariableBuilder(self, module_source)(module_value)
+
+            if self.output.side_effects.is_attribute_mutation(module_vt):
+                self.push(self.output.side_effects.load_attr(module_vt, name))
+            else:
+                source = AttrSource(module_source, name)
+                try:
+                    value = self.f_globals[name]
+                except KeyError:
+                    return self.load_builtin(inst)
+
+                self.push(VariableBuilder(self, source)(value))
+
+    def STORE_GLOBAL(self, inst):
+        if self.f_globals is self.parent.f_globals:
+            super().STORE_GLOBAL(inst)
+        else:
+            value = self.pop()
+            name = inst.argval
+            assert "__name__" in self.f_globals
+
+            module_name = self.f_globals["__name__"]
+            module_source = self.import_source(module_name)
+            module_value = importlib.import_module(module_name)
+            module_vt = VariableBuilder(self, module_source)(module_value)
+            module_vt = self.output.side_effects.track_object_existing(
+                module_value, module_vt
+            )
+            self.output.side_effects.store_attr(module_vt, name, value)
+
 
 class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
     generated_items: List[VariableTracker]
