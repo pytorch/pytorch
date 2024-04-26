@@ -1,32 +1,11 @@
-import logging
 from typing import List, Optional
 
 import torch
 import torch.distributed.distributed_c10d as c10d
 
 """
-Moved eager kernel implementations to a separate file partly for readability and partly as it is currently
-easier in dynamo to set tracing policy on a file-by-file level.
-
-Do not put code in this file that Dynamo is expected to trace into, as dynamo may disallow this whole file.
-
-DEBUG/TESTING HELPERS:
-
-This module includes some helpers that are quite useful when debugging or testing functional collectives:
-
-_tensor_needs_wait
-_outstanding_wait_count
-_wait_all
-
-"""
-
-logger = logging.getLogger(__name__)
-
-"""
-Kernel implementations (for eager runtime only) - should never be traced by torch.compile
-
-These functions should all be bound to dispatcher ops.  During tracing, the op itself should be
-captured in the graph and the backend should implement the op however it prefers.
+This file contains the op impls for the legacy (c10d_functional) functional collectives.
+These impls simply call into the native (_c10d_functional) functional collectives.
 """
 
 

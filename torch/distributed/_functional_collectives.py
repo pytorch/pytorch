@@ -923,7 +923,36 @@ def _reduce_scatter_tensor_coalesced_native_meta(
     ]
 
 
-def _register_ops():
+if not torch._running_with_deploy():
+    # Library MUST be defined at module scope or it doesn't work
+    # Creating a "DEF" Library always crashes torch::deploy so we create our
+    # Library instances here guarded against running inside it
+    lib_impl = torch.library.Library("_c10d_functional", "IMPL")
+    lib_impl.impl("all_reduce", _all_reduce_meta, "Meta")
+    lib_impl.impl("all_reduce_", _all_reduce__meta, "Meta")
+    lib_impl.impl("all_reduce_coalesced", _all_reduce_coalesced_meta, "Meta")
+    lib_impl.impl("all_reduce_coalesced_", _all_reduce_coalesced__meta, "Meta")
+    lib_impl.impl("wait_tensor", _wait_tensor_meta, "Meta")
+    lib_impl.impl("all_gather_into_tensor", _all_gather_into_tensor_native_meta, "Meta")
+    lib_impl.impl(
+        "all_gather_into_tensor_coalesced",
+        _all_gather_into_tensor_coalesced_native_meta,
+        "Meta",
+    )
+    lib_impl.impl("reduce_scatter_tensor", _reduce_scatter_tensor_native_meta, "Meta")
+    lib_impl.impl(
+        "reduce_scatter_tensor_coalesced",
+        _reduce_scatter_tensor_coalesced_native_meta,
+        "Meta",
+    )
+    lib_impl.impl("all_to_all_single", _all_to_all_single_meta, "Meta")
+    lib_impl.impl("broadcast", _broadcast_meta, "Meta")
+    lib_impl.impl("broadcast_", _broadcast__meta, "Meta")
+
+    # Register legacy ops for backward compatibility
+    # TODO(yifu): remove these in functional collective beta release
+    legacy_lib = torch.library.Library("c10d_functional", "DEF")
+    legacy_lib_impl = torch.library.Library("c10d_functional", "IMPL")
     ops_defs = [
         "broadcast(Tensor self, int src, str tag, int[] ranks, int group_size) -> Tensor",
         "all_reduce(Tensor self, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor",
@@ -940,46 +969,8 @@ def _register_ops():
     for op_def in ops_defs:
         op_name = op_def[0 : op_def.index("(")]
         backend_impl = getattr(fun_col_impl, f"_{op_name}")
-        # meta_impl = getattr(my_module, f"_{op_name}_meta")
-        c10_lib.define(op_def, tags=torch.Tag.pt2_compliant_tag)
-        c10_lib_impl.impl(op_name, backend_impl, "CompositeImplicitAutograd")
-        # impl_abstract(f"c10d_functional::{op_name}")(meta_impl)
-
-
-if not torch._running_with_deploy():
-    # Library MUST be defined at module scope or it doesn't work
-    # Creating a "DEF" Library always crashes torch::deploy so we create our Library instances here
-    #   guarded against running inside it
-    _c10_lib_impl = torch.library.Library("_c10d_functional", "IMPL")
-    _c10_lib_impl.impl("all_reduce", _all_reduce_meta, "Meta")
-    _c10_lib_impl.impl("all_reduce_", _all_reduce__meta, "Meta")
-    _c10_lib_impl.impl("all_reduce_coalesced", _all_reduce_coalesced_meta, "Meta")
-    _c10_lib_impl.impl("all_reduce_coalesced_", _all_reduce_coalesced__meta, "Meta")
-    _c10_lib_impl.impl("wait_tensor", _wait_tensor_meta, "Meta")
-    _c10_lib_impl.impl(
-        "all_gather_into_tensor", _all_gather_into_tensor_native_meta, "Meta"
-    )
-    _c10_lib_impl.impl(
-        "all_gather_into_tensor_coalesced",
-        _all_gather_into_tensor_coalesced_native_meta,
-        "Meta",
-    )
-    _c10_lib_impl.impl(
-        "reduce_scatter_tensor", _reduce_scatter_tensor_native_meta, "Meta"
-    )
-    _c10_lib_impl.impl(
-        "reduce_scatter_tensor_coalesced",
-        _reduce_scatter_tensor_coalesced_native_meta,
-        "Meta",
-    )
-    _c10_lib_impl.impl("all_to_all_single", _all_to_all_single_meta, "Meta")
-    _c10_lib_impl.impl("broadcast", _broadcast_meta, "Meta")
-    _c10_lib_impl.impl("broadcast_", _broadcast__meta, "Meta")
-
-    # Register legacy ops
-    c10_lib = torch.library.Library("c10d_functional", "DEF")
-    c10_lib_impl = torch.library.Library("c10d_functional", "IMPL")
-    _register_ops()
+        legacy_lib.define(op_def, tags=torch.Tag.pt2_compliant_tag)
+        legacy_lib_impl.impl(op_name, backend_impl, "CompositeImplicitAutograd")
 
 else:
     warnings.warn(
@@ -1033,18 +1024,6 @@ def reduce_scatter_tensor_inplace(
     assert group is not None
 
     return output.copy_(reduce_scatter_tensor(input, op, scatter_dim, group, tag))
-
-
-REDUCE_OP_TO_STR = {
-    dist.ReduceOp.SUM: "sum",
-    dist.ReduceOp.AVG: "avg",
-    dist.ReduceOp.PRODUCT: "product",
-    dist.ReduceOp.MIN: "min",
-    dist.ReduceOp.MAX: "max",
-    dist.ReduceOp.BAND: "band",
-    dist.ReduceOp.BOR: "bor",
-    dist.ReduceOp.BXOR: "bxor",
-}
 
 
 def all_reduce_inplace(
