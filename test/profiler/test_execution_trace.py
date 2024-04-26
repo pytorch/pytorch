@@ -274,8 +274,7 @@ class TestExecutionTrace(TestCase):
                         found_captured_triton_kernel_node = True
                         assert len(n["inputs"]["values"]) > 0
                         assert len(n["outputs"]["values"]) == 0
-        if not found_captured_triton_kernel_node:
-            print("triton kernels not found")
+        assert found_captured_triton_kernel_node
 
     def test_execution_trace_start_stop(self):
         use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
