@@ -2054,11 +2054,16 @@ void ONNXShapeTypeInference(
           clone_node->output(i)->debugName();
     }
     // Make inferred_shape_data use name from temporal ONNX graph
-    // instead of original PyTorch graph
-    for (const auto& gs_data : original_shape_data) {
-      const auto onnx_output_name = torch_to_onnx_input.find(gs_data.first);
-      if (onnx_output_name != torch_to_onnx_input.end()) {
-        inferred_shape_data[onnx_output_name->second] = gs_data.second;
+    // instead of original PyTorch graph. Only copy what we need,
+    // which are the inputs of n.
+    for (auto input : n->inputs()) {
+      const auto maybe_shape = original_shape_data.find(input->debugName());
+      if (maybe_shape != original_shape_data.end()) {
+        const auto onnx_output_name =
+            torch_to_onnx_input.find(input->debugName());
+        if (onnx_output_name != torch_to_onnx_input.end()) {
+          inferred_shape_data[onnx_output_name->second] = maybe_shape->second;
+        }
       }
     }
     // Use scalar_type_analysis without low precision cast

@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import functools
+import io
 import re
 import sys
 import unittest
@@ -1341,6 +1342,24 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent, m) {
 
             out = compiled_fn(activations)
             self.assertTrue(len(activations) == 0)
+
+    @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    def test_cudagraphs_cpu_division(self):
+        from torch._dynamo.testing import reduce_to_scalar_loss
+
+        model = torch.nn.Linear(10, 10, dtype=torch.float16).cuda()
+        inputs = torch.randn(10, 10, dtype=torch.float16).cuda()
+        out = model(inputs)
+        loss = reduce_to_scalar_loss(out)
+        torch._inductor.config.triton.cudagraphs = True
+
+        stderr_msgs = io.StringIO()
+        with mock.patch("sys.stderr", stderr_msgs), compiled_autograd.enable(
+            compiler_fn
+        ):
+            loss.backward()
+
+        self.assertFalse("skipping cudagraphs" in stderr_msgs.getvalue())
 
 
 def load_test_module(name):
