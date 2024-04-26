@@ -561,7 +561,7 @@ class Function(_SingleLevelFunction):
 
             return bound_args.args
 
-        is_setup_ctx_defined = cls.setup_context != _SingleLevelFunction.setup_context
+        is_setup_ctx_defined = is_setup_context_defined(cls.setup_context)
         if is_setup_ctx_defined:
             args = bind_default_args(cls.forward, *args, **kwargs)
 
@@ -583,6 +583,10 @@ class Function(_SingleLevelFunction):
     @staticmethod
     def _compiled_autograd_key(ctx):
         return (ctx._autograd_function_id,)
+
+
+def is_setup_context_defined(fn):
+    return fn != _SingleLevelFunction.setup_context
 
 
 def autograd_function_forward_rewritten(original_forward, original_setup_context):
