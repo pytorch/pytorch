@@ -66,7 +66,7 @@ def query_changed_files() -> List[str]:
         capture_output=True,
         check=False,
     )
-    print(f"merge_base: {merge_base}, head: {head}")
+    print(f"base_commit: {base_commit}")
 
     if proc.returncode != 0:
         raise RuntimeError("Unable to get changed files")
