@@ -911,8 +911,10 @@ class SelfMutatingModule(torch.nn.Module):
 
 
 class ModuleAttributePrecedenceBase(torch.nn.Module):
-    def linear(self, x):
-        return x * 2.0
+    def linear(self, x, flag=None):
+        if flag:
+            return x * 2.0
+        return x * 3.0
 
 
 class ModuleAttributePrecedence(ModuleAttributePrecedenceBase):
