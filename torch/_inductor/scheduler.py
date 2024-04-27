@@ -31,6 +31,7 @@ from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.utils._triton import has_triton
 
 from . import comms, config, dependencies, ir, metrics
+from .codecache import write_text
 from .codegen.common import get_scheduling_for_device, Kernel
 from .comm_analysis import estimate_nccl_collective_runtime
 from .dependencies import Dep, MemoryDep, StarDep, WeakDep
@@ -50,7 +51,6 @@ from .utils import (
     is_wait,
     sympy_product,
 )
-from .codecache import write_text
 from .virtualized import V
 
 
@@ -738,6 +738,13 @@ class SchedulerNode(BaseSchedulerNode):
         if isinstance(self._body, ir.LoopBody):
             lines.append(f"class {name}_loop_body:")
             lines.append(textwrap.indent(self._body.debug_str(), "    "))
+
+        if ir.is_triton(self.node.get_device()):
+            backend = self.scheduler.get_backend(self.node.get_device())
+            V.graph.scheduler.current_device = self.node.get_device()
+            triton_code = backend.generate_kernel_code_from_nodes((self,)).strip()
+            lines.append(f"{self.get_name()} Triton code:")
+            lines.append(textwrap.indent(triton_code, "    "))
         return "\n".join(lines)
 
     def get_ranges(self):
@@ -895,6 +902,14 @@ class FusedSchedulerNode(BaseSchedulerNode):
             f"{self.get_name()}.snodes[{i}] =\n{node.debug_str()}"
             for i, node in enumerate(self.snodes)
         ]
+        device = self.snodes[0].node.get_device()
+        if ir.is_triton(device):
+            backend = self.scheduler.get_backend(device)
+            V.graph.scheduler.current_device = device
+            triton_code = backend.generate_kernel_code_from_nodes(self.snodes).strip()
+            lines.append(f"{self.get_name()} Triton code:")
+            lines.append(textwrap.indent(triton_code, "    "))
+
         return textwrap.indent("\n".join(lines).rstrip(), "    ")
 
     def set_last_usage(
@@ -1266,6 +1281,7 @@ class Scheduler:
     @dynamo_timed
     def __init__(self, nodes):
         super().__init__()
+        V.graph.scheduler = self
         self.backends = {}
         self.fuse_cache = {}
         self.post_grad_graph_id = next(_post_grad_graph_counter)
@@ -1719,7 +1735,6 @@ class Scheduler:
         """
         assert len(nodes) > 0
         device = nodes[0].get_device()
-        V.graph.scheduler = self
         self.current_device = device
         backend = self.get_backend(device)
         return backend.benchmark_fused_nodes(nodes)
@@ -2081,7 +2096,7 @@ class Scheduler:
             rhs_dep = node2_name2dep[buf_name]
 
             if lhs_dep.get_numel() != rhs_dep.get_numel():
-                reasons[buf_name] = "different numel" 
+                reasons[buf_name] = "different numel"
                 continue
 
             # Add more rules here
@@ -2158,7 +2173,9 @@ class Scheduler:
             not config.aggressive_fusion or node1.is_reduction() or node2.is_reduction()
         ):
             if is_metric_table_enabled("fusion_failure_due_to_indexing_mismatch"):
-                common_buf_names = node1.read_writes.buffer_names() & node2.read_writes.buffer_names()
+                common_buf_names = (
+                    node1.read_writes.buffer_names() & node2.read_writes.buffer_names()
+                )
                 if len(common_buf_names) > 0:
                     get_metric_table("fusion_failure_due_to_indexing_mismatch").add_row(
                         lambda: {
@@ -2169,11 +2186,13 @@ class Scheduler:
                             "node1_debug_str": write_text(node1.debug_str()),
                             "node2_debug_str": write_text(node2.debug_str()),
                             "common_buffer_names": list(common_buf_names),
-                            "failure_reason": self.decide_fusion_fail_reason(node1, node2, common_buf_names),
+                            "failure_reason": self.decide_fusion_fail_reason(
+                                node1, node2, common_buf_names
+                            ),
                         }
                     )
 
-                    why("no shared data due to loop ordering mismatch")
+                    why("no shared data due to indexing mismatch")
                     return False
             why("no shared data")
             return False  # heuristic not needed for correctness

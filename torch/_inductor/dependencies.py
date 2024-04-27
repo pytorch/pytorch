@@ -253,7 +253,9 @@ class ReadWrites:
         for dep in self.reads_and_writes():
             if not isinstance(dep, MemoryDep):
                 continue
-            if not ignore_integer_index or not isinstance(dep.index, (int, sympy.Integer)):
+            if not ignore_integer_index or not isinstance(
+                dep.index, (int, sympy.Integer)
+            ):
                 names.add(dep.name)
         return names
 
