@@ -646,7 +646,10 @@ class GraphSignature:
         names = [*input_tokens, *parameters, *buffers, *user_inputs]
         mutations = []
         for idx, input_info in enumerate(view_mutation_metadata.input_info):
-            if input_info.mutates_data:
+            if (
+                input_info.mutates_data
+                and input_info.mutation_type == MutationType.MUTATED_OUT_GRAPH
+            ):
                 # Only buffers can be mutated, not parameters
                 assert idx >= len(parameters)
                 mutations.append(names[idx + num_tokens])

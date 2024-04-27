@@ -145,21 +145,6 @@ std::vector<size_t> get_tensor_parameter_index(
   return tensor_parameter_index;
 }
 
-// Regarding aten operations contain out tensor, AOTI kernel returns the out
-// tensor as well. It conflicts with aten operation schema. So, we need to
-// exclude the out tensor from the result.
-std::vector<at::Tensor> exclude_out_tensors(
-    const std::vector<c10::Argument>& arguments,
-    const std::vector<at::Tensor>& output_tensors) {
-  size_t num_out_tensors = std::count_if(
-      arguments.begin(), arguments.end(), [](const c10::Argument& argument) {
-        return argument.is_out() &&
-            *argument.real_type() == *c10::getTypePtr<at::Tensor>();
-      });
-  return std::vector<at::Tensor>(
-      output_tensors.begin(), output_tensors.end() - num_out_tensors);
-}
-
 } // namespace
 
 AOTIPythonKernelHolder::AOTIPythonKernelHolder(
@@ -250,9 +235,7 @@ void AOTIPythonKernelHolder::cache_hit(
   torch::jit::drop(*stack, op.schema().arguments().size());
 
   auto outputs = kernel_state.kernel_runner_->run(inputs);
-  auto non_out_tensors = exclude_out_tensors(op.schema().arguments(), outputs);
-  TORCH_INTERNAL_ASSERT(op.schema().returns().size() == non_out_tensors.size());
-  for (auto& output : non_out_tensors) {
+  for (auto& output : outputs) {
     stack->push_back(output);
   }
 }
@@ -462,9 +445,7 @@ void AOTIPythonKernelHolder::cache_miss(
   torch::jit::drop(*stack, op.schema().arguments().size());
   // TODO: Get the output type of this operation and then convert to the
   // output type.
-  auto non_out_tensors = exclude_out_tensors(op.schema().arguments(), outputs);
-  TORCH_INTERNAL_ASSERT(op.schema().returns().size() == non_out_tensors.size());
-  for (auto& output : non_out_tensors) {
+  for (auto& output : outputs) {
     torch::jit::push(*stack, std::move(output));
   }
 }
