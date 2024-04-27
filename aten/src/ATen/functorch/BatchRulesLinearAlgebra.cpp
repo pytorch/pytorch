@@ -36,6 +36,15 @@ Tensor vdot_decomp(const Tensor& A, const Tensor& B) {
   return at::dot(A.is_complex() ? A.conj() : A, B);
 }
 
+
+oneOutput matrix_exp_batch_rule(const Tensor& self, c10::optional<int64_t> self_bdim) {
+    TORCH_CHECK(rankWithoutBatchDim(self, self_bdim) >= 2, 
+                "torch.matrix_exp: The input tensor must have at least 2 dimensions.");
+
+    auto self_ = moveBatchDimToFront(self, self_bdim);
+    return std::make_tuple(at::matrix_exp(self_), 0);
+}
+
 // NB: I wrote this like this because we *might* want its for a future matmul
 // batch rule that isn't decomposed...
 // "tv" = tensor @ vector
@@ -592,6 +601,8 @@ LINALG_CHECK_MATRIX_UNARY_TWO_OUT(_linalg_eigh, linalg.eigh);
 LINALG_CHECK_MATRIX_UNARY_FOUR_OUT(_linalg_slogdet, linalg.slogdet);
 LINALG_CHECK_MATRIX_UNARY_THREE_OUT(_linalg_svd, linalg.svd);
 // NOLINTEND(*array*)
+
+TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {m.impl("matrix_exp", matrix_exp_batch_rule);}
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(bmm, bmm_batch_rule);
