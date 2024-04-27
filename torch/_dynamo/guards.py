@@ -18,7 +18,7 @@ import textwrap
 import types
 import weakref
 from inspect import currentframe, getframeinfo
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 from weakref import ReferenceType
 
 
@@ -603,7 +603,14 @@ class GuardBuilder(GuardBuilderBase):
         attr_name = source.member
         mod_dict = base_example_value.__dict__
 
-        if attr_name in mod_dict:
+        all_class_attribute_names: Set[str] = set()
+        for x in inspect.getmro(base_example_value.__class__):
+            all_class_attribute_names.update(x.__dict__.keys())
+
+        if attr_name in all_class_attribute_names:
+            # base classes attribute take precedence in nn modules
+            accessor_info = NNModuleAttrAccessorInfo(False, None, None)
+        elif attr_name in mod_dict:
             accessor_info = NNModuleAttrAccessorInfo(True, attr_name, None)
         elif "_parameters" in mod_dict and attr_name in mod_dict["_parameters"]:
             accessor_info = NNModuleAttrAccessorInfo(True, "_parameters", attr_name)

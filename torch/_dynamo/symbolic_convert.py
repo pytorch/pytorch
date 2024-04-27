@@ -2556,15 +2556,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             and func.source
             and not func.fn.__module__.startswith(("torch.nn", "torch.ao"))
         ):
-            fn_source_to_guard = func.source
-            if isinstance(func, UserMethodVariable):
-                # methods go through descriptor and can give different IDs every
-                # time. Get the static object by accessing __func__.
-
-                # TODO(anijain2305) - Use PyMethod_Function to speedup guard
-                # accessor.
-                fn_source_to_guard = AttrSource(fn_source_to_guard, "__func__")
-            install_guard(fn_source_to_guard.make_guard(GuardBuilder.ID_MATCH))
+            install_guard(func.source.make_guard(GuardBuilder.FUNCTION_MATCH))
 
         parent.inconsistent_side_effects |= tracer.inconsistent_side_effects
 

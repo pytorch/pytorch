@@ -223,22 +223,30 @@ class NNModuleVariable(VariableTracker):
             return VariableBuilder(tx, NNModuleSource(source))(subobj)
         else:
             if istype(subobj, property):
+                # Get the source of the property object
+                base_source = source.base
+                new_source = AttrSource(AttrSource(base_source, '__class__'), name)
                 return variables.UserFunctionVariable(
                     subobj.fget,
-                    source=source,
+                    source=new_source,
                 ).call_function(tx, [(self)], {})
             elif istype(subobj, classmethod):
                 return variables.UserMethodVariable(
                     subobj.__func__,
                     variables.UserDefinedObjectVariable(type(base)),
-                    source=source,
+                    source=AttrSource(source, '__func__'),
                 )
             elif istype(subobj, staticmethod):
                 return variables.UserFunctionVariable(
                     subobj.__get__(base), source=source
                 )
             elif istype(subobj, types.FunctionType):
-                return variables.UserMethodVariable(subobj, self, source=source)
+                # inspect.getattr_static gives the (unbound) function object.
+                # So, add the __func__ to generate the correct source.
+                new_source = AttrSource(source, "__func__")
+                return variables.UserMethodVariable(
+                    subobj, self, source=new_source,
+                )
             elif is_safe_constant(subobj) or istensor(subobj):
                 # Support possibly common cases of class members
                 return VariableBuilder(tx, NNModuleSource(source))(subobj)
@@ -326,7 +334,9 @@ class NNModuleVariable(VariableTracker):
                 forward_method_source = AttrSource(
                     AttrSource(self.source, "forward"), "__func__"
                 )
-                install_guard(forward_method_source.make_guard(GuardBuilder.ID_MATCH))
+                install_guard(
+                    forward_method_source.make_guard(GuardBuilder.FUNCTION_MATCH)
+                )
 
                 from .builder import wrap_fx_proxy
 
