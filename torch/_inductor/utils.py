@@ -56,6 +56,8 @@ log = logging.getLogger(__name__)
 _T = TypeVar("_T")
 VarRanges = Dict[sympy.Expr, sympy.Expr]
 
+ALIGNMENT = 16
+
 
 def do_bench_using_profiling(fn: Callable[[], Any], warmup=25, rep=100) -> float:
     """
@@ -1428,3 +1430,39 @@ def dump_node_schedule(node_schedule):
                 print(dep)
         else:
             raise RuntimeError(f"Unrecognized node type: {type(node)}")
+
+
+def tensor_is_aligned(tensor: torch.Tensor):
+    # See Note: [Input Alignment handling in Inductor]
+    # Right now, we don't try to guard on the alignment of the storage offset.
+    # When this comment was written, non-symbolic storage_offsets are not guarded on
+    # but symbolic storage_offsets are. For consistency, we suppress guard creation
+    # upon performing this check: that ensures that we don't add recompiles when we
+    # add this logic.
+    return (tensor.storage_offset() * get_dtype_size(tensor.dtype)) % ALIGNMENT == 0
+
+
+def should_assume_input_aligned(example_input: torch.Tensor):
+    # See Note: [Input Alignment handling in Inductor]
+
+    # right now, we only care about alignment for cuda tensors.
+    if example_input.device.type != "cuda":
+        return False
+    return config.assume_aligned_inputs or tensor_is_aligned(example_input)
+
+
+def maybe_get_suppress_shape_guards_ctx():
+    # Try to get TracingContext.try_get().fake_mode.shape_env.suppress_guards()
+    # If it's not available, return a nullcontext.
+
+    # If we're dealing with cudagraphs, we might not have a tracing_context
+    tracing_context = torch._guards.TracingContext.try_get()
+    if not tracing_context:
+        return contextlib.nullcontext()
+
+    # In standalone inductor compile mode, we might not have a shape_env attached to the fake mode
+    shape_env = tracing_context.fake_mode.shape_env
+    if not shape_env:
+        return contextlib.nullcontext()
+
+    return shape_env.suppress_guards()
