@@ -109,22 +109,8 @@ class Library:
         assert self.m is not None
         if isinstance(tags, torch.Tag):
             tags = (tags,)
-
-        name = schema.split("(")[0]
-        packet_name = name.split(".")[0] if "." in name else name
-        has_preexisting_packet = hasattr(torch.ops, self.ns) and hasattr(getattr(torch.ops, self.ns), packet_name)
-
         result = self.m.define(schema, alias_analysis, tuple(tags))
-        name = schema.split("(")[0]
-        qualname = self.ns + "::" + name
-
-        # If the OpOverloadPacket exists already, then this means we're adding a
-        # new OpOverload for it. Refresh the packet to include the new OpOverload.
-        if has_preexisting_packet:
-            ns = getattr(torch.ops, self.ns)
-            packet = getattr(ns, packet_name)
-            torch._ops._refresh_packet(packet)
-
+        qualname = self.ns + "::" + schema.split("(")[0]
         self._op_defs.add(qualname)
         _defs.add(qualname)
         return result
@@ -432,7 +418,9 @@ def impl_abstract(qualname, func=None, *, lib=None, _stacklevel=1):
                   "we will remove torch.library.impl_abstract in a future "
                   "version of PyTorch.",
                   DeprecationWarning, stacklevel=2)
-    return register_fake(qualname, func, lib=lib, _stacklevel=_stacklevel + 1)
+    if func is not None:
+        _stacklevel = _stacklevel + 1
+    return register_fake(qualname, func, lib=lib, _stacklevel=_stacklevel)
 
 
 _op_identifier = Union[str, "torch._ops.OpOverload", "torch._library.custom_ops.CustomOpDef"]
@@ -606,7 +594,7 @@ def register_fake(
             _keep_alive.append(use_lib)
         else:
             use_lib = lib
-        use_lib._register_fake(op_name, func, _stacklevel=stacklevel)
+        use_lib._register_fake(op_name, func, _stacklevel=stacklevel + 1)
         return func
 
     if func is None:
@@ -863,11 +851,11 @@ def opcheck(
         >>> def _(x, y):
         >>>     return torch.empty_like(x)
         >>>
-        >>> def setup_context(ctx, inputs, output)
+        >>> def setup_context(ctx, inputs, output):
         >>>     y, = inputs
         >>>     ctx.y = y
         >>>
-        >>> def backward(ctx, grad)
+        >>> def backward(ctx, grad):
         >>>     return grad * ctx.y, None
         >>>
         >>> numpy_sin.register_autograd(backward, setup_context=setup_context)

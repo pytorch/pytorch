@@ -1,3 +1,4 @@
+
 # Owner(s): ["module: cpp-extensions"]
 
 import os
@@ -160,6 +161,8 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         self.assertTrue(hasattr(torch.UntypedStorage, "is_foo"))
         self.assertTrue(hasattr(torch.UntypedStorage, "foo"))
         self.assertTrue(hasattr(torch.nn.Module, "foo"))
+        self.assertTrue(hasattr(torch.nn.utils.rnn.PackedSequence, "is_foo"))
+        self.assertTrue(hasattr(torch.nn.utils.rnn.PackedSequence, "foo"))
 
     def test_open_device_generator_registration_and_hooks(self):
         device = self.module.custom_device()
@@ -269,6 +272,15 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         z = z.foo(0)
         self.assertFalse(self.module.custom_add_called())
         self.assertTrue(z.is_foo)
+
+    def test_open_device_packed_sequence():
+    device = self.module.custom_device()
+    a = torch.rand(5, 3)
+    b = torch.tensor([1, 1, 1, 1, 1])
+    input = torch.nn.utils.rnn.PackedSequence(a, b)
+    self.assertFalse(input.is_foo)
+    input_foo = input.foo()
+    self.assertTrue(input_foo.is_foo)
 
     def test_open_device_storage(self):
         # check whether the attributes and methods for storage of the corresponding custom backend are generated correctly
@@ -514,7 +526,6 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         self.assertEqual(out_ref, out_test)
         self.assertEqual(x_ref.grad, x_test.grad)
 
-    @unittest.skip("Temporary disabled due to unsupported triu_indices")
     def test_open_device_scalar_type_fallback(self):
         z_cpu = torch.Tensor([[0, 0, 0, 1, 1, 2], [0, 1, 2, 1, 2, 2]]).to(torch.int64)
         z = torch.triu_indices(3, 3, device="foo")
