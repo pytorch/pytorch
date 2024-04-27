@@ -140,7 +140,7 @@ multinomial_with_replacement_apply(
   /* cumulative probability distribution vector */
   Tensor cum_dist = at::empty({n_categories}, self.options().dtype(kFloat));
 
-  const scalar_t* const self_ptr = self.data_ptr<scalar_t>();
+  const scalar_t* const self_ptr = self.const_data_ptr<scalar_t>();
   float* const cum_dist_ptr = cum_dist.data_ptr<float>();
   int64_t* const result_ptr = result.data_ptr<int64_t>();
 

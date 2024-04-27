@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import functools
+import io
 import re
 import sys
 import unittest
@@ -14,6 +15,7 @@ from torch._dynamo import compiled_autograd
 from torch._dynamo.utils import counters
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.logging_utils import logs_to_string
 
 # note: these tests are not run on windows due to inductor_utils.HAS_CPU
 
@@ -1341,6 +1343,167 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent, m) {
 
             out = compiled_fn(activations)
             self.assertTrue(len(activations) == 0)
+
+    @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    def test_cudagraphs_cpu_division(self):
+        from torch._dynamo.testing import reduce_to_scalar_loss
+
+        model = torch.nn.Linear(10, 10, dtype=torch.float16).cuda()
+        inputs = torch.randn(10, 10, dtype=torch.float16).cuda()
+        out = model(inputs)
+        loss = reduce_to_scalar_loss(out)
+        torch._inductor.config.triton.cudagraphs = True
+
+        stderr_msgs = io.StringIO()
+        with mock.patch("sys.stderr", stderr_msgs), compiled_autograd.enable(
+            compiler_fn
+        ):
+            loss.backward()
+
+        self.assertFalse("skipping cudagraphs" in stderr_msgs.getvalue())
+
+    def test_verbose_logs_graph(self):
+        torch._logging.set_logs(compiled_autograd_verbose=True)
+
+        def fn():
+            model = torch.nn.Sequential(
+                torch.nn.Linear(4, 4),
+                torch.nn.ReLU(),
+                torch.nn.Linear(4, 4),
+                torch.nn.ReLU(),
+            )
+            x = torch.randn([2, 4])
+            result = model(x).sum()
+            result.backward()
+            yield model[0].weight.grad
+            yield model[0].bias.grad
+            yield model[2].weight.grad
+            yield model[2].bias.grad
+
+        logs, ctx = logs_to_string(
+            torch._dynamo.compiled_autograd.__name__, "compiled_autograd_verbose"
+        )
+        with ctx():
+            self.check_output_and_recompiles(fn)
+
+        expected_logs = [
+            "SumBackward0 (NodeCall 1)",
+            "ReluBackward0 (NodeCall 2)",
+            "AddmmBackward0 (NodeCall 3)",
+            "TBackward0 (NodeCall 4)",
+            "torch::autograd::AccumulateGrad (NodeCall 5)",
+            "ReluBackward0 (NodeCall 6)",
+            "AddmmBackward0 (NodeCall 7)",
+            "TBackward0 (NodeCall 8)",
+            "torch::autograd::AccumulateGrad (NodeCall 9)",
+            "torch::autograd::AccumulateGrad (NodeCall 10)",
+            "torch::autograd::AccumulateGrad (NodeCall 11)",
+        ]
+
+        self.assertEqual(
+            sum(1 for e in expected_logs if e in logs.getvalue()), len(expected_logs)
+        )
+
+    def test_verbose_logs_cpp(self):
+        script = """
+import torch
+
+def compiler_fn(gm):
+    return torch.compile(gm, backend="eager")
+
+def main():
+    torch._logging.set_logs(compiled_autograd_verbose=True)
+    model = torch.nn.Sequential(
+        torch.nn.Linear(4, 4),
+        torch.nn.ReLU(),
+        torch.nn.Linear(4, 4),
+        torch.nn.ReLU(),
+    )
+
+    for i in range(10, 100):
+        x = torch.randn([i, 4])
+        result = model(x).sum()
+        with torch._dynamo.compiled_autograd.enable(compiler_fn):
+            result.backward()
+
+main()
+"""
+        stdout, _ = self.run_process_no_exception(script)
+        stdout = stdout.decode("utf-8")
+
+        patterns = [
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for SumBackward0, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for ReluBackward0, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for AddmmBackward0, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for TBackward0, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for ReluBackward0, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for AddmmBackward0, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for TBackward0, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for ReluBackward0, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for AddmmBackward0, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for TBackward0, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
+            r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
+            r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
+            r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
+            r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
+            r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
+            r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
+        ]
+
+        pattern = r"".join(patterns)
+        matches = re.findall(pattern, stdout)
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(len(matches[0]), len(patterns))
+
+    def test_snapshot_verbose_logs_flag(self):
+        def fn():
+            model = torch.nn.Sequential(
+                torch.nn.Linear(4, 4),
+                torch.nn.ReLU(),
+                torch.nn.Linear(4, 4),
+                torch.nn.ReLU(),
+            )
+            x = torch.randn([2, 4])
+            result = model(x).sum()
+            result.backward()
+            yield model[0].weight.grad
+            yield model[0].bias.grad
+            yield model[2].weight.grad
+            yield model[2].bias.grad
+
+        logs, ctx = logs_to_string(
+            torch._dynamo.compiled_autograd.__name__, "compiled_autograd_verbose"
+        )
+        with ctx():
+            with compiled_autograd.enable(compiler_fn):
+                # unused, verbose level already snapshot with contextmanager
+                torch._logging.set_logs(compiled_autograd_verbose=True)
+                fn()
+
+        unexpected_logs = [
+            "SumBackward0 (NodeCall 1)",
+            "ReluBackward0 (NodeCall 2)",
+            "AddmmBackward0 (NodeCall 3)",
+            "TBackward0 (NodeCall 4)",
+            "torch::autograd::AccumulateGrad (NodeCall 5)",
+            "ReluBackward0 (NodeCall 6)",
+            "AddmmBackward0 (NodeCall 7)",
+            "TBackward0 (NodeCall 8)",
+            "torch::autograd::AccumulateGrad (NodeCall 9)",
+            "torch::autograd::AccumulateGrad (NodeCall 10)",
+            "torch::autograd::AccumulateGrad (NodeCall 11)",
+        ]
+
+        self.assertEqual(sum(1 for e in unexpected_logs if e in logs.getvalue()), 0)
 
 
 def load_test_module(name):
