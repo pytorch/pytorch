@@ -9390,7 +9390,7 @@ class DistributedTest:
 
                 @staticmethod
                 def backward(ctx, grad_output):
-                    raise RuntimeError()
+                    raise RuntimeError
 
             class MyModel(nn.Module):
                 def __init__(self, device):
@@ -9534,7 +9534,7 @@ class DistributedTest:
 
                 @staticmethod
                 def backward(ctx, grad_output):
-                    raise RuntimeError()
+                    raise RuntimeError
 
             class MyModel(torch.nn.Module):
                 def __init__(self, device):
