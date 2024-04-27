@@ -133,10 +133,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             torch._register_device_module("foo", generate_faked_module())
 
         # backend name can be renamed to the same name multiple times
-        with self.assertRaisesRegex(
-            RuntimeError, "torch.register_privateuse1_backend()"
-        ):
-            torch.utils.rename_privateuse1_backend("foo")
+        torch.utils.rename_privateuse1_backend("foo")
 
         # backend name can't be renamed multiple times to different names.
         with self.assertRaisesRegex(
