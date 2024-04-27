@@ -821,8 +821,6 @@ class CommonTemplate:
                 max=max_tensor, min=min_tensor, input=inp_tensor, out=res_out_tensor
             )
 
-            print(inp_tensor)
-            print(res_tensor)
             self.assertEqual(ref_tensor, res_tensor)
             self.assertEqual(ref_out_tensor, res_out_tensor)
 
