@@ -3,7 +3,7 @@ Dynamo Overview
 
 Before you read this section, read :ref:`torch.compiler_overview`.
 
-**Dynamo** is a Python-level Just-In-Time (JIT) compiler designed to make
+TorchDynamo (or simply Dynamo) is a Python-level Just-In-Time (JIT) compiler designed to make
 unmodified PyTorch programs faster. Dynamo hooks into the frame evaluation
 API in CPython (`PEP 523 <https://peps.python.org/pep-0523/>`__) to
 dynamically modify Python bytecode right before it is executed. It

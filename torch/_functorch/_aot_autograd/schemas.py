@@ -504,7 +504,7 @@ class SubclassMeta:
     # in case we made incorrect assumptions about the subclass-ness of our grad_outputs
     #
     # Optional field because we don't compute for inference graphs
-    grad_input_metas: Optional[List[Union[int, SubclassCreationMeta]]]
+    grad_input_metas: Optional[List[Union[int, SubclassCreationMeta]]] = None
 
     def __init__(self):
         # The fields in this class get set after its construction.
