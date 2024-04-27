@@ -1856,8 +1856,9 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             return arg
 
         meta_val = fx_arg.meta["val"]
+        meta_stride = meta_val.stride()
 
-        stride_order = ir.get_stride_order(meta_val.stride())
+        stride_order = ir.get_stride_order(meta_stride)
         if stride_order and stride_order[-1] != 0:
             # contiguous stride order
             stride_order = list(reversed(range(len(arg.get_size()))))
@@ -1885,7 +1886,9 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         try:
             arg.get_stride()
             if is_aligned_realized_tensor(arg):
-                return arg
+                return V.graph.try_match_insignificant_strides(
+                    ir.ExternKernel.realize_input(arg), meta_stride
+                )
         except AttributeError:
             pass
 
@@ -1895,7 +1898,9 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         if isinstance(arg.data, ir.BaseView):
             if not is_aligned(arg):
                 if is_aligned(arg.unwrap_view()):
-                    return arg
+                    return V.graph.try_match_insignificant_strides(
+                        ir.ExternKernel.realize_input(arg), meta_stride
+                    )
 
         return ir.ExternKernel.require_stride_order(arg, stride_order)
 
@@ -2345,6 +2350,8 @@ def long_tensor(data):
 
 @register_lowering(aten._local_scalar_dense)
 def _local_scalar_dense(data):
+    from torch.fx.experimental.symbolic_shapes import resolve_unbacked_bindings
+
     # This is interesting!  Most lowerings return tensors, so you can just
     # return the buffer you allocated and it will get used (or not used, if
     # it's dead.)  But _local_scalar_dense (aka item) returns an int,
@@ -2355,10 +2362,35 @@ def _local_scalar_dense(data):
     # solely responsible for generating this .item().  The buffer is
     # not used for anything (notice we discard it); at codegen time,
     # the "buffer" just gets assigned None.
-    sym = V.graph.current_node.meta["val"].node.expr
-    buffer = ir.DynamicScalar(sym, data)
+    unbacked_bindings = resolve_unbacked_bindings(
+        V.graph.sizevars.shape_env, V.graph.current_node.meta["unbacked_bindings"]
+    )
+    assert len(unbacked_bindings) == 1, unbacked_bindings
+    # NB: Have to be very careful here.  V.graph.current_node.meta["val"]
+    # seemingly also contains a symbol which you want to do binding for,
+    # but it actually isn't.  In particular, if we have later performed
+    # a deferred runtime assert saying that u0 == s0, you will actually
+    # see s0 from expr!  This is bad because we need to actually generate
+    # the assert that says u0 == s0, so we need to know where to get u0
+    # from (this call).  In particular, we must use unbacked_bindings, which
+    # is guaranteed to have the original, unreplaced symbol in question.
+    #
+    # NB2: Another thing we have to be very careful about are symbol bindings
+    # that require nontrivial refinement, e.g., when you have a binding site
+    # x: Sym(u0 * 4) = y.item().  Here, the code generation must do a division
+    # in order to appropriately bind u0.  This is communicated via the keypath
+    # in unbacked_bindings, and we need to hold onto it in order to generate
+    # code appropriately for this case.
+    binding_sym, keypath = next(iter(unbacked_bindings.items()))
+    buffer = ir.DynamicScalar(binding_sym, keypath, data)
     buffer.name = V.graph.register_buffer(buffer)
-    return sym
+    # NB: the replaced expr is OK to use directly downstream, we want
+    # simplifications in this case!
+    val = V.graph.current_node.meta["val"]
+    if isinstance(val, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+        return val.node.expr
+    else:
+        return sympy.sympify(val)
 
 
 @register_lowering(aten._assert_scalar)
