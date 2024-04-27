@@ -2058,7 +2058,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
       // fill in src_int_idx, sorted_int_idx, int_counts
       {
         const auto sorted_len = sorted.numel();
-        const auto* ptr_sorted = sorted.data_ptr<int64_t>();
+        const auto* ptr_sorted = sorted.const_data_ptr<int64_t>();
         const auto* ptr_sorted_start = ptr_sorted;
         const auto* ptr_sorted_end = ptr_sorted + sorted_len;
 
@@ -2121,7 +2121,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
         auto* ptr_selected_src = selected_src.data_ptr<int64_t>();
 
         const auto thread_offsets = compressed_int_counts.cumsum(0).sub_(compressed_int_counts);
-        const auto* ptr_sorted_idx = sorted_idx.data_ptr<int64_t>();
+        const auto* ptr_sorted_idx = sorted_idx.const_data_ptr<int64_t>();
         at::parallel_for(0, n_threads_src, 1, [&](int64_t tid, C10_UNUSED int64_t _) {
             const auto start = tid * chunk_size_src;
             const auto end = std::min(start + chunk_size_src, src_len);
@@ -2163,7 +2163,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
         bool run_in_parallel = true) -> Tensor {
       auto cidx = at::empty({len + 1}, idx.options());
 
-      const auto* ptr_idx = idx.data_ptr<int64_t>();
+      const auto* ptr_idx = idx.const_data_ptr<int64_t>();
       auto* ptr_cidx = cidx.data_ptr<int64_t>();
 
       const auto idx_len = idx.numel();
@@ -2202,7 +2202,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
         }
         else {
           auto* ptr_counts = counts.data_ptr<int64_t>();
-          const auto* ptr_vals = t.data_ptr<int64_t>();
+          const auto* ptr_vals = t.const_data_ptr<int64_t>();
           for (C10_UNUSED const auto _ : c10::irange(t.numel())) {
             ++ptr_counts[*ptr_vals++];
           }
@@ -2310,10 +2310,10 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
         const auto src_idx_len = src_intersection_offsets.const_data_ptr<int64_t>()[size - 1];
         auto src_idx = at::empty({src_idx_len}, src.options());
 
-        const auto* ptr_src = src.data_ptr<int64_t>();
-        const auto* ptr_intersection_counts = intersection_counts.data_ptr<int64_t>();
-        const auto* ptr_src_intersection_counts = src_intersection_counts.data_ptr<int64_t>();
-        const auto* ptr_src_intersection_offsets = src_intersection_offsets.data_ptr<int64_t>();
+        const auto* ptr_src = src.const_data_ptr<int64_t>();
+        const auto* ptr_intersection_counts = intersection_counts.const_data_ptr<int64_t>();
+        const auto* ptr_src_intersection_counts = src_intersection_counts.const_data_ptr<int64_t>();
+        const auto* ptr_src_intersection_offsets = src_intersection_offsets.const_data_ptr<int64_t>();
         auto* ptr_src_idx = src_idx.data_ptr<int64_t>();
 
         const auto src_len = src.numel();
@@ -2362,16 +2362,16 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
           auto counts_per_thread = idx_counts_per_thread.mul_(src_counts).sum(-1);
           return counts_per_thread.cumsum(0).sub_(counts_per_thread);
         }();
-        const auto* ptr_thread_offset = thread_offset.data_ptr<int64_t>();
+        const auto* ptr_thread_offset = thread_offset.const_data_ptr<int64_t>();
 
         auto idx_selected = at::empty({res_len}, idx.options());
         auto src_selected = at::empty({res_len}, src.options());
 
-        const auto* ptr_idx = idx.data_ptr<int64_t>();
-        const auto* ptr_src_counts = src_counts.data_ptr<int64_t>();
-        const auto* ptr_intersection_counts = intersection_counts.data_ptr<int64_t>();
-        const auto* ptr_src_idx = src_idx.data_ptr<int64_t>();
-        const auto* ptr_src_idx_offsets = src_idx_offsets.data_ptr<int64_t>();
+        const auto* ptr_idx = idx.const_data_ptr<int64_t>();
+        const auto* ptr_src_counts = src_counts.const_data_ptr<int64_t>();
+        const auto* ptr_intersection_counts = intersection_counts.const_data_ptr<int64_t>();
+        const auto* ptr_src_idx = src_idx.const_data_ptr<int64_t>();
+        const auto* ptr_src_idx_offsets = src_idx_offsets.const_data_ptr<int64_t>();
         auto* ptr_idx_selected = idx_selected.data_ptr<int64_t>();
         auto* ptr_src_selected = src_selected.data_ptr<int64_t>();
 
@@ -2433,8 +2433,8 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
         }
       }();
 
-      const auto* ptr_outer = outer.data_ptr<int64_t>();
-      const auto* ptr_inner = inner.data_ptr<int64_t>();
+      const auto* ptr_outer = outer.const_data_ptr<int64_t>();
+      const auto* ptr_inner = inner.const_data_ptr<int64_t>();
       // NOTE: if very critical, replace std::vector with
       // a data structure that operates on stack up to some limit.
       auto outer_selected_idx = std::vector<int64_t>();

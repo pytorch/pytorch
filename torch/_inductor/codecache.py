@@ -109,6 +109,8 @@ output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
 
 LOCK_TIMEOUT = 600
 
+_IS_WINDOWS = sys.platform == "win32"
+
 # timing metrics for time spent in the compilation
 _cumulative_compile_time = 0.0
 _t0: Optional[float] = None
@@ -1049,6 +1051,40 @@ def is_clang() -> bool:
     return bool(re.search(r"(clang|clang\+\+)", cpp_compiler()))
 
 
+def get_compiler_version_info(compiler):
+    SUBPROCESS_DECODE_ARGS = ("oem",) if _IS_WINDOWS else ()
+    env = os.environ.copy()
+    env["LC_ALL"] = "C"  # Don't localize output
+    try:
+        version_string = subprocess.check_output(
+            [compiler, "-v"], stderr=subprocess.STDOUT, env=env
+        ).decode(*SUBPROCESS_DECODE_ARGS)
+    except Exception as e:
+        try:
+            version_string = subprocess.check_output(
+                [compiler, "--version"], stderr=subprocess.STDOUT, env=env
+            ).decode(*SUBPROCESS_DECODE_ARGS)
+        except Exception as e:
+            return ""
+    # Mutiple lines to one line string.
+    version_string = version_string.replace("\r", "_")
+    version_string = version_string.replace("\n", "_")
+    return version_string
+
+
+def _get_isa_dry_compile_fingerprint(isa_flags: str) -> str:
+    # ISA dry compile will cost about 1 sec time each startup time.
+    # Please check the issue: https://github.com/pytorch/pytorch/issues/100378
+    # Actually, dry compile is checking compile capability for ISA.
+    # We just record the compiler version, isa options and pytorch version info,
+    # and generated them to output binary hash path.
+    # It would optimize and skip compile existing binary.
+    compiler_info = get_compiler_version_info(cpp_compiler())
+    torch_version = torch.__version__
+    fingerprint = f"{compiler_info}={isa_flags}={torch_version}"
+    return fingerprint
+
+
 class VecISA:
     _bit_width: int
     _macro: str
@@ -1114,7 +1150,11 @@ cdll.LoadLibrary("__lib_path__")
         if config.is_fbcode():
             return True
 
-        key, input_path = write(VecISA._avx_code, "cpp")
+        key, input_path = write(
+            VecISA._avx_code,
+            "cpp",
+            extra=_get_isa_dry_compile_fingerprint(self._arch_flags),
+        )
         from filelock import FileLock
 
         lock_dir = get_lock_dir()
@@ -1127,8 +1167,11 @@ cdll.LoadLibrary("__lib_path__")
                 )
             )
             try:
+                # Check if the output file exist, and compile when not.
+                if not os.path.isfile(output_path):
+                    compile_file(input_path, output_path, build_cmd)
+
                 # Check build result
-                compile_file(input_path, output_path, build_cmd)
                 subprocess.check_call(
                     [
                         sys.executable,
