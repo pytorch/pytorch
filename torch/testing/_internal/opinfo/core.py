@@ -2729,7 +2729,7 @@ class ForeachFuncInfo(OpInfo):
         sample_inputs_func,
         *,
         dtypes=floating_and_complex_types(),
-        dtypesIfCUDA=floating_and_complex_types_and(torch.half),
+        dtypesIfCUDA=None,
         dtypesIfROCM=None,
         dtypesIfXPU=None,
         supports_alpha_param=False,
