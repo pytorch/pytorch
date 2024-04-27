@@ -446,7 +446,6 @@ cu_library(
 # caffe2
 CAFFE2_COPTS = COMMON_COPTS + [
     "-Dcaffe2_EXPORTS",
-    "-DCAFFE2_USE_GLOO",
     "-DCAFFE2_USE_CUDNN",
     "-DCAFFE2_BUILD_MAIN_LIB",
     "-fvisibility-inlines-hidden",
@@ -1372,7 +1371,6 @@ cc_library(
         "@fbgemm//:fbgemm_src_headers",
         "@fmt",
         "@foxi",
-        "@gloo",
         "@onnx",
     ] + if_cuda(
         [
@@ -1420,7 +1418,6 @@ cu_library(
         "@cuda//:curand",
         "@cudnn",
         "@eigen",
-        "@gloo",
         "@tensorpipe//:tensorpipe_cuda",
     ],
     alwayslink = True,
