@@ -43,8 +43,8 @@ from torch._dynamo.testing import (
     expectedFailureDynamic,
     same,
     skipIfNotPy311,
-    xfailIfPy312,
     unsupported,
+    xfailIfPy312,
 )
 from torch._dynamo.utils import CompileProfiler, counters, ifdynstaticdefault
 from torch._inductor.utils import run_and_get_code
