@@ -275,7 +275,7 @@ class TestCuda(TestCase):
         self.assertTrue((tensor == 1).all())
 
     def test_uuid(self):
-        assert len(torch.cuda.get_device_properties(0).uuid) == 16
+        assert len(torch.cuda.get_device_properties(0).uuid.bytes) == 16
 
     def test_copy_non_blocking(self):
         def _test_copy_non_blocking(a, b):
