@@ -14,9 +14,7 @@ from torch.distributed._tensor.placement_types import Replicate, Shard
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 
 from torch.testing._internal.common_utils import run_tests
-from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorOpTestBase,
-)
+from torch.testing._internal.distributed._tensor.common_dtensor import DTensorOpTestBase
 
 c10d_functional = torch.ops.c10d_functional
 
@@ -54,7 +52,6 @@ class UtilTest(DTensorOpTestBase):
             self.assertEqual(local_size3[1], 4)
         else:
             self.assertEqual(local_size3[1], 3)
-
 
     def test_compute_local_shape_and_global_offset_1D(self):
         one_d_placements = [[Shard(0)], [Replicate()]]

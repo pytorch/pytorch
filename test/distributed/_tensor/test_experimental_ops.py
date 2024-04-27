@@ -8,9 +8,7 @@ import torch.distributed as dist
 
 from torch.distributed._tensor import distribute_tensor, Replicate
 from torch.testing._internal.common_utils import run_tests
-from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorOpTestBase,
-)
+from torch.testing._internal.distributed._tensor.common_dtensor import DTensorOpTestBase
 
 
 ITER_TIME = 10

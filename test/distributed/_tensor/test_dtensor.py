@@ -21,9 +21,7 @@ from torch.distributed.tensor.parallel import (
 )
 
 from torch.testing._internal.common_utils import run_tests
-from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorOpTestBase,
-)
+from torch.testing._internal.distributed._tensor.common_dtensor import DTensorOpTestBase
 
 
 c10d_functional = torch.ops.c10d_functional

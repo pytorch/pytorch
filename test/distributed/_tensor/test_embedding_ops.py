@@ -12,9 +12,7 @@ from torch.distributed._tensor import (
 )
 from torch.distributed._tensor.debug import CommDebugMode
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
-from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorOpTestBase,
-)
+from torch.testing._internal.distributed._tensor.common_dtensor import DTensorOpTestBase
 
 if TEST_WITH_DEV_DBG_ASAN:
     print(

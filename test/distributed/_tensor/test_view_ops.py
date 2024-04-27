@@ -21,9 +21,7 @@ from torch.distributed._tensor.ops.view_ops import (
 )
 from torch.distributed._tensor.placement_types import Placement
 from torch.testing._internal.common_utils import run_tests
-from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorOpTestBase,
-)
+from torch.testing._internal.distributed._tensor.common_dtensor import DTensorOpTestBase
 from torch.utils import _pytree as pytree
 
 
