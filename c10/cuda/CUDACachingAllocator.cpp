@@ -34,6 +34,8 @@
 #include <utility>
 #include <vector>
 
+#include <c10/util/Logging.h>
+
 TORCH_SDT_DEFINE_SEMAPHORE(malloc)
 TORCH_SDT_DEFINE_SEMAPHORE(free)
 
@@ -2796,6 +2798,12 @@ class DeviceCachingAllocator {
       cudaStream_t stream,
       c10::DeviceIndex device,
       std::shared_ptr<GatheredContext> context) {
+    if (action == TraceEntry::SEGMENT_ALLOC) {
+      LOG(INFO) << "CacheAllocator: SEGMENT_ALLOC addr=0x" << std::hex << addr
+                << std::dec << ", size=" << size
+                << ", trace_trackers_.size=" << trace_trackers_.size();
+    }
+
     if (!record_history && trace_trackers_.empty())
       return;
 

@@ -875,6 +875,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   // lazyInitCUDA is called (and is a no-op if CUDA is already initialized).
   if (useTensorRegisterAllocatorHook_ && !allocatorHooksAttached) {
     at::globalContext().lazyInitCUDA();
+    LOG(INFO) << logPrefix() << "Registered cacheAllocatorRegisterHook";
     c10::cuda::CUDACachingAllocator::attachAllocatorTraceTracker(
         &cacheAllocatorRegisterHook);
     c10::cuda::CUDACachingAllocator::attachAllocatorTraceTracker(
