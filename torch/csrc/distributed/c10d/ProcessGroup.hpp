@@ -59,10 +59,11 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     std::chrono::milliseconds timeout;
 
     // backend name
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
     const std::string backend;
   };
 
-  enum BackendType {
+  enum BackendType : uint8_t {
     UNDEFINED = 0,
     GLOO = 1,
     NCCL = 2,
@@ -719,9 +720,13 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   void init();
 
   c10::intrusive_ptr<c10d::Store> store_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const int rank_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const int size_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const c10::intrusive_ptr<Options> options_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const BackendType backendType_;
   std::string pg_desc_;
 
