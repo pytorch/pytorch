@@ -1267,7 +1267,8 @@ def _check_tensor_all(cond, message=None):  # noqa: F811
 # For Python Array API (https://data-apis.org/array-api/latest/API_specification/constants.html) and
 # NumPy consistency (https://numpy.org/devdocs/reference/constants.html)
 from math import e , nan , inf , pi
-__all__.extend(['e', 'pi', 'nan', 'inf'])
+newaxis: None = None
+__all__.extend(['e', 'pi', 'nan', 'inf', 'newaxis'])
 
 ################################################################################
 # Define Storage and Tensor classes
