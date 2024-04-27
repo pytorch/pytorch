@@ -909,6 +909,11 @@ PyObject* THCPModule_cudaGetSyncDebugMode(PyObject* self, PyObject* noargs) {
 static void registerCudaDeviceProperties(PyObject* module) {
   // Add _cudaDevicePropertires class to torch._C
   auto m = py::handle(module).cast<py::module>();
+  py::class_<CUuuid>(m, "_CUuuid")
+      .def_readonly("bytes", &CUuuid::bytes)
+      .def("__repr__", [](const CUuuid& uuid) {
+        return std::string(uuid.bytes, 16);
+      });
   py::class_<cudaDeviceProp>(m, "_CudaDeviceProperties")
       .def_readonly("name", &cudaDeviceProp::name)
       .def_readonly("major", &cudaDeviceProp::major)
@@ -945,7 +950,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
 #endif // USE_ROCM
                << ", total_memory=" << prop.totalGlobalMem / (1024ull * 1024)
                << "MB, multi_processor_count=" << prop.multiProcessorCount
-               << ", uuid=" << prop.uuid.bytes << ")";
+               << ", uuid=" << std::string(prop.uuid.bytes, 16) << ")";
         return stream.str();
       });
 
