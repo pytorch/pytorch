@@ -225,7 +225,7 @@ class NNModuleVariable(VariableTracker):
             if istype(subobj, property):
                 # Get the source of the property object
                 base_source = source.base
-                new_source = AttrSource(AttrSource(base_source, '__class__'), name)
+                new_source = AttrSource(AttrSource(base_source, "__class__"), name)
                 return variables.UserFunctionVariable(
                     subobj.fget,
                     source=new_source,
@@ -234,18 +234,17 @@ class NNModuleVariable(VariableTracker):
                 return variables.UserMethodVariable(
                     subobj.__func__,
                     variables.UserDefinedObjectVariable(type(base)),
-                    source=AttrSource(source, '__func__'),
+                    source=source,
                 )
             elif istype(subobj, staticmethod):
                 return variables.UserFunctionVariable(
                     subobj.__get__(base), source=source
                 )
             elif istype(subobj, types.FunctionType):
-                # inspect.getattr_static gives the (unbound) function object.
-                # So, add the __func__ to generate the correct source.
-                new_source = AttrSource(source, "__func__")
                 return variables.UserMethodVariable(
-                    subobj, self, source=new_source,
+                    subobj,
+                    self,
+                    source=source,
                 )
             elif is_safe_constant(subobj) or istensor(subobj):
                 # Support possibly common cases of class members
@@ -331,9 +330,7 @@ class NNModuleVariable(VariableTracker):
                 # Guard on the id of forward method. Though its uncommon, there
                 # are cases where users monkeypatch the forward method after the
                 # model has already been torch.compile'd.
-                forward_method_source = AttrSource(
-                    AttrSource(self.source, "forward"), "__func__"
-                )
+                forward_method_source = AttrSource(self.source, "forward")
                 install_guard(
                     forward_method_source.make_guard(GuardBuilder.FUNCTION_MATCH)
                 )
