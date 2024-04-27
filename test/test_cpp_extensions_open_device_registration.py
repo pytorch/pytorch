@@ -1,4 +1,3 @@
-
 # Owner(s): ["module: cpp-extensions"]
 
 import os
@@ -273,14 +272,14 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         self.assertFalse(self.module.custom_add_called())
         self.assertTrue(z.is_foo)
 
-    def test_open_device_packed_sequence():
-    device = self.module.custom_device()
-    a = torch.rand(5, 3)
-    b = torch.tensor([1, 1, 1, 1, 1])
-    input = torch.nn.utils.rnn.PackedSequence(a, b)
-    self.assertFalse(input.is_foo)
-    input_foo = input.foo()
-    self.assertTrue(input_foo.is_foo)
+    def test_open_device_packed_sequence(self):
+        device = self.module.custom_device()
+        a = torch.rand(5, 3)
+        b = torch.tensor([1, 1, 1, 1, 1])
+        input = torch.nn.utils.rnn.PackedSequence(a, b)
+        self.assertFalse(input.is_foo)
+        input_foo = input.foo()
+        self.assertTrue(input_foo.is_foo)
 
     def test_open_device_storage(self):
         # check whether the attributes and methods for storage of the corresponding custom backend are generated correctly
