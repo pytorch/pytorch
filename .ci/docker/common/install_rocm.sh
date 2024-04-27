@@ -59,8 +59,11 @@ install_ubuntu() {
                    rocm-libs \
                    rccl \
                    rocprofiler-dev \
-                   roctracer-dev \
-                   rocm-llvm-dev
+                   roctracer-dev
+
+    if [[ $(ver $ROCM_VERSION) -ge $(ver 6.1) ]]; then
+        DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated rocm-llvm-dev
+    fi
 
     # precompiled miopen kernels added in ROCm 3.5, renamed in ROCm 5.5
     # search for all unversioned packages
