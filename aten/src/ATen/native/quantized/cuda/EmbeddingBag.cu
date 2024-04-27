@@ -545,7 +545,7 @@ Tensor qembeddingbag_4bit_unpack(const Tensor& packed_weight) {
   int BIT_RATE = 4;
   const auto input_rows = packed_weight.size(0);
   const auto input_columns = packed_weight.size(1);
-  const auto* input_data = packed_weight.data_ptr<uint8_t>();
+  const auto* input_data = packed_weight.const_data_ptr<uint8_t>();
   int NUM_ELEM_PER_BYTE = 8 / BIT_RATE;
 
   // The last 4 bytes per row are two fp16 scale and zero_point.
