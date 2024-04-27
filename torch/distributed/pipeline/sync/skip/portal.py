@@ -9,7 +9,7 @@ autograd engine. The shared context of three functions (:class:`PortalBlue`,
 :class:`PortalOrange`, and :class:`PortalCopy`) out of the computation graph is
 one of the most important feature of :mod:`torchpipe.skip`.
 
-The metaphor is inspired by Portal™ from Valve.
+The metaphor is inspired by Portal(tm) from Valve.
 
 """
 from typing import List, Optional, Tuple
