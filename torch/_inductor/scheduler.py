@@ -737,6 +737,13 @@ class SchedulerNode(BaseSchedulerNode):
         if isinstance(self._body, ir.LoopBody):
             lines.append(f"class {name}_loop_body:")
             lines.append(textwrap.indent(self._body.debug_str(), "    "))
+
+        if ir.is_triton(self.node.get_device()):
+            backend = self.scheduler.get_backend(self.node.get_device())
+            V.graph.scheduler.current_device = self.node.get_device()
+            triton_code = backend.generate_kernel_code_from_nodes((self,)).strip()
+            lines.append(f"{self.get_name()} Triton code:")
+            lines.append(textwrap.indent(triton_code, "    "))
         return "\n".join(lines)
 
     def get_ranges(self):
@@ -894,6 +901,14 @@ class FusedSchedulerNode(BaseSchedulerNode):
             f"{self.get_name()}.snodes[{i}] =\n{node.debug_str()}"
             for i, node in enumerate(self.snodes)
         ]
+        device = self.snodes[0].node.get_device()
+        if ir.is_triton(device):
+            backend = self.scheduler.get_backend(device)
+            V.graph.scheduler.current_device = device
+            triton_code = backend.generate_kernel_code_from_nodes(self.snodes).strip()
+            lines.append(f"{self.get_name()} Triton code:")
+            lines.append(textwrap.indent(triton_code, "    "))
+
         return textwrap.indent("\n".join(lines).rstrip(), "    ")
 
     def set_last_usage(
@@ -1265,6 +1280,7 @@ class Scheduler:
     @dynamo_timed
     def __init__(self, nodes):
         super().__init__()
+        V.graph.scheduler = self
         self.backends = {}
         self.fuse_cache = {}
         self.post_grad_graph_id = next(_post_grad_graph_counter)
@@ -1718,7 +1734,6 @@ class Scheduler:
         """
         assert len(nodes) > 0
         device = nodes[0].get_device()
-        V.graph.scheduler = self
         self.current_device = device
         backend = self.get_backend(device)
         return backend.benchmark_fused_nodes(nodes)
