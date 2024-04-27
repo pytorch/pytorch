@@ -15,19 +15,17 @@ from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
-    with_comms,
+    DTensorOpTestBase,
 )
 
 c10d_functional = torch.ops.c10d_functional
 
 
-class UtilTest(DTensorTestBase):
+class UtilTest(DTensorOpTestBase):
     @property
     def world_size(self):
         return 8
 
-    @with_comms
     def test_compute_local_shape_2d_uneven(self):
         # mesh: 4 * 2
         mesh_tensor = torch.arange(self.world_size).reshape(4, 2)
@@ -57,7 +55,7 @@ class UtilTest(DTensorTestBase):
         else:
             self.assertEqual(local_size3[1], 3)
 
-    @with_comms
+
     def test_compute_local_shape_and_global_offset_1D(self):
         one_d_placements = [[Shard(0)], [Replicate()]]
 
@@ -67,8 +65,7 @@ class UtilTest(DTensorTestBase):
             # 2) sharding resulting in shards of different size across different ranks
             # 3) sharding resulting in non-empty shards of same size across all ranks
             for size in range(self.world_size * 2 + 1):
-                mesh_tensor = torch.arange(self.world_size)
-                device_mesh = DeviceMesh(self.device_type, mesh_tensor)
+                device_mesh = self.build_device_mesh()
                 global_tensor = torch.arange(size)
                 global_shape = global_tensor.size()
 
@@ -88,7 +85,6 @@ class UtilTest(DTensorTestBase):
                     global_tensor[dim0_start:dim0_end],
                 )
 
-    @with_comms
     def test_compute_local_shape_and_global_offset_2D(self):
         two_d_placements_options = [Shard(0), Shard(1), Replicate()]
         # Generating 6 two-d placements combinations
@@ -123,12 +119,11 @@ class UtilTest(DTensorTestBase):
                 )
 
 
-class Test2DStridedLocalShard(DTensorTestBase):
+class Test2DStridedLocalShard(DTensorOpTestBase):
     @property
     def world_size(self):
         return 4
 
-    @with_comms
     def test_fsdp1_tp_2d_dtensor_local_shards_and_offsets(self):
         # We are mimicking the behavior of FSDP1 + TP.
         # Currently, the 2D DTensor's local shard is correct, since from_local + redistribute incurs a all_gather behind the scene.
@@ -162,7 +157,6 @@ class Test2DStridedLocalShard(DTensorTestBase):
         self.assertEqual(local_size, torch.Size([1, 2]))
         self.assertEqual(global_offset, torch.Size([self.rank, 0]))
 
-    @with_comms
     def test_fsdp2_tp_2d_dtensor_local_shards_and_offsets(self):
         # We are mimicking the behavior of FSDP2 + TP.
         # Currently, the 2D DTensor's local shard is incorrect for resharding, since we want to avoid extra communication.

@@ -17,14 +17,13 @@ from torch.distributed.distributed_c10d import broadcast_object_list
 
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    DTensorOpTestBase,
     skip_if_lt_x_gpu,
     skip_unless_torch_gpu,
-    with_comms,
 )
 
 
-class DistTensorRandomInitTest(DTensorTestBase):
+class DistTensorRandomInitTest(DTensorOpTestBase):
     def _run_init_op(self, init_op, *args, **kwargs):
         device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
@@ -62,7 +61,6 @@ class DistTensorRandomInitTest(DTensorTestBase):
                     # other rank should have a different local tensor
                     self.assertNotEqual(dtensor.full_tensor()[slice_idx], local_tensor)
 
-    @with_comms
     def test_init_ops(self):
         self._run_init_op(
             torch.nn.init.kaiming_uniform_,
@@ -79,8 +77,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
             self._run_init_op(torch.randint_like, low=0, high=100, dtype=dtype)
 
 
-class DistTensorRandomOpTest(DTensorTestBase):
-    @with_comms
+class DistTensorRandomOpTest(DTensorOpTestBase):
     @skip_unless_torch_gpu
     def test_rng_tracker_init(self):
         torch.cuda.manual_seed(self.rank)
@@ -88,23 +85,21 @@ class DistTensorRandomOpTest(DTensorTestBase):
         broadcast_object_list(object_list)
         seed_from_rank_0 = int(object_list[0])
 
-        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        device_mesh = self.build_device_mesh()
         # seed synchronization happens after the first `distribute_tensor` call
         dtensor = distribute_tensor(
             torch.empty([self.world_size], device="cuda"), device_mesh, [Shard(0)]
         )
         self.assertEqual(seed_from_rank_0, random._rng_tracker.get_seed("parallel-rng"))
 
-    @with_comms
     @skip_unless_torch_gpu
     def test_manual_seed(self):
-        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        device_mesh = self.build_device_mesh()
         manual_seed(1234, device_mesh)
         self.assertEqual(1234, random._rng_tracker.get_seed("parallel-rng"))
         with self.assertRaisesRegex(RuntimeError, "different seed values"):
             manual_seed(self.rank, device_mesh)
 
-    @with_comms
     @skip_unless_torch_gpu
     def test_deterministic_dropout_1d(self):
         # test suite sets each rank's seed to the same value but in actual
@@ -113,7 +108,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
         # torch random generator keeps different seeds on ranks.
         torch.cuda.manual_seed(self.rank)
         # TODO: add test before/after enabling distribute region
-        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        device_mesh = self.build_device_mesh()
         size = [4, 4]
 
         dtensor = distribute_tensor(
@@ -145,10 +140,9 @@ class DistTensorRandomOpTest(DTensorTestBase):
                     local_tensor[other_slice, :],
                 )
 
-    @with_comms
     @skip_unless_torch_gpu
     def test_deterministic_rand_1d(self):
-        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        device_mesh = self.build_device_mesh()
         size = [4, 4 * self.world_size]
 
         for fn in [
@@ -188,7 +182,6 @@ class DistTensorRandomOpTest(DTensorTestBase):
                         local_tensor[other_slice, :],
                     )
 
-    @with_comms
     @skip_if_lt_x_gpu(4)
     def test_deterministic_uniform_2d(self):
         mesh = torch.arange(self.world_size).reshape(2, 2)
@@ -290,7 +283,6 @@ class DistTensorRandomOpTest(DTensorTestBase):
                 else:
                     self.assertNotEqual(full_tensor[slice_idx], local_tensor)
 
-    @with_comms
     @skip_if_lt_x_gpu(4)
     def test_meta_tensor_init(self):
         # test suite sets each rank's seed to the same value but in actual
@@ -300,7 +292,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
         # that Replicate DTensor will have the same initialized results
         # across ranks.
         torch.cuda.manual_seed(self.rank)
-        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        device_mesh = self.build_device_mesh()
         size = [1024, 2048]
         meta_dtensor = distribute_tensor(
             torch.empty(*size, device="meta"), device_mesh, [Replicate()]

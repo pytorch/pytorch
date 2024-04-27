@@ -40,9 +40,8 @@ from torch.testing._internal.common_utils import (
     run_tests,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    DTensorOpTestBase,
     MLPModule,
-    with_comms,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.utils._triton import has_triton
@@ -141,13 +140,13 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
 
         compiled_fn = torch.compile(backend="aot_eager", fullgraph=True)(fn)
 
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        mesh = self.build_device_mesh()
         opt_fn = fn(mesh)
         compiled_out = compiled_fn(mesh)
         self.assertEqual(opt_fn, compiled_out)
 
     def test_fakify_dtensor(self):
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        mesh = self.build_device_mesh()
 
         # pass in DTensor as inputs/outputs to the function
         def fn(x):
@@ -161,7 +160,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         self.assertEqual(res, ref)
 
     def test_dynamo_dtensor(self):
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        mesh = self.build_device_mesh()
 
         # test passing in DTensor as inputs/outputs and run some tensor computation
         def fn(x):
@@ -175,7 +174,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         self.assertEqual(res, ref)
 
     def test_dtensor_attribute_access_on_intermediate(self):
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        mesh = self.build_device_mesh()
 
         def fn(x):
             tmp = x * 2
@@ -192,7 +191,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         self.assertEqual(res, ref)
 
     def test_dtensor_noncontiguous_output(self):
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        mesh = self.build_device_mesh()
 
         # test passing in DTensor as inputs/outputs and run some tensor computation
         def fn(x, y, z):
@@ -210,7 +209,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         out.contiguous().sum().backward()
 
     def test_dynamo_dtensor_from_local(self):
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        mesh = self.build_device_mesh()
 
         # create DTensor inside fn and run some compute
         def fn(x):
@@ -253,7 +252,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 2)
 
     def test_dynamo_to_local_kwargs(self):
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        mesh = self.build_device_mesh()
 
         def fn(x):
             return dt.to_local(grad_placements=[Shard(0)]) + 2
@@ -267,7 +266,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         self.assertEqual(out_ref, out_test)
 
     def test_dynamo_to_local_kwargs_forward_hook(self):
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        mesh = self.build_device_mesh()
 
         def fw_hook(module, inp, out):
             tmp = out.to_local(grad_placements=out.placements) + 2
@@ -295,7 +294,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_dtensor_different_gradient_placement(self):
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        mesh = self.build_device_mesh()
 
         def fn(x, y, z):
             permute = x.permute(0, 2, 1)
@@ -319,7 +318,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         out_dt.sum().backward()
 
     def test_dynamo_dtensor_from_local_redistribute(self):
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        mesh = self.build_device_mesh()
 
         # pass in tensor as inputs/outputs, create DTensor and run redistribute
         # (allgather collective) inside the fn
@@ -350,7 +349,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         self.assertEqual(res, ref)
 
     def test_dtensor_dynamo_device_mesh_attrs(self):
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        mesh = self.build_device_mesh()
 
         # pass in tensor as inputs/outputs, create DTensor and run redistribute
         # (allgather collective) inside the fn
@@ -370,7 +369,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_dtensor_partial_placement_graph_output(self):
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        mesh = self.build_device_mesh()
 
         def fn(x):
             return x + x
@@ -463,15 +462,14 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
 
 
 @instantiate_parametrized_tests
-class TestDTensorCompileE2E(DTensorTestBase):
+class TestDTensorCompileE2E(DTensorOpTestBase):
     @property
     def world_size(self):
         return 4
 
-    @with_comms
     @parametrize("is_seq_parallel", [True, False])
     def test_tp_compile_fullgraph(self, is_seq_parallel):
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        mesh = self.build_device_mesh()
 
         model = SimpleModel(self.device_type)
 
@@ -528,7 +526,6 @@ class TestDTensorCompileE2E(DTensorTestBase):
         self.assertEqual(compiled_out, out)
         self.assertEqual(cnt.frame_count, 1)
 
-    @with_comms
     @skip_if_lt_x_gpu(4)
     def test_2d_fsdp_tp_compile(self):
         data_parallel_size = 2
@@ -579,7 +576,6 @@ class TestDTensorCompileE2E(DTensorTestBase):
         self.assertEqual(out, compiled_output)
         self.assertEqual(cnt.frame_count, 1)
 
-    @with_comms
     @skip_if_lt_x_gpu(4)
     def test_2d_fsdp_tp_ac_compile(self):
         dp_degree = 2
@@ -630,7 +626,6 @@ class TestDTensorCompileE2E(DTensorTestBase):
         for n, p in zip(fsdp_2d.parameters(), compiled_2d.parameters()):
             self.assertEqual(n.grad, p.grad)
 
-    @with_comms
     @skip_if_lt_x_gpu(4)
     def test_compile_dtensor_redistribute_backward(self):
         mesh = DeviceMesh(device_type="cuda", mesh=torch.arange(self.world_size))

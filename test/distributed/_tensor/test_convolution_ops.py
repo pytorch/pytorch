@@ -14,8 +14,7 @@ from torch.distributed._tensor import (
 )
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
-    with_comms,
+    DTensorOpTestBase,
 )
 
 ITER_TIME = 10
@@ -36,15 +35,14 @@ def _conv_fn(
         module.register_parameter(name, dist_param)
 
 
-class DistConvolutionOpsTest(DTensorTestBase):
+class DistConvolutionOpsTest(DTensorOpTestBase):
     @property
     def world_size(self) -> int:
         # hard code world size to 2
         return 2
 
-    @with_comms
     def test_downsampling_convolution(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Shard(3)]
 
         input_list = torch.rand(ITER_TIME, 7, 3, 512, 1024)
@@ -109,9 +107,8 @@ class DistConvolutionOpsTest(DTensorTestBase):
             f"Too large relative mse for bias tensor, expected less equal 1e-6, got {bias_mse_rel}",
         )
 
-    @with_comms
     def test_depthwise_convolution(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Shard(3)]
 
         input_list = torch.rand(ITER_TIME, 7, 256, 128, 256)

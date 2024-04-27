@@ -13,8 +13,7 @@ from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed._tensor.experimental import local_map
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
-    with_comms,
+    DTensorOpTestBase,
 )
 
 
@@ -38,13 +37,12 @@ def mul_forward(device_mesh, X, scalar):
     return torch.mul(X, scalar)
 
 
-class TestLocalMap(DTensorTestBase):
+class TestLocalMap(DTensorOpTestBase):
     @property
     def world_size(self):
         return 2
 
     # simple correctness check
-    @with_comms
     def test_local_map_correctness(self):
         device_mesh = init_device_mesh(
             device_type=self.device_type, mesh_shape=(self.world_size,)
@@ -86,7 +84,6 @@ class TestLocalMap(DTensorTestBase):
         self.assertEqual(Y_dt.to_local(), Y)
 
     # check for `out_placements`
-    @with_comms
     def test_local_map_out_placements(self):
         device_mesh = init_device_mesh(
             device_type=self.device_type, mesh_shape=(self.world_size,)
@@ -108,7 +105,6 @@ class TestLocalMap(DTensorTestBase):
         self.assertTrue(not (X.equal(Y)))
 
     # check for `in_placements` handling
-    @with_comms
     def test_local_map_in_placements(self):
         device_mesh = init_device_mesh(
             device_type=self.device_type, mesh_shape=(self.world_size,)
@@ -174,7 +170,6 @@ class TestLocalMap(DTensorTestBase):
         self.assertEqual(Y_dt.full_tensor(), Y)
 
     # check for `redistribute_inputs` handling
-    @with_comms
     def test_local_map_redistribute(self):
         device_mesh = init_device_mesh(
             device_type=self.device_type, mesh_shape=(self.world_size,)

@@ -7,7 +7,6 @@ import torch
 import torch.nn as nn
 
 from torch.distributed._tensor import (
-    DeviceMesh,
     distribute_module,
     distribute_tensor,
     DTensor,
@@ -17,9 +16,8 @@ from torch.distributed._tensor import (
 from torch.testing._internal.common_utils import run_tests
 
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    DTensorOpTestBase,
     MLPModule,
-    with_comms,
 )
 
 
@@ -50,7 +48,7 @@ def output_fn(mod, outputs, device_mesh):
     return outputs.redistribute(placements=[Replicate()] * device_mesh.ndim).to_local()
 
 
-class TestDTensorOptimizer(DTensorTestBase):
+class TestDTensorOptimizer(DTensorOpTestBase):
     def _assert_optimizer(
         self,
         mesh,
@@ -84,9 +82,8 @@ class TestDTensorOptimizer(DTensorTestBase):
                 # Default 'rtol' and 'atol' for attr:`~torch.float32` are ``1.3e-6`` and ``1e-5``
                 self.assertEqual(p1, p2, atol=atol, rtol=rtol)
 
-    @with_comms
     def test_adam_1d_sharding(self):
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        mesh = self.build_device_mesh()
 
         # TODO: add fused_adam support
         adam_configs = [
@@ -118,9 +115,8 @@ class TestDTensorOptimizer(DTensorTestBase):
             inp = torch.ones(8, 10, device=self.device_type)
             self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
 
-    @with_comms
     def test_adamw_1d_sharding(self):
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        mesh = self.build_device_mesh()
 
         # TODO: add fused_adamw support
         adamw_configs = [
@@ -160,9 +156,8 @@ class TestDTensorOptimizer(DTensorTestBase):
             inp = torch.ones(8, 10, device=self.device_type)
             self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
 
-    @with_comms
     def test_sgd_1d_sharding(self):
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        mesh = self.build_device_mesh()
 
         sgd_configs = [
             {"lr": 0.1},
@@ -200,9 +195,8 @@ class TestDTensorOptimizer(DTensorTestBase):
             inp = torch.ones(8, 10, device=self.device_type)
             self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
 
-    @with_comms
     def test_adagrad_1d_sharding(self):
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        mesh = self.build_device_mesh()
 
         adagrad_configs = [
             {"lr": 0.1},
@@ -254,9 +248,8 @@ class TestDTensorOptimizer(DTensorTestBase):
             inp = torch.ones(8, 10, device=self.device_type)
             self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
 
-    @with_comms
     def test_RMSprop_1d_sharding(self):
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        mesh = self.build_device_mesh()
 
         RMSprop_configs = [
             {"lr": 0.1},
@@ -313,9 +306,8 @@ class TestDTensorOptimizer(DTensorTestBase):
             inp = torch.ones(8, 10, device=self.device_type)
             self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
 
-    @with_comms
     def test_adadelta_1d_sharding(self):
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        mesh = self.build_device_mesh()
 
         adadelta_configs = [
             {"lr": 0.1},
@@ -353,9 +345,8 @@ class TestDTensorOptimizer(DTensorTestBase):
             inp = torch.ones(8, 10, device=self.device_type)
             self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
 
-    @with_comms
     def test_nadam_1d_sharding(self):
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        mesh = self.build_device_mesh()
 
         nadam_configs = [
             {"lr": 0.1},
@@ -392,9 +383,8 @@ class TestDTensorOptimizer(DTensorTestBase):
             inp = torch.ones(8, 10, device=self.device_type)
             self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
 
-    @with_comms
     def test_radam_1d_sharding(self):
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        mesh = self.build_device_mesh()
 
         radam_configs = [
             {"lr": 0.1},
@@ -431,9 +421,8 @@ class TestDTensorOptimizer(DTensorTestBase):
             inp = torch.ones(8, 10, device=self.device_type)
             self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
 
-    @with_comms
     def test_adamax_1d_sharding(self):
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        mesh = self.build_device_mesh()
 
         adamax_configs = [
             {"lr": 0.1},
@@ -471,9 +460,8 @@ class TestDTensorOptimizer(DTensorTestBase):
             inp = torch.ones(8, 10, device=self.device_type)
             self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
 
-    @with_comms
     def test_asgd_1d_sharding(self):
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        mesh = self.build_device_mesh()
 
         asgd_configs = [
             {"lr": 0.1},

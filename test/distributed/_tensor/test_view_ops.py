@@ -22,13 +22,12 @@ from torch.distributed._tensor.ops.view_ops import (
 from torch.distributed._tensor.placement_types import Placement
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
-    with_comms,
+    DTensorOpTestBase,
 )
 from torch.utils import _pytree as pytree
 
 
-class TestViewOps(DTensorTestBase):
+class TestViewOps(DTensorOpTestBase):
     def test_view_groups(self):
         self.assertEqual(
             view_groups([2, 3], [3, 2]),
@@ -184,7 +183,6 @@ class TestViewOps(DTensorTestBase):
         self.assertEqual(rules, expected_rule_output)
         self.call_dt_test(op, args, {}, self.device_mesh)
 
-    @with_comms
     def test_view_ops(self):
         self.device_mesh = DeviceMesh(
             self.device_type, torch.arange(dist.get_world_size()).view(-1, 2)
@@ -481,7 +479,6 @@ class TestViewOps(DTensorTestBase):
     #         Split(InputDim(1), (13, 2), 1),
     #     ),
     # )
-    @with_comms
     def test_complex_view_ops(self):
         self.device_mesh = DeviceMesh(
             self.device_type, torch.arange(dist.get_world_size()).view(-1, 2)

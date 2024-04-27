@@ -11,22 +11,20 @@ from torch.distributed._tensor.placement_types import _Partial, Replicate, Shard
 from torch.testing._internal.common_utils import run_tests
 
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
-    with_comms,
+    DTensorOpTestBase,
 )
 
 funcol = torch.ops.c10d_functional
 
 
-class RedistributeTest(DTensorTestBase):
+class RedistributeTest(DTensorOpTestBase):
     @property
     def world_size(self):
         return 4
 
-    @with_comms
     def test_shard_to_replicate_forward_backward(self):
         # 1) test shard -> replicate forward
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         replica_spec = [Replicate()]
 
         input_sizes_and_shard_dim = [
@@ -65,9 +63,8 @@ class RedistributeTest(DTensorTestBase):
             )
             self.assertEqual(comm_mode.get_total_counts(), 0)
 
-    @with_comms
     def test_replicate_to_replicate_forward_backward(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         replica_spec = [Replicate()]
         local_tensor = torch.randn(12, 3, device=self.device_type, requires_grad=True)
 
@@ -93,9 +90,8 @@ class RedistributeTest(DTensorTestBase):
         self.assertEqual(grad_input.to_local(), torch.ones(12, 3))
         self.assertEqual(comm_mode.get_total_counts(), 0)
 
-    @with_comms
     def test_replicate_to_local_partial_grad(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         replica_spec = [Replicate()]
         local_tensor = torch.randn(12, 3, device=self.device_type, requires_grad=True)
 
@@ -112,9 +108,8 @@ class RedistributeTest(DTensorTestBase):
         self.assertEqual(comm_mode.get_total_counts(), 1)
         self.assertEqual(comm_mode.get_comm_counts()[funcol.all_reduce], 1)
 
-    @with_comms
     def test_replicate_to_shard_forward_backward(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         replica_spec = [Replicate()]
 
         input_sizes_and_shard_dim = [
@@ -160,13 +155,12 @@ class RedistributeTest(DTensorTestBase):
                 comm_mode.get_comm_counts()[funcol.all_gather_into_tensor], 1
             )
 
-    @with_comms
     def test_partial_to_replicate_forward_backward(self):
         # Although we don't allow user to reshard to produce a partial
         # placement (i.e. user can't reshard to partial), we do allow
         # replicate to partial internally, and also partial to replicate
         # backward should work as expected
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         partial_local = torch.ones(12, 3, device=self.device_type, requires_grad=True)
         partial_spec = [_Partial()]
         replica_spec = [Replicate()]
@@ -195,9 +189,8 @@ class RedistributeTest(DTensorTestBase):
         self.assertEqual(partial_local.grad, torch.ones_like(partial_local))
         self.assertEqual(comm_mode.get_total_counts(), 0)
 
-    @with_comms
     def test_replicate_to_partial(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         local_tensor = torch.randn(12, 3, device=self.device_type, requires_grad=True)
         partial_spec = _Partial()
         replica_spec = Replicate()
@@ -243,9 +236,8 @@ class RedistributeTest(DTensorTestBase):
         )
         self.assertEqual(comm_mode.get_total_counts(), 0)
 
-    @with_comms
     def test_partial_to_shard(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         partial_spec = [_Partial()]
         my_rank = device_mesh.get_rank()
 
@@ -298,9 +290,8 @@ class RedistributeTest(DTensorTestBase):
                 comm_mode.get_comm_counts()[funcol.reduce_scatter_tensor], 1
             )
 
-    @with_comms
     def test_redistribute_negative_shard_dim(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         local_tensor = torch.randn(12, 3, device=self.device_type, requires_grad=True)
         shard_spec = [Shard(1)]
         shard_minus_spec = [Shard(-1)]
@@ -310,7 +301,6 @@ class RedistributeTest(DTensorTestBase):
         reshard_tensor = shard_tensor.redistribute(device_mesh, shard_minus_spec)
         self.assertEqual(shard_tensor.placements[0].dim, 1)
 
-    @with_comms
     def test_redistribute_uneven_sharding(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).reshape(2, 2))
         data_to_test = [
@@ -335,12 +325,11 @@ class RedistributeTest(DTensorTestBase):
                 self.assertEqual(dt_full_tensor, input_tensor)
 
 
-class MultiDimRedistributeTest(DTensorTestBase):
+class MultiDimRedistributeTest(DTensorOpTestBase):
     @property
     def world_size(self) -> int:
         return 8
 
-    @with_comms
     def test_multi_dim_mesh(self):
         devices = torch.arange(self.world_size)
         for mesh_shape in [devices, devices.view(4, 2), devices.view(2, 2, 2)]:

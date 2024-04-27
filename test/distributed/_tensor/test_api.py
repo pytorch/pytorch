@@ -13,8 +13,7 @@ from torch.distributed._tensor import (
 )
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
-    with_comms,
+    DTensorOpTestBase,
 )
 
 
@@ -33,16 +32,15 @@ class MyModel(nn.Module):
             m.reset_parameters()
 
 
-class DTensorAPITest(DTensorTestBase):
+class DTensorAPITest(DTensorOpTestBase):
     @property
     def world_size(self) -> int:
         # hard code world size to 4 as we need to test
         # at least with 2d mesh
         return 4
 
-    @with_comms
     def test_distribute_tensor(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
 
         for requires_grad in [True, False]:
@@ -63,7 +61,6 @@ class DTensorAPITest(DTensorTestBase):
         dist_tensor = distribute_tensor(tensor_to_shard, device_mesh, shard_minus_spec)
         self.assertEqual(dist_tensor.placements[0].dim, 1)
 
-    @with_comms
     def test_distribute_tensor_errors(self):
         device_mesh = DeviceMesh(
             self.device_type, torch.arange(self.world_size).reshape(2, 2)
@@ -92,9 +89,8 @@ class DTensorAPITest(DTensorTestBase):
             new_spec = [Shard(0), Replicate()]
             distribute_tensor(dtensor, device_mesh, new_spec)
 
-    @with_comms
     def test_distribute_tensor_uneven_sharding(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         input_sizes_and_shard_dims = [
             ((self.world_size * 3 + 1, 3, 3), 0),
             ((self.world_size * 3 + 2, 3, 3), 0),
@@ -114,9 +110,8 @@ class DTensorAPITest(DTensorTestBase):
             local_tensor = dist_tensor.to_local()
             self.assertEqual(local_tensor, splitted_tensor_list[self.rank])
 
-    @with_comms
     def test_distribute_module(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         # fully shard all linear modules on dim 0
         module_to_shard = MyModel(5 * self.world_size, 20, device=self.device_type)
         shard_spec = [Shard(0)]
@@ -177,9 +172,8 @@ class DTensorAPITest(DTensorTestBase):
             else:
                 self.assertEqual(param.placements, replica_spec)
 
-    @with_comms
     def test_distribute_module_input_fn_output_fn(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
 
         # fully replicate all linear modules
         module_to_replicate = MyModel(20, 1, device=self.device_type)
@@ -222,9 +216,8 @@ class DTensorAPITest(DTensorTestBase):
         self.assertTrue(isinstance(param_grad, DTensor))
         self.assertTrue(isinstance(param_grad.placements[0], Replicate))
 
-    @with_comms
     def test_distribute_module_input_fn_output_fn_warning(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
 
         # fully replicate all linear modules
         module_to_replicate = MyModel(20, 1, device=self.device_type)
@@ -250,9 +243,8 @@ class DTensorAPITest(DTensorTestBase):
         self.assertIsInstance(local_out, torch.Tensor)
         self.assertNotIsInstance(local_out, DTensor)
 
-    @with_comms
     def test_distribute_module_casting(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
 
         # check DTensor casting
         dt = DTensor.from_local(torch.rand(10), device_mesh, [Replicate()])
@@ -288,11 +280,10 @@ class DTensorAPITest(DTensorTestBase):
             output = replica_model(dt)
         self.assertEqual(output.dtype, torch.bfloat16)
 
-    @with_comms
     def test_distribute_module_meta(self):
         # If  the model is too big, the user may first the create entire model on the meta device and then initialize
         # it on the device in the partition function.
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
 
         # fully shard all parameters on dim 0
         module_to_shard = MyModel(5 * self.world_size, 20, device="meta")

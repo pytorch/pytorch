@@ -4,7 +4,7 @@ import unittest
 
 import torch
 from torch import nn
-from torch.distributed._tensor import DeviceMesh, distribute_tensor, Shard
+from torch.distributed._tensor import distribute_tensor, Shard
 from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed._tensor.experimental.attention import (
     _CausalBehavior,
@@ -25,17 +25,16 @@ from torch.testing._internal.common_utils import (
     run_tests,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    DTensorOpTestBase,
     ModelArgs,
     Transformer,
-    with_comms,
 )
 
 
 c10d_functional = torch.ops.c10d_functional
 
 
-class RingAttentionTest(DTensorTestBase):
+class RingAttentionTest(DTensorOpTestBase):
     @property
     def world_size(self) -> int:
         return 2
@@ -44,13 +43,9 @@ class RingAttentionTest(DTensorTestBase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
     )
-    @with_comms
     @parametrize("is_causal", [True, False])
     def test_ring_attention_sdpa(self, is_causal: bool) -> None:
-        device_mesh = DeviceMesh(
-            self.device_type,
-            torch.arange(0, self.world_size),
-        )
+        device_mesh = self.build_device_mesh()
         dtype = torch.bfloat16
         bs = 8
         query_tokens = 8
@@ -168,14 +163,10 @@ class RingAttentionTest(DTensorTestBase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
     )
-    @with_comms
     @sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION])
     @parametrize("is_causal", [True, False])
     def test_ring_attention_native_transformer(self, is_causal: bool) -> None:
-        device_mesh = DeviceMesh(
-            self.device_type,
-            torch.arange(0, self.world_size),
-        )
+        device_mesh = self.build_device_mesh()
         dtype = torch.bfloat16
         bs = 8
         ntokens = 8
@@ -250,13 +241,9 @@ class RingAttentionTest(DTensorTestBase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
     )
-    @with_comms
     @sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION])
     def test_ring_attention_custom_transformer(self) -> None:
-        device_mesh = DeviceMesh(
-            self.device_type,
-            torch.arange(0, self.world_size),
-        )
+        device_mesh = self.build_device_mesh()
         dtype = torch.bfloat16
         bs = 2
         args = ModelArgs()
@@ -301,7 +288,6 @@ class RingAttentionTest(DTensorTestBase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
     )
-    @with_comms
     @parametrize(
         "attention_fn",
         [
@@ -311,10 +297,7 @@ class RingAttentionTest(DTensorTestBase):
         ],
     )
     def test_ring_attention_compile(self, attention_fn: object) -> None:
-        device_mesh = DeviceMesh(
-            self.device_type,
-            torch.arange(0, self.world_size),
-        )
+        device_mesh = self.build_device_mesh()
         dtype = torch.bfloat16
         bs = 8
         query_tokens = 8

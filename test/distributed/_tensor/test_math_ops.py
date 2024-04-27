@@ -12,16 +12,15 @@ from torch.distributed._tensor.ops.utils import is_tensor_partial, normalize_dim
 from torch.distributed._tensor.placement_types import Replicate, Shard
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    DTensorOpTestBase,
     skip_unless_torch_gpu,
-    with_comms,
 )
 
 
 funcol = torch.ops.c10d_functional
 
 
-class DistMathOpsTest(DTensorTestBase):
+class DistMathOpsTest(DTensorOpTestBase):
     def linear_op_reductions(self, op_str):
         device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
@@ -50,18 +49,15 @@ class DistMathOpsTest(DTensorTestBase):
         dt_full_reduced = op_dt().full_tensor()
         self.assertEqual(dt_full_reduced, full_reduced_tensor)
 
-    @with_comms
     def test_linear_op_reductions(self):
         for op_str in ("all", "sum", "prod", "max", "min"):
             self.linear_op_reductions(op_str)
 
-    @with_comms
     @skip_unless_torch_gpu
     def test_mean(self):
         self.linear_op_reductions("mean")
 
     # TODO: forward test can be removed once test_softmax_with_bwd passes on CPU
-    @with_comms
     def test_softmax_fwd(self):
         device_mesh = self.build_device_mesh()
 
@@ -90,7 +86,6 @@ class DistMathOpsTest(DTensorTestBase):
     # TODO: get test_softmax_with_bwd pass on CPU
     # DTensor's _softmax_backward_data produces wrong result on CPU on certain dimension.
     # fail_on_cpu_list = [(0, -1), (1, -1)]
-    @with_comms
     @skip_unless_torch_gpu
     def test_softmax_with_bwd(self):
         device_mesh = self.build_device_mesh()
@@ -133,7 +128,6 @@ class DistMathOpsTest(DTensorTestBase):
                 self.assertTrue(dist_x.grad.placements[0].is_shard(dim=shard_dim))
             self.assertEqual(dist_x.grad.full_tensor(), x.grad)
 
-    @with_comms
     @skip_unless_torch_gpu
     def test_nll_loss_and_cross_entropy(self):
         device_mesh = self.build_device_mesh()
@@ -203,7 +197,6 @@ class DistMathOpsTest(DTensorTestBase):
                         self.assertEqual(dist_x.grad.full_tensor(), x.grad)
                     x.grad.zero_()
 
-    @with_comms
     def test_shard_math_ops(self):
         mesh_shape = (2, self.world_size // 2)
         mesh = DeviceMesh(
@@ -227,7 +220,6 @@ class DistMathOpsTest(DTensorTestBase):
             fully_shard_full_tensor = op(fully_shard_tensor, 2).full_tensor()
             self.assertEqual(fully_shard_full_tensor, expect_rs)
 
-    @with_comms
     def test_layer_norm_fwd(self):
         device_mesh = self.build_device_mesh()
 
@@ -286,7 +278,6 @@ class DistMathOpsTest(DTensorTestBase):
             self.assertEqual(y_local.shape, dtensor_meta.shape)
             self.assertEqual(y_local, y_dist.full_tensor())
 
-    @with_comms
     def test_layer_norm_bwd(self):
         device_mesh = self.build_device_mesh()
 
