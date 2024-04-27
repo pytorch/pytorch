@@ -1,11 +1,7 @@
 # flake8: noqa: B950
 from ._internal import register_artifact, register_log
 
-DYNAMIC = [
-    "torch.fx.experimental.symbolic_shapes",
-    "torch.fx.experimental.sym_node",
-    "torch.fx.experimental.recording",
-]
+DYNAMIC = ["torch.fx.experimental.symbolic_shapes", "torch.fx.experimental.sym_node"]
 DISTRIBUTED = [
     "torch.distributed",
     "torch._dynamo.backends.distributed",
@@ -79,6 +75,11 @@ register_artifact(
     "compiled_autograd",
     "Prints various logs in compiled_autograd, including but not limited to the graphs. Useful for debugging compiled_autograd.",
     visible=True,
+)
+register_artifact(
+    "compiled_autograd_verbose",
+    "Will affect performance. Prints compiled_autograd logs with C++ info e.g. autograd node -> fx node mapping",
+    off_by_default=True,
 )
 register_artifact(
     "ddp_graphs",

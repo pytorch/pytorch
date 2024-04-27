@@ -466,7 +466,7 @@ class CustomOpDef:
                 )
             return self._abstract_fn(*args, **kwargs)
 
-        lib._register_fake(self._name, fake_impl)
+        lib._register_fake(self._name, fake_impl, _stacklevel=4)
 
         autograd_impl = _library.autograd.make_autograd_impl(self._opoverload, self)
         lib.impl(self._name, autograd_impl, "Autograd", with_keyset=True)

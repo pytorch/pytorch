@@ -4,7 +4,7 @@ import functools
 from collections import namedtuple
 from typing import Callable
 
-from unittest import skip, skipUnless
+from unittest import expectedFailure, skip, skipUnless
 from unittest.mock import patch
 
 import torch
@@ -13,15 +13,7 @@ from torch._higher_order_ops.templated_attention import (
 )
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
-from torch.nn.attention._templated_attention import (
-    _causal,
-    _compose,
-    _generate_alibi_bias,
-    _identity,
-    _rel_bias,
-    _rel_causal,
-    _templated_attention,
-)
+from torch.nn.attention._templated_attention import _compose, _templated_attention
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16
@@ -56,13 +48,9 @@ test_dtypes_fast = [torch.float16]
 if common_utils.TEST_WITH_ROCM:
     test_dtypes = [torch.float32]
 
-test_score_mods = [
-    _identity,
-    _causal,
-    _rel_bias,
-    _rel_causal,
-    _generate_alibi_bias(8),
-]
+
+def _identity_mod(score, b, h, m, n):
+    return score
 
 
 def _causal_mod(score, b, h, token_q, token_kv):
@@ -102,8 +90,58 @@ class TestTemplatedSDPA(InductorTestCase):
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
-    @common_utils.parametrize("score_mod", test_score_mods)
-    def test_builtin_score_mods(self, dtype: torch.dtype, score_mod: Callable):
+    def test_identity(self, dtype: torch.dtype):
+        def score_mod(score, b, h, m, n):
+            return score
+
+        self.run_test(score_mod, dtype)
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes)
+    def test_causal_mask(self, dtype: torch.dtype):
+        def score_mod(score, b, h, token_q, token_kv):
+            return torch.where(token_q >= token_kv, score, float("-inf"))
+
+        self.run_test(score_mod, dtype)
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes)
+    def test_rel_bias(self, dtype: torch.dtype):
+        def score_mod(score, b, h, m, n):
+            return score + (m - n)
+
+        self.run_test(score_mod, dtype)
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes)
+    def test_alibi_bias(self, dtype: torch.dtype):
+        def score_mod(score, b, h, m, n):
+            return score + (m - n) * h
+
+        self.run_test(score_mod, dtype)
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes)
+    def test_rel_causal(self, dtype: torch.dtype):
+        def score_mod(score, b, h, m, n):
+            return torch.where(m <= n, score + (m - n), float("-inf"))
+
+        self.run_test(score_mod, dtype)
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes)
+    def test_skip_odd_keys(self, dtype: torch.dtype):
+        def score_mod(score, b, h, q, kv):
+            return torch.where(kv % 2 == 0, score, float("-inf"))
+
+        self.run_test(score_mod, dtype)
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes)
+    def test_alibi_causal(self, dtype: torch.dtype):
+        def score_mod(score, b, h, m, n):
+            return torch.where(m <= n, score + (m - n) * h, float("-inf"))
+
         self.run_test(score_mod, dtype)
 
     @supported_platform
@@ -125,7 +163,7 @@ class TestTemplatedSDPA(InductorTestCase):
         head_offset = torch.rand(H, device="cuda", dtype=dtype)
 
         def score_mod(score, b, h, m, n):
-            return score + index(head_offset, [h])
+            return score + head_offset[h]
 
         self.run_test(score_mod, dtype)
 
@@ -136,9 +174,7 @@ class TestTemplatedSDPA(InductorTestCase):
         seq_idx[S // 2 :] = 1
 
         def seq_mask_mod(score, b, h, q, kv):
-            return torch.where(
-                index(seq_idx, [q]) == index(seq_idx, [kv]), score, float("-inf")
-            )
+            return torch.where(seq_idx[q] == seq_idx[kv], score, float("-inf"))
 
         self.run_test(seq_mask_mod, dtype)
 
@@ -148,7 +184,7 @@ class TestTemplatedSDPA(InductorTestCase):
         bias = torch.randn(S, S, device="cuda", dtype=dtype)
 
         def bias_mod(score, b, h, q, kv):
-            return score + index(bias, [q, kv])
+            return score + bias[q, kv]
 
         self.run_test(bias_mod, dtype)
 
@@ -158,7 +194,7 @@ class TestTemplatedSDPA(InductorTestCase):
         bias = torch.randn(B, S, S, device="cuda", dtype=dtype)
 
         def bias_mod(score, b, h, q, kv):
-            return score + index(bias, [b, q, kv])
+            return score + bias[b, q, kv]
 
         self.run_test(bias_mod, dtype)
 
@@ -168,7 +204,7 @@ class TestTemplatedSDPA(InductorTestCase):
         bias = torch.randn(B, H, S, S, device="cuda", dtype=dtype)
 
         def bias_mod(score, b, h, q, kv):
-            return score + index(bias, [b, h, q, kv])
+            return score + bias[b, h, q, kv]
 
         self.run_test(bias_mod, dtype)
 
@@ -178,7 +214,7 @@ class TestTemplatedSDPA(InductorTestCase):
         rel_bias = torch.randn(2 * S, device="cuda", dtype=dtype)
 
         def bias_mod(score, b, h, q, kv):
-            return score + index(rel_bias, [(q - kv) + S])
+            return score + rel_bias[(q - kv) + S]
 
         self.run_test(bias_mod, dtype)
 
@@ -189,7 +225,7 @@ class TestTemplatedSDPA(InductorTestCase):
 
         def bias_mod(score, b, h, q, kv):
             causal_attention = q >= kv
-            cur_num_bidirectional = index(num_bidirectional, (b,))
+            cur_num_bidirectional = num_bidirectional[b]
             bidirectional_attention_on_video = (q <= cur_num_bidirectional) & (
                 kv <= cur_num_bidirectional
             )
@@ -200,6 +236,38 @@ class TestTemplatedSDPA(InductorTestCase):
             )
 
         self.run_test(bias_mod, dtype)
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    def test_natten_2d(self, dtype):
+        H = 32
+        W = S // H
+        WINDOW = 3
+        assert W * H == S
+
+        def get_x_y(idx):
+            # This should be a floor divide, but we don't support that properly
+            return idx / W, idx % W
+
+        def natten_mask(score, b, h, q, kv):
+            q_x, q_y = get_x_y(q)
+            kv_x, kv_y = get_x_y(kv)
+            return torch.where(
+                ((q_x - kv_x).abs() <= WINDOW) | ((q_y - kv_y).abs() <= WINDOW),
+                score,
+                float("-inf"),
+            )
+
+        self.run_test(natten_mask, dtype)
+
+    @supported_platform
+    @expectedFailure
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    def test_silu_on_score(self, dtype):
+        def silu_score(score, b, h, q, kv):
+            return torch.nn.functional.silu(score)
+
+        self.run_test(silu_score, dtype)
 
     @supported_platform
     @skip("Triton bug ")  # https://github.com/pytorch/pytorch/issues/124571
@@ -214,8 +282,8 @@ class TestTemplatedSDPA(InductorTestCase):
 
         def create_njt_wrapper(orig_score_mod, offsets, seq_idx):
             def njt_score_mod(qk, b, h, q, kv):
-                q_nested = q - index(offsets, [index(seq_idx, [q])])
-                kv_nested = kv - index(offsets, [index(seq_idx, [kv])])
+                q_nested = q - offsets[seq_idx[q]]
+                kv_nested = kv - offsets[seq_idx[kv]]
                 return orig_score_mod(qk, b, h, q_nested, kv_nested)
 
             return njt_score_mod
@@ -234,7 +302,7 @@ class TestTemplatedSDPA(InductorTestCase):
             requires_grad=True,
         )
         q, k, v = make_tensor(), make_tensor(), make_tensor()
-        out = _templated_attention(q, k, v, _identity)
+        out = _templated_attention(q, k, v, _identity_mod)
         with self.assertRaisesRegex(
             RuntimeError, "Autograd not implemented for templated_attention"
         ):
@@ -248,7 +316,7 @@ class TestTemplatedSDPA(InductorTestCase):
         with self.assertRaisesRegex(
             ValueError, "Expected query, key, and value to have the same dtype"
         ):
-            _templated_attention(query, key, value, _identity)
+            _templated_attention(query, key, value, _identity_mod)
 
     @supported_platform
     def test_different_sequence_length_fails(self):
@@ -256,7 +324,7 @@ class TestTemplatedSDPA(InductorTestCase):
         key = torch.randn((1, 1, 1024, 64), dtype=torch.float32, device="cuda")
         value = torch.randn((1, 1, 1024, 64), dtype=torch.float32, device="cuda")
         with self.assertRaisesRegex(ValueError, "NYI: The target sequence length"):
-            _templated_attention(query, key, value, _identity)
+            _templated_attention(query, key, value, _identity_mod)
 
     @supported_platform
     @patch.object(torch._inductor.config, "max_autotune", True)
@@ -274,16 +342,16 @@ class TestTemplatedSDPA(InductorTestCase):
         tok_scale = torch.randn(S, device="cuda")
 
         def bias_mod(score, batch, head, token_q, token_kv):
-            score = score + index(tok_scale, [token_q])
-            score = score + index(batch_scale, [batch])
-            score = score + index(head_scale, [head])
+            score = score + tok_scale[token_q]
+            score = score + batch_scale[batch]
+            score = score + head_scale[head]
             return score
 
         self.run_test(bias_mod)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
-    @common_utils.parametrize("score_mod", [_identity, _causal])
+    @common_utils.parametrize("score_mod", [_identity_mod, _causal_mod])
     def test_logsumexp_correctness(self, dtype, score_mod):
         @torch.compile
         def sdpa_hop(q, k, v, score_mod):
@@ -346,7 +414,7 @@ class TestTemplatedSDPA(InductorTestCase):
             lse_2 = lse * 2
             return lse_2
 
-        _, code = run_and_get_code(func, q, k, v, _identity)
+        _, code = run_and_get_code(func, q, k, v, _identity_mod)
         # Ensure that two kernels are generated
         FileCheck().check_count(".run(", 2, True).run(code[0])
 
@@ -367,7 +435,7 @@ class TestTemplatedSDPA(InductorTestCase):
             lse_2 = lse * 2
             return out, lse_2
 
-        _, code = run_and_get_code(func, q, k, v, _identity)
+        _, code = run_and_get_code(func, q, k, v, _identity_mod)
         # Ensure that two kernels are generated
         FileCheck().check_count(".run(", 2, True).run(code[0])
 
