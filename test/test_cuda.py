@@ -4554,7 +4554,7 @@ class TestCudaOptims(TestCase):
             params_graphed = [p.clone().requires_grad_() for p in params]
 
             grads = [
-                [torch.randn_like(p) for p in params] 
+                [torch.randn_like(p) for p in params]
                 for _ in range(steps_warmup + steps_train)
             ]
 
@@ -4602,21 +4602,21 @@ class TestCudaOptims(TestCase):
     )
     @optims(
         [
-            optim 
-            for optim in optim_db 
-            if optim.optim_cls 
+            optim
+            for optim in optim_db
+            if optim.optim_cls
             in [
-                torch.optim.NAdam, 
+                torch.optim.NAdam,
                 torch.optim.RAdam,
-                torch.optim.Rprop, 
-                torch.optim.Adam, 
-                torch.optim.AdamW, 
-                torch.optim.Adamax, 
+                torch.optim.Rprop,
+                torch.optim.Adam,
+                torch.optim.AdamW,
+                torch.optim.Adamax,
                 torch.optim.ASGD,
-                torch.optim.Adadelta, 
+                torch.optim.Adadelta,
                 torch.optim.RMSprop
             ]
-        ], 
+        ],
         dtypes=[torch.float32]
     )
     def test_graph_optims(self, device, dtype, optim_info):
@@ -4625,15 +4625,15 @@ class TestCudaOptims(TestCase):
             torch.optim.NAdam: [
                 (
                     {
-                        "lr": 0.1, 
-                        "betas": (0.8, 0.7), 
+                        "lr": 0.1,
+                        "betas": (0.8, 0.7),
                         "foreach": foreach,
-                        "decoupled_weight_decay": decoupled_weight_decay, 
+                        "decoupled_weight_decay": decoupled_weight_decay,
                         "weight_decay": weight_decay
                     }
                     for foreach, decoupled_weight_decay, weight_decay in product(
                         (
-                            False, 
+                            False,
                             True,
                         ),
                         (False, True),
@@ -4643,10 +4643,10 @@ class TestCudaOptims(TestCase):
             ],
             torch.optim.RAdam: [
                 (
-                    {"lr": 0.1, 
-                     "betas": (0.8, 0.7), 
+                    {"lr": 0.1,
+                     "betas": (0.8, 0.7),
                      "foreach": foreach,
-                     "decoupled_weight_decay": decoupled_weight_decay, 
+                     "decoupled_weight_decay": decoupled_weight_decay,
                      "weight_decay": weight_decay
                     }
                     for foreach, decoupled_weight_decay, weight_decay in product(
@@ -4663,9 +4663,9 @@ class TestCudaOptims(TestCase):
             torch.optim.Adam: [
                 (
                     {
-                        "lr": 0.1, 
-                        "betas": (0.8, 0.7), 
-                        "foreach": foreach, 
+                        "lr": 0.1,
+                        "betas": (0.8, 0.7),
+                        "foreach": foreach,
                         "amsgrad": amsgrad
                     }
                     for foreach, amsgrad in product((False, True), (False, True))
@@ -4678,9 +4678,9 @@ class TestCudaOptims(TestCase):
             torch.optim.AdamW: [
                 (
                     {
-                        "lr": 0.1, 
-                        "betas": (0.8, 0.7), 
-                        "foreach": foreach, 
+                        "lr": 0.1,
+                        "betas": (0.8, 0.7),
+                        "foreach": foreach,
                         "amsgrad": amsgrad
                     }
                     for foreach, amsgrad in product((False, True), (False, True))
@@ -4693,9 +4693,9 @@ class TestCudaOptims(TestCase):
             torch.optim.Adamax: [
                 (
                     {
-                        "lr": 0.1, 
-                        "foreach": foreach, 
-                        "maximize": maximize, 
+                        "lr": 0.1,
+                        "foreach": foreach,
+                        "maximize": maximize,
                         "weight_decay": weight_decay
                     }
                     for foreach, maximize, weight_decay in product(
@@ -4706,8 +4706,8 @@ class TestCudaOptims(TestCase):
             torch.optim.ASGD: [
                 (
                     {
-                        "lr": 0.1, 
-                        "foreach": foreach, 
+                        "lr": 0.1,
+                        "foreach": foreach,
                         "maximize": maximize,
                         "weight_decay": weight_decay
                     }
@@ -4719,8 +4719,8 @@ class TestCudaOptims(TestCase):
             torch.optim.Adadelta: [
                 (
                     {
-                        "lr": 0.1, 
-                        "foreach": foreach, 
+                        "lr": 0.1,
+                        "foreach": foreach,
                         "maximize": maximize,
                         "weight_decay": weight_decay}
                         for foreach, maximize, weight_decay in product(
@@ -4731,8 +4731,8 @@ class TestCudaOptims(TestCase):
             torch.optim.RMSprop: [
                 (
                     {
-                        "lr": 0.1, 
-                        "foreach": foreach, 
+                        "lr": 0.1,
+                        "foreach": foreach,
                         "maximize": maximize,
                         "weight_decay": weight_decay
                     }
@@ -4753,8 +4753,8 @@ class TestCudaOptims(TestCase):
     )
     @optims(
         [
-            optim 
-            for optim in optim_db 
+            optim
+            for optim in optim_db
             if optim.optim_cls in [torch.optim.Adam, torch.optim.AdamW, torch.optim.SGD]
         ]
     )
@@ -4776,10 +4776,10 @@ class TestCudaOptims(TestCase):
             torch.optim.SGD: [
                 (
                     {
-                        "lr": 0.1, 
-                        "momentum": 0.0, 
-                        "dampening": d, 
-                        "weight_decay": w, 
+                        "lr": 0.1,
+                        "momentum": 0.0,
+                        "dampening": d,
+                        "weight_decay": w,
                         "nesterov": n,
                         "fused": True
                     }
@@ -4787,10 +4787,10 @@ class TestCudaOptims(TestCase):
                 ),
                 (
                     {
-                        "lr": 0.1, 
-                        "momentum": 0.5, 
-                        "dampening": d, 
-                        "weight_decay": w, 
+                        "lr": 0.1,
+                        "momentum": 0.5,
+                        "dampening": d,
+                        "weight_decay": w,
                         "nesterov": n,
                         "fused": True}
                         for d, w, n in product((0.0,), (0.0, 0.5), (True, False))
@@ -4804,7 +4804,7 @@ class TestCudaOptims(TestCase):
         for kwargs in optKwargs[optim_cls]:
             for kwarg in kwargs:
                 has_capturable_arg = optim_cls in (torch.optim.Adam, torch.optim.AdamW)
-                for actually_do_graphs in ( 
+                for actually_do_graphs in (
                     (True, False) if has_capturable_arg else (True,)
                 ):
                     params = [
@@ -4815,7 +4815,7 @@ class TestCudaOptims(TestCase):
 
                     # `GradScaler` in-place updates gradients thus it's necessary to duplicate gradients.
                     grads = [
-                        [torch.randn_like(p) for p in params] 
+                        [torch.randn_like(p) for p in params]
                         for _ in range(steps_warmup + steps_train)
                     ]
                     with torch.no_grad():
