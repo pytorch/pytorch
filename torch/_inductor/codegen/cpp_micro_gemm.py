@@ -82,11 +82,11 @@ class CppMicroGemmRef(CppMicroGemm):
 {{declare_kernel}} {
     for (int64_t m = 0; m < M; ++m) {
         for (int64_t n = 0; n < N; ++n) {
+            {{compute_t}} result = accum ? C[m * ldc + n] : 0;
             for (int64_t k = 0; k < K; ++k) {
-                C[m * ldc + n] =
-                    ({{compute_t}})C[m * ldc + n] * accum
-                        + ({{compute_t}})A[m * lda + k] * ({{compute_t}})B[k * ldb + n] * {{alpha}};
+                result += ({{compute_t}})A[m * lda + k] * ({{compute_t}})B[k * ldb + n] * {{alpha}};
             }
+            C[m * ldc + n] = result;
         }
     }
 }
@@ -121,14 +121,15 @@ class CppMicroGemmFP32AVX(CppMicroGemm):
                     A + m * lda,
                     B + n,
                     C + m * ldc + n,
-                    {{block_k}},
+                    K,
                     lda,
                     ldb,
                     ldc
                 );
+                break;
             {% endfor %}
             default:
-                TORCH_CHECK(false, "Unsupported block_m");
+                TORCH_CHECK(false, "Unsupported block_m: ", block_m);
             }
         }
     }
@@ -253,7 +254,7 @@ def create_micro_gemm(
     compute_dtype=None,
     alpha=1,
     num_threads=-1,
-    use_ref=True,
+    use_ref=False,
 ) -> CppMicroGemm:
     def create_from_config(config: CppMicroGemmConfig):
         return config.cls(

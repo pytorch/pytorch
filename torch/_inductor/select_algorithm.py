@@ -889,6 +889,9 @@ class DataProcessorChoiceCallerWrapper:
         result = self._wrapped.output_node()
         return self._postprocessor(result)
 
+    def __repr__(self) -> str:
+        return f"DataProcessorChoiceCallerWrapper({self._wrapped})"
+
 
 class DataProcessorTemplateWrapper:
     def __init__(
@@ -924,6 +927,9 @@ class DataProcessorTemplateWrapper:
         return DataProcessorChoiceCallerWrapper(
             choice_caller, self._preprocessor, self._postprocessor
         )
+
+    def __repr__(self) -> str:
+        return f"DataProcessorTemplateWrapper({self._wrapped})"
 
 
 class ErrorFromChoice(RuntimeError):

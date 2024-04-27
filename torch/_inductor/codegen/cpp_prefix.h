@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <limits>
+#include <memory>
 #include <omp.h>
 
 #include <ATen/NumericUtils.h>
@@ -360,7 +361,6 @@ inline void mm_get_thread_blocks(
   n_block_start = (thread_id % num_Nt) * Nt_blocks;
   n_block_end = std::min(n_block_start + Nt_blocks, N_blocks);
   thread_id /= num_Nt;
-  int64_t num_Mt = (M_blocks + Mt_blocks - 1) / Mt_blocks;
-  m_block_start = (thread_id % num_Mt) * Mt_blocks;
+  m_block_start = std::min(thread_id * Mt_blocks, M_blocks);
   m_block_end = std::min(m_block_start + Mt_blocks, M_blocks);
 }

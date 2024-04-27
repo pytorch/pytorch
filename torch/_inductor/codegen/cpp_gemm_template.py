@@ -37,7 +37,6 @@ extern "C"
     {% if is_dynamic_M %}
     const int64_t M = {{kernel.size(Y, 0)}};
     const int64_t M0_blocks = (M + M0 - 1) / M0;
-    // TODO: implement below
     const auto [Mt_blocks, Nt_blocks, Kt_blocks] = mm_get_thread_blocking(M, N, K, M0, N0, K0, num_threads);
     const int64_t M2_blocks = Mt_blocks; // TODO: improve cache blocking
     {% else %}
@@ -63,7 +62,7 @@ extern "C"
         int tid = omp_get_thread_num();
         int64_t m_block_start, m_block_end, n_block_start, n_block_end, k_block_start, k_block_end;
         mm_get_thread_blocks(
-            tid, M, N, K, Mt_blocks, Nt_blocks, Kt_blocks,
+            tid, M0_blocks, N0_blocks, K0_blocks, Mt_blocks, Nt_blocks, Kt_blocks,
             m_block_start, m_block_end, n_block_start, n_block_end, k_block_start, k_block_end);
         for (int64_t m2 = m_block_start; m2 < m_block_end; m2 += M2_blocks) {
             int64_t m_start = m2 * M0;
@@ -113,7 +112,7 @@ class CppPackedGemmTemplate(CppTemplate):
         beta=1,
         alpha=1,
     ):
-        super().__init__("cpp_gemm", input_nodes, layout)
+        super().__init__("packed_gemm", input_nodes, layout)
         self.beta = beta
         self.alpha = alpha
         self.num_threads = num_threads
@@ -214,6 +213,7 @@ class CppPackedGemmTemplate(CppTemplate):
                 new_inputs[1] = W.transpose(0, 1)
             return new_inputs, layout_or_out
 
+        # TODO: decide proper number of threads per problem size
         num_threads = parallel_num_threads()
         new_inputs, _ = transpose_weight(*reorder_and_filter(input_nodes, layout))
         m, n, k, *_ = mm_args(new_inputs[0], new_inputs[1])
