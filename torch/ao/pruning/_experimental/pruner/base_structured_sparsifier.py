@@ -57,6 +57,7 @@ def _get_supported_activation_functions():
         F.softsign,
         F.tanhshrink,
         F.gelu,
+        F.dropout,
     }
     return SUPPORTED_ACTIVATION_FUNCTIONS
 
@@ -84,6 +85,7 @@ def _get_supported_activation_modules():
         nn.Softsign,
         nn.Tanhshrink,
         nn.GELU,
+        nn.Dropout,
     }
     return SUPPORTED_ACTIVATION_MODULES
 
