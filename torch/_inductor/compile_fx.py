@@ -36,7 +36,12 @@ from torch._inductor.cudagraph_utils import (
 )
 
 from torch._inductor.debug import save_args_for_compile_fx_inner
-from torch._inductor.utils import BoxedBool, count_tangents
+from torch._inductor.utils import (
+    BoxedBool,
+    count_tangents,
+    should_assume_input_aligned,
+    tensor_is_aligned,
+)
 from torch._logging import trace_structured
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
@@ -57,8 +62,8 @@ from .graph import GraphLowering
 from .ir import ExternKernelNode
 from .utils import (
     get_cloned_parameter_buffer_name,
-    get_dtype_size,
     has_incompatible_cudagraph_ops,
+    maybe_get_suppress_shape_guards_ctx,
     output_node,
 )
 from .virtualized import V
@@ -842,20 +847,34 @@ def get_input_idxs_to_check(
     inputs: Union[List[torch.Tensor], Sequence[int]],
     static_input_idxs: Sequence[int],
 ) -> Sequence[int]:
-    def is_aligned(storage_offset, dtype):
-        return (storage_offset * get_dtype_size(dtype)) % ALIGNMENT == 0
-
+    """
+    This function runs at compile time, and generates a list of indices for which we
+    might need to do a copy to preserve alignment requirements.
+    """
     ids_to_check = []
+
     for i, input in enumerate(inputs):
-        if (
-            isinstance(input, torch.Tensor)
-            and (
-                i not in static_input_idxs
-                or not is_aligned(input.storage_offset(), input.dtype)
-            )
-            and input.device.type == "cuda"
-        ):
-            ids_to_check.append(i)
+        if not isinstance(input, torch.Tensor):
+            # non-tensors don't need alignment
+            continue
+        if input.device.type != "cuda":
+            # right now we only care for cuda tensors
+            continue
+        with maybe_get_suppress_shape_guards_ctx():
+            # suppress guards so that tensor_is_aligned and should_assume_input_aligned
+            # do not add guards on input's storage offset
+            if i in static_input_idxs and tensor_is_aligned(input):
+                continue
+            if not should_assume_input_aligned(input):
+                continue
+
+        # if we get here, then
+        # (a) our triton code assumes that the input is aligned
+        # (b) we can't be sure ahead of time that the input will actually be aligned.
+        # therefore, at runtime, we'll need to check that the input is aligned
+        # (and if not, clone it to make it aligned.)
+        ids_to_check.append(i)
+
     return ids_to_check
 
 
@@ -877,10 +896,7 @@ def align_inputs(
     inputs: List[torch.Tensor],
     static_input_idxs: Sequence[int] = (),
 ):
-    if config.assume_aligned_inputs:
-        inputs_to_check = get_input_idxs_to_check(inputs, static_input_idxs)
-    else:
-        inputs_to_check = []
+    inputs_to_check = get_input_idxs_to_check(inputs, static_input_idxs)
     return align_inputs_from_check_idxs(model, inputs_to_check)
 
 
