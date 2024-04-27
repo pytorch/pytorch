@@ -97,7 +97,7 @@ __all__ = [
     "StatefulSymbolicContext", "SubclassSymbolicContext", "statically_known_true",
     "guard_size_oblivious", "check_consistent",
     "compute_unbacked_bindings", "ConvertIntKey",
-    "rebind_unbacked",
+    "rebind_unbacked", "resolve_unbacked_bindings",
 ]
 
 # FX node metadata keys for symbolic shape FX graph.
@@ -266,6 +266,14 @@ def check_consistent(new, old) -> None:
         assert isinstance(old, scalar_types) and not isinstance(old, bool), f"{old} != {new}"
         torch._check(old == new, lambda: f"{old} != {new} (old != new)")
 
+def resolve_unbacked_bindings(shape_env, bindings):
+    if bindings is None:
+        return None
+    return {
+        shape_env.unbacked_renamings.get(k, k): v
+        for k, v in bindings.items()
+    }
+
 def rebind_unbacked(shape_env, n: torch.fx.Node, result):
     """
     Suppose we are retracing a pre-existing FX graph that previously had
@@ -282,7 +290,7 @@ def rebind_unbacked(shape_env, n: torch.fx.Node, result):
     if n.op == "placeholder":
         return
 
-    if bindings := n.meta.get("unbacked_bindings"):
+    if bindings := resolve_unbacked_bindings(shape_env, n.meta.get("unbacked_bindings")):
         for raw_u0, path in bindings.items():
             u1 = pytree.key_get(result, path)
             # tensor_version ops get specialized after AOTAutograd, it's OK,
@@ -313,7 +321,8 @@ def rebind_unbacked(shape_env, n: torch.fx.Node, result):
             # The old and new could be the same if you improperly hit the memo
             # while retracing.  Make sure you updated FakeTensorMode.epoch
             assert raw_u0 != raw_u1, f"{raw_u0} possible memo disaster"
-            shape_env._rename_unbacked_to(raw_u0, raw_u1)
+            # Reuse the OLD symbol name
+            shape_env._rename_unbacked_to(raw_u1, raw_u0)
 
 def canonicalize_bool_expr(expr: SympyBoolean) -> SympyBoolean:
     r""" Canonicalize a boolean expression by transforming it into a lt / le
@@ -716,10 +725,6 @@ def guard_scalar(a):
         raise AssertionError(f"unrecognized scalar {a}")
 
 
-def _constrain_symbol_range(shape_env, s: sympy.Symbol, compiler_min: int, compiler_max: int):
-    shape_env.constrain_symbol_range(s, compiler_min, compiler_max)
-
-
 def _advise_is_size(a):
     """
     Don't use this directly; use torch._check_is_size instead.
@@ -761,7 +766,6 @@ def _advise_is_size(a):
     ):
         _constrain_range_for_size(a)
 
-@record_shapeenv_event()
 def _constrain_range_for_size(a, min: Optional[int] = None, max: Optional[int] = None):
     """
     This function is NOT INTENDED to be used by itself.
@@ -773,27 +777,10 @@ def _constrain_range_for_size(a, min: Optional[int] = None, max: Optional[int] =
     assert isinstance(a, SymInt), "can only constrain range for SymInt"
     assert isinstance(a.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
 
-    if min is None:
-        min = 0
-    if max is None:
-        max = sys.maxsize - 1
-
-    if max < min:
-        raise ValueError(
-            "Maximum value to constrain_as_size can't be less than the specified min value, "
-            "received min={min} and max={max}"
-        )
-
-    a.node.shape_env.constrain_symbol_range(
-        a.node.expr,
-        compiler_min=min,
-        compiler_max=max,
-    )
-    a.node.shape_env.size_like.add(a.node.expr)
+    a.node.shape_env._constrain_range_for_size(a.node.expr, min, max)
 
 
 # inclusive both ways
-@record_shapeenv_event()
 def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
     """
     Applies a constraint that the passed in SymInt must lie between min-max
@@ -835,54 +822,24 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
             raise ValueError(f"Invalid value {a} for range [{min}:{max}]")
         return
 
-    if isinstance(a.node.expr, sympy.Integer):
-        if not (min <= int(a.node.expr) <= max):
-            raise ValueRangeError(f"Invalid value {int(a.node.expr)} for range [{min}:{max}]")
-        return
-    assert isinstance(a.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
+    a.node.shape_env._constrain_range(a.node.expr, min, max)
 
-    # TODO: Shouldn't we install a guard if the symbol is backed?  Or is the
-    # semantics that this is an "unchecked" assert (but it this actually
-    # something useful?  Might be better to restrict only for unbacked
-    # SymInt).
-    _constrain_symbol_range(
-        a.node.shape_env,
-        a.node.expr,
-        compiler_min=min,
-        compiler_max=max,
-    )
-
-
-@record_shapeenv_event()
-def constrain_unify(a, b):
+def constrain_unify(a: torch.SymInt, b: torch.SymInt) -> None:
     """
     Given two SymInts, constrain them so that they must be equal.  NB:
     this will not work with SymInts that represent nontrivial expressions
     (yet!)
     """
-    # TODO: this does not install a deferred runtime assert yet
-
-    # TODO: Maybe dedupe this with _maybe_guard_rel?
     if not isinstance(a, SymInt):
         if not isinstance(b, SymInt):
             assert a == b
+            return
         else:
-            assert isinstance(b.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
             shape_env = b.node.shape_env
-            shape_env.replacements[b.node.expr] = sympy.Integer(a)
     else:
-        # TODO: Actually, we can support this as long as one of them is a symbol.
-        # NB: We can't actually do "unification" as our operators are not
-        # injective
-        assert isinstance(a.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
         shape_env = a.node.shape_env
-        if not isinstance(b, SymInt):
-            shape_env.replacements[a.node.expr] = sympy.Integer(b)
-        else:
-            assert a.node.shape_env is b.node.shape_env
-            assert isinstance(b.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
-            new_var = shape_env._find(a.node.expr)
-            shape_env.replacements[b.node.expr] = new_var
+
+    shape_env._constrain_unify(a, b)
 
 # Assume that a boolean is true for the purposes of subsequent symbolic
 # reasoning.  This will keep track of corresponding runtime checks to verify
@@ -2447,7 +2404,11 @@ class ShapeEnv:
 
     # Unlike set_replacement, this records a shapeenv event
     @record_shapeenv_event()
-    def _rename_unbacked_to(self, orig_s: sympy.Expr, new_s: sympy.Expr):
+    def _rename_unbacked_to(self, orig_s: sympy.Symbol, new_s: sympy.Symbol):
+        assert isinstance(orig_s, sympy.Symbol), orig_s
+        assert isinstance(new_s, sympy.Symbol), new_s
+        assert free_unbacked_symbols(new_s), new_s
+        assert free_unbacked_symbols(orig_s), orig_s
         if self._ignore_fresh_unbacked_symbols_tls():
             return
         dest = self.replacements.get(orig_s)
@@ -2456,6 +2417,78 @@ class ShapeEnv:
         self.unbacked_renamings[orig_s] = new_s
         if dest is not None:
             self._set_replacement(new_s, dest, "rename_unbacked_to_dest")
+
+    @record_shapeenv_event()
+    def _constrain_range_for_size(self, a: sympy.Symbol, min: Optional[int] = None, max: Optional[int] = None):
+        if min is None:
+            min = 0
+        if max is None:
+            max = sys.maxsize - 1
+
+        if max < min:
+            raise ValueError(
+                "Maximum value to constrain_as_size can't be less than the specified min value, "
+                "received min={min} and max={max}"
+            )
+
+        self.constrain_symbol_range(
+            a,
+            compiler_min=min,
+            compiler_max=max,
+        )
+        self.size_like.add(a)
+
+    @record_shapeenv_event()
+    def _constrain_range(self, a: sympy.Expr, min: int, max: int):
+        if isinstance(a, sympy.Integer):
+            if not (min <= int(a) <= max):
+                raise ValueRangeError(f"Invalid value {int(a)} for range [{min}:{max}]")
+            return
+        assert isinstance(a, sympy.Symbol), "constraining non-Symbols NYI"
+
+        # TODO: Shouldn't we install a guard if the symbol is backed?  Or is the
+        # semantics that this is an "unchecked" assert (but it this actually
+        # something useful?  Might be better to restrict only for unbacked
+        # SymInt).
+        self.constrain_symbol_range(
+            a,
+            compiler_min=min,
+            compiler_max=max,
+        )
+
+    @record_shapeenv_event()
+    def _constrain_unify(self, a, b):
+        """
+        Given two SymInts, constrain them so that they must be equal.  NB:
+        this will not work with SymInts that represent nontrivial expressions
+        (yet!)
+        """
+        # TODO: this does not install a deferred runtime assert yet
+
+        # TODO: Maybe dedupe this with _maybe_guard_rel?
+        # Update Feb 2024: this is extra important to do, this doesn't handle
+        # unbacked replacements properly nor does it generate deferred runtime
+        # asserts
+        if not isinstance(a, SymInt):
+            if not isinstance(b, SymInt):
+                assert a == b
+            else:
+                assert isinstance(b.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
+                assert b.node.shape_env is self
+                self.replacements[b.node.expr] = sympy.Integer(a)
+        else:
+            # TODO: Actually, we can support this as long as one of them is a symbol.
+            # NB: We can't actually do "unification" as our operators are not
+            # injective
+            assert isinstance(a.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
+            assert a.node.shape_env is self
+            if not isinstance(b, SymInt):
+                self.replacements[a.node.expr] = sympy.Integer(b)
+            else:
+                assert a.node.shape_env is b.node.shape_env
+                assert isinstance(b.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
+                new_var = self._find(a.node.expr)
+                self.replacements[b.node.expr] = new_var
 
     def _ignore_fresh_unbacked_symbols_tls(self):
         return getattr(TLS, "ignore_fresh_unbacked_symbols", False)
