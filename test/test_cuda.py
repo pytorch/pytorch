@@ -4648,8 +4648,8 @@ class TestCudaOptims(TestCase):
                         "betas": (0.8, 0.7),
                         "foreach": foreach,
                         "decoupled_weight_decay": decoupled_weight_decay,
-                        "weight_decay": weight_decay
-                        }
+                        "weight_decay": weight_decay,
+                    }
                     for foreach, decoupled_weight_decay, weight_decay in product(
                         (False, True), (False, True), (0.0, 0.1)
                     )
@@ -4723,11 +4723,11 @@ class TestCudaOptims(TestCase):
                         "lr": 0.1,
                         "foreach": foreach,
                         "maximize": maximize,
-                        "weight_decay": weight_decay
-                        }
+                        "weight_decay": weight_decay,
+                    }
                     for foreach, maximize, weight_decay in product(
                         (False, True), (False, True), (0, 0.1)
-                        )
+                    )
                 )
             ],
             torch.optim.RMSprop: [
@@ -4795,7 +4795,7 @@ class TestCudaOptims(TestCase):
                         "weight_decay": w,
                         "nesterov": n,
                         "fused": True,
-                        }
+                    }
                     for d, w, n in product((0.0,), (0.0, 0.5), (True, False))
                 ),
             ],
@@ -4830,14 +4830,14 @@ class TestCudaOptims(TestCase):
                     with torch.no_grad():
                         scaler_for_control._lazy_init_scale_growth_tracker(
                             torch.device("cuda")
-                            )
+                        )
 
                     scaler_for_graphed = torch.cuda.amp.GradScaler()
                     scaler_for_graphed.load_state_dict(scaler_for_control.state_dict())
                     with torch.no_grad():
                         scaler_for_graphed._lazy_init_scale_growth_tracker(
                             torch.device("cuda")
-                            )
+                        )
 
                     # Control (capturable=False)
                     if has_capturable_arg:
