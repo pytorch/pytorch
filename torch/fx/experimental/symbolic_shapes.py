@@ -725,6 +725,10 @@ def guard_scalar(a):
         raise AssertionError(f"unrecognized scalar {a}")
 
 
+def _constrain_symbol_range(shape_env, s: sympy.Symbol, compiler_min: int, compiler_max: int):
+    shape_env.constrain_symbol_range(s, compiler_min, compiler_max)
+
+
 def _advise_is_size(a):
     """
     Don't use this directly; use torch._check_is_size instead.
@@ -766,6 +770,7 @@ def _advise_is_size(a):
     ):
         _constrain_range_for_size(a)
 
+@record_shapeenv_event()
 def _constrain_range_for_size(a, min: Optional[int] = None, max: Optional[int] = None):
     """
     This function is NOT INTENDED to be used by itself.
@@ -777,10 +782,27 @@ def _constrain_range_for_size(a, min: Optional[int] = None, max: Optional[int] =
     assert isinstance(a, SymInt), "can only constrain range for SymInt"
     assert isinstance(a.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
 
-    a.node.shape_env._constrain_range_for_size(a.node.expr, min, max)
+    if min is None:
+        min = 0
+    if max is None:
+        max = sys.maxsize - 1
+
+    if max < min:
+        raise ValueError(
+            "Maximum value to constrain_as_size can't be less than the specified min value, "
+            "received min={min} and max={max}"
+        )
+
+    a.node.shape_env.constrain_symbol_range(
+        a.node.expr,
+        compiler_min=min,
+        compiler_max=max,
+    )
+    a.node.shape_env.size_like.add(a.node.expr)
 
 
 # inclusive both ways
+@record_shapeenv_event()
 def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
     """
     Applies a constraint that the passed in SymInt must lie between min-max
@@ -822,24 +844,54 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
             raise ValueError(f"Invalid value {a} for range [{min}:{max}]")
         return
 
-    a.node.shape_env._constrain_range(a.node.expr, min, max)
+    if isinstance(a.node.expr, sympy.Integer):
+        if not (min <= int(a.node.expr) <= max):
+            raise ValueRangeError(f"Invalid value {int(a.node.expr)} for range [{min}:{max}]")
+        return
+    assert isinstance(a.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
 
-def constrain_unify(a: torch.SymInt, b: torch.SymInt) -> None:
+    # TODO: Shouldn't we install a guard if the symbol is backed?  Or is the
+    # semantics that this is an "unchecked" assert (but it this actually
+    # something useful?  Might be better to restrict only for unbacked
+    # SymInt).
+    _constrain_symbol_range(
+        a.node.shape_env,
+        a.node.expr,
+        compiler_min=min,
+        compiler_max=max,
+    )
+
+
+@record_shapeenv_event()
+def constrain_unify(a, b):
     """
     Given two SymInts, constrain them so that they must be equal.  NB:
     this will not work with SymInts that represent nontrivial expressions
     (yet!)
     """
+    # TODO: this does not install a deferred runtime assert yet
+
+    # TODO: Maybe dedupe this with _maybe_guard_rel?
     if not isinstance(a, SymInt):
         if not isinstance(b, SymInt):
             assert a == b
-            return
         else:
+            assert isinstance(b.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
             shape_env = b.node.shape_env
+            shape_env.replacements[b.node.expr] = sympy.Integer(a)
     else:
+        # TODO: Actually, we can support this as long as one of them is a symbol.
+        # NB: We can't actually do "unification" as our operators are not
+        # injective
+        assert isinstance(a.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
         shape_env = a.node.shape_env
-
-    shape_env._constrain_unify(a, b)
+        if not isinstance(b, SymInt):
+            shape_env.replacements[a.node.expr] = sympy.Integer(b)
+        else:
+            assert a.node.shape_env is b.node.shape_env
+            assert isinstance(b.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
+            new_var = shape_env._find(a.node.expr)
+            shape_env.replacements[b.node.expr] = new_var
 
 # Assume that a boolean is true for the purposes of subsequent symbolic
 # reasoning.  This will keep track of corresponding runtime checks to verify
@@ -2418,78 +2470,6 @@ class ShapeEnv:
         if dest is not None:
             self._set_replacement(new_s, dest, "rename_unbacked_to_dest")
 
-    @record_shapeenv_event()
-    def _constrain_range_for_size(self, a: sympy.Symbol, min: Optional[int] = None, max: Optional[int] = None):
-        if min is None:
-            min = 0
-        if max is None:
-            max = sys.maxsize - 1
-
-        if max < min:
-            raise ValueError(
-                "Maximum value to constrain_as_size can't be less than the specified min value, "
-                "received min={min} and max={max}"
-            )
-
-        self.constrain_symbol_range(
-            a,
-            compiler_min=min,
-            compiler_max=max,
-        )
-        self.size_like.add(a)
-
-    @record_shapeenv_event()
-    def _constrain_range(self, a: sympy.Expr, min: int, max: int):
-        if isinstance(a, sympy.Integer):
-            if not (min <= int(a) <= max):
-                raise ValueRangeError(f"Invalid value {int(a)} for range [{min}:{max}]")
-            return
-        assert isinstance(a, sympy.Symbol), "constraining non-Symbols NYI"
-
-        # TODO: Shouldn't we install a guard if the symbol is backed?  Or is the
-        # semantics that this is an "unchecked" assert (but it this actually
-        # something useful?  Might be better to restrict only for unbacked
-        # SymInt).
-        self.constrain_symbol_range(
-            a,
-            compiler_min=min,
-            compiler_max=max,
-        )
-
-    @record_shapeenv_event()
-    def _constrain_unify(self, a, b):
-        """
-        Given two SymInts, constrain them so that they must be equal.  NB:
-        this will not work with SymInts that represent nontrivial expressions
-        (yet!)
-        """
-        # TODO: this does not install a deferred runtime assert yet
-
-        # TODO: Maybe dedupe this with _maybe_guard_rel?
-        # Update Feb 2024: this is extra important to do, this doesn't handle
-        # unbacked replacements properly nor does it generate deferred runtime
-        # asserts
-        if not isinstance(a, SymInt):
-            if not isinstance(b, SymInt):
-                assert a == b
-            else:
-                assert isinstance(b.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
-                assert b.node.shape_env is self
-                self.replacements[b.node.expr] = sympy.Integer(a)
-        else:
-            # TODO: Actually, we can support this as long as one of them is a symbol.
-            # NB: We can't actually do "unification" as our operators are not
-            # injective
-            assert isinstance(a.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
-            assert a.node.shape_env is self
-            if not isinstance(b, SymInt):
-                self.replacements[a.node.expr] = sympy.Integer(b)
-            else:
-                assert a.node.shape_env is b.node.shape_env
-                assert isinstance(b.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
-                new_var = self._find(a.node.expr)
-                self.replacements[b.node.expr] = new_var
-
     def _ignore_fresh_unbacked_symbols_tls(self):
         return getattr(TLS, "ignore_fresh_unbacked_symbols", False)
 
@@ -3656,9 +3636,11 @@ class ShapeEnv:
                 self.log.warning("Failing guard allocated at: \n%s", ''.join(guard.stack.format()))
                 raise
 
-        # First, issue all the non-trivial guards.
+        # First, issue all guards.
+        # This removes all the checks that follow from bounds
+        # We could simply emit those and also the bounds 2 <= size when necessary
         for guard in self.guards:
-            if self._maybe_evaluate_static(guard.expr) is not None:
+            if self._maybe_evaluate_static(guard.expr, axioms=()) is not None:
                 continue
             issue_guard(guard)
 
@@ -3863,7 +3845,7 @@ class ShapeEnv:
 
     def get_nontrivial_guards(self):
         """Returns a list of guard expressions that aren't statically known (i.e. not trivial)"""
-        return [self.simplify(guard.expr) for guard in self.guards if self._maybe_evaluate_static(guard.expr) is None]
+        return [self.simplify(guard.expr) for guard in self.guards if self._maybe_evaluate_static(guard.expr, axioms=()) is None]
 
     def format_guards(self, verbose=False):
         """Format this shape env's guard expressions with optional traceback info if verbose"""
@@ -3885,9 +3867,60 @@ class ShapeEnv:
         return bound_sympy(expr, var_to_range)
 
     @_lru_cache
+    def get_axioms(self, symbols: Optional[Tuple["sympy.Symbol"]] = None) -> Tuple["sympy.Expr"]:
+        """
+        Given the symbols in an expression, it returns all the runtime asserts that have those symbols
+        concatenated with all the guards.
+        If symbols is None, it returns all the runtime asserts (and all the guards)
+        """
+        if symbols is None:
+            runtime_asserts = (r.expr
+                               for rs in self.deferred_runtime_asserts.values()
+                               for r in rs)
+        else:
+            runtime_asserts = (r.expr
+                               for s in symbols if s not in self.var_to_val
+                               for r in self.deferred_runtime_asserts.get(s, ()))
+        guards = (g.expr for g in self.guards)
+        return tuple(itertools.chain(guards, runtime_asserts))
+
+    @_lru_cache
+    def get_implications(self,
+                         e: "sympy.Expr",
+                         compute_hint: bool) -> Tuple[Tuple["sympy.Expr", 'sympy.logic.boolalg.BooleanAtom']]:
+        """ Given a expression, it returns a list of predicates that follow from it """
+        equiv = {}
+
+        def add_expr(expr):
+            # Expr and negation
+            equiv[canonicalize_bool_expr(expr)] = sympy.true
+            equiv[canonicalize_bool_expr(sympy.Not(expr))] = sympy.false
+            if isinstance(expr, sympy.Rel):
+                # multiplying by -1 changes the direction of the inequality
+                dual = type(expr)(-expr.rhs, -expr.lhs)
+                equiv[canonicalize_bool_expr(dual)] = sympy.true
+                equiv[canonicalize_bool_expr(sympy.Not(dual))] = sympy.false
+
+        if compute_hint:
+            e = canonicalize_bool_expr(e.xreplace(self.var_to_val))
+        add_expr(e)
+        # Other relational expressions this expression implies
+        if isinstance(e, sympy.Eq):
+            add_expr(sympy.Le(e.lhs, e.rhs))
+            add_expr(sympy.Ge(e.lhs, e.rhs))
+        elif isinstance(e, sympy.Lt):
+            add_expr(sympy.Le(e.lhs, e.rhs))
+            add_expr(sympy.Ne(e.lhs, e.rhs))
+            if e.lhs.is_integer and e.rhs.is_integer:
+                add_expr(sympy.Le(e.lhs, e.rhs - 1))
+        elif isinstance(e, sympy.Le):
+            add_expr(sympy.Lt(e.lhs, e.rhs + 1))
+        return tuple(equiv.items())
+
+    @_lru_cache
     def _maybe_evaluate_static(
         self, expr: "sympy.Expr", *, unbacked_only: bool = False, compute_hint: bool = False,
-        expect_rational=True, size_oblivious: bool = False
+        expect_rational=True, size_oblivious: bool = False, axioms: Optional[Tuple[sympy.Expr]] = None
     ) -> "Optional[sympy.Expr]":
         """
         Tries to evaluate expr without introducing guards
@@ -3901,6 +3934,9 @@ class ShapeEnv:
         hint for the particular hint values of backed SymInts, e.g., if
         s0 happens to be 3 this run, compute_hint will subsitute s0 with 3.
         """
+        # axioms with compute hint NYE
+        assert not compute_hint or not axioms
+
         expr = self.simplify(expr)
 
         if compute_hint:
@@ -3908,53 +3944,14 @@ class ShapeEnv:
 
         expr = canonicalize_bool_expr(expr)
 
-        symbols = list(expr.free_symbols)
-
-        # Apply known runtime asserts
-        guards_exprs = []
-        for g in self.guards:
-            e = self.simplify(g.expr)
-            if compute_hint:
-                e = canonicalize_bool_expr(e.xreplace(self.var_to_val))
-            guards_exprs.append(e)
-
-        symbols_unbacked = symbols - self.var_to_val.keys()
-        defra_exprs = {}
-        for s in symbols_unbacked:
-            defras = self.deferred_runtime_asserts.get(s, ())
-            l = []
-            for defra in defras:
-                e = self.simplify(defra.expr)
-                if compute_hint:
-                    e = canonicalize_bool_expr(e.xreplace(self.var_to_val))
-                l.append(e)
-            defra_exprs[s] = l
-
-
+        # Pattern matching
+        symbols = tuple(expr.free_symbols)
+        if axioms is None:
+            axioms = self.get_axioms(symbols)
         subst = {}
-        for s in symbols_unbacked:
+        for e in axioms:
+            subst.update(dict(self.get_implications(e, compute_hint=compute_hint)))
 
-            def add_expr(expr):
-                # Expr and negation
-                subst[canonicalize_bool_expr(expr)] = sympy.true
-                subst[canonicalize_bool_expr(sympy.Not(expr))] = sympy.false
-                if isinstance(expr, sympy.Rel):
-                    # multiplying by -1 changes the direction of the inequality
-                    dual = type(expr)(-expr.rhs, -expr.lhs)
-                    subst[canonicalize_bool_expr(dual)] = sympy.true
-                    subst[canonicalize_bool_expr(sympy.Not(dual))] = sympy.false
-
-            for e in itertools.chain(guards_exprs, defra_exprs[s]):
-                add_expr(e)
-                # Other relational expressions this expression implies
-                if isinstance(e, sympy.Eq):
-                    add_expr(sympy.Le(e.lhs, e.rhs))
-                    add_expr(sympy.Ge(e.lhs, e.rhs))
-                elif isinstance(e, sympy.Lt):
-                    add_expr(sympy.Le(e.lhs, e.rhs))
-                    add_expr(sympy.Ne(e.lhs, e.rhs))
-
-        # NB: this helps us deal with And/Or connectives
         expr = expr.xreplace(subst)
 
         # Simplify making use of value range lower bound
@@ -4668,7 +4665,6 @@ class ShapeEnv:
             if not self._suppress_guards_tls():
                 stack = CapturedTraceback.extract(skip=1)
                 guard = ShapeGuard(g, stack)
-                # TODO: deal with duplicate guards somehow
                 self.guards.append(guard)
         except Exception:
             if fresh:

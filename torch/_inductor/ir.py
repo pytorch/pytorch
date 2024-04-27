@@ -788,14 +788,7 @@ class Reduction(Loops):
             if split == 1:
                 # No need to split.
                 return ReductionHint.INNER, split
-            if (
-                len(ranges) == 0
-                and input_node is not None
-                and isinstance(input_node, TensorBox)
-            ):
-                # Only handles the case where keep_dim = False.
-                # Otherwise, we need to propagate reduction dim info to the stage where
-                # the intermediate loader of the first Reduction is generated.
+            if input_node is not None and isinstance(input_node, TensorBox):
                 new_ranges, new_reduction_ranges = extract_input_node_reduction_ranges(
                     input_node
                 )
@@ -1173,13 +1166,20 @@ class Reduction(Loops):
         new_reduction_ranges,
         default,
     ):
-        assert len(original_ranges) == 0, f"{original_ranges}= is not equal to []"
+        assert all(
+            r == 1 for r in original_ranges
+        ), f"Only enabled for numel_hint == 1, found {original_ranges=}"
         reindex = View.dynamic_reshape_indexer(
             original_reduction_ranges, tuple(new_ranges) + tuple(new_reduction_ranges)
         )
 
-        def wrapper_fn(index, reduction_index):
-            return loader([], reindex(tuple(index) + tuple(reduction_index)))
+        def wrapper_fn(merged_index, new_reduction_index):
+            original_idx = merged_index[: len(original_ranges)]
+            new_index = merged_index[len(original_ranges) :]
+            return loader(
+                original_idx,
+                reindex(tuple(new_index) + tuple(new_reduction_index)),
+            )
 
         return wrapper_fn
 
@@ -1318,7 +1318,7 @@ class Reduction(Loops):
             wrapper_fn,
             original_ranges,
             original_reduction_ranges,
-            new_ranges,
+            [*original_ranges, *new_ranges],
             new_reduction_ranges,
             reduction_type,
             -1,
@@ -3814,7 +3814,12 @@ class ConcatKernel(NopKernel):
                     break
         any_input_is_storage_and_layout = any(is_storage_and_layout(x) for x in inputs)
         fx_node_args = V.graph.current_node.args[0]
-        assert V.graph.current_node.target in [aten.cat, aten.cat.default]
+        target_func = (
+            V.graph.current_node.target.func
+            if isinstance(V.graph.current_node.target, functools.partial)
+            else V.graph.current_node.target
+        )
+        assert target_func in [aten.cat, aten.cat.default]
         assert isinstance(fx_node_args, list)
         # If any of the inputs has meta tensor and the meta tensor is in CL format, use CL format for the output
         if any_input_is_storage_and_layout is False and any(
