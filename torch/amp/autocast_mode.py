@@ -203,6 +203,8 @@ class autocast:
         enabled: bool = True,
         cache_enabled: Optional[bool] = None,
     ):
+        if dtype is None:
+            dtype = torch.get_autocast_dtype(device_type)
         if torch._jit_internal.is_scripting():
             self._enabled = enabled
             self.device = device_type
