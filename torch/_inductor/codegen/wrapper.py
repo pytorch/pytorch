@@ -1138,7 +1138,7 @@ class WrapperCodeGen(CodeGen):
             # https://github.com/openai/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
             "constants": {
                 **constants,
-                **{idx: 1 for idx in equal_to_1_arg_idx},
+                **dict.fromkeys(equal_to_1_arg_idx, 1),
             },
             "configs": [
                 config_of(
