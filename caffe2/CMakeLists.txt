@@ -59,23 +59,7 @@ if(INTERN_BUILD_ATEN_OPS)
 
   # Generate the headers wrapped by our operator
   file(GLOB_RECURSE torchgen_python "${PROJECT_SOURCE_DIR}/torchgen/*.py")
-  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/contrib/aten/aten_op.h
-  COMMAND
-  "${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/gen_op.py
-    --aten_root=${CMAKE_CURRENT_SOURCE_DIR}/../aten
-    --template_dir=${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten
-    --yaml_dir=${CMAKE_BINARY_DIR}/aten/src/ATen
-    --install_dir=${CMAKE_CURRENT_BINARY_DIR}/contrib/aten
-  DEPENDS
-  ${torchgen_python}
-  ${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml
-  ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/gen_op.py
-  ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/aten_op_template.h)
 
-  add_custom_target(__aten_op_header_gen
-    DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/contrib/aten/aten_op.h)
-  add_library(aten_op_header_gen INTERFACE)
-  add_dependencies(aten_op_header_gen __aten_op_header_gen)
 
   # Add source, includes, and libs to lists
   list(APPEND Caffe2_CPU_SRCS ${ATen_CPU_SRCS})
@@ -132,7 +116,6 @@ endif()
 
 # Skip modules that are not used by libtorch mobile yet.
 if(BUILD_CAFFE2 AND NOT INTERN_BUILD_MOBILE)
-  add_subdirectory(contrib)
   add_subdirectory(predictor)
   add_subdirectory(predictor/emulator)
   add_subdirectory(core/nomnigraph)
@@ -141,7 +124,6 @@ if(BUILD_CAFFE2 AND NOT INTERN_BUILD_MOBILE)
   endif()
   add_subdirectory(db)
   add_subdirectory(distributed)
-  # add_subdirectory(experiments) # note, we may remove this folder at some point
   add_subdirectory(ideep)
   add_subdirectory(image)
   add_subdirectory(video)
