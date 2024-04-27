@@ -267,6 +267,24 @@ Times are in {common.unit_to_english(self.time_unit)}s ({self.time_unit}).
 
 
 class Compare:
+    """Helper class for displaying the results of many measurements in a 
+    formatted table.
+    
+    The table format is based on the information fields provided in 
+    :class:`torch.utils.benchmark.Timer` (`description`, `label`, `sub_label`, 
+    `num_threads`, etc).
+
+    The methods :meth:`trim_significant_figures`, and :meth:`colorize` provide 
+    an interface to change the table format.
+
+    the table can be directly printed using :meth:`print` or casted as a `str`.
+
+    For a full tutorial on how to use this class, see:
+    https://pytorch.org/tutorials/recipes/recipes/benchmark.html
+
+    Args:
+        results: List of Measurment to display.
+    """
     def __init__(self, results: List[common.Measurement]):
         self._results: List[common.Measurement] = []
         self.extend_results(results)
