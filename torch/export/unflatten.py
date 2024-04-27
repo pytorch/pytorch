@@ -840,7 +840,7 @@ def _reorder_submodules(
         _reorder_submodules(child, fqn_order, prefix=fqn + ".")
         delattr(parent, name)
         children.append((fqn_order[fqn], name, child))
-    children.sort(key=lambda x: x[0])
+    children.sort(key=operator.itemgetter(0))
     for _, name, child in children:
         parent.register_module(name, child)
 

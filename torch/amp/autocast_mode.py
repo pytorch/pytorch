@@ -6,7 +6,19 @@ from typing import Any, Optional
 import torch
 from torch.types import _dtype
 
-__all__ = ["autocast_decorator", "autocast"]
+__all__ = ["autocast_decorator", "autocast", "is_autocast_available"]
+
+
+def is_autocast_available(device_type: str) -> bool:
+    r"""
+    Return a bool indicating if autocast is available on :attr:`device_type`.
+
+    Args:
+        device_type(str):  Device type to use. Possible values are: 'cuda', 'cpu', 'xpu' and so on.
+            The type is the same as the `type` attribute of a :class:`torch.device`.
+            Thus, you may obtain the device type of a tensor using `Tensor.device.type`.
+    """
+    return torch._C._is_autocast_available(device_type)
 
 
 def autocast_decorator(autocast_instance, func):
@@ -199,7 +211,7 @@ class autocast:
             assert dtype is not None
             return
         self.device = device_type
-        if not torch._C._is_autocast_available(self.device):
+        if not is_autocast_available(self.device):
             raise RuntimeError(
                 f"User specified an unsupported autocast device_type '{self.device}'"
             )
