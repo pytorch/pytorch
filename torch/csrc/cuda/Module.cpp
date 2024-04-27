@@ -945,8 +945,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
 #endif // USE_ROCM
                << ", total_memory=" << prop.totalGlobalMem / (1024ull * 1024)
                << "MB, multi_processor_count=" << prop.multiProcessorCount
-               << ", uuid=" << prop.uuid.bytes
-               << ")";
+               << ", uuid=" << prop.uuid.bytes << ")";
         return stream.str();
       });
 
