@@ -694,6 +694,11 @@ class InstructionTranslatorBase(
             self._cell_and_freevars = tuple(
                 self.code_options["co_cellvars"] or []
             ) + tuple(self.code_options["co_freevars"] or [])
+
+            # An inlined function might depend on the freevar of the parent
+            # function. So, recursively obtain parent cell and freevars.
+            if isinstance(self, InliningInstructionTranslator):
+                self._cell_and_freevars += self.parent.cell_and_freevars()
         return self._cell_and_freevars
 
     def prune_dead_locals(self):
