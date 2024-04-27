@@ -46,15 +46,25 @@ def get_merge_base() -> str:
         url = f"https://api.github.com/repos/pytorch/pytorch/pulls/{pr_number}"
         with urlopen(Request(url, headers=headers)) as conn:
             pr_info = json.loads(conn.read().decode())
-            base = pr_info["base"]["ref"]
-    else:
-        base = "HEAD^"
-
+            base = f"origin/{pr_info['base']['ref']}"
+        merge_base = (
+            subprocess.check_output(["git", "merge-base", base, "HEAD"])
+            .decode()
+            .strip()
+        )
+        return merge_base
+    default_branch = f"origin/{os.environ.get('GIT_DEFAULT_BRANCH', 'main')}"
     merge_base = (
-        subprocess.check_output(["git", "merge-base", f"origin/{base}", "HEAD"])
+        subprocess.check_output(["git", "merge-base", default_branch, "HEAD"])
         .decode()
         .strip()
     )
+
+    head = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode().strip()
+
+    if merge_base == head:
+        # We are on the default branch, so check for changes since the last commit
+        merge_base = "HEAD^"
     return merge_base
 
 

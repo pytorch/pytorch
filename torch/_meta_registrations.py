@@ -5373,7 +5373,7 @@ def meta__scaled_dot_product_flash_attention_for_cpu_backward(
     scale: Optional[float] = None,
 ):
     # cpus's grad layout is different from cuda's,
-    # i.e. (batch_size, seq_len，num_heads, head_dim）
+    # i.e. (batch_size, seq_len,num_heads, head_dim)
     batch_size = query.size(0)
     num_heads = query.size(1)
     head_dim = query.size(3)

@@ -77,6 +77,11 @@ register_artifact(
     visible=True,
 )
 register_artifact(
+    "compiled_autograd_verbose",
+    "Will affect performance. Prints compiled_autograd logs with C++ info e.g. autograd node -> fx node mapping",
+    off_by_default=True,
+)
+register_artifact(
     "ddp_graphs",
     "Only relevant for compiling DDP. DDP splits into multiple graphs to trigger comms early. This will print each individual graph here.",
 )
