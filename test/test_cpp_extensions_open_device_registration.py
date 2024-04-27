@@ -48,7 +48,7 @@ def generate_faked_module():
     def current_device():
         return 0
 
-    # create a new module to fake torch.foo dynamicly
+    # create a new module to fake torch.foo dynamicaly
     foo = types.ModuleType("foo")
 
     foo.device_count = device_count
@@ -132,7 +132,13 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         with self.assertRaisesRegex(RuntimeError, "The runtime module of"):
             torch._register_device_module("foo", generate_faked_module())
 
-        # backend name can only rename once
+        # backend name can be renamed to the same name multiple times
+        with self.assertRaisesRegex(
+            RuntimeError, "torch.register_privateuse1_backend()"
+        ):
+            torch.utils.rename_privateuse1_backend("foo")
+
+        # backend name can't be renamed multiple times to different names.
         with self.assertRaisesRegex(
             RuntimeError, "torch.register_privateuse1_backend()"
         ):
