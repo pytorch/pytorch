@@ -168,7 +168,7 @@ class Library:
         '''
         if dispatch_key == '':
             dispatch_key = self.dispatch_key
-        assert dispatch_key in ['CPU', 'CUDA', 'XPU']
+        assert torch.DispatchKeySet(dispatch_key).has(torch._C.DispatchKey.Dense)
 
         if isinstance(op_name, str):
             name = op_name
