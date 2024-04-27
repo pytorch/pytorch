@@ -192,26 +192,22 @@ kernel void nextafter_kernel(constant void  * input_       [[buffer(0)]],
                              device   void  * out_         [[buffer(2)]],
                              constant uint3 * offsets      [[buffer(3)]],
                              uint tid [[thread_position_in_grid]]) {
-  device   T* out   = (device   T*)((device uint8_t*)out_ + offsets[tid].x);
-  constant T* input = (constant T*)((constant uint8_t*)input_ + offsets[tid].y);
-  constant T* other = (constant T*)((constant uint8_t*)other_ + offsets[tid].z);
+  auto out   = (device   T*)((device uint8_t*)out_ + offsets[tid].x);
+  auto input = *(constant T*)((constant uint8_t*)input_ + offsets[tid].y);
+  auto other = *(constant T*)((constant uint8_t*)other_ + offsets[tid].z);
 #if __METAL_VERSION__ >= 310
-  *out = nextafter(*input, *other);
+  *out = nextafter(input, other);
 #else
-  if (*input == *other)
-  {
-    *out = *other;
-  }
-  else if (isnan(*input) || isnan(*other))
-  {
+  if (input == other) {
+    *out = input;
+  } else if (isnan(input) || isnan(other)) {
     *out = NAN;
-  }
-  else
-  {
-    U bits = as_type<U>(*input);
-    U other_bits = as_type<U>(*other);
-
-    bits = bits + ((other_bits > bits) ? 1 : -1);
+  } else if (input == 0) {
+    constexpr auto one = as_type<T>(static_cast<U>(1));
+    *out = other > 0 ? one : -one;
+  } else {
+    U bits = as_type<U>(input);
+    (input > 0) ^ (input > other) ? bits++ : bits--;
     *out = as_type<T>(bits);
   }
 #endif
