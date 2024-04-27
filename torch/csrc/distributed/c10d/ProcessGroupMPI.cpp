@@ -514,7 +514,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::allgather(
             pgComm_));
 
         for (const auto i : c10::irange(outputDataVec.size())) {
-          outputDataVec[i].copy_(flatOutputTensor[i]);
+          outputDataVec[i].copy_(flatOutputTensor[static_cast<int64_t>(i)]);
         }
       };
   auto entry = std::make_unique<WorkEntry>(
@@ -586,7 +586,8 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::gather(
           const std::vector<at::Tensor>& outputDataVec = entry->dst;
           // copy the flattened output tensors to the outputs
           for (const auto i : c10::irange(outputDataVec.size())) {
-            outputDataVec.at(i).copy_(flatOutputTensor[i]);
+            outputDataVec.at(i).copy_(
+                flatOutputTensor[static_cast<int64_t>(i)]);
           }
         }
       };
@@ -647,7 +648,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::scatter(
 
           // copy the input tensors to the flatten large send buffer
           for (const auto i : c10::irange(inputDataVec.size())) {
-            flatInputTensor[i].copy_(inputDataVec.at(i));
+            flatInputTensor[static_cast<int64_t>(i)].copy_(inputDataVec.at(i));
           }
         }
 
@@ -793,16 +794,18 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::alltoall(
         std::vector<int> recv_offsets(size_);
         auto srcdata = entry->src;
         auto dstdata = entry->dst;
-        int64_t src_len = c10d::computeLengthsAndOffsets(
+        auto src_len = c10d::computeLengthsAndOffsets(
             srcdata, &send_lengths, &send_offsets);
-        int64_t dst_len = c10d::computeLengthsAndOffsets(
+        auto dst_len = c10d::computeLengthsAndOffsets(
             dstdata, &recv_lengths, &recv_offsets);
         std::vector<int64_t> send_lengthsL(
             send_lengths.begin(), send_lengths.end());
         std::vector<int64_t> recv_lengthsL(
             recv_lengths.begin(), recv_lengths.end());
-        at::Tensor srcFlatData = at::empty({src_len}, srcdata[0].options());
-        at::Tensor dstFlatData = at::empty({dst_len}, dstdata[0].options());
+        at::Tensor srcFlatData =
+            at::empty({static_cast<int64_t>(src_len)}, srcdata[0].options());
+        at::Tensor dstFlatData =
+            at::empty({static_cast<int64_t>(dst_len)}, dstdata[0].options());
         auto srcFlatDataSplits =
             srcFlatData.split_with_sizes(c10::IntArrayRef(send_lengthsL), 0);
         for (const auto i : c10::irange(size_)) {
