@@ -1546,7 +1546,10 @@ class CppWrapperCpu(WrapperCodeGen):
             )
             device_type, device_id = device_str.split(",")
             device_idx = "this->device_idx_" if V.graph.aot_mode else device_id
-            if buffer_if_can_stack_allocate is not None:
+            scheduler_node = V.graph.scheduler.name_to_node.get(name)
+            if buffer_if_can_stack_allocate is not None and not (
+                scheduler_node and scheduler_node.is_extern()
+            ):
                 from .cpp import DTYPE_TO_CPP
 
                 self.stack_allocated_buffers[name] = buffer_if_can_stack_allocate
