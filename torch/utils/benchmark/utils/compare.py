@@ -274,10 +274,7 @@ class Compare:
     :class:`torch.utils.benchmark.Timer` (`description`, `label`, `sub_label`, 
     `num_threads`, etc).
 
-    The methods :meth:`trim_significant_figures`, and :meth:`colorize` provide 
-    an interface to change the table format.
-
-    the table can be directly printed using :meth:`print` or casted as a `str`.
+    The table can be directly printed using :meth:`print` or casted as a `str`.
 
     For a full tutorial on how to use this class, see:
     https://pytorch.org/tutorials/recipes/recipes/benchmark.html
