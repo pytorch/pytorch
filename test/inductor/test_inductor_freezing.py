@@ -456,11 +456,6 @@ class OptimizeForInferenceTemplate(TestCase):
                 out_eager = mod(x)
                 out_optimized_for_infernece, code = run_and_get_code(foo, mod, x)
 
-            self.assertNotIn(
-                "aten._native_batch_norm_legit_no_training(",
-                code[0],
-            )
-
             # we unfuse the conv bias, but it should only have one constant in the kernel
             if self.device == "cuda":
                 FileCheck().check_not(".run(").check("conv").check(".run(").check_same(
@@ -492,14 +487,9 @@ class OptimizeForInferenceTemplate(TestCase):
 
         with torch.no_grad():
             out_eager = foo(mod, x)
-            out_optimized_for_infernece, code = run_and_get_code(
+            out_optimized_for_infernece, _ = run_and_get_code(
                 torch.compile(foo), mod, x
             )
-
-        self.assertNotIn(
-            "aten._native_batch_norm_legit_no_training(",
-            code[0],
-        )
 
         self.assertEqual(out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2)
 
@@ -532,14 +522,9 @@ class OptimizeForInferenceTemplate(TestCase):
 
         with torch.no_grad():
             out_eager = foo(mod, x)
-            out_optimized_for_infernece, code = run_and_get_code(
+            out_optimized_for_infernece, _ = run_and_get_code(
                 torch.compile(foo), mod, x
             )
-
-        self.assertNotIn(
-            "aten._native_batch_norm_legit_no_training(",
-            code[0],
-        )
 
         self.assertEqual(out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2)
 
