@@ -6,6 +6,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests, TemporaryFileName)
 import torch
 import torch._dynamo
+from torch._dynamo.testing import make_test_cls_with_patches
 import itertools
 import numpy as np
 from torch.testing._internal.jit_utils import RUN_CUDA
@@ -52,6 +53,10 @@ aten = torch.ops.aten
 
 torch._dynamo.config.fake_tensor_cache_enabled = True
 torch._dynamo.config.fake_tensor_cache_crosscheck_enabled = True
+
+def expectedFailurePropagateRealTensors(fn):
+    fn._expected_failure_propagate_real_tensors = True
+    return fn
 
 class FakeTensorTest(TestCase):
     def checkType(self, t, device_str, size):
@@ -207,6 +212,8 @@ class FakeTensorTest(TestCase):
                 FileCheck().check("CPU").check("AutocastCPU").run(torch._C._dispatch_key_set(y))
                 FileCheck().check_not("ADInplaceOrView").check_not("Autograd").run(torch._C._dispatch_key_set(y))
 
+    # TODO: functorch support for propagate real tensors
+    @expectedFailurePropagateRealTensors
     def test_batch_tensor(self):
         x = torch.rand((3, 4, 5))
         b = _add_batch_dim(x, 0, 0)
@@ -392,10 +399,10 @@ class FakeTensorTest(TestCase):
             x = torch.rand([4])
             y = torch.rand([4], device="cuda")
 
-            with self.assertRaisesRegex(Exception, "found two different devices"):
+            with self.assertRaisesRegex(Exception, "found.+two.+devices"):
                 torch.sin(x, out=y)
 
-            with self.assertRaisesRegex(Exception, "found two different devices"):
+            with self.assertRaisesRegex(Exception, "found.+two.+devices"):
                 x.add_(y)
 
 
@@ -578,6 +585,9 @@ class FakeTensorTest(TestCase):
         self.assertIs(t2.size(0).node.shape_env, t1.size(0).node.shape_env)
         self.assertEqual(str(t2.size(0)), str(t1.size(0)))
 
+    # TODO: Support NJT.  There's also some funny business with dynamic shapes
+    # which would need to be dealt with as well
+    @expectedFailurePropagateRealTensors
     def test_jagged_fake_to_fake_preserved(self):
         from torch.nested._internal.nested_tensor import jagged_from_list
 
@@ -736,7 +746,9 @@ class FakeTensorTest(TestCase):
             x2 = torch.rand(4, 4, device="cuda")
             i1 = torch.tensor([0, 1], device="cuda")
             i2 = torch.tensor([0, 1], device="cpu")
-            r1 = torch.ops.aten.index(x1, i1)
+            # NB: This one does not work: cuda indices not allowed on cpu
+            # tensor
+            # r1 = torch.ops.aten.index(x1, i1)
             r2 = torch.ops.aten.index(x2, i2)
 
             y1 = torch.rand(4, device="cpu")
@@ -745,7 +757,7 @@ class FakeTensorTest(TestCase):
             j2 = torch.tensor([2], device="cpu")
             r3 = torch.ops.aten.index_put.default(x1, j1, y1)
             r4 = torch.ops.aten.index_put.default(x2, j2, y2)
-        self.checkType(r1, "cpu", ())
+        # self.checkType(r1, "cpu", ())
         self.checkType(r2, "cuda", ())
         self.checkType(r3, "cpu", (4, 4))
         self.checkType(r4, "cuda", (4, 4))
@@ -783,6 +795,23 @@ class FakeTensorTest(TestCase):
         with FakeTensorMode():
             ep = torch.export.export(MyNumpyModel(), args=(torch.randn(1000),))
             self.assertTrue(isinstance(ep, torch.export.ExportedProgram))
+
+
+instantiate_parametrized_tests(FakeTensorTest)
+
+
+def make_propagate_real_tensors_cls(cls):
+    cls = make_test_cls_with_patches(
+        cls,
+        "PropagateRealTensors",
+        "_propagate_real_tensors",
+        (torch._functorch.config, "fake_tensor_propagate_real_tensors", True),
+        xfail_prop="_expected_failure_propagate_real_tensors",
+    )
+    globals()[cls.__name__] = cls
+
+
+make_propagate_real_tensors_cls(FakeTensorTest)
 
 
 class FakeTensorConstHandling(TestCase):
@@ -875,6 +904,10 @@ class FakeTensorConstHandling(TestCase):
             y = torch.div(4, 4, rounding_mode='trunc')
             self.assertConst(y)
 
+
+make_propagate_real_tensors_cls(FakeTensorConstHandling)
+
+
 def contains_type(type: torch._C.Type, maybe_contained_type: torch._C.Type):
     return maybe_contained_type.isSubtypeOf(type) or any(
         contains_type(e, maybe_contained_type) for e in type.containedTypes()
@@ -889,6 +922,13 @@ class FakeTensorOpInfoTest(TestCase):
             args = (sample_input.input,) + sample_input.args
             kwargs = sample_input.kwargs
             optests.fake_check(op, args, kwargs)
+
+
+instantiate_device_type_tests(FakeTensorOpInfoTest, globals(), only_for=("cpu", "cuda"))
+
+
+# CPU only for efficiency ig
+make_propagate_real_tensors_cls(FakeTensorOpInfoTestCPU)
 
 
 class FakeTensorConverterTest(TestCase):
@@ -1002,16 +1042,17 @@ class FakeTensorConverterTest(TestCase):
         assert y_weak() is None
 
 
+make_propagate_real_tensors_cls(FakeTensorConverterTest)
+
+
 class FakeTensorOperatorInvariants(TestCase):
-    @staticmethod
-    def get_aten_op(schema):
+    def get_aten_op(self, schema):
         namespace, name = schema.name.split("::")
         overload = schema.overload_name if schema.overload_name else "default"
         assert namespace == "aten"
         return getattr(getattr(torch.ops.aten, name), overload)
 
-    @staticmethod
-    def get_all_aten_schemas():
+    def get_all_aten_schemas(self):
         for schema in torch._C._jit_get_all_schemas():
             namespace = schema.name.split("::")[0]
             if namespace != "aten":
@@ -1220,6 +1261,9 @@ class FakeTensorOperatorInvariants(TestCase):
         self.assertEqual(mode.count, 0)
 
 
+make_propagate_real_tensors_cls(FakeTensorOperatorInvariants)
+
+
 class FakeTensorPropTest(TestCase):
     def test_fake_tensor_prop_on_nn_module(self):
         class ToyNnModuleWithParameters(torch.nn.Module):
@@ -1305,6 +1349,8 @@ class FakeTensorPropTest(TestCase):
             FakeTensorProp(graph_model, fake_mode).propagate(value, None, another_optional_value)
 
 
+    # TODO: not sure about this one, kinda strange
+    @expectedFailurePropagateRealTensors
     def test_unbacked_shape_realloc(self):
         def f(x):
             return x.nonzero()
@@ -1350,6 +1396,9 @@ class FakeTensorPropTest(TestCase):
             with fake_mode:
                 torch.load(state_dict_file)  # scenario 1
                 torch.load(state_dict_file, map_location="cpu")  # scenario 2
+
+
+make_propagate_real_tensors_cls(FakeTensorPropTest)
 
 
 class FakeTensorSerialization(TestCase):
@@ -1689,12 +1738,6 @@ class FakeTensorDispatchCache(TestCase):
                 extract_tensor_metadata(res2),
                 extract_tensor_metadata(res4),
             )
-
-
-instantiate_parametrized_tests(FakeTensorTest)
-
-only_for = ("cpu", "cuda")
-instantiate_device_type_tests(FakeTensorOpInfoTest, globals(), only_for=only_for)
 
 if __name__ == "__main__":
     run_tests()

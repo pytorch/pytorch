@@ -515,31 +515,35 @@ def compute_unbacked_bindings(shape_env, example_value, old_example_value=None):
         fs.clear()
 
         def free_unbacked_symbols_with_path(
-            a, path
+            a, path, real=None
         ) -> Dict[sympy.Symbol, pytree.KeyPath]:
             r = {}
             if isinstance(a, (tuple, list)):
                 for i in range(len(a)):
                     r.update(
                         free_unbacked_symbols_with_path(
-                            a[i], path + (pytree.SequenceKey(i),)
+                            a[i], path + (pytree.SequenceKey(i),),
+                            real=real[i] if real is not None else None
                         )
                     )
             elif isinstance(a, torch.Tensor):
                 r.update(
                     free_unbacked_symbols_with_path(
-                        a.size(), path + (CallMethodKey("size"),)
+                        a.size(), path + (CallMethodKey("size"),),
+                        real=a.real_tensor.size() if a.real_tensor is not None else None
                     )
                 )
                 r.update(
                     free_unbacked_symbols_with_path(
-                        a.stride(), path + (CallMethodKey("stride"),)
+                        a.stride(), path + (CallMethodKey("stride"),),
+                        real=a.real_tensor.stride() if a.real_tensor is not None else None
                     )
                 )
                 r.update(
                     free_unbacked_symbols_with_path(
                         a.storage_offset(), path + (CallMethodKey("storage_offset"),)
-                    )
+                    ),
+                    real=a.real_tensor.storage_offset() if a.real_tensor is not None else None
                 )
 
             # NB: Intentionally access _expr, not expr, do not want
@@ -550,6 +554,8 @@ def compute_unbacked_bindings(shape_env, example_value, old_example_value=None):
                 and s in pending
             ):
                 r[s] = path
+                if real is not None:
+                    shape_env.unbacked_var_to_val[s] = real
                 pending.remove(s)
             # When an unbacked SymInt is perfectly divisible by an integer
             # constant, we replace it with the integer constant to improve
@@ -566,6 +572,8 @@ def compute_unbacked_bindings(shape_env, example_value, old_example_value=None):
             ):
                 # TODO: DivideByKey needs to test divisibility at runtime!
                 r[s] = path + (DivideByKey(int(lhs)),)
+                if real is not None:
+                    shape_env.unbacked_var_to_val[s] = real // int(lhs)
                 pending.remove(rhs)
             # The annoyance here arises from the fact that SymBool is
             # allocated by allocating a SymInt and then testing if it's equal
@@ -579,6 +587,8 @@ def compute_unbacked_bindings(shape_env, example_value, old_example_value=None):
                 and s.lhs in pending
             ):
                 r[s.lhs] = path + (ConvertIntKey(),)
+                if real is not None:
+                    shape_env.unbacked_var_to_val[s] = int(real)
                 pending.remove(s.lhs)
 
             return r
@@ -592,6 +602,7 @@ def compute_unbacked_bindings(shape_env, example_value, old_example_value=None):
                 else ""
             )
         )
+
         # TODO: This is pretty fragile
         # Normally, the equality test is supposed to be a no-op here, because
         # you've already called rebind_unbacked first which takes all the old
@@ -2221,6 +2232,9 @@ class ShapeEnv:
         # Maps symbolic ints to their original concrete values
         # Currently populated from tensors
         self.var_to_val: Dict[sympy.Symbol, sympy.Integer] = {}
+        # Like var_to_val, but only set when propagate_real_tensors is on.
+        # Used as last resort to avoid GuardOnDataDependent error
+        self.unbacked_var_to_val: Dict[sympy.Symbol, sympy.Integer] = {}
         # Maps symbolic ints to their min/max range.  These ranges
         # are conservative: the int MUST fall in the range, but the
         # range may contain ints which may not actually appear in
@@ -2619,7 +2633,7 @@ class ShapeEnv:
         Defines the current "state" of the guards we've accumulated in this ShapeEnv.
         Determines when we need to invalidate our cache
         """
-        return (len(self.replacements), len(self.divisible), self.num_deferred_runtime_asserts)
+        return (len(self.replacements), len(self.divisible), self.num_deferred_runtime_asserts, len(self.unbacked_var_to_val))
 
     def _update_version_counter(self):
         # The shape environment is queried orders of magnitude more often than
@@ -4102,6 +4116,13 @@ class ShapeEnv:
                 return r
             if allow_none:
                 return None
+
+            if self.unbacked_var_to_val:
+                unsound_expr = result_expr.xreplace(self.unbacked_var_to_val)
+                if not unsound_expr.free_symbols:
+                    log.warning("propagate_real_tensors size_hint(%s) -> %s", expr, unsound_expr)
+                    return unsound_expr
+
             raise self._make_data_dependent_error(result_expr, expr)
         return result_expr
 
@@ -4603,6 +4624,7 @@ class ShapeEnv:
                     assert static_expr == hint, f"{static_expr} != {hint}"
                 return static_expr
 
+            concrete_val = None
             if not (expr.free_symbols <= self.var_to_val.keys()):
                 # TODO: dedupe this with _maybe_evaluate_static
                 # Attempt to eliminate the unbacked SymInt
@@ -4616,14 +4638,21 @@ class ShapeEnv:
                             size_oblivious=True
                         )
 
-                    raise self._make_data_dependent_error(
-                        expr.xreplace(self.var_to_val),
-                        expr,
-                        size_oblivious_result=size_oblivious_result
-                    )
-                expr = new_expr
+                    # Last ditch
+                    if self.unbacked_var_to_val and (unsound_result := orig_expr.xreplace(self.unbacked_var_to_val)) and not unsound_result.free_symbols:
+                        log.warning("propagate_real_tensors evaluate_expr(%s) -> %s", orig_expr, unsound_result)
+                        concrete_val = unsound_result
+                    else:
+                        raise self._make_data_dependent_error(
+                            expr.xreplace(self.var_to_val),
+                            expr,
+                            size_oblivious_result=size_oblivious_result
+                        )
+                else:
+                    expr = new_expr
 
-            concrete_val = compute_concrete_val()
+            if concrete_val is None:
+                concrete_val = compute_concrete_val()
             self._check_frozen(expr, concrete_val)
 
             if (
