@@ -7,6 +7,7 @@ import dataclasses
 from typing import Any, Callable, List, Optional, Tuple, Union
 
 import torch
+import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch import Tensor
 from torch._dispatch.python import enable_python_dispatcher
@@ -127,6 +128,9 @@ def aot_dispatch_base_graph(
             _map_assigned_buffer_to_proxy
         )
 
+    saved_updated_flat_args_subclasses_desugared = pytree.tree_map_only(
+        torch.Tensor, lambda t: t.detach(), updated_flat_args_subclasses_desugared
+    )
     fw_module = _create_graph(
         fn_to_trace,
         updated_flat_args_subclasses_desugared,
@@ -171,9 +175,9 @@ def aot_dispatch_base_graph(
     num_tokens = len(fw_metadata.tokens)
     if num_tokens != 0 and config.unlift_effect_tokens:
         unlift_tokens(fw_module, fw_metadata)
-        updated_flat_args_subclasses_desugared = updated_flat_args_subclasses_desugared[
-            num_tokens:
-        ]
+        saved_updated_flat_args_subclasses_desugared = (
+            saved_updated_flat_args_subclasses_desugared[num_tokens:]
+        )
 
     assert copy_count == copy_count2
 
@@ -192,7 +196,7 @@ def aot_dispatch_base_graph(
             maybe_subclass_meta is None
         ), "aot_export_module does not support tensor subclass inputs for now."
         return fw_module
-    return fw_module, list(updated_flat_args_subclasses_desugared), maybe_subclass_meta
+    return fw_module, saved_updated_flat_args_subclasses_desugared, maybe_subclass_meta
 
 
 # Has the precondition that there
@@ -235,6 +239,17 @@ def aot_dispatch_autograd_graph(
 
     joint_fn_to_trace = subclass_tracing_info.plain_tensor_trace_fn
     updated_joint_inputs = subclass_tracing_info.plain_tensor_args
+    # When we call _create_graph, this may mutate the metadata of joint
+    # inputs.  But callers are expecting to get the original joint inputs.  So
+    # we make aliases of all the inputs to make sure we have a copy that
+    # doesn't get modified.
+    #
+    # This destroys requires_grad/grad_fn information.  However, backends
+    # beneath AOTAutograd are indifferent to this information, so it doesn't
+    # matter.
+    saved_updated_joint_inputs = pytree.tree_map_only(
+        torch.Tensor, lambda t: t.detach(), updated_joint_inputs
+    )
     maybe_subclass_meta = subclass_tracing_info.maybe_subclass_meta
     aot_graphs_log.debug(
         "aot_config id: %s, fw_metadata=%s,subclass_metadata=%s",
@@ -262,4 +277,4 @@ def aot_dispatch_autograd_graph(
             maybe_subclass_meta is None
         ), "aot_export_module does not support tensor subclass inputs for now."
         return fx_g
-    return fx_g, updated_joint_inputs, maybe_subclass_meta
+    return fx_g, saved_updated_joint_inputs, maybe_subclass_meta  # type: ignore[return-value]

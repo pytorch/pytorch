@@ -194,34 +194,23 @@ def set_device_states(devices, states) -> None:
 
 
 def _get_autocast_kwargs(device="cuda"):
-    if device == "cuda":
+    if torch.amp.is_autocast_available(device):
         device_autocast_kwargs = {
-            "enabled": torch.is_autocast_enabled(),
-            "dtype": torch.get_autocast_gpu_dtype(),
-            "cache_enabled": torch.is_autocast_cache_enabled(),
-        }
-    elif _supports_autocast(device):
-        device_module = _get_device_module(device)
-        device_autocast_kwargs = {
-            "enabled": device_module.is_autocast_enabled(),
-            "dtype": device_module.get_autocast_dtype(),
+            "enabled": torch.is_autocast_enabled(device),
+            "dtype": torch.get_autocast_dtype(device),
             "cache_enabled": torch.is_autocast_cache_enabled(),
         }
     else:
         device_autocast_kwargs = None
 
     cpu_autocast_kwargs = {
-        "enabled": torch.is_autocast_cpu_enabled(),
-        "dtype": torch.get_autocast_cpu_dtype(),
+        "enabled": torch.is_autocast_enabled('cpu'),
+        "dtype": torch.get_autocast_dtype('cpu'),
         "cache_enabled": torch.is_autocast_cache_enabled(),
     }
 
     return device_autocast_kwargs, cpu_autocast_kwargs
 
-def _supports_autocast(device):
-    device_module = _get_device_module(device)
-    return device == "cuda" or (hasattr(device_module, "is_autocast_enabled")
-                                and hasattr(device_module, "get_autocast_dtype"))
 
 class CheckpointFunction(torch.autograd.Function):
     @staticmethod
@@ -300,7 +289,7 @@ class CheckpointFunction(torch.autograd.Function):
 
             device_autocast_ctx = device_module.amp.autocast(
                 **ctx.device_autocast_kwargs
-            ) if _supports_autocast(ctx.device) else contextlib.nullcontext()
+            ) if torch.amp.is_autocast_available(ctx.device) else contextlib.nullcontext()
             with torch.enable_grad(), device_autocast_ctx, \
                  torch.cpu.amp.autocast(**ctx.cpu_autocast_kwargs):
                 outputs = ctx.run_function(*detached_inputs)
@@ -1085,7 +1074,7 @@ class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
             if target_frame.early_stop and target_frame.recomp_counter[gid] == len(
                 target_frame.weak_holders
             ):
-                raise _StopRecomputationError()
+                raise _StopRecomputationError
             # See Rule 6: [ retain_graph is True ] above
             return x.detach()
 
@@ -1407,7 +1396,7 @@ def _checkpoint_without_reentrant_generator(
 
             device_autocast_ctx = device_module.amp.autocast(
                 **device_autocast_kwargs
-            ) if _supports_autocast(device) else contextlib.nullcontext()
+            ) if torch.amp.is_autocast_available(device) else contextlib.nullcontext()
             with device_autocast_ctx, torch.cpu.amp.autocast(**cpu_autocast_kwargs), \
                  recompute_context:
                 fn(*args, **kwargs)

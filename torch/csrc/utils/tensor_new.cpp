@@ -48,6 +48,8 @@ namespace torch::utils {
 namespace {
 const int MAX_DIMS = 128;
 
+thread_local bool kOnlyLiftCPUTensors = false;
+
 TensorOptions build_options(
     c10::TensorOptions options,
     at::ScalarType scalar_type,
@@ -453,19 +455,35 @@ Tensor internal_new_from_data(
     // "no observable data dependence".  In an ideal world, we wouldn't trace
     // a to() call but I need to think harder about what exactly we should trace
     // in this case.
-    tensor = tensor.to(
-        device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/false);
+    if (only_lift_cpu_tensors()) {
+      tensor = tensor.to(
+          inferred_scalar_type, /*non_blocking=*/false, /*copy=*/false);
+
+    } else {
+      tensor = tensor.to(
+          device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/false);
+    }
   }
 
   // torch.jit.trace will continue to trace out `.to()` instead of `.lift()`,
   // since changing it is BC-breaking.
   at::tracer::impl::NoTracerDispatchMode tracer_guard;
-  // lift has no autograd implementation, so we need to make sure we don't try
-  // to dispatch to it.
-  // TODO: arguably it should have an autograd implementation that noops
-  at::AutoDispatchBelowADInplaceOrView guard;
-
-  return at::lift_fresh(tensor);
+  {
+    // lift has no autograd implementation, so we need to make sure we don't try
+    // to dispatch to it.
+    // TODO: arguably it should have an autograd implementation that noops
+    at::AutoDispatchBelowADInplaceOrView guard;
+    tensor = at::lift_fresh(tensor);
+  }
+  if (only_lift_cpu_tensors() && device.type() != DeviceType::CPU) {
+    if (!device.has_index() &&
+        !torch::utils::is_device_initialized(device.type())) {
+      // Infer device 0 to avoid device init
+      device = c10::Device(device.type(), 0);
+    }
+    tensor = tensor.to(device, /*non_blocking=*/false, /*copy=*/false);
+  }
+  return tensor;
 }
 
 Tensor new_from_data_copy(
@@ -1786,6 +1804,14 @@ Tensor asarray(
   }
 
   return tensor;
+}
+
+bool only_lift_cpu_tensors() {
+  return kOnlyLiftCPUTensors;
+}
+
+void set_only_lift_cpu_tensors(bool value) {
+  kOnlyLiftCPUTensors = value;
 }
 
 } // namespace torch::utils

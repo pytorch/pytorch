@@ -243,7 +243,7 @@ class DeferredCudaCallError(Exception):
     pass
 
 
-OutOfMemoryError = torch._C._OutOfMemoryError
+OutOfMemoryError = torch._C.OutOfMemoryError
 
 
 def init():
