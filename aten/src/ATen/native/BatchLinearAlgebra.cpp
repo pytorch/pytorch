@@ -3427,7 +3427,7 @@ static void linalg_lstsq_out_info(
 
   // 'input' is modified in-place so we need a column-major copy
   auto input_working_copy = copyBatchedColumnMajor(input);
-  
+
   // now the actual call that computes the result in-place (apply_lstsq)
   if(driver == "gelsd" || driver == "gelss") {
     auto k = std::min(m, n);
@@ -3575,7 +3575,7 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> linalg_lstsq_out(
   // to be consistent with torch.linalg.matrix_rank output dtype
   ScalarType rank_expected_type = ScalarType::Long;
   checkLinalgCompatibleDtype("torch.linalg.lstsq", rank.scalar_type(), rank_expected_type, "rank");
-  
+
   // 'singular_values' is expected to have real float dtype
   checkLinalgCompatibleDtype("torch.linalg.lstsq", singular_values.scalar_type(), real_dtype, "singular_values");
 
@@ -3688,7 +3688,7 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> linalg_lstsq_out(
     // else use the provided output storage directly
     linalg_lstsq_out_info(solution, residuals, rank, singular_values, infos, input, other, rcond_value, driver_name);
   }
-  
+
   at::_linalg_check_errors(infos, "torch.linalg.lstsq", infos.numel() <= 1);
   return std::tuple<Tensor&, Tensor&, Tensor&, Tensor&>(solution, residuals, rank, singular_values);
 }
