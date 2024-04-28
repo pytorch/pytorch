@@ -3442,10 +3442,9 @@ static void linalg_lstsq_out_info(
           U, singular_values, Vh, infos);
 
     auto tol = 1e-5; // what should this be? can rcond be used?
-    auto mask = singular_values > tol;
-    auto pseudo_sv = at::zeros_like(singular_values);
-
-    pseudo_sv.masked_scatter_(mask, singular_values.masked_select(mask).reciprocal());
+    auto S_pinv = S.reciprocal();
+    auto s1 = at::narrow(S, /*dim=*/-1, /*start=*/0, /*length=*/1);  // singular values are sorted in descending order
+    S_pinv.masked_fill_(S < rcond * s1, 0);
     auto uhOther = at::matmul(U.adjoint(), other);
     if(pseudo_sv.dim() !=uhOther.dim()) {
       pseudo_sv = pseudo_sv.unsqueeze(-1);
