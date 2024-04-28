@@ -684,8 +684,7 @@ def forward(self, x_1, start_1):
 
     def test_masked_fill(self, device):
         from torch.fx.experimental.proxy_tensor import make_fx
-        device = device.rstrip(":0123456789")
-        if device not in ["xpu", "cuda", torch._C._get_privateuse1_backend_name()]:
+        if torch.device(device).type not in ["xpu", "cuda", torch._C._get_privateuse1_backend_name()]:
             self.skipTest("only runs on XPU and CUDA and PrivateUse1.")
 
         def func(scores, mask, value):
