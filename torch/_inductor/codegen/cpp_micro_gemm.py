@@ -1,8 +1,10 @@
 from collections import namedtuple
+from typing import Dict, List, Type
 
 import torch
 
 from .. import ir
+from ..codecache import pick_vec_isa, VecAVX2, VecAVX512
 from ..utils import IndentedBuffer, parallel_num_threads
 from .common import KernelTemplate
 from .cpp_template_kernel import CppTemplateKernel
@@ -90,6 +92,32 @@ inline void {{kernel_name}}(
         return res.getvalue()
 
 
+CppMicroGemmConfig = namedtuple(
+    "CppMicroGemmConfig",
+    [
+        "input_dtype",
+        "output_dtype",
+        "compute_dtype",
+        "vec_isa_cls",
+        "register_blocking",
+    ],
+)
+
+micro_gemm_configs: Dict[Type[CppMicroGemm], List[CppMicroGemmConfig]] = {}
+
+
+def register_micro_gemm(*configs):
+    def inner(cls):
+        assert (
+            cls not in micro_gemm_configs
+        ), f"Duplicate micro_gemm registration for {cls}"
+        assert len(configs) > 0, f"No micro_gemm configs provided for {cls}"
+        micro_gemm_configs[cls] = list(configs)
+        return cls
+
+    return inner
+
+
 class CppMicroGemmRef(CppMicroGemm):
     TEMPLATE_ENTRY = r"""
 {{declare_kernel}} {
@@ -118,6 +146,20 @@ class CppMicroGemmRef(CppMicroGemm):
         return KernelTemplate._template_from_string(self.TEMPLATE_ENTRY).render(options)
 
 
+@register_micro_gemm(
+    CppMicroGemmConfig(
+        torch.float32, torch.float32, torch.float32, VecAVX512, GemmBlocking(8, 32, 1)
+    ),
+    CppMicroGemmConfig(
+        torch.float32, torch.float32, torch.float32, VecAVX512, GemmBlocking(16, 16, 1)
+    ),
+    CppMicroGemmConfig(
+        torch.float32, torch.float32, torch.float32, VecAVX2, GemmBlocking(4, 16, 1)
+    ),
+    CppMicroGemmConfig(
+        torch.float32, torch.float32, torch.float32, VecAVX2, GemmBlocking(8, 8, 1)
+    ),
+)
 class CppMicroGemmFP32AVX(CppMicroGemm):
     TEMPLATE_ENTRY = r"""
 {{declare_kernel}} {
@@ -232,31 +274,6 @@ inline void {{kernel_name}}_kernel(
         return result
 
 
-CppMicroGemmConfig = namedtuple(
-    "CppMicroGemmConfig",
-    ["cls", "input_dtype", "output_dtype", "compute_dtype", "register_blocking"],
-)
-
-
-micro_gemm_configs = [
-    # TODO: decide register_blocking per cpu arch, assume avx512 now
-    CppMicroGemmConfig(
-        CppMicroGemmFP32AVX,
-        torch.float32,
-        torch.float32,
-        torch.float32,
-        GemmBlocking(8, 32, 1),
-    ),
-    CppMicroGemmConfig(
-        CppMicroGemmFP32AVX,
-        torch.float32,
-        torch.float32,
-        torch.float32,
-        GemmBlocking(16, 16, 1),
-    ),
-]
-
-
 def create_micro_gemm(
     name,
     m,
@@ -269,8 +286,8 @@ def create_micro_gemm(
     num_threads=-1,
     use_ref=False,
 ) -> CppMicroGemm:
-    def create_from_config(config: CppMicroGemmConfig):
-        return config.cls(
+    def create_from_config(cls, config: CppMicroGemmConfig):
+        return cls(
             name,
             config.input_dtype,
             config.output_dtype,
@@ -287,25 +304,29 @@ def create_micro_gemm(
         compute_dtype = input_dtype
     if num_threads < 0:
         num_threads = parallel_num_threads()
+    vec_isa = pick_vec_isa()
     matched_configs = []
-    for config in micro_gemm_configs:
-        if (
-            config.input_dtype == input_dtype
-            and config.output_dtype == output_dtype
-            and config.compute_dtype == compute_dtype
-        ):
-            score = 0
-            block_m, block_n, block_k = config.register_blocking
-            if n % block_n == 0:
-                score += 1
-            if k % block_k == 0:
-                score += 1
-            if m % block_m == 0:
-                score += 1
-            n_blocks = (n + block_n - 1) // block_n
-            if n_blocks >= num_threads:
-                score += 1
-            matched_configs.append((score, config))
+    for cls, configs in micro_gemm_configs.items():
+        for config in configs:
+            if not isinstance(vec_isa, config.vec_isa_cls):
+                continue
+            if (
+                config.input_dtype == input_dtype
+                and config.output_dtype == output_dtype
+                and config.compute_dtype == compute_dtype
+            ):
+                score = 0
+                block_m, block_n, block_k = config.register_blocking
+                if n % block_n == 0:
+                    score += 1
+                if k % block_k == 0:
+                    score += 1
+                if m % block_m == 0:
+                    score += 1
+                n_blocks = (n + block_n - 1) // block_n
+                if n_blocks >= num_threads:
+                    score += 1
+                matched_configs.append((score, cls, config))
     if len(matched_configs) == 0 or use_ref:
         return CppMicroGemmRef(name, input_dtype, output_dtype, compute_dtype, alpha)
-    return create_from_config(max(matched_configs, key=lambda x: x[0])[1])
+    return create_from_config(*max(matched_configs, key=lambda x: x[0])[1:])
