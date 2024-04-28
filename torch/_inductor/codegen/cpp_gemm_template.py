@@ -38,7 +38,13 @@ extern "C"
     {%- if is_dynamic_M %}
     const int64_t M = {{kernel.size(Y, 0)}};
     const int64_t M0_blocks = (M + M0 - 1) / M0;
+    {%- if num_threads > 1 %}
     const auto [Mt_blocks, Nt_blocks, Kt_blocks] = mm_get_thread_blocking(M, N, K, M0, N0, K0, num_threads);
+    {%- else %}
+    const auto Mt_blocks = M0_blocks;
+    const auto Nt_blocks = N0_blocks;
+    const auto Kt_blocks = K0_blocks;
+    {%- endif %}
     const int64_t M2_blocks = Mt_blocks;
     const int64_t K2_blocks = Kt_blocks;
     {%- else %}
@@ -59,6 +65,7 @@ extern "C"
         "Not all partitions are assigned."
     );
 
+    {%- if num_threads > 1 %}
     #pragma omp parallel num_threads({{num_threads}})
     {
         int tid = omp_get_thread_num();
@@ -66,6 +73,15 @@ extern "C"
         mm_get_thread_blocks(
             tid, M0_blocks, N0_blocks, K0_blocks, Mt_blocks, Nt_blocks, Kt_blocks,
             m_block_start, m_block_end, n_block_start, n_block_end, k_block_start, k_block_end);
+    {%- else %}
+    {
+        int64_t m_block_start = 0;
+        int64_t m_block_end = M0_blocks;
+        int64_t n_block_start = 0;
+        int64_t n_block_end = N0_blocks;
+        int64_t k_block_start = 0;
+        int64_t k_block_end = K0_blocks;
+    {%- endif %}
         for (int64_t m2 = m_block_start; m2 < m_block_end; m2 += M2_blocks) {
             int64_t m_start = m2 * M0;
             int64_t m_end = std::min((m2 + M2_blocks) * M0, M);
