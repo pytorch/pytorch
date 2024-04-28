@@ -293,7 +293,7 @@ static PyObject* THPStorage_shareCuda(PyObject* self, PyObject* noargs) {
       "_share_cuda_: only available on CUDA");
   c10::StorageImpl* storage_impl = storage.unsafeGetStorageImpl();
 
-  if (storage_impl->received_cuda()) {
+  if (storage_impl->received_device()) {
     AT_ERROR(
         "Attempted to send CUDA tensor received from another process; this is not currently supported. Consider cloning before sending.");
   }
@@ -564,7 +564,7 @@ static PyObject* THPStorage_newSharedCuda(PyObject* _unused, PyObject* args) {
       /*resizable=*/false);
 
   base->set_resizable(false);
-  base->set_received_cuda(true);
+  base->set_received_device(true);
 
   return THPStorage_NewWithStorage(
       THPStorageClass,
@@ -651,19 +651,50 @@ PyObject* THPStorage_isShared(PyObject* self, PyObject* noargs) {
   }
 }
 
+
+// # Provides IPC extensions for third-party devices.
+static PyObject* THPStorage_shareDecice(PyObject* self, PyObject* noargs) {
+  at::globalContext().lazyInitPrivateUse1();
+  return (PyObject*)at::detail::getPrivateUse1Hooks().Storage_shareDevice(
+      self, noargs);
+}
+
+static PyObject* THPStorage_newSharedDevice(PyObject* _unused, PyObject* args) {
+  at::globalContext().lazyInitPrivateUse1();
+  return (PyObject*)at::detail::getPrivateUse1Hooks().Storage_newSharedDevice(
+      _unused, args);
+}
+
+static PyObject* THPStorage_releaseIPCCounterDevice(
+    PyObject* _unused,
+    PyObject* args) {
+  at::globalContext().lazyInitPrivateUse1();
+  return (PyObject*)at::detail::getPrivateUse1Hooks()
+      .Storage_releaseIPCCounterDevice(_unused, args);
+}
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static PyMethodDef THPStorage_sharingMethods[] = {
     {"_new_with_weak_ptr",
      THPStorage_newWithWeakPtr,
      METH_O | METH_CLASS,
      nullptr},
+    {"_share_device_", THPStorage_shareDecice, METH_NOARGS, nullptr},
     {"_share_cuda_", THPStorage_shareCuda, METH_NOARGS, nullptr},
+    {"_new_shared_device",
+     THPStorage_newSharedDevice,
+     METH_VARARGS | METH_STATIC,
+     nullptr},
     {"_new_shared_cuda",
      THPStorage_newSharedCuda,
      METH_VARARGS | METH_STATIC,
      nullptr},
     {"_release_ipc_counter_cuda",
      THPStorage_releaseIPCCounter,
+     METH_VARARGS | METH_STATIC,
+     nullptr},
+    {"_release_ipc_counter_device",
+     THPStorage_releaseIPCCounterDevice,
      METH_VARARGS | METH_STATIC,
      nullptr},
     {"_share_fd_cpu_", THPStorage_shareFd, METH_NOARGS, nullptr},

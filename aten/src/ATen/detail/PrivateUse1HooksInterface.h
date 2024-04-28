@@ -41,6 +41,24 @@ struct TORCH_API PrivateUse1HooksInterface : AcceleratorHooksInterface {
         false,
         "You should register `PrivateUse1HooksInterface` for PrivateUse1 before call `resizePrivateUse1Bytes`.");
   }
+
+  virtual void* Storage_shareDevice(void* self, void* noargs) const {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        "You should register `PrivateUse1HooksInterface` for PrivateUse1 before call `Storage_sharedevice`.");
+  }
+
+  virtual void* Storage_newSharedDevice(void* _unused, void* args) const {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        "You should register `PrivateUse1HooksInterface` for PrivateUse1 before call `Storage_newSharedDevice`.");
+  }
+
+  virtual void* Storage_releaseIPCCounterDevice(void* _unused, void* args) const {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        "You should register `PrivateUse1HooksInterface` for PrivateUse1 before call `releaseIPCCounterDevice`.");
+  }
 };
 
 struct TORCH_API PrivateUse1HooksArgs {};

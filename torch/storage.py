@@ -63,6 +63,8 @@ class _StorageBase:
     @classmethod
     def _release_ipc_counter_cuda(cls: Type[T], *args, **kwargs) -> T: ...  # type: ignore[empty-body] # noqa: E704
     @classmethod
+    def _release_ipc_counter_device(cls: Type[T], *args, **kwargs) -> T: ...  # type: ignore[empty-body] # noqa: E704
+    @classmethod
     def _new_with_weak_ptr(cls: Type[T], *args, **kwargs) -> T: ...  # type: ignore[empty-body] # noqa: E704
     def _shared_decref(self) -> T: ...  # type: ignore[empty-body, misc, type-var] # noqa: E704
     def _write_file(self, *args, **kwargs): ...  # noqa: E704
@@ -71,9 +73,12 @@ class _StorageBase:
     def _set_from_file(self, *args, **kwargs): ...  # noqa: E704
     def _set_cdata(self, *args, **kwargs): ...  # noqa: E704
     def _share_cuda_(self, *args, **kwargs): ...  # noqa: E704
+    def _share_device_(self, *args, **kwargs): ...  # noqa: E704
     def is_shared(self) -> bool: ...  # type: ignore[empty-body] # noqa: E704
     @classmethod
     def _new_shared_cuda(cls: Type[T], *args, **kwargs) -> T: ...  # type: ignore[empty-body] # noqa: E704
+    @classmethod
+    def _new_shared_device(cls: Type[T], *args, **kwargs) -> T: ...  # type: ignore[empty-body] # noqa: E704
     def _shared_incref(self, *args, **kwargs): ...  # noqa: E704
     @classmethod
     def _free_weak_ref(cls, *args, **kwargs): ...  # noqa: E704

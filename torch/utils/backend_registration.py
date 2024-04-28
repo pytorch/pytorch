@@ -266,6 +266,26 @@ def _generate_storage_methods_for_privateuse1_backend(custom_backend_name: str,
     _check_register_once(torch.storage._StorageBase, custom_backend_name)
     setattr(torch.storage._StorageBase, custom_backend_name, wrap_storage_to)
 
+    # Provides IPC extensions for third-party devices.
+    _check_register_once(torch.storage._StorageBase,
+                         f'_share_{custom_backend_name}_')
+    # type: ignore[attr-defined]
+    setattr(torch.storage._StorageBase, f'_share_{custom_backend_name}_',
+            torch.StorageBase._share_device_)
+
+    _check_register_once(torch.storage._StorageBase,
+                         f'_new_shared_{custom_backend_name}')
+    # type: ignore[attr-defined]
+    setattr(torch.storage._StorageBase, f'_new_shared_{custom_backend_name}',
+            classmethod(torch.StorageBase._new_shared_device))
+
+    _check_register_once(torch.storage._StorageBase,
+                         f'_release_ipc_counter_{custom_backend_name}')
+    # type: ignore[attr-defined]
+    setattr(torch.storage._StorageBase,
+            f'_release_ipc_counter_{custom_backend_name}',
+            classmethod(torch.StorageBase._release_ipc_counter_device))
+
     # Register the corresponding attribute for the TypedStorage class.
     # When the TypedStorage class is removed, the registration is also removed.
 
@@ -289,6 +309,36 @@ def _generate_storage_methods_for_privateuse1_backend(custom_backend_name: str,
 
     _check_register_once(torch.TypedStorage, custom_backend_name)
     setattr(torch.TypedStorage, custom_backend_name, wrap_typed_storage_to)
+
+    # Provides IPC extensions for third-party devices.
+    # type: ignore[attr-defined]
+    def wrap_typed_storage_share(self, *args, **kwargs):
+        return self._untyped_storage._share_device_(*args, **kwargs)
+
+    _check_register_once(torch.TypedStorage, f'_share_{custom_backend_name}_')
+    setattr(torch.TypedStorage, f'_share_{custom_backend_name}_',
+            wrap_typed_storage_share)
+
+    # type: ignore[attr-defined]
+    def wrap_typed_storage_new_shared(cls, *args, **kwargs):
+        return torch.UntypedStorage._new_shared_device(*args, **kwargs)
+
+    _check_register_once(torch.TypedStorage,
+                         f'_new_shared_{custom_backend_name}')
+    setattr(torch.TypedStorage, f'_new_shared_{custom_backend_name}',
+            classmethod(wrap_typed_storage_new_shared))
+
+    # type: ignore[attr-defined]
+    def wrap_typed_storage_release_ipc_counter(cls,
+                                               *args,
+                                               device=None,
+                                               **kwargs):
+        return torch.UntypedStorage._release_ipc_counter_device(*args, **kwargs)
+
+    _check_register_once(torch.TypedStorage,
+                         f'_release_ipc_counter_{custom_backend_name}')
+    setattr(torch.TypedStorage, f'_release_ipc_counter_{custom_backend_name}',
+            classmethod(wrap_typed_storage_release_ipc_counter))
 
 
 def generate_methods_for_privateuse1_backend(for_tensor: bool = True, for_module: bool = True,
