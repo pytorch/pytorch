@@ -344,7 +344,6 @@ class TestLinalg(TestCase):
         for m, batch in itertools.product(ms, batches):
             a = random_well_conditioned_matrix(m, m, dtype=dtype, device=device).view(*([1] * len(batch)), m, m)
             b = torch.rand(*(batch + (m, m)), dtype=dtype, device=device)
-
             check_correctness(a, b)
 
         # cases with broadcastable shapes

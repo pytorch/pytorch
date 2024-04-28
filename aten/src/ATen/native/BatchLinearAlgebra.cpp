@@ -3429,7 +3429,7 @@ static void linalg_lstsq_out_info(
   auto input_working_copy = copyBatchedColumnMajor(input);
 
   // now the actual call that computes the result in-place (apply_lstsq)
-  if (driver == "gelss") {
+  if (driver == "gelss" input.device() != at::kCPU) {
     auto [U, S, Vh] = at::_linalg_svd(input, false, true, "gesvd");
     auto S_pinv = S.reciprocal();
     auto s1 = at::narrow(S, /*dim=*/-1, /*start=*/0, /*length=*/1);  // singular values are sorted in descending order
