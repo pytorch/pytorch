@@ -1032,7 +1032,7 @@ To choose the best driver on CPU consider:
   - `'gelsd'` (tridiagonal reduction and SVD)
   - But if you run into memory issues: `'gelss'` (full SVD).
 
-For CUDA input, the only valid driver is `'gels'`, which assumes that :attr:`A` is full-rank.
+For CUDA inputs, two drivers are available: 'gels' and 'gelss'. The 'gels' driver assumes that :attr:A is full-rank. For rank-deficient matrices :attr:A, use the 'gelss' driver.
 
 See also the `full description of these drivers`_
 
@@ -1080,7 +1080,7 @@ Args:
 
 Keyword args:
     driver (str, optional): name of the LAPACK/MAGMA method to be used.
-        If `None`, `'gelsy'` is used for CPU inputs and `'gels'` for CUDA inputs.
+        If `None`, `'gelsy'` is used for CPU inputs, `'gels'` and `'gelss'` for CUDA inputs.
         Default: `None`.
 
 Returns:

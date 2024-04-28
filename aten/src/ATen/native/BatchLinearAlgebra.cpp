@@ -117,8 +117,8 @@
 #include <ATen/ops/triu.h>
 #include <ATen/ops/vdot.h>
 #include <ATen/ops/zeros.h>
-#include <ATen/ops/zeros_like.h>
 #include <ATen/ops/matmul.h>
+#include <ATen/ops/narrow.h>
 #endif
 
 // First the required LAPACK implementations are registered here.
@@ -3429,28 +3429,17 @@ static void linalg_lstsq_out_info(
   auto input_working_copy = copyBatchedColumnMajor(input);
 
   // now the actual call that computes the result in-place (apply_lstsq)
-  if(driver == "gelsd" || driver == "gelss") {
-    auto k = std::min(m, n);
-    auto U = at::zeros({input.size(0), m, k}, input.options());
-    auto Vh = at::zeros({input.size(0), k, n}, input.options());
-
-    svd_stub(input.device().type(),
-          input,
-          false, // you don't want the full SVD for least squares
-          true, // we need U, S, Vh for least squares
-          "gesvd",
-          U, singular_values, Vh, infos);
-
-    auto tol = 1e-5; // what should this be? can rcond be used?
+  if(driver == "gelss") {
+    auto [U, S, Vh] = at::_linalg_svd(input, false, true, "gesvd");
     auto S_pinv = S.reciprocal();
     auto s1 = at::narrow(S, /*dim=*/-1, /*start=*/0, /*length=*/1);  // singular values are sorted in descending order
     S_pinv.masked_fill_(S < rcond * s1, 0);
     auto uhOther = at::matmul(U.adjoint(), other);
-    if(pseudo_sv.dim() !=uhOther.dim()) {
-      pseudo_sv = pseudo_sv.unsqueeze(-1);
+    if(S_pinv.dim() != uhOther.dim()) {
+      S_pinv = S_pinv.unsqueeze(-1);
     }
-    auto pseudo_sv_other = pseudo_sv * uhOther;
-    solution = at::matmul(Vh.adjoint(), pseudo_sv_other);
+    auto S_pinv_other = S_pinv * uhOther;
+    solution = at::matmul(Vh.adjoint(), S_pinv_other);
   }
   else {
     lstsq_stub(input.device().type(), input_working_copy, solution, rank, singular_values, infos, rcond, driver);
@@ -3516,7 +3505,7 @@ static std::string get_default_lstsq_driver(c10::optional<c10::string_view> driv
       );
     } else { // else if (input.is_cuda())
       TORCH_CHECK(
-        (driver_str == "gels" || driver_str == "gelsd"),
+        driver_str == "gelss",
         "torch.linalg.lstsq: `driver` other than `gels` or `gelsd` is not supported on CUDA"
       );
     }

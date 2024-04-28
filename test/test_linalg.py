@@ -185,7 +185,7 @@ class TestLinalg(TestCase):
         if self.device_type == 'cpu':
             drivers = ('gels', 'gelsy', 'gelsd', 'gelss', None)
         else:
-            drivers = ('gels', None)
+            drivers = ('gels', 'gelss')
 
         def check_solution_correctness(a, b, sol):
             sol2 = a.pinverse() @ b
