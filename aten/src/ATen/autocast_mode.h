@@ -623,6 +623,9 @@ copy pasted in from VariableTypeEverything.cpp with appropriate substitutions.
 #define _KERNEL_OVERLOAD_NARG(...) \
   C10_EXPAND_MSVC_WORKAROUND(_KERNEL_OVERLOAD_NARG_IMPL(__VA_ARGS__, 2, 1))
 
+#define KERNEL_FN(OP, Function) \
+  m.impl(TORCH_SELECTIVE_NAME("aten::" OP), TORCH_FN(Function));
+
 // Common cases where registration signature matches redispatch signature
 // (that's why SIGNATURE is repeated in the WrapFunction instantiation)
 #define KERNEL1(DISPATCHKEY, OP, POLICY)      \

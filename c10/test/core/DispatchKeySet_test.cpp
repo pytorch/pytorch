@@ -9,6 +9,20 @@
 
 using namespace c10;
 
+static bool isRealDispatchKey(DispatchKey k) {
+  if (k == DispatchKey::EndOfFunctionalityKeys ||
+      k == DispatchKey::StartOfDenseBackends ||
+      k == DispatchKey::StartOfQuantizedBackends ||
+      k == DispatchKey::StartOfSparseBackends ||
+      k == DispatchKey::StartOfSparseCsrBackends ||
+      k == DispatchKey::StartOfNestedTensorBackends ||
+      k == DispatchKey::StartOfAutogradFunctionalityBackends) {
+    return false;
+  }
+
+  return true;
+}
+
 // This test exists not to be comprehensive, but to more clearly show
 // what the semantics of DispatchKeySet are.
 TEST(DispatchKeySet, ShowSemantics) {
@@ -179,10 +193,7 @@ TEST(DispatchKeySet, SingletonPerBackendFunctionalityKeys) {
        i++) {
     auto tid = static_cast<DispatchKey>(i);
     // Skip these because they aren't real keys.
-    if (tid == DispatchKey::StartOfDenseBackends ||
-        tid == DispatchKey::StartOfSparseBackends ||
-        tid == DispatchKey::StartOfQuantizedBackends ||
-        tid == DispatchKey::StartOfAutogradFunctionalityBackends) {
+    if (isRealDispatchKey(tid)) {
       continue;
     }
     DispatchKeySet sing(tid);
@@ -221,20 +232,9 @@ TEST(DispatchKeySet, DoubletonPerBackend) {
       auto tid2 = static_cast<DispatchKey>(j);
 
       // Skip these because they aren't real keys.
-      if (tid1 == DispatchKey::StartOfDenseBackends ||
-          tid1 == DispatchKey::StartOfSparseBackends ||
-          tid1 == DispatchKey::StartOfSparseCsrBackends ||
-          tid1 == DispatchKey::StartOfQuantizedBackends ||
-          tid1 == DispatchKey::StartOfNestedTensorBackends ||
-          tid1 == DispatchKey::StartOfAutogradFunctionalityBackends)
+      if (!isRealDispatchKey(tid1) || !isRealDispatchKey(tid2)) {
         continue;
-      if (tid2 == DispatchKey::StartOfDenseBackends ||
-          tid2 == DispatchKey::StartOfSparseBackends ||
-          tid2 == DispatchKey::StartOfSparseCsrBackends ||
-          tid2 == DispatchKey::StartOfQuantizedBackends ||
-          tid2 == DispatchKey::StartOfNestedTensorBackends ||
-          tid2 == DispatchKey::StartOfAutogradFunctionalityBackends)
-        continue;
+      }
 
       auto backend1 = toBackendComponent(tid1);
       auto backend2 = toBackendComponent(tid2);
@@ -421,14 +421,9 @@ TEST(DispatchKeySet, TestFunctionalityDispatchKeyToString) {
     auto k = static_cast<DispatchKey>(i);
     // These synthetic keys never actually get used and don't need
     // to be printed
-    if (k == DispatchKey::EndOfFunctionalityKeys ||
-        k == DispatchKey::StartOfDenseBackends ||
-        k == DispatchKey::StartOfQuantizedBackends ||
-        k == DispatchKey::StartOfSparseBackends ||
-        k == DispatchKey::StartOfSparseCsrBackends ||
-        k == DispatchKey::StartOfNestedTensorBackends ||
-        k == DispatchKey::StartOfAutogradFunctionalityBackends)
+    if (!isRealDispatchKey(k)) {
       continue;
+    }
     auto res = std::string(toString(k));
     ASSERT_TRUE(res.find("Unknown") == std::string::npos)
         << i << " (before is " << toString(static_cast<DispatchKey>(i - 1))

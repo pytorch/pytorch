@@ -2594,6 +2594,8 @@ class TestFakeTensor(TestCase):
 
     @ops(op_db, dtypes=OpDTypes.any_one)
     def test_fake_autocast(self, device, dtype, op):
+        # remove the index from the device, first
+        device = device.split(":")[0]
         if op.name in fake_autocast_device_skips[device]:
             self.skipTest("Skip failing test")
         context = (
