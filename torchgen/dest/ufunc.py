@@ -507,7 +507,7 @@ def compute_ufunc_cpu_kernel(g: NativeFunctionsGroup) -> str:
                 elif k is UfuncKey.CPUVector:
                     compute_t = VectorizedCType(BaseCType(scalar_t))
                 else:
-                    raise AssertionError()
+                    raise AssertionError
                 inner_ufunc_sigs = ufunc_sigs.setdefault(dtype, {})
                 if k not in inner_ufunc_sigs:
                     inner_ufunc_sigs[k] = UfuncSignature(

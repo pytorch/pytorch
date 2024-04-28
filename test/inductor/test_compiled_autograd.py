@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import functools
+import io
 import re
 import sys
 import unittest
@@ -14,6 +15,7 @@ from torch._dynamo import compiled_autograd
 from torch._dynamo.utils import counters
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.logging_utils import logs_to_string
 
 # note: these tests are not run on windows due to inductor_utils.HAS_CPU
 
@@ -257,7 +259,7 @@ main()
         self.assertNotEqual(grads[1], None)
         self.assertNotEqual(grads[2], None)
 
-    def test_inputs_aliasing_bytecode(self):
+    def test_inputs_aliasing_bytecode_attr_mutations(self):
         # Freeze compiled autograd graph
         compiler = torch._dynamo.compiled_autograd.AutogradCompilerInstance(compiler_fn)
         param = torch.ones(100)
@@ -305,6 +307,65 @@ main()
         handle = torch._dynamo.convert_frame.register_bytecode_hook(bytecode_hook)
         try:
             compiled_fn(inputs=[param, activ], sizes=(), hooks=())
+        finally:
+            handle.remove()
+
+    def test_inputs_aliasing_bytecode_stack_restore(self):
+        from torch.testing._internal.logging_tensor import LoggingTensor
+
+        # Create a graph that allows inputs stealing
+        def forward(inputs):
+            add = inputs[0] + 1
+            add_1 = add + inputs[1]  # handled in suffix for tensor subclass
+            out = add_1.cpu()
+            return (out,)
+
+        gm = torch.fx.symbolic_trace(forward)
+        torch._dynamo.utils.set_locals_to_steal(gm, ["inputs"])
+        compiled_fn = torch.compile(gm)
+
+        inputs = [
+            torch.ones(1000000, dtype=torch.float32),
+            LoggingTensor(torch.ones(1)),
+        ]
+
+        def bytecode_hook(code, out_code):
+            import dis
+            import sys
+
+            if sys.version_info < (3, 11):
+                call_op = "CALL_FUNCTION"
+            else:
+                call_op = "CALL"
+
+            insts = list(dis.get_instructions(out_code))
+            call_graph_idx = next(
+                i for i, inst in enumerate(insts) if inst.opname == call_op
+            )
+            # pre-graph should alias: inputs_ref_0 = inputs[0]
+            matches = [
+                inst
+                for inst in insts[:call_graph_idx]
+                if inst.opname == "STORE_FAST" and inst.argval == "inputs_ref_0"
+            ]
+            self.assertTrue(len(matches) == 1)
+            # post-graph should access inputs_ref_0 instead of inputs
+            matches = [
+                inst for inst in insts[call_graph_idx:] if inst.argval == "inputs"
+            ]
+            self.assertTrue(len(matches) == 0)
+            matches = [
+                inst
+                for inst in insts[call_graph_idx:]
+                if inst.opname == "LOAD_FAST" and inst.argval == "inputs_ref_0"
+            ]
+            self.assertTrue(len(matches) == 1)
+
+        torch._dynamo.reset()
+        handle = torch._dynamo.convert_frame.register_bytecode_hook(bytecode_hook)
+        try:
+            out = compiled_fn(inputs)
+            self.assertTrue(len(inputs) == 0)
         finally:
             handle.remove()
 
@@ -1227,6 +1288,222 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent, m) {
 
             out = compiled_fn(activations)
             self.assertTrue(len(activations) == 0)
+
+    @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    def test_free_activation_memory_subclass(self):
+        # cover the case when aot inputs have subclasses, resulting in a different runtime wrapper
+        self.assertTrue(torch.cuda.memory_allocated() == 0)
+
+        # Use an op to check that the memory is freed by the time the op is executed
+        def assertion_impl(to_clone):
+            mem_allocated = torch.cuda.memory_allocated()
+            self.assertTrue(
+                mem_allocated < 1200000, "some activations should have been freed"
+            )
+            self.assertTrue(
+                mem_allocated > 800000,
+                "currently subclasses don't seem to be freed in inductor",
+            )
+            return to_clone.clone()
+
+        with torch.library._scoped_library("test_compiled_autograd", "FRAGMENT") as lib:
+            lib.define(
+                "assertion_op(Tensor x) -> Tensor", tags=(torch.Tag.pt2_compliant_tag,)
+            )
+            lib.impl("assertion_op", assertion_impl, "CPU")
+            lib.impl("assertion_op", lambda x: x.clone(), "Meta")
+            lib.impl("assertion_op", lambda x: x.clone(), "NestedTensor")
+
+            def fn(inputs):
+                _, y = inputs
+                out = y.cpu()
+                cloned_out = torch.ops.test_compiled_autograd.assertion_op(out)
+                return cloned_out
+
+            gm = torch.fx.symbolic_trace(fn)
+            torch._dynamo.utils.set_locals_to_steal(gm, ["inputs"])
+            compiled_fn = torch.compile(gm)
+
+            from torch.nested._internal.nested_tensor import jagged_from_list
+
+            activations = [
+                jagged_from_list(
+                    [
+                        torch.ones((1, 100000), device="cuda"),  # 400,000 bytes
+                        torch.ones((1, 100000), device="cuda"),  # 400,000 bytes
+                    ],
+                    None,
+                )[
+                    0
+                ],  # NestedTensor
+                torch.ones((1, 100000), device="cuda"),  # 400,000 bytes
+            ]
+            # 1,200,000 bytes (3 * 4 * 100,000 bytes)
+            self.assertTrue(torch.cuda.memory_allocated() > 1200000)
+
+            out = compiled_fn(activations)
+            self.assertTrue(len(activations) == 0)
+
+    @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    def test_cudagraphs_cpu_division(self):
+        from torch._dynamo.testing import reduce_to_scalar_loss
+
+        model = torch.nn.Linear(10, 10, dtype=torch.float16).cuda()
+        inputs = torch.randn(10, 10, dtype=torch.float16).cuda()
+        out = model(inputs)
+        loss = reduce_to_scalar_loss(out)
+        torch._inductor.config.triton.cudagraphs = True
+
+        stderr_msgs = io.StringIO()
+        with mock.patch("sys.stderr", stderr_msgs), compiled_autograd.enable(
+            compiler_fn
+        ):
+            loss.backward()
+
+        self.assertFalse("skipping cudagraphs" in stderr_msgs.getvalue())
+
+    def test_verbose_logs_graph(self):
+        torch._logging.set_logs(compiled_autograd_verbose=True)
+
+        def fn():
+            model = torch.nn.Sequential(
+                torch.nn.Linear(4, 4),
+                torch.nn.ReLU(),
+                torch.nn.Linear(4, 4),
+                torch.nn.ReLU(),
+            )
+            x = torch.randn([2, 4])
+            result = model(x).sum()
+            result.backward()
+            yield model[0].weight.grad
+            yield model[0].bias.grad
+            yield model[2].weight.grad
+            yield model[2].bias.grad
+
+        logs, ctx = logs_to_string(
+            torch._dynamo.compiled_autograd.__name__, "compiled_autograd_verbose"
+        )
+        with ctx():
+            self.check_output_and_recompiles(fn)
+
+        expected_logs = [
+            "SumBackward0 (NodeCall 1)",
+            "ReluBackward0 (NodeCall 2)",
+            "AddmmBackward0 (NodeCall 3)",
+            "TBackward0 (NodeCall 4)",
+            "torch::autograd::AccumulateGrad (NodeCall 5)",
+            "ReluBackward0 (NodeCall 6)",
+            "AddmmBackward0 (NodeCall 7)",
+            "TBackward0 (NodeCall 8)",
+            "torch::autograd::AccumulateGrad (NodeCall 9)",
+            "torch::autograd::AccumulateGrad (NodeCall 10)",
+            "torch::autograd::AccumulateGrad (NodeCall 11)",
+        ]
+
+        self.assertEqual(
+            sum(1 for e in expected_logs if e in logs.getvalue()), len(expected_logs)
+        )
+
+    def test_verbose_logs_cpp(self):
+        script = """
+import torch
+
+def compiler_fn(gm):
+    return torch.compile(gm, backend="eager")
+
+def main():
+    torch._logging.set_logs(compiled_autograd_verbose=True)
+    model = torch.nn.Sequential(
+        torch.nn.Linear(4, 4),
+        torch.nn.ReLU(),
+        torch.nn.Linear(4, 4),
+        torch.nn.ReLU(),
+    )
+
+    for i in range(10, 100):
+        x = torch.randn([i, 4])
+        result = model(x).sum()
+        with torch._dynamo.compiled_autograd.enable(compiler_fn):
+            result.backward()
+
+main()
+"""
+        stdout, _ = self.run_process_no_exception(script)
+        stdout = stdout.decode("utf-8")
+
+        patterns = [
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for SumBackward0, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for ReluBackward0, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for AddmmBackward0, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for TBackward0, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for ReluBackward0, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for AddmmBackward0, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for TBackward0, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for ReluBackward0, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for AddmmBackward0, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for TBackward0, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
+            r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
+            r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
+            r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
+            r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
+            r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
+            r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
+            r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
+        ]
+
+        pattern = r"".join(patterns)
+        matches = re.findall(pattern, stdout)
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(len(matches[0]), len(patterns))
+
+    def test_snapshot_verbose_logs_flag(self):
+        def fn():
+            model = torch.nn.Sequential(
+                torch.nn.Linear(4, 4),
+                torch.nn.ReLU(),
+                torch.nn.Linear(4, 4),
+                torch.nn.ReLU(),
+            )
+            x = torch.randn([2, 4])
+            result = model(x).sum()
+            result.backward()
+            yield model[0].weight.grad
+            yield model[0].bias.grad
+            yield model[2].weight.grad
+            yield model[2].bias.grad
+
+        logs, ctx = logs_to_string(
+            torch._dynamo.compiled_autograd.__name__, "compiled_autograd_verbose"
+        )
+        with ctx():
+            with compiled_autograd.enable(compiler_fn):
+                # unused, verbose level already snapshot with contextmanager
+                torch._logging.set_logs(compiled_autograd_verbose=True)
+                fn()
+
+        unexpected_logs = [
+            "SumBackward0 (NodeCall 1)",
+            "ReluBackward0 (NodeCall 2)",
+            "AddmmBackward0 (NodeCall 3)",
+            "TBackward0 (NodeCall 4)",
+            "torch::autograd::AccumulateGrad (NodeCall 5)",
+            "ReluBackward0 (NodeCall 6)",
+            "AddmmBackward0 (NodeCall 7)",
+            "TBackward0 (NodeCall 8)",
+            "torch::autograd::AccumulateGrad (NodeCall 9)",
+            "torch::autograd::AccumulateGrad (NodeCall 10)",
+            "torch::autograd::AccumulateGrad (NodeCall 11)",
+        ]
+
+        self.assertEqual(sum(1 for e in unexpected_logs if e in logs.getvalue()), 0)
 
 
 def load_test_module(name):
