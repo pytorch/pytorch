@@ -6,6 +6,7 @@
 #include <ATen/TensorMeta.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/TensorSubclassLikeUtils.h>
+
 #include <ATen/native/BatchLinearAlgebra.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Resize.h>
@@ -3423,8 +3424,10 @@ static void linalg_lstsq_out_info(
     TORCH_INTERNAL_ASSERT(singular_values.sizes().equals(singular_values_shape));
     TORCH_INTERNAL_ASSERT(singular_values.is_contiguous());
   }
+
   // 'input' is modified in-place so we need a column-major copy
   auto input_working_copy = copyBatchedColumnMajor(input);
+  
   // now the actual call that computes the result in-place (apply_lstsq)
   if(driver == "gelsd" || driver == "gelss") {
     auto k = std::min(m, n);
@@ -3456,7 +3459,6 @@ static void linalg_lstsq_out_info(
   // residuals are available only if m > n and drivers other than gelsy used
   if (m > n && driver != "gelsy") {
     // if the driver is gelss or gelsd then the residuals are available only if rank == n
-
     bool compute_residuals = true;
     if (driver == "gelss" || driver == "gelsd") {
       if (input.dim() == 2) {
@@ -3573,6 +3575,7 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> linalg_lstsq_out(
   // to be consistent with torch.linalg.matrix_rank output dtype
   ScalarType rank_expected_type = ScalarType::Long;
   checkLinalgCompatibleDtype("torch.linalg.lstsq", rank.scalar_type(), rank_expected_type, "rank");
+  
   // 'singular_values' is expected to have real float dtype
   checkLinalgCompatibleDtype("torch.linalg.lstsq", singular_values.scalar_type(), real_dtype, "singular_values");
 
@@ -3584,6 +3587,7 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> linalg_lstsq_out(
     : _get_epsilon(c10::toRealValueType(input.scalar_type())) * std::max<int64_t>(input.size(-2), input.size(-1));
 
   auto infos = at::zeros({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt));
+
   // now check whether the provided output tensors can be used directly
 
   // Two types of 'other' tensors are supported:
@@ -3599,6 +3603,7 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> linalg_lstsq_out(
   // 1. the shape matches the expected shape
   // 2. the dtype matches the expected dtype
   // 3. the tensor is contiguous
+
   // Checks for the 'solution' tensor
   std::vector<int64_t> expected_solution_shape = broadcast_batch_size(input, other_2d, input.dim() - 2);
   // the actual shape of the shape of the solution returned in (*, n,) or (*, n, nrhs)
@@ -3683,6 +3688,7 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> linalg_lstsq_out(
     // else use the provided output storage directly
     linalg_lstsq_out_info(solution, residuals, rank, singular_values, infos, input, other, rcond_value, driver_name);
   }
+  
   at::_linalg_check_errors(infos, "torch.linalg.lstsq", infos.numel() <= 1);
   return std::tuple<Tensor&, Tensor&, Tensor&, Tensor&>(solution, residuals, rank, singular_values);
 }
