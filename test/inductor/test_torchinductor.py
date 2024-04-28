@@ -10152,23 +10152,27 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
             )
             code = run_and_get_triton_code(f, *inps)
             lines = [line for line in code.split("\n") if "tl.load" in line]
+            if torch.hip.version is not None:
+                rmask = "(rmask).to(tl.int1)"
+            else:
+                rmask = "rmask"
             if config.triton.multi_kernel:
                 # the first 2 lines are generated for the persistent reduction
                 # variant.
                 self.assertExpectedInline(
                     "\n".join(lines),
-                    """\
-    tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r2)), rmask, eviction_policy='evict_last', other=0.0)
-    tmp1 = tl.load(in_ptr1 + (x3 + (262144*r2)), rmask, other=0.0)
-        tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r2)), rmask, eviction_policy='evict_last', other=0.0)
-        tmp1 = tl.load(in_ptr1 + (x3 + (262144*r2)), rmask, eviction_policy='evict_first', other=0.0)""",
+                    f"""\
+    tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r2)), {rmask}, eviction_policy='evict_last', other=0.0)
+    tmp1 = tl.load(in_ptr1 + (x3 + (262144*r2)), {rmask}, other=0.0)
+        tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r2)), {rmask}, eviction_policy='evict_last', other=0.0)
+        tmp1 = tl.load(in_ptr1 + (x3 + (262144*r2)), {rmask}, eviction_policy='evict_first', other=0.0)""",
                 )
             else:
                 self.assertExpectedInline(
                     "\n".join(lines),
-                    """\
-        tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r2)), rmask, eviction_policy='evict_last', other=0.0)
-        tmp1 = tl.load(in_ptr1 + (x3 + (262144*r2)), rmask, eviction_policy='evict_first', other=0.0)""",
+                    f"""\
+        tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r2)), {rmask}, eviction_policy='evict_last', other=0.0)
+        tmp1 = tl.load(in_ptr1 + (x3 + (262144*r2)), {rmask}, eviction_policy='evict_first', other=0.0)""",
                 )
 
         @skipIfRocm
