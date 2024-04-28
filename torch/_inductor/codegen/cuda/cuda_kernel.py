@@ -16,7 +16,7 @@ from ...utils import sympy_product
 from ...virtualized import V
 from ..common import IndentedBuffer, Kernel, OpOverrides
 
-from ..cpp import CppPrinter, DTYPE_TO_CPP
+from ..cpp_utils import CppPrinter, DTYPE_TO_CPP
 
 if TYPE_CHECKING:
     from torch._inductor.codegen.cuda.cuda_template import CUDATemplate

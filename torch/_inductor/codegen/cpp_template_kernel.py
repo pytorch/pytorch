@@ -22,7 +22,7 @@ from ..ir import (
 )
 from ..virtualized import V
 from .common import Kernel, OpOverrides
-from .cpp import cexpr_index
+from .cpp_utils import cexpr_index
 
 
 def parse_expr_with_index_symbols(expr_str: str) -> sympy.Expr:
@@ -113,7 +113,7 @@ class CppTemplateKernel(Kernel):
 
     def index(self, node: Buffer, indices: List[Any]) -> str:
         indexer = node.make_indexer()
-        index = indexer([sympy.Symbol(str(idx), integer=True) for idx in indices])
+        index = indexer([parse_expr_with_index_symbols(str(idx)) for idx in indices])
         index = self.rename_indexing(index)
         return f"{self.args.input(node.get_name())}[{cexpr_index(index)}]"
 

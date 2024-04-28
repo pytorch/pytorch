@@ -3,7 +3,7 @@ from collections import namedtuple
 import torch
 
 from .. import ir
-from ..utils import parallel_num_threads
+from ..utils import IndentedBuffer, parallel_num_threads
 from .common import KernelTemplate
 from .cpp_template_kernel import CppTemplateKernel
 from .cpp_utils import DTYPE_TO_CPP, GemmBlocking, value_to_cpp
@@ -74,7 +74,20 @@ inline void {{kernel_name}}(
         lda = kernel.stride(A, 0)
         ldb = kernel.stride(B, 0)
         ldc = kernel.stride(C, 0)
-        return f"{self.name}<{value_to_cpp(accum, 'bool')}>({A_ptr}, {B_ptr}, {C_ptr}, {M}, {N}, {K}, {lda}, {ldb}, {ldc});"
+        res = IndentedBuffer()
+        res.writeline(f"{self.name}<{value_to_cpp(accum, 'bool')}>(")
+        with res.indent():
+            res.writeline(f"{A_ptr},")
+            res.writeline(f"{B_ptr},")
+            res.writeline(f"{C_ptr},")
+            res.writeline(f"{M},")
+            res.writeline(f"{N},")
+            res.writeline(f"{K},")
+            res.writeline(f"{lda},")
+            res.writeline(f"{ldb},")
+            res.writeline(f"{ldc}")
+        res.writeline(");")
+        return res.getvalue()
 
 
 class CppMicroGemmRef(CppMicroGemm):

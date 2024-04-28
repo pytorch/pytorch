@@ -88,12 +88,12 @@ extern "C"
                     {%- set tile_W = kernel.view(tile_W_3d, ["k_end - k_start", micro_gemm.register_blocking.block_n]) %}
                     {%- set tile_Y = kernel.slice_nd(Y, [("m_start", "m_end"), ("n_start", "n_start + N0")]) %}
                     {%- if inp is not none and beta != 0 %}
-                    {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, tile_Y, accum=True) }}
+                    {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, tile_Y, accum=True)|indent(20, false) }}
                     {%- else %}
                     if (k2 == k_block_start) {
-                        {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, tile_Y, accum=False) }}
+                        {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, tile_Y, accum=False)|indent(24, false) }}
                     } else {
-                        {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, tile_Y, accum=True) }}
+                        {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, tile_Y, accum=True)|indent(24, false) }}
                     }
                     {%- endif %}
                 }
