@@ -235,7 +235,7 @@ class FSDPState(_State):
             return output
 
         flat_outputs, _ = tree_flatten(output)
-        tensors = tuple(t for t in flat_outputs if t.requires_grad)
+        tensors = tuple(t for t in flat_outputs if (t is not None and t.requires_grad))
         if tensors:
             grad_fns = tuple(t.grad_fn for t in tensors if t.grad_fn is not None)
             pre_backward = functools.partial(self._pre_backward, grad_fns)

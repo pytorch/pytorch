@@ -12,7 +12,7 @@ import numpy as np
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, skipIfTorchDynamo, DeterministicGuard)
+    TestCase, run_tests, skipIfTorchDynamo, DeterministicGuard, serialTest, TEST_CUDA)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, dtypes, dtypesIfCPU, dtypesIfCUDA,
     onlyNativeDeviceTypes, skipXLA)
@@ -701,10 +701,12 @@ class TestIndexing(TestCase):
         boolIndices = torch.tensor([True, False, False], dtype=torch.bool, device=device)
         uint8Indices = torch.tensor([1, 0, 0], dtype=torch.uint8, device=device)
         with warnings.catch_warnings(record=True) as w:
-            self.assertEqual(v[boolIndices].shape, v[uint8Indices].shape)
-            self.assertEqual(v[boolIndices], v[uint8Indices])
+            v1 = v[boolIndices]
+            v2 = v[uint8Indices]
+            self.assertEqual(v1.shape, v2.shape)
+            self.assertEqual(v1, v2)
             self.assertEqual(v[boolIndices], tensor([True], dtype=torch.bool, device=device))
-            self.assertEqual(len(w), 2)
+            self.assertEqual(len(w), 1)
 
     def test_bool_indices_accumulate(self, device):
         mask = torch.zeros(size=(10, ), dtype=torch.bool, device=device)
@@ -723,9 +725,10 @@ class TestIndexing(TestCase):
         v = torch.randn(5, 7, 3, device=device)
         mask = torch.ByteTensor([1, 0, 1, 1, 0]).to(device)
         with warnings.catch_warnings(record=True) as w:
-            self.assertEqual(v[mask].shape, (3, 7, 3))
-            self.assertEqual(v[mask], torch.stack([v[0], v[2], v[3]]))
-            self.assertEqual(len(w), 2)
+            res = v[mask]
+            self.assertEqual(res.shape, (3, 7, 3))
+            self.assertEqual(res, torch.stack([v[0], v[2], v[3]]))
+            self.assertEqual(len(w), 1)
 
         v = torch.tensor([1.], device=device)
         self.assertEqual(v[v == 0], torch.tensor([], device=device))
@@ -740,6 +743,7 @@ class TestIndexing(TestCase):
             self.assertEqual(len(w), 2)
 
     @skipIfTorchDynamo("This test causes SIGKILL when running with dynamo, https://github.com/pytorch/pytorch/issues/88472")
+    @serialTest(TEST_CUDA)
     def test_index_put_accumulate_large_tensor(self, device):
         # This test is for tensors with number of elements >= INT_MAX (2^31 - 1).
         N = (1 << 31) + 5

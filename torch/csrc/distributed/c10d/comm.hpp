@@ -87,6 +87,7 @@ class TORCH_API GradBucket {
   std::vector<c10::IntArrayRef> sizes_vec_;
 
   // Model parameters for this bucket.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const std::vector<at::Tensor> parameters_;
 
   // Predefined sparse indices for this bucket (only used for sparse tensors).

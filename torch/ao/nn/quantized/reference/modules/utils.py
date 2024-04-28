@@ -176,7 +176,7 @@ def _quantize_weight_decomposed(
                 weight_quant_max,
                 weight_dtype_)  # type: ignore[arg-type]
             return weight
-    raise Exception(f"Unsupported dtype and qscheme: {weight_dtype}, {weight_qscheme}")
+    raise Exception(f"Unsupported dtype and qscheme: {weight_dtype}, {weight_qscheme}")  # noqa: TRY002
 
 def _dequantize_weight_decomposed(
         weight: torch.Tensor,
@@ -226,7 +226,7 @@ def _dequantize_weight_decomposed(
                 weight_quant_max,
                 weight_dtype_)  # type: ignore[arg-type]
             return weight
-    raise Exception(f"Unsupported dtype and qscheme: {weight_dtype}, {weight_qscheme}")
+    raise Exception(f"Unsupported dtype and qscheme: {weight_dtype}, {weight_qscheme}")  # noqa: TRY002
 
 def _quantize_weight(
         weight: torch.Tensor,
@@ -250,7 +250,7 @@ def _quantize_weight(
                 weight, weight_scale,
                 weight_zero_point, weight_axis_int, weight_dtype)  # type: ignore[arg-type]
             return weight
-    raise Exception(f"Unsupported dtype and qscheme: {weight_dtype}, {weight_qscheme}")
+    raise Exception(f"Unsupported dtype and qscheme: {weight_dtype}, {weight_qscheme}")  # noqa: TRY002
 
 def _quantize_and_dequantize_weight_decomposed(
         weight: torch.Tensor,
