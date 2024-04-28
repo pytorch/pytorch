@@ -110,12 +110,12 @@ class CppMicroGemmFP32AVX(CppMicroGemm):
 {{declare_kernel}} {
     TORCH_CHECK(N % {{block_n}} == 0, "N dimension must be multiple of {{block_n}}");
     TORCH_CHECK(K % {{block_k}} == 0, "K dimension must be multiple of {{block_k}}");
-    // TODO: loop unroll
+    // TODO(jgong5): loop unroll for M and N
     for (int64_t m = 0; m < M; m += {{block_m}}) {
         int64_t block_m = std::min<int64_t>(M - m, {{block_m}});
         for (int64_t n = 0; n < N; n += {{block_n}}) {
             switch (block_m) {
-            {% for b in range(block_m, 0, -1) %}
+            {%- for b in range(block_m, 0, -1) %}
             case {{b}}:
                 {{kernel_name}}_kernel<{{b}}, {{block_n}}, accum>(
                     A + m * lda,
@@ -127,7 +127,7 @@ class CppMicroGemmFP32AVX(CppMicroGemm):
                     ldc
                 );
                 break;
-            {% endfor %}
+            {%- endfor %}
             default:
                 TORCH_CHECK(false, "Unsupported block_m: ", block_m);
             }
@@ -172,11 +172,11 @@ inline void {{kernel_name}}_kernel(
         constexpr int col = i % COLS;
 
         if constexpr (col == 0) {
-            {% if alpha != 1 %}
+            {%- if alpha != 1 %}
             va = Vectorized(A[row * lda + k] * {{alpha}});
-            {% else %}
+            {%- else %}
             va = Vectorized(A[row * lda + k]);
-            {% endif %}
+            {%- endif %}
         }
 
         if constexpr (row == 0) {
@@ -187,7 +187,7 @@ inline void {{kernel_name}}_kernel(
         vc[idx] = at::vec::fmadd(va, vb[col], vc[idx]);
     };
 
-    // TODO: unroll k
+    // TODO(jgong5): unroll k
     for (int k = 0; k < K; ++k) {
         c10::ForcedUnroll<ROWS * COLS>{}(compute, k);
     }
