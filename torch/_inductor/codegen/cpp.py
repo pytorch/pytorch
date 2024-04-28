@@ -3592,7 +3592,7 @@ class CppScheduling(BaseScheduling):
             return 0
 
     def can_fuse_vertical(self, node1, node2):
-        # TODO: support vertical fusion for template nodes
+        # TODO(jgong5): support vertical fusion for template nodes
         if node1.is_template() or node2.is_template():
             return False
         return (

@@ -6,13 +6,12 @@ from unittest.mock import patch
 
 import sympy
 
-from .. import codecache
+from .. import codecache, ir
 from ..autotune_process import CppBenchmarkRequest, TensorMeta
-from ..ir import Buffer, IRNode, Layout
 from ..utils import IndentedBuffer, Placeholder, unique
 from ..virtualized import V
 from .common import KernelTemplate
-from .cpp_template_kernel import CppTemplateBuffer, CppTemplateCaller, CppTemplateKernel
+from .cpp_template_kernel import CppTemplateCaller, CppTemplateKernel
 
 log = logging.getLogger(__name__)
 
@@ -24,11 +23,11 @@ class CppTemplate(KernelTemplate):
         self,
         name: str,
         input_nodes,
-        layout: Layout,
+        layout: ir.Layout,
     ):
         super().__init__(name)
         self.input_nodes = input_nodes
-        self.output_node: Buffer = Buffer("buf_out", layout)
+        self.output_node: ir.Buffer = ir.Buffer("buf_out", layout)
         self.layout = layout
 
     def generate(self, **kwargs):
@@ -71,8 +70,8 @@ class CppTemplate(KernelTemplate):
         )
 
         def make_kernel_render(
-            template_node: CppTemplateBuffer,
-            epilogue_nodes: Optional[List[IRNode]] = None,
+            template_node: ir.CppTemplateBuffer,
+            epilogue_nodes: Optional[List[ir.IRNode]] = None,
         ):
             kernel = CppTemplateKernel(
                 kernel_name=str(Placeholder.KERNEL_NAME),

@@ -1,11 +1,9 @@
 from typing import cast, List, Optional
 
 import torch
-from .. import ir
+from .. import ir, lowering as L
 
-from ..ir import Buffer, CppTemplateBuffer, IRNode, Layout
 from ..kernel.mm_common import mm_args
-from ..lowering import permute, view
 from ..select_algorithm import DataProcessorTemplateWrapper
 from ..utils import cache_on_self, parallel_num_threads
 from ..virtualized import V
@@ -124,7 +122,7 @@ class CppPackedGemmTemplate(CppTemplate):
     def __init__(
         self,
         input_nodes,
-        layout: Layout,
+        layout: ir.Layout,
         num_threads: int,
         register_blocking: GemmBlocking,
         beta=1,
@@ -142,7 +140,7 @@ class CppPackedGemmTemplate(CppTemplate):
 
     @cache_on_self
     def thread_blocking(self) -> GemmBlocking:
-        # TODO: allow tuning various blocking options
+        # TODO(jgong5): allow tuning various blocking options
         def get_factors(number):
             factors = []
             # priorize more evenly divided factors
@@ -224,14 +222,14 @@ class CppPackedGemmTemplate(CppTemplate):
             if isinstance(W, ir.IRNode):
                 if not isinstance(W, ir.TensorBox):
                     W = ir.TensorBox(W)
-                new_inputs[1] = permute(W, [1, 0])
+                new_inputs[1] = L.permute(W, [1, 0])
                 return new_inputs, layout_or_out
             else:
                 assert isinstance(W, torch.Tensor)
                 new_inputs[1] = W.transpose(0, 1)
             return new_inputs, layout_or_out
 
-        # TODO: decide proper number of threads per problem size
+        # TODO(jgong5): decide proper number of threads per problem size
         num_threads = parallel_num_threads()
         new_inputs, _ = transpose_weight(*reorder_and_filter(input_nodes, layout))
         m, n, k, *_ = mm_args(new_inputs[0], new_inputs[1])
@@ -250,8 +248,8 @@ class CppPackedGemmTemplate(CppTemplate):
                 assert (
                     n % block_n == 0
                 ), f"The last dimension of W must be a multiple of {block_n}."
-                blocked_w = permute(
-                    view(W, (k, n // block_n, block_n)),
+                blocked_w = L.permute(
+                    L.view(W, (k, n // block_n, block_n)),
                     [1, 0, 2],
                 )
                 blocked_w = ir.ExternKernel.require_contiguous(blocked_w)
@@ -268,11 +266,10 @@ class CppPackedGemmTemplate(CppTemplate):
             return pack_weight(*transpose_weight(*reorder_and_filter(inputs, layout)))
 
         def postprocessor(output):
-            if isinstance(output, ir.IRNode):
+            if isinstance(output, ir.TensorBox):
                 # prepack the weight as input to the template buffer
-                # TODO: prune the unused constants in V.graph
-                # TODO: should we implement it with constant folding in the scheduler instead?
-                assert isinstance(output, ir.TensorBox)
+                # TODO(jgong5): prune the unused constants in V.graph
+                # Should we implement it with constant folding in the scheduler instead?
                 template_buffer = ir.InputsKernel.unwrap_storage_for_input(output)
                 assert isinstance(template_buffer, ir.CppTemplateBuffer)
                 new_input_nodes, _ = reorder_and_filter(input_nodes, layout)
@@ -307,8 +304,8 @@ class CppPackedGemmTemplate(CppTemplate):
     def render(  # type: ignore[override]
         self,
         kernel: CppTemplateKernel,
-        template_buffer_node: Optional[CppTemplateBuffer] = None,
-        epilogue_nodes: Optional[List[IRNode]] = None,
+        template_buffer_node: Optional[ir.CppTemplateBuffer] = None,
+        epilogue_nodes: Optional[List[ir.IRNode]] = None,
         **kwargs,
     ) -> str:
         assert not epilogue_nodes, "Epilogue nodes are not supported for GEMM template."
@@ -323,7 +320,7 @@ class CppPackedGemmTemplate(CppTemplate):
             W = template_buffer_node.inputs[1]
             Y = template_buffer_node
         if epilogue_nodes is not None and len(epilogue_nodes) > 0:
-            Y = cast(Buffer, epilogue_nodes[-1])
+            Y = cast(ir.Buffer, epilogue_nodes[-1])
         assert self.output_node is not None
 
         micro_gemm = create_micro_gemm(

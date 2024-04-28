@@ -8,18 +8,7 @@ import torch
 
 from torch._inductor.autotune_process import CppBenchmarkRequest
 from torch._inductor.utils import sympy_index_symbol
-from .. import lowering as L
-from ..ir import (
-    Buffer,
-    ChoiceCaller,
-    CppTemplateBuffer,
-    IRNode,
-    Layout,
-    PrimitiveInfoType,
-    ReinterpretView,
-    TensorBox,
-    View,
-)
+from .. import ir, lowering as L
 from ..virtualized import V
 from .common import Kernel, OpOverrides
 from .cpp_utils import cexpr_index
@@ -31,8 +20,10 @@ def parse_expr_with_index_symbols(expr_str: str) -> sympy.Expr:
     return expr.subs(int_symbols)
 
 
-def wrap_with_tensorbox(node) -> TensorBox:
-    return TensorBox.create(node) if isinstance(node, Buffer) else TensorBox(node)
+def wrap_with_tensorbox(node) -> ir.TensorBox:
+    return (
+        ir.TensorBox.create(node) if isinstance(node, ir.Buffer) else ir.TensorBox(node)
+    )
 
 
 class CppTemplateKernel(Kernel):
@@ -44,8 +35,8 @@ class CppTemplateKernel(Kernel):
 
     def def_kernel(
         self,
-        inputs: List[Buffer],
-        outputs: List[Buffer],
+        inputs: List[ir.Buffer],
+        outputs: List[ir.Buffer],
         names_str: str = "",
     ) -> str:
         input_names = [inp.get_name() if inp is not None else None for inp in inputs]
@@ -80,12 +71,12 @@ class CppTemplateKernel(Kernel):
         cpp_argdefs, _, _ = self.args.cpp_argdefs()
         return f"void {self.kernel_name}({', '.join(cpp_argdefs)})"
 
-    def call_kernel(self, name: str, node: CppTemplateBuffer):
+    def call_kernel(self, name: str, node: ir.CppTemplateBuffer):
         wrapper = V.graph.wrapper_code
         _, call_args, arg_types = self.args.cpp_argdefs()
         wrapper.generate_kernel_call(name, call_args, cuda=False, arg_types=arg_types)
 
-    def dtype(self, node: Buffer) -> str:
+    def dtype(self, node: ir.Buffer) -> str:
         if node.get_dtype() == torch.float32:
             return "float"
         elif node.get_dtype() == torch.bfloat16:
@@ -95,7 +86,7 @@ class CppTemplateKernel(Kernel):
         else:
             raise NotImplementedError(f"Unsupported dtype: {node.get_dtype()}")
 
-    def acc_dtype(self, node: Buffer) -> str:
+    def acc_dtype(self, node: ir.Buffer) -> str:
         if node.get_dtype() == torch.float32:
             return "float"
         elif node.get_dtype() == torch.bfloat16:
@@ -105,19 +96,19 @@ class CppTemplateKernel(Kernel):
         else:
             raise NotImplementedError(f"Unsupported dtype: {node.get_dtype()}")
 
-    def size(self, node: Buffer, dim: int) -> str:
+    def size(self, node: ir.Buffer, dim: int) -> str:
         return str(self.rename_indexing(node.get_size()[dim]))
 
-    def stride(self, node: Buffer, dim: int) -> str:
+    def stride(self, node: ir.Buffer, dim: int) -> str:
         return str(self.rename_indexing(node.get_stride()[dim]))
 
-    def index(self, node: Buffer, indices: List[Any]) -> str:
+    def index(self, node: ir.Buffer, indices: List[Any]) -> str:
         indexer = node.make_indexer()
         index = indexer([parse_expr_with_index_symbols(str(idx)) for idx in indices])
         index = self.rename_indexing(index)
         return f"{self.args.input(node.get_name())}[{cexpr_index(index)}]"
 
-    def slice_nd(self, node, ranges: List[Tuple[Any]]) -> ReinterpretView:
+    def slice_nd(self, node, ranges: List[Tuple[Any]]) -> ir.ReinterpretView:
         assert len(ranges) == len(node.get_size())
         sliced = wrap_with_tensorbox(node)
         for dim, _range in enumerate(ranges):
@@ -126,38 +117,40 @@ class CppTemplateKernel(Kernel):
             assert len(_range) == 2
             start, end = (parse_expr_with_index_symbols(str(r)) for r in _range)
             sliced = L.slice_(sliced, dim, start, end, clamp=False)
-        assert isinstance(sliced.data, ReinterpretView)
+        assert isinstance(sliced.data, ir.ReinterpretView)
         return sliced.data
 
-    def view(self, node, sizes: List[Any]) -> View:
+    def view(self, node, sizes: List[Any]) -> ir.View:
         node = wrap_with_tensorbox(node)
         sizes = [parse_expr_with_index_symbols(str(s)) for s in sizes]
         return L.view(node, sizes).data
 
 
-class CppTemplateCaller(ChoiceCaller):
+class CppTemplateCaller(ir.ChoiceCaller):
     """
     CppTemplateCaller
 
-    This class represents a caller for CPP template kernels. It is a subclass of ChoiceCaller.
+    This class represents a caller for CPP template kernels. It is a subclass of ir.ChoiceCaller.
     Attributes:
         name (str): The name of the caller.
         category (str): The category of the caller.
         bmreq (CppBenchmarkRequest): The benchmark request for the caller.
-        template_buffer (CppTemplateBuffer): The template buffer for the caller.
+        template_buffer (ir.CppTemplateBuffer): The template buffer for the caller.
     """
 
     def __init__(
         self,
         name: str,
         category: str,
-        input_nodes: List[Buffer],
-        layout: Layout,
-        make_kernel_render: Callable[[CppTemplateBuffer, Optional[List[IRNode]]], str],
+        input_nodes: List[ir.Buffer],
+        layout: ir.Layout,
+        make_kernel_render: Callable[
+            [ir.CppTemplateBuffer, Optional[List[ir.IRNode]]], str
+        ],
         bmreq: CppBenchmarkRequest,
         template: "CppTemplate",  # type: ignore[name-defined]  # noqa: F821
         info_kwargs: Optional[
-            Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]
+            Dict[str, Union[ir.PrimitiveInfoType, List[ir.PrimitiveInfoType]]]
         ] = None,
     ):
         super().__init__(name, input_nodes, layout)
@@ -183,12 +176,14 @@ class CppTemplateCaller(ChoiceCaller):
             ]
         )
 
-    def info_dict(self) -> Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]:
+    def info_dict(
+        self,
+    ) -> Dict[str, Union[ir.PrimitiveInfoType, List[ir.PrimitiveInfoType]]]:
         return {"backend": "CPP", "op_type": "unknown"}
 
-    def output_node(self) -> TensorBox:
-        return TensorBox.create(
-            CppTemplateBuffer(
+    def output_node(self) -> ir.TensorBox:
+        return ir.TensorBox.create(
+            ir.CppTemplateBuffer(
                 layout=self.layout,
                 inputs=self.input_nodes,
                 make_kernel_render=self.make_kernel_render,
