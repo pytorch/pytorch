@@ -332,7 +332,7 @@ class NNModuleVariable(VariableTracker):
                 # model has already been torch.compile'd.
                 forward_method_source = AttrSource(self.source, "forward")
                 install_guard(
-                    forward_method_source.make_guard(GuardBuilder.FUNCTION_MATCH)
+                    forward_method_source.make_guard(GuardBuilder.CLOSURE_MATCH)
                 )
 
                 from .builder import wrap_fx_proxy

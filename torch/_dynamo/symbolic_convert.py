@@ -2554,9 +2554,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if (
             isinstance(func, UserFunctionVariable)
             and func.source
+            and func.fn.__module__
             and not func.fn.__module__.startswith(("torch.nn", "torch.ao"))
         ):
-            install_guard(func.source.make_guard(GuardBuilder.FUNCTION_MATCH))
+            install_guard(func.source.make_guard(GuardBuilder.CLOSURE_MATCH))
 
         parent.inconsistent_side_effects |= tracer.inconsistent_side_effects
 

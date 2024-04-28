@@ -1368,20 +1368,15 @@ class GuardBuilder(GuardBuilderBase):
 
     def FUNCTION_MATCH(self, guard: Guard):
         """things like torch.add and user defined functions"""
-        val = self.get(guard.name)
-        if isinstance(val, types.MethodType):
-            # methods go through descriptor protocol and can give different
-            # object ids on each invocation. Get the static object by accessing
-            # __func__
-            self._guard_on_attribute(guard, "__func__", GuardBuilder.ID_MATCH)
-        else:
-            self.ID_MATCH(guard)
+        self.ID_MATCH(guard)
 
     def CLOSURE_MATCH(self, guard: Guard):
         """matches a closure by __code__ id."""
         val = self.get(guard.name)
         # Strictly only want user-defined functions
-        if type(val) == types.FunctionType and hasattr(val, "__code__"):
+        if type(val) in (types.FunctionType, types.MethodType) and hasattr(
+            val, "__code__"
+        ):
             self._guard_on_attribute(guard, "__code__", GuardBuilder.HASATTR)
             self._guard_on_attribute(guard, "__code__", GuardBuilder.FUNCTION_MATCH)
         else:
