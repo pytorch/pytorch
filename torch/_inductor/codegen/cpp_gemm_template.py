@@ -1,6 +1,7 @@
 from typing import cast, List, Optional
 
 import torch
+import torch.utils
 from .. import ir, lowering as L
 
 from ..kernel.mm_common import mm_args
@@ -252,13 +253,30 @@ class CppPackedGemmTemplate(CppTemplate):
                     L.view(W, (k, n // block_n, block_n)),
                     [1, 0, 2],
                 )
-                blocked_w = ir.ExternKernel.require_contiguous(blocked_w)
                 blocked_w = ir.ExternKernel.realize_input(blocked_w)
+                blocked_w = ir.ExternKernel.require_contiguous(blocked_w)
+                if isinstance(blocked_w, ir.ReinterpretView):
+                    # normalize stride to be "contiguous_strides" per size
+                    # this avoids the problems in L.view during template codegen
+                    assert isinstance(blocked_w.layout, ir.FixedLayout)
+                    blocked_w.layout = ir.FixedLayout(
+                        blocked_w.layout.device,
+                        blocked_w.layout.dtype,
+                        blocked_w.layout.size,
+                        ir.FlexibleLayout.contiguous_strides(blocked_w.layout.size),
+                        blocked_w.layout.offset,
+                    )
             else:
                 k, n = list(W.shape)
                 blocked_w = (
                     W.reshape(k, n // block_n, block_n).transpose(0, 1).contiguous()
                 )
+                # normalize stride to be "contiguous_strides" per size
+                # this avoids the problems in L.view during template codegen
+                new_stride = [1]
+                for sz in reversed(blocked_w.shape[1:]):
+                    new_stride.insert(0, new_stride[0] * sz)
+                blocked_w = blocked_w.as_strided(blocked_w.shape, new_stride)
             new_inputs[1] = blocked_w
             return new_inputs, layout_or_out
 

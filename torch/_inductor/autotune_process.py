@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import ctypes
 import dataclasses
 import functools
 import logging
@@ -726,6 +727,7 @@ class CppBenchmarkRequest(CPUDeviceBenchmarkRequest):
     def make_run_fn(
         self, *input_tensors: torch.Tensor, output_tensor: torch.Tensor
     ) -> Callable[[], None]:
+        # TODO(jgong5): use CppPythonBindingsCodeCache for better binding perf
         self.DLL = CppCodeCache.load(self.source_code, cuda=False)
         args = [tensor.data_ptr() for tensor in list(input_tensors) + [output_tensor]]
         log.debug(
@@ -736,6 +738,7 @@ class CppBenchmarkRequest(CPUDeviceBenchmarkRequest):
             self.extra_args,
         )
         run_method = getattr(self.DLL, self.kernel_name)
+        run_method.argtypes = [ctypes.c_ulonglong] * len(args)
 
         # Generate partial function.
         return functools.partial(

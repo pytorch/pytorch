@@ -296,8 +296,8 @@ def create_micro_gemm(
             alpha,
         )
 
-    assert isinstance(n, int) or n.is_number
-    assert isinstance(k, int) or k.is_number
+    assert isinstance(n, int) or n.is_number, n
+    assert isinstance(k, int) or k.is_number, k
     if output_dtype is None:
         output_dtype = input_dtype
     if compute_dtype is None:

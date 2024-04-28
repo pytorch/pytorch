@@ -1034,6 +1034,9 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2):
 
     layout_dtypes = [torch.float32]
     m, n, k, *_ = mm_args(mat1, mat2)
+    # TODO(jgong5): support dynamic shapes for n or k
+    if n.free_symbols or k.free_symbols:
+        return False
     if isinstance(mat2, ir.BaseView):
         mat2 = mat2.unwrap_view()
     # TODO(jgong5): support n % n_block_size != 0

@@ -9,8 +9,12 @@ import torch._inductor.config as inductor_config
 import torch._inductor.select_algorithm as select_algorithm
 from torch._dynamo.utils import counters
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_device_type import (
+    dtypes,
+    instantiate_device_type_tests,
+)
 
-from torch.testing._internal.common_utils import IS_MACOS, TEST_MKL
+from torch.testing._internal.common_utils import IS_MACOS, parametrize, TEST_MKL
 
 aten = torch.ops.aten
 
@@ -37,31 +41,56 @@ def patches(fn):
 
 
 class TestSelectAlgorithm(TestCase):
-    @inductor_config.patch({"freezing": True})
-    @patches
-    @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
-    def test_linear_fp32_cpu(self):
+    def _test_linear(self, batch_size, in_features, out_features, bias, dtype):
         class M(torch.nn.Module):
             def __init__(self, bias):
                 super().__init__()
-                self.linear = torch.nn.Linear(10, 32, bias)
+                self.linear = torch.nn.Linear(in_features, out_features, bias)
 
             @torch.compile
             def forward(self, x):
                 return self.linear(x)
 
-        for bias in [True, False]:
-            counters.clear()
-            mod = M(bias=bias).eval()
-            v = torch.randn(2, 10)
-            mod(v)
-            self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        counters.clear()
+        mod = M(bias=bias).to(dtype=dtype).eval()
+        v = torch.randn(batch_size, in_features).to(dtype=dtype)
+        mod(v)
+        self.assertEqual(
+            counters["inductor"]["select_algorithm_autotune"],
+            1 if out_features != 1 else 0,
+        )
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("batch_size", (1, 2, 1000))
+    @parametrize("in_features", (1, 2, 1000))
+    @parametrize("out_features", (1, 32, 1024))
+    @parametrize("bias", (True, False))
+    @dtypes(torch.float)
+    def test_linear_static_shapes(
+        self, batch_size, in_features, out_features, bias, dtype
+    ):
+        self._test_linear(batch_size, in_features, out_features, bias, dtype)
+
+    @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("batch_size", (1, 2, 1000))
+    @parametrize("in_features", (1, 2, 1000))
+    @parametrize("out_features", (1, 32, 1024))
+    @parametrize("bias", (True, False))
+    @dtypes(torch.float)
+    def test_linear_dynamic_shapes(
+        self, batch_size, in_features, out_features, bias, dtype
+    ):
+        self._test_linear(batch_size, in_features, out_features, bias, dtype)
 
 
-@dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
-class TestDynamicSelectAlgorithm(TestCase):
-    test_linear_fp32_dynamic_shapes_cpu = TestSelectAlgorithm.test_linear_fp32_cpu
+instantiate_device_type_tests(TestSelectAlgorithm, globals(), only_for="cpu")
 
 
 if __name__ == "__main__":
