@@ -85,7 +85,7 @@ void _fused_adam_amsgrad_cuda_impl_(
       grad_scale.has_value() ? grad_scale->data_ptr<float>() : nullptr;
   const float* found_inf_ptr =
       found_inf.has_value() ? found_inf->data_ptr<float>() : nullptr;
-  const float* lr_ptr = lr.data_ptr<float>();
+  const float* lr_ptr = lr.const_data_ptr<float>();
 
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf,

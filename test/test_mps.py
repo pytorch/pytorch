@@ -1961,6 +1961,25 @@ class TestMPS(TestCaseMPS):
         helper(())
         helper((2, 4))
 
+    def test_linear_errors(self):
+        # Mixed CPU<->MPS tensors
+        size = (3, 3)
+
+        # Unsupported dtypes
+        with self.assertRaisesRegex(RuntimeError, "does not support linear for non-float weights"):
+            torch.nn.functional.linear(torch.rand(size, device='mps'),
+                                       torch.randint(-10, 10, size, dtype=torch.int8, device='mps'))
+
+        # Weigths on wrong device
+        with self.assertRaisesRegex(RuntimeError, "argument weight is on cpu but expected on mps"):
+            torch.nn.functional.linear(torch.rand(size, device='mps'),
+                                       torch.rand(size, device='cpu'))
+
+        # Input on wrong device
+        with self.assertRaisesRegex(RuntimeError, "argument input is on cpu but expected on mps"):
+            torch.nn.functional.linear(torch.rand(size, device='cpu'),
+                                       torch.rand(size, device='mps'))
+
     def _linear_helper(self, in_features, out_features, shape, bias=True, backward_pass=False):
         cpu_linear = torch.nn.Linear(in_features=in_features, out_features=out_features, device="cpu", bias=bias)
         mps_linear = torch.nn.Linear(in_features=in_features, out_features=out_features, device="mps", bias=bias)
