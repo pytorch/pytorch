@@ -682,6 +682,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return x - 1
 
     @make_test
+    def test_tensor_is_complex(x):
+        if x.is_complex():
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
     def test_get_privateuse1_name(x):
         if torch._C._get_privateuse1_backend_name() == "privateuseone":
             return x + 1
