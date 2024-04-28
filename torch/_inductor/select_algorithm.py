@@ -35,7 +35,6 @@ from .codegen.triton import (
 from .codegen.triton_utils import config_of, signature_to_meta
 from .exc import CUDACompileError
 from .ir import ChoiceCaller, PrimitiveInfoType
-from .runtime.hints import DeviceProperties
 from .runtime.runtime_utils import do_bench
 from .utils import (
     get_dtype_size,
@@ -155,7 +154,8 @@ class TritonTemplateKernel(TritonKernel):
         argdefs, _, signature = self.args.python_argdefs()
         triton_meta = {
             "signature": signature_to_meta(signature, size_dtype=self.index_dtype),
-            "device": DeviceProperties.create(self.output_node.get_device()),
+            "device": self.output_node.get_device().index,
+            "device_type": self.output_node.get_device().type,
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
@@ -990,6 +990,11 @@ class AlgorithmSelectorCache(PersistentCache):
             if timings:
                 return no_op
 
+            if config.search_autotune_cache and not (
+                config.max_autotune or config.max_autotune_gemm
+            ):
+                return no_op
+
             precompile_key = (
                 f"{name}: {inputs_key} : {torch.get_float32_matmul_precision()}"
             )
@@ -1008,6 +1013,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 [c for c in choices if hasattr(c, "precompile")],
                 timeout=precompilation_timeout_seconds,
             )
+            from triton.runtime.autotuner import OutOfResources
 
             @functools.lru_cache(None)
             def wait_on_futures():
@@ -1026,6 +1032,9 @@ class AlgorithmSelectorCache(PersistentCache):
                         f"Precompilation timed out after {precompilation_timeout_seconds} seconds."  # noqa: G004
                     )
                 except StopIteration:
+                    pass
+                except OutOfResources:
+                    # This config is invalid due to requiring too many resources
                     pass
 
                 executor.shutdown(wait=True)
