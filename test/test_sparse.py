@@ -4383,6 +4383,37 @@ class TestSparseMeta(TestCase):
 
     @all_sparse_layouts('layout', include_strided=False)
     @parametrize("dtype", [torch.float64])
+    def test_to_meta(self, dtype, layout):
+        index_dtype = torch.int64
+        device = 'cpu'
+        for t in self.generate_simple_inputs(layout, device=device, dtype=dtype, index_dtype=index_dtype):
+            m = t.to(device="meta")
+            self.assertEqual(m.device.type, "meta")
+            self.assertEqual(m, t, exact_device=False, exact_layout=True)
+            self.assertEqual(m.sparse_dim(), t.sparse_dim())
+            self.assertEqual(m.dense_dim(), t.dense_dim())
+
+            if layout is torch.sparse_coo:
+                self.assertEqual(m._indices().device.type, "meta")
+                self.assertEqual(m._indices(), t._indices(), exact_device=False, exact_layout=True)
+                self.assertEqual(m._values().device.type, "meta")
+                self.assertEqual(m._values(), t._values(), exact_device=False, exact_layout=True)
+            else:
+                if layout in {torch.sparse_csr, torch.sparse_bsr}:
+                    m_compressed_indices, m_plain_indices = m.crow_indices(), m.col_indices()
+                    compressed_indices, plain_indices = t.crow_indices(), t.col_indices()
+                else:
+                    m_compressed_indices, m_plain_indices = m.ccol_indices(), m.row_indices()
+                    compressed_indices, plain_indices = t.ccol_indices(), t.row_indices()
+                self.assertEqual(m_compressed_indices.device.type, "meta")
+                self.assertEqual(m_compressed_indices, compressed_indices, exact_device=False, exact_layout=True)
+                self.assertEqual(m_plain_indices.device.type, "meta")
+                self.assertEqual(m_plain_indices, plain_indices, exact_device=False, exact_layout=True)
+                self.assertEqual(m.values().device.type, "meta")
+                self.assertEqual(m.values(), t.values(), exact_device=False, exact_layout=True)
+
+    @all_sparse_layouts('layout', include_strided=False)
+    @parametrize("dtype", [torch.float64])
     def test_fake(self, dtype, layout):
         from torch._subclasses.fake_tensor import FakeTensorMode, FakeTensor
         fake_mode = FakeTensorMode()
