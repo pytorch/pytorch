@@ -321,7 +321,7 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   KERNEL_CUDA(__VA_ARGS__, lower_precision_fp)
 
   AT_FORALL_LOWER_PRECISION_FP(_KERNEL_CUDA_LOW_PRECISION_FP)
-#undef _KERNEL_CUDA_LOW_PRECISION_FP(...)
+#undef _KERNEL_CUDA_LOW_PRECISION_FP
   KERNEL_CUDA(cudnn_convolution, lower_precision_fp)
   KERNEL_CUDA(cudnn_convolution_transpose, lower_precision_fp)
 
