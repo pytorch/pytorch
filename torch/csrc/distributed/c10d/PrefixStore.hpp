@@ -1,7 +1,6 @@
 #pragma once
 
 #include <torch/csrc/distributed/c10d/Store.hpp>
-#include <memory>
 
 namespace c10d {
 

@@ -45,15 +45,15 @@ class TestExperiment(TestCase):
             """\
 def forward(self, b_submodule_buffer1, x):
     sin = torch.ops.aten.sin.default(x)
-    strict_graph_1 = self.strict_graph_1
-    strict_mode_1 = torch.ops.higher_order.strict_mode(strict_graph_1, (sin, b_submodule_buffer1));  strict_graph_1 = sin = b_submodule_buffer1 = None
-    getitem_1 = strict_mode_1[0];  strict_mode_1 = None
+    strict_graph_0 = self.strict_graph_0
+    strict_mode = torch.ops.higher_order.strict_mode(strict_graph_0, (sin, b_submodule_buffer1));  strict_graph_0 = sin = b_submodule_buffer1 = None
+    getitem = strict_mode[0];  strict_mode = None
     add = torch.ops.aten.add.Tensor(x, 3);  x = None
-    return (getitem_1, add)""",
+    return (getitem, add)""",
         )
 
         self.assertExpectedInline(
-            str(ep.graph_module.strict_graph_1.code.strip()),
+            str(ep.graph_module.strict_graph_0.code.strip()),
             """\
 def forward(self, arg0_1, arg1_1):
     add = torch.ops.aten.add.Tensor(arg0_1, 2)
