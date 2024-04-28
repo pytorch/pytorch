@@ -2210,6 +2210,15 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         #include <sstream>
         #include <cstdlib>
 
+        #ifndef _MSC_VER
+        #if __cplusplus < 202002L
+        // C++20 earlier code
+        // https://en.cppreference.com/w/cpp/language/attributes/likely
+        #define likely(x)       __builtin_expect(!!(x), 1)
+        #define unlikely(x)     __builtin_expect(!!(x), 0)
+        #endif
+        #endif
+
         // This is defined in guards.cpp so we don't need to import PyTorch headers that are slooow.
         // We manually link it below to workaround issues with fbcode build.
         static void* (*_torchinductor_pyobject_tensor_data_ptr)(PyObject* obj);
