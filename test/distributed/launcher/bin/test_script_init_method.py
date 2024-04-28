@@ -9,6 +9,7 @@
 
 import argparse
 import os
+import time
 
 import torch
 import torch.distributed as dist
@@ -73,6 +74,7 @@ def main():
         )
 
     dist.destroy_process_group()
+    time.sleep(10)
     print("Done")
 
 
