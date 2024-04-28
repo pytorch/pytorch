@@ -191,6 +191,8 @@ XPU_TEST = [
 RUN_PARALLEL_BLOCKLIST = [
     "test_cpp_extensions_jit",
     "test_cpp_extensions_open_device_registration",
+    "test_cpp_extensions_stream_and_event",
+    "test_cpp_extensions_mtia_backend",
     "test_jit_disabled",
     "test_mobile_optimizer",
     "test_multiprocessing",
@@ -214,8 +216,6 @@ CI_SERIAL_LIST = [
     "test_fake_tensor",
     "test_cpp_api_parity",
     "test_reductions",
-    "test_cuda",
-    "test_cuda_expandable_segments",
     "test_fx_backends",
     "test_linalg",
     "test_cpp_extensions_jit",

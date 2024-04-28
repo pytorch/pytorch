@@ -284,10 +284,10 @@ void int8pack_mm_kernel_(
     const Tensor& B,
     const Tensor& scales) {
 
-  const auto* A_data = A.data_ptr<T>();
-  const auto* B_data = B.data_ptr<int8_t>();
+  const auto* A_data = A.const_data_ptr<T>();
+  const auto* B_data = B.const_data_ptr<int8_t>();
   auto* C_data = C.data_ptr<T>();
-  const auto* S_data = scales.data_ptr<T>();
+  const auto* S_data = scales.const_data_ptr<T>();
 
   int M = A.size(0);
   int N = B.size(0);

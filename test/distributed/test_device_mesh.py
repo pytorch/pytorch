@@ -5,11 +5,16 @@ import os
 import torch
 import torch.distributed._functional_collectives as funcol
 from torch.distributed._tensor import DTensor
-from torch.distributed._tensor._collective_utils import mesh_broadcast, mesh_scatter
+from torch.distributed._tensor._collective_utils import (
+    mesh_broadcast,
+    mesh_scatter,
+    unpad_tensor,
+)
 from torch.distributed._tensor.placement_types import _Partial, Shard
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh, init_device_mesh
 
 from torch.distributed.distributed_c10d import (
+    _get_default_group,
     _world,
     get_global_rank,
     get_world_size,
@@ -161,6 +166,19 @@ class DeviceMeshTest(DTensorTestBase):
             local_tensor, gather_dim=0, group=(mesh, 0)
         )
         self.assertEqual(global_tensor.shape, (self.world_size * 2, 8))
+
+    @with_comms
+    def test_from_group(self):
+        # Simple test: check `from_group` for a global PG vs. directly
+        # initializing via `init_device_mesh`
+        global_pg = _get_default_group()
+        ref_global_mesh = init_device_mesh("cuda", (self.world_size,))
+        global_mesh = DeviceMesh.from_group(global_pg, "cuda")
+        self.assertEqual(ref_global_mesh, global_mesh)
+        self.assertEqual(ref_global_mesh._dim_group_infos, global_mesh._dim_group_infos)
+        self.assertEqual(
+            ref_global_mesh._coordinate_on_dim, global_mesh._coordinate_on_dim
+        )
 
 
 class DeviceMeshTestNDim(DTensorTestBase):
@@ -472,8 +490,8 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             mesh_scatter(scattered_tensor, padded_tensor_list, device_mesh, mesh_dim=0)
 
             if pad_sizes[my_rank] != 0:
-                scattered_tensor = shard_placement._unpad_tensor(
-                    scattered_tensor, pad_sizes[my_rank]
+                scattered_tensor = unpad_tensor(
+                    scattered_tensor, shard_dim, pad_sizes[my_rank]
                 )
 
             if scattered_tensor.numel() == 0:
@@ -515,7 +533,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             )
             unpadded_list = [
                 (
-                    shard_placement._unpad_tensor(big_tensor_chunks[i], pad_sizes[i])
+                    unpad_tensor(big_tensor_chunks[i], shard_dim, pad_sizes[i])
                     if pad_sizes[i] > 0
                     else big_tensor_chunks[i]
                 )
@@ -611,8 +629,8 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
 
             # unpad scattered_tensor
             if pad_sizes[my_rank] > 0:
-                scattered_tensor = shard_placement._unpad_tensor(
-                    scattered_tensor, pad_sizes[my_rank]
+                scattered_tensor = unpad_tensor(
+                    scattered_tensor, shard_dim, pad_sizes[my_rank]
                 )
 
             if scattered_tensor.numel() == 0:
