@@ -3505,8 +3505,8 @@ static std::string get_default_lstsq_driver(c10::optional<c10::string_view> driv
       );
     } else { // else if (input.is_cuda())
       TORCH_CHECK(
-        driver_str == "gelss",
-        "torch.linalg.lstsq: `driver` other than `gels` or `gelsd` is not supported on CUDA"
+        (driver_str == "gelss" || driver_str == "gels"),
+        "torch.linalg.lstsq: `driver` other than `gels` or `gelss` is not supported on CUDA"
       );
     }
   } else {

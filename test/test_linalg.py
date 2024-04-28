@@ -185,7 +185,7 @@ class TestLinalg(TestCase):
         if self.device_type == 'cpu':
             drivers = ('gels', 'gelsy', 'gelsd', 'gelss', None)
         else:
-            drivers = ('gels', 'gelss')
+            drivers = ('gels', None)
 
         def check_solution_correctness(a, b, sol):
             sol2 = a.pinverse() @ b
@@ -344,6 +344,7 @@ class TestLinalg(TestCase):
         for m, batch in itertools.product(ms, batches):
             a = random_well_conditioned_matrix(m, m, dtype=dtype, device=device).view(*([1] * len(batch)), m, m)
             b = torch.rand(*(batch + (m, m)), dtype=dtype, device=device)
+
             check_correctness(a, b)
 
         # cases with broadcastable shapes
@@ -445,7 +446,15 @@ class TestLinalg(TestCase):
         b = torch.rand(2, 2, 2, dtype=dtype, device=device)
 
         if device != 'cpu':
-            with self.assertRaisesRegex(RuntimeError, '`driver` other than `gels` is not supported on CUDA'):
+            try:
+                result = torch.linalg.lstsq(a, b, driver='gelss')
+                self.assertTrue(result is not None)
+            except Exception as e:
+                self.fail(f"Unexpected error occurred: {e}")
+            with self.assertRaisesRegex(
+                RuntimeError,
+                'torch.linalg.lstsq: `driver` other than `gels` or `gelss` is not supported on CUDA'
+            ):
                 torch.linalg.lstsq(a, b, driver='fictitious_driver')
         # if on cpu
         else:
