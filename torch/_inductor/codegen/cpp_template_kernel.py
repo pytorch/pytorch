@@ -11,7 +11,7 @@ from torch._inductor.utils import sympy_index_symbol
 from .. import ir, lowering as L
 from ..virtualized import V
 from .common import Kernel, OpOverrides
-from .cpp_utils import cexpr_index
+from .cpp_utils import cexpr_index, DTYPE_TO_CPP
 
 
 def parse_expr_with_index_symbols(expr_str: str) -> sympy.Expr:
@@ -65,7 +65,7 @@ class CppTemplateKernel(Kernel):
             for sym in itertools.chain(output.get_size(), output.get_stride())
             for s in sym.free_symbols
         }
-        sizevars = sorted(unique_sizevars)
+        sizevars = sorted(unique_sizevars, key=str)
         for sizevar in sizevars:
             self.args.sizevars[sizevar] = f"k{sizevar}"
         cpp_argdefs, _, _ = self.args.cpp_argdefs()
@@ -77,30 +77,19 @@ class CppTemplateKernel(Kernel):
         wrapper.generate_kernel_call(name, call_args, cuda=False, arg_types=arg_types)
 
     def dtype(self, node: ir.Buffer) -> str:
-        if node.get_dtype() == torch.float32:
-            return "float"
-        elif node.get_dtype() == torch.bfloat16:
-            return "float"
-        elif node.get_dtype() == torch.half:
-            return "float"
-        else:
-            raise NotImplementedError(f"Unsupported dtype: {node.get_dtype()}")
+        return DTYPE_TO_CPP[node.get_dtype()]
 
     def acc_dtype(self, node: ir.Buffer) -> str:
-        if node.get_dtype() == torch.float32:
-            return "float"
-        elif node.get_dtype() == torch.bfloat16:
-            return "float"
-        elif node.get_dtype() == torch.half:
+        if node.get_dtype() in [torch.float32, torch.bfloat16, torch.half]:
             return "float"
         else:
             raise NotImplementedError(f"Unsupported dtype: {node.get_dtype()}")
 
     def size(self, node: ir.Buffer, dim: int) -> str:
-        return str(self.rename_indexing(node.get_size()[dim]))
+        return cexpr_index(self.rename_indexing(node.get_size()[dim]))
 
     def stride(self, node: ir.Buffer, dim: int) -> str:
-        return str(self.rename_indexing(node.get_stride()[dim]))
+        return cexpr_index(self.rename_indexing(node.get_stride()[dim]))
 
     def index(self, node: ir.Buffer, indices: List[Any]) -> str:
         indexer = node.make_indexer()

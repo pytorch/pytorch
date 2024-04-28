@@ -41,7 +41,9 @@ def patches(fn):
 
 
 class TestSelectAlgorithm(TestCase):
-    def _test_linear(self, batch_size, in_features, out_features, bias, dtype):
+    def _test_linear(
+        self, batch_size, in_features, out_features, bias, input_3d, dtype
+    ):
         class M(torch.nn.Module):
             def __init__(self, bias):
                 super().__init__()
@@ -53,7 +55,8 @@ class TestSelectAlgorithm(TestCase):
 
         counters.clear()
         mod = M(bias=bias).to(dtype=dtype).eval()
-        v = torch.randn(batch_size, in_features).to(dtype=dtype)
+        B = (2, batch_size) if input_3d else (batch_size,)
+        v = torch.randn(*B, in_features).to(dtype=dtype)
         mod(v)
         self.assertEqual(
             counters["inductor"]["select_algorithm_autotune"],
@@ -68,11 +71,12 @@ class TestSelectAlgorithm(TestCase):
     @parametrize("in_features", (1, 2, 1000))
     @parametrize("out_features", (1, 32, 1024))
     @parametrize("bias", (True, False))
+    @parametrize("input_3d", (True, False))
     @dtypes(torch.float)
     def test_linear_static_shapes(
-        self, batch_size, in_features, out_features, bias, dtype
+        self, batch_size, in_features, out_features, bias, input_3d, dtype
     ):
-        self._test_linear(batch_size, in_features, out_features, bias, dtype)
+        self._test_linear(batch_size, in_features, out_features, bias, input_3d, dtype)
 
     @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
     @inductor_config.patch({"freezing": True})
@@ -83,11 +87,12 @@ class TestSelectAlgorithm(TestCase):
     @parametrize("in_features", (1, 2, 1000))
     @parametrize("out_features", (1, 32, 1024))
     @parametrize("bias", (True, False))
+    @parametrize("input_3d", (True, False))
     @dtypes(torch.float)
     def test_linear_dynamic_shapes(
-        self, batch_size, in_features, out_features, bias, dtype
+        self, batch_size, in_features, out_features, bias, input_3d, dtype
     ):
-        self._test_linear(batch_size, in_features, out_features, bias, dtype)
+        self._test_linear(batch_size, in_features, out_features, bias, input_3d, dtype)
 
 
 instantiate_device_type_tests(TestSelectAlgorithm, globals(), only_for="cpu")
