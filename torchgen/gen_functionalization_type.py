@@ -44,6 +44,7 @@ from torchgen.native_function_generation import (
 )
 
 from torchgen.selective_build.selector import SelectiveBuilder
+from torchgen.utils import dataclass_repr
 
 
 # Note: [Mutable Ops Not Using Functionalization]
@@ -431,7 +432,8 @@ def emit_view_functionalization_body(
         {reverse_lambda.decl()} {{
           return {reverse_lambda.inner_call()}
         }},
-        /*is_multi_output=*/{str(is_multi_output_view).lower()}
+        /*is_multi_output=*/{str(is_multi_output_view).lower()},
+        /*is_as_strided=*/{str(str(f.func.name) == 'as_strided').lower()}
       );
       auto out = at::functionalization::impl::create_functional_tensor_with_view_meta(tmp_output, {view_tensor_name}, view_meta);
       // See  Note [Propagating strides in the functionalization pass]
@@ -778,7 +780,7 @@ def gen_functionalization_definition(
         if not g.composite:
             # invariant: NativeFunctionsViewGroup's always have a view_copy operator
             # if the view is not composite (implicit autograd)
-            assert g.view_copy is not None
+            assert g.view_copy is not None, dataclass_repr(g, indent=1)
             view_defs.append(emit_view_functionalization_body(g, view_inplace=False))
             if g.view_inplace is not None:
                 view_defs.append(emit_view_functionalization_body(g, view_inplace=True))

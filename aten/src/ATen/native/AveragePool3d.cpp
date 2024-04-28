@@ -344,7 +344,7 @@ namespace {
 template <typename scalar_t>
 static void avg_pool3d_backward_out_frame(
           scalar_t *gradInput_p,
-          scalar_t *gradOutput_p,
+          const scalar_t *gradOutput_p,
           int64_t nslices,
           int64_t itime,
           int64_t iwidth,
@@ -371,7 +371,7 @@ static void avg_pool3d_backward_out_frame(
 
       /* local pointers */
       scalar_t *ip = gradInput_p + k * itime * iwidth * iheight;
-      scalar_t *op = gradOutput_p + k * otime * owidth * oheight;
+      const scalar_t *op = gradOutput_p + k * otime * owidth * oheight;
       for (i = 0; i < itime*iwidth*iheight; i++)
         *(ip + i) = 0;
 
@@ -479,7 +479,7 @@ TORCH_IMPL_FUNC(avg_pool3d_backward_out_cpu) (
       "avg_pool3d_backward_out_frame",
       [&] {
        scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
-       scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
+       const scalar_t *gradOutput_data = gradOutput.const_data_ptr<scalar_t>();
 
        avg_pool3d_backward_out_frame(
          gradInput_data, gradOutput_data,
@@ -503,7 +503,7 @@ TORCH_IMPL_FUNC(avg_pool3d_backward_out_cpu) (
       "avg_pool3d_backward_out_frame",
       [&] {
         scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
-        scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
+        const scalar_t *gradOutput_data = gradOutput.const_data_ptr<scalar_t>();
 
         at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
           for (const auto p : c10::irange(start, end)) {

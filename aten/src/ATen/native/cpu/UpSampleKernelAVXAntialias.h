@@ -66,7 +66,7 @@ at::Tensor unpack_rgb(const at::Tensor& packed_tensor) {
   // into as 32 bits. This generalizes to num_channels <= 4 and also works for
   // non-channels_last tensors.
 
-  const uint8_t* packed = (const uint8_t*)packed_tensor.data_ptr<uint8_t>();
+  const uint8_t* packed = (const uint8_t*)packed_tensor.const_data_ptr<uint8_t>();
   auto num_pixels = packed_tensor.size(1) * packed_tensor.size(2);
   auto num_channels = packed_tensor.size(0);
 
@@ -180,18 +180,18 @@ void ImagingResampleHorizontal(
   // Although this may not be needed if / when we port all this code to use
   // Vec.h since this would potentially give us another fall-back implem
 
-  const int16_t* kk = (int16_t*)(horiz_indices_weights[3].data_ptr<double>());
+  const int16_t* kk = (int16_t*)(horiz_indices_weights[3].const_data_ptr<double>());
 
   auto xout = unpacked_output.size(2);
   auto yout = unpacked_output.size(1);
   auto xin = unpacked_input.size(2);
   TORCH_INTERNAL_ASSERT(num_channels == unpacked_input.size(0));
 
-  const int64_t* idx_ptr_xmin = horiz_indices_weights[0].data_ptr<int64_t>();
-  const int64_t* idx_ptr_size = horiz_indices_weights[1].data_ptr<int64_t>();
+  const int64_t* idx_ptr_xmin = horiz_indices_weights[0].const_data_ptr<int64_t>();
+  const int64_t* idx_ptr_size = horiz_indices_weights[1].const_data_ptr<int64_t>();
 
   uint8_t* unpacked_output_p = unpacked_output.data_ptr<uint8_t>();
-  const uint8_t* unpacked_input_p = unpacked_input.data_ptr<uint8_t>();
+  const uint8_t* unpacked_input_p = unpacked_input.const_data_ptr<uint8_t>();
 
   int64_t yy = 0;
   auto xout_stride = xout * num_channels;
@@ -255,13 +255,13 @@ void ImagingResampleVertical(
   // basic_loop_aa_vertical<uint8_t>)
   // Although this may not be needed if / when we port all this code to use
   // Vec.h since this would potentially give us another fall-back implem
-  const int16_t* kk = (int16_t*)(vert_indices_weights[3].data_ptr<double>());
+  const int16_t* kk = (int16_t*)(vert_indices_weights[3].const_data_ptr<double>());
 
-  const int64_t* idx_ptr_xmin = vert_indices_weights[0].data_ptr<int64_t>();
-  const int64_t* idx_ptr_size = vert_indices_weights[1].data_ptr<int64_t>();
+  const int64_t* idx_ptr_xmin = vert_indices_weights[0].const_data_ptr<int64_t>();
+  const int64_t* idx_ptr_size = vert_indices_weights[1].const_data_ptr<int64_t>();
 
   uint8_t* unpacked_output_p = unpacked_output.data_ptr<uint8_t>();
-  const uint8_t* unpacked_input_p = unpacked_input.data_ptr<uint8_t>();
+  const uint8_t* unpacked_input_p = unpacked_input.const_data_ptr<uint8_t>();
 
   auto xout = unpacked_output.size(2);
   auto yout = unpacked_output.size(1);

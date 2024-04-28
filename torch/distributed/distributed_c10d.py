@@ -562,7 +562,7 @@ class _World:
             config_info.append(
                 {
                     "pg_name": self.pg_names[pg],
-                    "uid": _get_process_group_uid(pg),
+                    "pg_desc": pg.group_desc,
                     "backend_config": self.pg_backend_config[pg],
                     "ranks": list(ranks.keys())
                     if len(ranks) != default_pg_size
@@ -739,9 +739,8 @@ def _store_based_barrier(rank, store, group_name, rendezvous_count, timeout, log
             if timedelta(seconds=(time.time() - start)) > timeout:
                 raise DistStoreError(  # noqa: TRY200
                     "Timed out initializing process group in store based barrier on "
-                    "rank {}, for key: {} (world_size={}, num_workers_joined={}, timeout={} error={})".format(
-                        rank, store_key, world_size, worker_count, timeout, e
-                    )
+                    f"rank {rank}, for key: {store_key} (world_size={world_size}, "
+                    f"num_workers_joined={worker_count}, timeout={timeout} error={e})"
                 )
 
     logger.info(
@@ -996,12 +995,6 @@ def _is_barrier_after_init() -> int:
     return int(os.getenv("TORCH_DIST_INIT_BARRIER", "0"))
 
 
-def _abort_in_destroy_pg() -> bool:
-    # Environment variable to control whether to abort the communicators when users call destroy_process_group()
-    env = os.getenv("TORCH_NCCL_ABORT_IN_DESTROY_PG", "0")
-    return env == "1" or env.lower() == "true"
-
-
 def _get_default_group() -> ProcessGroup:
     """Get the default process group created by init_process_group."""
     if not is_initialized():
@@ -1097,7 +1090,7 @@ def _get_pg_config(group: Optional[ProcessGroup] = None) -> Dict[str, Any]:
         pg = group
     return {
         "pg_name": _get_process_group_name(pg),
-        "uid": _get_process_group_uid(pg),
+        "pg_desc": pg.group_desc,
         "backend_config": get_backend_config(pg),
         "pg_size": _get_group_size(pg),
         "ranks": get_process_group_ranks(pg),
@@ -1119,6 +1112,28 @@ def get_pg_count() -> int:
 
     """
     return _world.group_count
+
+def get_node_local_rank() -> int:
+    """
+    Return the local rank of the current process relative to the node.
+
+    Semantically, this is a useful concept for mapping processes to devices.
+    For example, on a node with 8 accelerator you could use the node local rank to decide
+    which accelerator device to bind the process to.
+
+    In practice, the actual assignment of node local ranks is handled by the process launcher outside of pytorch,
+    and communicated via the `LOCAL_RANK` environment variable.
+
+    Torchrun will automatically populate `LOCAL_RANK`, but other launchers may not.  If `LOCAL_RANK` is unspecified,
+    this API will raise an exception.
+
+    """
+    if "LOCAL_RANK" in os.environ:
+        return int(os.environ["LOCAL_RANK"])
+    raise RuntimeError(
+        "LOCAL_RANK is not in the environment, so `get_node_local_rank` can't be used. "
+        "Consider using torchrun or updating your process launcher to specify LOCAL_RANK."
+    )
 
 def _set_pg_timeout(timeout: timedelta, group: Optional[ProcessGroup] = None) -> None:
     """
@@ -1296,7 +1311,7 @@ def init_process_group(
             )
 
         default_pg, _ = _new_process_group_helper(
-            -1, -1, [], backend, None, group_name, timeout=timeout
+            -1, -1, [], backend, None, group_name, timeout=timeout, group_desc="default_pg"
         )
         _update_default_pg(default_pg)
     else:
@@ -1322,6 +1337,7 @@ def init_process_group(
             pg_options=pg_options,
             timeout=timeout,
             device_id=device_id,
+            group_desc="default_pg"
         )
         _update_default_pg(default_pg)
 
@@ -1383,7 +1399,7 @@ def _get_split_source(pg):
 
     # If necessary, find a backend to split from by peeling process
     # group wrappers from our potentially wrapped process group.
-    while isinstance(split_from, _ProcessGroupWrapper):
+    while _GLOO_AVAILABLE and isinstance(split_from, _ProcessGroupWrapper):
         split_from = split_from.wrapped_pg
 
     return split_from
@@ -1399,7 +1415,7 @@ def _shutdown_backend(pg):
         backend = pg._get_backend(torch.device("cuda"))
     except RuntimeError:
         pass
-    if isinstance(backend, ProcessGroupNCCL):
+    if is_nccl_available() and isinstance(backend, ProcessGroupNCCL):
         # explictly call shutdown to ensure that NCCL resources are released
         backend._shutdown()
 
@@ -1414,6 +1430,7 @@ def _new_process_group_helper(
     timeout=None,
     pg_tag=None,
     device_id=None,
+    group_desc=None,
 ):
     """
     Create a new distributed process group.
@@ -1445,6 +1462,8 @@ def _new_process_group_helper(
         if existing_group:
             _, prefix_store = _world.pg_map[existing_group]
             return existing_group, prefix_store
+
+    group_desc = "undefined" if group_desc is None else group_desc
 
     # The list of group ranks is empty if we're creating the default group.
     is_default_group = len(global_ranks_in_group) == 0
@@ -1620,9 +1639,11 @@ def _new_process_group_helper(
 
     # update global state
     assert group_name is not None
+    assert group_desc is not None
     _world.pg_map[pg] = (backend, prefix_store)
     _world.pg_names[pg] = group_name
     pg._set_group_name(group_name)
+    pg._set_group_desc(group_desc)
     _register_process_group(group_name, pg)
 
     _world.pg_backend_config[pg] = str(backend_config)
@@ -1673,11 +1694,10 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
         pg._wait_for_pending_works()
 
     if group is None or group == GroupMember.WORLD:
-        if _abort_in_destroy_pg():
-            # shutdown all backends in the order of pg names. shutting down in order because
-            # ncclCommAbort() was a 'collective' call in some versions of NCCL.
-            for pg_to_shutdown in sorted(_world.pg_names, key=lambda x: _world.pg_names[x], reverse=True):
-                _shutdown_backend(pg_to_shutdown)
+        # shutdown all backends in the order of pg names. shutting down in order because
+        # ncclCommAbort() was a 'collective' call in some versions of NCCL.
+        for pg_to_shutdown in sorted(_world.pg_names, key=lambda x: _world.pg_names[x], reverse=True):
+            _shutdown_backend(pg_to_shutdown)
 
         _update_default_pg(None)
         _world.pg_map.clear()
@@ -1700,8 +1720,7 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
         # process group is in good state, we aren't dealing with failures.
         _world.group_count = 0
     else:
-        if _abort_in_destroy_pg():
-            _shutdown_backend(pg)
+        _shutdown_backend(pg)
         del _world.pg_map[pg]
         del _world.pg_names[pg]
         del _world.pg_group_ranks[pg]
@@ -3775,6 +3794,8 @@ def _create_process_group_wrapper(
     world_size: int,
     timeout: timedelta = default_pg_timeout,
 ):
+    assert _GLOO_AVAILABLE, "ProcessGroupWrapper unsupported without GLOO backend."
+
     # (whc) this appears to be just for the gloo backend? if so, `default_pg_timeout` is appropriate...
 
     # Create a separate prefix store for the helper process group.
@@ -3814,7 +3835,7 @@ def _get_backend_from_str(backend: Optional[str] = None) -> Backend:
 
 
 @_time_logger
-def new_group(ranks=None, timeout=None, backend=None, pg_options=None, use_local_synchronization=False):
+def new_group(ranks=None, timeout=None, backend=None, pg_options=None, use_local_synchronization=False, group_desc=None):
     """
     Create a new distributed group.
 
@@ -3855,6 +3876,7 @@ def new_group(ranks=None, timeout=None, backend=None, pg_options=None, use_local
             barrier at the end of the process group creation. This is different
             in that non-member ranks don't need to call into API and don't
             join the barrier.
+        group_desc (str, optional): a string to describe the process group.
 
     Returns:
         A handle of distributed group that can be given to collective calls or None if the rank is not part of ``ranks``.
@@ -3869,7 +3891,15 @@ def new_group(ranks=None, timeout=None, backend=None, pg_options=None, use_local
     multiple overlaping process groups. To avoid that, make sure all ranks follow the
     same global creation order.
     """
-    return _new_group_with_tag(ranks, timeout, backend, pg_options, None, use_local_synchronization=use_local_synchronization)
+    return _new_group_with_tag(
+        ranks,
+        timeout,
+        backend,
+        pg_options,
+        None,
+        use_local_synchronization=use_local_synchronization,
+        group_desc=group_desc,
+    )
 
 def _new_group_with_tag(
     ranks=None,
@@ -3877,7 +3907,8 @@ def _new_group_with_tag(
     backend=None,
     pg_options=None,
     pg_tag=None,
-    use_local_synchronization=False
+    use_local_synchronization=False,
+    group_desc=None
 ):
     """
     Variant of ``new_group`` that exposes tag creation.
@@ -3949,7 +3980,8 @@ def _new_group_with_tag(
         group_name,
         pg_options=pg_options,
         timeout=timeout,
-        pg_tag=pg_tag
+        pg_tag=pg_tag,
+        group_desc=group_desc
     )
 
     # Create the global rank to group rank mapping
@@ -3989,6 +4021,7 @@ def new_subgroups(
     timeout=None,
     backend=None,
     pg_options=None,
+    group_desc=None,
 ):
     """
     Create subgroups of equal size.
@@ -4041,6 +4074,8 @@ def new_subgroups(
             the construction of specific process groups. i.e. for the ``nccl``
             backend, ``is_high_priority_stream`` can be specified so that
             process group can pick up high priority cuda streams.
+        group_desc (str, optional): A string describing the group. Each subgroup will
+            inherit its group_desc
 
     Returns:
         The subgroup containing the current rank, and all the subgroups used for cleanup.
@@ -4054,7 +4089,7 @@ def new_subgroups(
         >>> tensor = torch.ones(1, device=rank) * rank
         >>> dist.all_reduce(tensor, group=cur_subgroup)
         >>> tensor
-        tensor([8])     # Assume 8 is the number of CUDA devices per machine.
+        tensor([28])  # Assume 8 CUDA devices per machine.  28 is sum(range(8)).
         >>> # Cleanup.
         >>> for subgroup in subgroups:
         >>>     dist.destroy_process_group(subgroup)
@@ -4086,6 +4121,7 @@ def new_subgroups(
             timeout=timeout,
             backend=backend,
             pg_options=pg_options,
+            group_desc=group_desc,
         )
         subgroups.append(subgroup)
 
@@ -4105,6 +4141,7 @@ def new_subgroups_by_enumeration(
     timeout=None,
     backend=None,
     pg_options=None,
+    group_desc=None,
 ):
     """
     Create subgroups by dividing the global world.
@@ -4145,6 +4182,8 @@ def new_subgroups_by_enumeration(
             the construction of specific process groups. i.e. for the ``nccl``
             backend, ``is_high_priority_stream`` can be specified so that
             process group can pick up high priority cuda streams.
+        group_desc (str, optional): A string describing the group. Each subgroup will
+            inherit its group_desc.
 
     Returns:
         The subgroup containing the current rank, and all the subgroups used for cleanup.
@@ -4173,6 +4212,7 @@ def new_subgroups_by_enumeration(
             timeout=timeout,
             backend=backend,
             pg_options=pg_options,
+            group_desc=group_desc,
         )
         subgroups.append(subgroup)
         my_rank = get_rank()

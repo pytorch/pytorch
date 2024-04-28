@@ -26,21 +26,49 @@ Tensor _clamp(
       v_self.sizes(),
       v_self.dtype(),
   };
+  if (v_self.is_quantized()) {
+    v_output.set_is_quantized();
+    v_output.set_scale(v_self.get_scale());
+    v_output.set_zero_point(v_self.get_zero_point());
+  }
 
-  const struct Block final {
-    uvec3 extents;
-    uint32_t _;
-    vec2 clamp;
-  } block{
-      v_output.extents(),
-      0u,
-      {
-          min ? min->to<float>() : -std::numeric_limits<float>::infinity(),
-          max ? max->to<float>() : std::numeric_limits<float>::infinity(),
-      },
-  };
+  api::UniformParamsBuffer params;
 
-  api::UniformParamsBuffer params(context, block);
+  if (v_self.is_quantized()) {
+    float mini = min
+        ? roundevenf(min->to<float>() / float(v_self.get_scale())) +
+            float(v_self.get_zero_point())
+        : -std::numeric_limits<float>::infinity();
+    float maxi = max
+        ? roundevenf(max->to<float>() / float(v_self.get_scale())) +
+            float(v_self.get_zero_point())
+        : std::numeric_limits<float>::infinity();
+    const struct Block final {
+      uvec3 extents;
+      uint32_t align;
+      vec2 clamp;
+    } block{
+        v_output.extents(),
+        0u,
+        {mini, maxi},
+    };
+    params = api::UniformParamsBuffer(context, block);
+  } else {
+    const struct Block final {
+      uvec3 extents;
+      uint32_t align;
+      vec2 clamp;
+    } block{
+        v_output.extents(),
+        0u,
+        {
+            min ? min->to<float>() : -std::numeric_limits<float>::infinity(),
+            max ? max->to<float>() : std::numeric_limits<float>::infinity(),
+        },
+    };
+    params = api::UniformParamsBuffer(context, block);
+  }
+
   api::PipelineBarrier pipeline_barrier{};
 
   context->submit_compute_job(
@@ -89,20 +117,42 @@ Tensor& _clamp_(
   const Tensor self = self_arg.is_vulkan() ? self_arg : self_arg.vulkan();
   vTensor& v_self = convert(self);
 
-  const struct Block final {
-    uvec3 extents;
-    uint32_t _;
-    vec2 clamp;
-  } block{
-      v_self.extents(),
-      0u,
-      {
-          min ? min->to<float>() : -std::numeric_limits<float>::infinity(),
-          max ? max->to<float>() : std::numeric_limits<float>::infinity(),
-      },
-  };
+  api::UniformParamsBuffer params;
 
-  api::UniformParamsBuffer params(context, block);
+  if (v_self.is_quantized()) {
+    float mini = min
+        ? roundevenf(min->to<float>() / float(v_self.get_scale())) +
+            float(v_self.get_zero_point())
+        : -std::numeric_limits<float>::infinity();
+    float maxi = max
+        ? roundevenf(max->to<float>() / float(v_self.get_scale())) +
+            float(v_self.get_zero_point())
+        : std::numeric_limits<float>::infinity();
+    const struct Block final {
+      uvec3 extents;
+      uint32_t align;
+      vec2 clamp;
+    } block{
+        v_self.extents(),
+        0u,
+        {mini, maxi},
+    };
+    params = api::UniformParamsBuffer(context, block);
+  } else {
+    const struct Block final {
+      uvec3 extents;
+      uint32_t align;
+      vec2 clamp;
+    } block{
+        v_self.extents(),
+        0u,
+        {
+            min ? min->to<float>() : -std::numeric_limits<float>::infinity(),
+            max ? max->to<float>() : std::numeric_limits<float>::infinity(),
+        },
+    };
+    params = api::UniformParamsBuffer(context, block);
+  }
   api::PipelineBarrier pipeline_barrier{};
 
   context->submit_compute_job(
@@ -242,11 +292,25 @@ Tensor& hardtanh_(Tensor& self, const Scalar& min, const Scalar& max) {
 }
 
 Tensor relu(const Tensor& self) {
-  return ops::_clamp(self, 0, c10::nullopt, VK_KERNEL(clamp));
+  return (
+      (self.scalar_type() == at::kQUInt8)
+          ? ops::_clamp(
+                self, 0, c10::nullopt, VK_KERNEL(quantized_clamp_quint8))
+          : ((self.scalar_type() == at::kQInt8)
+                 ? ops::_clamp(
+                       self, 0, c10::nullopt, VK_KERNEL(quantized_clamp_qint8))
+                 : ops::_clamp(self, 0, c10::nullopt, VK_KERNEL(clamp))));
 }
 
 Tensor& relu_(Tensor& self) {
-  return ops::_clamp_(self, 0, c10::nullopt, VK_KERNEL(clamp_));
+  return (
+      (self.scalar_type() == at::kQUInt8)
+          ? ops::_clamp_(
+                self, 0, c10::nullopt, VK_KERNEL(quantized_clamp_quint8_))
+          : ((self.scalar_type() == at::kQInt8)
+                 ? ops::_clamp_(
+                       self, 0, c10::nullopt, VK_KERNEL(quantized_clamp_qint8_))
+                 : ops::_clamp_(self, 0, c10::nullopt, VK_KERNEL(clamp_))));
 }
 
 Tensor hardswish(const Tensor& self) {
