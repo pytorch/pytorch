@@ -2062,7 +2062,7 @@ class BenchmarkRunner:
             #  factor between eager and dynamo run, making accuracy check
             #  harder.
             # self.grad_scaler = torch.cuda.amp.GradScaler(init_scale=2.0)
-            self.autocast = functools.partial(torch.amp.autocast, device_type=devices)
+            self.autocast = functools.partial(torch.amp.autocast, device_type=devices[0])
             if self.args.amp_dtype:
                 amp_dtype = (
                     torch.float16
