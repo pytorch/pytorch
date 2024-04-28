@@ -95,11 +95,12 @@ at::Tensor _float_to_bfloat16_cuda(const at::Tensor& input) {
       nrows,
       ncols,
 #if HAS_NCCL_BF16_DATATYPE
-      reinterpret_cast<uint16_t*>(output.mutable_data_ptr<at::BFloat16>()));
+      reinterpret_cast<uint16_t*>(output.mutable_data_ptr<at::BFloat16>())
 #else
-      reinterpret_cast<uint16_t*>(output.mutable_data_ptr<at::Half>()));
+      reinterpret_cast<uint16_t*>(output.mutable_data_ptr<at::Half>())
 #endif
-  //C10_CUDA_KERNEL_LAUNCH_CHECK();
+      );
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return output;
 }
