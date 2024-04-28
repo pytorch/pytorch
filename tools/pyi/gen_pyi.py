@@ -252,7 +252,7 @@ def sig_for_ops(opname: str) -> List[str]:
             tname = "builtins." + tname
         return [f"def {opname}(self) -> {tname}: ..."]
     else:
-        raise Exception("unknown op", opname)
+        raise Exception("unknown op", opname)  # noqa: TRY002
 
 
 def generate_type_hints(sig_group: PythonSignatureGroup) -> List[str]:
@@ -799,6 +799,15 @@ def gen_pyi(
                 "def _functionalize_are_all_mutations_under_no_grad_or_inference_mode(t: Tensor) -> _bool: ..."
             ],
             "_functionalize_sync": ["def _functionalize_sync(t: Tensor) -> None: ..."],
+            "_functionalize_was_storage_changed": [
+                "def _functionalize_was_storage_changed(tensor: Tensor) -> _bool: ..."
+            ],
+            "_functionalize_has_metadata_mutation": [
+                "def _functionalize_has_metadata_mutation(tensor: Tensor) -> _bool: ..."
+            ],
+            "_functionalize_apply_view_metas": [
+                "def _functionalize_apply_view_metas(tensor: Tensor,  base: Tensor) -> Tensor: ..."
+            ],
             "_enable_functionalization": [
                 "def _enable_functionalization(*, reapply_views: _bool = False): ..."
             ],
@@ -1118,7 +1127,7 @@ def gen_pyi(
             "cpu": [
                 "def cpu(self, memory_format: torch.memory_format = torch.preserve_format) -> Tensor: ..."
             ],
-            "numpy": ["def numpy(self, *, force: _bool = False) -> Any: ..."],
+            "numpy": ["def numpy(self, *, force: _bool = False) -> numpy.ndarray: ..."],
             "apply_": ["def apply_(self, callable: Callable) -> Tensor: ..."],
             "map_": [
                 "def map_(self, tensor: Tensor, callable: Callable) -> Tensor: ..."
@@ -1151,7 +1160,7 @@ def gen_pyi(
             "is_meta": ["is_meta: _bool"],
             "is_mps": ["is_mps: _bool"],
             "is_mtia": ["is_mtia: _bool"],
-            "is_ort": ["is_ort: _bool"],
+            "is_maia": ["is_maia: _bool"],
             "is_mkldnn": ["is_mkldnn: _bool"],
             "is_vulkan": ["is_vulkan: _bool"],
             "is_ipu": ["is_ipu: _bool"],

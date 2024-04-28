@@ -6,8 +6,6 @@ from typing import Dict, List
 import torch
 from torch.utils._pytree import tree_map_only
 
-from ..exc import unimplemented, Unsupported
-
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
@@ -42,23 +40,6 @@ class OptimizerVariable(UserDefinedObjectVariable):
         *UserDefinedObjectVariable._nonvar_fields,
     }
 
-    @classmethod
-    def throw_if_unsupported_step(cls, symbolic_locals, f_name):
-        """
-        We don't support calling the step with closure argument, so graph break if
-        if that's the case.
-        """
-        if (
-            "closure" in symbolic_locals
-            and not isinstance(symbolic_locals["closure"], ConstantVariable)
-            and "self" in symbolic_locals
-            and isinstance(symbolic_locals["self"], OptimizerVariable)
-            and f_name == "step"
-        ):
-            unimplemented(
-                "Optimizer step with closure not supported by torch.compile()"
-            )
-
     def __init__(
         self,
         value,
@@ -67,14 +48,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         tensor_to_source=None,
         **kwargs,
     ):
-        from ..decorators import mark_static_address
-
         super().__init__(value, **kwargs)
-
-        for group in self.value.param_groups:
-            for p in group["params"]:
-                mark_static_address(p)
-
         self.grad_to_source = grad_to_source or {}
         self.tensor_to_source = tensor_to_source or {}
         self.static_tensor_names = static_tensor_names or set()
@@ -89,6 +63,8 @@ class OptimizerVariable(UserDefinedObjectVariable):
         """This is an optimization to avoid tracing the very slow initialization of the optimizer"""
         if name == "_init_group":
             try:
+                self.graph_break_if_pending_mutation(tx)
+                self.move_step_if_cpu()
                 py_args, py_kwargs = self.get_python_args(*args, **kwargs)
                 ret_val = self.value._init_group(*py_args, **py_kwargs)
                 self.map_sources_and_install_guards(tx)
@@ -108,17 +84,6 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 # trace normally if we can't map args or install guards correctly
                 pass
 
-        if name == "step":
-            if (
-                "closure" in kwargs
-                and not isinstance(kwargs["closure"], ConstantVariable)
-                or len(args) == 1
-                and not isinstance(args[0], ConstantVariable)
-            ):
-                raise Unsupported(
-                    "Optimizer step with closure not supported by torch.compile()"
-                )
-
         return super().call_method(tx, name, args, kwargs)
 
     def var_getattr(self, tx, name):
@@ -129,9 +94,30 @@ class OptimizerVariable(UserDefinedObjectVariable):
             return GetAttrVariable(self, name, source=AttrSource(self.source, name))
 
         if name == "param_groups":
+            from ..decorators import mark_static_address
+
+            for group in self.value.param_groups:
+                for p in group["params"]:
+                    mark_static_address(p)
+
             self._set_capturable(tx)
 
         return super().var_getattr(tx, name)
+
+    def graph_break_if_pending_mutation(self, tx):
+        # If there are pending mutations on a parameter (due to using closure)
+        # then we need to graph break to allow the python version of the parameter
+        # to update, so that running _init_group will initialize the states with
+        # the correct values
+        for g in self.value.param_groups:
+            for p in g["params"]:
+                side_effects = tx.output.side_effects
+                if side_effects.has_pending_mutation(
+                    side_effects.id_to_variable.get(id(p), None)
+                ):
+                    from ..exc import Unsupported
+
+                    raise Unsupported("Pending mutation on parameter")
 
     def _set_capturable(self, tx):
         from . import LazyVariableTracker
@@ -170,12 +156,22 @@ class OptimizerVariable(UserDefinedObjectVariable):
             ):
                 return self.value.param_groups[arg.source.index]
 
-            raise ArgMappingException()
+            raise ArgMappingException
 
         new_args = [map_arg(arg) for arg in args]
         new_kwargs = {k: map_arg(v) for k, v in kwargs.items()}
 
         return new_args, new_kwargs
+
+    # If users load an old state dictionary,
+    # it's possible that step could be on the cpu
+    # if this is the case, move it to the GPU
+    # corresponding to the parameter
+    # in most cases this is a no-op because the state is empty
+    def move_step_if_cpu(self):
+        for p, state in self.value.state.items():
+            if "step" in state and state["step"].is_cpu:
+                state["step"] = state["step"].to(p.device)
 
     def map_sources_and_install_guards(self, tx):
         from ..decorators import mark_static_address
