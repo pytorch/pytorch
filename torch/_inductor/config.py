@@ -722,6 +722,9 @@ class aot_inductor:
     # rather than embedded into the data section. Needed to support 1B+ parameter models
     force_mmap_weights: bool = False
 
+    # Flag to determine if an input tensor, which is also an output tensor and is being mutated, should be mutated in the graph.
+    keep_inference_input_mutations: bool = False
+
 
 class cuda:
     # CUDA arch to use for CUDA template kernel compilation.

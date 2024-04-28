@@ -1430,6 +1430,7 @@ def compile_fx(
                 example_inputs_,
                 trace_joint=False,
                 decompositions=decompositions,
+                keep_inference_input_mutations=config.aot_inductor.keep_inference_input_mutations,
             )
         unlifted_gm = _unlift_graph(model_, gm, graph_signature)
         if "dynamo_flat_name_to_original_fqn" in model_.meta:
