@@ -1456,8 +1456,7 @@ class GraphModuleDeserializer(metaclass=Final):
                         self.shape_env.add_var_to_val(sym, hint)
 
                     if vr := self.symbol_name_to_range.get(val.expr_str):
-                        symbolic_shapes._constrain_symbol_range(
-                            self.shape_env,
+                        self.shape_env.constrain_symbol_range(
                             sym,
                             compiler_min=vr.lower,  # type: ignore[arg-type]
                             compiler_max=vr.upper,  # type: ignore[arg-type]
@@ -1472,8 +1471,7 @@ class GraphModuleDeserializer(metaclass=Final):
                         if s.name not in self.symbol_name_to_symbol:
                             self.symbol_name_to_symbol[s.name] = s
                         if vr := self.symbol_name_to_range.get(s.name):
-                            symbolic_shapes._constrain_symbol_range(
-                                self.shape_env,
+                            self.shape_env.constrain_symbol_range(
                                 s,
                                 compiler_min=vr.lower,  # type: ignore[arg-type]
                                 compiler_max=vr.upper,  # type: ignore[arg-type]
@@ -2630,12 +2628,12 @@ def _canonicalize_graph(
         n.metadata.clear()
 
     # Stage 4: Aggregate values.
-    sorted_tensor_values = dict(sorted(graph.tensor_values.items(), key=lambda x: x[0]))
+    sorted_tensor_values = dict(sorted(graph.tensor_values.items(), key=operator.itemgetter(0)))
     sorted_sym_int_values = dict(
-        sorted(graph.sym_int_values.items(), key=lambda x: x[0])
+        sorted(graph.sym_int_values.items(), key=operator.itemgetter(0))
     )
     sorted_sym_bool_values = dict(
-        sorted(graph.sym_bool_values.items(), key=lambda x: x[0])
+        sorted(graph.sym_bool_values.items(), key=operator.itemgetter(0))
     )
 
     # Stage 5: Recurse in subgraphs.
@@ -2683,8 +2681,8 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
     """
     ep = copy.deepcopy(ep)
 
-    opset_version = dict(sorted(ep.opset_version.items(), key=lambda x: x[0]))
-    range_constraints = dict(sorted(ep.range_constraints.items(), key=lambda x: x[0]))
+    opset_version = dict(sorted(ep.opset_version.items(), key=operator.itemgetter(0)))
+    range_constraints = dict(sorted(ep.range_constraints.items(), key=operator.itemgetter(0)))
     module_call_graph = sorted(ep.graph_module.module_call_graph, key=lambda x: x.fqn)
     signature = ep.graph_module.signature
     graph = ep.graph_module.graph
