@@ -1032,8 +1032,7 @@ To choose the best driver on CPU consider:
   - `'gelsd'` (tridiagonal reduction and SVD)
   - But if you run into memory issues: `'gelss'` (full SVD).
 
-For CUDA inputs, two drivers are available: 'gels' and 'gelss'. The 'gels' driver assumes that :attr:A is full-rank.
-For rank-deficient matrices :attr:A, use the 'gelss' driver.
+For CUDA inputs, two drivers are available: 'gels' and 'gelss'.
 
 See also the `full description of these drivers`_
 
