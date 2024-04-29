@@ -7,6 +7,7 @@ from warnings import warn
 import torch
 
 import torch.cuda
+from torch._C import _get_privateuse1_backend_name
 from torch._C._profiler import _ExperimentalConfig
 
 from torch.autograd import (
@@ -240,7 +241,9 @@ class profile:
                 use_kineto
             ), "Device-only events supported only with Kineto (use_kineto=True)"
 
-        VALID_DEVICE_OPTIONS = ["cuda", "xpu", "privateuseone"]
+        VALID_DEVICE_OPTIONS = ["cuda", "xpu"]
+        if _get_privateuse1_backend_name() != "privateuseone":
+            VALID_DEVICE_OPTIONS.append(_get_privateuse1_backend_name())
         if self.use_device not in VALID_DEVICE_OPTIONS:
             warn(f"The {self.use_device} is not a valid device option.")
             self.use_device = None
