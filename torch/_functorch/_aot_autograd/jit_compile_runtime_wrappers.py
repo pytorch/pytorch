@@ -65,6 +65,7 @@ from .utils import (
     strict_zip,
     unlift_tokens,
 )
+from .autograd_cache import AOTAutogradCache
 
 zip = strict_zip
 
@@ -289,6 +290,10 @@ def aot_dispatch_autograd(
             fw_module, bw_module = aot_config.partition_fn(
                 fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
             )
+            key = "test"
+            AOTAutogradCache._save(key, fw_module, None)
+            results = AOTAutogradCache._lookup(key)
+            breakpoint()
 
             # See Note [Side-Effectful Tokens in AOTAutograd]
             if num_tokens != 0 and config.unlift_effect_tokens:
