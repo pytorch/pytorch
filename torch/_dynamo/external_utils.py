@@ -56,7 +56,11 @@ def wrap_inline(fn):
 
     # Create a new function dynamically to avoid Dynamo cache collisions on the
     # same fn.__code__ object.
-    return create_new_fn(inner)
+    new_fn = create_new_fn(inner)
+
+    if hasattr(fn, "_boxed_call"):
+        new_fn._boxed_call = True  # type: ignore[attr-defined]
+    return new_fn
 
 
 def call_hook(hook, *args):
