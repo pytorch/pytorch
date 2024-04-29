@@ -14,6 +14,7 @@
 #include <ATen/ops/clamp_native.h>
 #include <ATen/ops/isin_native.h>
 #include <ATen/ops/nan_to_num_native.h>
+#include <ATen/ops/ones_like_native.h>
 #include <ATen/ops/where_native.h>
 #endif
 
@@ -278,6 +279,20 @@ static void isin_Tensor_Tensor_out_mps(const Tensor& elements,
   if (elements.numel() == 0) {
     return;
   }
+
+  if (test_elements.numel() == 0) {
+    if (invert) {
+      auto ones = ones_like(out);
+      out.copy_(ones);
+    } else {
+      auto zeros = zeros_like(out);
+      out.copy_(zeros);
+    }
+    return;
+  }
+
+  TORCH_CHECK(elements.is_mps() && test_elements.is_mps());
+  TORCH_CHECK(elements.dtype() == test_elements.dtype());
 
   @autoreleasepool {
     string key =
