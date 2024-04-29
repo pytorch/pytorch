@@ -50,16 +50,15 @@ def wrap_inline(fn):
     Create an extra frame around fn that is not in skipfiles
     """
 
-    @functools.wraps(fn)
     def inner(*args, **kwargs):
         return fn(*args, **kwargs)
 
     # Create a new function dynamically to avoid Dynamo cache collisions on the
     # same fn.__code__ object.
-    new_fn = create_new_fn(inner)
+    # functools.wraps is really important to ensure that __dict__ of the old
+    # function is propagated to the new function.
+    new_fn = functools.wraps(fn)(create_new_fn(inner))
 
-    if hasattr(fn, "_boxed_call"):
-        new_fn._boxed_call = True  # type: ignore[attr-defined]
     return new_fn
 
 
