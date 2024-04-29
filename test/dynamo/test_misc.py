@@ -8496,8 +8496,6 @@ def ___make_guard_fn():
 
         f(torch.tensor([2, 3, 4]), torch.randn(9))
 
-    # See https://github.com/pytorch/pytorch/issues/119689
-    @unittest.expectedFailure
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_runtime_assert_replacement(self):
         @torch.compile(backend="aot_eager")
@@ -10161,21 +10159,36 @@ fn
     def test_outside_linear_module_free(self):
         # Compared to test_linear_module_free, the linear
         # layer is not the code object that is directly compiled.
-        def model_inp_ctr():
-            fc = torch.nn.Linear(100, 100)
 
-            class Mod(torch.nn.Module):
-                def __init__(self):
-                    super().__init__()
-                    self.fc_ref = fc
+        # This test does not use _test_compile_model_free because of difficulty
+        # in handling variable fc.
 
-                def forward(self, x):
-                    return fc(x[0])
+        fc = torch.nn.Linear(100, 100)
 
-            # return fc to keep it alive in _test_compile_model_free
-            return Mod(), (torch.randn(100, 100), fc)
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc_ref = fc
 
-        self._test_compile_model_free(model_inp_ctr, lambda mod: mod.fc_ref)
+            def forward(self, x):
+                return fc(x[0])
+
+        cleared = False
+
+        def finalize():
+            nonlocal cleared
+            cleared = True
+
+        def run():
+            mod = Mod()
+            inp = torch.randn(100, 100)
+            weakref.finalize(mod.fc_ref, finalize)
+            torch.compile(mod, backend="eager")(inp)
+
+        run()
+        del fc  # This should delete all the references
+        gc.collect()
+        self.assertTrue(cleared)
 
     @unittest.skipIf(sys.version_info >= (3, 12), "leaks in 3.12+")
     def test_parameter_free(self):
