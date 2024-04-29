@@ -4402,14 +4402,18 @@ class TestSparseMeta(TestCase):
             assertEqualAttrs(x.crow_indices(), y.crow_indices(), y.crow_indices().shape)
             assertEqualAttrs(x.col_indices(), y.col_indices(), (*y.col_indices().shape[:-1], expected_nnz))
             batch_dim = x.col_indices().ndim - 1
-            assertEqualAttrs(x.values(), y.values(),
-                             (*y.values().shape[:batch_dim], expected_nnz, *y.values().shape[batch_dim + 1:]))
+            values_shape = (*y.values().shape[:batch_dim], expected_nnz, *y.values().shape[batch_dim + 1:])
+            self.assertEqual(x.values().layout, y.values().layout)
+            self.assertEqual(x.values().dtype, y.values().dtype)
+            self.assertEqual(x.values().shape, values_shape)
         elif x.layout in {torch.sparse_csc, torch.sparse_bsc}:
             assertEqualAttrs(x.ccol_indices(), y.ccol_indices(), y.ccol_indices().shape)
             assertEqualAttrs(x.row_indices(), y.row_indices(), (*y.row_indices().shape[:-1], expected_nnz))
             batch_dim = x.row_indices().ndim - 1
-            assertEqualAttrs(x.values(), y.values(),
-                             (*y.values().shape[:batch_dim], expected_nnz, *y.values().shape[batch_dim + 1:]))
+            values_shape = (*y.values().shape[:batch_dim], expected_nnz, *y.values().shape[batch_dim + 1:])
+            self.assertEqual(x.values().layout, y.values().layout)
+            self.assertEqual(x.values().dtype, y.values().dtype)
+            self.assertEqual(x.values().shape, values_shape)
 
     @all_sparse_layouts('layout', include_strided=False)
     @parametrize("dtype", [torch.float64])
