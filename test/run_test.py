@@ -30,6 +30,7 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_LINUX,
     IS_MACOS,
+    IS_WINDOWS,
     parser as common_parser,
     retry_shell,
     set_cwd,
@@ -1192,9 +1193,12 @@ def parse_args():
                 and os.getenv("TEST_CONFIG") == "distributed"
                 and TEST_CUDA
             )
+            or (IS_WINDOWS and not TEST_CUDA)
         )
         and os.getenv("BRANCH", "") != "main"
-        and not strtobool(os.environ.get("NO_TD", "False")),
+        and not strtobool(os.environ.get("NO_TD", "False"))
+        and "slow" not in os.getenv("TEST_CONFIG", "")
+        and "slow" not in os.getenv("BUILD_ENVIRONMENT", ""),
     )
     parser.add_argument(
         "additional_unittest_args",
