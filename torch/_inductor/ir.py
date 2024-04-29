@@ -1948,12 +1948,12 @@ class ExpandView(BaseView):
             elif old_size[i] is None or old_size[i] == 1:
                 pass
             else:
-                # Expect broadcast compatibility
-                new_size[i] = V.graph.sizevars.expect_equals(
-                    new_size[i],
-                    old_size[i],
-                    msg=f"Broadcast failed in ExpandView({x.get_size()}, {new_size}) on dimension {i}",
-                )
+                # NB: new_size[i] == old_size[i] is known because the meta
+                # formula was expected to have taught us this equality.
+                # We can't conveniently check it right now because
+                # statically_known_equals doesn't know to consult preexisting
+                # guards
+                pass
         return new_size
 
     @classmethod
@@ -3018,7 +3018,7 @@ class Buffer(IRNode):
         return self.layout.make_indexer()
 
     def get_name(self) -> str:
-        assert self.name
+        assert self.name, self
         return self.name
 
     def get_device(self):
@@ -5073,8 +5073,15 @@ class AssertScalar(ExternKernel):
         if V.graph.cpp_wrapper:
             pass
         else:
+            # NB: It is EXTREMELY important not to simplify the scalar under
+            # assertion here, because simplify is done with respect to
+            # runtime asserts.  So if you have "u0 == 0" in the runtime
+            # asserts, if you subsequently try to simplify(u0 == 0), you will
+            # get True (because we've already runtime assert'ed that it's
+            # true).  But we're code generating the actual runtime assert
+            # here!!
             wrapper.writeline(
-                f"if not {V.graph.wrapper_code.codegen_python_sizevar(self.scalar)}:"
+                f"if not {V.graph.wrapper_code.codegen_python_sizevar(self.scalar, simplify=False)}:"
             )
             wrapper.writeline(f"    raise RuntimeError({repr(self.msg)})")
             # No one should ever use this buffer, but for uniformity
