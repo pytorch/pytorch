@@ -496,6 +496,37 @@ static PyObject* is_autocast_enabled(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* get_autocast_dtype(
+    PyObject* _unused,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser(
+      {"get_autocast_dtype(c10::string_view device_type)"});
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto device_type = at::Device(r.string(0)).type();
+  at::ScalarType current_dtype = at::autocast::get_autocast_dtype(device_type);
+  return Py_NewRef(torch::getTHPDtype(current_dtype));
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* set_autocast_dtype(
+    PyObject* _unused,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser(
+      {"set_autocast_dtype(c10::string_view device_type, ScalarType dtype)"});
+  ParsedArgs<2> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto device_type = at::Device(r.string(0)).type();
+  auto dtype = r.scalartype(1);
+  at::autocast::set_autocast_dtype(device_type, dtype);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* is_any_autocast_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   if (at::autocast::is_enabled() || at::autocast::is_cpu_enabled() ||
@@ -628,37 +659,37 @@ static PyObject* set_autocast_xla_dtype(PyObject* _unused, PyObject* arg) {
 
 static PyObject* get_autocast_gpu_dtype(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  at::ScalarType current_dtype = at::autocast::get_autocast_gpu_dtype();
-  auto dtype = (PyObject*)torch::getTHPDtype(current_dtype);
-  Py_INCREF(dtype);
-  return dtype;
+  TORCH_WARN_DEPRECATION(
+      "torch.get_autocast_gpu_dtype() is deprecated. Please use torch.get_autocast_dtype('cuda') instead.")
+  at::ScalarType current_dtype = at::autocast::get_autocast_dtype(at::kCUDA);
+  return Py_NewRef(torch::getTHPDtype(current_dtype));
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* get_autocast_cpu_dtype(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  at::ScalarType current_dtype = at::autocast::get_autocast_cpu_dtype();
-  auto dtype = (PyObject*)torch::getTHPDtype(current_dtype);
-  Py_INCREF(dtype);
-  return dtype;
+  TORCH_WARN_DEPRECATION(
+      "torch.get_autocast_cpu_dtype() is deprecated. Please use torch.get_autocast_dtype('cpu') instead.")
+  at::ScalarType current_dtype = at::autocast::get_autocast_dtype(at::kCPU);
+  return Py_NewRef(torch::getTHPDtype(current_dtype));
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* get_autocast_ipu_dtype(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  at::ScalarType current_dtype = at::autocast::get_autocast_ipu_dtype();
-  auto dtype = (PyObject*)torch::getTHPDtype(current_dtype);
-  Py_INCREF(dtype);
-  return dtype;
+  TORCH_WARN_DEPRECATION(
+      "torch.get_autocast_ipu_dtype() is deprecated. Please use torch.get_autocast_dtype('ipu') instead.")
+  at::ScalarType current_dtype = at::autocast::get_autocast_dtype(at::kIPU);
+  return Py_NewRef(torch::getTHPDtype(current_dtype));
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* get_autocast_xla_dtype(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  at::ScalarType current_dtype = at::autocast::get_autocast_xla_dtype();
-  auto dtype = (PyObject*)torch::getTHPDtype(current_dtype);
-  Py_INCREF(dtype);
-  return dtype;
+  TORCH_WARN_DEPRECATION(
+      "torch.get_autocast_xla_dtype() is deprecated. Please use torch.get_autocast_dtype('xla') instead.")
+  at::ScalarType current_dtype = at::autocast::get_autocast_dtype(at::kXLA);
+  return Py_NewRef(torch::getTHPDtype(current_dtype));
   END_HANDLE_TH_ERRORS
 }
 
