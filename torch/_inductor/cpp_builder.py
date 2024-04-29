@@ -529,7 +529,7 @@ def _get_openmp_args(cpp_compiler):
         )
 
         # only Apple builtin compilers (Apple Clang++) require openmp
-        omp_available = not is_apple_clang(cpp_compiler)
+        omp_available = not is_apple_clang()
 
         # check the `OMP_PREFIX` environment first
         omp_prefix = os.getenv("OMP_PREFIX")
