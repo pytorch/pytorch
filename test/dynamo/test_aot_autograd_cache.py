@@ -37,7 +37,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             fx_graph = gm
             return gm
 
-        g = torch.compile(fn, backend=compiler)
+        g = torch.compile(fn, backend=compiler, fullgraph=True)
         result = g(*args, **kwargs)
         return (result, fx_graph)
 
