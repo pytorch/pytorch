@@ -96,7 +96,7 @@ class TestNativeFunctions(TestCase):
                 return traced_none(values)
             if const == [5.1, 4.1]:
                 return traced_list(values)
-            raise Exception("Invalid argument")
+            raise Exception("Invalid argument")  # noqa: TRY002
 
         self.do_test_optional_floatlist_with_module(fake_module)
 
@@ -150,7 +150,7 @@ class TestNativeFunctions(TestCase):
                 return traced_none(values)
             if const == [5, 4]:
                 return traced_list(values)
-            raise Exception("Invalid argument")
+            raise Exception("Invalid argument")  # noqa: TRY002
 
         self.do_test_optional_intlist_with_module(fake_module)
 
@@ -217,7 +217,7 @@ class TestNativeFunctions(TestCase):
                 return traced_none(values)
             if const == 10:
                 return traced_int(values)
-            raise Exception("Invalid argument")
+            raise Exception("Invalid argument")  # noqa: TRY002
 
         self.do_test_optional_filled_intlist_with_module(fake_module)
 

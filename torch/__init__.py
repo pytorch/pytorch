@@ -1267,7 +1267,8 @@ def _check_tensor_all(cond, message=None):  # noqa: F811
 # For Python Array API (https://data-apis.org/array-api/latest/API_specification/constants.html) and
 # NumPy consistency (https://numpy.org/devdocs/reference/constants.html)
 from math import e , nan , inf , pi
-__all__.extend(['e', 'pi', 'nan', 'inf'])
+newaxis: None = None
+__all__.extend(['e', 'pi', 'nan', 'inf', 'newaxis'])
 
 ################################################################################
 # Define Storage and Tensor classes
@@ -1805,7 +1806,7 @@ def compile(model: Optional[Callable] = None, *,
     results are not applicable for subsequent calls (this is called a "guard
     failure), you can use TORCH_LOGS=guards to debug these situations.
     Multiple compiled results can be associated with a frame up to
-    ``torch._dynamo.config.cache_size_limit``, which defaults to 64; at which
+    ``torch._dynamo.config.cache_size_limit``, which defaults to 8; at which
     point we will fall back to eager.  Note that compile caches are per
     *code object*, not frame; if you dynamically create multiple copies of a
     function, they will all share the same code cache.
