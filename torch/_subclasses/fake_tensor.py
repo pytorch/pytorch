@@ -1489,7 +1489,7 @@ class FakeTensorMode(TorchDispatchMode):
             real_flat_args = [maybe_to_real_tensor(a) for a in flat_args]
             real_args, real_kwargs = pytree.tree_unflatten(real_flat_args, args_spec)
             real_out = func(*real_args, **real_kwargs)
-        else:
+        elif self.propagate_real_tensors:
             # This can happen occasionally legitimately, specifically when you
             # are inside the meta of a data dependent operation and you create
             # a tensor on an unbacked SymInt; at this point in time we don't
