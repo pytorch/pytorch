@@ -4381,6 +4381,34 @@ class TestSparseMeta(TestCase):
             self.maxDiff = orig_maxDiff
             raise
 
+    def assertEqualMeta(self, x, y, expected_nnz):
+        self.assertEqual(x, y, exact_device=not x.is_meta, exact_layout=True)
+        self.assertEqual(x.sparse_dim(), y.sparse_dim())
+        self.assertEqual(x.dense_dim(), y.dense_dim())
+
+        def assertEqualAttrs(x, y, expected_shape):
+            self.assertEqual(x.shape, expected_shape)
+            self.assertEqual(x.dtype, y.dtype)
+            self.assertEqual(x.layout, y.layout)
+            if not x.is_meta:
+                self.assertEqual(x.device, y.device)
+
+        if x.layout is torch.sparse_coo:
+            assertEqualAttrs(x._indices(), y._indices(), (*y._indices().shape[:-1], expected_nnz))
+            assertEqualAttrs(x._values(), y._values(), (expected_nnz, *y._values().shape[1:]))
+        elif x.layout in {torch.sparse_csr, torch.sparse_bsr}:
+            assertEqualAttrs(x.crow_indices(), y.crow_indices(), y.crow_indices().shape)
+            assertEqualAttrs(x.col_indices(), y.col_indices(), (*y.col_indices().shape[:-1], expected_nnz))
+            batch_dim = x.col_indices().ndim - 1
+            assertEqualAttrs(x.values(), y.values(),
+                             (*y.values().shape[:batch_dim], expected_nnz, *y.values().shape[batch_dim + 1:]))
+        elif x.layout in {torch.sparse_csc, torch.sparse_bsc}:
+            assertEqualAttrs(x.ccol_indices(), y.ccol_indices(), y.ccol_indices().shape)
+            assertEqualAttrs(x.row_indices(), y.row_indices(), (*y.row_indices().shape[:-1], expected_nnz))
+            batch_dim = x.row_indices().ndim - 1
+            assertEqualAttrs(x.values(), y.values(),
+                             (*y.values().shape[:batch_dim], expected_nnz, *y.values().shape[batch_dim + 1:]))
+
     @all_sparse_layouts('layout', include_strided=False)
     @parametrize("dtype", [torch.float64])
     def test_to_meta(self, dtype, layout):
@@ -4389,28 +4417,17 @@ class TestSparseMeta(TestCase):
         for t in self.generate_simple_inputs(layout, device=device, dtype=dtype, index_dtype=index_dtype):
             m = t.to(device="meta")
             self.assertEqual(m.device.type, "meta")
-            self.assertEqual(m, t, exact_device=False, exact_layout=True)
-            self.assertEqual(m.sparse_dim(), t.sparse_dim())
-            self.assertEqual(m.dense_dim(), t.dense_dim())
+            self.assertEqualMeta(m, t, t._nnz())
 
-            if layout is torch.sparse_coo:
-                self.assertEqual(m._indices().device.type, "meta")
-                self.assertEqual(m._indices(), t._indices(), exact_device=False, exact_layout=True)
-                self.assertEqual(m._values().device.type, "meta")
-                self.assertEqual(m._values(), t._values(), exact_device=False, exact_layout=True)
-            else:
-                if layout in {torch.sparse_csr, torch.sparse_bsr}:
-                    m_compressed_indices, m_plain_indices = m.crow_indices(), m.col_indices()
-                    compressed_indices, plain_indices = t.crow_indices(), t.col_indices()
-                else:
-                    m_compressed_indices, m_plain_indices = m.ccol_indices(), m.row_indices()
-                    compressed_indices, plain_indices = t.ccol_indices(), t.row_indices()
-                self.assertEqual(m_compressed_indices.device.type, "meta")
-                self.assertEqual(m_compressed_indices, compressed_indices, exact_device=False, exact_layout=True)
-                self.assertEqual(m_plain_indices.device.type, "meta")
-                self.assertEqual(m_plain_indices, plain_indices, exact_device=False, exact_layout=True)
-                self.assertEqual(m.values().device.type, "meta")
-                self.assertEqual(m.values(), t.values(), exact_device=False, exact_layout=True)
+    @all_sparse_layouts('layout', include_strided=False)
+    @parametrize("dtype", [torch.float64])
+    def test_zeros_like_meta(self, dtype, layout):
+        index_dtype = torch.int64
+        device = 'cpu'
+        for t in self.generate_simple_inputs(layout, device=device, dtype=dtype, index_dtype=index_dtype):
+            m = torch.zeros_like(t, device="meta")
+            self.assertEqual(m.device.type, "meta")
+            self.assertEqualMeta(m, t, 0)
 
     @all_sparse_layouts('layout', include_strided=False)
     @parametrize("dtype", [torch.float64])
@@ -4422,45 +4439,7 @@ class TestSparseMeta(TestCase):
         for t in self.generate_simple_inputs(layout, device=device, dtype=dtype, index_dtype=index_dtype):
             f = FakeTensor.from_tensor(t, fake_mode)
             self.assertIsInstance(f, FakeTensor)
-            self.assertEqual(f.layout, layout)
-            self.assertEqual(f.shape, t.shape)
-            self.assertEqual(f.device, t.device)
-            if layout is torch.sparse_coo:
-                nnz = 0
-                indices = f._indices()
-                self.assertEqual(indices.dtype, index_dtype)
-                self.assertEqual(indices.device, t.device)
-                self.assertEqual(indices.shape, (*t._indices().shape[:-1], nnz))
-                values = f._values()
-                self.assertEqual(values.dtype, dtype)
-                self.assertEqual(values.device, t.device)
-                self.assertEqual(values.shape, (nnz, *t._values().shape[1:]))
-            else:
-                nnz = 0
-                if layout in {torch.sparse_csr, torch.sparse_bsr}:
-                    f_compressed_indices, f_plain_indices = f.crow_indices(), f.col_indices()
-                    compressed_indices, plain_indices = t.crow_indices(), t.col_indices()
-                else:
-                    f_compressed_indices, f_plain_indices = f.ccol_indices(), f.row_indices()
-                    compressed_indices, plain_indices = t.ccol_indices(), t.row_indices()
-                f_values = f.values()
-                values = t.values()
-                batch_dims = len(compressed_indices.shape) - 1
-                self.assertEqual(f_compressed_indices.layout, compressed_indices.layout)
-                self.assertEqual(f_compressed_indices.shape, compressed_indices.shape)
-                self.assertEqual(f_compressed_indices.dtype, compressed_indices.dtype)
-                self.assertEqual(f_compressed_indices.device, compressed_indices.device)
-
-                self.assertEqual(f_plain_indices.layout, plain_indices.layout)
-                self.assertEqual(f_plain_indices.shape, (*plain_indices.shape[:-1], nnz))
-                self.assertEqual(f_plain_indices.dtype, plain_indices.dtype)
-                self.assertEqual(f_plain_indices.device, plain_indices.device)
-
-                batch_dim = plain_indices.ndim - 1
-                self.assertEqual(f_values.layout, values.layout)
-                self.assertEqual(f_values.shape, (*values.shape[:batch_dim], nnz, *values.shape[batch_dim + 1:]))
-                self.assertEqual(f_values.dtype, values.dtype)
-                self.assertEqual(f_values.device, values.device)
+            self.assertEqualMeta(f, t, 0)
 
     @all_sparse_layouts('layout', include_strided=False)
     @parametrize("dtype", [torch.float64])
@@ -4495,9 +4474,10 @@ class TestSparseMeta(TestCase):
         device = 'cpu'
         index_dtype = torch.int64
         for t in self.generate_simple_inputs(layout, device=device, dtype=dtype, index_dtype=index_dtype):
+            expected = torch.add(t, t).to(device='meta')
             m = t.to(device='meta')
             r = torch.add(m, m)
-            self.assertEqual(r, m)
+            self.assertEqualMeta(r, expected, 0 if layout is torch.sparse_coo else expected._nnz())
 
 
 class _SparseDataset(torch.utils.data.Dataset):
