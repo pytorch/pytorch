@@ -56,6 +56,8 @@ log = logging.getLogger(__name__)
 _T = TypeVar("_T")
 VarRanges = Dict[sympy.Expr, sympy.Expr]
 
+ALIGNMENT = 16
+
 
 def do_bench_using_profiling(fn: Callable[[], Any], warmup=25, rep=100) -> float:
     """
@@ -590,7 +592,7 @@ def any_is_symbolic(*args: Any) -> bool:
     return any(is_symbolic(a) for a in args)
 
 
-def has_incompatible_cudagraph_ops(gm):
+def get_first_incompatible_cudagraph_node(gm):
     from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
     forbidden_set = {
@@ -626,10 +628,14 @@ def has_incompatible_cudagraph_ops(gm):
         )
     for node in gm.graph.nodes:
         if str(node.target) in forbidden_set:
-            return True
+            return node
         if (val := node.meta.get("val")) is not None and free_unbacked_symbols(val):
-            return True
-    return False
+            return node
+    return None
+
+
+def has_incompatible_cudagraph_ops(gm):
+    return get_first_incompatible_cudagraph_node(gm) is not None
 
 
 def output_node(gm: torch.fx.GraphModule):
@@ -665,7 +671,8 @@ def fresh_inductor_cache(cache_entries=None):
     for obj in _registered_caches:
         obj.cache_clear()
 
-    with tempfile.TemporaryDirectory() as inductor_cache_dir:
+    inductor_cache_dir = tempfile.mkdtemp()
+    try:
         with mock.patch.dict(
             os.environ, {"TORCHINDUCTOR_CACHE_DIR": inductor_cache_dir}
         ):
@@ -683,6 +690,10 @@ def fresh_inductor_cache(cache_entries=None):
                                 if ".lock" not in f
                             }
                         )
+        shutil.rmtree(inductor_cache_dir)
+    except Exception:
+        log.warning("on error, temporary cache dir kept at %s", inductor_cache_dir)
+        raise
 
 
 def argsort(seq) -> List[int]:
@@ -1186,6 +1197,12 @@ def get_gpu_dram_gbps():
     return get_dram_gbps()
 
 
+def get_gpu_shared_memory():
+    from triton.runtime import driver
+
+    return driver.active.utils.get_device_properties(0).get("max_shared_mem", 0)
+
+
 def is_welford_reduction(reduction_type):
     return reduction_type.startswith("welford")
 
@@ -1360,9 +1377,16 @@ def needs_fallback_due_to_atomic_add_limitations(dtype):
 
 
 def use_scatter_fallback(
-    fn, reduction_type, self_dtype, src_dtype, src_device_type, src_is_tensor
+    op_overload: torch._ops.OpOverload,
+    reduction_type,
+    self_dtype,
+    src_dtype,
+    src_device_type,
+    src_is_tensor,
 ):
-    reduce_ty = "add" if fn == "aten.scatter_" else "sum"
+    reduce_ty = (
+        "add" if op_overload.overloadpacket == torch.ops.aten.scatter_ else "sum"
+    )
 
     return (
         reduction_type not in {None, reduce_ty}
@@ -1372,7 +1396,7 @@ def use_scatter_fallback(
             and needs_fallback_due_to_atomic_add_limitations(src_dtype)
         )
         or (
-            fn == "aten.scatter_reduce_"
+            op_overload.overloadpacket == torch.ops.aten.scatter_reduce_
             and reduction_type == "sum"
             and src_is_tensor
             and src_device_type == "cpu"
@@ -1412,3 +1436,39 @@ def dump_node_schedule(node_schedule):
                 print(dep)
         else:
             raise RuntimeError(f"Unrecognized node type: {type(node)}")
+
+
+def tensor_is_aligned(tensor: torch.Tensor):
+    # See Note: [Input Alignment handling in Inductor]
+    # Right now, we don't try to guard on the alignment of the storage offset.
+    # When this comment was written, non-symbolic storage_offsets are not guarded on
+    # but symbolic storage_offsets are. For consistency, we suppress guard creation
+    # upon performing this check: that ensures that we don't add recompiles when we
+    # add this logic.
+    return (tensor.storage_offset() * get_dtype_size(tensor.dtype)) % ALIGNMENT == 0
+
+
+def should_assume_input_aligned(example_input: torch.Tensor):
+    # See Note: [Input Alignment handling in Inductor]
+
+    # right now, we only care about alignment for cuda tensors.
+    if example_input.device.type != "cuda":
+        return False
+    return config.assume_aligned_inputs or tensor_is_aligned(example_input)
+
+
+def maybe_get_suppress_shape_guards_ctx():
+    # Try to get TracingContext.try_get().fake_mode.shape_env.suppress_guards()
+    # If it's not available, return a nullcontext.
+
+    # If we're dealing with cudagraphs, we might not have a tracing_context
+    tracing_context = torch._guards.TracingContext.try_get()
+    if not tracing_context:
+        return contextlib.nullcontext()
+
+    # In standalone inductor compile mode, we might not have a shape_env attached to the fake mode
+    shape_env = tracing_context.fake_mode.shape_env
+    if not shape_env:
+        return contextlib.nullcontext()
+
+    return shape_env.suppress_guards()
