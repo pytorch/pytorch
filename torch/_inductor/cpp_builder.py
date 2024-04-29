@@ -14,7 +14,7 @@ import sys
 import sysconfig
 import warnings
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Tuple, Union
 
 import torch
 from torch._inductor import config, exc
@@ -886,7 +886,7 @@ class CppBuilder:
     def __init__(
         self,
         name: str,
-        sources: List[str],
+        sources: Union[str, List[str]],
         BuildOption: BuildOptionsBase,
         output_dir: str = "",
         compile_only: bool = False,
@@ -905,6 +905,9 @@ class CppBuilder:
         self._target_file = ""
 
         self._name = name
+
+        if isinstance(sources, str):
+            sources = [sources]
 
         if config.is_fbcode():
             if BuildOption.get_aot_mode() and not use_absolute_path:
