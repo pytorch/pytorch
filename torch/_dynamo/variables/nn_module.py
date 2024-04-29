@@ -224,8 +224,11 @@ class NNModuleVariable(VariableTracker):
         else:
             if istype(subobj, property):
                 # Get the source of the property object
-                base_source = source.base
-                new_source = AttrSource(AttrSource(base_source, "__class__"), name)
+                new_source = None
+                if self.source:
+                    # Get the fget function of the property object
+                    new_source = AttrSource(self.source, "__class__")
+                    new_source = AttrSource(new_source, "fget")
                 return variables.UserFunctionVariable(
                     subobj.fget,
                     source=new_source,
