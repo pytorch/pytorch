@@ -22,6 +22,7 @@ GEMM_TEMPLATE = r"""
 extern "C"
 {{kernel.def_kernel(inputs=[X, W, inp], outputs=[Y], names_str="X, W, inp, Y")}}
 {
+    {{kernel.maybe_codegen_profile()}}
     constexpr int64_t num_threads = {{num_threads}};
     constexpr int64_t N = {{kernel.size(Y, 1)}};
     constexpr int64_t K = {{kernel.size(X, 1)}};

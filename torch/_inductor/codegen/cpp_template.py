@@ -1,12 +1,14 @@
 import functools
 import itertools
 import logging
+
+import sys
 from typing import List, Optional
 from unittest.mock import patch
 
 import sympy
 
-from .. import codecache, ir
+from .. import codecache, config, ir
 from ..autotune_process import CppBenchmarkRequest, TensorMeta
 from ..utils import IndentedBuffer, Placeholder, unique
 from ..virtualized import V
@@ -103,6 +105,11 @@ class CppTemplate(KernelTemplate):
                 #include "c10/util/Unroll.h"
             """
         )
+        enable_kernel_profile = (
+            config.cpp.enable_kernel_profile and sys.platform == "linux"
+        )
+        if enable_kernel_profile:
+            res.writelines(["#include <ATen/record_function.h>"])
         return res
 
     def render(self, **kwargs) -> str:

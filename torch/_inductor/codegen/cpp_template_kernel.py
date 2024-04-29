@@ -8,7 +8,7 @@ import torch
 
 from torch._inductor.autotune_process import CppBenchmarkRequest
 from torch._inductor.utils import sympy_index_symbol
-from .. import ir, lowering as L
+from .. import config, ir, lowering as L
 from ..virtualized import V
 from .common import Kernel, OpOverrides
 from .cpp_utils import cexpr_index, DTYPE_TO_CPP
@@ -120,6 +120,14 @@ class CppTemplateKernel(Kernel):
             return "AOTI_TORCH_CHECK"
         else:
             return "TORCH_CHECK"
+
+    def maybe_codegen_profile(self) -> str:
+        if config.cpp.enable_kernel_profile:
+            graph_id = V.graph.graph_id
+            prefix = "graph_" + str(graph_id) + "_" if graph_id is not None else ""
+            return f'RECORD_FUNCTION("{prefix}{self.kernel_name}", c10::ArrayRef<c10::IValue>({{}}));'
+        else:
+            return ""
 
 
 class CppTemplateCaller(ir.ChoiceCaller):

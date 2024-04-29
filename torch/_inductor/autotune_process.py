@@ -43,8 +43,7 @@ if TYPE_CHECKING:
     from torch._inductor.select_algorithm import TritonTemplateCaller
 
 from . import config
-from .runtime.runtime_utils import do_bench
-from .utils import timed
+from .runtime.runtime_utils import do_bench, do_bench_cpu
 from .virtualized import V
 
 CUDA_VISIBLE_DEVICES = "CUDA_VISIBLE_DEVICES"
@@ -759,7 +758,7 @@ class CPUDeviceBenchmarkRequest(BenchmarkRequest):
         *input_tensors: torch.Tensor,
         output_tensor: Optional[torch.Tensor] = None,
     ) -> float:
-        return timed(fn, ())
+        return do_bench_cpu(fn)
 
 
 @dataclasses.dataclass
