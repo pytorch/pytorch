@@ -1479,7 +1479,7 @@ void convert_indices_from_coo_to_csr_cpu(
     const Tensor& input,
     const int64_t size) {
   int64_t numel = input.numel();
-  const input_t* data_in = input.data_ptr<input_t>();
+  const input_t* data_in = input.const_data_ptr<input_t>();
   output_t* data_out = result.data_ptr<output_t>();
 
   if (numel == 0) {
@@ -1525,7 +1525,7 @@ void convert_indices_from_csr_to_coo_cpu(
     batch_indices.copy_(at::sparse::full_coo_indices(crow_indices.sizes().slice(0, batch_ndim), crow_indices.options())
                         .repeat_interleave(nnz, 1));
   }
-  const input_t* crow_indices_data_in = crow_indices_->data_ptr<input_t>();
+  const input_t* crow_indices_data_in = crow_indices_->const_data_ptr<input_t>();
   TORCH_INTERNAL_ASSERT(indices.is_contiguous());
   auto row0 = indices.select(0, transpose ? batch_ndim + 1 : batch_ndim + 0);
   auto row1 = indices.select(0, transpose ? batch_ndim + 0 : batch_ndim + 1);
