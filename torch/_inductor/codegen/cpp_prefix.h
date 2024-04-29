@@ -339,7 +339,7 @@ std::tuple<int64_t, int64_t, int64_t> mm_get_thread_blocking(
     }
   }
 
-  TORCH_CHECK(false, "Should not reach here.");
+  assert(false && "Should not reach here.");
   // Dummy return to avoid compiler warning
   return std::make_tuple(0, 0, 0);
 }

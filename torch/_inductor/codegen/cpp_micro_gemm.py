@@ -56,7 +56,7 @@ inline void {{kernel_name}}(
         options = self.get_common_options()
         return KernelTemplate._template_from_string(self.DECLARE_KERNEL).render(options)
 
-    def codegen_define(self) -> str:
+    def codegen_define(self, kernel: CppTemplateKernel) -> str:
         raise NotImplementedError
 
     def codegen_call(
@@ -138,7 +138,7 @@ class CppMicroGemmRef(CppMicroGemm):
             name, input_dtype, output_dtype, compute_dtype, GemmBlocking(1, 1, 1), alpha
         )
 
-    def codegen_define(self) -> str:
+    def codegen_define(self, kernel: CppTemplateKernel) -> str:
         options = {
             "declare_kernel": self.get_kernel_declaration(),
             **self.get_common_options(),
@@ -184,7 +184,7 @@ class CppMicroGemmFP32AVX(CppMicroGemm):
                 break;
             {%- endfor %}
             default:
-                TORCH_CHECK(false, "Unsupported block_m: ", block_m);
+                {{kernel.assert_function}}(false, "Unsupported block_m: ", block_m);
             }
         }
     }
@@ -257,9 +257,10 @@ inline void {{kernel_name}}_kernel(
 }
 """
 
-    def codegen_define(self) -> str:
+    def codegen_define(self, kernel: CppTemplateKernel) -> str:
         options = {
             "declare_kernel": self.get_kernel_declaration(),
+            "kernel": kernel,
             "block_m": self.register_blocking.block_m,
             "block_n": self.register_blocking.block_n,
             "block_k": self.register_blocking.block_k,

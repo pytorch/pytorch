@@ -17,7 +17,7 @@ from .cpp_utils import GemmBlocking
 GEMM_TEMPLATE = r"""
 {{template.header().getvalue()}}
 
-{{micro_gemm.codegen_define()}}
+{{micro_gemm.codegen_define(kernel)}}
 
 extern "C"
 {{kernel.def_kernel(inputs=[X, W, inp], outputs=[Y], names_str="X, W, inp, Y")}}
@@ -57,9 +57,9 @@ extern "C"
     {%- endif %}
 
     // TODO(jgong5): support k-slicing
-    TORCH_CHECK(Kt_blocks == K0_blocks, "Do not support k slicing yet.");
+    {{kernel.assert_function}}(Kt_blocks == K0_blocks, "Do not support k slicing yet.");
     // make sure all partitions are assigned
-    TORCH_CHECK(
+    {{kernel.assert_function}}(
         Mt_blocks * Nt_blocks * Kt_blocks * {{num_threads}} >= M0_blocks * N0_blocks * K0_blocks,
         "Not all partitions are assigned."
     );
