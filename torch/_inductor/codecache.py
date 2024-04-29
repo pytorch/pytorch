@@ -2485,6 +2485,8 @@ def _temp_validate_new_and_old_command(new_cmd: List[str], old_cmd: List[str]):
 def _do_validate_cpp_commands(include_pytorch: bool, cuda: bool, compile_only: bool, mmap_weights: bool):
     input_path = "/temp/dummy_input.cpp"
     output_path = "/temp/dummy_output.so"
+    if compile_only:
+        output_path = "/temp/dummy_output.o"
     picked_isa = pick_vec_isa()
 
     old_cmd = cpp_compile_command(

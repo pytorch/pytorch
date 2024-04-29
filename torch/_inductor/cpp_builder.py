@@ -1008,7 +1008,7 @@ class CppBuilder:
         else:
             self._output_dir = output_dir
 
-        file_ext = self.get_shared_lib_ext() if compile_only else self.get_shared_lib_ext()
+        file_ext = self.get_object_ext() if compile_only else self.get_shared_lib_ext()
         self._target_file = os.path.join(self._output_dir, f"{self._name}{file_ext}")
 
         self._compiler = BuildOption.get_compiler()
