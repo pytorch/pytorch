@@ -796,6 +796,7 @@ libtorch_python_core_sources = [
     "torch/csrc/StorageMethods.cpp",
     "torch/csrc/StorageSharing.cpp",
     "torch/csrc/Stream.cpp",
+    "torch/csrc/Event.cpp",
     "torch/csrc/TypeInfo.cpp",
     "torch/csrc/api/src/python/init.cpp",
     "torch/csrc/autograd/functions/init.cpp",
@@ -948,7 +949,7 @@ aten_cpu_non_globed_sources = [
     "aten/src/ATen/detail/CUDAHooksInterface.cpp",
     "aten/src/ATen/detail/HIPHooksInterface.cpp",
     "aten/src/ATen/detail/MPSHooksInterface.cpp",
-    "aten/src/ATen/detail/ORTHooksInterface.cpp",
+    "aten/src/ATen/detail/MAIAHooksInterface.cpp",
     "aten/src/ATen/detail/PrivateUse1HooksInterface.cpp",
     "aten/src/ATen/detail/XPUHooksInterface.cpp",
     "aten/src/ATen/detail/MTIAHooksInterface.cpp",
@@ -965,7 +966,7 @@ aten_cpu_non_globed_headers = [
     "aten/src/ATen/detail/CUDAHooksInterface.h",
     "aten/src/ATen/detail/MPSHooksInterface.h",
     "aten/src/ATen/detail/HIPHooksInterface.h",
-    "aten/src/ATen/detail/ORTHooksInterface.h",
+    "aten/src/ATen/detail/MAIAHooksInterface.h",
     "aten/src/ATen/detail/PrivateUse1HooksInterface.h",
     "aten/src/ATen/detail/XPUHooksInterface.h",
     "aten/src/ATen/detail/MTIAHooksInterface.h",
@@ -1167,6 +1168,8 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/SpmmReduceKernel.cpp",
     "aten/src/ATen/native/cpu/SparseFactories.cpp",
     "aten/src/ATen/native/quantized/cpu/kernels/QuantizedOpKernels.cpp",
+    "aten/src/ATen/native/cpu/FusedAdamKernel.cpp",
+    "aten/src/ATen/native/cpu/FusedSGDKernel.cpp",
 ]
 
 # This aten native source file list will not go through aten codegen process
@@ -1401,6 +1404,8 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/xnnpack/OpContext.cpp",
     "aten/src/ATen/native/xnnpack/RegisterOpContextClass.cpp",
     "aten/src/ATen/native/xnnpack/Shim.cpp",
+    "aten/src/ATen/native/FusedAdam.cpp",
+    "aten/src/ATen/native/FusedSGD.cpp",
     # Files not in native, but depends on native symbols
     # "aten/src/ATen/TensorIndexing.cpp",
     "aten/src/ATen/TensorIterator.cpp",
