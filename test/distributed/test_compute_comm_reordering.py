@@ -230,6 +230,11 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             "reorder_compute_for_overlap",
         ],
     )
+    @patch.object(
+        torch._inductor.config,
+        "estimate_op_runtime",
+        get_snode_runtime_for_reorder_compute_test,
+    )
     def test_reorder_compute_for_overlap_custom_runtime_estimation(self):
         def func(a, *, tag, ranks, group_size):
             ar = _functional_collectives.all_reduce(a, "sum", ranks, tag)

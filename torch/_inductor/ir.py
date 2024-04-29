@@ -788,14 +788,7 @@ class Reduction(Loops):
             if split == 1:
                 # No need to split.
                 return ReductionHint.INNER, split
-            if (
-                len(ranges) == 0
-                and input_node is not None
-                and isinstance(input_node, TensorBox)
-            ):
-                # Only handles the case where keep_dim = False.
-                # Otherwise, we need to propagate reduction dim info to the stage where
-                # the intermediate loader of the first Reduction is generated.
+            if input_node is not None and isinstance(input_node, TensorBox):
                 new_ranges, new_reduction_ranges = extract_input_node_reduction_ranges(
                     input_node
                 )
@@ -1173,13 +1166,20 @@ class Reduction(Loops):
         new_reduction_ranges,
         default,
     ):
-        assert len(original_ranges) == 0, f"{original_ranges}= is not equal to []"
+        assert all(
+            r == 1 for r in original_ranges
+        ), f"Only enabled for numel_hint == 1, found {original_ranges=}"
         reindex = View.dynamic_reshape_indexer(
             original_reduction_ranges, tuple(new_ranges) + tuple(new_reduction_ranges)
         )
 
-        def wrapper_fn(index, reduction_index):
-            return loader([], reindex(tuple(index) + tuple(reduction_index)))
+        def wrapper_fn(merged_index, new_reduction_index):
+            original_idx = merged_index[: len(original_ranges)]
+            new_index = merged_index[len(original_ranges) :]
+            return loader(
+                original_idx,
+                reindex(tuple(new_index) + tuple(new_reduction_index)),
+            )
 
         return wrapper_fn
 
@@ -1318,7 +1318,7 @@ class Reduction(Loops):
             wrapper_fn,
             original_ranges,
             original_reduction_ranges,
-            new_ranges,
+            [*original_ranges, *new_ranges],
             new_reduction_ranges,
             reduction_type,
             -1,
@@ -1948,12 +1948,12 @@ class ExpandView(BaseView):
             elif old_size[i] is None or old_size[i] == 1:
                 pass
             else:
-                # Expect broadcast compatibility
-                new_size[i] = V.graph.sizevars.expect_equals(
-                    new_size[i],
-                    old_size[i],
-                    msg=f"Broadcast failed in ExpandView({x.get_size()}, {new_size}) on dimension {i}",
-                )
+                # NB: new_size[i] == old_size[i] is known because the meta
+                # formula was expected to have taught us this equality.
+                # We can't conveniently check it right now because
+                # statically_known_equals doesn't know to consult preexisting
+                # guards
+                pass
         return new_size
 
     @classmethod
@@ -3018,7 +3018,7 @@ class Buffer(IRNode):
         return self.layout.make_indexer()
 
     def get_name(self) -> str:
-        assert self.name
+        assert self.name, self
         return self.name
 
     def get_device(self):
@@ -5073,8 +5073,15 @@ class AssertScalar(ExternKernel):
         if V.graph.cpp_wrapper:
             pass
         else:
+            # NB: It is EXTREMELY important not to simplify the scalar under
+            # assertion here, because simplify is done with respect to
+            # runtime asserts.  So if you have "u0 == 0" in the runtime
+            # asserts, if you subsequently try to simplify(u0 == 0), you will
+            # get True (because we've already runtime assert'ed that it's
+            # true).  But we're code generating the actual runtime assert
+            # here!!
             wrapper.writeline(
-                f"if not {V.graph.wrapper_code.codegen_python_sizevar(self.scalar)}:"
+                f"if not {V.graph.wrapper_code.codegen_python_sizevar(self.scalar, simplify=False)}:"
             )
             wrapper.writeline(f"    raise RuntimeError({repr(self.msg)})")
             # No one should ever use this buffer, but for uniformity
@@ -7928,88 +7935,6 @@ class LoopBodyBlock:
             r";[^\n]*",
             "",
             code.strip().replace("def forward(", f"def {name}("),
-        )
-
-
-class Wait(ExternKernelAlloc):
-    """
-    Wait should not be used by itself.  It should always be constructed in tandem
-    with a collective op that produces a work to wait on.
-    """
-
-    def __init__(
-        self,
-        layout,
-        inputs,
-        constant_args=(),
-    ):
-        super().__init__(layout, inputs, constant_args)
-
-    def should_allocate(self):
-        return False
-
-    def codegen(self, wrapper):
-        from .codegen.wrapper import ReuseLine
-
-        wrapper.add_import_once(
-            "from torch.distributed._functional_collectives_impl import _wait_tensor"
-        )
-        (input_collective,) = (t.codegen_reference() for t in self.inputs)
-        wrapper.writeline(f"{input_collective} = _wait_tensor({input_collective})")
-
-        # wait op still needs to produce a 'buffer' that represents the tensor output.
-        # this is a symbolic gesture, and it gets handled by WrapperCodegen.
-        # codegen outputs a '# reuse' line that assigns the input buffer here ('input_collective')
-        # to a new name (`self.get_name()`) and `del`s the old name.
-        wrapper.writeline(ReuseLine(wrapper, self.inputs[0], self, delete_old=False))
-
-    @classmethod
-    def create(cls, collective_op: "TensorBox"):
-        # TODO(whc) i'm not sure what's going on here, this probably means I missed something upstream
-        collective_op.decide_layout()
-        return Wait(
-            layout=NonOwningLayout(collective_op),
-            inputs=[collective_op],
-        )
-
-    def get_inputs_that_alias_output(self):
-        # Signal to codegen that our output buffer isn't safe to reuse
-        return [self.inputs[0].get_name()]
-
-    def get_mutation_names(self):
-        # The generated `_wait_tensor` op mutates the input tensor
-        return [self.inputs[0].get_name()]
-
-
-class OutputBuffer(ExternKernel):
-    """
-    Represent the output buffer used by ops that require multiple of them
-    """
-
-    def __init__(self, layout):
-        super().__init__(name=None, layout=layout, inputs=[])
-        self.name = V.graph.register_buffer(self)
-
-    def should_allocate(self):
-        return True
-
-    def codegen(self, wrapper):
-        wrapper.writeline(f"# collective out buffer {self.name}")
-
-
-class MultiOutputNoSizeAssert(MultiOutput):
-    """
-    Extract partial output from a multi-output OP.
-    Works like MultiOutput but doesn't assert size. This must be a property guaranteed by the op emitting this.
-    """
-
-    def __init__(self, layout, input, index):
-        super().__init__(layout, input, [])
-        self.index = index
-
-    def codegen(self, wrapper):
-        wrapper.writeline(
-            f"{self.get_name()} = {self.inputs[0].get_name()}{self.index}"
         )
 
 
