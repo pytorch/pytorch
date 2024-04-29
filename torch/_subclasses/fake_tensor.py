@@ -46,7 +46,7 @@ from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     TorchDispatchMode,
 )
-from torch.utils._pytree import PyTree, tree_map
+from torch.utils._pytree import PyTree, tree_map, tree_map_
 from torch.utils._stats import count
 from torch.utils._traceback import CapturedTraceback
 
@@ -1465,6 +1465,7 @@ class FakeTensorMode(TorchDispatchMode):
                 return t
 
         from torch.fx.experimental.symbolic_shapes import (
+            compute_unbacked_bindings,
             free_unbacked_symbols,
             SymTypes,
         )
@@ -1475,16 +1476,33 @@ class FakeTensorMode(TorchDispatchMode):
         if (
             self.propagate_real_tensors
             and all(e.real_tensor is not None for e in flat_arg_fake_tensors)
-            and
-            # TODO: Modify this to handle unbacked symbols with real values
-            not any(
-                isinstance(a, torch.SymInt) and free_unbacked_symbols(a)
+            # TODO: Handle SymFloat/SymBool
+            and not any(
+                (
+                    isinstance(a, torch.SymInt)
+                    and (syms := free_unbacked_symbols(a))
+                    and any(s not in self.shape_env.unbacked_var_to_val for s in syms)
+                )
                 for a in flat_args
             )
         ):
             real_flat_args = [maybe_to_real_tensor(a) for a in flat_args]
             real_args, real_kwargs = pytree.tree_unflatten(real_flat_args, args_spec)
             real_out = func(*real_args, **real_kwargs)
+        else:
+            # This can happen occasionally legitimately, specifically when you
+            # are inside the meta of a data dependent operation and you create
+            # a tensor on an unbacked SymInt; at this point in time we don't
+            # know what the unbacked SymInt is, but we will know later.
+            # However, if there's a bug in the condition above, this condition
+            # will also trigger.
+            log.debug(
+                "propagate_real_tensors skipped %s(%s, %s) %s",
+                func,
+                flat_arg_fake_tensors,
+                flat_args,
+                self.shape_env.unbacked_var_to_val,
+            )
 
         def maybe_propagate_real_tensors(fake_out):
             import sympy
@@ -1496,16 +1514,16 @@ class FakeTensorMode(TorchDispatchMode):
                 elif isinstance(t, SymTypes) and free_unbacked_symbols(t):
                     if isinstance(t.node.expr, sympy.Symbol):
                         self.shape_env.unbacked_var_to_val[t.node.expr] = real_t
-                    elif prev != real_t:
-                        log.warning(
-                            "propagate_real_tensors mismatch %s != %s", prev, real_t
-                        )
-                return t
 
             if real_out is not nil:
-                return tree_map(go, fake_out, real_out)
-            else:
-                return fake_out
+                tree_map_(go, fake_out, real_out)
+
+                # If a data-dependent op is used in a decomposition, we
+                # may need to get the unbacked settings "early"
+                # TODO: Is this really needed?
+                compute_unbacked_bindings(self.shape_env, fake_out, peek=True)
+
+            return fake_out
 
         # Try for fastpath
         if has_symbolic_sizes:

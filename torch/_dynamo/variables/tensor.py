@@ -648,7 +648,6 @@ class TensorVariable(VariableTracker):
                 return SymNodeVariable.create(
                     tx,
                     sub_proxy.item(),
-                    sym_num=tx.output.shape_env.create_unbacked_symint(),
                 )
 
             if tensor.dtype not in [
@@ -963,11 +962,11 @@ class SymNodeVariable(VariableTracker):
     }
 
     @classmethod
-    def create(cls, tx, proxy, sym_num, **options):
-        if "example_value" in proxy.node.meta:
-            assert proxy.node.meta["example_value"] == sym_num
+    def create(cls, tx, proxy, sym_num=None, **options):
         if sym_num is None:
             sym_num = get_fake_value(proxy.node, tx)
+        if "example_value" in proxy.node.meta:
+            assert proxy.node.meta["example_value"] == sym_num
         set_example_value(proxy.node, sym_num)
 
         if isinstance(sym_num, (sympy.Integer, int, bool)):

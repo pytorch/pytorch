@@ -496,7 +496,7 @@ class DivideByKey:
         return o // self.divisor
 
 
-def compute_unbacked_bindings(shape_env, example_value, old_example_value=None):
+def compute_unbacked_bindings(shape_env, example_value, old_example_value=None, peek=False):
     """
     After having run fake tensor propagation and producing example_value
     result, traverse example_value looking for freshly bound unbacked
@@ -505,14 +505,19 @@ def compute_unbacked_bindings(shape_env, example_value, old_example_value=None):
     example_value.  (NB: this means if you have a multi-output
     function, you must call this on the tuple of tensor output, you
     cannot wait!)
+
+    The peek parameter lets you check out what the bindings are without
+    changing the affected list.  This is primarily useful for ensuring
+    unbacked_var_to_val is promptly populated when propagate_real_tensors is on.
     """
     if shape_env._ignore_fresh_unbacked_symbols_tls():
         return
     fs = shape_env.pending_fresh_unbacked_symbols
     pending = set(fs)
     if pending:
-        log.info("compute_unbacked_bindings %s", fs)
-        fs.clear()
+        if not peek:
+            log.info("compute_unbacked_bindings %s", fs)
+            fs.clear()
 
         def free_unbacked_symbols_with_path(
             a, path, real=None
@@ -3639,6 +3644,12 @@ class ShapeEnv:
             if expr in issued:
                 return
 
+            # When propagate_real_tensors is on, we may end up with guards on
+            # data dependent variables.  These guards are unissuable, so just ignore them
+            if free_unbacked_symbols(expr):
+                log.warning("propagate_real_tensors: ignoring guard %s", expr)
+                return
+
             issued.add(expr)
 
             try:
@@ -4665,8 +4676,7 @@ class ShapeEnv:
                     # Last ditch
                     if (
                         self.unbacked_var_to_val and
-                        (unsound_result := orig_expr.xreplace(self.unbacked_var_to_val)) and
-                        not unsound_result.free_symbols
+                        not (unsound_result := orig_expr.xreplace(self.unbacked_var_to_val)).free_symbols
                     ):
                         log.warning("propagate_real_tensors evaluate_expr(%s) -> %s", orig_expr, unsound_result)
                         concrete_val = unsound_result
