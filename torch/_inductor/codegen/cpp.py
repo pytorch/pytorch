@@ -2028,7 +2028,7 @@ class CppKernel(Kernel):
                 if isinstance(kernel, OuterLoopFusedKernel):
                     for loop in kernel.inner:
                         if loop.inner:
-                            gen_loops(loop.inner, loop.is_reduction)
+                            gen_loop_maybe_reduction(loop.inner, loop.is_reduction)
                         else:
                             with contextlib.ExitStack() as stack:
                                 # If there is any kernel existing at the final outer loop fusion level,
