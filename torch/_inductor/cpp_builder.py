@@ -19,7 +19,7 @@ from typing import List, Tuple
 import torch
 from torch._inductor import config, exc
 from torch._inductor.codecache import get_lock_dir, LOCK_TIMEOUT, VecISA
-from torch._inductor.utils import cache_dir
+from torch._inductor.runtime.runtime_utils import cache_dir
 
 if config.is_fbcode():
     from triton.fb import build_paths  # noqa: F401
