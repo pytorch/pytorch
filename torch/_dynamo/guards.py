@@ -607,19 +607,21 @@ class GuardBuilder(GuardBuilderBase):
         for x in inspect.getmro(base_example_value.__class__):
             all_class_attribute_names.update(x.__dict__.keys())
 
-        if attr_name in all_class_attribute_names:
-            # base classes attribute take precedence in nn modules
-            accessor_info = NNModuleAttrAccessorInfo(False, None, None)
-        elif attr_name in mod_dict:
+        accessor_info = NNModuleAttrAccessorInfo(False, None, None)
+
+        if attr_name in mod_dict:
             accessor_info = NNModuleAttrAccessorInfo(True, attr_name, None)
         elif "_parameters" in mod_dict and attr_name in mod_dict["_parameters"]:
             accessor_info = NNModuleAttrAccessorInfo(True, "_parameters", attr_name)
         elif "_buffers" in mod_dict and attr_name in mod_dict["_buffers"]:
             accessor_info = NNModuleAttrAccessorInfo(True, "_buffers", attr_name)
-        elif "_modules" in mod_dict and attr_name in mod_dict["_modules"]:
+        elif (
+            attr_name not in all_class_attribute_names
+            and "_modules" in mod_dict
+            and attr_name in mod_dict["_modules"]
+        ):
+            # Check test_attr_precedence test - instance attributes always take precedence unless its an nn.Module.
             accessor_info = NNModuleAttrAccessorInfo(True, "_modules", attr_name)
-        else:
-            accessor_info = NNModuleAttrAccessorInfo(False, None, None)
 
         if not accessor_info.present_in_generic_dict:
             # The attribute can be accessed by __getattribute__ call, so rely on
