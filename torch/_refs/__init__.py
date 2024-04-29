@@ -3715,7 +3715,10 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
 
     # Squeezes tail
     while idx < a_.ndim:
-        assert a_.shape[idx] == 1
+        torch._check(
+            a_.shape[idx] == 1,
+            lambda: f"a.size({idx}) expected to be 1 but got {a_.shape[idx]}",
+        )
         a_ = squeeze(a_, idx)
 
     return a_
