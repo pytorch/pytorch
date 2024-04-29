@@ -2061,40 +2061,35 @@ class CppKernel(Kernel):
 
                 assert buffer in ("prefix", "suffix", "local")
                 kernel = loop.get_kernel()
-                if kernel.vec_kernel:
-                    return get_kernel_buffer(kernel.vec_kernel, buffer)
-                else:
-                    assert kernel.scalar_kernel
-                    return get_kernel_buffer(kernel.scalar_kernel, buffer)
+                return get_kernel_buffer(kernel, buffer)
 
-            def gen_loops(loop: LoopLevel, in_reduction=False):
+            def gen_loop_maybe_reduction(loop: LoopLevel, in_reduction=False):
                 with contextlib.ExitStack() as stack_outer:
                     local_reduction_init = local_reduction_stores = None
-                    if loop:
-                        if loop.is_reduction and not in_reduction:
-                            reduction_prefix = get_reduction_code_buffer(loop)
-                            if reduction_prefix:
-                                stack_outer.enter_context(code.indent())
-                            code.splice(reduction_prefix)
-                        if loop_nest.is_reduction_only() and loop.parallel:
-                            (
-                                local_reduction_init,
-                                local_reduction_stores,
-                            ) = get_reduction_code_buffer(loop, "local")
-                            worksharing.parallel(threads)
-                            if local_reduction_init:
-                                assert local_reduction_stores
-                                code.splice(local_reduction_init)
+                    if loop.is_reduction and not in_reduction:
+                        reduction_prefix = get_reduction_code_buffer(loop)
+                        if reduction_prefix:
+                            stack_outer.enter_context(code.indent())
+                        code.splice(reduction_prefix)
+                    if loop_nest.is_reduction_only() and loop.parallel:
+                        (
+                            local_reduction_init,
+                            local_reduction_stores,
+                        ) = get_reduction_code_buffer(loop, "local")
+                        worksharing.parallel(threads)
+                        if local_reduction_init:
+                            assert local_reduction_stores
+                            code.splice(local_reduction_init)
 
                     gen_loop(loop)
 
-                    if loop:
-                        if loop_nest.is_reduction_only() and loop.parallel:
-                            if local_reduction_stores:
-                                code.splice(local_reduction_stores)
-                            worksharing.close()
-                        if loop.is_reduction and not in_reduction:
-                            code.splice(get_reduction_code_buffer(loop, "suffix"))
+                    if loop_nest.is_reduction_only() and loop.parallel:
+                        if local_reduction_stores:
+                            code.splice(local_reduction_stores)
+                        worksharing.close()
+                    if loop.is_reduction and not in_reduction:
+                        code.splice(get_reduction_code_buffer(loop, "suffix"))
+                        pass
 
             def gen_loop(loop: LoopLevel):
                 with contextlib.ExitStack() as stack:
@@ -2105,15 +2100,16 @@ class CppKernel(Kernel):
                     stack.enter_context(code.indent())
                     # generate inner loops or loop body
                     if loop.inner:
-                        gen_loops(loop.inner, loop.is_reduction)
+                        gen_loop_maybe_reduction(loop.inner, loop.is_reduction)
                     else:
                         gen_loop_kernel(loop)
 
             stack.enter_context(code.indent())
             if loop_nest.root:
-                gen_loops(loop_nest.root)
+                gen_loop_maybe_reduction(loop_nest.root)
             else:
                 gen_kernel(loop_nest.kernel)
+                pass
 
     def codegen_loops(self, code, worksharing):
         loop_nest = LoopNestWithSplit.build(self)
@@ -2484,7 +2480,6 @@ class CppVecKernel(CppKernel):
 
         vec_ns = "at::vec"
         vec = f"{vec_ns}::Vectorized<{DTYPE_TO_CPP[dtype]}>"
-        acc_type = reduction_acc_type(reduction_type, dtype)
         acc_type_vec = self.reduction_acc_type_vec(reduction_type, dtype)
 
         acc = self.reduction_cse.generate(
@@ -2493,19 +2488,10 @@ class CppVecKernel(CppKernel):
         acc_vec = f"{acc}_vec"
         self.is_reduction = True
         self.reduction_prefix.writeline(
-            f"{acc_type} {acc} = {reduction_init(reduction_type, dtype)};"
-        )
-        self.reduction_prefix.writeline(
             f"{acc_type_vec} {acc_vec} = {self.reduction_init_vec(reduction_type, dtype)};"
         )
         self.stores.writeline(
             f"{acc_vec} = {self.reduction_combine_vec(reduction_type, acc_vec, value)};"
-        )
-        self._gen_parallel_reduction_buffers(
-            acc,
-            acc_type,
-            reduction_type,
-            dtype,
         )
         self._gen_parallel_reduction_buffers(
             acc_vec,
@@ -3139,6 +3125,11 @@ class CppKernelDispatcher(CppKernel):
         self.scalar_loop = IndentedBuffer()
         self.vec_loop = IndentedBuffer()
         self.gen_tiling_loops()
+        self.reduction_var_dict = {}
+        self.need_arr_acc_var = False
+        if len(loops) == 1:
+            if loop.inner and loop.inner.is_reduction:
+                self.need_arr_acc_var = True
 
     def gen_tiling_conditions(self):
         if len(self.tiling_ranges) == 1:
@@ -3187,6 +3178,17 @@ class CppKernelDispatcher(CppKernel):
                 ]
             )
 
+    def replace_loop_vars(self, lines, var, new_var):
+        pattern = re.compile(f"(?<!{var}_){var}")
+        for i, line in enumerate(lines):
+            if isinstance(line, IndirectAssertLine):
+                continue
+            elif isinstance(line, DeferredLine):
+                line.line = pattern.sub(new_var, line.line)
+            else:
+                modified_line = pattern.sub(new_var, line)
+                lines[i] = modified_line
+
     def replace_vars(self, kernel, dim: List[int]):
         def replace_loop_vars(lines, var, new_var):
             pattern = re.compile(f"(?<!{var}_){var}")
@@ -3194,7 +3196,7 @@ class CppKernelDispatcher(CppKernel):
                 if isinstance(line, IndirectAssertLine):
                     continue
                 elif isinstance(line, DeferredLine):
-                    line.line = modified_line = pattern.sub(new_var, line.line)
+                    line.line = pattern.sub(new_var, line.line)
                 else:
                     modified_line = pattern.sub(new_var, line)
                     lines[i] = modified_line
@@ -3206,6 +3208,9 @@ class CppKernelDispatcher(CppKernel):
             replace_loop_vars(
                 kernel.stores._lines, self.itervars[i], self.itervars_tail[i]
             )
+            if len(self.reduction_var_dict):
+                for k, v in self.reduction_var_dict.items():
+                    replace_loop_vars(kernel.stores._lines, k, v["new_var"])
             replace_loop_vars(
                 kernel.compute._lines, self.itervars[i], self.itervars_tail[i]
             )
@@ -3261,6 +3266,122 @@ class CppKernelDispatcher(CppKernel):
             self.vec_kernel.update_stores_with_parallel_reduction()
         if self.scalar_kernel:
             self.scalar_kernel.update_stores_with_parallel_reduction()
+
+    def rewrite_scalar_reduction_prefix(self):
+        # float tmp_acc0 = 0; -> float tmp_acc0_arr[n];
+        if not self.need_arr_acc_var:
+            return
+        new_prefix = IndentedBuffer()
+        for i in range(len(self.scalar_kernel.reduction_prefix._lines)):
+            line = self.scalar_kernel.reduction_prefix._lines[i]
+            var, init_value = line.split(" = ")
+            _type, var_name = var.split()
+            new_var = f"{var_name}_arr"
+            self.reduction_var_dict[var_name] = {
+                "type": _type,
+                "new_var": f"{new_var}[{self.itervars_tail[0]} - {self.tiling_ranges[0]}]",
+            }
+            tail_size = f"{self.sizes[0]} - {self.tiling_ranges[0]}"
+            new_prefix.writeline(f"{_type} {new_var}[{tail_size}];")
+            new_prefix.writelines(
+                [
+                    f"for (int i = 0; i < {tail_size}; i++)",
+                    "{",
+                    f"    {new_var}[i] = {init_value}",
+                    "}",
+                ],
+            )
+            pass
+        self.scalar_kernel.reduction_prefix = new_prefix
+
+    def rewrite_scalar_reduction_suffix(self):
+        # out_ptr0[x1] = tmp_acc0; ->
+        # out_ptr0[x1_tail] = tmp_acc0_arr[x1_tail - start_idx];
+        if not self.need_arr_acc_var:
+            return
+        for i in range(len(self.scalar_kernel.reduction_suffix._lines)):
+            line = self.scalar_kernel.reduction_suffix._lines[i]
+            if isinstance(line, DeferredLine):
+                line = line.line
+            line = line.replace(f"{self.itervars[0]}", f"{self.itervars_tail[0]}")
+            _, value = line.split(" = ")
+            value = value.rstrip(";")
+            new_value = (
+                f"{value}_arr[{self.itervars_tail[0]} - {self.tiling_ranges[0]}]"
+            )
+            line = line.replace(value, new_value)
+            if isinstance(self.scalar_kernel.reduction_suffix._lines[0], DeferredLine):
+                self.scalar_kernel.reduction_suffix._lines[i].line = line
+            else:
+                self.scalar_kernel.reduction_suffix._lines[i] = line
+            pass
+
+    def set_kernels(self, scalar_kernel, vec_kernel=None, tile2d_kernel=None):
+        self.scalar_kernel = scalar_kernel
+        self.vec_kernel = vec_kernel
+        self.tile2d_kernel = tile2d_kernel
+        if len(self.itervars):
+            self.aggregate_reduction_buffers()
+
+    def aggregate_reduction_buffers(self):
+        def aggregate_buffers(attr):
+            buf = BracesBuffer()
+            if self.scalar_kernel:
+                if attr == "reduction_prefix":
+                    self.rewrite_scalar_reduction_prefix()
+                buf.splice(getattr(self.scalar_kernel, attr))
+            if self.vec_kernel:
+                buf.splice(getattr(self.vec_kernel, attr))
+            # if self.tile2d_kernel:
+            #     buf.splice(getattr(self.tile2d_kernel, attr))
+            setattr(self, attr, buf)
+
+        def aggregate_reduction_suffix():
+            #  For horizontal reduction, we should choose vec kernel suffix
+            #  scalar kernel suffix
+            #  out_ptr1[static_cast<long>(x0)] = tmp_acc0;
+            #  vec kernel suffix
+            #  tmp_acc0 = tmp_acc0 + at::vec::vec_reduce_all<float>([](at::vec::Vectorized<float>& x, at::vec::Vectorized<float>& y) { return x + y; }, tmp_acc0_vec);
+            #  out_ptr1[static_cast<long>(x0)] = static_cast<float>(tmp_acc0);
+            buf = BracesBuffer()
+            if self.vec_kernel:
+                horizontal_reduction = (
+                    self.vec_kernel.tiling_idx >= self.vec_kernel.reduction_depth
+                )
+                if horizontal_reduction:
+                    buf.splice(self.vec_kernel.reduction_suffix)
+                    self.reduction_suffix = buf
+                    return
+            # self.reduction_suffix = buf
+            # return
+
+            if self.scalar_kernel:
+                with contextlib.ExitStack() as stack:
+                    buf.splice(self.scalar_condition)
+                    stack.enter_context(buf.indent())
+                    buf.splice(self.scalar_loop)
+                    stack.enter_context(buf.indent())
+                    self.rewrite_scalar_reduction_suffix()
+                    buf.splice(self.scalar_kernel.reduction_suffix)
+            if self.vec_kernel:
+                with contextlib.ExitStack() as stack:
+                    buf.splice(self.vec_condition)
+                    stack.enter_context(buf.indent())
+                    buf.splice(self.vec_kernel.reduction_suffix)
+            # if self.tile2d_kernel:
+            #     with contextlib.ExitStack() as stack:
+            #         buf.splice(self.tile2d_condition)
+            #         stack.enter_context(buf.indent())
+            #         buf.splice(self.tile2d_kernel.reduction_suffix)
+            self.reduction_suffix = buf
+
+        aggregate_reduction_suffix()
+        # aggregate_buffers("reduction_suffix")
+        aggregate_buffers("reduction_prefix")
+        aggregate_buffers("parallel_reduction_prefix")
+        aggregate_buffers("parallel_reduction_suffix")
+        aggregate_buffers("local_reduction_init")
+        aggregate_buffers("local_reduction_stores")
 
 
 class CppKernelProxy(CppKernel):
@@ -3651,8 +3772,7 @@ class CppKernelProxy(CppKernel):
                     tiling_indices[0], factor=tiling_factors[0]
                 )
                 kernel = CppKernelDispatcher([loop])
-                kernel.vec_kernel = vec_kernel
-                kernel.scalar_kernel = scalar_kernel
+                kernel.set_kernels(scalar_kernel, vec_kernel)
                 loop.set_kernel(kernel)
                 loop.simd_vec = True
             elif len(tiling_indices) == 2:
@@ -3674,9 +3794,7 @@ class CppKernelProxy(CppKernel):
                     tiling_indices[1] - tiling_indices[0], factor=tiling_factors[0]
                 )
                 kernel = CppKernelDispatcher([outer_loop, inner_loop])
-                kernel.tile2d_kernel = tile2d_kernel
-                kernel.vec_kernel = vec_kernel
-                kernel.scalar_kernel = scalar_kernel
+                kernel.set_kernels(scalar_kernel, vec_kernel, tile2d_kernel)
                 inner_loop.set_kernel(kernel)
 
     def codegen_loops(self, code, worksharing):
@@ -4320,7 +4438,7 @@ class LoopNestWithSplit:
 
         loop_nest = LoopNestWithSplit(root)
         _kernel = CppKernelDispatcher([])
-        _kernel.scalar_kernel = kernel
+        _kernel.set_kernels(kernel)
         if loop:
             loop.kernel = _kernel
         else:
