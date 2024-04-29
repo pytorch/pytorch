@@ -53,6 +53,7 @@ import torch._export
 import torch.distributed
 import torch.multiprocessing as mp
 from scipy.stats import gmean, ttest_ind
+from torch._C import _has_cuda as HAS_CUDA, _has_xpu as HAS_XPU
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import (
     dummy_fx_compile,
@@ -333,10 +334,16 @@ def patch_torch_manual_seed():
         from torch._C import default_generator
 
         seed = 1337
-        import torch.cuda
+        if HAS_CUDA:
+            import torch.cuda
 
-        if not torch.cuda._is_in_bad_fork():
-            torch.cuda.manual_seed_all(seed)
+            if not torch.cuda._is_in_bad_fork():
+                torch.cuda.manual_seed_all(seed)
+        if HAS_XPU:
+            import torch.xpu
+
+            if not torch.xpu._is_in_bad_fork():
+                torch.xpu.manual_seed_all(seed)
         return default_generator.manual_seed(seed)
 
     torch.manual_seed = deterministic_torch_manual_seed
@@ -1956,6 +1963,9 @@ def get_dynamo_stats():
             "autograd_compiles": torch._dynamo.utils.counters["compiled_autograd"][
                 "compiles"
             ],
+            "cudagraph_skips": torch._dynamo.utils.counters["inductor"][
+                "cudagraph_skips"
+            ],
         }
     )
 
@@ -2468,7 +2478,7 @@ class BenchmarkRunner:
                     if isinstance(e, torch.cuda.OutOfMemoryError)
                     else "eager_1st_run_fail"
                 )
-                log.exception(e)
+                log.exception("")
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
             finally:
                 del model_copy
@@ -2489,7 +2499,7 @@ class BenchmarkRunner:
                     if isinstance(e, torch.cuda.OutOfMemoryError)
                     else "eager_2nd_run_fail"
                 )
-                log.exception(e)
+                log.exception("")
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
             finally:
                 del model_copy
@@ -2541,7 +2551,7 @@ class BenchmarkRunner:
                     with maybe_enable_compiled_autograd(self.args.compiled_autograd):
                         new_result = optimized_model_iter_fn(model_copy, example_inputs)
             except Exception as e:
-                log.exception(e)
+                log.exception("")
                 print(
                     "TorchDynamo optimized model failed to run because of following error"
                 )
@@ -2578,6 +2588,14 @@ class BenchmarkRunner:
                 # E.g., the output order might not match, None might be part of output, etc.
 
             try:
+                if self.args.training and self.args.amp:
+                    if process_fn := self.get_output_amp_train_process_func.get(
+                        name, None
+                    ):
+                        correct_result = process_fn(correct_result)
+                        new_result = process_fn(new_result)
+                        fp64_outputs = process_fn(fp64_outputs)
+
                 if not same(
                     correct_result,
                     new_result,
@@ -2635,7 +2653,7 @@ class BenchmarkRunner:
                 optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
                 new_result = optimized_model_iter_fn(model, example_inputs)
             except Exception as e:
-                log.exception(e)
+                log.exception("")
                 print(
                     "TorchDynamo optimized model failed to run because of following error"
                 )
@@ -3679,9 +3697,9 @@ def run(runner, args, original_dir=None):
             log.warning("torch.cuda.is_available() == False, using CPU")
             args.devices = ["cpu"]
 
-    if args.devices != ["cpu"] and torch.cuda.is_available():
+    if args.devices != ["cpu"] and (HAS_CUDA or HAS_XPU):
         global synchronize
-        synchronize = torch.cuda.synchronize
+        synchronize = torch.cuda.synchronize if HAS_CUDA else torch.xpu.synchronize
 
     if (
         args.devices == ["cuda"]
