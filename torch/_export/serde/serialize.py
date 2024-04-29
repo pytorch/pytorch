@@ -2265,13 +2265,11 @@ class ExportedProgramDeserializer(metaclass=Final):
             key for key in model_opset_version if key in self.expected_opset_version
         }
         for namespace in common_namespaces:
-            assert isinstance(
-                model_version := model_opset_version[namespace], int
-            ), f"model_opset_version value should be int, got {model_opset_version[namespace]}"
+            model_version = model_opset_version[namespace]
+            assert isinstance(model_version, int), f"model_opset_version value should be int, got {model_version}"
 
-            assert isinstance(
-                compiler_version := self.expected_opset_version[namespace], int
-            ), f"expected_opset_version value should be int, got {self.expected_opset_version[namespace]}"
+            compiler_version = self.expected_opset_version[namespace]
+            assert isinstance(compiler_version, int), f"expected_opset_version value should be int, got {compiler_version}"
 
             # TODO(larryliu0820): Add support for upgrader & downgrader
             if model_version != compiler_version:
