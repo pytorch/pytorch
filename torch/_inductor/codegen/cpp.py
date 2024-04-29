@@ -3105,7 +3105,7 @@ class CppVecKernelChecker(CppVecKernel):
 
 
 class CppKernelDispatcher(CppKernel):
-    def __init__(self, loops):
+    def __init__(self, loops, split=False):
         self.scalar_kernel: Optional[CppKernel] = None
         self.vec_kernel: Optional[CppVecKernel] = None
         self.tile2d_kernel: Optional[CppTile2DKernel] = None
@@ -3113,23 +3113,24 @@ class CppKernelDispatcher(CppKernel):
         self.itervars_tail = []
         self.sizes = []
         self.tiling_ranges = []
-        for loop in loops:
-            self.itervars.append(loop.var)
-            self.itervars_tail.append(f"{loop.var}_tail")
-            self.sizes.append(loop.size)
-            self.tiling_ranges.append(FloorDiv(loop.size, loop.steps) * loop.steps)
         self.scalar_condition = IndentedBuffer()
         self.vec_condition = IndentedBuffer()
         self.tile2d_condition = IndentedBuffer()
-        self.gen_tiling_conditions()
         self.scalar_loop = IndentedBuffer()
         self.vec_loop = IndentedBuffer()
-        self.gen_tiling_loops()
         self.reduction_var_dict = {}
         self.need_arr_acc_var = False
-        if len(loops) == 1:
-            if loop.inner and loop.inner.is_reduction:
-                self.need_arr_acc_var = True
+        if split:
+            for loop in loops:
+                self.itervars.append(loop.var)
+                self.itervars_tail.append(f"{loop.var}_tail")
+                self.sizes.append(loop.size)
+                self.tiling_ranges.append(FloorDiv(loop.size, loop.steps) * loop.steps)
+            self.gen_tiling_conditions()
+            self.gen_tiling_loops()
+            if len(loops) == 1:
+                if loops[0].inner and loops[0].inner.is_reduction:
+                    self.need_arr_acc_var = True
 
     def gen_tiling_conditions(self):
         if len(self.tiling_ranges) == 1:
@@ -3320,8 +3321,7 @@ class CppKernelDispatcher(CppKernel):
         self.scalar_kernel = scalar_kernel
         self.vec_kernel = vec_kernel
         self.tile2d_kernel = tile2d_kernel
-        if len(self.itervars):
-            self.aggregate_reduction_buffers()
+        self.aggregate_reduction_buffers()
 
     def aggregate_reduction_buffers(self):
         def aggregate_buffers(attr):
@@ -3357,11 +3357,12 @@ class CppKernelDispatcher(CppKernel):
 
             if self.scalar_kernel:
                 with contextlib.ExitStack() as stack:
-                    buf.splice(self.scalar_condition)
-                    stack.enter_context(buf.indent())
-                    buf.splice(self.scalar_loop)
-                    stack.enter_context(buf.indent())
-                    self.rewrite_scalar_reduction_suffix()
+                    if self.need_arr_acc_var:
+                        buf.splice(self.scalar_condition)
+                        stack.enter_context(buf.indent())
+                        buf.splice(self.scalar_loop)
+                        stack.enter_context(buf.indent())
+                        self.rewrite_scalar_reduction_suffix()
                     buf.splice(self.scalar_kernel.reduction_suffix)
             if self.vec_kernel:
                 with contextlib.ExitStack() as stack:
@@ -3771,7 +3772,7 @@ class CppKernelProxy(CppKernel):
                 loop = self.loop_nest.split_with_tiling(
                     tiling_indices[0], factor=tiling_factors[0]
                 )
-                kernel = CppKernelDispatcher([loop])
+                kernel = CppKernelDispatcher([loop], True)
                 kernel.set_kernels(scalar_kernel, vec_kernel)
                 loop.set_kernel(kernel)
                 loop.simd_vec = True
@@ -3793,7 +3794,7 @@ class CppKernelProxy(CppKernel):
                 inner_loop = outer_loop.split_with_tiling(
                     tiling_indices[1] - tiling_indices[0], factor=tiling_factors[0]
                 )
-                kernel = CppKernelDispatcher([outer_loop, inner_loop])
+                kernel = CppKernelDispatcher([outer_loop, inner_loop], True)
                 kernel.set_kernels(scalar_kernel, vec_kernel, tile2d_kernel)
                 inner_loop.set_kernel(kernel)
 
@@ -4437,8 +4438,14 @@ class LoopNestWithSplit:
                 loop.is_reduction = kernel.is_reduction
 
         loop_nest = LoopNestWithSplit(root)
-        _kernel = CppKernelDispatcher([])
+
+        # not split
+        inner_most = root
+        while inner_most.inner:
+            inner_most = inner_most.inner
+        _kernel = CppKernelDispatcher([inner_most])
         _kernel.set_kernels(kernel)
+
         if loop:
             loop.kernel = _kernel
         else:
