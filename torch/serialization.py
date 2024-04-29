@@ -38,6 +38,8 @@ IS_WINDOWS = sys.platform == "win32"
 
 if not IS_WINDOWS:
     from mmap import MAP_SHARED, MAP_PRIVATE
+else:
+    MAP_SHARED, MAP_PRIVATE = None, None
 
 __all__ = [
     'SourceChangeWarning',
