@@ -3603,6 +3603,8 @@ def run(runner, args, original_dir=None):
     if args.dynamic_shapes:
         if not args.dynamic_batch_only:
             torch._dynamo.config.assume_static_by_default = False
+        torch._dynamo.config.capture_scalar_outputs = True
+        torch._dynamo.config.capture_dynamic_output_shape_ops = True
     if args.specialize_int:
         torch._dynamo.config.specialize_int = True
     if args.ci:
