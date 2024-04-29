@@ -46,6 +46,7 @@ from torch._inductor.utils import (
 from torch._inductor.virtualized import V
 from torch._prims_common import is_integer_dtype
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.library import _scoped_library
 from torch.nn import functional as F
 from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_cuda import (
@@ -758,6 +759,70 @@ class CommonTemplate:
                 torch.tensor([False, False, True, True]),
             ),
         )
+
+    @skipCUDAIf(not SM80OrLater, "Requires sm80")
+    def test_torch_compile_override_registration(self):
+        dynamic = False
+        namespace_name = "aten"
+        dispatch_key = "CPU"
+        device = torch.device("cpu")
+        if self.device.lower() == "cuda":
+            dispatch_key = "CUDA"
+            device = torch.device("cuda")
+
+        unary_op_set = ["abs", "acos"]
+
+        def fn(x, op_name=""):
+            return getattr(torch, op_name)(x)
+
+        # Invoke torch.compile directly to get referent results
+        x = torch.randn(3, 4, device=device)
+
+        ref_array = []
+        for unary_op_name in unary_op_set:
+            opt_fn = torch.compile(functools.partial(fn, op_name=unary_op_name))
+            ref = opt_fn(x)
+            ref_array.append(ref)
+
+        def register_ops(op_set, dispatch_key, torch_compile_op_lib_impl):
+            for _op_name in op_set:
+                qualified_op_name = f"{namespace_name}::{_op_name}"
+                _, overload_names = torch._C._jit_get_operation(qualified_op_name)
+                for overload_name in overload_names:
+                    try:
+                        reg_op_name = qualified_op_name
+                        schema = torch._C._get_schema(qualified_op_name, overload_name)
+                        if schema.overload_name:
+                            reg_op_name = f"{qualified_op_name}.{schema.overload_name}"
+                        torch_compile_op_lib_impl._impl_with_aoti_compile(  # noqa: F821
+                            reg_op_name, dispatch_key
+                        )
+                    except Exception as e:
+                        continue
+
+        with _scoped_library("aten", "IMPL") as torch_compile_op_lib_impl:
+            register_ops(unary_op_set, dispatch_key, torch_compile_op_lib_impl)
+
+            res_array = []
+            for unary_op_name in unary_op_set:
+                res_array.append(getattr(torch, unary_op_name)(x))
+
+            for ref, res in zip(ref_array, res_array):
+                self.assertEqual(ref, res)
+
+        a = torch.randn(128, device=device)
+        min_tensor = torch.randn(128, device=device)
+        max_tensor = min_tensor + 0.5
+
+        ref_with_min = torch.ops.aten.clamp(a, min_tensor)
+        ref_with_min_max = torch.ops.aten.clamp(a, min_tensor, max_tensor)
+
+        with _scoped_library("aten", "IMPL") as torch_compile_op_lib_impl:
+            register_ops(["clamp"], dispatch_key, torch_compile_op_lib_impl)
+            res_with_min = torch.ops.aten.clamp(a, min_tensor)
+            res_with_min_max = torch.ops.aten.clamp(a, min_tensor, max_tensor)
+            self.assertEqual(ref_with_min, res_with_min)
+            self.assertEqual(ref_with_min_max, res_with_min_max)
 
     def test_add_const_int(self):
         def fn(a):
@@ -8807,6 +8872,17 @@ class CommonTemplate:
         ]
         args = [rand_strided(sh, st) for (sh, st) in args]
         args.append(256)
+
+        if self.device == "cpu":
+            opt_fn = torch._dynamo.optimize("inductor")(fn)
+            _, code = run_and_get_cpp_code(opt_fn, *args)
+            print(code)
+            FileCheck().check_count(
+                "static_cast<int>(256)",
+                1,
+                exactly=True,
+            ).run(code)
+
         self.common(fn, args)
 
     def test_cumsum_pattern_matcher_issue(self):
@@ -9093,6 +9169,110 @@ class CommonTemplate:
         offsets = torch.tensor([-0.9, -0.8, 0.1, 0.2, 0.5, 0.9]) - 0.01
 
         self.common(fn, (inp, offsets), check_lowp=False)
+
+    @requires_gpu()
+    @config.patch(assume_aligned_inputs=False)
+    def test_config_option_dont_assume_alignment(self):
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            return x.sin() + x.cos()
+
+        # Inductor specializes on the (unguarded) alignment of the initial input.
+        # Make sure that for different configurations, nothing breaks.
+        for offset in (0, 1, 2, 3, 4):
+            base = torch.randn(64 * 64 + 64, dtype=torch.float32, device=GPU_TYPE)
+            inp = torch.as_strided(base, (64, 64), (64, 1), offset)
+            torch._dynamo.reset()
+            fn_c = torch.compile(fn)
+
+            ref = fn(inp)
+            res = fn_c(inp)
+            self.assertEqual(ref, res)
+
+            for offset2 in (0, 1, 2, 3, 4):
+                base2 = torch.randn(64 * 64 + 64, dtype=torch.float32, device=GPU_TYPE)
+                inp2 = torch.as_strided(base, (64, 64), (64, 1), offset2)
+                ref2 = fn(inp2)
+                res2 = fn_c(inp2)
+                self.assertEqual(ref2, res2)
+
+    @requires_gpu()
+    @config.patch(assume_aligned_inputs=False)
+    def test_config_option_dont_assume_alignment_recompiles(self):
+        # Inputs:
+        #  1. (32, 32) shape
+        #  2. (64, 64) shape -> causes a recompile
+        #  3. (64, 64) shape with different storage offset -> should NOT cause a recompile
+        failed_guards = []
+
+        def fail(guard):
+            nonlocal failed_guards
+            failed_guards.append(guard)
+
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            return x.sin() + x.cos()
+
+        base = torch.randn(64 * 64 + 64, dtype=torch.float32, device=GPU_TYPE)
+
+        inp1 = torch.as_strided(base, (32, 32), (32, 1), 4)
+        inp2 = torch.as_strided(base, (64, 64), (64, 1), 4)
+        inp3 = torch.as_strided(base, (64, 64), (64, 1), 5)
+
+        torch._dynamo.reset()
+
+        fn_c = torch._dynamo.optimize("inductor", guard_fail_fn=fail)(fn)
+
+        ref1 = fn(inp1)
+        res1 = fn_c(inp1)
+        self.assertEqual(ref1, res1)
+        self.assertEqual(0, len(failed_guards))
+
+        ref2 = fn(inp2)
+        res2 = fn_c(inp2)
+        self.assertEqual(ref2, res2)
+        # if dynamic shapes isn't already turned on, we might have a guard failure as we turn
+        # on dynamic shapes
+        self.assertLessEqual(len(failed_guards), 1)
+        failed_guard_count_iteration_2 = len(failed_guards)
+
+        failed_guards = []
+        ref3 = fn(inp3)
+        res3 = fn_c(inp3)
+        self.assertEqual(ref3, res3)
+        # we might still have the dynamics shapes failure, but offset change shouldn't be guarded on
+        # see Note: [Input Alignment handling in Inductor]
+        self.assertLessEqual(len(failed_guards), failed_guard_count_iteration_2)
+
+    @requires_gpu()
+    @config.patch(assume_aligned_inputs=False)
+    def test_config_option_dont_assume_alignment_cudagraphs(self):
+        def fn(x):
+            return x.cos() * x.sin()
+
+        fn_c = torch.compile(fn, mode="reduce-overhead", dynamic=True)
+
+        for size, stride, offset in (
+            ((32, 32), (32, 1), 4),
+            ((48, 48), (48, 1), 4),
+            ((64, 64), (64, 1), 5),
+        ):
+            torch.manual_seed(42)
+            base = torch.randn(64 * 64 + 64, dtype=torch.float32, device=GPU_TYPE)
+            torch.manual_seed(42)
+            base_ref = torch.randn(64 * 64 + 64, dtype=torch.float32, device=GPU_TYPE)
+
+            inp = torch.as_strided(base, size, stride, offset)
+            inp_ref = torch.as_strided(base_ref, size, stride, offset)
+
+            inp.requires_grad_(True)
+            inp_ref.requires_grad_(True)
+
+            res = fn_c(inp)
+            ref = fn(inp_ref)
+            self.assertEqual(ref, res)
+
+            res.sum().backward()
+            ref.sum().backward()
+            self.assertEqual(base.grad, base_ref.grad)
 
     @config.patch(implicit_fallbacks=True)
     def test_custom_op_1(self):
@@ -9404,6 +9584,8 @@ class CommonTemplate:
         b = torch.randn(65, 2**24, device=self.device)
         fn(a, b)
 
+    # Skipped on ROCm until https://github.com/ROCm/triton/issues/443 resolved
+    @skipIfRocm
     def test_fuse_large_params(self):
         def pt2_optimizer_step(optimizer):
             @torch.compile()
@@ -9834,12 +10016,13 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
             torch._dynamo.reset()
 
         @config.patch(assume_aligned_inputs=False)
-        def test_config_option_dont_assume_alignment(self):
+        def test_codegen_config_option_dont_assume_alignment(self):
             def fn(x: torch.Tensor) -> torch.Tensor:
                 return x.sin() + x.cos()
 
-            for offset in (0, 1, 2):
-                base = torch.randn(64 * 64 + 64, device=GPU_TYPE)
+            # We want code that assumes alignment if the initial input is 16-byte aligned
+            for offset in (0, 1, 2, 3, 4):
+                base = torch.randn(64 * 64 + 64, dtype=torch.float32, device=GPU_TYPE)
                 inps = torch.as_strided(base, (64, 64), (64, 1), offset)
                 torch._dynamo.reset()
                 kernels = self.get_kernels(fn, [inps])
@@ -9850,7 +10033,20 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
                 #             NO_ALIGN ALIGN     ALIGN
                 # def triton_(in_ptr0, out_ptr0, xnumel, XBLOCK : tl.constexpr)
 
-                self.assertEqual(arguments_that_are_divisible_by_16, (1, 2))
+                if offset % 4 == 0:
+                    expected_aligned = (0, 1, 2)
+                else:
+                    expected_aligned = (1, 2)
+                self.assertEqual(arguments_that_are_divisible_by_16, expected_aligned)
+
+            # If input isn't a view, storage offset != , inductor will assume alignment.
+            torch._dynamo.reset()
+            inp = torch.randn((64, 64), device=GPU_TYPE)
+            kernels = self.get_kernels(fn, [inp])
+            arguments_that_are_divisible_by_16 = (
+                kernels[0].triton_meta["configs"][0].divisible_by_16
+            )
+            self.assertEqual(arguments_that_are_divisible_by_16, (0, 1, 2))
 
         def test_optimize_indexing_dtype(self):
             def fn(x: torch.Tensor) -> torch.Tensor:

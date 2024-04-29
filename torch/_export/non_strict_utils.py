@@ -13,7 +13,7 @@ from torch._dynamo.source import (
 from torch._dynamo.variables.builder import TrackedFake
 from torch._export.passes.add_runtime_assertions_for_constraints_pass import InputDim
 from torch._guards import Source
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.export import Constraint
 from torch.export.dynamic_shapes import _Dim
 from torch.export.graph_signature import CustomObjArgument
@@ -92,9 +92,15 @@ def make_fake_params_buffers(
     params_buffers: Dict[str, torch.Tensor],
 ) -> Dict[str, Union[torch.Tensor, torch.nn.Parameter]]:
     faked_params_buffers = {}
+    memo: Dict[int, FakeTensor] = {}
     for key, value in params_buffers.items():
-        faked_params_buffers[key] = fake_mode.from_tensor(value, static_shapes=True)
-    return faked_params_buffers
+        if id(value) in memo:
+            fake_tensor = memo[id(value)]
+        else:
+            fake_tensor = fake_mode.from_tensor(value, static_shapes=True)
+            memo[id(value)] = fake_tensor
+        faked_params_buffers[key] = fake_tensor
+    return faked_params_buffers  # type: ignore[return-value]
 
 
 def make_fake_inputs(nn_module, args, kwargs, dynamic_shapes):

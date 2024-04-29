@@ -1296,6 +1296,28 @@ class CodeGen:
         self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
 
 
+class ScopedDict:
+    def __init__(self, original_dict):
+        self.original_dict = original_dict
+        self.new_items = {}
+
+    def __getitem__(self, key):
+        if key in self.new_items:
+            return self.new_items[key]
+        return self.original_dict[key]
+
+    def __setitem__(self, key, value):
+        self.new_items[key] = value
+
+    def __contains__(self, key):
+        return key in self.new_items or key in self.original_dict
+
+    def get(self, key, default=None):
+        if key in self.new_items:
+            return self.new_items[key]
+        return self.original_dict.get(key, default)
+
+
 class Kernel(CodeGen):
     newvar_prefix = ""
     suffix = ""
@@ -1349,6 +1371,13 @@ class Kernel(CodeGen):
 
     @contextlib.contextmanager
     def swap_buffers(self, lb, cb=None, sb=None):
+        def scope_cse(cse):
+            new_cse = cse.clone()
+            new_cse.cache = ScopedDict(cse.cache)
+            new_cse.reduction_cache = ScopedDict(cse.reduction_cache)
+            new_cse.store_cache = ScopedDict(cse.store_cache)
+            return new_cse
+
         if cb is None:
             cb = lb
         loads = self.loads
@@ -1358,7 +1387,7 @@ class Kernel(CodeGen):
         self.loads = lb
         self.compute = cb
         self.stores = sb
-        self.cse = cse.clone()
+        self.cse = scope_cse(cse)
         try:
             yield
         finally:

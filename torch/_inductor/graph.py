@@ -75,6 +75,8 @@ from .utils import (
     gather_origins,
     get_cloned_parameter_buffer_name,
     get_sympy_Expr_dtype,
+    maybe_get_suppress_shape_guards_ctx,
+    should_assume_input_aligned,
 )
 from .virtualized import V
 
@@ -406,6 +408,8 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.effectful_ops: Dict[_EffectType, ir.Buffer] = {}
 
+        self.aligned_inputs: Set[str] = set()
+
     @staticmethod
     def decide_layout_opt(gm, *, is_inference) -> bool:
         """
@@ -670,6 +674,14 @@ class GraphLowering(torch.fx.Interpreter):
             return self.name_to_buffer[buffer_name]
         if buffer_name in self.graph_inputs:
             return self.graph_inputs[buffer_name]
+        if buffer_name in self.constants:
+            data = V.graph.constants[buffer_name]
+            return ir.ConstantBuffer(
+                buffer_name,
+                ir.FixedLayout(
+                    data.device, data.dtype, *V.graph.static_sizes_strides(data)
+                ),
+            )
         return None
 
     def get_dtype(self, buffer_name: str):
@@ -712,6 +724,7 @@ class GraphLowering(torch.fx.Interpreter):
             and buffer.get_device() is not None
         ):
             self.add_device_info(buffer.get_device())
+
         if set_name:
             buffer.name = name
         return name
@@ -867,6 +880,22 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_inputs[target] = tensor
         self.graph_inputs_original[target] = tensor.data.data
         self.add_device_info(example.device)
+
+        # Note: [Input Alignment handling in Inductor]
+        # Alignment matters for generating efficient code. Some operations,
+        # e.g. vectorized loads, can only be performed on aligned inputs.
+        #
+        # But if we codegen assuming aligned inputs and then get unaligned
+        # inputs at runtime, then we are forced to clone - which is bad for
+        # both perf and memory usage.
+        #
+        # One option would be to guard on storage_offset%ALIGNMENT, and then
+        # codegen based on this. But storage_offset guards turned out to be
+        # expensive and cause recompiles; Instead, we're generating code
+        # based on the alignment of the example input without guarding.
+        with maybe_get_suppress_shape_guards_ctx():
+            if should_assume_input_aligned(example):
+                self.aligned_inputs.add(target)
         return tensor
 
     def call_function(self, target, args, kwargs):
