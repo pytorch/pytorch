@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import ctypes
 import dataclasses
 import functools
 import logging
@@ -9,9 +10,10 @@ import queue
 import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor
-from ctypes import byref, c_size_t, c_void_p
+from ctypes import byref, c_size_t, c_void_p, CDLL
 from multiprocessing.process import BaseProcess
 from multiprocessing.queues import Queue
+from types import ModuleType
 from typing import (
     Any,
     Callable,
@@ -29,13 +31,19 @@ from torch import multiprocessing
 from torch._dynamo.testing import rand_strided
 
 from torch._inductor import ir
-from torch._inductor.codecache import CUDACodeCache, DLLWrapper, PyCodeCache
+from torch._inductor.codecache import (
+    CppCodeCache,
+    CUDACodeCache,
+    DLLWrapper,
+    get_hash,
+    PyCodeCache,
+)
 
 if TYPE_CHECKING:
     from torch._inductor.select_algorithm import TritonTemplateCaller
 
 from . import config
-from .runtime.runtime_utils import do_bench
+from .runtime.runtime_utils import do_bench, do_bench_cpu
 from .virtualized import V
 
 CUDA_VISIBLE_DEVICES = "CUDA_VISIBLE_DEVICES"
@@ -487,6 +495,14 @@ class BenchmarkRequest:
     def cleanup_run_fn(self) -> None:
         pass
 
+    def do_bench(
+        self,
+        fn,
+        *input_tensors: torch.Tensor,
+        output_tensor: Optional[torch.Tensor] = None,
+    ) -> float:
+        raise NotImplementedError
+
     def benchmark(
         self,
         *input_tensors: torch.Tensor,
@@ -512,22 +528,7 @@ class BenchmarkRequest:
             load_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
             start_ts = time.time()
 
-        device_idx_set = {
-            tensor.device.index
-            for tensor in [*input_tensors, output_tensor]
-            if isinstance(tensor, torch.Tensor)
-            and tensor.is_cuda
-            and tensor.device.index is not None
-        }
-        assert len(device_idx_set) <= 1, f"Can not mix devices {device_idx_set}"
-        if len(device_idx_set) == 1:
-            device_idx = next(iter(device_idx_set))
-        else:
-            device_idx = torch.cuda.current_device()
-
-        with torch.cuda.device(device_idx):
-            out = do_bench(fn)
-            torch.cuda.synchronize()  # shake out any CUDA errors
+        out = self.do_bench(fn, *input_tensors, output_tensor)
 
         if debug:
             bench_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
@@ -559,7 +560,34 @@ class TestBenchmarkRequest(BenchmarkRequest):
         return self.value
 
 
-class TritonBenchmarkRequest(BenchmarkRequest):
+class GPUDeviceBenchmarkRequest(BenchmarkRequest):
+    def do_bench(
+        self,
+        fn,
+        *input_tensors: torch.Tensor,
+        output_tensor: Optional[torch.Tensor] = None,
+    ) -> float:
+        device_idx_set = {
+            tensor.device.index
+            for tensor in [*input_tensors, output_tensor]
+            if isinstance(tensor, torch.Tensor)
+            and tensor.is_cuda
+            and tensor.device.index is not None
+        }
+        assert len(device_idx_set) <= 1, f"Can not mix devices {device_idx_set}"
+        if len(device_idx_set) == 1:
+            device_idx = next(iter(device_idx_set))
+        else:
+            device_idx = torch.cuda.current_device()
+
+        with torch.cuda.device(device_idx):
+            out = do_bench(fn)
+            torch.cuda.synchronize()  # shake out any CUDA errors
+
+        return out
+
+
+class TritonBenchmarkRequest(GPUDeviceBenchmarkRequest):
     # Important: Instances of this class have to be serializable
     # across process boundaries. Do not put CUDA Tensors in here!
     def __init__(
@@ -635,7 +663,7 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         return f"{self.kernel_name=}, {self.module_path=}, {self.module_cache_key=}"
 
 
-class CUDABenchmarkRequest(BenchmarkRequest):
+class CUDABenchmarkRequest(GPUDeviceBenchmarkRequest):
     # Important: Instances of this class have to be serializable
     # across process boundaries. Do not put CUDA Tensors in here!
 
@@ -721,6 +749,72 @@ class CUDABenchmarkRequest(BenchmarkRequest):
 
     def __str__(self) -> str:
         return f"{self.kernel_name=}, {self.source_file=}, {self.hash_key=}"
+
+
+class CPUDeviceBenchmarkRequest(BenchmarkRequest):
+    def do_bench(
+        self,
+        fn,
+        *input_tensors: torch.Tensor,
+        output_tensor: Optional[torch.Tensor] = None,
+    ) -> float:
+        return do_bench_cpu(fn)
+
+
+@dataclasses.dataclass
+class CppBenchmarkRequest(CPUDeviceBenchmarkRequest):
+    # Important: Instances of this class have to be serializable
+    # across process boundaries. Do not put Tensors in here!
+
+    def __init__(
+        self,
+        kernel_name: str,
+        input_tensor_meta: Union[TensorMeta, List[TensorMeta]],
+        output_tensor_meta: Union[TensorMeta, List[TensorMeta]],
+        extra_args: Iterable[Any],
+        source_code: str,
+    ):
+        super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
+        self.source_code = source_code
+        self.hash_key = get_hash(source_code)
+        self.DLL: Optional[Union[CDLL, ModuleType]] = None
+
+    def precompile(self):
+        # Prepopulate CppCodeCache
+        # may happen in separate Threadpool
+        log.debug("Precompiling %s", self)
+        CppCodeCache.load(self.source_code, cuda=False)
+        log.debug("Done precompiling %s", self)
+
+    def make_run_fn(
+        self, *input_tensors: torch.Tensor, output_tensor: torch.Tensor
+    ) -> Callable[[], None]:
+        # TODO(jgong5): use CppPythonBindingsCodeCache for better binding perf
+        self.DLL = CppCodeCache.load(self.source_code, cuda=False)
+        args = [tensor.data_ptr() for tensor in list(input_tensors) + [output_tensor]]
+        log.debug(
+            "make_run_fn: self.kernel_name=%s, self.DLL=%s, args=%s, self.extra_args=%s",
+            self.kernel_name,
+            self.DLL,
+            args,
+            self.extra_args,
+        )
+        run_method = getattr(self.DLL, self.kernel_name)
+        run_method.argtypes = [ctypes.c_ulonglong] * len(args)
+
+        # Generate partial function.
+        return functools.partial(
+            run_method,
+            *args,
+            *self.extra_args,
+        )
+
+    def cleanup_run_fn(self) -> None:
+        if self.DLL is not None:
+            self.DLL.close()
+
+    def __str__(self) -> str:
+        return f"{self.kernel_name=}"
 
 
 def benchmark_in_sub_process(
