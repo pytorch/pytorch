@@ -203,6 +203,10 @@ class autocast:
         enabled: bool = True,
         cache_enabled: Optional[bool] = None,
     ):
+        if not isinstance(device_type, str):
+            raise ValueError(
+                f"Expected `device_type` of type `str`, got: `{type(device_type)}`"
+            )
         if torch._jit_internal.is_scripting():
             self._enabled = enabled
             self.device = device_type

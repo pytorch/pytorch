@@ -2478,7 +2478,7 @@ class BenchmarkRunner:
                     if isinstance(e, torch.cuda.OutOfMemoryError)
                     else "eager_1st_run_fail"
                 )
-                log.exception(e)
+                log.exception("")
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
             finally:
                 del model_copy
@@ -2499,7 +2499,7 @@ class BenchmarkRunner:
                     if isinstance(e, torch.cuda.OutOfMemoryError)
                     else "eager_2nd_run_fail"
                 )
-                log.exception(e)
+                log.exception("")
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
             finally:
                 del model_copy
@@ -2551,7 +2551,7 @@ class BenchmarkRunner:
                     with maybe_enable_compiled_autograd(self.args.compiled_autograd):
                         new_result = optimized_model_iter_fn(model_copy, example_inputs)
             except Exception as e:
-                log.exception(e)
+                log.exception("")
                 print(
                     "TorchDynamo optimized model failed to run because of following error"
                 )
@@ -2653,7 +2653,7 @@ class BenchmarkRunner:
                 optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
                 new_result = optimized_model_iter_fn(model, example_inputs)
             except Exception as e:
-                log.exception(e)
+                log.exception("")
                 print(
                     "TorchDynamo optimized model failed to run because of following error"
                 )

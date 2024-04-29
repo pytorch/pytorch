@@ -805,7 +805,7 @@ class CachingAutotuner(KernelInterface):
                 args,
                 {
                     "kernel_file": self.filename,
-                    "kernel_type": "triton",
+                    "kernel_backend": "triton",
                     "grid": grid_info,
                     "stream": stream,
                 },
