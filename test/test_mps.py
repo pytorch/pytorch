@@ -8153,7 +8153,7 @@ class TestLogical(TestCaseMPS):
                       ([5], [10]), ([0], [5]), ([5], [0])]
             for shape_tuple in shapes:
                 for inverted in [True, False]:
-                    if dtype == torch.float32 or dtype == torch.float16:
+                    if dtype.is_floating_point:
                         # Half is not supported for CPU isin. Compute reference in FP32
                         A = torch.randn(size=shape_tuple[0], device='cpu', dtype=torch.float32)
                         B = torch.randn(size=shape_tuple[1], device='cpu', dtype=torch.float32)
