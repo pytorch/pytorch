@@ -73,7 +73,7 @@ class _NormPartial(_Partial):
         """Set the appropriate reduce op based on the norm type."""
         # Use `object.__setattr__` to bypass frozen checks
         if self.norm_type in (float("inf"), "inf"):
-            object.__setattr__(self, "reduce_op", "sum")
+            object.__setattr__(self, "reduce_op", "max")
         elif self.norm_type in (float("-inf"), "-inf"):
             object.__setattr__(self, "reduce_op", "min")
         elif isinstance(self.norm_type, (int, float)):
