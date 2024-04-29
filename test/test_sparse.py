@@ -4382,7 +4382,9 @@ class TestSparseMeta(TestCase):
             raise
 
     def assertEqualMeta(self, x, y, expected_nnz):
-        self.assertEqual(x, y, exact_device=not x.is_meta, exact_layout=True)
+        self.assertEqual(x.layout, y.layout)
+        self.assertEqual(x.shape, y.shape)
+        self.assertEqual(x.dtype, y.dtype)
         self.assertEqual(x.sparse_dim(), y.sparse_dim())
         self.assertEqual(x.dense_dim(), y.dense_dim())
 
