@@ -1,0 +1,9 @@
+{% extends "!layout.html" %}
+<link rel="canonical" href="{{ theme_canonical_url }}{{ pagename }}.html" />
+
+{% block sidebartitle %}
+    <div class="version">
+      <a href='https://pytorch.org/functorch/versions.html'>{{ version }} &#x25BC</a>
+    </div>
+    {% include "searchbox.html" %}
+{% endblock %}

@@ -1,0 +1,66 @@
+name: Revert merged PR
+
+on:
+  repository_dispatch:
+    types: [try-revert]
+
+jobs:
+  do_revert:
+    name: try_revert_pr_${{ github.event.client_payload.pr_num }}
+    runs-on: linux.20_04.4x
+    environment: mergebot
+    env:
+        GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v2
+        id: checkout
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.MERGEBOT_TOKEN }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.8'
+          architecture: x64
+          check-latest: false
+          cache: pip
+      - run: pip install pyyaml==6.0
+
+      - name: Setup committer id
+        run: |
+          git config --global user.email "pytorchmergebot@users.noreply.github.com"
+          git config --global user.name "PyTorch MergeBot"
+      - name: Revert PR
+        env:
+          GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
+          PR_NUM: ${{ github.event.client_payload.pr_num }}
+          COMMENT_ID: ${{ github.event.client_payload.comment_id }}
+          REASON: ${{ github.event.client_payload.reason }}
+        run: |
+          set -ex
+          if [ -n "${COMMENT_ID}" ]; then
+            if [ -n "${REASON}" ]; then
+              python3 .github/scripts/trymerge.py --revert --comment-id "${COMMENT_ID}" --reason "${REASON}" "${PR_NUM}"
+            else
+              python3 .github/scripts/trymerge.py --revert --comment-id "${COMMENT_ID}" "${PR_NUM}"
+            fi
+          else
+            if [ -n "${REASON}" ]; then
+              python3 .github/scripts/trymerge.py --revert --reason "${REASON}" "${PR_NUM}"
+            else
+              python3 .github/scripts/trymerge.py --revert "${PR_NUM}"
+            fi
+          fi
+      - name: Comment on Canceled
+        if: ${{ cancelled() && steps.checkout.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
+          PR_NUM: ${{ github.event.client_payload.pr_num }}
+        run: |
+          set -ex
+          python3 .github/scripts/comment_on_pr.py "${PR_NUM}" "revert"
+
+concurrency: try-revert
