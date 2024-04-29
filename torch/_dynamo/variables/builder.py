@@ -284,8 +284,7 @@ class VariableBuilder:
             return cached_vt
 
         vt = self._wrap(value)
-        if vt.source is None:
-            vt.source = self.source
+        vt.source = self.source
         if self._can_lift_attrs_to_inputs(vt):
             vt = self.tx.output.side_effects.track_object_existing(value, vt)
 
