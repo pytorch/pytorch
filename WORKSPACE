@@ -72,11 +72,23 @@ http_archive(
 )
 
 http_archive(
-    name = "com_github_opentelemetry-cpp",
+    name = "io_opentelemetry_cpp",
+    sha256 = "<sha256>",
+    strip_prefix = "opentelemetry-cpp-1.14.2",
     urls = [
         "https://github.com/open-telemetry/opentelemetry-cpp/archive/refs/tags/v1.14.2.tar.gz",
     ],
 )
+
+load("@io_opentelemetry_cpp//bazel:repository.bzl", "opentelemetry_cpp_deps")
+opentelemetry_cpp_deps()
+load("@io_opentelemetry_cpp//bazel:extra_deps.bzl", "opentelemetry_extra_deps")
+opentelemetry_extra_deps()
+load("@com_github_grpc_grpc//bazel:grpc_deps.bzl", "grpc_deps")
+grpc_deps()
+load("@com_github_grpc_grpc//bazel:grpc_extra_deps.bzl", "grpc_extra_deps")
+grpc_extra_deps()
+
 
 new_local_repository(
     name = "gloo",

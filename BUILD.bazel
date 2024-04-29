@@ -1640,6 +1640,7 @@ cc_library(
         ":torch",
         ":shm",
         "@pybind11",
+        "@io_opentelemetry_cpp//api",
     ],
 )
 
