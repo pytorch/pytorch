@@ -786,6 +786,7 @@ class GraphLowering(torch.fx.Interpreter):
                         and data.device == value.device
                         and data.untyped_storage().data_ptr()
                         == value.untyped_storage().data_ptr()
+                        and data.storage_offset() == value.storage_offset()
                     ):
                         return constant_name
 
