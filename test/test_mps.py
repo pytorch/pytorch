@@ -8153,8 +8153,9 @@ class TestLogical(TestCaseMPS):
             for shape_tuple in shapes:
                 for inverted in [True, False]:
                     if dtype == torch.float32 or dtype == torch.float16:
-                        A = torch.randn(size=shape_tuple[0], device='cpu', dtype=dtype)
-                        B = torch.randn(size=shape_tuple[1], device='cpu', dtype=dtype)
+                        # Half is not supported for CPU isin. Compute reference in FP32
+                        A = torch.randn(size=shape_tuple[0], device='cpu', dtype=torch.float32)
+                        B = torch.randn(size=shape_tuple[1], device='cpu', dtype=torch.float32)
                     else:
                         A = torch.randint(0, 100, size=shape_tuple[0], device='cpu', dtype=dtype)
                         B = torch.randint(0, 100, size=shape_tuple[1], device='cpu', dtype=dtype)
@@ -8163,11 +8164,14 @@ class TestLogical(TestCaseMPS):
                     B_mps = B.clone().detach().to('mps')
 
                     cpu_ref = torch.isin(A, B, invert=inverted)
+                    if dtype is torch.float16:
+                        cpu_ref.type(dtype)
+
                     mps_out = torch.isin(A_mps, B_mps, invert=inverted)
 
                     self.assertEqual(mps_out, cpu_ref)
 
-        [helper(dtype) for dtype in [torch.float32, torch.int32, torch.int16, torch.uint8, torch.int8]]
+        [helper(dtype) for dtype in [torch.float32, torch.float16, torch.int32, torch.int16, torch.uint8, torch.int8]]
 
 class TestSmoothL1Loss(TestCaseMPS):
 
