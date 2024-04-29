@@ -25,10 +25,10 @@ Note:
 
     1. Please make sure pytest-subtests is installed. Otherwise, the sub-tests will be ignored.
 
-    2. Install pytest-xdist to run tests in parallel if runng all tests is the goal.
+    2. Install pytest-xdist to run tests in parallel if running all tests is the goal.
 
     3. When new ops are supported, please scroll down to modify the EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES and
-    TESTED_OPS lists. See "Modify this section"
+    SKIP_XFAIL_SUBTESTS_WITH_MATCHER_AND_MODEL_TYPE lists. See "Modify this section"
 
 """
 
@@ -138,7 +138,7 @@ def skip_torchlib_forward_compatibility(
 EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] = (
     xfail(
         "__getitem__",
-        reason="io_adaper doesn't support __getitem__ input slice(0, 3, None)",
+        reason="io_adapter doesn't support __getitem__ input slice(0, 3, None)",
     ),
     xfail(
         "__radd__",
@@ -147,6 +147,7 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
     ),
     xfail(
         "__rmatmul__",
+        dtypes=(torch.float16,),
         reason="fixme: Assertion error: result mismatch",
     ),
     xfail(
@@ -218,11 +219,6 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
         reason=onnx_test_common.reason_dynamo_does_not_support("Addr", "complex64")
     ),
     xfail(
-        "all",
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
-            "Op (ReduceXXX) [ShapeInferenceError] axis must be in [-rank, rank-1]. input rank was 0")
-    ),
-    xfail(
         "allclose",
         reason=onnx_test_common.reason_dynamo_does_not_support("Allclose")
     ),
@@ -239,11 +235,6 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
         "aminmax",
         dtypes=(torch.int16, *onnx_test_common.BOOL_TYPES),
         reason=onnx_test_common.reason_onnx_does_not_support("ReduceMin", "bool, int16"),
-    ),
-    xfail(
-        "any",
-        reason=onnx_test_common.reason_onnx_does_not_support(
-            "Op (ReduceXXX) [ShapeInferenceError] axis must be in [-rank, rank-1]. input rank was 0")
     ),
     xfail(
         "arange",
@@ -347,10 +338,6 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
         reason="fixme: ONNX shape type inference error: Invalid tensor data type 0."
     ),
     xfail(
-        "chunk", dtypes=onnx_test_common.BOOL_TYPES,
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support("Chunk", "bool")
-    ),
-    xfail(
         "chunk",
         dtypes=(torch.uint8, torch.int8, torch.int16,),
         reason=onnx_test_common.reason_onnx_runtime_does_not_support(
@@ -423,6 +410,16 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
     xfail(
         "cross",
         reason=onnx_test_common.reason_onnx_script_does_not_support("linalg_cross"),
+    ),
+    xfail(
+        "diag",
+        dtypes=onnx_test_common.BOOL_TYPES,
+        reason=onnx_test_common.reason_onnx_does_not_support("diag", "bool"),
+    ),
+    xfail(
+        "diagonal_copy",
+        dtypes=onnx_test_common.BOOL_TYPES,
+        reason=onnx_test_common.reason_onnx_does_not_support("diagonal_copy", "bool"),
     ),
     xfail(
         "dot", dtypes=(torch.uint8, torch.int8, torch.int16,),
@@ -548,6 +545,11 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
         reason=onnx_test_common.reason_onnx_script_does_not_support("Add", "int8, int16"),
     ),
     xfail(
+        "index_put",
+        dtypes=(torch.int32, torch.int64,),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("ScatterND", "int32, int64"),
+    ),
+    xfail(
         "isnan",
         dtypes=onnx_test_common.INT_TYPES + onnx_test_common.BOOL_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("IsNaN", "int, bool"),
@@ -588,6 +590,11 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
         reason="fixme: Assertion error: result shape mismatch",
     ),
     xfail(
+        "linalg.vector_norm",
+        dtypes=(torch.float16,),
+        reason="fixme: Assertion error: result mismatch",
+    ),
+    xfail(
         "linspace",
         dtypes=(torch.int64, torch.int32,),
         reason="fixme: Results do not match with PyTorch. https://github.com/microsoft/onnxscript/issues/854",
@@ -625,11 +632,6 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
         reason="fixme: ORT optimizer error: https://github.com/microsoft/onnxruntime/issues/16438",
     ),
     xfail(
-        "logcumsumexp",
-        reason=onnx_test_common.reason_onnx_does_not_support(
-            "Op (ReduceXXX) [ShapeInferenceError] axis must be in [-rank, rank-1]. input rank was 0")
-    ),
-    xfail(
         "logical_and",
         dtypes=onnx_test_common.FLOAT_TYPES + onnx_test_common.INT_TYPES,
         reason=onnx_test_common.reason_onnx_script_does_not_support("And", "float, int"),
@@ -650,12 +652,8 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
         reason=onnx_test_common.reason_onnx_script_does_not_support("Xor", "float, int"),
     ),
     xfail(
-        "logsumexp",
-        dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support("ReduceLogSumExp", "bool, int"),
-    ),
-    xfail(
         "masked.logsumexp",
+        dtypes=onnx_test_common.FLOAT_TYPES + (torch.int64,),
         reason="fixme: https://github.com/onnx/onnx/issues/4986",
     ),
     xfail(
@@ -688,7 +686,7 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
     ),
     xfail(
         "masked.log_softmax",
-        dtypes=(torch.float16,),
+        dtypes=(torch.float16, torch.int64),
         reason="fixme: ORT optimizer error: https://github.com/microsoft/onnxruntime/issues/16438",
     ),
     xfail(
@@ -698,6 +696,7 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
     ),
     xfail(
         "masked.norm",
+        dtypes=(torch.float32, torch.float16,),
         reason="fixme: Assertion error: result mismatch",
     ),
     xfail(
@@ -724,11 +723,8 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
     xfail(
         "max",
         variant_name="reduction_with_dim",
-        reason="https://github.com/onnx/onnx/issues/4986",
-    ),
-    xfail(
-        "mean",
-        reason="(ReduceMean) [ShapeInferenceError] axis must be in [-rank, rank-1]. input rank was 0",
+        dtypes=(torch.int64,),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("ArgMax", "int64"),
     ),
     xfail(
         "min",
@@ -769,9 +765,9 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
         reason=onnx_test_common.reason_onnx_script_does_not_support("cpu is not supported: \
             https://github.com/microsoft/onnxscript/pull/1289")
     ),
-    xfail(
+    skip(
         "native_layer_norm",
-        dtypes=(torch.float16,),
+        dtypes=(torch.float16, torch.float32),
         reason="fixme: ORT optimizer error: https://github.com/microsoft/onnxruntime/issues/16438",
     ),
     xfail(
@@ -865,6 +861,11 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
         reason="fixme: Assertion error: result mismatch",
     ),
     xfail(
+        "nn.functional.cosine_embedding_loss",
+        dtypes=(torch.bool,),
+        reason=onnx_test_common.reason_onnx_script_does_not_support("AssertionError: Scalars are not close!"),
+    ),
+    xfail(
         "nn.functional.ctc_loss",
         reason=onnx_test_common.reason_dynamo_does_not_support("aten.ctc_loss.default"),
     ),
@@ -908,8 +909,13 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
     ),
     xfail(
         "nn.functional.group_norm",
-        dtypes=(torch.float16,),
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support("GroupNormalization", "float16"),
+        dtypes=(torch.float16, torch.float32),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("GroupNormalization", "float16, float32"),
+    ),
+    xfail(
+        "nn.functional.layer_norm",
+        dtypes=(torch.float32,),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("LayerNormalization", "float32"),
     ),
     xfail(
         "nn.functional.local_response_norm",
@@ -995,6 +1001,11 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
     xfail(
         "normal",
         reason=onnx_test_common.reason_dynamo_does_not_support("wrapper_set_seed"),
+    ),
+    xfail(
+        "norm",
+        dtypes=(torch.float16,),
+        reason="fixme: Assertion error: result mismatch",
     ),
     xfail(
         "normal",
@@ -1133,17 +1144,7 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
     ),
     xfail(
         "split",
-        dtypes=onnx_test_common.BOOL_TYPES,
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support("Split, SplitToSequence", "bool"),
-    ),
-    xfail(
-        "split",
         variant_name="list_args",
-        dtypes=onnx_test_common.BOOL_TYPES,
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support("Split, SplitToSequence", "bool"),
-    ),
-    xfail(
-        "split_with_sizes",
         dtypes=onnx_test_common.BOOL_TYPES,
         reason=onnx_test_common.reason_onnx_runtime_does_not_support("Split, SplitToSequence", "bool"),
     ),
@@ -1151,10 +1152,6 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
         "square",
         dtypes=(torch.int8, torch.uint8, torch.int16),
         reason=onnx_test_common.reason_onnx_runtime_does_not_support("Pow", "int8, uint8, int16"),
-    ),
-    xfail(
-        "squeeze",
-        reason="fixme: Assertion error: result mismatch",
     ),
     xfail(
         "squeeze",
@@ -1214,11 +1211,6 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
         reason=onnx_test_common.reason_onnx_does_not_support("Floor", "int"),
     ),
     xfail(
-        "unbind",
-        dtypes=onnx_test_common.BOOL_TYPES,
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support("Split, SplitToSequence", "bool"),
-    ),
-    xfail(
         "unflatten",
         dtypes=onnx_test_common.BOOL_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Unflatten")
@@ -1239,11 +1231,6 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
         "unravel_index",
         dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
         reason=onnx_test_common.reason_onnx_script_does_not_support("Floor", "bool, int"),
-    ),
-    xfail(
-        "unsafe_split",
-        dtypes=onnx_test_common.BOOL_TYPES,
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support("Split, SplitToSequence", "bool"),
     ),
     xfail(
         "unsafe_chunk",
@@ -1273,6 +1260,16 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
     skip_slow(
         "histogramdd",
         reason="fixme: Test sets are too many.",
+    ),
+    xfail(
+        "index_add",
+        dtypes=(torch.int64, torch.float16, torch.bool, torch.int32),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("ScatterND", "float16, int64, bool, torch.int32"),
+    ),
+    xfail(
+        "index_copy",
+        dtypes=(torch.int32,),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("index_copy", "int32"),
     ),
     skip_slow(
         "linalg.lu_solve",
@@ -1413,10 +1410,24 @@ SKIP_XFAIL_SUBTESTS_WITH_MATCHER_AND_MODEL_TYPE: tuple[
         matcher=lambda sample: sample.input[0].equal(torch.tensor([])),
         reason="core dump - cat does not support zero-dim tensors yet",
     ),
+    skip(
+        "gather",
+        matcher=lambda sample: sample.input.dtype in (torch.int64, torch.bool, torch.float32,),
+        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        reason="axis 0 is not in valid range [-0,-1]. Flaky test",
+    ),
+    xfail(
+        "gather",
+        model_type=pytorch_test_common.TorchModelType.TORCH_NN_MODULE,
+        matcher=lambda sample: sample.input.dtype in (torch.int64, torch.int32,),
+        reason=onnx_test_common.reason_dynamo_does_not_support("gather", "int64")
+    ),
     xfail(
         "index_add",
-        matcher=lambda sample: len(sample.input.shape) < 2,
-        reason="fixme: https://github.com/microsoft/onnxscript/issues/1212",
+        matcher=lambda sample: len(sample.input.shape) == 0,
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
+            "ScatterND", "0-D tensor"
+        ),
     ),
     xfail(
         "index_add",
@@ -1425,7 +1436,7 @@ SKIP_XFAIL_SUBTESTS_WITH_MATCHER_AND_MODEL_TYPE: tuple[
     ),
     xfail(
         "index_copy",
-        matcher=lambda sample: len(sample.input.shape) < 2,
+        matcher=lambda sample: len(sample.input.shape) == 0,
         reason="fixme: https://github.com/microsoft/onnxscript/issues/1212",
     ),
     xfail(
@@ -1457,12 +1468,6 @@ SKIP_XFAIL_SUBTESTS_WITH_MATCHER_AND_MODEL_TYPE: tuple[
         matcher=lambda sample: len(sample.input.shape) == 0,
         reason="fixme: LogSoftMax does not support empty tensor as input",
     ),
-    xfail(
-        "logsumexp",
-        matcher=lambda sample: isinstance(sample.input, torch.Tensor)
-        and len(sample.input.shape) == 0,
-        reason="fixme: IsScalar",
-    ),
     skip(
         "masked.log_softmax",
         matcher=lambda sample: len(sample.input.shape) == 0,
@@ -1474,10 +1479,10 @@ SKIP_XFAIL_SUBTESTS_WITH_MATCHER_AND_MODEL_TYPE: tuple[
         reason="values of matmul of [m, 0] and [0, n] matrices are undefined",
     ),
     xfail(
-        "min",
-        variant_name="reduction_with_dim",
-        matcher=lambda sample: len(sample.input.shape) == 0,
-        reason="fixme: https://github.com/onnx/onnx/issues/4986",
+        "mean",
+        matcher=lambda sample: sample.input.dtype in (torch.float32,),
+        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        reason="AssertionError: Output 0 mismatch",
     ),
     skip(
         "mm",
@@ -1571,7 +1576,7 @@ SKIP_XFAIL_SUBTESTS_WITH_MATCHER_AND_MODEL_TYPE: tuple[
         "nn.functional.instance_norm",
         model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
         matcher=lambda sample: sample.kwargs.get("running_mean") is not None
-        or sample.input.dtype in (torch.float16,),
+        or sample.input.dtype in (torch.float32,),
         reason="fixme: KeyError: 'self___kwargs__running_mean'",
     ),
     xfail(
@@ -1579,6 +1584,18 @@ SKIP_XFAIL_SUBTESTS_WITH_MATCHER_AND_MODEL_TYPE: tuple[
         matcher=lambda sample: sample.kwargs.get("ceil_mode") is True
         and sample.kwargs.get("padding") == 1,
         reason="FIXME: After https://github.com/microsoft/onnxruntime/issues/15446 is fixed",
+    ),
+    xfail(
+        "nn.functional.normalize",
+        model_type=pytorch_test_common.TorchModelType.TORCH_NN_MODULE,
+        matcher=lambda sample: sample.input.dtype in (torch.float16,),
+        reason="fixme: Assertion error: result mismatch",
+    ),
+    xfail(
+        "nn.functional.poisson_nll_loss",
+        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        matcher=lambda sample: sample.input.dtype in (torch.int64,),
+        reason="fixme: ORT doesn't match PyTorch when ceil_mode=True until opset 19",
     ),
     xfail(
         "nonzero",
@@ -1624,12 +1641,6 @@ SKIP_XFAIL_SUBTESTS_WITH_MATCHER_AND_MODEL_TYPE: tuple[
         "softmax",
         matcher=lambda sample: len(sample.input.shape) == 0,
         reason="fixme: LogSoftMax does not support empty tensor as input",
-    ),
-    xfail(
-        "t",
-        matcher=lambda sample: isinstance(sample.input, torch.Tensor)
-        and len(sample.input.shape) < 2,
-        reason="fixme: IsScalar",
     ),
     xfail(
         "unflatten",
