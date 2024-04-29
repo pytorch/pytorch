@@ -510,6 +510,8 @@ def compute_unbacked_bindings(shape_env, example_value, old_example_value=None, 
     changing the affected list.  This is primarily useful for ensuring
     unbacked_var_to_val is promptly populated when propagate_real_tensors is on.
     """
+    if shape_env is None:
+        return
     if shape_env._ignore_fresh_unbacked_symbols_tls():
         return
     fs = shape_env.pending_fresh_unbacked_symbols

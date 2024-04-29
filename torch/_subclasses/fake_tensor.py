@@ -867,6 +867,10 @@ class FakeTensorMode(TorchDispatchMode):
         import torch._dynamo.config
         import torch._functorch.config
 
+        # This is temporarily patched to True in Dynamo to grandfather in some
+        # places where we unconditionally allow scalar outputs, TO BE REMOVED
+        self.allow_scalar_outputs = False
+
         self.propagate_real_tensors = (
             torch._functorch.config.fake_tensor_propagate_real_tensors
         )

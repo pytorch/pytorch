@@ -808,6 +808,7 @@ def make_propagate_real_tensors_cls(cls):
         (torch._functorch.config, "fake_tensor_propagate_real_tensors", True),
         xfail_prop="_expected_failure_propagate_real_tensors",
     )
+    cls.__file__ = __file__
     globals()[cls.__name__] = cls
 
 
