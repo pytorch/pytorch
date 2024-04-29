@@ -331,6 +331,17 @@ class TestSerialize(TestCase):
             g.nodes[1].inputs[0].arg.as_tensor.name,
         )
 
+    def test_int_list(self) -> None:
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aten.sum.dim_IntList(x, [])
+
+        ep = torch.export.export(M(), (torch.randn(3, 2),))
+        serialized = ExportedProgramSerializer().serialize(ep)
+        for node in serialized.exported_program.graph_module.graph.nodes:
+            if "aten.sum.dim_IntList" in node.target:
+                self.assertEqual(node.inputs[1].arg.type, "as_ints")
+
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
