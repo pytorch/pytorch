@@ -2482,7 +2482,9 @@ def _temp_validate_new_and_old_command(new_cmd: List[str], old_cmd: List[str]):
         raise RuntimeError("Error in new and old command different.")
 
 
-def _do_validate_cpp_commands(include_pytorch: bool, cuda: bool, compile_only: bool, mmap_weights: bool):
+def _do_validate_cpp_commands(
+    include_pytorch: bool, cuda: bool, compile_only: bool, mmap_weights: bool
+):
     input_path = "/temp/dummy_input.cpp"
     output_path = "/temp/dummy_output.so"
     if compile_only:
@@ -2533,7 +2535,9 @@ def validate_new_cpp_commands():
         for y in use_mmap_weights:
             for z in compile_only:
                 for m in include_pytorch:
-                    _do_validate_cpp_commands(include_pytorch= m, cuda=x, mmap_weights=y, compile_only=z)
+                    _do_validate_cpp_commands(
+                        include_pytorch=m, cuda=x, mmap_weights=y, compile_only=z
+                    )
 
 
 def _reload_python_module_in_subproc(key, path):
