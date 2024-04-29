@@ -1,16 +1,15 @@
-from dataclasses import dataclass
 import glob
 import os
 import pathlib
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Callable, List, Optional
 
 import torch
 import torch._inductor
 import torch.utils._pytree as pytree
-from torch.export._tree_utils import reorder_kwargs
-from torch.export import ExportedProgram, export
 from torch._export.serde.serialize import deserialize, serialize, SerializedArtifact
-
+from torch._inductor import config
+from torch.export import ExportedProgram
+from torch.export._tree_utils import reorder_kwargs
 
 from .pt2_archive_constants import (
     AOTINDUCTOR_DIR,
@@ -89,10 +88,19 @@ def _package_exported_program(
     archive_writer: PT2ArchiveWriter, exported_program: ExportedProgram
 ) -> None:
     exported_artifact: SerializedArtifact = serialize(exported_program)
-    archive_writer.write_bytes(MODELS_FILENAME_FORMAT.format("model"), exported_artifact.exported_program)
-    archive_writer.write_bytes(os.path.join(WEIGHTS_DIR, "weights.pt"), exported_artifact.state_dict)
-    archive_writer.write_bytes(os.path.join(CONSTANTS_DIR, "constants.pt"), exported_artifact.constants)
-    archive_writer.write_bytes(os.path.join(SAMPLE_INPUTS_DIR, "example_inputs.pt"), exported_artifact.example_inputs)
+    archive_writer.write_bytes(
+        MODELS_FILENAME_FORMAT.format("model"), exported_artifact.exported_program
+    )
+    archive_writer.write_bytes(
+        os.path.join(WEIGHTS_DIR, "weights.pt"), exported_artifact.state_dict
+    )
+    archive_writer.write_bytes(
+        os.path.join(CONSTANTS_DIR, "constants.pt"), exported_artifact.constants
+    )
+    archive_writer.write_bytes(
+        os.path.join(SAMPLE_INPUTS_DIR, "example_inputs.pt"),
+        exported_artifact.example_inputs,
+    )
 
 
 def _package_aoti_files(archive_writer: PT2ArchiveWriter, so_path: str):
@@ -113,10 +121,18 @@ def _package_aoti_files(archive_writer: PT2ArchiveWriter, so_path: str):
 
 
 def _extract_exported_program(archive_reader: PT2ArchiveReader) -> ExportedProgram:
-    exported_program_bytes = archive_reader.read_bytes(MODELS_FILENAME_FORMAT.format("model"))
-    state_dict_bytes = archive_reader.read_bytes(os.path.join(WEIGHTS_DIR, "weights.pt"))
-    constants_bytes = archive_reader.read_bytes(os.path.join(CONSTANTS_DIR, "constants.pt"))
-    example_inputs_bytes = archive_reader.read_bytes(os.path.join(SAMPLE_INPUTS_DIR, "example_inputs.pt"))
+    exported_program_bytes = archive_reader.read_bytes(
+        MODELS_FILENAME_FORMAT.format("model")
+    )
+    state_dict_bytes = archive_reader.read_bytes(
+        os.path.join(WEIGHTS_DIR, "weights.pt")
+    )
+    constants_bytes = archive_reader.read_bytes(
+        os.path.join(CONSTANTS_DIR, "constants.pt")
+    )
+    example_inputs_bytes = archive_reader.read_bytes(
+        os.path.join(SAMPLE_INPUTS_DIR, "example_inputs.pt")
+    )
 
     artifact: SerializedArtifact = SerializedArtifact(
         exported_program_bytes,
@@ -139,9 +155,9 @@ def _extract_so(archive_reader: PT2ArchiveReader, device: str) -> Callable:
     so_path = None
     for file in aoti_files:
         filename = os.path.basename(file)
-        with open(tmp_output_dir / filename, 'wb') as f:
+        with open(tmp_output_dir / filename, "wb") as f:
             f.write(archive_reader.read_bytes(file))
-            if file.endswith('.so'):
+            if file.endswith(".so"):
                 assert so_path is None
                 so_path = tmp_output_dir / filename
     assert so_path is not None
@@ -170,7 +186,8 @@ def save_package(
     so_path: Optional[str] = None,
     exported_program: Optional[ExportedProgram] = None,
 ):
-    work_dir = pathlib.Path(so_path).parent
+    work_dir = config.aot_inductor.output_path or pathlib.Path(so_path).parent
+    print(work_dir)
     archive_path = os.path.join(work_dir, f"{ARCHIVE_ROOT_NAME}.zip")
 
     with PT2ArchiveWriter(archive_path) as archive_writer:

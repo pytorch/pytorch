@@ -58,7 +58,9 @@ class AOTIRunnerUtil:
             else:
                 if options is None:
                     options = {}
-                options["aot_inductor.package"] = True
+                options["aot_inductor.package"] = options.get(
+                    "aot_inductor.package", True
+                )
                 path = torch._inductor.aot_compile(
                     gm, example_inputs, options=options
                 )  # type: ignore[arg-type]
@@ -81,10 +83,10 @@ class AOTIRunnerUtil:
             )
 
     @classmethod
-    def load(cls, device, so_path):
+    def load(cls, device, path, package=True):
         # TODO: unify fbcode and oss behavior to only use torch._export.aot_load
         if IS_FBCODE:
-            runner = AOTIRunnerUtil.load_runner(device, so_path)
+            runner = AOTIRunnerUtil.load_runner(device, path)
 
             def optimized(*args, **kwargs):
                 call_spec = runner.get_call_spec()
@@ -95,8 +97,10 @@ class AOTIRunnerUtil:
                 return pytree.tree_unflatten(flat_outputs, out_spec)
 
             return optimized
+        elif package:
+            return torch._inductor._aot_load(path, device)
         else:
-            return torch._inductor._aot_load(so_path, device)
+            return torch._export.aot_load(path, device)
 
     @classmethod
     def run(

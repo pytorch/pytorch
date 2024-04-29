@@ -603,6 +603,9 @@ class triton:
     # TODO - need to debug why this prevents cleanup
     cudagraph_trees_history_recording = False
 
+    # Enable cudagraph support for mutated inputs from prior cudagraph pool
+    cudagraph_support_input_mutation = False
+
     # synchronize after cudagraph invocation
     force_cudagraph_sync = False
 
@@ -774,10 +777,26 @@ class cuda:
     # Minimum value of M*N*K to consider the CUTLASS backend for GEMM ops.
     cutlass_backend_min_gemm_size: int = 1
 
-    # If set to True, it will ensure that only GEMM ops capable of
-    # epilogue fusion via CUTLASS Epilogue Visitor Trees ( EVT )
-    # are enabled for the CUTLASS backend.
-    cutlass_only_evt_capable_ops: bool = False
+    # enable generation of inline standalone runner in CUDA CPP generated code
+    # which allows to compile the generated code into a standalone executable.
+    generate_test_runner: bool = (
+        os.environ.get("INDUCTOR_CUDA_BACKEND_GENERATE_TEST_RUNNER_CODE", "1") == "1"
+    )
+
+    # Keep only Cutlass op configs which contain this regular expression pattern
+    # Set this to "warpspecialized_cooperative_epi_tma" to enable only SM90 TMA Cutlass Kernels for large GEMMs
+    cutlass_op_allowlist_regex: Optional[str] = None
+
+    # Note: Names of Cutlass ops names can be obtained by calling
+    # op.configuration_name() on a Cutlass op instance, for example those
+    # returned from cutlass_utils.gen_ops() or the op argument passed to
+    # CUTLASSGemmTemplate.render(...)
+
+    # Filter Cutlass configs which contain this regular expression pattern
+    # Set this to "pingpong" to avoid numerical issues
+    # caused by the op ordering of the "pingpong" memory access
+    # pattern used by some Cutlass Kernels.
+    cutlass_op_denylist_regex: Optional[str] = "pingpong"
 
 
 # create a directory containing lots of debug information

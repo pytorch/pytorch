@@ -13,7 +13,7 @@ ARCHIVE_FORMAT_PATH: str = "archive_format"
 
 # Model definitions
 MODELS_DIR: str = "models/"
-MODELS_FILENAME_FORMAT: str = "models/{}.json"; # {model_name}
+MODELS_FILENAME_FORMAT: str = "models/{}.json"  # {model_name}
 
 # AOTInductor artifacts
 AOTINDUCTOR_DIR: str = "data/aotinductor/"
@@ -29,7 +29,7 @@ CUSTOM_OBJ_FILENAME_PREFIX: str = "custom_obj_"
 
 # sample inputs
 SAMPLE_INPUTS_DIR: str = "data/sample_inputs/"
-SAMPLE_INPUTS_FILENAME_FORMAT: str = "data/sample_inputs/{}.pt"; # {model_name}
+SAMPLE_INPUTS_FILENAME_FORMAT: str = "data/sample_inputs/{}.pt"  # {model_name}
 
 # extra folder
 EXTRA_DIR: str = "extra/"
