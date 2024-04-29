@@ -43,7 +43,7 @@ jobs:
       curr_branch: ${{ github.ref_name }}
 
   linux-jammy-py3_8-gcc11-build-rg:
-    name: linux-jammy-py3.8-gcc11
+    name: linux-jammy-py3.8-gcc11 / ARC
     needs: get-workflow-type
     if: needs.get-workflow-type.outputs.workflow-type == 'rg' || needs.get-workflow-type.outputs.workflow-type == 'both'
     uses: ./.github/workflows/_linux-build-rg.yml
@@ -83,7 +83,7 @@ jobs:
         ]}
 
   linux-jammy-py3_8-gcc11-test-rg:
-    name: linux-jammy-py3.8-gcc11
+    name: linux-jammy-py3.8-gcc11 / ARC
     uses: ./.github/workflows/_linux-test.yml
     needs:
       - linux-jammy-py3_8-gcc11-build-rg
