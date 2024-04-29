@@ -1456,8 +1456,7 @@ class GraphModuleDeserializer(metaclass=Final):
                         self.shape_env.add_var_to_val(sym, hint)
 
                     if vr := self.symbol_name_to_range.get(val.expr_str):
-                        symbolic_shapes._constrain_symbol_range(
-                            self.shape_env,
+                        self.shape_env.constrain_symbol_range(
                             sym,
                             compiler_min=vr.lower,  # type: ignore[arg-type]
                             compiler_max=vr.upper,  # type: ignore[arg-type]
@@ -1472,8 +1471,7 @@ class GraphModuleDeserializer(metaclass=Final):
                         if s.name not in self.symbol_name_to_symbol:
                             self.symbol_name_to_symbol[s.name] = s
                         if vr := self.symbol_name_to_range.get(s.name):
-                            symbolic_shapes._constrain_symbol_range(
-                                self.shape_env,
+                            self.shape_env.constrain_symbol_range(
                                 s,
                                 compiler_min=vr.lower,  # type: ignore[arg-type]
                                 compiler_max=vr.upper,  # type: ignore[arg-type]
@@ -2267,13 +2265,11 @@ class ExportedProgramDeserializer(metaclass=Final):
             key for key in model_opset_version if key in self.expected_opset_version
         }
         for namespace in common_namespaces:
-            assert isinstance(
-                model_version := model_opset_version[namespace], int
-            ), f"model_opset_version value should be int, got {model_opset_version[namespace]}"
+            model_version = model_opset_version[namespace]
+            assert isinstance(model_version, int), f"model_opset_version value should be int, got {model_version}"
 
-            assert isinstance(
-                compiler_version := self.expected_opset_version[namespace], int
-            ), f"expected_opset_version value should be int, got {self.expected_opset_version[namespace]}"
+            compiler_version = self.expected_opset_version[namespace]
+            assert isinstance(compiler_version, int), f"expected_opset_version value should be int, got {compiler_version}"
 
             # TODO(larryliu0820): Add support for upgrader & downgrader
             if model_version != compiler_version:
