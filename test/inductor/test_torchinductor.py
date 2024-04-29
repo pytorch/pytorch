@@ -10152,7 +10152,7 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
             )
             code = run_and_get_triton_code(f, *inps)
             lines = [line for line in code.split("\n") if "tl.load" in line]
-            if torch.hip.version is not None:
+            if torch.version.hip is not None:
                 rmask = "(rmask).to(tl.int1)"
             else:
                 rmask = "rmask"
