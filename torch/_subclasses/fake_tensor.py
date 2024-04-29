@@ -1487,21 +1487,17 @@ class FakeTensorMode(TorchDispatchMode):
             real_out = func(*real_args, **real_kwargs)
 
         def maybe_propagate_real_tensors(fake_out):
+            import sympy
+
             def go(t, real_t):
                 if isinstance(t, FakeTensor) and t.real_tensor is None:
                     t.real_tensor = real_t
                 elif isinstance(t, SymTypes) and free_unbacked_symbols(t):
                     # If the latest value is inconsistent, well, that's kind
                     # of suspicious, but we should keep going.
-                    prev = (
-                        self.shape_env.propagate_real_tensors_unbacked_var_to_val.get(
-                            t.node.expr
-                        )
-                    )
+                    prev = self.shape_env.unbacked_var_to_val.get(t.node.expr)
                     if isinstance(t.node.expr, sympy.Symbol) and prev is not None:
-                        self.shape_env.propagate_real_tensors_unbacked_var_to_val[
-                            t.node.expr
-                        ] = real_t
+                        self.shape_env.unbacked_var_to_val[t.node.expr] = real_t
                     elif prev != real_t:
                         log.warning(
                             "propagate_real_tensors mismatch %s != %s", prev, real_t

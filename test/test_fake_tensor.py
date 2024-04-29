@@ -928,7 +928,7 @@ instantiate_device_type_tests(FakeTensorOpInfoTest, globals(), only_for=("cpu", 
 
 
 # CPU only for efficiency ig
-make_propagate_real_tensors_cls(FakeTensorOpInfoTestCPU)
+make_propagate_real_tensors_cls(FakeTensorOpInfoTestCPU)  # noqa: F821
 
 
 class FakeTensorConverterTest(TestCase):
@@ -1349,11 +1349,11 @@ class FakeTensorPropTest(TestCase):
             FakeTensorProp(graph_model, fake_mode).propagate(value, None, another_optional_value)
 
 
-    # TODO: not sure about this one, kinda strange
-    @expectedFailurePropagateRealTensors
+    @expectedFailurePropagateRealTensors  # TODO: not sure about this one, kinda strange
     def test_unbacked_shape_realloc(self):
         def f(x):
             return x.nonzero()
+
         shape_env = ShapeEnv()
         fake_mode = FakeTensorMode(shape_env=shape_env)
         with fake_mode:

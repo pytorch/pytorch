@@ -541,9 +541,9 @@ def compute_unbacked_bindings(shape_env, example_value, old_example_value=None):
                 )
                 r.update(
                     free_unbacked_symbols_with_path(
-                        a.storage_offset(), path + (CallMethodKey("storage_offset"),)
-                    ),
-                    real=a.real_tensor.storage_offset() if a.real_tensor is not None else None
+                        a.storage_offset(), path + (CallMethodKey("storage_offset"),),
+                        real=a.real_tensor.storage_offset() if a.real_tensor is not None else None
+                    )
                 )
 
             # NB: Intentionally access _expr, not expr, do not want
@@ -4663,7 +4663,11 @@ class ShapeEnv:
                         )
 
                     # Last ditch
-                    if self.unbacked_var_to_val and (unsound_result := orig_expr.xreplace(self.unbacked_var_to_val)) and not unsound_result.free_symbols:
+                    if (
+                        self.unbacked_var_to_val and
+                        (unsound_result := orig_expr.xreplace(self.unbacked_var_to_val)) and
+                        not unsound_result.free_symbols
+                    ):
                         log.warning("propagate_real_tensors evaluate_expr(%s) -> %s", orig_expr, unsound_result)
                         concrete_val = unsound_result
                     else:
