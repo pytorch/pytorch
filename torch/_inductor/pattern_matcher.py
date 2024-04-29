@@ -894,7 +894,7 @@ class ReplacementPatternEntry(PatternEntry):
                 for n in output_nodes
                 if isinstance(n, torch.fx.Node)
             ]
-            last_node = min(indices, key=lambda tup: tup[0])[1]
+            last_node = min(indices, key=operator.itemgetter(0))[1]
 
         def percolate_tags(node, recompute_tag, input_stops):
             queue = [node]
@@ -1237,7 +1237,7 @@ def _serialize_pattern(
         return f"{file_template}{formatted_imports}"
 
     if not SERIALIZED_PATTERN_PATH.is_dir():
-        raise Exception(
+        raise Exception(  # noqa: TRY002
             f"Could not find serialized patterns directory at {SERIALIZED_PATTERN_PATH}"
         )
 
