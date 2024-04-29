@@ -540,7 +540,7 @@ public:
 template <typename T>
 class Vectorized8 : public Vectorizedi {
   static_assert(
-    std::is_same<T, int8_t>::value || std::is_same<T, uint8_t>::value,
+    std::is_same_v<T, int8_t> || std::is_same_v<T, uint8_t>,
     "Only int8_t/uint8_t are supported");
 protected:
   static constexpr __m512i zero_vector {0, 0, 0, 0, 0, 0, 0, 0};
@@ -1069,7 +1069,7 @@ Vectorized<int8_t> inline maximum(const Vectorized<int8_t>& a, const Vectorized<
 
 template <>
 Vectorized<uint8_t> inline maximum(const Vectorized<uint8_t>& a, const Vectorized<uint8_t>& b) {
-  return _mm512_max_epi8(a, b);
+  return _mm512_max_epu8(a, b);
 }
 
 template <>
@@ -1320,7 +1320,7 @@ inline Vectorized<uint8_t> Vectorized<uint8_t>::le(const Vectorized<uint8_t>& ot
   return (*this <= other) & Vectorized<uint8_t>(1);
 }
 
-template <bool left_shift, typename T, typename std::enable_if_t<std::is_same<T, int8_t>::value || std::is_same<T, uint8_t>::value, int> = 0>
+template <bool left_shift, typename T, typename std::enable_if_t<std::is_same_v<T, int8_t> || std::is_same_v<T, uint8_t>, int> = 0>
 Vectorized<T> inline shift_512_8(const Vectorized<T>& a, const Vectorized<T>& b) {
   // No vector instruction for shifting int8_t/uint8_t, so emulating
   // it instead.

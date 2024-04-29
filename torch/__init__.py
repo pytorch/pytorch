@@ -58,6 +58,7 @@ __all__ = [
     'SymBool', 'sym_not', 'unravel_index',
     'sym_int', 'sym_float', 'sym_max', 'sym_min', 'sym_ite', 'compile', 'vmap',
     'export', 'autocast', 'cond', 'GradScaler',
+    'get_device_module',
 ]
 
 ################################################################################
@@ -339,6 +340,9 @@ class SymFloat:
     def __ge__(self, other) -> builtins.bool:
         raise AssertionError("type stub not overridden")
 
+    def __trunc__(self):
+        raise AssertionError("type stub not overridden")
+
     def __sym_max__(self, other):
         raise AssertionError("type stub not overridden")
 
@@ -465,7 +469,7 @@ def sym_int(a):
     if isinstance(a, SymInt):
         return a
     elif isinstance(a, SymFloat):
-        return math.floor(a) if a >= 0 else math.ceil(a)  # type: ignore[arg-type, call-overload]
+        return math.trunc(a)
     return py_int(a)  # type: ignore[operator]
 
 def sym_max(a, b):
@@ -1263,7 +1267,8 @@ def _check_tensor_all(cond, message=None):  # noqa: F811
 # For Python Array API (https://data-apis.org/array-api/latest/API_specification/constants.html) and
 # NumPy consistency (https://numpy.org/devdocs/reference/constants.html)
 from math import e , nan , inf , pi
-__all__.extend(['e', 'pi', 'nan', 'inf'])
+newaxis: None = None
+__all__.extend(['e', 'pi', 'nan', 'inf', 'newaxis'])
 
 ################################################################################
 # Define Storage and Tensor classes
@@ -1576,6 +1581,7 @@ from torch import cuda as cuda
 from torch import cpu as cpu
 from torch import mps as mps
 from torch import xpu as xpu
+from torch import mtia as mtia
 from torch import autograd as autograd
 from torch.autograd import (
     no_grad as no_grad,
@@ -1619,8 +1625,8 @@ import torch.nn.intrinsic
 _C._init_names(list(torch._storage_classes))
 
 # attach docstrings to torch and tensor functions
-from . import _torch_docs, _tensor_docs, _storage_docs
-del _torch_docs, _tensor_docs, _storage_docs
+from . import _torch_docs, _tensor_docs, _storage_docs, _size_docs
+del _torch_docs, _tensor_docs, _storage_docs, _size_docs
 
 
 def compiled_with_cxx11_abi() -> builtins.bool:
@@ -1777,6 +1783,10 @@ class _TorchCompileWrapper:
     def __call__(self, model_, inputs_):
         return self.compiler_fn(model_, inputs_, **self.kwargs)
 
+    def reset(self):
+        if hasattr(self.compiler_fn, "reset"):
+            self.compiler_fn.reset()
+
 
 def compile(model: Optional[Callable] = None, *,
             fullgraph: builtins.bool = False,
@@ -1787,6 +1797,8 @@ def compile(model: Optional[Callable] = None, *,
             disable: builtins.bool = False) -> Callable:
     """
     Optimizes given model/function using TorchDynamo and specified backend.
+    If you are compiling an :class:`torch.nn.Module`, you can also use :meth:`torch.nn.Module.compile`
+    to compile the module inplace without changing its structure.
 
     Concretely, for every frame executed within the compiled region, we will attempt
     to compile it and cache the compiled result on the code object for future
@@ -1867,9 +1879,8 @@ def compile(model: Optional[Callable] = None, *,
 
     """
     _C._log_api_usage_once("torch.compile")
-    # Temporary until we get proper support for python 3.12
-    if sys.version_info >= (3, 12):
-        raise RuntimeError("Dynamo is not supported on Python 3.12+")
+    if sys.version_info >= (3, 13):
+        raise RuntimeError("Dynamo is not supported on Python 3.13+")
 
     # Decorator mode
     if model is None:
@@ -2007,6 +2018,27 @@ else:
             return importlib.import_module(f".{name}", __name__)
 
         raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+
+def get_device_module(device: Optional[Union[torch.device, str]] = None):
+    """
+    Returns the module associated with a given device(e.g., torch.device('cuda'), "mtia:0", "xpu", ...).
+    If no device is given, return the module for the current accelerator or CPU if none is present.
+    """
+    if isinstance(device, torch.device):
+        device_module_name = device.type
+    elif isinstance(device, str):
+        device_module_name = torch.device(device).type
+    elif device is None:
+        # Using default accelerator type. If no accelerator is available, it automatically returns CPU device.
+        device_module_name = torch._C._get_accelerator().type
+    else:
+        raise RuntimeError(f"Invalid value of device '{device}', expect torch.device, str, or None")
+    device_module = getattr(torch, device_module_name, None)
+    if device_module is None:
+        raise RuntimeError(
+            f"Device '{device_module_name}' does not have a corresponding module registered as 'torch.{device_module_name}'."
+        )
+    return device_module
 
 
 def _constrain_as_value(symbol, min: Optional[builtins.int] = None, max: Optional[builtins.int] = None):

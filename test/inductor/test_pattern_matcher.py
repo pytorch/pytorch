@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import copy
+import os
 import unittest
 
 import torch
@@ -9,17 +10,12 @@ from torch._dynamo.utils import count_calls, counters
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.fx_passes import joint_graph
 
-from torch._inductor.fx_passes.serialized_patterns.central_index import (
-    get_serialized_pattern,
-)
 from torch._inductor.pattern_matcher import (
-    _TargetExpr,
     Arg,
     CallFunction,
     gen_pattern,
     KeywordArg,
     Match,
-    PatternExpr,
     PatternMatcherPass,
     PatternPrettyPrinter,
     register_graph_pattern,
@@ -947,65 +943,49 @@ class TestPatternMatcher(TestCase):
         _, (code) = run_and_get_code(fn2, args[0], args[1], args[2])
         FileCheck().check_not("extern_kernels.addmm(").run(code[0])
 
-    def test_fuse_attention_roundtrip_pattern(self):
-        # are we losing anything in serialization
-        from torch._inductor.fx_passes.fuse_attention import _get_sfdp_patterns
+    def test_serialized_patterns_up_to_date(self):
+        import torch.utils._pytree as pytree
+        from torch._inductor.fx_passes import joint_graph
+        from torch._inductor.pattern_matcher import _known_precompiled_patterns
 
-        global_vals = {
-            "aten": torch.ops.aten,
-            "prims": torch.ops.prims,
-            "torch": torch,
-        }
+        # Ensure the patterns are loaded
+        os.environ.pop("PYTORCH_GEN_PATTERNS", None)
+        joint_graph.lazy_init()
 
-        for name in dir(torch._inductor.pattern_matcher):
-            attr = getattr(torch._inductor.pattern_matcher, name)
-            if isinstance(attr, type) and issubclass(attr, (PatternExpr, _TargetExpr)):
-                global_vals[name] = attr
+        with torch._subclasses.FakeTensorMode() as mode:
+            for (
+                search_fn,
+                example_inputs,
+                trace_fn,
+                scalar_workaround,
+                search_fn_pattern,
+            ) in _known_precompiled_patterns:
+                # Because the example_inputs were saved as fake tensors in a
+                # different FakeTensorMode we need to update them to our
+                # FakeTensorMode().
+                def remap_fake_tensor(x):
+                    if isinstance(x, torch.Tensor):
+                        return torch._subclasses.FakeTensor.from_tensor(x, mode)
+                    return x
 
-        with torch._subclasses.FakeTensorMode():
-            for _, kwargs in _get_sfdp_patterns():
-                gen_kwargs = {
-                    key: kwargs[key]
-                    for key in (
-                        "search_fn",
-                        "example_inputs",
-                        "trace_fn",
-                        "scalar_workaround",
-                    )
-                }
-                pattern = gen_pattern(**gen_kwargs)
+                example_inputs = pytree.tree_map(remap_fake_tensor, example_inputs)
+
+                pattern = gen_pattern(
+                    search_fn, example_inputs, trace_fn, scalar_workaround
+                )
                 pattern_pp = PatternPrettyPrinter.run(pattern)
-                env = global_vals.copy()
-                exec(pattern_pp, env)
-                pattern_2 = env["output"]
-                self.assertEqual(pattern_pp, PatternPrettyPrinter.run(pattern_2))
-
-    def test_fuse_attention_all_patterns_serialized(self):
-        from torch._inductor.fx_passes.fuse_attention import _get_sfdp_patterns
-
-        with torch._subclasses.FakeTensorMode():
-            for key, kwargs in _get_sfdp_patterns():
-                gen_kwargs = {
-                    key: kwargs[key]
-                    for key in (
-                        "search_fn",
-                        "example_inputs",
-                        "trace_fn",
-                        "scalar_workaround",
-                    )
-                }
-                pattern = gen_pattern(**gen_kwargs)
-                pattern_pp = PatternPrettyPrinter.run(pattern)
-
-                search_fn_pattern = get_serialized_pattern(key)
-                if search_fn_pattern is None:
-                    continue
 
                 self.assertEqual(
                     pattern_pp,
                     PatternPrettyPrinter.run(search_fn_pattern),
-                    msg=f"Found mismatched pattern {key}. Run gen_attention_patterns.py",
+                    msg=f"Found mismatched pattern {search_fn.__name__}. Run torchgen/fuse/gen_patterns.py",
                 )
+
+                # Since we've already checked that the serialized patterns match
+                # lets verify the serializer by ensuring the generated patterns
+                # also match (since search_fn_pattern is the serialized version
+                # of search_fn).
+                self.assertTrue(pattern.pattern_eq(search_fn_pattern))
 
     def test_match_equivalent_function_invocations1(self):
         counter = 0

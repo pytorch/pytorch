@@ -227,6 +227,9 @@ static void registerXpuDeviceProperties(PyObject* module) {
   py::class_<DeviceProp>(m, "_XpuDeviceProperties")
       .def_readonly("name", &DeviceProp::name)
       .def_readonly("platform_name", &DeviceProp::platform_name)
+      .def_readonly("vendor", &DeviceProp::vendor)
+      .def_readonly("driver_version", &DeviceProp::driver_version)
+      .def_readonly("version", &DeviceProp::version)
       .def_readonly("total_memory", &DeviceProp::global_mem_size)
       .def_readonly("max_compute_units", &DeviceProp::max_compute_units)
       .def_readonly("gpu_eu_count", &DeviceProp::gpu_eu_count)
@@ -234,6 +237,9 @@ static void registerXpuDeviceProperties(PyObject* module) {
       .def_readonly("max_work_group_size", &DeviceProp::max_work_group_size)
       .def_readonly("max_num_sub_groups", &DeviceProp::max_num_sub_groups)
       .def_readonly("sub_group_sizes", &DeviceProp::sub_group_sizes)
+      .def_readonly("has_fp16", &DeviceProp::has_fp16)
+      .def_readonly("has_fp64", &DeviceProp::has_fp64)
+      .def_readonly("has_atomic64", &DeviceProp::has_atomic64)
       .def_property_readonly("type", get_device_type)
       .def(
           "__repr__",
@@ -241,14 +247,18 @@ static void registerXpuDeviceProperties(PyObject* module) {
             std::ostringstream stream;
             stream << "_XpuDeviceProperties(name='" << prop.name
                    << "', platform_name='" << prop.platform_name << "', type='"
-                   << get_device_type(prop) << ", total_memory="
+                   << get_device_type(prop) << "', driver_version='"
+                   << prop.driver_version << "', total_memory="
                    << prop.global_mem_size / (1024ull * 1024)
                    << "MB, max_compute_units=" << prop.max_compute_units
                    << ", gpu_eu_count=" << prop.gpu_eu_count
                    << ", gpu_subslice_count=" << gpu_subslice_count(prop)
                    << ", max_work_group_size=" << prop.max_work_group_size
                    << ", max_num_sub_groups=" << prop.max_num_sub_groups
-                   << ", sub_group_sizes=[" << prop.sub_group_sizes << "])";
+                   << ", sub_group_sizes=[" << prop.sub_group_sizes
+                   << "], has_fp16=" << prop.has_fp16
+                   << ", has_fp64=" << prop.has_fp64
+                   << ", has_atomic64=" << prop.has_atomic64 << ")";
             return stream.str();
           });
 }

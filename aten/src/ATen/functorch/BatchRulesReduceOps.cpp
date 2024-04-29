@@ -75,7 +75,7 @@ static Tensor any_decomp(const Tensor& self) {
   return at::any(self.flatten(), 0, false);
 }
 
-enum ReductionCase { DimArray, Dim };
+enum class ReductionCase:uint8_t { DimArray, Dim };
 
 // Macros and templates have a difficult time dealing with enums,
 // so we didn't turn this into an enum.
@@ -129,7 +129,7 @@ void boxed_reduction_batch_rule(const c10::OperatorHandle& op, torch::jit::Stack
 
   auto logical_dim = rankWithoutBatchDim(self, self_bdim);
   std::vector<int64_t> dims;
-  ReductionCase reduction_case;
+  ReductionCase reduction_case{};
   if (arguments[dim_arg_pos].isIntList()) {
     reduction_case = ReductionCase::DimArray;
     dims = arguments[dim_arg_pos].toIntList().vec();

@@ -10,9 +10,12 @@ from . import utils
 
 from .bytecode_transformation import (
     create_call_function,
+    create_call_method,
     create_dup_top,
     create_instruction,
+    create_load_attr,
     create_load_global,
+    create_load_method,
     create_rot_n,
     Instruction,
 )
@@ -261,12 +264,18 @@ class PyCodegen:
 
     def create_load_method(self, name):
         self.tx.output.update_co_names(name)
-        return create_instruction("LOAD_METHOD", argval=name)
+        return create_load_method(name)
+
+    def load_method(self, name):
+        self.append_output(self.create_load_method(name))
+
+    def call_method(self, nargs):
+        self.extend_output(create_call_method(nargs))
 
     def create_load_attr(self, name) -> Instruction:
         if name not in self.code_options["co_names"]:
             self.code_options["co_names"] += (name,)
-        return create_instruction("LOAD_ATTR", argval=name)
+        return create_load_attr(name)
 
     def load_attr(self, name):
         self.append_output(self.create_load_attr(name))
@@ -319,6 +328,9 @@ class PyCodegen:
             *create_call_function(0, False),
             create_instruction("POP_TOP"),
         ]
+
+    def pop_top(self):
+        self.append_output(create_instruction("POP_TOP"))
 
     def call_function(self, nargs: int, push_null: bool):
         self.extend_output(create_call_function(nargs, push_null=push_null))
@@ -388,11 +400,20 @@ class PyCodegen:
     def create_call_function_kw(self, nargs, kw_names, push_null) -> List[Instruction]:
         if sys.version_info >= (3, 11):
             output = create_call_function(nargs, push_null)
-            assert output[-2].opname == "PRECALL"
+            if sys.version_info >= (3, 12):
+                idx = -1
+                expected_inst = "CALL"
+            else:
+                idx = -2
+                expected_inst = "PRECALL"
+            assert output[idx].opname == expected_inst
             kw_names_inst = create_instruction("KW_NAMES", argval=kw_names)
-            output.insert(-2, kw_names_inst)
+            output.insert(idx, kw_names_inst)
             return output
         return [
             self.create_load_const(kw_names),
             create_instruction("CALL_FUNCTION_KW", arg=nargs),
         ]
+
+    def create_delete(self, value) -> Instruction:
+        return create_instruction("DELETE_FAST", argval=value)

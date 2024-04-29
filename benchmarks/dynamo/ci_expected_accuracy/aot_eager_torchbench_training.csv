@@ -166,10 +166,6 @@ moco,pass,11
 
 
 
-moondream,model_fail_to_load,0
-
-
-
 nanogpt,pass,7
 
 
@@ -198,7 +194,7 @@ pytorch_stargan,pass,6
 
 
 
-pytorch_unet,pass,7
+pytorch_unet,pass_due_to_skip,7
 
 
 

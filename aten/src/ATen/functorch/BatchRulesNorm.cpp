@@ -474,7 +474,7 @@ C10_ALWAYS_INLINE void _check_layer_norm_inputs(
     const Tensor& weight, optional<int64_t> weight_bdim,
     const Tensor& bias, optional<int64_t> bias_bdim) {
 
-  const int normalized_ndim = normalized_shape.size();
+  const auto normalized_ndim = normalized_shape.size();
   TORCH_CHECK(
       normalized_ndim >= 1,
       "Expected normalized_shape to be at least 1-dimensional, i.e., ",
@@ -616,7 +616,7 @@ static std::tuple<at::Tensor,at::Tensor,at::Tensor> native_layer_norm_backward_p
     if (num_front_dims_to_reduce == 0) {
       grad_bias = grad_out;
     } else {
-      grad_bias = grad_out.sum(range(0, num_front_dims_to_reduce));
+      grad_bias = grad_out.sum(range(0, static_cast<int64_t>(num_front_dims_to_reduce)));
     }
   }
   if (output_mask[1] && weight_value.has_value()) {
@@ -628,7 +628,7 @@ static std::tuple<at::Tensor,at::Tensor,at::Tensor> native_layer_norm_backward_p
     if (num_front_dims_to_reduce == 0) {
       grad_weight = expanded_grad_weight;
     } else {
-      grad_weight = expanded_grad_weight.sum(range(0, num_front_dims_to_reduce));
+      grad_weight = expanded_grad_weight.sum(range(0, static_cast<int64_t>(num_front_dims_to_reduce)));
     }
   }
   if (output_mask[0]) {

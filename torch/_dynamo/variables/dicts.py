@@ -14,6 +14,7 @@ from ..bytecode_transformation import (
     create_call_function,
     create_call_method,
     create_instruction,
+    create_load_method,
 )
 from ..eval_frame import skip_code
 
@@ -50,6 +51,7 @@ def is_hashable(x):
                 variables.SkipFunctionVariable,
                 variables.misc.NumpyVariable,
                 variables.NNModuleVariable,
+                variables.UnspecializedNNModuleVariable,
                 variables.MethodWrapperVariable,
                 variables.TorchInGraphFunctionVariable,
                 variables.TypingVariable,
@@ -89,6 +91,8 @@ class ConstDictVariable(VariableTracker):
                 x = tuple(Hashable(e).underlying_value for e in self.vt.items)
             elif isinstance(self.vt, variables.NNModuleVariable):
                 return self.vt.module
+            elif isinstance(self.vt, variables.UnspecializedNNModuleVariable):
+                return self.vt.value
             elif isinstance(self.vt, variables.UserFunctionVariable):
                 return self.vt.get_function()
             else:
@@ -219,13 +223,19 @@ class ConstDictVariable(VariableTracker):
             return self.getitem_const(args[0])
         elif name == "items":
             assert not (args or kwargs)
+            if self.source:
+                tx.output.guard_on_key_order.add(self.source.name())
             return TupleVariable(
                 [TupleVariable([k.vt, v]) for k, v in self.items.items()]
             )
         elif name == "keys":
+            if self.source:
+                tx.output.guard_on_key_order.add(self.source.name())
             assert not (args or kwargs)
             return DictKeys(self)
         elif name == "values":
+            if self.source:
+                tx.output.guard_on_key_order.add(self.source.name())
             assert not (args or kwargs)
             return DictValues(self)
         elif name == "copy":
@@ -238,6 +248,10 @@ class ConstDictVariable(VariableTracker):
             assert not kwargs and len(args) == 2
             tx.output.side_effects.mutation(self)
             self.items[Hashable(args[0])] = args[1]
+            return ConstantVariable.create(None)
+        elif name == "__delitem__" and arg_hashable and self.mutable_local:
+            tx.output.side_effects.mutation(self)
+            self.items.__delitem__(Hashable(args[0]))
             return ConstantVariable.create(None)
         elif name in ("pop", "get") and len(args) in (1, 2) and args[0] not in self:
             # missing item, return the default value
@@ -416,7 +430,7 @@ class DictView(VariableTracker):
     def view_items_vt(self):
         # Returns an iterable of the unpacked items
         # Implement in the subclasses
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def unpack_var_sequence(self, tx):
         def unwrap(x):
@@ -428,7 +442,7 @@ class DictView(VariableTracker):
         codegen(self.dv_dict)
         codegen.extend_output(
             [
-                create_instruction("LOAD_METHOD", argval=self.kv),
+                create_load_method(self.kv),
                 *create_call_method(0),
             ]
         )
@@ -611,7 +625,7 @@ class DataClassVariable(ConstDictVariable):
         assert self.is_matching_cls(user_cls)
 
     def as_proxy(self):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def reconstruct(self, codegen):
         codegen.extend_output([codegen._create_load_const(self.user_cls)])
@@ -733,14 +747,14 @@ class CustomizedDictVariable(ConstDictVariable):
     # called from builder.py
     @classmethod
     def wrap(cls, builder, obj):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def __init__(self, items, user_cls, **options):
         super().__init__(items, user_cls, **options)
         assert self.is_matching_cls(user_cls)
 
     def as_proxy(self):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     # 'RETURN_VALUE triggered compile'
     # called from torch/_dynamo/codegen.py
@@ -879,18 +893,13 @@ class PythonSysModulesVariable(VariableTracker):
     def call_method(
         self, tx, name, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ):
-        from .builder import VariableBuilder
-
         if name == "__getitem__":
             return self.call_getitem(tx, *args, **kwargs)
         elif name == "get":
             return self.call_get(tx, *args, **kwargs)
         elif name == "__contains__":
             return self.call_contains(tx, *args, **kwargs)
-
-        # Fallback to dict implementation
-        real_dict = VariableBuilder(tx, self.source)(sys.modules)
-        return real_dict.call_method(tx, name, args, kwargs)
+        unimplemented(f"sys.modules.{name}(*{args}, **{kwargs})")
 
     def _contains_helper(self, tx, key: VariableTracker):
         k = key.as_python_constant()

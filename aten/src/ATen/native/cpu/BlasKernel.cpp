@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/Dispatch.h>
+#include <ATen/Parallel.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/cpu/zmath.h>
 #include <c10/util/irange.h>
@@ -337,20 +338,22 @@ void gemm_transa_(
     at::native::blas_impl::fp16_gemv_trans(k, m, alpha, reinterpret_cast<const float16_t*>(a), lda, reinterpret_cast<const float16_t*>(b), 1, beta, reinterpret_cast<float16_t*>(c), 1);
     return;
   }
-  const auto *a_ = a;
-  for (const auto i : c10::irange(m)) {
-    const auto *b_ = b;
-    for (const auto j : c10::irange(n)) {
-      const auto dot = compute_dot(reinterpret_cast<const float16_t*>(a_), reinterpret_cast<const float16_t*>(b_), k);
-      b_ += ldb;
-      if (beta == 0) {
-        c[j*ldc+i] = alpha*dot;
-      } else {
-        c[j*ldc+i] = beta*c[j*ldc+i]+alpha*dot;
+  parallel_for(0, m, 1, [&](int64_t begin, int64_t end) {
+    const auto *a_ = a + begin * lda;
+    for (const auto i : c10::irange(begin, end)) {
+      const auto *b_ = b;
+      for (const auto j : c10::irange(n)) {
+        const auto dot = compute_dot(reinterpret_cast<const float16_t*>(a_), reinterpret_cast<const float16_t*>(b_), k);
+        b_ += ldb;
+        if (beta == 0) {
+          c[j*ldc+i] = alpha*dot;
+        } else {
+          c[j*ldc+i] = beta*c[j*ldc+i]+alpha*dot;
+        }
       }
+      a_ += lda;
     }
-    a_ += lda;
-  }
+  });
 }
 
 #endif

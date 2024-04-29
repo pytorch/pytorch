@@ -124,18 +124,18 @@ Tensor embedding_dense_backward_cpu(
   auto add_iter = TensorIteratorConfig()
     .add_output(grad_weight)
     .add_input(grad_weight)
-    .add_input(grad)
+    .add_const_input(grad)
     .resize_outputs(false)
     .declare_static_shape(grad.sizes(), /*squash_dims=*/0)
     .build();
 
   const auto gW_data = reinterpret_cast<char*>(grad_weight.data_ptr());
-  const auto gO_data = reinterpret_cast<char*>(grad.data_ptr());
+  const auto gO_data = reinterpret_cast<const char*>(grad.const_data_ptr());
   const auto gW_stride = grad_weight.strides()[0] * grad_weight.element_size();
   const auto gO_stride = grad.strides()[0] * grad.element_size();
 
   AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_dense_backward_cpu", [&] () {
-    auto indices_data = indices_contig.data_ptr<index_t>();
+    auto indices_data = indices_contig.const_data_ptr<index_t>();
 
     // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     std::unique_ptr<index_t[]> counts;
@@ -164,7 +164,7 @@ Tensor embedding_dense_backward_cpu(
             // grad_weight[k].add_(grad[i], scale);
             iter.unsafe_replace_operand(0, gW_data + k * gW_stride);
             iter.unsafe_replace_operand(1, gW_data + k * gW_stride);
-            iter.unsafe_replace_operand(2, gO_data + i * gO_stride);
+            iter.unsafe_replace_operand(2, const_cast<char*>(gO_data + i * gO_stride));
             add_stub(kCPU, iter, scale);
           }
         }
@@ -189,7 +189,7 @@ Tensor & embedding_renorm_cpu_(
   auto num_indices = indices.numel();
 
   AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_renorm_cpu_", [&]() {
-    auto data_ptr = indices_contig.data_ptr<index_t>();
+    auto data_ptr = indices_contig.const_data_ptr<index_t>();
     auto sorted_indices = std::vector<index_t>(data_ptr, data_ptr + num_indices);
     std::sort(sorted_indices.begin(), sorted_indices.end());
 

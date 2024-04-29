@@ -102,13 +102,12 @@ inline void check_foreach_api_restrictions(
 // corresponding tensors (aligning in index across the tensorLists) share the
 // same device and dtype.
 inline bool _check_tensors_share_device_and_dtype(
-    ArrayRef<TensorList> tensorLists,
-    const bool skip_dtype_check = false) {
+    ArrayRef<TensorList> tensorLists) {
   const auto expected_dtype = tensorLists[0][0].dtype();
   const auto expected_device = tensorLists[0][0].device();
 
   auto is_tensor_okay = [&](const Tensor& tensor) {
-    return (skip_dtype_check || tensor.dtype() == expected_dtype) &&
+    return tensor.dtype() == expected_dtype &&
         tensor.device() == expected_device && tensor.layout() == at::kStrided &&
         tensor.is_non_overlapping_and_dense();
   };
@@ -217,7 +216,7 @@ inline std::vector<c10::Scalar> convert_tensor_to_scalar_list(
       scalarList_.scalar_type(),
       "convert_tensor_to_scalar_list",
       [&]() {
-        const scalar_t* scalar_data = scalarList_.data_ptr<scalar_t>();
+        const scalar_t* scalar_data = scalarList_.const_data_ptr<scalar_t>();
         TORCH_CHECK(
             (expect_length == scalarList_.size(0)),
             "Expected length of scalars to match input of length ",
