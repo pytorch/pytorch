@@ -2515,7 +2515,7 @@ def _do_validate_cpp_commands(cuda: bool, mmap_weights: bool):
     _temp_validate_new_and_old_command(new_cmd, old_cmd)
 
 
-def _validate_new_cpp_commands():
+def validate_new_cpp_commands():
     cuda = [True, False]
     use_mmap_weights = [True, False]
 
