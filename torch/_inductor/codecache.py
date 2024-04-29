@@ -2489,7 +2489,9 @@ def _validate_cpp_commands():
 
     from torch._inductor.cpp_builder import CppBuilder, CppTorchCudaOptions
 
-    dummy_build_option = CppTorchCudaOptions(chosen_isa=picked_isa, use_cuda=True)
+    dummy_build_option = CppTorchCudaOptions(
+        chosen_isa=picked_isa, use_cuda=True, use_mmap_weights=True
+    )
 
     dummy_builder = CppBuilder(
         name="dummy_output",

@@ -299,6 +299,8 @@ def _get_optimization_cflags() -> List[str]:
 
         if not config.cpp.enable_unsafe_math_opt_flag:
             cflags.append("fno-unsafe-math-optimizations")
+        if not config.cpp.enable_floating_point_contract_flag:
+            cflags.append("ffp-contract=off")
 
         if config.is_fbcode():
             # FIXME: passing `-fopenmp` adds libgomp.so to the generated shared library's dependencies.
@@ -488,12 +490,10 @@ def _get_torch_related_args(aot_mode: bool):
     if not aot_mode:
         libraries.append("torch_python")
 
-    """
     # Unconditionally import c10 for non-abi-compatible mode to use TORCH_CHECK - See PyTorch #108690
-    if not config.aot_inductor.abi_compatible:
-        libraries += ["c10"]
-        libraries_dirs += [TORCH_LIB_PATH]
-    """
+    if not config.abi_compatible:
+        libraries.append("c10")
+        libraries_dirs.append(TORCH_LIB_PATH)
 
     return include_dirs, libraries_dirs, libraries
 
@@ -591,7 +591,16 @@ def _get_openmp_args(cpp_compiler):
     return cflags, ldflags, include_dir_paths, lib_dir_paths, libs
 
 
-def get_cpp_torch_options(cpp_compiler, chosen_isa: VecISA, aot_mode: bool = False):
+def get_mmap_self_macro(use_mmap_weights: bool) -> List[str]:
+    macros = []
+    if use_mmap_weights:
+        macros.append(" USE_MMAP_SELF")
+    return macros
+
+
+def get_cpp_torch_options(
+    cpp_compiler, chosen_isa: VecISA, aot_mode: bool, use_mmap_weights: bool
+):
     definations: List[str] = []
     include_dirs: List[str] = []
     cflags: List[str] = []
@@ -626,11 +635,14 @@ def get_cpp_torch_options(cpp_compiler, chosen_isa: VecISA, aot_mode: bool = Fal
     cxx_abi_passthough_args = _get_glibcxx_abi_build_flags()
     fb_macro_passthough_args = _use_fb_internal_macros()
 
+    mmap_self_macros = get_mmap_self_macro(use_mmap_weights)
+
     definations = (
         torch_cpp_wrapper_definations
         + use_custom_generated_macros_definations
         + isa_macros
         + fb_macro_passthough_args
+        + mmap_self_macros
     )
     include_dirs = (
         sys_dir_header_include_dirs
@@ -668,7 +680,11 @@ class CppTorchOptions(CppOptions):
     """
 
     def __init__(
-        self, chosen_isa: VecISA, warning_all: bool = True, aot_mode: bool = False
+        self,
+        chosen_isa: VecISA,
+        warning_all: bool = True,
+        aot_mode: bool = False,
+        use_mmap_weights: bool = False,
     ) -> None:
         super().__init__(warning_all)
 
@@ -682,7 +698,12 @@ class CppTorchOptions(CppOptions):
             torch_libraries_dirs,
             torch_libraries,
             torch_passthough_args,
-        ) = get_cpp_torch_options(cpp_compiler=self._compiler, chosen_isa=chosen_isa)
+        ) = get_cpp_torch_options(
+            cpp_compiler=self._compiler,
+            chosen_isa=chosen_isa,
+            aot_mode=aot_mode,
+            use_mmap_weights=use_mmap_weights,
+        )
 
         _append_list(self._definations, torch_definations)
         _append_list(self._include_dirs, torch_include_dirs)
@@ -807,11 +828,17 @@ class CppTorchCudaOptions(CppTorchOptions):
     """
 
     def __init__(
-        self, chosen_isa: VecISA, use_cuda: bool = True, aot_mode: bool = False
+        self,
+        chosen_isa: VecISA,
+        use_cuda: bool = True,
+        aot_mode: bool = False,
+        use_mmap_weights: bool = False,
     ) -> None:
         # from torch._inductor.codecache import pick_vec_isa
 
-        super().__init__(chosen_isa=chosen_isa, aot_mode=aot_mode)
+        super().__init__(
+            chosen_isa=chosen_isa, aot_mode=aot_mode, use_mmap_weights=use_mmap_weights
+        )
 
         cuda_definations: List[str] = []
         cuda_include_dirs: List[str] = []
