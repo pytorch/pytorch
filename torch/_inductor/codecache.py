@@ -2475,12 +2475,14 @@ def _temp_validate_new_and_old_command(new_cmd: List[str], old_cmd: List[str]):
     old_diff: List[str] = [y for y in old_cmd if y not in new_cmd]
 
     if new_diff or old_diff:
+        print("!!! new_cmd: ", new_cmd)
+        print("!!! old_cmd: ", old_cmd)
         print("!!! new_diff: ", new_diff)
         print("!!! old_diff: ", old_diff)
         raise RuntimeError("Error in new and old command different.")
 
 
-def _do_validate_cpp_commands(cuda: bool, mmap_weights: bool):
+def _do_validate_cpp_commands(cuda: bool, compile_only: bool, mmap_weights: bool):
     input_path = "/temp/dummy_input.cpp"
     output_path = "/temp/dummy_output.so"
     picked_isa = pick_vec_isa()
@@ -2491,7 +2493,7 @@ def _do_validate_cpp_commands(cuda: bool, mmap_weights: bool):
         vec_isa=picked_isa,
         cuda=cuda,
         aot_mode=False,
-        compile_only=False,
+        compile_only=compile_only,
         use_absolute_path=False,
         use_mmap_weights=mmap_weights,
     ).split(" ")
@@ -2499,7 +2501,10 @@ def _do_validate_cpp_commands(cuda: bool, mmap_weights: bool):
     from torch._inductor.cpp_builder import CppBuilder, CppTorchCudaOptions
 
     dummy_build_option = CppTorchCudaOptions(
-        chosen_isa=picked_isa, use_cuda=cuda, use_mmap_weights=mmap_weights
+        chosen_isa=picked_isa,
+        use_cuda=cuda,
+        compile_only=compile_only,
+        use_mmap_weights=mmap_weights,
     )
 
     dummy_builder = CppBuilder(
@@ -2507,7 +2512,7 @@ def _do_validate_cpp_commands(cuda: bool, mmap_weights: bool):
         sources=input_path,
         BuildOption=dummy_build_option,
         output_dir="/temp/",
-        compile_only=False,
+        compile_only=compile_only,
         use_absolute_path=False,
     )
     new_cmd = dummy_builder.get_command_line().split(" ")
@@ -2518,10 +2523,12 @@ def _do_validate_cpp_commands(cuda: bool, mmap_weights: bool):
 def validate_new_cpp_commands():
     cuda = [True, False]
     use_mmap_weights = [True, False]
+    compile_only = [True, False]
 
     for x in cuda:
         for y in use_mmap_weights:
-            _do_validate_cpp_commands(cuda=x, mmap_weights=y)
+            for z in compile_only:
+                _do_validate_cpp_commands(cuda=x, mmap_weights=y, compile_only=z)
 
 
 # _validate_new_cpp_commands()

@@ -331,12 +331,12 @@ def _get_optimization_cflags() -> List[str]:
         return cflags
 
 
-def _get_shared_cflag() -> List[str]:
+def _get_shared_cflag(compile_only: bool) -> List[str]:
     SHARED_FLAG = ["DLL"] if _IS_WINDOWS else ["shared", "fPIC"]
     return SHARED_FLAG
 
 
-def get_cpp_options(cpp_compiler, warning_all: bool = True):
+def get_cpp_options(cpp_compiler, compile_only: bool, warning_all: bool = True):
     definations: List[str] = []
     include_dirs: List[str] = []
     cflags: List[str] = []
@@ -346,7 +346,7 @@ def get_cpp_options(cpp_compiler, warning_all: bool = True):
     passthough_args: List[str] = []
 
     cflags = (
-        _get_shared_cflag()
+        _get_shared_cflag(compile_only)
         + _get_optimization_cflags()
         + _get_warning_all_cflag(warning_all)
         + _get_cpp_std_cflag()
@@ -375,7 +375,7 @@ class CppOptions(BuildOptionsBase):
     1. This Options is good for assist modules build, such as x86_isa_help.
     """
 
-    def __init__(self, warning_all: bool = True) -> None:
+    def __init__(self, compile_only: bool, warning_all: bool = True) -> None:
         super().__init__()
         self._compiler = _get_cpp_compiler()
 
@@ -387,7 +387,7 @@ class CppOptions(BuildOptionsBase):
             libraries_dirs,
             libraries,
             passthough_args,
-        ) = get_cpp_options(self._compiler)
+        ) = get_cpp_options(cpp_compiler=self._compiler, compile_only=compile_only)
 
         _append_list(self._definations, definations)
         _append_list(self._include_dirs, include_dirs)
@@ -613,7 +613,11 @@ def get_mmap_self_macro(use_mmap_weights: bool) -> List[str]:
 
 
 def get_cpp_torch_options(
-    cpp_compiler, chosen_isa: VecISA, aot_mode: bool, use_mmap_weights: bool
+    cpp_compiler,
+    chosen_isa: VecISA,
+    aot_mode: bool,
+    compile_only: bool,
+    use_mmap_weights: bool,
 ):
     definations: List[str] = []
     include_dirs: List[str] = []
@@ -698,9 +702,10 @@ class CppTorchOptions(CppOptions):
         chosen_isa: VecISA,
         warning_all: bool = True,
         aot_mode: bool = False,
+        compile_only: bool = False,
         use_mmap_weights: bool = False,
     ) -> None:
-        super().__init__(warning_all)
+        super().__init__(compile_only=compile_only, warning_all=warning_all)
 
         self._aot_mode = aot_mode
 
@@ -716,8 +721,13 @@ class CppTorchOptions(CppOptions):
             cpp_compiler=self._compiler,
             chosen_isa=chosen_isa,
             aot_mode=aot_mode,
+            compile_only=compile_only,
             use_mmap_weights=use_mmap_weights,
         )
+
+        if compile_only:
+            torch_libraries_dirs = []
+            torch_libraries = []
 
         _append_list(self._definations, torch_definations)
         _append_list(self._include_dirs, torch_include_dirs)
@@ -851,12 +861,16 @@ class CppTorchCudaOptions(CppTorchOptions):
         chosen_isa: VecISA,
         use_cuda: bool = True,
         aot_mode: bool = False,
+        compile_only: bool = False,
         use_mmap_weights: bool = False,
     ) -> None:
         # from torch._inductor.codecache import pick_vec_isa
 
         super().__init__(
-            chosen_isa=chosen_isa, aot_mode=aot_mode, use_mmap_weights=use_mmap_weights
+            chosen_isa=chosen_isa,
+            aot_mode=aot_mode,
+            compile_only=compile_only,
+            use_mmap_weights=use_mmap_weights,
         )
 
         cuda_definations: List[str] = []
@@ -877,6 +891,10 @@ class CppTorchCudaOptions(CppTorchOptions):
                 cuda_libraries,
                 cuda_passthough_args,
             ) = get_cpp_torch_cuda_options(aot_mode=aot_mode)
+
+        if compile_only:
+            cuda_libraries_dirs = []
+            cuda_libraries = []
 
         _append_list(self._definations, cuda_definations)
         _append_list(self._include_dirs, cuda_include_dirs)
