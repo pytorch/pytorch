@@ -769,7 +769,7 @@ floor = _make_elementwise_unary_prim(
 )
 
 imag = _make_prim(
-    schema="imag(Tensor self) -> Tensor",
+    schema="imag(Tensor(a) self) -> Tensor(a)",
     meta=partial(
         _complex_only_elementwise_meta,
         type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
@@ -822,7 +822,7 @@ log10 = _make_elementwise_unary_prim(
 )
 
 real = _make_prim(
-    schema="real(Tensor self) -> Tensor",
+    schema="real(Tensor(a) self) -> Tensor(a)",
     meta=partial(
         _complex_only_elementwise_meta,
         type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
@@ -1812,7 +1812,7 @@ _view_of_doc = """
     """
 
 view_of = _make_prim(
-    schema="view_of(Tensor(a) a) -> Tensor",
+    schema="view_of(Tensor(a) a) -> Tensor(a)",
     meta=_view_of_meta,
     impl_aten=_view_of_aten,
     return_type=RETURN_TYPE.VIEW,
@@ -1833,7 +1833,7 @@ _view_element_type_doc = """
     """
 
 view_element_type = _make_prim(
-    schema="view_of_dtype(Tensor(a) a, ScalarType dtype) -> Tensor",
+    schema="view_of_dtype(Tensor(a) a, ScalarType dtype) -> Tensor(a)",
     meta=_view_element_type_meta,
     impl_aten=_view_element_type_aten,
     return_type=RETURN_TYPE.VIEW,
