@@ -3,7 +3,7 @@ import torch
 
 def register_if_not(qualname):
     entry = torch._library.simple_registry.singleton.find(qualname)
-    if entry.abstract_impl.kernel is not None:
+    if entry.abstract_impl.kernel is None:
         return torch.library.impl_abstract(qualname)
     else:
 
@@ -28,5 +28,5 @@ def register_fake_operators():
         return tq.push(x)
 
     @register_if_not("_TorchScriptTesting::queue_size")
-    def fake_queue_size(tq, x):
+    def fake_queue_size(tq):
         return tq.size()
