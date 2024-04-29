@@ -106,6 +106,7 @@ struct TorchOpBasicFields {
   uint64_t forward_tid_{0};
   at::RecordScope scope_{};
   bool is_async_{false};
+  uint64_t record_function_id_{0};
   int64_t debug_handle_{0};
   std::string name_;
 
@@ -339,7 +340,7 @@ struct ExtraFields<EventType::Kineto> {
   };
 
   std::string name_;
-  int64_t duration_us_{0};
+  int64_t duration_ns_{0};
   uint64_t correlation_id_{0};
   libkineto::ActivityType activity_type_;
   Flow flow;
@@ -631,8 +632,8 @@ class TORCH_API RecordQueue {
       std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>>
   getRecords(
       std::function<c10::time_t(c10::approx_time_t)> time_converter,
-      uint64_t start_time_us,
-      uint64_t end_time_us);
+      uint64_t start_time_ns,
+      uint64_t end_time_ns);
 
  private:
   uint32_t id_;

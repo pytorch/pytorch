@@ -27,6 +27,8 @@ def make_np(x):
 
 
 def _prepare_pytorch(x):
+    if x.dtype == torch.bfloat16:
+        x = x.to(torch.float16)
     x = x.detach().cpu().numpy()
     return x
 

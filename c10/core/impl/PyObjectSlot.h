@@ -56,7 +56,7 @@ struct C10_API PyObjectSlot {
         // fallthrough, we lost the race.  We are guaranteed not to lose the
         // race with ourself, as calls to init_pyobj with the same interpreter
         // ID must be sequentialized by the GIL
-        C10_FALLTHROUGH;
+        [[fallthrough]];
       case impl::PyInterpreterStatus::TAGGED_BY_OTHER:
         TORCH_CHECK(
             false,

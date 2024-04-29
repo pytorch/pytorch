@@ -15,7 +15,7 @@ import os
 import torch
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
     skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN, \
-    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, IS_WINDOWS, TEST_MPS, \
+    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, IS_WINDOWS, TEST_MPS, TEST_XPU, \
     _TestParametrizer, compose_parametrize_fns, dtype_name, \
     TEST_WITH_MIOPEN_SUGGEST_NHWC, NATIVE_DEVICES, skipIfTorchDynamo, \
     get_tracked_input, clear_tracked_input, PRINT_REPRO_ON_FAILURE, \
@@ -569,6 +569,27 @@ class MPSTestBase(DeviceTypeTestBase):
     def _should_stop_test_suite(self):
         return False
 
+class XPUTestBase(DeviceTypeTestBase):
+    device_type = 'xpu'
+    primary_device: ClassVar[str]
+
+    @classmethod
+    def get_primary_device(cls):
+        return cls.primary_device
+
+    @classmethod
+    def get_all_devices(cls):
+        # currently only one device is supported on MPS backend
+        prim_device = cls.get_primary_device()
+        return [prim_device]
+
+    @classmethod
+    def setUpClass(cls):
+        cls.primary_device = 'xpu:0'
+
+    def _should_stop_test_suite(self):
+        return False
+
 class PrivateUse1TestBase(DeviceTypeTestBase):
     primary_device: ClassVar[str]
     device_mod = None
@@ -669,6 +690,7 @@ PYTORCH_CUDA_MEMCHECK = os.getenv('PYTORCH_CUDA_MEMCHECK', '0') == '1'
 
 PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY = 'PYTORCH_TESTING_DEVICE_ONLY_FOR'
 PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY = 'PYTORCH_TESTING_DEVICE_EXCEPT_FOR'
+PYTORCH_TESTING_DEVICE_FOR_CUSTOM_KEY = 'PYTORCH_TESTING_DEVICE_FOR_CUSTOM'
 
 
 def get_desired_device_type_test_bases(except_for=None, only_for=None, include_lazy=False, allow_mps=False):
@@ -676,6 +698,8 @@ def get_desired_device_type_test_bases(except_for=None, only_for=None, include_l
     test_bases = device_type_test_bases.copy()
     if allow_mps and TEST_MPS and MPSTestBase not in test_bases:
         test_bases.append(MPSTestBase)
+    if only_for == 'xpu' and TEST_XPU and XPUTestBase not in test_bases:
+        test_bases.append(XPUTestBase)
     # Filter out the device types based on user inputs
     desired_device_type_test_bases = filter_desired_device_types(test_bases, except_for, only_for)
     if include_lazy:
@@ -692,6 +716,14 @@ def get_desired_device_type_test_bases(except_for=None, only_for=None, include_l
 
     def split_if_not_empty(x: str):
         return x.split(",") if x else []
+
+    # run some cuda testcases on other devices if available
+    # Usage:
+    # export PYTORCH_TESTING_DEVICE_FOR_CUSTOM=privateuse1
+    env_custom_only_for = split_if_not_empty(os.getenv(PYTORCH_TESTING_DEVICE_FOR_CUSTOM_KEY, ''))
+    if env_custom_only_for:
+        desired_device_type_test_bases += filter(lambda x: x.device_type in env_custom_only_for, test_bases)
+        desired_device_type_test_bases = list(set(desired_device_type_test_bases))
 
     # Filter out the device types based on environment variables if available
     # Usage:
@@ -752,6 +784,23 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
                 assert name not in device_type_test_class.__dict__, f"Redefinition of directly defined member {name}"
                 nontest = getattr(generic_test_class, name)
                 setattr(device_type_test_class, name, nontest)
+
+        # The dynamically-created test class derives from the test template class
+        # and the empty class. Arrange for both setUpClass and tearDownClass methods
+        # to be called. This allows the parameterized test classes to support setup
+        # and teardown.
+        @classmethod
+        def _setUpClass(cls):
+            base.setUpClass()
+            empty_class.setUpClass()
+
+        @classmethod
+        def _tearDownClass(cls):
+            empty_class.tearDownClass()
+            base.tearDownClass()
+
+        device_type_test_class.setUpClass = _setUpClass
+        device_type_test_class.tearDownClass = _tearDownClass
 
         # Mimics defining the instantiated class in the caller's file
         # by setting its module to the given class's and adding
@@ -924,7 +973,7 @@ class ops(_TestParametrizer):
                         except Exception as e:
                             tracked_input = get_tracked_input()
                             if PRINT_REPRO_ON_FAILURE and tracked_input is not None:
-                                raise Exception(
+                                raise Exception(  # noqa: TRY002
                                     f"Caused by {tracked_input.type_desc} "
                                     f"at index {tracked_input.index}: "
                                     f"{_serialize_sample(tracked_input.val)}") from e
@@ -1283,6 +1332,10 @@ def onlyCUDA(fn):
 
 def onlyMPS(fn):
     return onlyOn('mps')(fn)
+
+
+def onlyXPU(fn):
+    return onlyOn('xpu')(fn)
 
 def onlyPRIVATEUSE1(fn):
     device_type = torch._C._get_privateuse1_backend_name()

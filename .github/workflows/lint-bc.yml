@@ -6,8 +6,6 @@ on:
       - opened
       - synchronize
       - reopened
-      - labeled
-      - unlabeled
     branches-ignore:
       - nightly
   workflow_dispatch:

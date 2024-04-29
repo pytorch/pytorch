@@ -168,7 +168,7 @@ class ConvNdImpl : public torch::nn::Cloneable<Derived> {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Conv1d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies convolution over a 1-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.Conv1d to learn about
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.Conv1d to learn about
 /// the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::Conv1dOptions` class to learn what
@@ -200,7 +200,7 @@ TORCH_MODULE(Conv1d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Conv2d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies convolution over a 2-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.Conv2d to learn about
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.Conv2d to learn about
 /// the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::Conv2dOptions` class to learn what
@@ -235,7 +235,7 @@ TORCH_MODULE(Conv2d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Conv3d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies convolution over a 3-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.Conv3d to learn about
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.Conv3d to learn about
 /// the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::Conv3dOptions` class to learn what
@@ -325,7 +325,7 @@ class ConvTransposeNdImpl : public ConvNdImpl<D, Derived> {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the ConvTranspose1d function.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.ConvTranspose1d to
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.ConvTranspose1d to
 /// learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::ConvTranspose1dOptions` class to learn
@@ -367,7 +367,7 @@ TORCH_MODULE(ConvTranspose1d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the ConvTranspose2d function.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.ConvTranspose2d to
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.ConvTranspose2d to
 /// learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::ConvTranspose2dOptions` class to learn
@@ -409,7 +409,7 @@ TORCH_MODULE(ConvTranspose2d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the ConvTranspose3d function.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.ConvTranspose3d to
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.ConvTranspose3d to
 /// learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::ConvTranspose3dOptions` class to learn

@@ -1743,11 +1743,49 @@ All tensors need to be of the same size.
 
 Arguments:
     tensors (sequence of Tensors): sequence of tensors to concatenate
-    dim (int): dimension to insert. Has to be between 0 and the number
-        of dimensions of concatenated tensors (inclusive)
+    dim (int, optional): dimension to insert. Has to be between 0 and the number
+        of dimensions of concatenated tensors (inclusive). Default: 0
 
 Keyword args:
     {out}
+
+Example::
+
+    >>> x = torch.randn(2, 3)
+    >>> x
+    tensor([[ 0.3367,  0.1288,  0.2345],
+            [ 0.2303, -1.1229, -0.1863]])
+    >>> x = torch.stack((x, x)) # same as torch.stack((x, x), dim=0)
+    >>> x
+    tensor([[[ 0.3367,  0.1288,  0.2345],
+             [ 0.2303, -1.1229, -0.1863]],
+
+            [[ 0.3367,  0.1288,  0.2345],
+             [ 0.2303, -1.1229, -0.1863]]])
+    >>> x.size()
+    torch.Size([2, 2, 3])
+    >>> x = torch.stack((x, x), dim=1)
+    tensor([[[ 0.3367,  0.1288,  0.2345],
+             [ 0.3367,  0.1288,  0.2345]],
+
+            [[ 0.2303, -1.1229, -0.1863],
+             [ 0.2303, -1.1229, -0.1863]]])
+    >>> x = torch.stack((x, x), dim=2)
+    tensor([[[ 0.3367,  0.3367],
+             [ 0.1288,  0.1288],
+             [ 0.2345,  0.2345]],
+
+            [[ 0.2303,  0.2303],
+             [-1.1229, -1.1229],
+             [-0.1863, -0.1863]]])
+    >>> x = torch.stack((x, x), dim=-1)
+    tensor([[[ 0.3367,  0.3367],
+             [ 0.1288,  0.1288],
+             [ 0.2345,  0.2345]],
+
+            [[ 0.2303,  0.2303],
+             [-1.1229, -1.1229],
+             [-0.1863, -0.1863]]])
 """.format(
         **common_args
     ),
@@ -2267,8 +2305,8 @@ Keyword Args:
         times each observation should be repeated. Its numel must equal the number of columns of :attr:`input`.
         Must have integral dtype. Ignored if ``None``. Defaults to ``None``.
     aweights (tensor, optional): A Scalar or 1D array of observation vector weights.
-        These relative weights are typically large for observations considered “important” and smaller for
-        observations considered less “important”. Its numel must equal the number of columns of :attr:`input`.
+        These relative weights are typically large for observations considered "important" and smaller for
+        observations considered less "important". Its numel must equal the number of columns of :attr:`input`.
         Must have floating point dtype. Ignored if ``None``. Defaults to ``None``.
 
 Returns:
@@ -4735,7 +4773,7 @@ This is detailed in the "Keyword Arguments" section below.
 The gradient is estimated by estimating each partial derivative of :math:`g` independently. This estimation is
 accurate if :math:`g` is in :math:`C^3` (it has at least 3 continuous derivatives), and the estimation can be
 improved by providing closer samples. Mathematically, the value at each interior point of a partial derivative
-is estimated using `Taylor’s theorem with remainder <https://en.wikipedia.org/wiki/Taylor%27s_theorem>`_.
+is estimated using `Taylor's theorem with remainder <https://en.wikipedia.org/wiki/Taylor%27s_theorem>`_.
 Letting :math:`x` be an interior point with :math:`x-h_l` and :math:`x+h_r` be points neighboring
 it to the left and right respectively, :math:`f(x+h_r)` and :math:`f(x-h_l)` can be estimated using:
 
@@ -6902,10 +6940,11 @@ add_docstr(
     r"""
 mean(input, *, dtype=None) -> Tensor
 
-Returns the mean value of all elements in the :attr:`input` tensor.
+Returns the mean value of all elements in the :attr:`input` tensor. Input must be floating point or complex.
 
 Args:
-    {input}
+    input (Tensor):
+      the input tensor, either of floating point or complex dtype
 
 Keyword args:
     {dtype}
@@ -13683,6 +13722,58 @@ Example::
 """,
 )
 
+add_docstr(
+    torch.Generator.graphsafe_set_state,
+    r"""
+Generator.graphsafe_set_state(state) -> None
+
+Sets the state of the generator to the specified state in a manner that is safe for use in graph capture.
+This method is crucial for ensuring that the generator's state can be captured in the CUDA graph.
+
+Arguments:
+    state (torch.Generator): A Generator point to the new state for the generator, typically obtained from `graphsafe_get_state`.
+
+Example:
+    >>> g_cuda = torch.Generator(device='cuda')
+    >>> g_cuda_other = torch.Generator(device='cuda')
+    >>> current_state = g_cuda_other.graphsafe_get_state()
+    >>> g_cuda.graphsafe_set_state(current_state)
+""",
+)
+
+add_docstr(
+    torch.Generator.graphsafe_get_state,
+    r"""
+Generator.graphsafe_get_state() -> torch.Generator
+
+Retrieves the current state of the generator in a manner that is safe for graph capture.
+This method is crucial for ensuring that the generator's state can be captured in the CUDA graph.
+
+Returns:
+    torch.Generator: A Generator point to the current state of the generator
+
+Example:
+    >>> g_cuda = torch.Generator(device='cuda')
+    >>> current_state = g_cuda.graphsafe_get_state()
+""",
+)
+
+add_docstr(
+    torch.Generator.clone_state,
+    r"""
+Generator.clone_state() -> torch.Generator
+
+Clones the current state of the generator and returns a new generator pointing to this cloned state.
+This method is beneficial for preserving a particular state of a generator to restore at a later point.
+
+Returns:
+    torch.Generator: A Generator pointing to the newly cloned state.
+
+Example:
+    >>> g_cuda = torch.Generator(device='cuda')
+    >>> cloned_state = g_cuda.clone_state()
+""",
+)
 
 add_docstr(
     torch.Generator.manual_seed,
@@ -13826,7 +13917,7 @@ Keyword args:
                             preferred. It will error if :attr:`side` is set to "left" while this is True.
     side (str, optional): the same as :attr:`right` but preferred. "left" corresponds to False for :attr:`right`
                             and "right" corresponds to True for :attr:`right`. It will error if this is set to
-                            "left" while :attr:`right` is True.
+                            "left" while :attr:`right` is True. Default value is None.
     out (Tensor, optional): the output tensor, must be the same size as :attr:`values` if provided.
     sorter (LongTensor, optional): if provided, a tensor matching the shape of the unsorted
                             :attr:`sorted_sequence` containing a sequence of indices that sort it in the

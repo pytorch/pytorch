@@ -2,13 +2,13 @@
 
 #include <c10/cuda/CUDAMacros.h>
 #include <c10/util/Exception.h>
-#include <cuda_runtime_api.h>
 
 #include <atomic>
 #include <cstddef>
 #include <cstdlib>
 #include <mutex>
 #include <string>
+#include <vector>
 
 namespace c10::cuda::CUDACachingAllocator {
 

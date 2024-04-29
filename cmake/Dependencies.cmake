@@ -635,6 +635,15 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
     # Disable I8MM For CI since clang 9 does not support neon i8mm.
     set(XNNPACK_ENABLE_ARM_I8MM OFF CACHE BOOL "")
 
+    # Conditionally disable AVX512AMX, as it requires Clang 11 or later. Note that
+    # XNNPACK does conditionally compile this based on GCC version. Once it also does
+    # so based on Clang version, this logic can be removed.
+    IF(CMAKE_C_COMPILER_ID STREQUAL "Clang")
+      IF(CMAKE_C_COMPILER_VERSION VERSION_LESS "11")
+        set(XNNPACK_ENABLE_AVX512AMX OFF CACHE BOOL "")
+      ENDIF()
+    ENDIF()
+
     # Setting this global PIC flag for all XNNPACK targets.
     # This is needed for Object libraries within XNNPACK which must
     # be PIC to successfully link this static libXNNPACK with pytorch
@@ -866,7 +875,6 @@ if(USE_OPENCL)
   message(INFO "USING OPENCL")
   find_package(OpenCL REQUIRED)
   include_directories(SYSTEM ${OpenCL_INCLUDE_DIRS})
-  include_directories(${CMAKE_CURRENT_LIST_DIR}/../caffe2/contrib/opencl)
   list(APPEND Caffe2_DEPENDENCY_LIBS ${OpenCL_LIBRARIES})
 endif()
 
@@ -1147,6 +1155,16 @@ if(APPLE)
   target_link_options(pybind::pybind11 INTERFACE -undefined dynamic_lookup)
 endif()
 
+# ---[ OpenTelemetry API headers
+find_package(OpenTelemetryApi)
+if(NOT OpenTelemetryApi_FOUND)
+  message(STATUS "Using third_party/opentelemetry-cpp.")
+  set(OpenTelemetryApi_INCLUDE_DIRS ${CMAKE_CURRENT_LIST_DIR}/../third_party/opentelemetry-cpp/api/include)
+endif()
+message(STATUS "opentelemetry api include dirs: " "${OpenTelemetryApi_INCLUDE_DIRS}")
+add_library(opentelemetry::api INTERFACE IMPORTED)
+target_include_directories(opentelemetry::api SYSTEM INTERFACE ${OpenTelemetryApi_INCLUDE_DIRS})
+
 # ---[ MPI
 if(USE_MPI)
   find_package(MPI)
@@ -1295,6 +1313,9 @@ if(USE_ROCM)
        list(APPEND HIP_HIPCC_FLAGS -fdebug-info-for-profiling)
     endif(CMAKE_BUILD_TYPE MATCHES Debug)
 
+    # needed for compat with newer versions of hip-clang that introduced C++20 mangling rules
+    list(APPEND HIP_HIPCC_FLAGS -fclang-abi-compat=17)
+
     set(HIP_CLANG_FLAGS ${HIP_CXX_FLAGS})
     # Ask hcc to generate device code during compilation so we can use
     # host linker to link.
@@ -1326,9 +1347,7 @@ if(USE_ROCM)
       message(STATUS "Disabling Kernel Assert for ROCm")
     endif()
 
-    if(USE_FLASH_ATTENTION)
-      include(${CMAKE_CURRENT_LIST_DIR}/External/oort.cmake)
-    endif()
+    include(${CMAKE_CURRENT_LIST_DIR}/External/aotriton.cmake)
     if(USE_CUDA)
       caffe2_update_option(USE_MEM_EFF_ATTENTION OFF)
     endif()
@@ -1512,16 +1531,6 @@ endif()
 if(USE_NNAPI AND NOT ANDROID)
   message(WARNING "NNApi is only used in android builds.")
   caffe2_update_option(USE_NNAPI OFF)
-endif()
-
-if(NOT INTERN_BUILD_MOBILE AND BUILD_CAFFE2_OPS)
-  if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
-    list(APPEND Caffe2_DEPENDENCY_LIBS aten_op_header_gen)
-    if(USE_CUDA)
-      list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS aten_op_header_gen)
-    endif()
-    include_directories(${PROJECT_BINARY_DIR}/caffe2/contrib/aten)
-  endif()
 endif()
 
 if(USE_ZSTD)
@@ -1960,7 +1969,7 @@ if(USE_KINETO)
   endif()
 
   if(NOT LIBKINETO_NOROCTRACER)
-    if(NOT ENV{ROCM_SOURCE_DIR})
+    if("$ENV{ROCM_SOURCE_DIR}" STREQUAL "")
       set(ENV{ROCM_SOURCE_DIR} "/opt/rocm")
     endif()
   endif()

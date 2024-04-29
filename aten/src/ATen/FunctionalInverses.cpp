@@ -174,8 +174,8 @@ Tensor FunctionalInverses::expand_inverse(const Tensor& base, const Tensor& muta
       return mutated_view.as_strided_symint(
           base.sym_sizes(), base.sym_strides(), base.sym_storage_offset());
     } else {
-      return at::sum_to(
-          mutated_view,
+      return base + at::sum_to(
+          mutated_view - base,
           base.sym_sizes(),
           /*always_return_non_view=*/inverse_return_mode == InverseReturnMode::NeverView
       );
@@ -316,7 +316,8 @@ Tensor FunctionalInverses::_nested_get_values_inverse(const Tensor& base, const 
   auto offsets = at::_nested_get_offsets(base);
   auto lengths = at::_nested_get_lengths(base);
   auto ragged_idx = at::_nested_get_ragged_idx(base);
-  auto nt = at::_nested_view_from_jagged(mutated_view, offsets, base, lengths, ragged_idx);
+  auto dummy = at::_nested_get_jagged_dummy(base);
+  auto nt = at::_nested_view_from_jagged(mutated_view, offsets, dummy, lengths, ragged_idx);
 
   if (inverse_return_mode != InverseReturnMode::NeverView) {
     return nt;

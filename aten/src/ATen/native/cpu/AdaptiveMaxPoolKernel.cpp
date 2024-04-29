@@ -348,8 +348,8 @@ void cpu_adaptive_max_pool_backward(
   auto indices = indices_.contiguous();
   auto grad_input = grad_input_.contiguous();
 
-  auto grad_output_data = grad_output.data_ptr<scalar_t>();
-  auto indices_data = indices.data_ptr<int64_t>();
+  auto grad_output_data = grad_output.const_data_ptr<scalar_t>();
+  auto indices_data = indices.const_data_ptr<int64_t>();
   auto grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
 
   int64_t ndim = grad_output.ndimension();
@@ -364,8 +364,8 @@ void cpu_adaptive_max_pool_backward(
   at::parallel_for(0, channels, 0, [&](int64_t begin, int64_t end) {
     for (const auto c : c10::irange(begin, end)) {
       scalar_t* grad_input_ptr = grad_input_data + c * input_height * input_width;
-      scalar_t* grad_output_ptr = grad_output_data + c * output_height * output_width;
-      int64_t* indices_ptr = indices_data + c * output_height * output_width;
+      const scalar_t* grad_output_ptr = grad_output_data + c * output_height * output_width;
+      const int64_t* indices_ptr = indices_data + c * output_height * output_width;
 
       for (const auto oh : c10::irange(output_height)) {
         for (const auto ow : c10::irange(output_width)) {
@@ -398,8 +398,8 @@ void cpu_adaptive_max_pool_backward_channels_last(
   auto indices = indices_.contiguous(memory_format);
 
   auto grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
-  auto grad_output_data = grad_output.data_ptr<scalar_t>();
-  auto indices_data = indices.data_ptr<int64_t>();
+  auto grad_output_data = grad_output.const_data_ptr<scalar_t>();
+  auto indices_data = indices.const_data_ptr<int64_t>();
 
   int64_t nbatch = grad_input.size(0);
   int64_t channels = grad_input.size(1);
@@ -412,13 +412,13 @@ void cpu_adaptive_max_pool_backward_channels_last(
   at::parallel_for(0, nbatch, 0, [&](int64_t begin, int64_t end) {
     for (const auto n : c10::irange(begin, end)) {
       scalar_t* grad_input_ptr = grad_input_data + n * input_height * input_width * channels;
-      scalar_t* grad_output_ptr = grad_output_data + n * output_height * output_width * channels;
-      int64_t* indices_ptr = indices_data + n * output_height * output_width * channels;
+      const scalar_t* grad_output_ptr = grad_output_data + n * output_height * output_width * channels;
+      const int64_t* indices_ptr = indices_data + n * output_height * output_width * channels;
 
       for (const auto oh : c10::irange(output_height)) {
         for (const auto ow : c10::irange(output_width)) {
-          scalar_t* gout = grad_output_ptr + oh * output_width * channels + ow * channels;
-          int64_t* ind = indices_ptr + oh * output_width * channels + ow * channels;
+          const scalar_t* gout = grad_output_ptr + oh * output_width * channels + ow * channels;
+          const int64_t* ind = indices_ptr + oh * output_width * channels + ow * channels;
           // TODO: gcc vectorization
           for (const auto c : c10::irange(channels)) {
             int64_t maxindex = ind[c];

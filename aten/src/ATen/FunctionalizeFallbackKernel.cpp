@@ -30,17 +30,29 @@
 namespace {
   void functionalizeFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatchKeySet, torch::jit::Stack* stack) {
     const auto& schema = op.schema();
+    // NB: auto_functionalize handles the case where outputs do not have alias info.
+    // This error message therefore suggests users to modify their custom op to the
+    // point where auto_functionalize works instead of asking them to try the raw
+    // functionalization API (because that is a bit difficult to use).
+    // If you're here and want to try the raw functionalizaton kernel approach,
+    // see https://gist.github.com/bdhirsh/7dadbf6296f8f7d1abcf4c482f438aaa
     TORCH_CHECK(
       !schema.hasAnyAliasInfo(),
-      "Found a custom (non-ATen) operator that either mutates or its inputs: ",
-      op.operator_name().name, ".", op.operator_name().overload_name,
-      ". Getting these operators to work with functionalization requires some extra work",
-      ". For mutable ops you need to register a corresponding out-of-place variant of the op,",
-      " and you also need to register a Functionalization kernel that performs some boilerplate,",
-      " telling functionalization to map from the mutable op to the out-of-place op",
-      ". See a more complete example of how to do this at ",
-      "https://gist.github.com/bdhirsh/7dadbf6296f8f7d1abcf4c482f438aaa.",
-      " Please file a GitHub issue if you run into any problems.");
+      "Found a custom (non-ATen) operator whose output has alias annotations: ",
+      op.schema(),
+      ". We only support functionalizing operators whose outputs do not have alias ",
+      "annotations (e.g. 'Tensor(a)' is a Tensor with an alias annotation whereas ",
+      "'Tensor' is a Tensor without. The '(a)' is the alias annotation). "
+      "The alias annotation specifies that the output ",
+      "Tensor shares storage with an input that has the same annotation. ",
+      "Please check if ",
+      "(1) the output needs to be an output (if not, don't return it), ",
+      "(2) if the output doesn't share storage with any inputs, then ",
+      "delete the alias annotation. ",
+      "(3) if the output indeed shares storage with an input, then add a ",
+      ".clone() before returning it to prevent storage sharing and then "
+      "delete the alias annotation. ",
+      "Otherwise, please file an issue on GitHub.");
     const auto num_arguments = schema.arguments().size();
     const auto arguments_begin = stack->size() - num_arguments;
     auto arguments = torch::jit::last(stack, num_arguments);
@@ -168,7 +180,7 @@ static const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatch
       return base.as_strided_scatter(mutated_view, size, c10::contiguous_strides(size));
     }
   );
-  at::functionalization::impl::mutate_view_meta(self, std::move(view_meta));
+  at::functionalization::impl::mutate_view_meta(self, view_meta);
   return self;
 }
 
@@ -198,7 +210,13 @@ static at::Tensor lift_fresh_functionalize_copy(const at::Tensor & self) {
   // but that isn't really a use case today.
   // Needed for https://github.com/pytorch/pytorch/issues/105327
   if (at::functionalization::impl::isFunctionalTensor(self)) {
-    return self.clone();
+    // Note [Composite Functionalization under PreDispatch mode]
+    // When we are tracing under PreDispatch, PreDispatch key will be
+    // in the local include TLS. As a result, when we redispatch here,
+    // we will end up hitting PreDispatch stack first. So, we should
+    // directly redispatch to the functionalize key manually.
+    static auto op = c10::Dispatcher::singleton().findSchemaOrThrow("aten::clone", "").typed<at::Tensor(const at::Tensor &, c10::optional<at::MemoryFormat>)>();
+    return op.redispatch(c10::DispatchKeySet({c10::DispatchKey::Functionalize}), self, c10::nullopt);
   }
 
   at::AutoDispatchSkipFunctionalize guard;
@@ -304,14 +322,14 @@ static at::Tensor& set__functionalize(at::Tensor& self, const at::Tensor& src) {
   TORCH_CHECK(at::functionalization::impl::isFunctionalTensor(self) || !at::functionalization::impl::isFunctionalTensor(src),
     "set__functionalize: Tried to mutate a non-functional tensor with a functional tensor, which is not allowed");
 
-  TORCH_CHECK(at::functionalization::impl::isFunctionalTensor(src),
-    "set__functionalize: We do not currently support x.set_(y) where y is not a FunctionalTensor. Please file an issue");
-
   // nop case
   if (!at::functionalization::impl::isFunctionalTensor(self) && !at::functionalization::impl::isFunctionalTensor(src)) {
     at::AutoDispatchSkipFunctionalize guard;
     return self.set_(src);
   }
+
+  TORCH_CHECK(at::functionalization::impl::isFunctionalTensor(src),
+    "set__functionalize: We do not currently support x.set_(y) where y is not a FunctionalTensor. Please file an issue");
 
   TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(self));
   TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(src));

@@ -1,6 +1,7 @@
 import collections
 import dataclasses
 import io
+import operator
 import os
 import pickle
 import queue
@@ -25,7 +26,7 @@ from typing import (
 
 import torch
 from torch import Tensor
-from torch._utils import _get_device_module
+from torch._utils import _get_available_device_type, _get_device_module
 from torch.distributed._shard._utils import narrow_tensor_by_index
 from torch.futures import Future
 
@@ -114,7 +115,9 @@ class _OverlappingCpuLoader(_TensorLoader):
         self.current_items: collections.deque = collections.deque()
         self.idx = 0
         self.started = False
-        self.device_type = stream.device_type if stream else torch.device("cuda").type
+        self.device_type = (
+            stream.device_type if stream else _get_available_device_type()
+        )
         self.device_module = _get_device_module(self.device_type)
         self.stream = cast(
             torch.cuda.Stream, stream or self.device_module.current_stream()
@@ -145,7 +148,10 @@ class _OverlappingCpuLoader(_TensorLoader):
                 if tensor.device.type == self.device_type:
                     tensor = tensor.to(device="cpu", non_blocking=True)
                 elif tensor.device == torch.device("cpu"):
-                    if tensor.storage().size() != tensor.numel():
+                    if (
+                        tensor.untyped_storage().size()
+                        != tensor.numel() * tensor.itemsize
+                    ):
                         # this forces the tensor to be both contiguous and with minimal storage
                         tensor = tensor.clone()
 
@@ -172,7 +178,7 @@ class _OverlappingCpuLoader(_TensorLoader):
         if self.started:
             return
         self.started = True
-        self.items.sort(key=lambda x: x[0])
+        self.items.sort(key=operator.itemgetter(0))
         self._refill()
 
     def values(self) -> Iterator[Tuple[torch.Tensor, object]]:
@@ -213,7 +219,7 @@ def _split_by_size_and_type(bins: int, items: List[WriteItem]) -> List[List[Writ
 
     for wi in tensor_w:
         # TODO replace with headq
-        idx = min(enumerate(bucket_sizes), key=lambda x: x[1])[0]
+        idx = min(enumerate(bucket_sizes), key=operator.itemgetter(1))[0]
         buckets[idx].append(wi)
         bucket_sizes[idx] += _item_size(wi)
 
@@ -258,12 +264,18 @@ def _write_files_from_queue(
             file_name, storage_key, write_items = file_queue.get_nowait()
             loader: _TensorLoader
 
+            custom_backend_name = torch._C._get_privateuse1_backend_name()
+            custom_device_mod = getattr(torch, custom_backend_name, None)
+
             # TODO: Using the OverlappingCpuLoader with multiple threads creates significant
             # performance degredation, observed as being related to cuda stream syncs. We
             # should try to fix this and use _OverlappingCpuLoader for all threaded cases
             if (
                 thread_count == 1
-                and torch.cuda.is_available()
+                and (
+                    torch.cuda.is_available()
+                    or (custom_device_mod and custom_device_mod.is_available())
+                )
                 and inflight_threshhold > 0
             ):
                 loader = _OverlappingCpuLoader(
@@ -434,10 +446,10 @@ class FileSystemWriter(StorageWriter):
         self.fs.mkdir(self.path)
         return plan
 
-    def prepare_global_plan(self, global_plan: List[SavePlan]) -> List[SavePlan]:
+    def prepare_global_plan(self, plans: List[SavePlan]) -> List[SavePlan]:
         new_plans = [
             dataclasses.replace(plan, storage_data=_StoragePrefix(f"__{i}_"))
-            for i, plan in enumerate(global_plan)
+            for i, plan in enumerate(plans)
         ]
         return new_plans
 
@@ -527,6 +539,13 @@ class FileSystemWriter(StorageWriter):
 
         self.fs.rename(tmp_path, meta_path)
 
+    @property
+    def checkpoint_id(self) -> Union[str, os.PathLike]:
+        """
+        return the checkpoint_id that will be used to save the checkpoint.
+        """
+        return self.path
+
     @classmethod
     def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
         return FileSystem.validate_checkpoint_id(checkpoint_id)
@@ -599,8 +618,15 @@ class FileSystemReader(StorageReader):
     def prepare_local_plan(self, plan: LoadPlan) -> LoadPlan:
         return plan
 
-    def prepare_global_plan(self, global_plan: List[LoadPlan]) -> List[LoadPlan]:
-        return global_plan
+    def prepare_global_plan(self, plans: List[LoadPlan]) -> List[LoadPlan]:
+        return plans
+
+    @property
+    def checkpoint_id(self) -> Union[str, os.PathLike]:
+        """
+        return the checkpoint_id that will be used to save the checkpoint.
+        """
+        return self.path
 
     @classmethod
     def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:

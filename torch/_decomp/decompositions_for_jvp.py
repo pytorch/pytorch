@@ -291,6 +291,34 @@ def native_batch_norm_backward(
     return (grad_input, grad_weight, grad_bias)
 
 
+@register_decomposition_for_jvp(aten.batch_norm_backward)
+def batch_norm_backward(
+    grad_out: Tensor,
+    input: Tensor,
+    weight: Tensor,
+    running_mean: Optional[Tensor],
+    running_var: Optional[Tensor],
+    save_mean: Optional[Tensor],
+    save_var: Optional[Tensor],
+    update: bool,
+    eps: float,
+    output_mask: List[bool],
+    reserve: Tensor,
+) -> Tuple[Tensor, Optional[Tensor], Optional[Tensor]]:
+    return native_batch_norm_backward(
+        grad_out,
+        input,
+        weight,
+        running_mean,
+        running_var,
+        save_mean,
+        save_var,
+        update,
+        eps,
+        output_mask,
+    )
+
+
 _register_jit_decomposition_for_jvp(torch.ops.aten.trace.default, use_python=True)
 _register_jit_decomposition_for_jvp(torch.ops.aten.nll_loss_backward.default)
 _register_jit_decomposition_for_jvp(torch.ops.aten.nll_loss2d_backward.default)
@@ -300,3 +328,4 @@ _register_jit_decomposition_for_jvp(torch.ops.aten.log_sigmoid_forward.default)
 _register_jit_decomposition_for_jvp(torch.ops.aten.native_layer_norm_backward.default)
 _register_jit_decomposition_for_jvp(torch.ops.aten.native_batch_norm_backward.default)
 _register_jit_decomposition_for_jvp(torch.ops.aten.cudnn_batch_norm_backward.default)
+_register_jit_decomposition_for_jvp(torch.ops.aten.batch_norm_backward.default)

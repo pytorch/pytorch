@@ -226,7 +226,7 @@ CallbackHandle GlobalCallbackManager::addCallback(RecordFunctionCallback cb) {
   std::lock_guard<std::mutex> guard(update_mutex_);
   ++version_;
   auto handle = next_unique_callback_handle();
-  global_callbacks_.emplace_back(std::move(cb), handle);
+  global_callbacks_.emplace_back(cb, handle);
   return handle;
 }
 
@@ -416,7 +416,7 @@ CallbackHandle LocalCallbackManager::addCallback(
     RecordFunctionCallback callback) {
   auto handle = next_unique_callback_handle();
   auto& callbacks = registered_callbacks_.sorted_tls_callbacks_;
-  callbacks.emplace_back(std::move(callback), handle);
+  callbacks.emplace_back(callback, handle);
   rebuild_callback_scopes(
       GlobalCallbackManager::get().getSnapshot(), callbacks.back().callback_);
   return handle;
@@ -647,12 +647,12 @@ bool hasThreadLocalCallbacks() {
 
 CallbackHandle addThreadLocalCallback(
     RecordFunctionCallback cb) {
-  return LocalCallbackManager::get().addCallback(std::move(cb));
+  return LocalCallbackManager::get().addCallback(cb);
 }
 
 CallbackHandle addGlobalCallback(
     RecordFunctionCallback cb) {
-  return GlobalCallbackManager::get().addCallback(std::move(cb));
+  return GlobalCallbackManager::get().addCallback(cb);
 }
 
 void removeCallback(CallbackHandle handle) {

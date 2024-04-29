@@ -1,3 +1,5 @@
+import copy
+
 import torch
 from torch._higher_order_ops.wrap import wrap_with_set_grad_enabled
 
@@ -53,6 +55,9 @@ def _replace_with_hop(node: torch.fx.Node):
         enable_grad_val = set_grad_node.args[0]
         with graph.inserting_before(node):
             get_attr_node = graph.get_attr(node.target)
+            get_attr_node.meta["nn_module_stack"] = copy.copy(
+                set_grad_node.meta.get("nn_module_stack", {})
+            )
             output_node = next(iter(reversed(sub_gm.graph.nodes)), None)
             if output_node is not None:
                 assert len(output_node.args) == 1
@@ -66,6 +71,13 @@ def _replace_with_hop(node: torch.fx.Node):
                     # Create the metadata
                     call_func_node.meta["val"] = tuple(
                         arg.meta["val"] for arg in output_args
+                    )
+                    call_func_node.meta["nn_module_stack"] = copy.copy(
+                        set_grad_node.meta.get("nn_module_stack", {})
+                    )
+                    call_func_node.meta["torch_fn"] = (
+                        f"{wrap_with_set_grad_enabled.__name__}",
+                        f"{wrap_with_set_grad_enabled.__class__.__name__}.{wrap_with_set_grad_enabled.__name__}",
                     )
                     node_replace_(node, call_func_node, delete_old=True)
 
@@ -108,34 +120,58 @@ def _remove_set_grad_and_inline(node: torch.fx.Node):
     sub_graph = sub_gm.graph
     nodes_map(
         sub_graph.nodes,
-        lambda n: graph.erase_node(n) if _is_set_grad_enabled_node(n) else n,
+        lambda n: sub_graph.erase_node(n) if _is_set_grad_enabled_node(n) else n,
     )
     node_inline_(node)
 
 
-def replace_set_grad_with_hop_pass(gm: torch.fx.GraphModule):
+def _sequential_split_and_maybe_inline_subgraphs(gm: torch.fx.GraphModule):
+    """
+    Helper function for replace_set_grad_with_hop_pass().
+    Split the graph module into multiple subgraphs based on the set_grad_enabled nodes.
+    For each subgraph, decides whether to construct a HOO subgraph, or inline the calls
+    back into the parent graph module.
+    """
     # If there is no set_grad_enabled node, return the original graph module
     need_replacing = False
     for node in gm.graph.nodes:
         if _is_set_grad_enabled_node(node):
             need_replacing = True
 
-    if not need_replacing:
-        return gm
+    if need_replacing:
+        new_gm = sequential_split(gm, _is_set_grad_enabled_node)
 
-    new_gm = sequential_split(gm, _is_set_grad_enabled_node)
+        def _maybe_inline_or_replace_with_hop(node: torch.fx.Node):
+            if _is_set_grad_enabled_sub_mod(node, omit_if_same_with_ambient=True):
+                _replace_with_hop(node)
+            else:
+                _remove_set_grad_and_inline(node)
 
-    def _maybe_inline_or_replace_with_hop(node: torch.fx.Node):
-        if _is_set_grad_enabled_sub_mod(node, omit_if_same_with_ambient=True):
-            _replace_with_hop(node)
-        else:
-            _remove_set_grad_and_inline(node)
+        nodes_map(
+            list(new_gm.graph.nodes),
+            lambda node: (
+                _maybe_inline_or_replace_with_hop(node)
+                if node.op == "call_module"
+                else node
+            ),
+        )
+        return new_gm
 
-    nodes_map(
-        list(new_gm.graph.nodes),
-        lambda node: _maybe_inline_or_replace_with_hop(node)
-        if node.op == "call_module"
-        else node,
-    )
+    return gm
+
+
+def replace_set_grad_with_hop_pass(gm: torch.fx.GraphModule):
+    new_gm = _sequential_split_and_maybe_inline_subgraphs(gm)
+
+    # recursively call
+    for node in new_gm.graph.nodes:
+        if node.op == "get_attr":
+            subgm = getattr(new_gm, node.target)
+            if not isinstance(subgm, torch.fx.GraphModule):
+                continue
+            new_subgm = replace_set_grad_with_hop_pass(subgm)
+            setattr(new_gm, node.target, new_subgm)
+
+    new_gm.recompile()
     new_gm.graph.lint()
     return new_gm

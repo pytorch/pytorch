@@ -202,6 +202,11 @@ TORCH_LIBRARY(vulkan_prepack, m) {
       "vulkan_prepack::run_conv1d_context(Tensor X, "
       "__torch__.torch.classes.vulkan.Conv1dPackedContext W_prepack) -> Tensor Y"));
   m.def(TORCH_SELECTIVE_SCHEMA(
+      "vulkan_prepack::create_qtconv2d_context(Tensor W, Tensor? B, int[2] stride, "
+      "int[2] padding, int[2] output_padding, int[2] dilation, int groups, "
+      "Scalar? output_min=None, Scalar? output_max=None) "
+      "-> __torch__.torch.classes.vulkan.Conv2dPackedContext"));
+  m.def(TORCH_SELECTIVE_SCHEMA(
       "vulkan_prepack::create_linear_context(Tensor W, Tensor? B) "
       "-> __torch__.torch.classes.vulkan.LinearPackedContext"));
   m.def(TORCH_SELECTIVE_SCHEMA(
@@ -295,6 +300,9 @@ TORCH_LIBRARY_IMPL(vulkan_prepack, QuantizedCPU, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("vulkan_prepack::create_qconv2d_context"),
       TORCH_FN(create_qconv2d_context));
+  m.impl(
+      TORCH_SELECTIVE_NAME("vulkan_prepack::create_qtconv2d_context"),
+      TORCH_FN(create_qtconv2d_context));
 }
 
 TORCH_LIBRARY_IMPL(vulkan_prepack, Vulkan, m) {

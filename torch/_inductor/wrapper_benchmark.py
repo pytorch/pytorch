@@ -4,7 +4,7 @@ from collections import defaultdict
 
 import torch
 from torch.autograd import DeviceType
-from .utils import create_bandwidth_info_str, do_bench, get_num_bytes
+from .runtime.runtime_utils import create_bandwidth_info_str, do_bench, get_num_bytes
 
 _kernel_category_choices = [
     "foreach",
@@ -21,7 +21,9 @@ def get_kernel_category_by_source_code(src_code):
     Similar to get_kernel_category but use the source code. Call this API
     if we have not compile the src_code to module yet.
     """
-    choices = [ch for ch in _kernel_category_choices if f"@{ch}" in src_code]
+    choices = [
+        ch for ch in _kernel_category_choices if f"@triton_heuristics.{ch}" in src_code
+    ]
     if len(choices) == 1:
         return choices[0]
     else:
@@ -47,7 +49,7 @@ def get_kernel_category(kernel_mod):
 
 
 def get_triton_kernel(mod):
-    from torch._inductor.triton_heuristics import CachingAutotuner
+    from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 
     cand_list = [
         v

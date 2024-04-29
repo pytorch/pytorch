@@ -12,6 +12,7 @@ from typing import (
     Callable,
     cast,
     List,
+    NamedTuple,
     Optional,
     overload,
     Sequence,
@@ -84,6 +85,7 @@ torch_function_passthrough = {
     torch.Tensor.__format__,
     torch.Tensor.__repr__,
     torch.Tensor.requires_grad.__get__,  # type: ignore[attr-defined]
+    torch.Tensor.__getitem__,
 }
 
 
@@ -241,7 +243,7 @@ def is_contiguous(a: TensorLikeType) -> bool:
         if guard_size_oblivious(x == 1):
             continue
 
-        if y != expected_stride:
+        if guard_size_oblivious(y != expected_stride):
             return False
         expected_stride = expected_stride * x
 
@@ -365,7 +367,30 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
 
     # Checks that there exists a permutation of the strides s.t. the tensor would be contiguous
     # Sorts (length, stride) pairs by stride
-    lengths_and_strides = sorted(zip(a.shape, a.stride()), key=operator.itemgetter(1))
+    #
+    # This sort is done in a size-oblivious way, which helps if we do a
+    # comparison like 2048*u0 > u0; we just want this to return True
+    # (and not worry about what if u0 is zero).
+    class K(NamedTuple):
+        size: int
+        stride: int
+
+        def __lt__(self, other):
+            return guard_size_oblivious(self.stride < other.stride)
+
+        def __gt__(self, other):
+            return guard_size_oblivious(self.stride > other.stride)
+
+        def __le__(self, other):
+            return guard_size_oblivious(self.stride <= other.stride)
+
+        def __ge__(self, other):
+            return guard_size_oblivious(self.stride >= other.stride)
+
+        def __eq__(self, other):
+            return guard_size_oblivious(self.stride == other.stride)
+
+    lengths_and_strides = sorted(map(K, a.shape, a.stride()))
 
     expected_stride = 1
     for length, stride in lengths_and_strides:
@@ -1320,6 +1345,7 @@ class RETURN_TYPE(Enum):
     NEW = (0,)
     VIEW = (1,)
     INPLACE = (2,)
+    NONE = (3,)
 
 
 # TODO: when NumberType contains the sym types, can simplify this
@@ -1728,8 +1754,10 @@ def compute_required_storage_length(
     40
 
     """
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     # Short-circuits if the shape has no elements
-    if reduce(operator.mul, shape, 1) == 0:
+    if guard_size_oblivious(reduce(operator.mul, shape, 1) == 0):
         return 0
 
     max_offset = sum((x - 1) * y for x, y in zip(shape, strides))
@@ -1747,10 +1775,9 @@ def check_in_bounds_for_storage(
     required_length = compute_required_storage_length(shape, strides, storage_offset)
     if a.size() < required_length:
         msg = (
-            "Can't view a storage of size {} with an offset of {}, shape of {}, and strides of {}, "
-            "which requires a storage of size {}".format(
-                a.size(), storage_offset, str(shape), str(strides), required_length
-            )
+            f"Can't view a storage of size {a.size()} with an offset of {storage_offset}, "
+            f"shape of {str(shape)}, and strides of {str(strides)}, "
+            f"which requires a storage of size {required_length}"
         )
         raise ValueError(msg)
 

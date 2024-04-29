@@ -3,7 +3,7 @@ import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed._tensor.random as random
 
-from torch.distributed._tensor import DeviceMesh, Replicate
+from torch.distributed._tensor import init_device_mesh, Replicate
 from torch.distributed.tensor.parallel.api import parallelize_module
 from torch.distributed.tensor.parallel.style import ColwiseParallel
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -38,10 +38,17 @@ class TensorParallelRandomStateTests(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(4)
     def test_model_init(self):
-        mesh = torch.arange(self.world_size).reshape(2, 2)
-        device_mesh = DeviceMesh(self.device_type, mesh)
-        tp_rank = device_mesh.get_coordinate()[0]  # the tensor parallel dimension is 0
-        dp_rank = device_mesh.get_coordinate()[1]  # the data parallel dimension is 1
+        dp_size = 2
+        tp_size = self.world_size // dp_size
+        mesh_2d = init_device_mesh(
+            self.device_type, (dp_size, tp_size), mesh_dim_names=("dp", "tp")
+        )
+        dp_mesh = mesh_2d["dp"]
+        tp_mesh = mesh_2d["tp"]
+        dp_rank = dp_mesh.get_coordinate()[0]
+        tp_rank = tp_mesh.get_coordinate()[0]
+        self.assertEqual(dp_rank, self.rank // tp_size)
+        self.assertEqual(tp_rank, self.rank % tp_size)
 
         for enable_distribute_flag in [False, True]:
             # a local model on meta device
@@ -49,7 +56,7 @@ class TensorParallelRandomStateTests(DTensorTestBase):
             # the col-wise parallel style shards the weight over tensor dim 0
             model_tp = parallelize_module(
                 model,
-                device_mesh,
+                tp_mesh,
                 {
                     "net1": ColwiseParallel(output_layouts=Replicate()),
                     "net2": ColwiseParallel(output_layouts=Replicate()),
@@ -73,6 +80,7 @@ class TensorParallelRandomStateTests(DTensorTestBase):
                 # the 1d mesh represents the TP group
                 _1d_mesh = dtensor.device_mesh
                 assert _1d_mesh.ndim == 1
+                self.assertEqual(_1d_mesh, tp_mesh)
 
                 tensor_local = dtensor.to_local()
 
@@ -80,7 +88,7 @@ class TensorParallelRandomStateTests(DTensorTestBase):
                 tensor_gather = funcol.all_gather_tensor(
                     tensor_local,
                     gather_dim=0,
-                    group=(_1d_mesh, 0)
+                    group=_1d_mesh,
                 )
                 self.assertEqual(_1d_mesh.get_coordinate()[0], tp_rank)
 
@@ -94,14 +102,16 @@ class TensorParallelRandomStateTests(DTensorTestBase):
                         # each rank within a TP group has the same initial weights
                         self.assertEqual(tensor1, tensor2)
 
-                self.check_gathered_tensors(tp_rank, 2, tensor_gather, tp_weights_assert)
+                self.check_gathered_tensors(
+                    tp_rank, tp_size, tensor_gather, tp_weights_assert
+                )
 
                 # check across TP groups
                 # all-gather local shards
                 tensor_gather = funcol.all_gather_tensor(
                     tensor_local,
                     gather_dim=0,
-                    group=(_1d_mesh, 1)
+                    group=dp_mesh,
                 )
 
                 # compare local shards across TP groups
@@ -115,7 +125,9 @@ class TensorParallelRandomStateTests(DTensorTestBase):
                         # random seeds set in data loading.
                         self.assertNotEqual(tensor1, tensor2)
 
-                self.check_gathered_tensors(dp_rank, 2, tensor_gather, dp_weights_assert)
+                self.check_gathered_tensors(
+                    dp_rank, dp_size, tensor_gather, dp_weights_assert
+                )
 
 
 if __name__ == "__main__":

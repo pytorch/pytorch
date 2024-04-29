@@ -28,11 +28,74 @@ except ImportError:
 
 CPP_H_NAME = "spv.h"
 CPP_SRC_NAME = "spv.cpp"
-DEFAULT_ENV = {
+
+DEFAULT_ENV: Dict[str, Any] = {
     "PRECISION": "highp",
     "FLOAT_IMAGE_FORMAT": "rgba16f",
     "INT_IMAGE_FORMAT": "rgba32i",
     "UINT_IMAGE_FORMAT": "rgba32ui",
+}
+
+TYPES_ENV: Dict[str, Any] = {
+    "IMAGE_FORMAT": {
+        "float": "rgba32f",
+        "half": "rgba16f",
+        "int": "rgba32i",
+        "uint": "rgba32ui",
+        "int8": "rgba8i",
+        "uint8": "rgba8ui",
+    },
+    "IMAGE_T": {
+        3: {
+            "float": "image3D",
+            "half": "image3D",
+            "int": "iimage3D",
+            "uint": "uimage3D",
+        },
+        2: {
+            "float": "image2D",
+            "half": "image2D",
+            "int": "iimage2D",
+            "uint": "uimage2D",
+        },
+    },
+    "SAMPLER_T": {
+        3: {
+            "float": "sampler3D",
+            "half": "sampler3D",
+            "int": "isampler3D",
+            "uint": "usampler3D",
+        },
+        2: {
+            "float": "sampler2D",
+            "half": "sampler2D",
+            "int": "isampler2D",
+            "uint": "usampler2D",
+        },
+    },
+    "VEC4_T": {
+        "float": "vec4",
+        "half": "vec4",
+        "int": "ivec4",
+        "uint": "uvec4",
+        "int8": "vec4",
+        "uint8": "uvec4",
+    },
+    "T": {
+        "float": "float",
+        "half": "float",
+        "int": "int",
+        "uint": "uint",
+        "int8": "int",
+        "uint8": "uint8",
+    },
+}
+
+FUNCS_ENV: Dict[str, Any] = {
+    "GET_POS": {
+        3: lambda pos: pos,
+        2: lambda pos: f"{pos}.xy",
+    }
 }
 
 
@@ -513,115 +576,127 @@ def getShaderInfo(srcFilePath: str) -> ShaderInfo:
 #  C++ File Generation  #
 #########################
 
+cpp_template = """
+#include <ATen/native/vulkan/api/ShaderRegistry.h>
+#include <stdint.h>
+#include <vector>
 
-def gen_cpp_files(
-    spv_files: Dict[str, str], cpp_header_path: str, cpp_src_file_path: str
-) -> None:
-    h = "#pragma once\n"
-    h += "#include <ATen/native/vulkan/api/Types.h>\n"
-    h += "#include <ATen/native/vulkan/api/vk_api.h>\n"
-    h += "#include <string>\n"
-    h += "#include <unordered_map>\n"
+using namespace at::native::vulkan;
 
-    nsbegin = "namespace at {\nnamespace native {\nnamespace vulkan {\n"
-    nsend = "} // namespace vulkan\n} // namespace native\n} // namespace at\n"
+namespace at {{
+namespace native {{
+namespace vulkan {{
 
-    anon_ns_begin = "namespace {\n"
-    anon_ns_end = "} // namespace\n"
+namespace {{
 
-    h += nsbegin
+{spv_bin_arrays}
 
-    # Forward declaration of ShaderInfo
-    h += "namespace api {\nstruct ShaderInfo;\n} // namespace api\n"
-    h += "typedef std::unordered_map<std::string, api::ShaderInfo> ShaderListing;\n"
-    h += "typedef std::unordered_map<std::string, std::string> RegistryKeyMap;\n"
-    h += "typedef std::unordered_map<std::string, RegistryKeyMap> ShaderRegistry;\n"
-    h += "extern const ShaderListing shader_infos;\n"
-    h += "extern ShaderRegistry shader_registry;\n"
-    h += "inline const ShaderListing& get_shader_infos() {\n  return shader_infos;\n}\n"
-    h += (
-        "inline ShaderRegistry& get_shader_registry() {\n  return shader_registry;\n}\n"
+}}
+
+static void register_fn() {{
+
+{register_shader_infos}
+
+{shader_info_registry}
+
+}}
+
+static const api::ShaderRegisterInit register_shaders(&register_fn);
+
+}}
+}}
+}}
+
+"""
+
+
+def generateSpvBinStr(spvPath: str, name: str) -> Tuple[int, str]:
+    with open(spvPath, "rb") as fr:
+        next_bin = array.array("I", fr.read())
+        sizeBytes = 4 * len(next_bin)
+        spv_bin_str = "const uint32_t {}_bin[] = {{\n{}\n}};".format(
+            name,
+            textwrap.indent(",\n".join(str(x) for x in next_bin), "  "),
+        )
+
+    return sizeBytes, spv_bin_str
+
+
+def generateShaderInfoStr(shader_info: ShaderInfo, name: str, sizeBytes: int) -> str:
+    tile_size = (
+        f"{{{', '.join(str(x) for x in shader_info.tile_size)}}}"
+        if (len(shader_info.tile_size) > 0)
+        else "std::vector<uint32_t>()"
     )
 
-    h += nsend
+    shader_info_layouts = "{{{}}}".format(",\n ".join(shader_info.layouts))
 
-    cpp = "#include <ATen/native/vulkan/api/Shader.h>\n"
-    cpp += f"#include <ATen/native/vulkan/{CPP_H_NAME}>\n"
-    cpp += "#include <stdint.h>\n"
-    cpp += "#include <vector>\n"
-    cpp += nsbegin
+    shader_info_args = [
+        f'"{name}"',
+        f"{name}_bin",
+        str(sizeBytes),
+        shader_info_layouts,
+        tile_size,
+        storageTypeToEnum[shader_info.weight_storage_type],
+        storageTypeToEnum[shader_info.bias_storage_type],
+    ]
 
-    shader_info_bin_code = []
-    shader_info_cpp_code = []
-    shader_info_registry_code = []
+    shader_info_str = textwrap.indent(
+        "api::shader_registry().register_shader(\n  api::ShaderInfo(\n{args}));\n".format(
+            args=textwrap.indent(",\n".join(shader_info_args), "     "),
+        ),
+        "    ",
+    )
+
+    return shader_info_str
+
+
+def generateShaderDispatchStr(shader_info: ShaderInfo, name: str) -> str:
+    if shader_info.register_for is None:
+        return ""
+
+    (op_name, registry_keys) = shader_info.register_for
+    for registry_key in registry_keys:
+        shader_dispatch_str = textwrap.indent(
+            f'api::shader_registry().register_op_dispatch("{op_name}", api::DispatchKey::{registry_key.upper()}, "{name}");',
+            "    ",
+        )
+
+    return shader_dispatch_str
+
+
+def genCppFiles(
+    spv_files: Dict[str, str], cpp_header_path: str, cpp_src_file_path: str
+) -> None:
+    spv_bin_strs = []
+    register_shader_info_strs = []
+    shader_registry_strs = []
 
     for spvPath, srcPath in spv_files.items():
         name = getName(spvPath).replace("_spv", "")
 
-        with open(spvPath, "rb") as fr:
-            next_bin = array.array("I", fr.read())
-            sizeBytes = 4 * len(next_bin)
-            shader_info_bin_code.append(
-                "const uint32_t {}_bin[] = {{\n{}\n}};".format(
-                    name,
-                    textwrap.indent(",\n".join(str(x) for x in next_bin), "  "),
-                ),
-            )
+        sizeBytes, spv_bin_str = generateSpvBinStr(spvPath, name)
+        spv_bin_strs.append(spv_bin_str)
 
         shader_info = getShaderInfo(srcPath)
 
-        tile_size = (
-            f"{{{', '.join(str(x) for x in shader_info.tile_size)}}}"
-            if (len(shader_info.tile_size) > 0)
-            else "std::vector<uint32_t>()"
-        )
-
-        shader_info_layouts = "{{{}}}".format(",\n ".join(shader_info.layouts))
-
-        shader_info_args = [
-            f'"vulkan.{name}"',
-            f"{name}_bin",
-            str(sizeBytes),
-            shader_info_layouts,
-            tile_size,
-            storageTypeToEnum[shader_info.weight_storage_type],
-            storageTypeToEnum[shader_info.bias_storage_type],
-        ]
-
-        shader_info_cpp_code.append(
-            textwrap.indent(
-                '{{"{}",\n api::ShaderInfo(\n{})}}'.format(
-                    name,
-                    textwrap.indent(",\n".join(shader_info_args), "     "),
-                ),
-                "    ",
-            ),
+        register_shader_info_strs.append(
+            generateShaderInfoStr(shader_info, name, sizeBytes)
         )
 
         if shader_info.register_for is not None:
-            (op_name, registry_keys) = shader_info.register_for
-            for registry_key in registry_keys:
-                shader_info_registry_code.append(
-                    textwrap.indent(
-                        f'{{"{op_name}", {{{{"{registry_key}", "{name}"}}}}}}',
-                        "        ",
-                    ),
-                )
+            shader_registry_strs.append(generateShaderDispatchStr(shader_info, name))
 
-    cpp += anon_ns_begin
-    cpp += "\n".join(shader_info_bin_code) + "\n"
-    cpp += anon_ns_end
+    spv_bin_arrays = "\n".join(spv_bin_strs)
+    register_shader_infos = "\n".join(register_shader_info_strs)
+    shader_info_registry = "\n".join(shader_registry_strs)
 
-    cpp += "const ShaderListing shader_infos = {{\n{}}};\n".format(
-        ",\n".join(shader_info_cpp_code),
+    cpp = cpp_template.format(
+        spv_bin_arrays=spv_bin_arrays,
+        register_shader_infos=register_shader_infos,
+        shader_info_registry=shader_info_registry,
     )
-    cpp += "ShaderRegistry shader_registry = {{\n{}}};\n".format(
-        ",\n".join(shader_info_registry_code),
-    )
-    cpp += nsend
 
-    with open(cpp_header_path, "w") as fw:
-        fw.write(h)
     with open(cpp_src_file_path, "w") as fw:
         fw.write(cpp)
 
@@ -659,7 +734,10 @@ def main(argv: List[str]) -> int:
     )
     options = parser.parse_args()
 
+    DEFAULT_ENV.update(TYPES_ENV)
+    DEFAULT_ENV.update(FUNCS_ENV)
     env = DEFAULT_ENV
+
     for key, value in parse_arg_env(options.env).items():
         env[key] = value
 
@@ -672,7 +750,7 @@ def main(argv: List[str]) -> int:
     shader_generator = SPVGenerator(options.glsl_paths, env, options.glslc_path)
     output_spv_files = shader_generator.generateSPV(options.tmp_dir_path)
 
-    gen_cpp_files(
+    genCppFiles(
         output_spv_files,
         f"{options.output_path}/{CPP_H_NAME}",
         f"{options.output_path}/{CPP_SRC_NAME}",

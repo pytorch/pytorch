@@ -25,6 +25,22 @@ torch.xpu
     stream
     synchronize
 
+Random Number Generator
+-------------------------
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    get_rng_state
+    get_rng_state_all
+    initial_seed
+    manual_seed
+    manual_seed_all
+    seed
+    seed_all
+    set_rng_state
+    set_rng_state_all
+
 Streams and events
 ------------------
 .. autosummary::
@@ -37,4 +53,5 @@ Streams and events
 
 .. This module needs to be documented. Adding here in the meantime
 .. for tracking purposes
+.. py:module:: torch.xpu.random
 .. py:module:: torch.xpu.streams

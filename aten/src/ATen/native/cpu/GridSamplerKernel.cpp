@@ -389,8 +389,7 @@ struct ComputeLocation<scalar_t, GridSamplerPadding::Border, align_corners>
   }
 
   inline std::pair<Vec, Vec> apply_get_grad(const Vec &in) const {
-    Vec res, grad_clip;
-    std::tie(res, grad_clip) = clip_coordinates_get_grad(unnormalize(in));
+    auto [res, grad_clip] = clip_coordinates_get_grad(unnormalize(in));
     return std::make_pair(res, grad_clip & Vec(scaling_factor));
   }
 };
@@ -421,8 +420,8 @@ struct ComputeLocation<scalar_t, GridSamplerPadding::Reflection, align_corners>
   }
 
   inline std::pair<Vec, Vec> apply_get_grad(const Vec &in) const {
-    Vec res, grad_refl, grad_clip, grad(scaling_factor);
-    std::tie(res, grad_refl) = reflect_coordinates_get_grad(unnormalize(in));
+    auto [res, grad_refl] = reflect_coordinates_get_grad(unnormalize(in));
+    Vec grad_clip, grad(scaling_factor);
     grad = grad_refl * grad;
     std::tie(res, grad_clip) = clip_coordinates_get_grad(res);
     grad = grad_clip & grad;
@@ -473,7 +472,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear,
   const ComputeLocation<scalar_t, padding, align_corners> compute_W;
   const bool must_in_bound = padding != GridSamplerPadding::Zeros;
 
-  ApplyGridSample(const TensorAccessor<scalar_t, 4>& input)
+  ApplyGridSample(const TensorAccessor<const scalar_t, 4>& input)
     : inp_H(input.size(2))
     , inp_W(input.size(3))
     , inp_sH(input.stride(2))
@@ -539,7 +538,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear,
   }
 
   inline void forward(TensorAccessor<scalar_t, 3>& out_slice,
-                      const TensorAccessor<scalar_t, 3>& inp_slice,
+                      const TensorAccessor<const scalar_t, 3>& inp_slice,
                       int64_t offset, const Vec& grid_x, const Vec& grid_y,
                       int64_t len) const {
     auto x = compute_W.apply(grid_x);
@@ -589,20 +588,16 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear,
   template<bool input_requires_grad>
   inline void backward(TensorAccessor<scalar_t, 3>* gInp_slice_ptr,
                        TensorAccessor<scalar_t, 3>& gGrid_slice,
-                       const TensorAccessor<scalar_t, 3>& gOut_slice,
-                       const TensorAccessor<scalar_t, 3>& inp_slice,
+                       const TensorAccessor<const scalar_t, 3>& gOut_slice,
+                       const TensorAccessor<const scalar_t, 3>& inp_slice,
                        int64_t offset, const Vec& grid_x, const Vec& grid_y,
                        int64_t len) const {
-    Vec x, y, gx_mult, gy_mult;
-    std::tie(x, gx_mult) = compute_W.apply_get_grad(grid_x);
-    std::tie(y, gy_mult) = compute_H.apply_get_grad(grid_y);
+    auto [x, gx_mult] = compute_W.apply_get_grad(grid_x);
+    auto [y, gy_mult] = compute_H.apply_get_grad(grid_y);
 
-    Vec n, s, w, e, nw, ne, sw, se, nw_mask, ne_mask, sw_mask, se_mask;
-    iVec i_y_n, i_x_w;
-
-    std::tie(
+    auto [
       n, s, w, e, nw, ne, sw, se, nw_mask, ne_mask, sw_mask, se_mask,
-      i_y_n, i_x_w) = compute_interp_params(x, y);
+      i_y_n, i_x_w] = compute_interp_params(x, y);
 
     auto i_nw_offset = i_y_n * iVec(inp_sH) + i_x_w * iVec(inp_sW);
     auto i_ne_offset = i_nw_offset + iVec(inp_sW);
@@ -720,7 +715,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Nearest,
   const ComputeLocation<scalar_t, padding, align_corners> compute_W;
   const bool must_in_bound = padding != GridSamplerPadding::Zeros;
 
-  ApplyGridSample(const TensorAccessor<scalar_t, 4>& input)
+  ApplyGridSample(const TensorAccessor<const scalar_t, 4>& input)
     : inp_H(input.size(2))
     , inp_W(input.size(3))
     , inp_sH(input.stride(2))
@@ -731,7 +726,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Nearest,
     , compute_W(input.size(3)) {}
 
   inline void forward(TensorAccessor<scalar_t, 3>& out_slice,
-                      const TensorAccessor<scalar_t, 3>& inp_slice,
+                      const TensorAccessor<const scalar_t, 3>& inp_slice,
                       int64_t offset, const Vec& grid_x, const Vec& grid_y,
                       int64_t len) const {
     auto x = compute_W.apply(grid_x);
@@ -767,8 +762,8 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Nearest,
   template<bool input_requires_grad>
   inline void backward(TensorAccessor<scalar_t, 3>* gInp_slice_ptr,
                        TensorAccessor<scalar_t, 3>& gGrid_slice,
-                       const TensorAccessor<scalar_t, 3>& gOut_slice,
-                       const TensorAccessor<scalar_t, 3>& /*inp_slice*/,
+                       const TensorAccessor<const scalar_t, 3>& gOut_slice,
+                       const TensorAccessor<const scalar_t, 3>& /*inp_slice*/,
                        int64_t offset, const Vec& grid_x, const Vec& grid_y,
                        int64_t len) const {
     if (input_requires_grad) {
@@ -832,7 +827,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
   // could be -0.5 or -0.75, use the same value in UpSampleBicubic2d.h
   const Vec A = Vec(-0.75);
 
-  ApplyGridSample(const TensorAccessor<scalar_t, 4>& input)
+  ApplyGridSample(const TensorAccessor<const scalar_t, 4>& input)
     : inp_H(input.size(2))
     , inp_W(input.size(3))
     , inp_sH(input.stride(2))
@@ -911,7 +906,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
   }
 
   inline void forward(TensorAccessor<scalar_t, 3>& out_slice,
-                      const TensorAccessor<scalar_t, 3>& inp_slice,
+                      const TensorAccessor<const scalar_t, 3>& inp_slice,
                       int64_t offset, const Vec& grid_x, const Vec& grid_y,
                       int64_t len) const {
 
@@ -955,8 +950,8 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
   template<bool input_requires_grad>
   inline void backward(TensorAccessor<scalar_t, 3>* gInp_slice_ptr,
                       TensorAccessor<scalar_t, 3>& gGrid_slice,
-                      const TensorAccessor<scalar_t, 3>& gOut_slice,
-                      const TensorAccessor<scalar_t, 3>& inp_slice,
+                      const TensorAccessor<const scalar_t, 3>& gOut_slice,
+                      const TensorAccessor<const scalar_t, 3>& inp_slice,
                       int64_t offset, const Vec& grid_x, const Vec& grid_y,
                       int64_t len) const {
     Vec x = compute_W.unnormalize(grid_x);
@@ -1026,7 +1021,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
 
 template<typename scalar_t, typename ApplyFn>
 static inline void grid_sample_2d_grid_slice_iterator(
-    const TensorAccessor<scalar_t, 3>& grid_slice, const ApplyFn &apply_fn) {
+    const TensorAccessor<const scalar_t, 3>& grid_slice, const ApplyFn &apply_fn) {
   int64_t out_H = grid_slice.size(0);
   int64_t out_W = grid_slice.size(1);
   int64_t grid_sH = grid_slice.stride(0);
@@ -1191,8 +1186,8 @@ void grid_sampler_2d_cpu_kernel_impl(
 
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "grid_sampler_2d_cpu_kernel_impl", [&] {
     auto out_acc = output.accessor<scalar_t, 4>();
-    auto inp_acc = input.accessor<scalar_t, 4>();
-    auto grid_acc = grid.accessor<scalar_t, 4>();
+    auto inp_acc = input.accessor<const scalar_t, 4>();
+    auto grid_acc = grid.accessor<const scalar_t, 4>();
     if (align_corners) {
       switch (static_cast<GridSamplerInterpolation>(interpolation_mode)) {
         HANDLE_INTERP(GridSamplerInterpolation::Bilinear, true);
@@ -1279,9 +1274,9 @@ void grid_sampler_2d_backward_cpu_kernel_impl(
 
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "grid_sampler_2d_backward_cpu_kernel_impl", [&] {
     auto gGrid_acc = grad_grid.accessor<scalar_t, 4>();
-    auto inp_acc = input.accessor<scalar_t, 4>();
-    auto grid_acc = grid.accessor<scalar_t, 4>();
-    auto gOut_acc = grad_output.accessor<scalar_t, 4>();
+    auto inp_acc = input.accessor<const scalar_t, 4>();
+    auto grid_acc = grid.accessor<const scalar_t, 4>();
+    auto gOut_acc = grad_output.accessor<const scalar_t, 4>();
     if (input_requires_grad) {
       auto gInp_acc = grad_input.accessor<scalar_t, 4>();
       if (align_corners) {

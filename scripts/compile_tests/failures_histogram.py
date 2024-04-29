@@ -97,7 +97,7 @@ def failures_histogram(eager_dir, dynamo_dir, verbose=False, format_issues=False
         else "(num_failed_tests, error_msg, sample_test)"
     )
     print(header)
-    sum_counts = sum([r[0] for r in result])
+    sum_counts = sum(r[0] for r in result)
     for row in result:
         if format_issues:
             print(as_issue(*row))
@@ -117,8 +117,10 @@ def as_issue(count, msg, repro, tests):
 `{repro}`
 
 You will need to remove the skip or expectedFailure before running the repro command.
-This may be just removing a line in
-[dynamo_test_failures.py](https://github.com/pytorch/pytorch/blob/main/torch/testing/_internal/dynamo_test_failures.py)
+This may be just removing a sentinel file from in
+[dynamo_expected_failures](https://github.com/pytorch/pytorch/blob/main/test/dynamo_expected_failures)
+or [dynamo_skips](https://github.com/pytorch/pytorch/blob/main/test/dynamo_skips).
+
 
 ## Failing tests
 

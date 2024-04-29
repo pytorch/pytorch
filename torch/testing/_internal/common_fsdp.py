@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import contextlib
-import itertools
 import os
 import re
 import sys
@@ -11,17 +10,7 @@ from contextlib import nullcontext
 from copy import deepcopy
 from enum import auto, Enum
 from functools import partial, wraps
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    no_type_check,
-    Optional,
-    Tuple,
-    Type,
-    Union,
-)
+from typing import Any, Callable, Dict, no_type_check, Optional, Tuple, Type, Union
 from unittest import mock
 
 import torch
@@ -32,7 +21,7 @@ from torch.distributed._composable.fsdp._fsdp_param_group import (
     FSDPParamGroup,
     RegisterPostBackwardFunction,
 )
-from torch.distributed._tensor import DTensor
+from torch.distributed._tensor import distribute_tensor, DTensor, Shard
 from torch.distributed.fsdp import CPUOffload, FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._common_utils import TrainingState
 from torch.distributed.fsdp._init_utils import NO_RESHARD_AFTER_FORWARD_STRATEGIES
@@ -48,6 +37,7 @@ from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     MultiThreadedTestCase,
+    run_subtests,
     TEST_SKIPS,
 )
 from torch.testing._internal.common_utils import FILE_SCHEMA, get_cycles_per_ms
@@ -725,7 +715,7 @@ class MixtureOfExperts(NestedWrappedModule):
         d_input = 8
         expert = _maybe_cuda(nn.Linear(d_expert, d_shared), self.move_to_cuda)
 
-        self.num_expert_params = sum([p.numel() for p in expert.parameters()])
+        self.num_expert_params = sum(p.numel() for p in expert.parameters())
         for p in expert.parameters():
             p.expert = True  # type: ignore[attr-defined]
 
@@ -838,13 +828,15 @@ class MLP(nn.Module):
     def __init__(
         self,
         dim: int,
-        device: torch.device = torch.device("cpu"),
+        device: Optional[torch.device] = None,
+        *,
+        bias: bool = True,
         with_buffer: bool = False,
         dim_multiplier: int = 4,
     ):
         super().__init__()
-        self.in_proj = nn.Linear(dim, dim_multiplier * dim, device=device)
-        self.out_proj = nn.Linear(dim_multiplier * dim, dim, device=device)
+        self.in_proj = nn.Linear(dim, dim_multiplier * dim, device=device, bias=bias)
+        self.out_proj = nn.Linear(dim_multiplier * dim, dim, device=device, bias=bias)
         if with_buffer:
             self.register_buffer("buffer", torch.randn((dim,), device=device))
         else:
@@ -855,9 +847,13 @@ class MLP(nn.Module):
         z = F.relu(z)
         z = self.out_proj(z)
         z = F.relu(z)
-        if self.buffer:
-            z += self.buffer
+        if self.buffer is not None:
+            z = z + self.buffer
         return z
+
+    def reset_parameters(self):
+        if self.buffer is not None:
+            torch.nn.init.normal_(self.buffer)
 
 
 class DoubleLinear(nn.Module):
@@ -881,23 +877,33 @@ class DoubleLinear(nn.Module):
         return self.relu(self.lin1(x))
 
 
+# NOTE: For these patch methods, if we want safety under multi-threading (e.g.
+# when using multi-threaded process group), then we want:
+# (1) a barrier immediately after reading the original value to ensure that all
+# threads see the same original value
+# (2) a barrier immediately before restoring the original value to ensure that
+# all threads use the patched value inside the context
 @contextlib.contextmanager
 def patch_all_gather(new_all_gather_into_tensor: Callable):
     orig_all_gather = dist.all_gather_into_tensor
+    dist.barrier()
     dist.all_gather_into_tensor = new_all_gather_into_tensor
     try:
         yield
     finally:
+        dist.barrier()
         dist.all_gather_into_tensor = orig_all_gather
 
 
 @contextlib.contextmanager
 def patch_reduce_scatter(new_reduce_scatter_tensor: Callable):
     orig_reduce_scatter = dist.reduce_scatter_tensor
+    dist.barrier()
     dist.reduce_scatter_tensor = new_reduce_scatter_tensor
     try:
         yield
     finally:
+        dist.barrier()
         dist.reduce_scatter_tensor = orig_reduce_scatter
 
 
@@ -905,10 +911,12 @@ def patch_reduce_scatter(new_reduce_scatter_tensor: Callable):
 @contextlib.contextmanager
 def patch_unshard(new_unshard: Callable):
     orig_unshard = FSDPParamGroup.unshard
+    dist.barrier()
     FSDPParamGroup.unshard = new_unshard
     try:
         yield
     finally:
+        dist.barrier()
         FSDPParamGroup.unshard = orig_unshard
 
 
@@ -916,10 +924,12 @@ def patch_unshard(new_unshard: Callable):
 @contextlib.contextmanager
 def patch_post_backward(new_post_backward: Callable):
     orig_post_backward = FSDPParamGroup.post_backward
+    dist.barrier()
     FSDPParamGroup.post_backward = new_post_backward
     try:
         yield
     finally:
+        dist.barrier()
         FSDPParamGroup.post_backward = orig_post_backward
 
 
@@ -927,10 +937,12 @@ def patch_post_backward(new_post_backward: Callable):
 @contextlib.contextmanager
 def patch_register_post_backward_hook_backward(new_backward: Callable):
     orig_backward = RegisterPostBackwardFunction.backward
+    dist.barrier()
     RegisterPostBackwardFunction.backward = new_backward
     try:
         yield
     finally:
+        dist.barrier()
         RegisterPostBackwardFunction.backward = orig_backward
 
 
@@ -953,16 +965,12 @@ def reduce_scatter_with_assert(
     return orig_reduce_scatter(*args, **kwargs)
 
 
-def check_1d_sharded_parity(
+def check_sharded_parity(
     cls,  # unit test class
     replicated_module: nn.Module,
     sharded_module: nn.Module,
-    group: Optional[dist.ProcessGroup] = None,
-    check_grads: bool = True,
     prefixes_to_ignore: Tuple[str, ...] = (),
 ):
-    group = group or dist.distributed_c10d._get_default_group()
-    rank, world_size = group.rank(), group.size()
     for (replicated_name, replicated_param), (sharded_name, sharded_param) in zip(
         replicated_module.named_parameters(), sharded_module.named_parameters()
     ):
@@ -972,50 +980,22 @@ def check_1d_sharded_parity(
         cls.assertEqual(replicated_name, clean_sharded_name)
         cls.assertIsInstance(sharded_param, DTensor)
         assert isinstance(sharded_param, DTensor)  # mypy
-        param_chunks = torch.chunk(replicated_param, world_size, dim=0)
-        cls.assertEqual(sharded_param._local_tensor, param_chunks[rank])
-        if not check_grads:
-            continue
+        mesh, placements = sharded_param.device_mesh, sharded_param.placements
+        if tuple(placements) == (Shard(0), Shard(0)):
+            raise AssertionError(
+                "FSDP's (Shard(0), Shard(0)) layout differs from distribute_tensor(), "
+                "so we cannot check for equality using it"
+            )
+        sharded_ref_param = distribute_tensor(replicated_param, mesh, placements)
+        cls.assertEqual(sharded_param.to_local(), sharded_ref_param.to_local())
         if replicated_param.grad is None:
             cls.assertIsNone(sharded_param.grad)
             continue
         cls.assertIsNotNone(sharded_param.grad)
-        grad_chunks = torch.chunk(replicated_param.grad, world_size, dim=0)
+        sharded_ref_grad = distribute_tensor(replicated_param.grad, mesh, placements)
         cls.assertIsInstance(sharded_param.grad, DTensor)
         assert isinstance(sharded_param.grad, DTensor)  # mypy
-        cls.assertEqual(sharded_param.grad._local_tensor, grad_chunks[rank])
-
-
-def run_subtests(
-    cls_inst,
-    subtest_config: Dict[str, List[Any]],
-    test_fn: Callable,
-    *test_args,
-    **test_kwargs: Any,
-):
-    """
-    Runs a test function given by ``test_fn`` as a subtest according to the
-    configurations specified by ``subtest_config``. This amortizes the
-    costly setup overhead (including process spawn and initializing the
-    process group) over the subtests.
-
-    Args:
-        subtest_config (Dict[str, List[Any]]): A mapping from subtest
-            keyword argument name to a list of its possible values.
-        test_fn (Callable): A callable that runs the actual test.
-        test_args: Positional arguments to pass to ``test_fn``.
-        test_kwargs: Keyword arguments to pass to ``test_fn``.
-    """
-    # Convert the config mapping to a list to have a fixed order
-    subtest_config_items: List[Tuple[str, List[Any]]] = list(subtest_config.items())
-    subtest_config_keys: List[str] = [item[0] for item in subtest_config_items]
-    subtest_config_values: List[List[Any]] = [item[1] for item in subtest_config_items]
-    for values in itertools.product(*subtest_config_values):
-        # Map keyword to chosen value
-        subtest_kwargs = dict(zip(subtest_config_keys, values))
-        with cls_inst.subTest(**subtest_kwargs):
-            test_fn(*test_args, **test_kwargs, **subtest_kwargs)
-        dist.barrier()
+        cls.assertEqual(sharded_param.grad.to_local(), sharded_ref_grad.to_local())
 
 
 class FSDPTestMultiThread(MultiThreadedTestCase):
@@ -1089,17 +1069,20 @@ class FSDPTest(MultiProcessTestCase):
 
             raise
 
+        device_ids = None
         if torch.cuda.is_available() and torch.cuda.device_count():
-            torch.cuda.set_device(self.rank % torch.cuda.device_count())
+            device_id = self.rank % torch.cuda.device_count()
+            torch.cuda.set_device(device_id)
+            device_ids = [device_id]
 
         # Execute barrier prior to running test to ensure that every process
         # has finished initialization and that the following test
         # immediately exiting due to a skip doesn't cause flakiness.
-        dist.barrier()
+        dist.barrier(device_ids=device_ids)
 
         self.run_test(test_name, pipe)
 
-        dist.barrier()
+        dist.barrier(device_ids=device_ids)
 
         dist.destroy_process_group()
 
@@ -1374,15 +1357,28 @@ def test_compiled_fsdp(compile_compute_on_module: Optional[type] = None):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
+            original_fully_shard = torch.distributed._composable.fsdp.fully_shard
             for fully_shard_patch in FullyShardPatch:
                 if fully_shard_patch != FullyShardPatch.EAGER and not has_triton():
                     warnings.warn("Inductor on GPU needs Triton and recent GPU arch")
                     continue
+                imported_fully_shard = (
+                    f"{func.__module__}.{original_fully_shard.__name__}"
+                )
                 with mock.patch(
-                    f"{func.__module__}.{torch.distributed._composable.fsdp.fully_shard.__name__}",
+                    imported_fully_shard,
                     fully_shard_patch.value,
                 ):
                     func(*args, **kwargs)
+                    torch.distributed.barrier()
+                # mock.patch.__exit__ does not work with multi-thread
+                # thread 1 set {func.__module__}.fully_shard
+                # thread 2 read {func.__module__}.fully_shard and thought it is original
+                # hence we manually reset them after __exit__
+                import_path, _ = mock._get_target(imported_fully_shard)  # type: ignore[attr-defined]
+                setattr(
+                    import_path(), original_fully_shard.__name__, original_fully_shard
+                )
 
         return wrapper
 

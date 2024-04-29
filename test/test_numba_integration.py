@@ -258,6 +258,7 @@ class TestNumbaIntegration(common.TestCase):
         ]
         for dtype in dtypes:
             numpy_arys = [
+                numpy.ones((), dtype=dtype),
                 numpy.arange(6).reshape(2, 3).astype(dtype),
                 numpy.arange(6).reshape(2, 3).astype(dtype)[1:],  # View offset should be ignored
                 numpy.arange(6).reshape(2, 3).astype(dtype)[:, None],  # change the strides but still contiguous

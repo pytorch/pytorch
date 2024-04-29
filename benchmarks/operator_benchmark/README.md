@@ -18,40 +18,40 @@ Key Features:
 
 ## Initial Setup
 The instruction below installs a cpp\_extension for PyTorch and it is required to run the benchmark suite.
-```
-$ cd pt_extension
-$ python setup.py install
+```bash
+cd pt_extension
+python setup.py install
 ```
 
 ## How to run the benchmarks:
 
 Run `torch.add` benchmark:
-```
-$ cd pytorch/benchmarks/operator_benchmark
-$ python -m pt.add_test --omp-num-threads 1 --mkl-num-threads 1
+```bash
+cd pytorch/benchmarks/operator_benchmark
+python -m pt.add_test --omp-num-threads 1 --mkl-num-threads 1
 ```
 Note: we set the number of OpenMP and MKL threads both to 1. If you want to benchmark operators with multithreading (intra-op parallelism), use the `--omp-num-threads` and `--mkl-num-threads` flags.
 
 List all the supported tests:
-```
-$ python -m pt.add_test --list-tests
+```bash
+python -m pt.add_test --list-tests
 ```
 
 Filter and run a test (use `add_M8_N16_K32` as an example):
-```
-$ python -m pt.add_test --test-name add_K32_M8_N1
+```bash
+python -m pt.add_test --test-name add_K32_M8_N1
 --omp-num-threads 1 --mkl-num-threads 1
 ```
 
 Run all the supported benchmarks:
-```
-$ python -m benchmark_all_test
+```bash
+python -m benchmark_all_test
 ```
 
 ## Code to support `torch.add` in the benchmark
 The following example shows the code to support `torch.add` with 27 different tests. In the subpages of this wiki, we'll step through the complete flow of adding PyTorch and Caffe2 operators to the benchmark suite. Existing benchmarks for operators are in `pt` and `c2` directories and we highly recommend putting your new operators in those locations.
 
-```
+```python
 add_short_configs = op_bench.cross_product_configs(
     M=[8, 64, 128],
     N=range(2, 10, 3),
@@ -115,34 +115,34 @@ At a high level, the output includes the execution time of `torch.add` with thre
 
 ### Command-Line Control
 You can control all the aspects of the benchmark suite through the command-line. Please find details of those arguments by running the following command or look into `benchmark_runner.py`.
-```
-$ python benchmark_runner.py --help
+```bash
+python benchmark_runner.py --help
 ```
 
 Run all the supported benchmarks:
-```
-$ python -m benchmark_all_test --omp-num-threads 1 --mkl-num-threads 1
+```bash
+python -m benchmark_all_test --omp-num-threads 1 --mkl-num-threads 1
 ```
 
 List all the supported operators:
-```
-$ python -m benchmark_all_test --list-ops
+```bash
+python -m benchmark_all_test --list-ops
 ```
 
 List all the supported tests:
-```
-$ python -m benchmark_all_test --list-tests
+```bash
+python -m benchmark_all_test --list-tests
 ```
 
 Filter and run an operator (use add as an example):
-```
-$ python -m benchmark_all_test --operators add --omp-num-threads 1 --mkl-num-threads 1
+```bash
+python -m benchmark_all_test --operators add --omp-num-threads 1 --mkl-num-threads 1
 ```
 Note: this filter is based on the operator name rather than the file name.
 
 Run torch.add benchmark with tag 'long':
-```
-$ python -m pt.add_test --tag-filter long
+```bash
+python -m pt.add_test --tag-filter long
 ```
 
 ## Adding New Operators to the Benchmark Suite
@@ -150,11 +150,11 @@ In the previous sections, we gave several examples to show how to run the alread
 
 ### Add a New PyTorch Operator
 Let's say you want to measure the execution time of the following operator:
-```
+```python
 C = torch.add(A, B) # Shape of A and B is [M, N, K]
 ```
 The code below shows how to add it to the benchmark suite. Let's go over the example line by line.
-```
+```python
 import operator_benchmark as op_bench
 import torch
 
@@ -194,7 +194,7 @@ if __name__ == "__main__":
 
 #### Part 1. Specify Inputs to Operators
 For the `torch.add` operator, we would like to make sure it delivers good performance with input tensors which are of small, medium and large sizes. We have introduced two helper functions for users to easily generate a combination of inputs.
-```
+```python
 # Generate list configurations that will be used for benchmark experiments
 add_long_configs = op_bench.cross_product_configs(
     M=[8, 64, 128],
@@ -225,7 +225,7 @@ After inputs are provided, we now look at adding the computation of an operator.
 * `forward` includes the operator to be tested and the computation based on the created tensors in `init`. Apart from `self`, the order of the arguments must match the entries specified in `self.inputs`.
 
 The example below shows the code for `torch.add`:
-```
+```python
 # Given one set of M, N, K, the init method creates input tensors based on
 # that. The forward method does torch.add calculation on those input tensors.
 
@@ -247,14 +247,14 @@ class AddBenchmark(op_bench.TorchBenchmarkBase):
 
 #### Part 3. Register Tests With the Benchmark Suite
 After we have inputs and the benchmark class, it's time to register them with our benchmark suite. Here is how it looks like:
-```
+```python
 op_bench.generate_pt_test(add_long_configs + add_short_configs, AddBenchmark)
 ```
 `generate_pt_test` takes two parameters which are inputs configs and the benchmark class.
 
 #### Part 4. Run the Registered Tests
 To run the benchmark, we use the main method in `benchmark_runner` module.
-```
+```python
 if __name__ == "__main__":
     op_bench.benchmark_runner.main()
 ```
@@ -263,7 +263,7 @@ That's it. You just added a new operator to the benchmark suite!
 
 ### Add a New Caffe2 Operator
 The steps to add a new Caffe2 operator is the same as that for a PyTorch operator. The code below shows how to add Caffe2 `Add` operator:
-```
+```python
 import operator_benchmark as op_bench
 from caffe2.python import core
 
@@ -313,12 +313,12 @@ There are two things worth mentioning in this code:
 In the previous sections, we introduced the steps required to add a single operator to the benchmark suite. There are scenarios where you want to extend the benchmark suite with a list of operators which can share the same inputs. For example, to benchmark `abs` and `acos` operators, you can use the same set of inputs for both.
 
 Let's say we want to benchmark the following operators separately:
-```
+```python
 C = torch.abs(A) # Shape of A [M, N]
 C = torch.acos(A) # Shape of A [M, N]
 ```
 The following code shows how to do that:
-```
+```python
 import operator_benchmark as op_bench
 import torch
 
@@ -363,7 +363,7 @@ To add a list of operators to the benchmark suite, we introduce the `op_bench.op
 * `attr_names` stores the names of values in attrs.
 
 The example below shows the code to add `torch.abs` and `torch.acos` :
-```
+```python
 unary_ops_list = op_bench.op_list(
     attr_names=["op_name", "op_func"],
     attrs=[
@@ -380,7 +380,7 @@ Every new subclass is required to implement 3 methods:
 * `forward` includes the operator to be tested and the computation based on the created tensors in `init`. Apart from `self`, the order of the arguments must match the entries specified in `self.inputs`.
 Here is the code for `abs` and `acos`:
 
-```
+```python
 class UnaryOpBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, M, N, device, op_func):
         # The M and N match with the attr_names in the input configuration
@@ -397,7 +397,7 @@ class UnaryOpBenchmark(op_bench.TorchBenchmarkBase):
 #### Part 3. Register a List of Operators
 To register multiple operators,  we introduced the `generate_pt_tests_from_op_list` function which takes three parameters. First, the list of operators. Second,the configs. Third, the benchmark class.
 Here is an example:
-```
+```python
 op_bench.generate_pt_tests_from_op_list(unary_ops_list, unary_ops_configs, UnaryOpBenchmark)
 ```
 
@@ -412,13 +412,13 @@ To measure the performance of an operator in its backward path, there are only t
 2\. Use `generate_pt_gradient_test` to register the tests.
 
 The example below shows the relevant code for that:
-```
+```python
 self.input_one = torch.rand(M, N, K, requires_grad=True)
 generate_pt_gradient_test(long_configs + short_configs, TorchAddBenchmark)
 ```
 #### For Caffe2 Gradient Ops
 To add Caffe2 gradient ops, we need to implement a new backward method in the benchmark class:
-```
+```python
 class AddBenchmark(op_bench.Caffe2BenchmarkBase):
 
     def init(self, M, N, K):

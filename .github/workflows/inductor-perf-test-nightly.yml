@@ -4,15 +4,17 @@ on:
   schedule:
     - cron: 0 7 * * 1-6
     - cron: 0 7 * * 0
+  # NB: GitHub has an upper limit of 10 inputs here, so before we can sort it
+  # out, let try to run torchao cudagraphs_low_precision as part of cudagraphs
   workflow_dispatch:
     inputs:
       training:
-        description: Run training?
+        description: Run training (on by default)?
         required: false
         type: boolean
         default: true
       inference:
-        description: Run inference?
+        description: Run inference (off by default)?
         required: false
         type: boolean
         default: false
@@ -20,22 +22,17 @@ on:
         description: Run inductor_default?
         required: false
         type: boolean
-        default: true
+        default: false
       dynamic:
         description: Run inductor_dynamic_shapes?
         required: false
         type: boolean
-        default: true
+        default: false
       cudagraphs:
         description: Run inductor_cudagraphs?
         required: false
         type: boolean
         default: true
-      cppwrapper:
-        description: Run inductor_cpp_wrapper for inference?
-        required: false
-        type: boolean
-        default: false
       freezing_cudagraphs:
         description: Run inductor_cudagraphs with freezing for inference?
         required: false
@@ -56,6 +53,11 @@ on:
         required: false
         type: boolean
         default: false
+      benchmark_configs:
+        description: The list of configs used the benchmark
+        required: false
+        type: string
+        default: inductor_huggingface_perf,inductor_timm_perf,inductor_torchbench_perf
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
@@ -86,6 +88,7 @@ jobs:
           { config: "inductor_torchbench_perf", shard: 3, num_shards: 4, runner: "linux.gcp.a100.large" },
           { config: "inductor_torchbench_perf", shard: 4, num_shards: 4, runner: "linux.gcp.a100.large" },
         ]}
+      selected-test-configs: ${{ inputs.benchmark_configs }}
     secrets:
       HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
 
@@ -96,7 +99,7 @@ jobs:
     if: github.event.schedule == '0 7 * * 1-6'
     with:
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm80
-      dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-aotinductor-true-freezing_cudagraphs-true
+      dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-aotinductor-true-freezing_cudagraphs-true-cudagraphs_low_precision-true
       docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
@@ -111,7 +114,7 @@ jobs:
     if: github.event.schedule == '0 7 * * 0'
     with:
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm80
-      dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-aotinductor-true-freezing_cudagraphs-true-maxautotune-true-freeze_autotune_cudagraphs-true
+      dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-aotinductor-true-freezing_cudagraphs-true-maxautotune-true-freeze_autotune_cudagraphs-true-cudagraphs_low_precision-true
       docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
@@ -126,7 +129,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     with:
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm80
-      dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-cudagraphs-${{ inputs.cudagraphs }}-cppwrapper-${{ inputs.cppwrapper }}-aotinductor-${{ inputs.aotinductor }}-maxautotune-${{ inputs.maxautotune }}-freezing_cudagraphs-${{ inputs.freezing_cudagraphs }}
+      dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-cudagraphs-${{ inputs.cudagraphs }}-cppwrapper-false-aotinductor-${{ inputs.aotinductor }}-maxautotune-${{ inputs.maxautotune }}-freezing_cudagraphs-${{ inputs.freezing_cudagraphs }}-cudagraphs_low_precision-${{ inputs.cudagraphs }}
       docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha

@@ -367,6 +367,18 @@ inline c10::List<c10::IValue> new_list() {
   return c10::List<c10::IValue>(c10::AnyType::get());
 }
 
+inline std::string ranks_str(const std::vector<uint64_t>& ranks) {
+  std::string str;
+  for (const auto& rank : ranks) {
+    if (str.empty()) {
+      str = std::to_string(rank);
+    } else {
+      str += ", " + std::to_string(rank);
+    }
+  }
+  return c10::str("[", str, "]");
+}
+
 struct NCCLTraceBuffer {
   static NCCLTraceBuffer* get() {
     // intentionally leak on exit
@@ -386,7 +398,14 @@ struct NCCLTraceBuffer {
                 // buffer this entry will be located to
                 // update state information
     size_t pg_id_;
-    size_t seq_id_; // as tracked by the process group
+    std::tuple<std::string, std::string> pg_name_; // <group_name, group_desc>
+
+    // Both seq_id_ and op_id_ are per_pg incrementing counters
+    // seq_id refers to actual kernel launches (e.g. 1 per coalesced group)
+    // op_id refers to logical operations (e.g. one per op inside coalesced
+    // group)
+    size_t seq_id_;
+    size_t op_id_;
     std::string profiling_name_;
 
     std::shared_ptr<torch::CapturedTraceback> traceback_;
@@ -426,10 +445,14 @@ struct NCCLTraceBuffer {
   size_t max_entries_ = 0;
   size_t next_ = 0;
   size_t id_ = 0;
+  std::map<std::tuple<std::string, std::string>, std::vector<uint64_t>>
+      pg_name_to_ranks_ = {};
 
   c10::optional<size_t> record(
       size_t pg_id,
+      const std::tuple<std::string, std::string>& pg_name,
       size_t seq_id,
+      size_t op_id,
       std::string profiling_name,
       const std::vector<at::Tensor>& inputs,
       const std::vector<at::Tensor>& outputs,
@@ -445,7 +468,9 @@ struct NCCLTraceBuffer {
     auto te = Entry{
         id_,
         pg_id,
+        pg_name,
         seq_id,
+        op_id,
         std::move(profiling_name),
         std::move(traceback),
         std::move(start),
@@ -473,6 +498,16 @@ struct NCCLTraceBuffer {
       }
     }
     return id_++;
+  }
+
+  void record_pg_ranks(
+      const std::tuple<std::string, std::string>& pg_name,
+      std::vector<uint64_t> ranks) {
+    if (!enabled_) {
+      return;
+    }
+    std::lock_guard<std::mutex> guard(mutex_);
+    pg_name_to_ranks_[pg_name] = ranks;
   }
 
   void update_state(Entry& r) {
@@ -565,17 +600,24 @@ struct NCCLTraceBuffer {
     entry->start_ = entry->end_ = nullptr;
   }
 
-  std::string dump() {
+  std::string dump(
+      const c10::optional<std::unordered_map<
+          std::string,
+          std::unordered_map<std::string, std::string>>>& ncclDumpMap) {
     auto result = dump_entries();
     auto entries = new_list();
     c10::IValue entries_key = "entries";
+    c10::IValue nccl_comm_key = "nccl_comm_state";
     c10::IValue version_key = "version";
     // Update whenever changing contents or formatting of the dump
     // (minor when adding fields, major when changing existing fields)
-    c10::IValue version_val = "1.1";
-
+    c10::IValue version_val = "1.5";
+    c10::IValue pg_config_key = "pg_config";
+    c10::IValue record_id_key = "record_id";
     c10::IValue pg_id_key = "pg_id";
+    c10::IValue pg_name_key = "process_group";
     c10::IValue seq_id_key = "seq_id";
+    c10::IValue op_id_key = "op_id";
     c10::IValue profiling_name_key = "profiling_name";
     c10::IValue input_sizes_key = "input_sizes";
     c10::IValue output_sizes_key = "output_sizes";
@@ -609,8 +651,11 @@ struct NCCLTraceBuffer {
       auto& e = result.at(i);
       auto& tb = stracebacks.tracebacks.at(i);
       auto dict = new_dict();
+      dict.insert(record_id_key, int64_t(e.id_));
       dict.insert(pg_id_key, int64_t(e.pg_id_));
+      dict.insert(pg_name_key, e.pg_name_);
       dict.insert(seq_id_key, int64_t(e.seq_id_));
+      dict.insert(op_id_key, int64_t(e.op_id_));
       dict.insert(profiling_name_key, e.profiling_name_);
       dict.insert(time_created_key, int64_t(e.time_created_));
       if (e.duration_) {
@@ -660,10 +705,34 @@ struct NCCLTraceBuffer {
       dict.insert(frames_key, frames);
       entries.push_back(dict);
     }
+    auto pg_config = new_dict();
+    for (const auto& [pg_name, ranks] : pg_name_to_ranks_) {
+      auto pg_info = new_dict();
+      pg_info.insert("name", std::get<0>(pg_name));
+      pg_info.insert("desc", std::get<1>(pg_name));
+      pg_info.insert("ranks", ranks_str(ranks));
+      pg_config.insert(std::get<0>(pg_name), pg_info);
+    }
+
+    // convert ncclDumpMap into a dictionary
+    auto per_comm_dict = new_dict();
+    if (ncclDumpMap.has_value()) {
+      for (const auto& [ncclId, ncclDump] : ncclDumpMap.value()) {
+        auto inner_dict = new_dict();
+        for (const auto& [key, value] : ncclDump) {
+          inner_dict.insert(key, value);
+        }
+        per_comm_dict.insert(ncclId, inner_dict);
+      }
+    }
 
     auto dict = new_dict();
     dict.insert(entries_key, entries);
     dict.insert(version_key, version_val);
+    if (per_comm_dict.size() > 0) {
+      dict.insert(nccl_comm_key, per_comm_dict);
+    }
+    dict.insert(pg_config_key, pg_config);
 
     return pickle_str(dict);
   }

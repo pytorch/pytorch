@@ -295,7 +295,7 @@ class IterGraph(fx.Graph):
             raise ValueError(
                 "The target nodes for ``move_to_next_iter_before`` must "
                 "satisfy one of the following conditions: 1) the user of the "
-                "node is in the target nodes, 2) the user is the ouput of the "
+                "node is in the target nodes, 2) the user is the output of the "
                 "graph, 3) there are no users -- the node is a side-effect node. "
             )
 

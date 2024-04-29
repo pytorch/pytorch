@@ -9,7 +9,7 @@
 #include <ATen/functorch/BatchedFallback.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 // Flattens out all dims except the batch dim, and also moves batch dim
 // (if it exists) to front.
 static at::Tensor flatten_logical(const Tensor& tensor, optional<int64_t> bdim) {
@@ -180,4 +180,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("binary_cross_entropy_backward", binary_cross_entropy_backward_plumbing);
 }
 
-}}
+} // namespace at::functorch

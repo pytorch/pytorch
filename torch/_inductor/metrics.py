@@ -39,8 +39,11 @@ ir_nodes_pre_fusion = 0
 # counters for tracking to_dtype inserted
 cpp_to_dtype_count = 0
 
-# counters for tracking cpp_wrapper disabled
-disable_cpp_wrapper = 0
+# The length counts the number of outer loop fusions.
+# Each element counts the number of inner kernels in each outer loop fusion.
+cpp_outer_loop_fused_inner_counts: List[int] = []
+
+num_comprehensive_padding = 0
 
 
 # reset all counters
@@ -50,7 +53,8 @@ def reset():
     global num_bytes_accessed, nodes_num_elem
     global ir_nodes_pre_fusion
     global cpp_to_dtype_count
-    global disable_cpp_wrapper
+    global cpp_outer_loop_fused_inner_counts
+    global num_comprehensive_padding
 
     generated_kernel_count = 0
     generated_cpp_vec_kernel_count = 0
@@ -59,7 +63,65 @@ def reset():
     node_runtimes.clear()
     ir_nodes_pre_fusion = 0
     cpp_to_dtype_count = 0
-    disable_cpp_wrapper = 0
+    cpp_outer_loop_fused_inner_counts.clear()
+    num_comprehensive_padding = 0
+
+
+@dataclass
+class CachedMetricsDeltas:
+    """
+    The subset of metrics we want update across cache hits, e.g., the
+    FxGraphCache.
+    """
+
+    generated_kernel_count: int
+    generated_cpp_vec_kernel_count: int
+    ir_nodes_pre_fusion: int
+    cpp_to_dtype_count: int
+
+
+class CachedMetricsHelper:
+    """
+    A helper class to help calculate and apply counter deltas for those
+    metrics we want to save with cache entries (e.g., FxGraphCache) and
+    apply on a cache hit.
+    """
+
+    def __init__(self):
+        global generated_kernel_count
+        global generated_cpp_vec_kernel_count
+        global ir_nodes_pre_fusion
+        global cpp_to_dtype_count
+
+        self.generated_kernel_count = generated_kernel_count
+        self.generated_cpp_vec_kernel_count = generated_cpp_vec_kernel_count
+        self.ir_nodes_pre_fusion = ir_nodes_pre_fusion
+        self.cpp_to_dtype_count = cpp_to_dtype_count
+
+    def get_deltas(self) -> CachedMetricsDeltas:
+        global generated_kernel_count
+        global generated_cpp_vec_kernel_count
+        global ir_nodes_pre_fusion
+        global cpp_to_dtype_count
+
+        return CachedMetricsDeltas(
+            generated_kernel_count - self.generated_kernel_count,
+            generated_cpp_vec_kernel_count - self.generated_cpp_vec_kernel_count,
+            ir_nodes_pre_fusion - self.ir_nodes_pre_fusion,
+            cpp_to_dtype_count - self.cpp_to_dtype_count,
+        )
+
+    @staticmethod
+    def apply_deltas(delta: CachedMetricsDeltas):
+        global generated_kernel_count
+        global generated_cpp_vec_kernel_count
+        global ir_nodes_pre_fusion
+        global cpp_to_dtype_count
+
+        generated_kernel_count += delta.generated_kernel_count
+        generated_cpp_vec_kernel_count += delta.generated_cpp_vec_kernel_count
+        ir_nodes_pre_fusion += delta.ir_nodes_pre_fusion
+        cpp_to_dtype_count += delta.cpp_to_dtype_count
 
 
 REGISTERED_METRIC_TABLES: Dict[str, MetricTable] = {}
@@ -176,6 +238,7 @@ MetricTable.register_table(
         "num_load",
         "num_store",
         "num_for_loop",
+        "num_atomic_add",
         "num_args",
         # xyz numel can be different to size_hints since size_hints are rounded
         # up to the nearest power of 2.
@@ -185,6 +248,7 @@ MetricTable.register_table(
         "xnumel",
         "ynumel",
         "rnumel",
+        "kernel_args_num_gb",
     ],
 )
 
@@ -259,6 +323,25 @@ def _parse_numel(proper_kernel_fn_code, numel_arg_name):
         return None
 
 
+def _parse_kernel_args_num_gb(kernel_fn_code, kernel_category):
+    """
+    inductor meta looks like:
+        inductor_meta={... 'mutated_arg_names': [], 'no_x_dim': False, 'kernel_num_gb': 2.0},
+    """
+    m = re.search(r".kernel_num_gb.:\s*([0-9.]+)", kernel_fn_code)
+    if m:
+        return float(m.group(1))
+    else:
+        """
+        There are a few cases that kernel_num_gdb field can be missing:
+        1. the field will be missing if config.benchmark_kernel and
+           config.profile_bandwidth are false
+        2. even if config.benchmark_kernel or config.profile_bandwidth is true.
+           foreach kernel does not have kernel_num_gb field in the metadata
+        """
+        return None
+
+
 def log_kernel_metadata(kernel_name, kernel_path, kernel_module_code):
     """
     An utility to log kernel metadata. We may parse metadata from kernel source code here.
@@ -289,10 +372,14 @@ def log_kernel_metadata(kernel_name, kernel_path, kernel_module_code):
             "num_load": _count_pattern(proper_kernel_fn_code, "tl.load"),
             "num_store": _count_pattern(proper_kernel_fn_code, "tl.store"),
             "num_for_loop": _count_pattern(proper_kernel_fn_code, "for "),
+            "num_atomic_add": _count_pattern(proper_kernel_fn_code, "tl.atomic_add"),
             "num_args": _count_args(proper_kernel_fn_code),
             "xnumel": _parse_numel(proper_kernel_fn_code, "xnumel"),
             "ynumel": _parse_numel(proper_kernel_fn_code, "ynumel"),
             "rnumel": _parse_numel(proper_kernel_fn_code, "rnumel"),
+            "kernel_args_num_gb": _parse_kernel_args_num_gb(
+                kernel_fn_code, kernel_category
+            ),
         }
     )
 

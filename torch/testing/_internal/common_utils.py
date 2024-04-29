@@ -79,11 +79,6 @@ from torch.nn import (
     ParameterList,
     Sequential,
 )
-from .dynamo_test_failures import (
-    dynamo_expected_failures,
-    dynamo_skips,
-    FIXME_inductor_non_strict,
-)
 from torch.onnx import (
     register_custom_op_symbolic,
     unregister_custom_op_symbolic,
@@ -102,6 +97,11 @@ from torch.utils._import_utils import _check_module_exists
 import torch.utils._pytree as pytree
 
 from .composite_compliance import no_dispatch
+try:
+    import pytest
+    has_pytest = True
+except ImportError:
+    has_pytest = False
 
 
 # Class to keep track of test flags configurable by environment variables.
@@ -395,9 +395,8 @@ def compose_parametrize_fns(old_parametrize_fn, new_parametrize_fn):
                 redundant_params = set(old_param_kwargs.keys()).intersection(new_param_kwargs.keys())
                 if redundant_params:
                     raise RuntimeError('Parametrization over the same parameter by multiple parametrization '
-                                       'decorators is not supported. For test "{}", the following parameters '
-                                       'are handled multiple times: {}'.format(
-                                           test.__name__, redundant_params))
+                                       f'decorators is not supported. For test "{test.__name__}", the following parameters '
+                                       f'are handled multiple times: {redundant_params}')
                 full_param_kwargs = {**old_param_kwargs, **new_param_kwargs}
                 merged_test_name = '{}{}{}'.format(new_test_name,
                                                    '_' if old_test_name != '' and new_test_name != '' else '',
@@ -985,7 +984,9 @@ def sanitize_pytest_xml(xml_file: str):
     import xml.etree.ElementTree as ET
     tree = ET.parse(xml_file)
     for testcase in tree.iter('testcase'):
-        full_classname = testcase.attrib['classname']
+        full_classname = testcase.attrib.get("classname")
+        if full_classname is None:
+            continue
         # The test prefix is optional
         regex_result = re.search(r"^(test\.)?(?P<file>.*)\.(?P<classname>[^\.]*)$", full_classname)
         if regex_result is None:
@@ -1236,7 +1237,7 @@ TEST_CUDA = torch.cuda.is_available()
 custom_device_mod = getattr(torch, torch._C._get_privateuse1_backend_name(), None)
 TEST_PRIVATEUSE1 = True if (hasattr(custom_device_mod, "is_available") and custom_device_mod.is_available()) else False
 TEST_NUMBA = _check_module_exists('numba')
-
+TEST_TRANSFORMERS = _check_module_exists('transformers')
 TEST_DILL = _check_module_exists('dill')
 
 TEST_LIBROSA = _check_module_exists('librosa') and not IS_ARM64
@@ -1387,6 +1388,15 @@ def skipIfTorchInductor(msg="test doesn't currently work with torchinductor",
 
     return decorator
 
+def serialTest(condition=True):
+    """
+    Decorator for running tests serially.  Requires pytest
+    """
+    def decorator(fn):
+        if has_pytest and condition:
+            return pytest.mark.serial(fn)
+        return fn
+    return decorator
 
 def unMarkDynamoStrictTest(cls=None):
     def decorator(cls):
@@ -1619,6 +1629,19 @@ def setLinalgBackendsToDefaultFinally(fn):
             fn(*args, **kwargs)
         finally:
             torch.backends.cuda.preferred_linalg_library(_preferred_backend)
+    return _fn
+
+
+# Reverts the blas backend back to default to make sure potential failures in one
+# test do not affect other tests
+def setBlasBackendsToDefaultFinally(fn):
+    @wraps(fn)
+    def _fn(*args, **kwargs):
+        _preferred_backend = torch.backends.cuda.preferred_blas_library()
+        try:
+            fn(*args, **kwargs)
+        finally:
+            torch.backends.cuda.preferred_blas_library(_preferred_backend)
     return _fn
 
 
@@ -2164,30 +2187,20 @@ class CudaMemoryLeakCheck:
                 #   statistics or a leak too small to trigger the allocation of an
                 #   additional block of memory by the CUDA driver
                 msg = ("CUDA caching allocator reports a memory leak not "
-                       "verified by the driver API in {}! "
-                       "Caching allocator allocated memory was {} and is now reported as {} "
-                       "on device {}. "
-                       "CUDA driver allocated memory was {} and is now {}.").format(
-                    self.name,
-                    self.caching_allocator_befores[i],
-                    caching_allocator_mem_allocated,
-                    i,
-                    self.driver_befores[i],
-                    driver_mem_allocated)
+                       f"verified by the driver API in {self.name}! "
+                       f"Caching allocator allocated memory was {self.caching_allocator_befores[i]} "
+                       f"and is now reported as {caching_allocator_mem_allocated} "
+                       f"on device {i}. "
+                       f"CUDA driver allocated memory was {self.driver_befores[i]} and is now {driver_mem_allocated}.")
                 warnings.warn(msg)
             elif caching_allocator_discrepancy and driver_discrepancy:
                 # A caching allocator discrepancy validated by the driver API is a
                 #   failure (except on ROCm, see below)
-                msg = ("CUDA driver API confirmed a leak in {}! "
-                       "Caching allocator allocated memory was {} and is now reported as {} "
-                       "on device {}. "
-                       "CUDA driver allocated memory was {} and is now {}.").format(
-                    self.name,
-                    self.caching_allocator_befores[i],
-                    caching_allocator_mem_allocated,
-                    i,
-                    self.driver_befores[i],
-                    driver_mem_allocated)
+                msg = (f"CUDA driver API confirmed a leak in {self.name}! "
+                       f"Caching allocator allocated memory was {self.caching_allocator_befores[i]} "
+                       f"and is now reported as {caching_allocator_mem_allocated} "
+                       f"on device {i}. "
+                       f"CUDA driver allocated memory was {self.driver_befores[i]} and is now {driver_mem_allocated}.")
 
                 raise RuntimeError(msg)
 
@@ -2659,7 +2672,7 @@ class TestCase(expecttest.TestCase):
                         parts = Path(abs_test_path).parts
                         for i, part in enumerate(parts):
                             if part == "test":
-                                base_dir = os.path.join(*parts[:i])
+                                base_dir = os.path.join(*parts[:i]) if i > 0 else ''
                                 return os.path.relpath(abs_test_path, start=base_dir)
 
                         # Can't determine containing dir; just return the test filename.
@@ -2765,6 +2778,7 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                 if match is not None:
                     filename = match.group(1)
                     if TEST_WITH_TORCHINDUCTOR:  # noqa: F821
+                        from .dynamo_test_failures import FIXME_inductor_non_strict
                         strict_default = filename not in FIXME_inductor_non_strict
                     else:
                         strict_default = True
@@ -2805,22 +2819,23 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                 # TorchDynamo optimize annotation
                 super_run = torch._dynamo.optimize("eager", nopython=nopython)(super_run)
                 key = f"{self.__class__.__name__}.{self._testMethodName}"
+                from .dynamo_test_failures import dynamo_expected_failures, dynamo_skips
 
-                def expect_failure(f):
+                def expect_failure(f, test_name):
                     @wraps(f)
                     def wrapper(*args, **kwargs):
                         try:
                             f(*args, **kwargs)
                         except BaseException as e:
                             self.skipTest(e)
-                        raise RuntimeError("Unexpected success, please remove test from dynamo_test_failures.py")
+                        raise RuntimeError(f"Unexpected success, please remove `test/dynamo_expected_failures/{test_name}`")
                     return wrapper
 
                 if key in dynamo_expected_failures:
                     method = getattr(self, self._testMethodName)
-                    setattr(self, self._testMethodName, expect_failure(method))
+                    setattr(self, self._testMethodName, expect_failure(method, key))
 
-                def ignore_failure(f):
+                def ignore_failure(f, test_name):
                     @wraps(f)
                     def wrapper(*args, **kwargs):
                         try:
@@ -2831,12 +2846,12 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                         if getattr(method, "__unittest_expecting_failure__", False):
                             self.skipTest("unexpected success")
                         else:
-                            self.skipTest("This test passed, maybe we can remove the skip from dynamo_test_failures.py")
+                            self.skipTest(f"This test passed, maybe we can remove `test/dynamo_skips/{test_name}`")
                     return wrapper
 
                 if key in dynamo_skips:
                     method = getattr(self, self._testMethodName)
-                    setattr(self, self._testMethodName, ignore_failure(method))
+                    setattr(self, self._testMethodName, ignore_failure(method, key))
 
             super_run(result=result)
 
@@ -5021,6 +5036,7 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
 
     s = re.sub(r'  File "([^"]+)", line \d+, in (.+)\n    .+\n( +[~^]+ *\n)?', repl_frame, s)
     s = re.sub(r"line \d+", "line N", s)
+    s = re.sub(r".py:\d+", ".py:N", s)
     s = re.sub(file, os.path.basename(file), s)
     s = re.sub(os.path.join(os.path.dirname(torch.__file__), ""), "", s)
     s = re.sub(r"\\", "/", s)  # for Windows
