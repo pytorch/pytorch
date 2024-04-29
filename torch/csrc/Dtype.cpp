@@ -74,21 +74,25 @@ PyObject* THPDtype_reduce(PyObject* _self, PyObject* noargs) {
 }
 
 PyObject* THPDtype_to_real(PyObject* _self, PyObject* noargs) {
+  HANDLE_TH_ERRORS
   auto* self = (THPDtype*)_self;
   auto scalar_type = self->scalar_type;
   if (!at::isFloatingType(self->scalar_type)) {
     scalar_type = at::toRealValueType(self->scalar_type);
   }
-  return (PyObject*)torch::getTHPDtype(scalar_type);
+  return Py_NewRef(torch::getTHPDtype(scalar_type));
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject* THPDtype_to_complex(PyObject* _self, PyObject* noargs) {
+  HANDLE_TH_ERRORS
   auto* self = (THPDtype*)_self;
   auto scalar_type = self->scalar_type;
   if (!at::isComplexType(self->scalar_type)) {
     scalar_type = at::toComplexType(self->scalar_type);
   }
-  return (PyObject*)torch::getTHPDtype(scalar_type);
+  return Py_NewRef(torch::getTHPDtype(scalar_type));
+  END_HANDLE_TH_ERRORS
 }
 
 typedef PyObject* (*getter)(PyObject*, void*);
