@@ -2480,7 +2480,7 @@ def _temp_validate_new_and_old_command(new_cmd: List[str], old_cmd: List[str]):
         raise RuntimeError("Error in new and old command different.")
 
 
-def _validate_cpp_commands():
+def _do_validate_cpp_commands(cuda: bool, mmap_weights: bool):
     input_path = "/temp/dummy_input.cpp"
     output_path = "/temp/dummy_output.so"
     picked_isa = pick_vec_isa()
@@ -2489,17 +2489,17 @@ def _validate_cpp_commands():
         input=input_path,
         output=output_path,
         vec_isa=picked_isa,
-        cuda=True,
+        cuda=cuda,
         aot_mode=False,
         compile_only=False,
         use_absolute_path=False,
-        use_mmap_weights=True,
+        use_mmap_weights=mmap_weights,
     ).split(" ")
 
     from torch._inductor.cpp_builder import CppBuilder, CppTorchCudaOptions
 
     dummy_build_option = CppTorchCudaOptions(
-        chosen_isa=picked_isa, use_cuda=True, use_mmap_weights=True
+        chosen_isa=picked_isa, use_cuda=cuda, use_mmap_weights=mmap_weights
     )
 
     dummy_builder = CppBuilder(
@@ -2515,7 +2515,16 @@ def _validate_cpp_commands():
     _temp_validate_new_and_old_command(new_cmd, old_cmd)
 
 
-# _validate_cpp_commands()
+def _validate_new_cpp_commands():
+    cuda = [True, False]
+    use_mmap_weights = [True, False]
+
+    for x in cuda:
+        for y in use_mmap_weights:
+            _do_validate_cpp_commands(cuda=x, mmap_weights=y)
+
+
+# _validate_new_cpp_commands()
 
 
 def _reload_python_module_in_subproc(key, path):
