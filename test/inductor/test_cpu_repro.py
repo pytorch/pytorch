@@ -343,6 +343,24 @@ class CPUReproTests(TestCase):
         ]
         self.common(fn, inps)
 
+    @config.patch(freezing=True)
+    def test_module_buffer_mutation(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("foo", torch.rand((3, 10)))
+
+            def forward(self, x):
+                lx = [x, x.clone(), x.clone()]
+                y = []
+                for i in range(3):
+                    y.append(lx[i] + self.foo[i])
+                return torch.cat(y, 1)
+
+        with torch.no_grad():
+            example_inputs = (torch.rand(1, 10),)
+            self.common(Model(), example_inputs)
+
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_linear_packed(self):
