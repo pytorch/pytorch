@@ -18,7 +18,12 @@ from typing import List, Tuple, Union
 
 import torch
 from torch._inductor import config, exc
-from torch._inductor.codecache import get_lock_dir, LOCK_TIMEOUT, VecISA
+from torch._inductor.codecache import (
+    get_lock_dir,
+    invalid_vec_isa,
+    LOCK_TIMEOUT,
+    VecISA,
+)
 from torch._inductor.runtime.runtime_utils import cache_dir
 
 if config.is_fbcode():
@@ -462,14 +467,21 @@ def _cpp_prefix_path() -> str:
 
 
 def _get_build_args_of_chosen_isa(chosen_isa: VecISA):
-    cap = str(chosen_isa).upper()
-    macros = [
-        f"CPU_CAPABILITY={cap}",
-        f"CPU_CAPABILITY_{cap}",
-        f"HAVE_{cap}_CPU_DEFINITION",
-    ]
-    # Add Windows support later.
-    build_flags = [chosen_isa.build_arch_flags()]
+    if chosen_isa != invalid_vec_isa:
+        # Add Windows support later.
+        # TODO: fix later use abstract macro
+        # macros = [chosen_isa.build_macro()]
+        cap = str(chosen_isa).upper()
+        macros = [f"CPU_CAPABILITY_{cap}"]
+        build_flags = [chosen_isa.build_arch_flags()]
+
+    if config.is_fbcode() and chosen_isa != invalid_vec_isa:
+        cap = str(chosen_isa).upper()
+        macros = [
+            f"CPU_CAPABILITY={cap}",
+            f"CPU_CAPABILITY_{cap}",
+            f"HAVE_{cap}_CPU_DEFINITION",
+        ]
 
     return macros, build_flags
 
