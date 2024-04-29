@@ -728,7 +728,7 @@ copy pasted in from VariableTypeEverything.cpp with appropriate substitutions.
 
 // KERNEL_PRIVATEUSEONE/KERNEL_DIFFERENT_REDISPATCH_SIGNATURE_PRIVATEUSEONE
 // registration (OP, POLICY) or (OP, OVERLOAD, POLICY) for AutocastPrivateUse1
-#define KERNEL_PRIVATEUSEONE(OP, ...) \
+#define KERNEL_PRIVATEUSEONE(...) \
   KERNEL(c10::DeviceType::PrivateUse1, __VA_ARGS__)
 
 #define KERNEL_DIFFERENT_REDISPATCH_SIGNATURE_PRIVATEUSEONE( \

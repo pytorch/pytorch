@@ -26,6 +26,7 @@ import torch
 
 from torch import SymInt
 from torch._guards import GuardSource, TracingContext
+from torch._higher_order_ops.torchbind import call_torchbind
 from torch._ops import HigherOrderOperator
 from torch._streambase import _EventBase, _StreamBase
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
@@ -891,13 +892,13 @@ class VariableBuilder:
                 ),
             )
         elif TorchScriptObjectVariable.is_matching_cls(type(value)):
-            from ..source import ConvertScriptObjectSource
+            from ..source import FlattenScriptObjectSource
 
             # different torch.ScriptObjects can point to the same underlying value
             # (but we guarantee that they will `hash()` to the same value if that's the case).
 
             # Install the guards on the content of value
-            convert_source = ConvertScriptObjectSource(self.source)
+            convert_source = FlattenScriptObjectSource(self.source)
             LazyVariableTracker.realize_all(
                 VariableBuilder(self.tx, convert_source)(value.__obj_flatten__())
             )
@@ -1757,8 +1758,9 @@ def wrap_fx_proxy_cls(
         return ConstantVariable.create(example_value, **options)
     elif (
         isinstance(example_value, (int, float, bool))
-        and proxy.node.target is torch._higher_order_ops.torchbind.call_torchbind
+        and proxy.node.target is call_torchbind
     ):
+        set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
     else:
         unimplemented(

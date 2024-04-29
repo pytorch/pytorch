@@ -4,6 +4,7 @@ import unittest
 
 import torch
 import torch.utils._pytree as pytree
+from torch._dynamo.testing import EagerAndRecordGraphs
 from torch._functorch.aot_autograd import aot_export_module
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch._library.fake_class_registry import FakeScriptObject
@@ -837,8 +838,6 @@ class TestCompileTorchbind(TestCase):
         torch._dynamo.reset()
 
     def test_compile_script_object_input(self):
-        from torch._dynamo.testing import EagerAndRecordGraphs
-
         backend = EagerAndRecordGraphs()
 
         class Model(torch.nn.Module):
@@ -942,10 +941,6 @@ def forward(self, L_tq_ : torch.ScriptObject, L_x_ : torch.Tensor):
         self.assertEqual(len(hashes), 4)
 
     def test_compile_script_object_input_guards(self):
-        from torch._dynamo.testing import EagerAndRecordGraphs
-
-        backend = EagerAndRecordGraphs()
-
         class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -1021,10 +1016,6 @@ def forward(self, L_tq_ : torch.ScriptObject, L_x_ : torch.Tensor):
         self.assertEqual(cnt.frame_count, 5)
 
     def test_compile_script_object_input_automatic_dynamic_shape(self):
-        from torch._dynamo.testing import EagerAndRecordGraphs
-
-        backend = EagerAndRecordGraphs()
-
         class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -1066,7 +1057,9 @@ def forward(self, L_tq_ : torch.ScriptObject, L_x_ : torch.Tensor):
         # should have no-recompilation
         torch.compile(mod, backend=cnt)(tq3, x)
 
-    def test_recompile_obj_type(self):
+    def test_compile_input_aliasing_contents(self):
+        backend = EagerAndRecordGraphs()
+
         class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -1077,6 +1070,20 @@ def forward(self, L_tq_ : torch.ScriptObject, L_x_ : torch.Tensor):
                 tq.push(x.sin())
                 x_sin = tq.pop() - tq.size()
                 return x_sin, tq
+
+        x = torch.randn(2, 3)
+        mod = Model()
+
+        tq1 = torch.classes._TorchScriptTesting._TensorQueue(
+            torch.empty(
+                0,
+            ).fill_(-1)
+        )
+        tq1.push(x)
+        # TODO: x's source is set/overrided to be the tq1.queue[0]
+        # the graph module and byte code seems to be reasonable.
+        with self.assertRaisesRegex(NotImplementedError, "is not implemented for"):
+            ret = torch.compile(mod, backend=backend)(tq1, x)
 
 
 @skipIfTorchDynamo("torchbind not supported with dynamo yet")

@@ -303,7 +303,7 @@ class ConvertIntSource(ChainedSource):
 
 
 @dataclasses.dataclass(frozen=True)
-class ConvertScriptObjectSource(ChainedSource):
+class FlattenScriptObjectSource(ChainedSource):
     def __post_init__(self):
         assert self.base is not None
 

@@ -114,8 +114,7 @@ def to_fake_obj(fake_mode, x: torch.ScriptObject) -> FakeScriptObject:
                 _call_torchbind(name).__get__(fake_x_wrapped),
             )
         else:
-            # log.warning("fake object of %s doesn't implement method %s.", x, name)
-            pass
+            log.warning("fake object of %s doesn't implement method %s.", x, name)
     return fake_x_wrapped
 
 
