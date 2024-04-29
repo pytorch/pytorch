@@ -332,7 +332,17 @@ def _get_optimization_cflags() -> List[str]:
 
 
 def _get_shared_cflag(compile_only: bool) -> List[str]:
-    SHARED_FLAG = ["DLL"] if _IS_WINDOWS else ["shared", "fPIC"]
+    if _IS_WINDOWS:
+        SHARED_FLAG = ["DLL"]
+    else:
+        if compile_only:
+            return ["fPIC"]
+        if platform.system() == "Darwin" and "clang" in _get_cpp_compiler():
+            # This causes undefined symbols to behave the same as linux
+            return ["shared", "fPIC", "undefined dynamic_lookup"]
+        else:
+            return ["shared", "fPIC"]
+
     return SHARED_FLAG
 
 
@@ -998,7 +1008,7 @@ class CppBuilder:
         else:
             self._output_dir = output_dir
 
-        file_ext = self.get_object_ext() if compile_only else self.get_shared_lib_ext()
+        file_ext = self.get_shared_lib_ext() if compile_only else self.get_shared_lib_ext()
         self._target_file = os.path.join(self._output_dir, f"{self._name}{file_ext}")
 
         self._compiler = BuildOption.get_compiler()
