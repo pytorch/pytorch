@@ -3429,17 +3429,23 @@ static void linalg_lstsq_out_info(
   auto input_working_copy = copyBatchedColumnMajor(input);
 
   // now the actual call that computes the result in-place (apply_lstsq)
-  if (driver == "gelss" input.device() != at::kCPU) {
-    auto [U, S, Vh] = at::_linalg_svd(input, false, true, "gesvd");
-    auto S_pinv = S.reciprocal();
-    auto s1 = at::narrow(S, /*dim=*/-1, /*start=*/0, /*length=*/1);  // singular values are sorted in descending order
-    S_pinv.masked_fill_(S < rcond * s1, 0);
-    auto uhOther = at::matmul(U.adjoint(), other);
-    if(S_pinv.dim() != uhOther.dim()) {
-      S_pinv = S_pinv.unsqueeze(-1);
+  if (driver == "gelss" && input.device() != at::kCPU) {
+    if (input.numel() == 0 || input.size(-2) == 0 || input.size(-1) == 0) {
+        auto output_shape = input.sizes().vec();
+        output_shape.back() = other.size(-1);
+        solution = at::zeros(output_shape, input.options());
+    } else {
+        auto [U, S, Vh] = at::_linalg_svd(input, false, true, "gesvd");
+        auto S_pinv = S.reciprocal();
+        auto s1 = at::narrow(S, /*dim=*/-1, /*start=*/0, /*length=*/1);  // singular values are sorted in descending order
+        S_pinv.masked_fill_(S < rcond * s1, 0);
+        auto uhOther = at::matmul(U.adjoint(), other);
+        if(S_pinv.dim() != uhOther.dim()) {
+          S_pinv = S_pinv.unsqueeze(-1);
+        }
+        auto S_pinv_other = S_pinv * uhOther;
+        solution = at::matmul(Vh.adjoint(), S_pinv_other);
     }
-    auto S_pinv_other = S_pinv * uhOther;
-    solution = at::matmul(Vh.adjoint(), S_pinv_other);
   }
   else {
     lstsq_stub(input.device().type(), input_working_copy, solution, rank, singular_values, infos, rcond, driver);
@@ -3450,7 +3456,7 @@ static void linalg_lstsq_out_info(
     bool compute_residuals = true;
     if (driver == "gelss" || driver == "gelsd") {
       if (input.dim() == 2) {
-        compute_residuals = (rank.item().toInt() == n);
+        compute_residuals = (rank.item().toDouble() == n);
       } else {
         // it is not clear what to do if some matrices have rank < n in case of batched input
         // For now let's compute the residuals only if all matrices have rank equal to n
@@ -3459,8 +3465,9 @@ static void linalg_lstsq_out_info(
         compute_residuals = at::all(rank == n).item().toBool();
       }
     }
-    if (compute_residuals) {
-      // LAPACK stores residuals data for postprocessing in rows n:(m-n)
+  if (compute_residuals) {
+    // LAPACK stores residuals data for postprocessing in rows n:(m-n)
+    if (solution.size(-2) >= n + (m - n)) {
       auto raw_residuals = solution.narrow(/*dim=*/-2, /*start=*/n, /*length*/m - n);
       if (raw_residuals.is_complex()) {
         raw_residuals.mul_(raw_residuals.conj());
@@ -3471,13 +3478,19 @@ static void linalg_lstsq_out_info(
       at::sum_out(residuals, raw_residuals, /*dim=*/-2, /*keepdim=*/false, /*dtype*/real_dtype);
     }
   }
-  auto solution_view = solution.narrow(/*dim=*/-2, /*start=*/0, /*length*/n);
-  // manually restride original
-  solution.set_(solution.storage(), solution_view.storage_offset(), solution_view.sizes(), solution_view.strides());
+  }
+  if (solution.size(-2) >= n) {
+    auto solution_view = solution.narrow(/*dim=*/-2, /*start=*/0, /*length*/n);
+
+    // manually restride original
+    solution.set_(solution.storage(), solution_view.storage_offset(),
+                  solution_view.sizes(), solution_view.strides());
+  } else {
+    solution = at::zeros({solution.size(-1), n}, solution.options());
+  }
   if (m == 0) {
     solution.zero_();
   }
-
   // for 1-dimensional 'other', we need to squeeze the solution after "apply_lstsq"
   if (vector_case) {
     solution.squeeze_(-1);

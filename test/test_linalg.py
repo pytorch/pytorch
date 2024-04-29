@@ -185,7 +185,7 @@ class TestLinalg(TestCase):
         if self.device_type == 'cpu':
             drivers = ('gels', 'gelsy', 'gelsd', 'gelss', None)
         else:
-            drivers = ('gels', None)
+            drivers = ('gels', 'gelss')
 
         def check_solution_correctness(a, b, sol):
             sol2 = a.pinverse() @ b
@@ -261,12 +261,13 @@ class TestLinalg(TestCase):
 
         def check_correctness_scipy(a, b, res, driver, cond):
             # SciPy provides 3 driver options: gelsd, gelss, gelsy
-            if TEST_SCIPY and driver in ('gelsd', 'gelss', 'gelsy'):
-                import scipy.linalg
+            if device == 'cpu':
+                if TEST_SCIPY and driver in ('gelsd', 'gelss', 'gelsy'):
+                    import scipy.linalg
 
-                def scipy_ref(a, b):
-                    return scipy.linalg.lstsq(a, b, lapack_driver=driver, cond=cond)
-                check_correctness_ref(a, b, res, scipy_ref, driver=driver)
+                    def scipy_ref(a, b):
+                        return scipy.linalg.lstsq(a, b, lapack_driver=driver, cond=cond)
+                    check_correctness_ref(a, b, res, scipy_ref, driver=driver)
 
         def check_correctness_numpy(a, b, res, driver, rcond):
             # NumPy uses only gelsd routine
@@ -337,6 +338,9 @@ class TestLinalg(TestCase):
             sol = torch.linalg.lstsq(a, b).solution
             sol2 = a.pinverse() @ b
             self.assertEqual(sol, sol2, rtol=1e-5, atol=1e-5)
+            sol_svd = torch.linalg.lstsq(a, b, driver='gelss').solution
+            sol2_svd = a.pinverse() @ b
+            self.assertEqual(sol_svd, sol2_svd, rtol=1e-5, atol=1e-5)
 
         ms = [2 ** i for i in range(5)]
         batches = [(), (0,), (2,), (2, 2), (2, 2, 2)]
@@ -378,11 +382,19 @@ class TestLinalg(TestCase):
             torch.linalg.lstsq(a, b)[0],
             torch.zeros(0, 0, 3, 2, dtype=dtype, device=device)
         )
+        self.assertEqual(
+            torch.linalg.lstsq(a, b, driver='gelss')[0],
+            torch.zeros(0, 0, 3, 2, dtype=dtype, device=device)
+        )
         # empty a and b
         a = torch.rand(2, 2, 0, 0, dtype=dtype, device=device)
         b = torch.rand(2, 2, 0, 0, dtype=dtype, device=device)
         self.assertEqual(
             torch.linalg.lstsq(a, b)[0],
+            torch.zeros(2, 2, 0, 0, dtype=dtype, device=device)
+        )
+        self.assertEqual(
+            torch.linalg.lstsq(a, b, driver='gelss')[0],
             torch.zeros(2, 2, 0, 0, dtype=dtype, device=device)
         )
         # empty a and b
@@ -392,11 +404,19 @@ class TestLinalg(TestCase):
             torch.linalg.lstsq(a, b)[0],
             torch.zeros(2, 2, 0, 0, dtype=dtype, device=device)
         )
+        self.assertEqual(
+            torch.linalg.lstsq(a, b, driver='gelss')[0],
+            torch.zeros(2, 2, 0, 0, dtype=dtype, device=device)
+        )
         # empty a but not b
         a = torch.rand(2, 2, 3, 0, dtype=dtype, device=device)
         b = torch.rand(2, 2, 3, 2, dtype=dtype, device=device)
         self.assertEqual(
             torch.linalg.lstsq(a, b)[0],
+            torch.zeros(2, 2, 0, 2, dtype=dtype, device=device)
+        )
+        self.assertEqual(
+            torch.linalg.lstsq(a, b, driver='gelss')[0],
             torch.zeros(2, 2, 0, 2, dtype=dtype, device=device)
         )
 
@@ -445,11 +465,6 @@ class TestLinalg(TestCase):
         b = torch.rand(2, 2, 2, dtype=dtype, device=device)
 
         if device != 'cpu':
-            try:
-                result = torch.linalg.lstsq(a, b, driver='gelss')
-                self.assertTrue(result is not None)
-            except Exception as e:
-                self.fail(f"Unexpected error occurred: {e}")
             with self.assertRaisesRegex(
                 RuntimeError,
                 'torch.linalg.lstsq: `driver` other than `gels` or `gelss` is not supported on CUDA'
