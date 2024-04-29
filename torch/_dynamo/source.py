@@ -581,6 +581,14 @@ def is_from_local_source(source: Source, *, allow_cell_or_freevar=True):
     return True
 
 
+def is_from_flatten_script_object_source(source: Source):
+    if isinstance(source, FlattenScriptObjectSource):
+        return True
+    elif isinstance(source, ChainedSource):
+        return is_from_flatten_script_object_source(source.base)
+    return False
+
+
 def is_from_optimizer_source(source: Source):
     if isinstance(source, OptimizerSource):
         return True

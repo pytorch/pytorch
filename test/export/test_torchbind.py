@@ -7,6 +7,8 @@ import torch.utils._pytree as pytree
 from torch._dynamo.testing import EagerAndRecordGraphs
 from torch._functorch.aot_autograd import aot_export_module
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
+
+from torch._higher_order_ops.wrap import wrap
 from torch._library.fake_class_registry import FakeScriptObject
 from torch.export import export
 from torch.export._trace import _export
@@ -18,7 +20,10 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TestCase,
 )
-from torch.testing._internal.torchbind_impls import init_torchbind_implementations
+from torch.testing._internal.torchbind_impls import (
+    _empty_tensor_queue,
+    init_torchbind_implementations,
+)
 
 
 def _assertEqualSkipScriptObject(test_case, exp, actual):
@@ -29,6 +34,25 @@ def _assertEqualSkipScriptObject(test_case, exp, actual):
         if isinstance(a, torch.ScriptObject) and isinstance(b, torch.ScriptObject):
             continue
         test_case.assertEqual(a, b)
+
+
+def _check_script_obj_equal(test_case, a: torch.ScriptObject, b: torch.ScriptObject):
+    return test_case.assertEqual(
+        a._type().qualified_name(), b._type().qualified_name()
+    ) and test_case.assertEqual(a.__obj_flatten__(), b.__obj_flatten__())
+
+
+def _assertEqualScriptObject(
+    test_case, exp, actual, check_obj_eq=_check_script_obj_equal
+):
+    flat_exp = pytree.tree_leaves(exp)
+    flat_actual = pytree.tree_leaves(actual)
+    test_case.assertEqual(len(flat_exp), len(flat_actual))
+    for a, b in zip(flat_exp, flat_actual):
+        if isinstance(a, torch.ScriptObject) and isinstance(b, torch.ScriptObject):
+            check_obj_eq(test_case, a, b)
+        else:
+            test_case.assertEqual(a, b)
 
 
 @skipIfTorchDynamo("torchbind not supported with dynamo yet")
@@ -910,32 +934,16 @@ def forward(self, L_tq_ : torch.ScriptObject, L_x_ : torch.Tensor):
     @unittest.expectedFailure
     def test_tensor_queue_hash(self):
         hashes = set()
-        tq = torch.classes._TorchScriptTesting._TensorQueue(
-            torch.empty(
-                0,
-            ).fill_(-1)
-        )
+        tq = _empty_tensor_queue()
         tq.push(torch.randn(2, 3))
         hashes.add(hash(tq))
-        tq = torch.classes._TorchScriptTesting._TensorQueue(
-            torch.empty(
-                0,
-            ).fill_(-1)
-        )
+        tq = _empty_tensor_queue()
         tq.push(torch.randn(2, 3))
         hashes.add(hash(tq))
-        tq = torch.classes._TorchScriptTesting._TensorQueue(
-            torch.empty(
-                0,
-            ).fill_(-1)
-        )
+        tq = _empty_tensor_queue()
         tq.push(torch.randn(2, 3))
         hashes.add(hash(tq))
-        tq = torch.classes._TorchScriptTesting._TensorQueue(
-            torch.empty(
-                0,
-            ).fill_(-1)
-        )
+        tq = _empty_tensor_queue()
         tq.push(torch.randn(2, 3))
         hashes.add(hash(tq))
         self.assertEqual(len(hashes), 4)
@@ -956,60 +964,36 @@ def forward(self, L_tq_ : torch.ScriptObject, L_x_ : torch.Tensor):
         cnt = torch._dynamo.testing.CompileCounter()
         x = torch.randn(2, 3)
 
-        tq1 = torch.classes._TorchScriptTesting._TensorQueue(
-            torch.empty(
-                0,
-            ).fill_(-1)
-        )
+        tq1 = _empty_tensor_queue()
         torch.compile(mod, backend=cnt)(tq1, x)
         self.assertEqual(cnt.frame_count, 1)
 
-        tq2 = torch.classes._TorchScriptTesting._TensorQueue(
-            torch.empty(
-                0,
-            ).fill_(-1)
-        )
+        tq2 = _empty_tensor_queue()
         for _ in range(10):
             tq2.push(torch.randn(4, 5, requires_grad=False))
         torch.compile(mod, backend=cnt)(tq2, x)
         # Queue length change causes re-compile
         self.assertEqual(cnt.frame_count, 2)
 
-        tq3 = torch.classes._TorchScriptTesting._TensorQueue(
-            torch.empty(
-                0,
-            ).fill_(-1)
-        )
+        tq3 = _empty_tensor_queue()
         tq3.push(torch.randn(2, 3, requires_grad=False))
         torch.compile(mod, backend=cnt)(tq3, x)
         # Tensor in queue changes shape causes re-compile
         self.assertEqual(cnt.frame_count, 3)
 
-        tq4 = torch.classes._TorchScriptTesting._TensorQueue(
-            torch.empty(
-                0,
-            ).fill_(-1)
-        )
+        tq4 = _empty_tensor_queue()
         tq4.push(torch.randn(2, 3, requires_grad=False))
         torch.compile(mod, backend=cnt)(tq4, x)
         # No recompile
         self.assertEqual(cnt.frame_count, 3)
 
-        tq5 = torch.classes._TorchScriptTesting._TensorQueue(
-            torch.empty(
-                0,
-            ).fill_(-1)
-        )
+        tq5 = _empty_tensor_queue()
         tq5.push(torch.randn(2, 3, requires_grad=True))
         torch.compile(mod, backend=cnt)(tq5, x)
         # Tensor in queue changes dispatch key causes re-compile
         self.assertEqual(cnt.frame_count, 4)
 
-        tq6 = torch.classes._TorchScriptTesting._TensorQueue(
-            torch.empty(
-                0,
-            ).fill_(-1)
-        )
+        tq6 = _empty_tensor_queue()
         tq6.push(torch.randn(2, 3, requires_grad=True, dtype=torch.float64))
         torch.compile(mod, backend=cnt)(tq6, x)
         # Tensor in queue changes dtype causes re-compile
@@ -1031,33 +1015,24 @@ def forward(self, L_tq_ : torch.ScriptObject, L_x_ : torch.Tensor):
         cnt = torch._dynamo.testing.CompileCounter()
         x = torch.randn(2, 3)
 
-        tq1 = torch.classes._TorchScriptTesting._TensorQueue(
-            torch.empty(
-                0,
-            ).fill_(-1)
-        )
+        tq1 = _empty_tensor_queue()
         tq1.push(torch.randn(2, 3, requires_grad=False))
         torch.compile(mod, backend=cnt)(tq1, x)
+        self.assertEqual(cnt.frame_count, 1)
 
-        tq2 = torch.classes._TorchScriptTesting._TensorQueue(
-            torch.empty(
-                0,
-            ).fill_(-1)
-        )
+        tq2 = _empty_tensor_queue()
         # make first tensor's secon dim dynamic
         tq2.push(torch.randn(2, 4, requires_grad=False))
         torch.compile(mod, backend=cnt)(tq2, x)
+        self.assertEqual(cnt.frame_count, 2)
 
-        tq3 = torch.classes._TorchScriptTesting._TensorQueue(
-            torch.empty(
-                0,
-            ).fill_(-1)
-        )
+        tq3 = _empty_tensor_queue()
         tq3.push(torch.randn(2, 5, requires_grad=False))
         # should have no-recompilation
         torch.compile(mod, backend=cnt)(tq3, x)
+        self.assertEqual(cnt.frame_count, 2)
 
-    def test_compile_input_aliasing_contents(self):
+    def test_compile_error_on_input_aliasing_contents(self):
         backend = EagerAndRecordGraphs()
 
         class Model(torch.nn.Module):
@@ -1066,24 +1041,174 @@ def forward(self, L_tq_ : torch.ScriptObject, L_x_ : torch.Tensor):
                 self.check_tq_is_fake = True
 
             def forward(self, tq, x):
-                tq.push(x.cos())
-                tq.push(x.sin())
-                x_sin = tq.pop() - tq.size()
-                return x_sin, tq
+                return x.sin(), tq.pop().cos()
 
         x = torch.randn(2, 3)
         mod = Model()
 
-        tq1 = torch.classes._TorchScriptTesting._TensorQueue(
-            torch.empty(
-                0,
-            ).fill_(-1)
-        )
+        tq1 = _empty_tensor_queue()
         tq1.push(x)
-        # TODO: x's source is set/overrided to be the tq1.queue[0]
-        # the graph module and byte code seems to be reasonable.
-        with self.assertRaisesRegex(NotImplementedError, "is not implemented for"):
-            ret = torch.compile(mod, backend=backend)(tq1, x)
+        with self.assertRaisesRegex(RuntimeError, "is alising"):
+            torch.compile(mod, backend=backend)(tq1, x)
+
+    def test_compile_body_aliasing_contents(self):
+        backend = EagerAndRecordGraphs()
+
+        def f(tq, x):
+            x1 = x.view(-1)
+            x2 = x.permute(1, 0)
+            tq.push(x1)
+            tq.push(x2)
+            return x1 - tq.size(), x2 + tq.size(), tq
+
+        x = torch.randn(2, 3)
+        _assertEqualScriptObject(
+            self,
+            f(_empty_tensor_queue(), x),
+            torch.compile(f, backend=backend)(_empty_tensor_queue(), x),
+        )
+        self.assertExpectedInline(
+            backend.graphs[0].code.strip(),
+            """\
+def forward(self, L_x_ : torch.Tensor, L_tq_ : torch.ScriptObject):
+    l_x_ = L_x_
+    l_tq_ = L_tq_
+    x1 = l_x_.view(-1)
+    x2 = l_x_.permute(1, 0);  l_x_ = None
+    call_torchbind = torch.ops.higher_order.call_torchbind(l_tq_, 'push', x1)
+    call_torchbind_1 = torch.ops.higher_order.call_torchbind(l_tq_, 'push', x2)
+    call_torchbind_2 = torch.ops.higher_order.call_torchbind(l_tq_, 'size')
+    sub = x1 - 2;  x1 = None
+    call_torchbind_3 = torch.ops.higher_order.call_torchbind(l_tq_, 'size');  l_tq_ = None
+    add = x2 + 2;  x2 = None
+    return (sub, add)""",
+        )
+
+    def test_compile_error_on_non_fakified_method(self):
+        backend = EagerAndRecordGraphs()
+
+        def f(tq, x):
+            x1 = x.view(-1)
+            x2 = x.permute(1, 0)
+            tq.push(x1)
+            tq.push(x2)
+            # though real tensor queue implemented a method clone_queue,
+            # The fakified version doesn't.
+            flat_obj = tq.clone_queue()
+            return flat_obj
+
+        x = torch.randn(2, 3)
+        with self.assertRaisesRegex(
+            RuntimeError, "FakeScriptObject doesn't define method"
+        ):
+            torch.compile(f, backend=backend)(_empty_tensor_queue(), x)
+
+    def test_compile_obj_as_hop_input(self):
+        def f(tq, x):
+            def fn(tq, x):
+                tq.push(x)
+                return x.sin()
+
+            return wrap(fn, tq, x)
+
+        x = torch.randn(2, 3)
+        _assertEqualScriptObject(
+            self,
+            f(_empty_tensor_queue(), x),
+            torch.compile(f, backend="eager")(_empty_tensor_queue(), x),
+        )
+
+    def test_compile_obj_closure(self):
+        def f(x):
+            def inner_f(x):
+                tq.push(x.sin())
+
+            inner_f(x)
+            return tq.pop(), tq
+
+        opt_f = torch.compile(f, backend="eager")
+
+        tq = _empty_tensor_queue()
+        x = torch.randn(3, 2)
+        _assertEqualScriptObject(self, f(x), opt_f(x))
+
+    def test_compile_global_obj(self):
+        global _TENSOR_QUEUE_GLOBAL_TEST
+        _TENSOR_QUEUE_GLOBAL_TEST = _empty_tensor_queue()
+
+        def f(x):
+            _TENSOR_QUEUE_GLOBAL_TEST.push(x.sin())
+            return _TENSOR_QUEUE_GLOBAL_TEST.pop(), _TENSOR_QUEUE_GLOBAL_TEST
+
+        opt_f = torch.compile(f, backend="eager")
+        x = torch.randn(3, 2)
+        eager_ret = f(x)
+        opt_ret = opt_f(x)
+        _assertEqualScriptObject(self, eager_ret, opt_ret)
+
+    def test_compile_obj_graph_breaks(self):
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        def f(tq, x):
+            tq.push(x.sin())
+            tq.push(x.sin())
+            torch._dynamo.graph_break()
+            tq.pop()
+            torch._dynamo.graph_break()
+            tq.push(x.cos() + tq.size())
+            torch._dynamo.graph_break()
+            tq.push(x.cos() - tq.size())
+            return x, tq.pop(), tq
+
+        opt_f = torch.compile(f, backend=cnt)
+        x = torch.randn(3, 2)
+        _assertEqualScriptObject(
+            self, f(_empty_tensor_queue(), x), opt_f(_empty_tensor_queue(), x)
+        )
+        self.assertEqual(cnt.frame_count, 4)
+
+    def test_compile_obj_attributes(self):
+        backend = EagerAndRecordGraphs()
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.tq = _empty_tensor_queue()
+
+            def forward(self, x):
+                self.tq.push(x)
+                return self.tq.pop()
+
+        x = torch.randn(2, 3)
+        opt_f = torch.compile(Model(), backend=backend)
+        _assertEqualScriptObject(self, Model()(x), opt_f(x))
+        self.assertEqual(len(backend.graphs), 1)
+        # lifted as input. In the future, we would want to cosolidate this
+        # with non-strict behavior, where they're set as attributes.
+        self.assertExpectedInline(
+            backend.graphs[0].code.strip(),
+            """\
+def forward(self, L_self_tq : torch.ScriptObject, L_x_ : torch.Tensor):
+    l_self_tq = L_self_tq
+    l_x_ = L_x_
+    call_torchbind = torch.ops.higher_order.call_torchbind(l_self_tq, 'push', l_x_);  l_x_ = None
+    call_torchbind_1 = torch.ops.higher_order.call_torchbind(l_self_tq, 'pop');  l_self_tq = None
+    return (call_torchbind_1,)""",
+        )
+
+    def test_compile_obj_torchbind_op(self):
+        def f(tq, x):
+            torch.ops._TorchScriptTesting.queue_push(tq, x.cos())
+            torch.ops._TorchScriptTesting.queue_push(tq, x.cos() + 1)
+            torch.ops._TorchScriptTesting.queue_pop(tq)
+            torch.ops._TorchScriptTesting.queue_push(tq, x.sin())
+            return tq.pop(), tq.pop() + tq.size(), tq
+
+        opt_f = torch.compile(f, backend="eager")
+        x = torch.randn(2)
+        _assertEqualScriptObject(
+            self, f(_empty_tensor_queue(), x), opt_f(_empty_tensor_queue(), x)
+        )
 
 
 @skipIfTorchDynamo("torchbind not supported with dynamo yet")

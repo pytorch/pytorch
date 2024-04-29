@@ -5,16 +5,28 @@ import torch
 
 _TORCHBIND_IMPLS_INITIALIZED = False
 
+_TENSOR_QUEUE_GLOBAL_TEST = None
+
 
 def init_torchbind_implementations():
     global _TORCHBIND_IMPLS_INITIALIZED
+    global _TENSOR_QUEUE_GLOBAL_TEST
     if _TORCHBIND_IMPLS_INITIALIZED:
         return
 
     load_torchbind_test_lib()
     register_fake_operators()
     register_fake_classes()
+    _TENSOR_QUEUE_GLOBAL_TEST = _empty_tensor_queue()
     _TORCHBIND_IMPLS_INITIALIZED = True
+
+
+def _empty_tensor_queue() -> torch.ScriptObject:
+    return torch.classes._TorchScriptTesting._TensorQueue(
+        torch.empty(
+            0,
+        ).fill_(-1)
+    )
 
 
 # put these under a function because the corresponding library might not be loaded yet.

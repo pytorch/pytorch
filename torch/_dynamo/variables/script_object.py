@@ -31,7 +31,17 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         from ..source import AttrSource
         from .higher_order_ops import TorchHigherOrderOperatorVariable
 
-        assert callable(getattr(self.value, name))
+        method = getattr(self.value, name, None)
+        if method is None:
+            raise RuntimeError(
+                f"FakeScriptObject doesn't define method {name}. Did you forget to implement it in the fake class?"
+            )
+
+        if not callable(method):
+            raise RuntimeError(
+                "Only method calls on TorchScript objects are supported. Please file a feature request if you need this."
+            )
+
         return TorchHigherOrderOperatorVariable.make(
             call_torchbind,
             source=AttrSource(self.source, name),
