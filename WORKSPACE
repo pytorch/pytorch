@@ -73,7 +73,7 @@ http_archive(
 
 http_archive(
     name = "io_opentelemetry_cpp",
-    sha256 = "<sha256>",
+    sha256 = "c7e7801c9f6228751cdb9dd4724d0f04777ed53f524c8828e73bf4c9f894e0bd",
     strip_prefix = "opentelemetry-cpp-1.14.2",
     urls = [
         "https://github.com/open-telemetry/opentelemetry-cpp/archive/refs/tags/v1.14.2.tar.gz",
