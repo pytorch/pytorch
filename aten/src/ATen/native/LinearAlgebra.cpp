@@ -2841,11 +2841,9 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
   if (is_reduce_over_1D_vector) {
     Tensor self_;
     if (opt_dtype.has_value()) {
-      self_ = self.to(*opt_dtype);
-    } else if (result.dtype() != self.dtype()) {
-      self_ = self.to(result.dtype());
+      self_ = self.to(*opt_dtype).abs();
     } else {
-      self_ = self;
+      self_ = self.abs();
     }
     if (ord != 0.0) {
       keepdim ? at::abs_outf(self_, const_cast<Tensor&>(result)) : at::abs_outf(self_.squeeze(reduce_dim), const_cast<Tensor&>(result));
