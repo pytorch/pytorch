@@ -4032,6 +4032,32 @@ def forward(self, b_t, x, y):
         ][0]
         self.assertEqual(op_node.target._name, "aten::add.Tensor")
 
+    @testing.expectedFailureRetraceability
+    def test_layer_sharing(self):
+        N, C, H, W = 1, 2, 2, 3
+
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                layer = torch.nn.LayerNorm([C, H, W])
+                self.norms = torch.nn.ModuleList(
+                    [
+                        layer,
+                        layer,
+                    ]
+                )
+
+            def forward(self, x):
+                for norm in self.norms:
+                    x = norm(x)
+                return x
+
+        m = Module()
+        copied_m = copy.deepcopy(m)
+        ep = export(copied_m, (torch.randn(N, C, H, W),))
+        self.assertEqual(copied_m.state_dict(), m.state_dict())
+        self.assertEqual(ep.state_dict, m.state_dict())
+
     def test_non_persistent_buffer(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
