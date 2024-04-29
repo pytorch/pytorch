@@ -208,7 +208,7 @@ class EagerAndRecordGraphs:
 
     def __call__(self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
         self.graphs.append(gm)
-        return gm
+        return gm.forward
 
 
 def strip_comment(code) -> str:
@@ -339,12 +339,6 @@ def skipIfNotPy311(fn):
     if sys.version_info >= (3, 11):
         return fn
     return unittest.skip(fn)
-
-
-def xfailIfPy311(fn):
-    if sys.version_info >= (3, 11):
-        return unittest.expectedFailure(fn)
-    return fn
 
 
 # Controls tests generated in test/inductor/test_torchinductor_dynamic_shapes.py
