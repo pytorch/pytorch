@@ -41,9 +41,9 @@ jobs:
             USER_LIST=$(echo "$COMMENTS" | tr -d '\r\n' | jq '.[0].body' -r)
             RUN_TYPE=$(echo $COMMENTS | tr -d '\r\n' | jq '.[1].body' --raw-output)
 
-            WORKFLOW_TYPE_RG = "rg"
-            WORKFLOW_TYPE_LABEL = "label"
-            WORKFLOW_TYPE_BOTH = "both"
+            WORKFLOW_TYPE_RG="rg"
+            WORKFLOW_TYPE_LABEL="label"
+            WORKFLOW_TYPE_BOTH="both"
 
             if [[ ${USER_LIST:0:1} == "!" ]]; then
               # Disable ARC runners for everyone.
