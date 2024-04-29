@@ -806,10 +806,11 @@ class CppTorchCudaOptions(CppTorchOptions):
     maintains cuda device related build args.
     """
 
-    def __init__(self, use_cuda: bool = True, aot_mode: bool = False) -> None:
-        from torch._inductor.codecache import pick_vec_isa
+    def __init__(
+        self, chosen_isa: VecISA, use_cuda: bool = True, aot_mode: bool = False
+    ) -> None:
+        # from torch._inductor.codecache import pick_vec_isa
 
-        chosen_isa = pick_vec_isa()
         super().__init__(chosen_isa=chosen_isa, aot_mode=aot_mode)
 
         cuda_definations: List[str] = []

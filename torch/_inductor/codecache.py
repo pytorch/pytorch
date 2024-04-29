@@ -2458,6 +2458,55 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
     )
 
 
+# Will remove the temp code after switch to new cpp_builder
+def _temp_validate_new_and_old_command(new_cmd: List[str], old_cmd: List[str]):
+    new_diff: List[str] = [x for x in new_cmd if x not in old_cmd]
+    old_diff: List[str] = [y for y in old_cmd if y not in new_cmd]
+
+    if new_diff or old_diff:
+        print("!!! new_diff: ", new_diff)
+        print("!!! old_diff: ", old_diff)
+        raise RuntimeError("Error in new and old command different.")
+
+
+def _validate_cpp_commands():
+    new_cmd = ["This ", "is", "New", "cmd"]
+
+    input_path = "/temp/dummy_input.cpp"
+    output_path = "/temp/dummy_output.so"
+    picked_isa = pick_vec_isa()
+
+    old_cmd = cpp_compile_command(
+        input=input_path,
+        output=output_path,
+        vec_isa=picked_isa,
+        cuda=True,
+        aot_mode=False,
+        compile_only=False,
+        use_absolute_path=False,
+        use_mmap_weights=True,
+    ).split(" ")
+
+    from torch._inductor.cpp_builder import CppBuilder, CppTorchCudaOptions
+
+    dummy_build_option = CppTorchCudaOptions(chosen_isa=picked_isa, use_cuda=True)
+
+    dummy_builder = CppBuilder(
+        name="dummy_output",
+        sources=input_path,
+        BuildOption=dummy_build_option,
+        output_dir="/temp/",
+        compile_only=False,
+        use_absolute_path=False,
+    )
+    new_cmd = dummy_builder.get_command_line().split(" ")
+
+    _temp_validate_new_and_old_command(new_cmd, old_cmd)
+
+
+# _validate_cpp_commands()
+
+
 def _reload_python_module_in_subproc(key, path):
     return PyCodeCache.load_by_key_path(key, path)
 
