@@ -37,7 +37,7 @@ at::Tensor PackedEmbeddingBagWeight::unpack() {
       scale_bias_bytes = 4;
     }
 
-    const auto* input = packed_weight.data_ptr<uint8_t>();
+    const auto* input = packed_weight.const_data_ptr<uint8_t>();
     // Calculate the output shape, accounting for the last n bytes to be used
     // for scale/bias rest of the entries are packed depending on the bit_width.
     std::vector<int64_t> output_shape = {
@@ -125,7 +125,7 @@ Tensor& qembeddingbag_byte_unpack_out(Tensor& output, const Tensor& packed_weigh
   // The last 2 values are used to store the FP32 scale and zero_point values
   // per row.
   const int32_t output_columns = input_columns - 2 * sizeof(float);
-  const auto* input_data = packed_weight.data_ptr<uint8_t>();
+  const auto* input_data = packed_weight.const_data_ptr<uint8_t>();
 
   std::vector<int64_t> output_shape = packed_weight_sizes.vec();
   output_shape[col_dim] = output_columns;
@@ -187,7 +187,7 @@ Tensor _qembeddingbag_nbit_unpack_helper(
     int BIT_RATE) {
   const auto input_rows = packed_weight.size(0);
   const auto input_columns = packed_weight.size(1);
-  const auto* input_data = packed_weight.data_ptr<uint8_t>();
+  const auto* input_data = packed_weight.const_data_ptr<uint8_t>();
   int NUM_ELEM_PER_BYTE = 8 / BIT_RATE;
 
   // The last 4 bytes per row are two fp16 scale and zero_point.

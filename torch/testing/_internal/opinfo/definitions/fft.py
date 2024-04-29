@@ -767,18 +767,10 @@ python_ref_db: List[OpInfo] = [
         "_refs.fft.fftshift",
         op_db=op_db,
         torch_opinfo_name="fft.fftshift",
-        skips=(
-            # TODO Move fftshift to decomps
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref"),
-        ),
     ),
     PythonRefInfo(
         "_refs.fft.ifftshift",
         op_db=op_db,
         torch_opinfo_name="fft.ifftshift",
-        skips=(
-            # TODO Move ifftshift to decomps
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref"),
-        ),
     ),
 ]

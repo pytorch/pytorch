@@ -570,14 +570,15 @@ class TestFakeQuantizeOps(TestCase):
             self.assertEqual(state_dict['zero_point'], 53)
             b = io.BytesIO()
             torch.save(state_dict, b)
-            b.seek(0)
-            loaded_dict = torch.load(b)
-            loaded_fq_module = FakeQuantizeClass(observer, quant_min, quant_max)
-            loaded_fq_module.load_state_dict(loaded_dict)
-            for key in state_dict:
-                self.assertEqual(state_dict[key], loaded_fq_module.state_dict()[key])
+            for weights_only in [True, False]:
+                b.seek(0)
+                loaded_dict = torch.load(b, weights_only=weights_only)
+                loaded_fq_module = FakeQuantizeClass(observer, quant_min, quant_max)
+                loaded_fq_module.load_state_dict(loaded_dict)
+                for key in state_dict:
+                    self.assertEqual(state_dict[key], loaded_fq_module.state_dict()[key])
 
-            self.assertEqual(loaded_fq_module.calculate_qparams(), fq_module.calculate_qparams())
+                self.assertEqual(loaded_fq_module.calculate_qparams(), fq_module.calculate_qparams())
 
     def test_fake_quant_control(self):
         for fq_module in [torch.ao.quantization.default_fake_quant(),
