@@ -989,7 +989,7 @@ class KernelArgs:
         return str(size)
 
     def cpp_argdefs(self):
-        from .cpp import DTYPE_TO_CPP, INDEX_TYPE
+        from .cpp_utils import DTYPE_TO_CPP, INDEX_TYPE
 
         call_args = []
         arg_defs = []
@@ -1138,7 +1138,7 @@ class CSEVariable:
 
 class CppWrapperKernelArgs(KernelArgs):
     def wrap_ptr_arg(self, buf, dtype):
-        from .cpp import DTYPE_TO_CPP
+        from .cpp_utils import DTYPE_TO_CPP
 
         if config.abi_compatible:
             # In the abi_compatible model, we just return the buf here.
