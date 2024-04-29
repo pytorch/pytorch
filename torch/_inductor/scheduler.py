@@ -2290,7 +2290,7 @@ class Scheduler:
                 )
         # return the possible fusions with highest priority
         possible_fusions_with_highest_priority = min(
-            possible_fusions_group_by_priority.items(), key=lambda item: item[0]
+            possible_fusions_group_by_priority.items(), key=operator.itemgetter(0)
         )[1]
         assert len(possible_fusions_with_highest_priority) > 0
         return possible_fusions_with_highest_priority

@@ -496,11 +496,11 @@ def _export_non_strict(
 ):
     # [NOTE] If the user is exporting under training mode, we want to detect if there is any
     # state change in the autograd global state and error. If the user is exporting under inference
-    # mode, we don't care.
+    # mode, we don't care. At predispatch level, we don't care about the state change.
     is_grad_enabled = torch._C.is_grad_enabled()
-    grad_safe_guard = (
-        AutogradStateOpsFailSafeguard() if is_grad_enabled else nullcontext()
-    )
+    grad_safe_guard = nullcontext()
+    if not pre_dispatch and is_grad_enabled:
+        grad_safe_guard = AutogradStateOpsFailSafeguard()  # type: ignore[assignment]
 
     @contextmanager
     def _compiling_state_context():
@@ -515,7 +515,11 @@ def _export_non_strict(
     # otherwise aot_export_module will error out because it sees a mix of fake_modes.
     # And we want aot_export_module to use the fake_tensor mode in dynamo to keep the pipeline easy to reason about.
     with torch.nn.utils.stateless._reparametrize_module(
-        mod, fake_params_buffers
+        mod,
+        fake_params_buffers,
+        tie_weights=True,
+        strict=True,
+        stack_weights=True,
     ), grad_safe_guard, _ignore_backend_decomps(), _compiling_state_context():  # type: ignore[attr-defined]
         gm, graph_signature = transform(aot_export_module)(
             mod,
@@ -585,10 +589,13 @@ def _export_non_strict(
             return CustomObjArgument(
                 name=node.name, class_fqn=val._type().qualified_name()  # type: ignore[attr-defined]
             )
-        else:
-            # TODO: this branch is likely wrong, all permissible ConstantArgument type
-            # should have been handled already
+        elif isinstance(val, (int, bool, str, float, type(None))):
             return ConstantArgument(name=node.name, value=val)
+        else:
+            raise AssertionError(
+                f"Encountered an unsupported object of type {type(val)} "
+                f"while writing the metadata for exported program"
+            )
 
     input_specs, output_specs = _sig_to_specs(
         user_inputs=set(graph_signature.user_inputs),
@@ -907,6 +914,7 @@ def _export(
     constant_attrs = _gather_constant_attrs(mod)
 
     flat_args, orig_in_spec = pytree.tree_flatten((args, kwargs))
+    original_state_dict = mod.state_dict(keep_vars=True)
 
     if not strict:
         out_spec = None
@@ -1069,7 +1077,7 @@ def _export(
             root=gm,
             graph=gm.graph,
             graph_signature=ep_non_strict.sig,
-            state_dict=mod.state_dict(keep_vars=True),
+            state_dict=original_state_dict,
             range_constraints=range_constraints,
             module_call_graph=_make_module_call_graph(
                 _EXPORT_MODULE_HIERARCHY, orig_in_spec, out_spec, module_call_signatures
@@ -1280,7 +1288,7 @@ def _export(
         root=gm,
         graph=gm.graph,
         graph_signature=export_graph_signature,
-        state_dict=mod.state_dict(keep_vars=True),
+        state_dict=original_state_dict,
         range_constraints=range_constraints,
         module_call_graph=_make_module_call_graph(
             _EXPORT_MODULE_HIERARCHY,
