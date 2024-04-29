@@ -81,7 +81,7 @@ def cpp_compiler_search(search: str) -> str:
             return cxx
         except (subprocess.SubprocessError, FileNotFoundError, ImportError):
             continue
-    raise exc.InvalidCxxCompiler()
+    raise exc.InvalidCxxCompiler()  # noqa: RSE102
 
 
 def install_gcc_via_conda() -> str:
