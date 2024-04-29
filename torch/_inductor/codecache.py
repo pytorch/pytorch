@@ -1090,7 +1090,7 @@ def _get_isa_dry_compile_fingerprint(isa_flags: str) -> str:
 
 class VecISA:
     _bit_width: int
-    _macro: str
+    _macro: List[str]
     _arch_flags: str
     _dtype_nelements: Dict[torch.dtype, int]
 
@@ -1136,7 +1136,7 @@ cdll.LoadLibrary("__lib_path__")
     def nelements(self, dtype: torch.dtype = torch.float) -> int:
         return self._dtype_nelements[dtype]
 
-    def build_macro(self) -> str:
+    def build_macro(self) -> List[str]:
         return self._macro
 
     def build_arch_flags(self) -> str:
@@ -1200,7 +1200,7 @@ cdll.LoadLibrary("__lib_path__")
 @dataclasses.dataclass
 class VecNEON(VecISA):
     _bit_width = 256  # This is required to leverage the compute implemented in aten/src/ATen/cpu/vec/vec256/vec256_float_neon.h
-    _macro = "-DCPU_CAPABILITY_NEON"
+    _macro = ["CPU_CAPABILITY_NEON"]
     _arch_flags = ""  # Unused
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
 
@@ -1213,7 +1213,7 @@ class VecNEON(VecISA):
 @dataclasses.dataclass
 class VecAVX512(VecISA):
     _bit_width = 512
-    _macro = "-DCPU_CAPABILITY_AVX512"
+    _macro = ["CPU_CAPABILITY_AVX512"]
     _arch_flags = (
         "-mavx512f -mavx512dq -mavx512vl -mavx512bw -mfma"
         if not _IS_WINDOWS
@@ -1230,7 +1230,7 @@ class VecAVX512(VecISA):
 @dataclasses.dataclass
 class VecAVX2(VecISA):
     _bit_width = 256
-    _macro = "-DCPU_CAPABILITY_AVX2"
+    _macro = ["CPU_CAPABILITY_AVX2"]
     _arch_flags = (
         "-mavx2 -mfma" if not _IS_WINDOWS else "/arch:AVX2"
     )  # TODO: use cflags
@@ -1245,7 +1245,11 @@ class VecAVX2(VecISA):
 @dataclasses.dataclass
 class VecZVECTOR(VecISA):
     _bit_width = 256
-    _macro = "-DCPU_CAPABILITY_ZVECTOR -DCPU_CAPABILITY=ZVECTOR -DHAVE_ZVECTOR_CPU_DEFINITION"
+    _macro = [
+        "CPU_CAPABILITY_ZVECTOR",
+        "CPU_CAPABILITY=ZVECTOR",
+        "HAVE_ZVECTOR_CPU_DEFINITION",
+    ]
     _arch_flags = "-mvx -mzvector"
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
 
@@ -1257,7 +1261,7 @@ class VecZVECTOR(VecISA):
 
 class InvalidVecISA(VecISA):
     _bit_width = 0
-    _macro = ""
+    _macro = [""]
     _arch_flags = ""
     _dtype_nelements = {}
 
@@ -1483,7 +1487,14 @@ def get_include_and_linking_paths(
     _set_gpu_runtime_env()
     from torch.utils import cpp_extension
 
-    macros = vec_isa.build_macro() if vec_isa != invalid_vec_isa else ""
+    # Remove below in the further
+    # macros = "-D {}".format(vec_isa.build_macro()) if vec_isa != invalid_vec_isa else ""
+    macros = ""
+    if vec_isa != invalid_vec_isa:
+        for x in vec_isa.build_macro():
+            macros_def = f"-D{x} "
+            macros += macros_def
+
     build_arch_flags = ""
     if sys.platform == "linux" and (
         include_pytorch

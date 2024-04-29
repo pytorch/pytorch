@@ -1,6 +1,7 @@
 # This CPP JIT builder is designed to support both Windows and Linux OS.
 # The design document please check this RFC: https://github.com/pytorch/pytorch/issues/124245
 
+import copy
 import errno
 import functools
 import logging
@@ -157,7 +158,7 @@ def is_apple_clang(cpp_compiler) -> bool:
 
 def _append_list(dest_list: List[str], src_list: List[str]):
     for item in src_list:
-        dest_list.append(item)  # noqa: PERF402
+        dest_list.append(copy.deepcopy(item))
 
 
 def _remove_duplication_in_list(orig_list: List[str]) -> List[str]:
@@ -467,12 +468,13 @@ def _cpp_prefix_path() -> str:
 
 
 def _get_build_args_of_chosen_isa(chosen_isa: VecISA):
+    macros = []
+    build_flags = []
     if chosen_isa != invalid_vec_isa:
         # Add Windows support later.
-        # TODO: fix later use abstract macro
-        # macros = [chosen_isa.build_macro()]
-        cap = str(chosen_isa).upper()
-        macros = [f"CPU_CAPABILITY_{cap}"]
+        for x in chosen_isa.build_macro():
+            macros.append(copy.deepcopy(x))
+
         build_flags = [chosen_isa.build_arch_flags()]
 
     if config.is_fbcode() and chosen_isa != invalid_vec_isa:
