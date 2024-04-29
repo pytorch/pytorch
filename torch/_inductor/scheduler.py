@@ -732,6 +732,10 @@ class SchedulerNode(BaseSchedulerNode):
             f"{name}.group.iteration = {self.group[1]}",
             f"{name}.sizes = {self._sizes}",
         ]
+        for dep in self.read_writes.reads_and_writes():
+            buf_name = dep.name
+            buf = V.graph.get_buffer(buf_name)
+            lines.append(f"{buf_name}_layout = {pformat(buf.layout)}")
         if self.get_aliases():
             lines.append(f"{name}.aliases = {pformat(self.get_aliases())}")
         if self.get_mutations():
