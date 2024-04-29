@@ -638,7 +638,7 @@ PyTorchStreamWriter::PyTorchStreamWriter(const std::string& file_name)
 PyTorchStreamWriter::PyTorchStreamWriter(
     const std::function<size_t(const void*, size_t)> writer_func)
     : archive_name_("archive"),
-      writer_func_(writer_func){
+      writer_func_(writer_func) {
   setup(archive_name_);
 }
 

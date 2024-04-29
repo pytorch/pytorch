@@ -25,7 +25,6 @@
  **************************************************************************/
 
 #include  "miniz.h"
-#include <stdio.h>
 
 typedef unsigned char mz_validate_uint16[sizeof(mz_uint16) == 2 ? 1 : -1];
 typedef unsigned char mz_validate_uint32[sizeof(mz_uint32) == 4 ? 1 : -1];
