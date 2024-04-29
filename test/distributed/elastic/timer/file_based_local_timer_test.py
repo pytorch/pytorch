@@ -38,7 +38,9 @@ if not (IS_WINDOWS or IS_MACOS):
             super().setUp()
             self.max_interval = 0.01
             self.file_path = "/tmp/test_file_path_" + str(uuid.uuid4())
-            self.server = timer.FileTimerServer(self.file_path, self.max_interval)
+            self.server = timer.FileTimerServer(
+                self.file_path, "test", self.max_interval
+            )
             self.server.start()
 
         def tearDown(self):
@@ -204,7 +206,9 @@ if not (IS_WINDOWS or IS_MACOS):
             super().setUp()
             self.file_path = "/tmp/test_file_path_" + str(uuid.uuid4())
             self.max_interval = 0.01
-            self.server = timer.FileTimerServer(self.file_path, self.max_interval)
+            self.server = timer.FileTimerServer(
+                self.file_path, "test", self.max_interval
+            )
 
         def tearDown(self):
             super().tearDown()
@@ -260,7 +264,8 @@ if not (IS_WINDOWS or IS_MACOS):
             )
 
         @mock.patch("os.kill")
-        def test_expired_timers(self, mock_os_kill):
+        @mock.patch("torch.distributed.elastic.timer.log_debug_info_for_expired_timers")
+        def test_expired_timers(self, mock_debug_info, mock_os_kill):
             """
             tests that a single expired timer on a process should terminate
             the process and clean up all pending timers that was owned by the process
@@ -275,6 +280,7 @@ if not (IS_WINDOWS or IS_MACOS):
             self.server.run_once()  # Allows the server to process all requests
             self.assertEqual(0, len(self.server._timers))
             mock_os_kill.assert_called_once_with(test_pid, signal.SIGKILL)
+            mock_debug_info.assert_called()
 
         @mock.patch("os.kill")
         def test_send_request_release(self, mock_os_kill):
