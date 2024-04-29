@@ -1070,7 +1070,8 @@ def _export(
         _rewrite_non_persistent_buffers(mod, ep_non_strict.sig, ep_non_strict.constants)
         _verify_nn_module_stack(gm)
         _verify_stack_trace(gm)
-        _verify_placeholder_names(gm, ep_non_strict.sig)
+        if not _is_torch_jit_trace:
+            _verify_placeholder_names(gm, ep_non_strict.sig)
         exported_program = ExportedProgram(
             root=gm,
             graph=gm.graph,
