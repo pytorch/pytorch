@@ -499,7 +499,7 @@ def get_args_parser() -> ArgumentParser:
         "--monitor_interval",
         action=env,
         type=float,
-        default=5,
+        default=0.1,
         help="Interval, in seconds, to monitor the state of workers.",
     )
     parser.add_argument(
@@ -802,7 +802,7 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
             ranks = set(map(int, args.local_ranks_filter.split(",")))
             assert ranks
         except Exception as e:
-            raise Exception(
+            raise Exception(  # noqa: TRY002
                 "--local_ranks_filter must be a comma-separated list of integers e.g. --local_ranks_filter=0,1,2"
             ) from e
 

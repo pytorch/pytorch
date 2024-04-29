@@ -1,4 +1,8 @@
 import torch
+from torch.overrides import (
+    handle_torch_function,
+    has_torch_function_unary,
+)
 from torch._C import _rename_privateuse1_backend, _get_privateuse1_backend_name
 from typing import List, Optional, Union
 
@@ -31,20 +35,6 @@ def rename_privateuse1_backend(backend_name: str) -> None:
 
     (1) ``get_amp_supported_dtype() -> List[torch.dtype]``
         get the supported dtypes on your "foo" device in AMP, maybe the "foo" device supports one more dtype.
-
-    (2) ``is_autocast_enabled() -> bool``
-        check the AMP is enabled or not on your "foo" device.
-
-    (3) ``get_autocast_dtype() -> torch.dtype``
-        get the supported dtype on your "foo" device in AMP, which is set by ``set_autocast_dtype`` or the
-        default dtype, and the default dtype is ``torch.float16``.
-
-    (4) ``set_autocast_enabled(bool) -> None``
-        enable the AMP or not on your "foo" device.
-
-    (5) ``set_autocast_dtype(dtype) -> None``
-        set the supported dtype on your "foo" device in AMP, and the dtype be contained in the dtypes got
-        from ``get_amp_supported_dtype``.
 
     Note(random): If you want to support to set seed for your device, BackendModule needs to have the following API's:
 
@@ -126,9 +116,13 @@ def _normalization_device(custom_backend_name: str, device: Optional[Union[int, 
 def _generate_tensor_methods_for_privateuse1_backend(custom_backend_name: str) -> None:
     @property  # type: ignore[misc]
     def wrap_tensor_backend(self: torch.Tensor) -> bool:
+        if has_torch_function_unary(self):
+            # TODO mypy doesn't support @property, see: https://github.com/python/mypy/issues/6185
+            return handle_torch_function(wrap_tensor_backend.__get__, (self,), self)  # type: ignore[attr-defined]
         return self.device.type == custom_backend_name
 
     _check_register_once(torch.Tensor, f'is_{custom_backend_name}')
+    wrap_tensor_backend.fget.__name__ = f'is_{custom_backend_name}'  # type: ignore[attr-defined]
     setattr(torch.Tensor, f'is_{custom_backend_name}', wrap_tensor_backend)
 
     def wrap_tensor_to(self: torch.Tensor, device: Optional[Union[int, torch.device]] = None, non_blocking=False,
@@ -147,10 +141,13 @@ def _generate_tensor_methods_for_privateuse1_backend(custom_backend_name: str) -
                 the argument has no effect.
             **kwargs (dict): For compatibility, may contain the key ``memory_format`` argument.
         """
+        if has_torch_function_unary(self):
+            return handle_torch_function(wrap_tensor_to, (self,), self, device=device, non_blocking=False, **kwargs)
         device_idx = _normalization_device(custom_backend_name, device)
         return self.to(device=torch.device(f'{custom_backend_name}:{device_idx}'), non_blocking=non_blocking, **kwargs)
 
     _check_register_once(torch.Tensor, custom_backend_name)
+    wrap_tensor_to.__name__ = custom_backend_name
     setattr(torch.Tensor, custom_backend_name, wrap_tensor_to)
 
 
