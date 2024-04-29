@@ -1412,7 +1412,7 @@ RecordQueue::getRecords(
     std::vector<std::shared_ptr<torch::profiler::impl::Result>> ev;
     try {
       ev = python_tracer_->getEvents(
-        converter, python_enters, static_cast<c10::time_t>(end_time_ns));
+          converter, python_enters, static_cast<c10::time_t>(end_time_ns));
     } catch (std::exception& e) {
       // Normally addKinetoEvents() below will stop the trace - but if an
       // exception happens here then the events will never be stopped and future
