@@ -1703,7 +1703,7 @@ def cpp_compile_command(
             {get_warning_all_flag(warning_all)} {cpp_flags()}
             {get_glibcxx_abi_build_flags()}
             {ipaths_str} {lpaths} {libs} {build_arch_flags}
-            {macros} {linker_paths} {clang_flags}
+            {macros} {linker_paths} {clang_flags} {cpp_wrapper_flags()}
             {optimization_flags()}
             {use_custom_generated_macros()}
             {use_fb_internal_macros()}
@@ -2506,7 +2506,7 @@ def _validate_cpp_commands():
     _temp_validate_new_and_old_command(new_cmd, old_cmd)
 
 
-# _validate_cpp_commands()
+_validate_cpp_commands()
 
 
 def _reload_python_module_in_subproc(key, path):
