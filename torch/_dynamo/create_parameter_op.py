@@ -12,13 +12,14 @@ allowed to compute gradients on).
 """.strip()
 
 _bind_nn_parameter = _make_prim(
-    schema="_bind_nn_parameter(Tensor self, Tensor(a) placeholder) -> Tensor(a)",
+    schema="_bind_nn_parameter(Tensor self, Tensor placeholder) -> Tensor",
     return_type=RETURN_TYPE.NEW,
     meta=lambda self, placeholder: torch.nn.Parameter(
         clone_preserve_strides(self), placeholder.requires_grad
     ),
     impl_aten=lambda self, placeholder: placeholder.set_(self),
     doc=doc,
+    use_old_custom_ops_api=True,
 )
 torch.fx.node.has_side_effect(_bind_nn_parameter)
 

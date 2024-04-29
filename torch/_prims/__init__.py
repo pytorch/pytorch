@@ -272,6 +272,7 @@ def _make_prim(
     impl_aten: Callable,
     doc: str,
     tags: Optional[Sequence[torch.Tag]] = None,
+    use_old_custom_ops_api: bool = False,
 ):
     """
     Creates a primitive operation.
@@ -305,7 +306,7 @@ def _make_prim(
 
     # register non-functional ops with old custom ops API
     cpp_schema = torch._C.parse_schema(name + schema)
-    if not is_functional_schema(cpp_schema):
+    if use_old_custom_ops_api or not is_functional_schema(cpp_schema):
         prim.define(name + schema, tags=torch.Tag.pt2_compliant_tag)
         prim_impl.impl(name, _prim_impl)
         prim_autograd_impl.impl(name, _autograd_impl)
