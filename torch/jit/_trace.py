@@ -1024,7 +1024,7 @@ def trace(
     export_example_inputs = process_trace_inputs_for_export(example_inputs)
     traced_func = _trace_impl(func, example_inputs, optimize, check_trace, check_inputs, check_tolerance, strict, _force_outplace, _module_class, _compilation_unit, example_kwarg_inputs, _store_inputs)
     # print(traced_func.code)
-    traced_func(*export_example_inputs)
+    # traced_func(*export_example_inputs)
     # breakpoint()
     # print(traced_func.graph)
     # print(traced_func.code)
@@ -1037,12 +1037,12 @@ def trace(
             from torch.export import export
             exported = export(traced_func, export_example_inputs, example_kwarg_inputs, strict=False, _is_torch_jit_trace=True).module()
         except Exception as e:
-            raise RuntimeError(f"Failed to export {func} with error message:\n{e}")
+            raise RuntimeError(f"Failed to export with error message:\n{e}")
 
         try:
             result_exported = exported(*export_example_inputs, **example_kwarg_inputs)
         except Exception as e:
-            raise RuntimeError(f"Failed to run exported {func} with error message:\n{e}")
+            raise RuntimeError(f"Failed to run exported with error message:\n{e}")
 
         result_traced = traced_func(*export_example_inputs, **example_kwarg_inputs)
 
@@ -1064,11 +1064,11 @@ def trace(
                     _is_torch_jit_trace=True,
                 ).module()
             except Exception as e:
-                raise RuntimeError(f"Failed to export {func} with error message:\n{e}")
+                raise RuntimeError(f"Failed to export with error message:\n{e}")
         try:
             result_exported = exported(*export_example_inputs, **example_kwarg_inputs)
         except Exception as e:
-            raise RuntimeError(f"Failed to run exported {func} with error message:\n{e}")
+            raise RuntimeError(f"Failed to run exported with error message:\n{e}")
         result_traced = traced_func(*export_example_inputs, **example_kwarg_inputs)
 
         res = analyze_result(result_exported, result_traced)
@@ -1085,12 +1085,12 @@ def trace(
                 _is_torch_jit_trace=True,
             ).module()
         except Exception as e:
-            raise RuntimeError(f"Failed to export {func} with error message:\n{e}")
+            raise RuntimeError(f"Failed to export with error message:\n{e}")
 
         try:
             result_exported = exported(*export_example_inputs, **example_kwarg_inputs)
         except Exception as e:
-            raise RuntimeError(f"Failed to run exported {func} with error message:\n{e}")
+            raise RuntimeError(f"Failed to run exported with error message:\n{e}")
         result_traced = traced_func(*export_example_inputs, **example_kwarg_inputs)
         res = analyze_result(result_exported, result_traced)
         if not res:
