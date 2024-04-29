@@ -10165,16 +10165,6 @@ fn
         # This test does not use _test_compile_model_free because of difficulty
         # in handling variable fc.
 
-        fc = torch.nn.Linear(100, 100)
-
-        class Mod(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.fc_ref = fc
-
-            def forward(self, x):
-                return self.fc_ref(x[0])
-
         cleared = False
 
         def finalize():
@@ -10182,13 +10172,23 @@ fn
             cleared = True
 
         def run():
+            fc = torch.nn.Linear(100, 100)
+
+            class Mod(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.fc_ref = fc
+
+                def forward(self, x):
+                    return self.fc_ref(x)
+
             mod = Mod()
             inp = torch.randn(100, 100)
-            weakref.finalize(mod.fc_ref, finalize)
+            weakref.finalize(fc, finalize)
             torch.compile(mod, backend="eager")(inp)
 
         run()
-        del fc  # This should delete all the references
+        # del fc  # This should delete all the references
         gc.collect()
         self.assertTrue(cleared)
 
