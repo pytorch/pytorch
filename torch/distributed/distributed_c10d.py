@@ -739,9 +739,8 @@ def _store_based_barrier(rank, store, group_name, rendezvous_count, timeout, log
             if timedelta(seconds=(time.time() - start)) > timeout:
                 raise DistStoreError(  # noqa: TRY200
                     "Timed out initializing process group in store based barrier on "
-                    "rank {}, for key: {} (world_size={}, num_workers_joined={}, timeout={} error={})".format(
-                        rank, store_key, world_size, worker_count, timeout, e
-                    )
+                    f"rank {rank}, for key: {store_key} (world_size={world_size}, "
+                    f"num_workers_joined={worker_count}, timeout={timeout} error={e})"
                 )
 
     logger.info(

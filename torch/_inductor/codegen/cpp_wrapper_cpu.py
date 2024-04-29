@@ -10,11 +10,13 @@ from sympy import Expr
 
 import torch
 import torch._ops
+from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey
 from .. import config, ir
 
 from ..codecache import CudaKernelParamCache
 from ..utils import cache_on_self, sympy_product
 from ..virtualized import V
+from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import IndentedBuffer
 from .wrapper import EnterSubgraphLine, ExitSubgraphLine, WrapperCodeGen
 
@@ -665,7 +667,9 @@ class CppWrapperCpu(WrapperCodeGen):
                 V.graph.const_module.wrapper_code.src_to_kernel.values()
             )
         for kernel in sorted(declare_kernel):
-            self.prefix.writeline(f"    CUfunction {kernel}{{nullptr}};")
+            self.prefix.writeline(
+                maybe_hipify_code_wrapper(f"    CUfunction {kernel}{{nullptr}};")
+            )
         self.prefix.writeline("};")
         self.prefix.writeline("}  // namespace")
 
@@ -1203,6 +1207,7 @@ class CppWrapperCpu(WrapperCodeGen):
         output_name_base = fallback_kernel.get_name()
         for idx, output in enumerate(fallback_kernel.outputs):
             if isinstance(output, ir.MultiOutput):
+                # TODO: handle integer output (e.g., as in attention)
                 name = f"{output.get_name()}"
                 output_handle_name = f"{name}_handle"
                 if output.indices:
@@ -1275,22 +1280,44 @@ class CppWrapperCpu(WrapperCodeGen):
         )
 
     def generate_scatter_fallback(
-        self, output, inputs, kernel, python_kernel_name, src_is_tensor, reduce, kwargs
+        self,
+        output,
+        inputs,
+        cpp_kernel_name,
+        python_kernel_name,
+        src_is_tensor,
+        reduce,
+        kwargs,
     ):
         # No stack allocation when there is a fallback op
         self.allow_stack_allocation = False
 
         # TODO: needs updates to use C shim v2
-        # TODO: support other overload for cpp wrapper and remove the below assertions
         if config.abi_compatible:
             # call the ABI shim function instead of the ATen one
-            kernel = kernel.replace("at::", "aoti_torch_")
-            inputs_wrapped = [f"convert_arrayref_tensor_to_tensor({x})" for x in inputs]
-            line = f"{kernel}(convert_arrayref_tensor_to_tensor({output}), {','.join(inputs_wrapped)}"
+            if config.c_shim_version == "1":
+                cpp_kernel_name = (
+                    "aoti_torch_scatter_reduce_out"
+                    if python_kernel_name.startswith("aten.scatter_reduce")
+                    else "aoti_torch_scatter_out"
+                )
+            else:
+                cpp_kernel_name = self.get_c_shim_func_name(cpp_kernel_name)
+                # C shim only contains out-variant instead of inplace-variant
+                cpp_kernel_name = cpp_kernel_name.replace("__", "_") + "_out"
+            inputs_wrapped = [
+                f"convert_arrayref_tensor_to_tensor({x})"
+                if isinstance(x, str)
+                else str(x)
+                for x in inputs
+            ]
+            line = f"{cpp_kernel_name}(convert_arrayref_tensor_to_tensor({output}), {','.join(inputs_wrapped)}"
         else:
-            line = f"{kernel}({output}, {','.join(map(str, inputs))}"
+            line = f"{cpp_kernel_name}({','.join(map(str, inputs))}"
 
-        if python_kernel_name == "aten.scatter_":
+        if python_kernel_name.startswith("aten.scatter_reduce"):
+            line += f", {','.join(kwargs)}"
+        else:
             if src_is_tensor:
                 if reduce:
                     line += f", {V.graph.wrapper_code.val_to_arg_str(reduce)}"
@@ -1298,9 +1325,7 @@ class CppWrapperCpu(WrapperCodeGen):
                 assert (
                     reduce is None
                 ), "Expect reduce to be None for aten.scatter_ with scalar src"
-        else:
-            line += f", {','.join(kwargs)}"
-        line += f"){self.ending}"
+        line += ");"
         self.writeline(line)
 
     def generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
@@ -1370,18 +1395,28 @@ class CppWrapperCpu(WrapperCodeGen):
         if config.abi_compatible:
             dtype = node.inputs[0].get_dtype()
             dtype_str = str(dtype).split(".")[-1]
-            self.writeline(f"{DTYPE_TO_CPP[dtype]} {node.sym};")
-            self.writeline(f"aoti_torch_item_{dtype_str}({data}, &{node.sym});")
-            # record in unbacked_symbol_decls so we won't generate a declaration of the symbol again
-            self.unbacked_symbol_decls.add(str(node.sym))
+            self.writeline(f"{DTYPE_TO_CPP[dtype]} {node.sym}_raw;")
+            self.writeline(f"aoti_torch_item_{dtype_str}({data}, &{node.sym}_raw);")
         else:
-            if node.is_bool:
-                self.writeline(f"bool {node.sym} = {data}.item() ? 1 : 0;")
-            else:
-                convert_type = DTYPE_TO_ATEN[node.inputs[0].get_dtype()].replace(
-                    "at::k", "to"
-                )
-                self.writeline(f"auto {node.sym} = {data}.item().{convert_type}();")
+            convert_type = DTYPE_TO_ATEN[node.inputs[0].get_dtype()].replace(
+                "at::k", "to"
+            )
+            self.writeline(f"auto {node.sym}_raw = {data}.item().{convert_type}();")
+
+        if len(node.keypath) == 0:
+            self.writeline(f"auto {node.sym} = {node.sym}_raw;")
+        elif len(node.keypath == 1) and isinstance(node.keypath[0], ConvertIntKey):
+            self.writeline(f"int64_t {node.sym} = {node.sym}_raw ? 1 : 0;")
+        elif len(node.keypath == 1) and isinstance(node.keypath[0], DivideByKey):
+            # TODO: assert divisibility here
+            self.writeline(
+                f"int64_t {node.sym} = {node.sym}_raw / {node.keypath[0].divisor};"
+            )
+        else:
+            raise AssertionError(f"unrecognized keypath {node.keypath}")
+
+        # record in unbacked_symbol_decls so we won't generate a declaration of the symbol again
+        self.unbacked_symbol_decls.add(str(node.sym))
 
     def can_stack_allocate_buffer(self, buffer):
         return (
