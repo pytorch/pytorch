@@ -43,7 +43,7 @@ class EtcdServerTest(unittest.TestCase):
 
         try:
             client = etcd.Client(server.get_host(), server.get_port())
-    
+
             rdzv = EtcdRendezvous(
                 client=client,
                 prefix="test",
