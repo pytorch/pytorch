@@ -2482,7 +2482,7 @@ def _temp_validate_new_and_old_command(new_cmd: List[str], old_cmd: List[str]):
         raise RuntimeError("Error in new and old command different.")
 
 
-def _do_validate_cpp_commands(cuda: bool, compile_only: bool, mmap_weights: bool):
+def _do_validate_cpp_commands(include_pytorch: bool, cuda: bool, compile_only: bool, mmap_weights: bool):
     input_path = "/temp/dummy_input.cpp"
     output_path = "/temp/dummy_output.so"
     picked_isa = pick_vec_isa()
@@ -2490,6 +2490,7 @@ def _do_validate_cpp_commands(cuda: bool, compile_only: bool, mmap_weights: bool
     old_cmd = cpp_compile_command(
         input=input_path,
         output=output_path,
+        include_pytorch=include_pytorch,
         vec_isa=picked_isa,
         cuda=cuda,
         aot_mode=False,
@@ -2524,14 +2525,13 @@ def validate_new_cpp_commands():
     cuda = [True, False]
     use_mmap_weights = [True, False]
     compile_only = [True, False]
+    include_pytorch = [True, False]
 
     for x in cuda:
         for y in use_mmap_weights:
             for z in compile_only:
-                _do_validate_cpp_commands(cuda=x, mmap_weights=y, compile_only=z)
-
-
-# _validate_new_cpp_commands()
+                for m in include_pytorch:
+                    _do_validate_cpp_commands(include_pytorch= m, cuda=x, mmap_weights=y, compile_only=z)
 
 
 def _reload_python_module_in_subproc(key, path):
