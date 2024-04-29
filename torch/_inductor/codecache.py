@@ -2485,6 +2485,8 @@ def _temp_validate_new_and_old_command(new_cmd: List[str], old_cmd: List[str]):
 def _do_validate_cpp_commands(
     include_pytorch: bool, cuda: bool, compile_only: bool, mmap_weights: bool
 ):
+    # PreCI will failed if test machine can't run cuda.
+    test_cuda = torch.cuda.is_available() and cuda
     input_path = "/temp/dummy_input.cpp"
     output_path = "/temp/dummy_output.so"
     if compile_only:
@@ -2496,7 +2498,7 @@ def _do_validate_cpp_commands(
         output=output_path,
         include_pytorch=include_pytorch,
         vec_isa=picked_isa,
-        cuda=cuda,
+        cuda=test_cuda,
         aot_mode=False,
         compile_only=compile_only,
         use_absolute_path=False,
@@ -2507,7 +2509,7 @@ def _do_validate_cpp_commands(
 
     dummy_build_option = CppTorchCudaOptions(
         chosen_isa=picked_isa,
-        use_cuda=cuda,
+        use_cuda=test_cuda,
         compile_only=compile_only,
         use_mmap_weights=mmap_weights,
     )

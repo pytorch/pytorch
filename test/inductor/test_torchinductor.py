@@ -6237,7 +6237,7 @@ class CommonTemplate:
 
         self.common(fn, [torch.randn(64, 64)])
 
-    def test_new_cpp_build_logica(self):
+    def test_new_cpp_build_logical(self):
         from torch._inductor.codecache import validate_new_cpp_commands
 
         validate_new_cpp_commands()
