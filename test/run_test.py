@@ -1190,7 +1190,9 @@ def parse_args():
             or (IS_WINDOWS and not TEST_CUDA)
         )
         and os.getenv("BRANCH", "") != "main"
-        and not strtobool(os.environ.get("NO_TD", "False")),
+        and not strtobool(os.environ.get("NO_TD", "False"))
+        and "slow" not in os.getenv("TEST_CONFIG", "")
+        and "slow" not in os.getenv("BUILD_ENVIRONMENT", ""),
     )
     parser.add_argument(
         "additional_unittest_args",
