@@ -569,6 +569,10 @@ class TestForeach(TestCase):
         filter(lambda op: op.supports_out, foreach_binary_op_db),
         dtypes=OpDTypes.supported,
     )
+    @unittest.skipIf(
+        torch.cuda.is_available() and not torch.cuda.get_device_capability(0) == (8, 6),
+        "failing flakily on non sm86 cuda jobs, ex https://github.com/pytorch/pytorch/issues/125035",
+    )
     def test_binary_op_list_error_cases(self, device, dtype, op):
         foreach_op, foreach_op_, ref, ref_ = (
             op.method_variant,

@@ -50,6 +50,8 @@ class CommDebugMode(TorchDispatchMode):
             self.comm_registry.add(native_op)
             self.comm_registry.add(py_op)
 
+        self.comm_registry.add(torch.ops._dtensor.shard_dim_alltoall)
+
     def get_total_counts(self) -> int:
         return sum(self.comm_counts.values())
 
