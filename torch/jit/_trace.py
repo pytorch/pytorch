@@ -1018,13 +1018,14 @@ def trace(
 
     """
 
+    torch._C._jit_set_texpr_fuser_enabled(False)
     if not via_export:
         return _trace_impl(func, example_inputs, optimize, check_trace, check_inputs, check_tolerance, strict, _force_outplace, _module_class, _compilation_unit, example_kwarg_inputs, _store_inputs)
     export_example_inputs = process_trace_inputs_for_export(example_inputs)
     traced_func = _trace_impl(func, example_inputs, optimize, check_trace, check_inputs, check_tolerance, strict, _force_outplace, _module_class, _compilation_unit, example_kwarg_inputs, _store_inputs)
-    # print(traced_func.graph)
     # print(traced_func.code)
-    traced_func(*example_inputs)
+    traced_func(*export_example_inputs)
+    # breakpoint()
     # print(traced_func.graph)
     # print(traced_func.code)
     # breakpoint()
