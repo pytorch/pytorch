@@ -46,6 +46,7 @@ struct Welford {
   T mean = T(0);
   T m2 = T(0);
   T weight = T(0);
+  int64_t index = 0;
 };
 
 
@@ -56,6 +57,19 @@ struct IsVecType: std::false_type {};
 template <typename T>
 struct IsVecType<at::vec::Vectorized<T>>: std::true_type {};
 #endif
+
+template <typename T>
+struct WeightRecp {
+  using scalar_t =
+      std::conditional_t<IsVecType<T>::value, typename T::value_type, T>;
+  int64_t N;
+  std::vector<T> weight_recps;
+  WeightRecp(int64_t N) : N(N) {
+    for (const auto i : c10::irange(N)) {
+      weight_recps.push_back(T(scalar_t(1) / static_cast<scalar_t>(i + 1)));
+    }
+  }
+};
 
 template <typename T>
 Welford<T> welford_combine(const Welford<T> &a, const Welford<T> &b) {
@@ -77,22 +91,32 @@ Welford<T> welford_combine(const Welford<T> &a, const Welford<T> &b) {
   auto result = Welford<T>{
     a.mean + delta * wb_over_w,
     a.m2 + b.m2 + delta * delta * a.weight * wb_over_w,
-    new_weight
+    new_weight,
+    a.index + b.index,
   };
   return result;
 }
 
 template <typename T>
-Welford<T> welford_combine(const Welford<T> &acc, T data) {
+Welford<T> welford_combine(const Welford<T> &acc, T data, const WeightRecp<T>* w=nullptr) {
   // Add a single data point
+  int64_t index = acc.index + 1;
   auto delta = data - acc.mean;
   auto new_weight = acc.weight + T(1);
-  auto new_mean = acc.mean + delta / new_weight;
+  T new_mean;
+    if constexpr (!IsVecType<T>::value) {
+    new_mean = acc.mean + delta / new_weight;
+  } else {
+    new_mean = acc.mean +
+        ((w == nullptr) ? delta / new_weight
+                        : delta * w->weight_recps[acc.index]);
+  }
   auto new_delta = data - new_mean;
   auto result = Welford<T>{
     new_mean,
     acc.m2 + delta * new_delta,
-    new_weight
+    new_weight,
+    index
   };
   return result;
 }
