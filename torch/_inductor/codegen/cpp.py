@@ -4441,7 +4441,7 @@ class LoopNestWithSplit:
 
         # not split
         inner_most = root
-        while inner_most.inner:
+        while inner_most:
             inner_most = inner_most.inner
         _kernel = CppKernelDispatcher([inner_most])
         _kernel.set_kernels(kernel)
