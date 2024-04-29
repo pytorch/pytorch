@@ -739,8 +739,14 @@ def _get_cuda_related_args(aot_mode: bool):
     include_dirs = cpp_extension.include_paths(use_cuda)
     libraries_dirs = cpp_extension.library_paths(use_cuda)
 
+    definations.append(" USE_ROCM" if torch.version.hip else " USE_CUDA")
+
     if torch.version.hip is not None:
-        libraries += ["c10_hip", "torch_hip"]
+        if config.is_fbcode():
+            libraries += ["amdhip64"]
+        else:
+            libraries += ["c10_hip", "torch_hip"]
+            definations.append(" __HIP_PLATFORM_AMD__")
     else:
         if config.is_fbcode():
             libraries += ["cuda"]
@@ -753,7 +759,6 @@ def _get_cuda_related_args(aot_mode: bool):
     if aot_mode:
         cpp_prefix_include_dir = [f"{os.path.dirname(_cpp_prefix_path())}"]
         include_dirs += cpp_prefix_include_dir
-        definations.append("USE_CUDA")
 
         if config.is_fbcode():
             include_dirs.append(build_paths.cuda())
