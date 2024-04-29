@@ -7,6 +7,7 @@ from typing import Dict, Optional, Union
 
 import torch
 import torch.distributed as dist
+import torch.distributed._functional_collectives as funcol
 import torch.nn as nn
 from torch.distributed._composable.fsdp import fully_shard, MixedPrecisionPolicy
 from torch.testing._internal.common_distributed import (
@@ -117,6 +118,10 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             {"reshard_after_forward": [False, True, 2]},
             self._test_reduce_dtype_fp32_reduce,
         )
+        self.run_subtests(
+            {"reshard_after_forward": [False, True, 2]},
+            self._test_reduce_dtype_bf16_reduce,
+        )
 
     def _test_reduce_dtype_fp32_reduce(self, reshard_after_forward: Union[bool, int]):
         param_dtype, reduce_dtype = torch.bfloat16, torch.float32
@@ -167,6 +172,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
         ref_model, ref_optim, model, optim = self._init_models_and_optims(
             reshard_after_forward, param_dtype=param_dtype, reduce_dtype=reduce_dtype
         )
+        group = dist.distributed_c10d._get_default_group()
         orig_reduce_scatter = dist.reduce_scatter_tensor
 
         def assert_fn(output: torch.Tensor):
@@ -188,10 +194,18 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             ref_loss = ref_model(inp).sum()
             ref_loss.backward()
             for param in ref_model.parameters():
-                param.grad.data = param.grad.to(reduce_dtype)
-                dist.all_reduce(param.grad)  # bf16 reduction
-                param.grad.div_(self.world_size)
-                param.grad = param.grad.to(param.dtype)  # upcast to fp32
+                param_grad = param.grad.to(reduce_dtype)
+                # Use reduce-scatter -> all-gather to implement all-reduce
+                # since for world size >2, bf16 all-reduce and reduce-scatter
+                # have numeric differences
+                sharded_grad = funcol.reduce_scatter_tensor(
+                    param_grad, scatter_dim=0, reduceOp="avg", group=group
+                )  # bf16 reduction
+                param.grad = funcol.all_gather_tensor(
+                    sharded_grad, gather_dim=0, group=group
+                ).to(
+                    param.dtype
+                )  # upcast to fp32
             ref_optim.step()  # fp32 optimizer step
 
             self.assertEqual(fsdp_loss, ref_loss)
