@@ -83,7 +83,7 @@ set(CMAKE_LINK_WHAT_YOU_USE TRUE)
 #    endif()
 set(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO ON)
 
-find_package(Python REQUIRED COMPONENTS Development)
+find_package(Python REQUIRED COMPONENTS Interpreter Development)
 
 # Googletest's cmake files are going to set it on once they are processed. Let's
 # set it at the very beginning so that the entire build is deterministic.

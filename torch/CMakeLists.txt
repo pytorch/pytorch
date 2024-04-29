@@ -79,6 +79,7 @@ list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${LIBSHM_SRCDIR})
 set(TORCH_PYTHON_LINK_LIBRARIES
     python::python
     pybind::pybind11
+    opentelemetry::api
     shm
     fmt::fmt-header-only
     ATEN_CPU_FILES_GEN_LIB)
@@ -344,7 +345,7 @@ endif()
 
 target_compile_definitions(torch_python PRIVATE "-DTHP_BUILD_MAIN_LIB")
 
-target_link_libraries(torch_python PRIVATE torch_library ${Python_LIBRARIES} ${TORCH_PYTHON_LINK_LIBRARIES})
+target_link_libraries(torch_python PRIVATE torch_library Python::Python ${TORCH_PYTHON_LINK_LIBRARIES})
 
 target_compile_definitions(torch_python PRIVATE ${TORCH_PYTHON_COMPILE_DEFINITIONS})
 
