@@ -3307,6 +3307,8 @@ class CppKernelDispatcher(CppKernel):
             line = line.replace(f"{self.itervars[0]}", f"{self.itervars_tail[0]}")
             _, value = line.split(" = ")
             value = value.rstrip(";")
+            if "." in value:
+                value = value.split(".")[0]
             new_value = (
                 f"{value}_arr[{self.itervars_tail[0]} - {self.tiling_ranges[0]}]"
             )
