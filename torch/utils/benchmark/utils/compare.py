@@ -267,11 +267,11 @@ Times are in {common.unit_to_english(self.time_unit)}s ({self.time_unit}).
 
 
 class Compare:
-    """Helper class for displaying the results of many measurements in a 
+    """Helper class for displaying the results of many measurements in a
     formatted table.
-    
-    The table format is based on the information fields provided in 
-    :class:`torch.utils.benchmark.Timer` (`description`, `label`, `sub_label`, 
+
+    The table format is based on the information fields provided in
+    :class:`torch.utils.benchmark.Timer` (`description`, `label`, `sub_label`,
     `num_threads`, etc).
 
     The table can be directly printed using :meth:`print` or casted as a `str`.
