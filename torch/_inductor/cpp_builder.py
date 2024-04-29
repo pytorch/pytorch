@@ -135,7 +135,7 @@ def is_gcc() -> bool:
 def _is_clang(cpp_compiler) -> bool:
     # Mac OS apple clang maybe named as gcc, need check compiler info.
     if sys.platform == "darwin":
-        return is_apple_clang()
+        return is_apple_clang(cpp_compiler)
     return bool(re.search(r"(clang|clang\+\+)", cpp_compiler))
 
 
@@ -145,9 +145,8 @@ def is_clang() -> bool:
 
 
 @functools.lru_cache(None)
-def is_apple_clang() -> bool:
-    cxx = _get_cpp_compiler()
-    version_string = subprocess.check_output([cxx, "--version"]).decode("utf8")
+def is_apple_clang(cpp_compiler) -> bool:
+    version_string = subprocess.check_output([cpp_compiler, "--version"]).decode("utf8")
     return "Apple" in version_string.splitlines()[0]
 
 
@@ -529,7 +528,7 @@ def _get_openmp_args(cpp_compiler):
         )
 
         # only Apple builtin compilers (Apple Clang++) require openmp
-        omp_available = not is_apple_clang()
+        omp_available = not is_apple_clang(cpp_compiler)
 
         # check the `OMP_PREFIX` environment first
         omp_prefix = os.getenv("OMP_PREFIX")
