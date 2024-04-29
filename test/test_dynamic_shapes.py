@@ -562,14 +562,14 @@ def forward(self, x_1):
         _constrain_range_for_size(i0)
         _constrain_range_for_size(i1)
         self.assertTrue(expect_true(i0 == i1 * 4))
-        self.assertExpectedInline(str(i0), """4*u1""")
+        self.assertExpectedInline(str(i0), """u0""")
 
         i2 = shape_env.create_unbacked_symint()
         i3 = shape_env.create_unbacked_symint()
         _constrain_range_for_size(i2)
         _constrain_range_for_size(i3)
         self.assertTrue(expect_true(i2 * 4 == i3))
-        self.assertExpectedInline(str(i3), """4*u2""")
+        self.assertExpectedInline(str(i3), """u3""")
 
     def test_avoid_unbacked_substitution(self):
         shape_env = ShapeEnv()
@@ -1054,6 +1054,13 @@ class TestSymNumberMagicMethods(TestCase):
 
         hash(n)
         hash(m)
+
+    def test_symint_deepcopy(self):
+        shape_env = ShapeEnv()
+
+        symnodes = (torch._C._get_nested_int(1, 1),)
+        deepcopied_symnodes = copy.deepcopy(symnodes)
+        self.assertEqual(symnodes, deepcopied_symnodes)
 
     def test_non_symbolic_symnode(self):
         j1 = torch._C._get_nested_int(1, 1)
