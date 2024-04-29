@@ -1203,6 +1203,10 @@ class FakeTensorOperatorInvariants(TestCase):
 
     # IMPORTANT!!! Always run even if CUDA is not available
     def test_fake_cuda_no_init(self):
+        # Skip this test, we will try to run CUDA operations to real prop so
+        # it clearly will not work on CPU runner
+        if torch._functorch.config.fake_tensor_propagate_real_tensors:
+            return
         with FakeTensorMode():
             torch.empty(10, device='cuda')
             torch.ones(10, device='cuda')
