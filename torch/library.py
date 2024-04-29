@@ -1,5 +1,5 @@
 from ._ops import OpOverload
-from typing import Any, Optional, Set, List
+from typing import Any, Optional, Set, List, Union, Callable, Tuple, Dict, Sequence
 import traceback
 import torch
 import weakref
@@ -9,7 +9,8 @@ import re
 import contextlib
 import sys
 import warnings
-from torch._library.custom_ops import custom_op
+from torch._library.custom_ops import custom_op, _maybe_get_opdef, device_types_t, CustomOpDef
+import torch._library as _library
 
 
 __all__ = [
@@ -108,18 +109,22 @@ class Library:
         assert self.m is not None
         if isinstance(tags, torch.Tag):
             tags = (tags,)
+
+        name = schema.split("(")[0]
+        packet_name = name.split(".")[0] if "." in name else name
+        has_preexisting_packet = hasattr(torch.ops, self.ns) and hasattr(getattr(torch.ops, self.ns), packet_name)
+
         result = self.m.define(schema, alias_analysis, tuple(tags))
         name = schema.split("(")[0]
         qualname = self.ns + "::" + name
 
         # If the OpOverloadPacket exists already, then this means we're adding a
         # new OpOverload for it. Refresh the packet to include the new OpOverload.
-        packet_name = name.split(".")[0] if "." in name else name
-        if hasattr(torch.ops, self.ns):
+        if has_preexisting_packet:
             ns = getattr(torch.ops, self.ns)
-            if hasattr(ns, packet_name):
-                packet = getattr(ns, packet_name)
-                torch._ops._refresh_packet(packet)
+            packet = getattr(ns, packet_name)
+            print("refreshing", ns, packet_name)
+            torch._ops._refresh_packet(packet)
 
         self._op_defs.add(qualname)
         _defs.add(qualname)
@@ -149,7 +154,7 @@ class Library:
         handle = entry.abstract_impl.register(func_to_register, source)
         self._registration_handles.append(handle)
 
-    def impl(self, op_name, fn, dispatch_key=''):
+    def impl(self, op_name, fn, dispatch_key='', *, with_keyset=False):
         r'''Registers the function implementation for an operator defined in the library.
 
         Args:
@@ -205,7 +210,7 @@ class Library:
                     " for the base ops that it decomposes into.")
 
         assert self.m is not None
-        self.m.impl(name, dispatch_key if dispatch_key != "" else "CompositeImplicitAutograd", fn)
+        self.m.impl(name, dispatch_key if dispatch_key != "" else "CompositeImplicitAutograd", fn, with_keyset)
 
         _impls.add(key)
         self._op_impls.add(key)
@@ -431,8 +436,76 @@ def impl_abstract(qualname, func=None, *, lib=None, _stacklevel=1):
     return register_fake(qualname, func, lib=lib, _stacklevel=_stacklevel + 1)
 
 
+_op_identifier = Union[str, "torch._ops.OpOverload", "torch._library.custom_ops.CustomOpDef"]
 
-def register_fake(qualname, func=None, /, *, lib=None, _stacklevel=1):
+
+def register_kernel(
+        op: _op_identifier,
+        device_types: device_types_t,
+        func: Optional[Callable] = None,
+        /,
+        *,
+        lib: Optional[Library] = None):
+    """Register an implementation for a device type for this operator.
+
+    Some valid device_types are: "cpu", "cuda", "xla", "mps", "ipu", "xpu".
+    This API may be used as a decorator.
+
+    Args:
+        fn (Callable): The function to register as the implementation for
+            the given device types.
+        device_types (None | str | Sequence[str]): The device_types to register an impl to.
+            If None, we will register to all device types -- please only use
+            this option if your implementation is truly device-type-agnostic.
+
+    Examples::
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+        >>> import torch
+        >>> from torch import Tensor
+        >>> from torch.library import custom_op
+        >>> import numpy as np
+        >>>
+        >>> # Create a custom op that works on cpu
+        >>> @custom_op("mylib::numpy_sin", mutates_args=(), device_types="cpu")
+        >>> def numpy_sin(x: Tensor) -> Tensor:
+        >>>     x_np = x.numpy()
+        >>>     y_np = np.sin(x_np)
+        >>>     return torch.from_numpy(y_np)
+        >>>
+        >>> # Add implementations for the cuda device
+        >>> @torch.library.register_kernel("mylib::numpy_sin", "cuda")
+        >>> def _(x):
+        >>>     x_np = x.cpu().numpy()
+        >>>     y_np = np.sin(x_np)
+        >>>     return torch.from_numpy(y_np).to(device=x.device)
+        >>>
+        >>> x_cpu = torch.randn(3)
+        >>> x_cuda = x_cpu.cuda()
+        >>> assert torch.allclose(numpy_sin(x_cpu), x_cpu.sin())
+        >>> assert torch.allclose(numpy_sin(x_cuda), x_cuda.sin())
+
+    """
+
+    if not isinstance(op, (str, torch._ops.OpOverload, torch._library.custom_ops.CustomOpDef)):
+        raise ValueError("register_kernel(op): got unexpected type for op: {type(op)}")
+    if isinstance(op, torch._ops.OpOverload):
+        op = op._name
+    opdef = _maybe_get_opdef(op)
+    if opdef is not None:
+        return opdef.register_kernel(device_types, func)
+    assert isinstance(op, str)
+    if device_types is None:
+        device_types = "CompositeExplicitAutograd"
+    return impl(op, device_types, func, lib=lib)
+
+
+def register_fake(
+        op: _op_identifier,
+        func: Optional[Callable] = None,
+        /,
+        *,
+        lib: Optional[Library] = None,
+        _stacklevel: int = 1):
     r"""Register a FakeTensor implementation ("fake impl") for this operator.
 
     Also sometimes known as a "meta kernel", "abstract impl".
@@ -462,9 +535,9 @@ def register_fake(qualname, func=None, /, *, lib=None, _stacklevel=1):
         >>> from torch import Tensor
         >>>
         >>> # Example 1: an operator without data-dependent output shape
-        >>> torch.library.define(
-        >>>     "mylib::custom_linear",
-        >>>     "(Tensor x, Tensor weight, Tensor bias) -> Tensor")
+        >>> @torch.library.custom_op("mylib::custom_linear", mutates_args=())
+        >>> def custom_linear(x: Tensor, weight: Tensor, bias: Tensor) -> Tensor:
+        >>>     raise NotImplementedError("Implementation goes here")
         >>>
         >>> @torch.library.register_fake("mylib::custom_linear")
         >>> def _(x, weight, bias):
@@ -486,7 +559,11 @@ def register_fake(qualname, func=None, /, *, lib=None, _stacklevel=1):
         >>> assert y.shape == (2, 3)
         >>>
         >>> # Example 2: an operator with data-dependent output shape
-        >>> torch.library.define("mylib::custom_nonzero", "(Tensor x) -> Tensor")
+        >>> @torch.library.custom_op("mylib::custom_nonzero", mutates_args=())
+        >>> def custom_nonzero(x: Tensor) -> Tensor:
+        >>>     x_np = x.numpy(force=True)
+        >>>     res = np.stack(np.nonzero(x_np), axis=1)
+        >>>     return torch.tensor(res, device=x.device)
         >>>
         >>> @torch.library.register_fake("mylib::custom_nonzero")
         >>> def _(x):
@@ -500,12 +577,6 @@ def register_fake(qualname, func=None, /, *, lib=None, _stacklevel=1):
         >>>     result = x.new_empty(shape, dtype=torch.int64)
         >>>     return result
         >>>
-        >>> @torch.library.impl("mylib::custom_nonzero", "cpu")
-        >>> def custom_nonzero_cpu(x):
-        >>>     x_np = x.numpy()
-        >>>     res = np.stack(np.nonzero(x_np), axis=1)
-        >>>     return torch.tensor(res, device=x.device)
-        >>>
         >>> from torch.fx.experimental.proxy_tensor import make_fx
         >>>
         >>> x = torch.tensor([0, 1, 2, 3, 4, 0])
@@ -515,10 +586,22 @@ def register_fake(qualname, func=None, /, *, lib=None, _stacklevel=1):
         >>> assert torch.allclose(trace(x), torch.ops.mylib.custom_nonzero(x))
 
     """
+    if not isinstance(op, (str, torch._ops.OpOverload, torch._library.custom_ops.CustomOpDef)):
+        raise ValueError("register_fake(op): got unexpected type for op: {type(op)}")
+    if isinstance(op, torch._ops.OpOverload):
+        op = op._name
+    opdef = _maybe_get_opdef(op)
+    if opdef is not None:
+        if func is None:
+            return opdef.register_fake
+        else:
+            return opdef.register_fake(func)
+    assert isinstance(op, str)
+
     stacklevel = _stacklevel
 
     def register(func):
-        namespace, op_name = torch._library.utils.parse_namespace(qualname)
+        namespace, op_name = torch._library.utils.parse_namespace(op)
         if lib is None:
             use_lib = Library(namespace, "FRAGMENT")
             _keep_alive.append(use_lib)
@@ -531,7 +614,118 @@ def register_fake(qualname, func=None, /, *, lib=None, _stacklevel=1):
         return register
     else:
         stacklevel += 1
-        register(func)
+        return register(func)
+
+
+def register_autograd(op: _op_identifier, backward: Callable, /, *, setup_context: Optional[Callable] = None, lib=None) -> None:
+    r"""Register a backward formula for this custom op.
+
+    In order for an operator to work with autograd, you need to register
+    a backward formula:
+    1. You must tell us how to compute gradients during the backward pass
+    by providing us a "backward" function.
+    2. If you need any values from the forward to compute gradients, you can
+    use `setup_context` to save values for backward.
+
+    ``backward`` runs during the backward pass. It accepts ``(ctx, *grads)``:
+    - ``grads`` is one or more gradients. The number of gradients matches
+    the number of outputs of the operator.
+    The ``ctx`` object is `the same ctx object <context_method_mixins>`_ used by
+    :class:`torch.autograd.Function`. The semantics of ``backward_fn`` are the
+    same as :meth:`torch.autograd.Function.backward`.
+
+    ``setup_context(ctx, inputs, output)`` runs during the forward pass.
+    Please save quantities needed for backward onto the ``ctx`` object via
+    either :meth:`torch.autograd.function.FunctionCtx.save_for_backward`
+    or assigning them as attributes of ``ctx``. If your custom op has
+    kwarg-only arguments, we expect the signature of ``setup_context``
+    to be ``setup_context(ctx, inputs, keyword_only_inputs, output)``.
+
+    Both ``setup_context_fn`` and ``backward_fn`` must be traceable. That is,
+    they may not directly access :meth:`torch.Tensor.data_ptr` and they must
+    not depend on or mutate global state. If you need a non-traceable backward,
+    you can make it a separate custom_op that you call inside ``backward_fn``.
+
+    Examples:
+        >>> import torch
+        >>> import numpy as np
+        >>> from torch import Tensor
+        >>>
+        >>> @torch.library.custom_op("mylib::numpy_sin", mutates_args=())
+        >>> def numpy_sin(x: Tensor) -> Tensor:
+        >>>     x_np = x.cpu().numpy()
+        >>>     y_np = np.sin(x_np)
+        >>>     return torch.from_numpy(y_np).to(device=x.device)
+        >>>
+        >>> def setup_context(ctx, inputs, output) -> Tensor:
+        >>>     x, = inputs
+        >>>     ctx.save_for_backward(x)
+        >>>
+        >>> def backward(ctx, grad):
+        >>>     x, = ctx.saved_tensors
+        >>>     return grad * x.cos()
+        >>>
+        >>> torch.library.register_autograd("mylib::numpy_sin", backward, setup_context=setup_context)
+        >>>
+        >>> x = torch.randn(3, requires_grad=True)
+        >>> y = numpy_sin(x)
+        >>> grad_x, = torch.autograd.grad(y, x, torch.ones_like(y))
+        >>> assert torch.allclose(grad_x, x.cos())
+        >>>
+        >>> # Example with a keyword-only arg
+        >>> @torch.library.custom_op("mylib::numpy_mul", mutates_args=())
+        >>> def numpy_mul(x: Tensor, *, val: float) -> Tensor:
+        >>>     x_np = x.cpu().numpy()
+        >>>     y_np = x_np * val
+        >>>     return torch.from_numpy(y_np).to(device=x.device)
+        >>>
+        >>> def setup_context(ctx, inputs, keyword_only_inputs, output) -> Tensor:
+        >>>     ctx.val = keyword_only_inputs["val"]
+        >>>
+        >>> def backward(ctx, grad):
+        >>>     return grad * ctx.val
+        >>>
+        >>> torch.library.register_autograd("mylib::numpy_mul", backward, setup_context=setup_context)
+        >>>
+        >>> x = torch.randn(3, requires_grad=True)
+        >>> y = numpy_mul(x, val=3.14)
+        >>> grad_x, = torch.autograd.grad(y, x, torch.ones_like(y))
+        >>> assert torch.allclose(grad_x, torch.full_like(x, 3.14))
+
+    """
+    if not isinstance(op, (str, torch._ops.OpOverload, torch._library.custom_ops.CustomOpDef)):
+        raise ValueError(f"register_autograd(op): got unexpected type for op: {type(op)}")
+    if isinstance(op, torch._ops.OpOverload):
+        op = op._name
+    opdef = _maybe_get_opdef(op)
+    if opdef is not None:
+        opdef.register_autograd(backward, setup_context=setup_context)
+        return
+
+    assert isinstance(op, str)
+    qualname = op
+    op = torch._library.utils.lookup_op(qualname)
+    schema = op._schema
+    if not _library.utils.is_functional_schema(schema):
+        raise RuntimeError(
+            f"Cannot register autograd formula for non-functional operator "
+            f"{op} with schema {schema}. Please create "
+            f"a functional operator and register an autograd formula for that."
+        )
+    if _library.utils.has_kwarg_only_tensors(schema):
+        raise NotImplementedError(
+            f"register_autograd with kwarg-only Tensor args. In the original "
+            f"definition of the op, please make your tensors not kwarg-only. "
+            f"Got: {schema}")
+
+    info = _library.autograd.Info(backward, setup_context)
+    autograd_kernel = _library.autograd.make_autograd_impl(op, info)
+    namespace, opname = torch._library.utils.parse_namespace(qualname)
+    if lib is None:
+        lib = Library(namespace, "FRAGMENT")
+        _keep_alive.append(lib)
+    lib.impl(opname, autograd_kernel, "Autograd", with_keyset=True)
+
 
 # If the op was defined in C++, then we want to make sure there was an
 # m.set_python_module(module, ...) call and that the module is the
@@ -555,7 +749,7 @@ def _check_pystubs_once(func, qualname, actual_module_name):
         if maybe_pystub is None:
             if torch._library.utils.requires_set_python_module():
                 namespace = op.namespace
-                cpp_filename = op._handle().debug()
+                cpp_filename = op._handle.debug()
                 raise RuntimeError(
                     f"Operator '{qualname}' was defined in C++ and has a Python "
                     f"fake impl. In this situation, we require there to also be a "
@@ -566,7 +760,7 @@ def _check_pystubs_once(func, qualname, actual_module_name):
         else:
             pystub_module = maybe_pystub[0]
             if actual_module_name != pystub_module:
-                cpp_filename = op._handle().debug()
+                cpp_filename = op._handle.debug()
                 raise RuntimeError(
                     f"Operator '{qualname}' specified that its python fake impl "
                     f"is in the Python module '{pystub_module}' but it was actually found "
@@ -591,3 +785,104 @@ def get_ctx() -> "torch._library.abstract_impl.AbstractImplCtx":
     (see :func:`torch.library.register_fake` for more usage details.
     """
     return torch._library.abstract_impl.global_ctx_getter()
+
+
+_OPCHECK_DEFAULT_UTILS = (
+    "test_schema",
+    "test_autograd_registration",
+    "test_faketensor",
+    "test_aot_dispatch_dynamic",
+)
+
+
+def opcheck(
+    op: Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket, CustomOpDef],
+    args: Tuple[Any, ...],
+    kwargs: Optional[Dict[str, Any]] = None,
+    *,
+    test_utils: Union[str, Sequence[str]] = _OPCHECK_DEFAULT_UTILS,
+    raise_exception: bool = True,
+) -> Dict[str, str]:
+    """Given an operator and some sample arguments, tests if the operator is
+    registered correctly.
+
+    That is, when you use the torch.library/TORCH_LIBRARY APIs to create a
+    custom op, you specified metadata (e.g. mutability info) about the custom op
+    and these APIs require that the functions you pass them satisfy certain
+    properties (e.g. no data pointer access in the fake/meta/abstract kernel)
+    ``opcheck`` tests these metadata and properties.
+
+    Concretely, we test the following:
+    - test_schema: if the operator's schema is correct.
+    - test_autograd_registration: if autograd was registered correctly.
+    - test_faketensor: If the operator has a FakeTensor kernel
+    (and if it is correct). The FakeTensor kernel is necessary (
+    but not sufficient) for the operator to work with PyTorch compilation
+    APIs (torch.compile/export/FX).
+    - test_aot_dispatch_dynamic: If the operator has correct behavior
+    with PyTorch compilation APIs (torch.compile/export/FX).
+    This checks that the outputs (and gradients, if applicable) are the
+    same under eager-mode PyTorch and torch.compile.
+    This test is a superset of ``test_faketensor``.
+
+    For best results, please call ``opcheck`` multiple times with a
+    representative set of inputs. If your operator supports
+    autograd, please use ``opcheck`` with inputs with ``requires_grad = True``;
+    if your operator supports multiple devices (e.g. CPU and CUDA), please
+    use ``opcheck`` with inputs on all supported devices.
+
+    Args:
+        op: The operator. Must either be a function decorated with
+            :func:`torch.library.custom_op` or an OpOverload/OpOverloadPacket
+            found in torch.ops.* (e.g. torch.ops.aten.sin, torch.ops.mylib.foo)
+        args: The args to the operator
+        kwargs: The kwargs to the operator
+        test_utils: Tests that we should run. Default: all of them.
+            Example: ("test_schema", "test_faketensor")
+        raise_exception: If we should raise an exception on the first
+            error. If False, we will return a dict with information
+            on if each test passed or not.
+
+    .. warning::
+
+        opcheck and :func:`torch.autograd.gradcheck` test different things;
+        opcheck tests if your usage of torch.library APIs is correct while
+        :func:`torch.autograd.gradcheck` tests if your autograd formula is
+        mathematically correct. Use both to test custom ops that support
+        gradient computation.
+
+    Example:
+
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+        >>> @torch.library.custom_op("mylib::numpy_mul", mutates_args=())
+        >>> def numpy_add(x: Tensor, y: float) -> Tensor:
+        >>>     x_np = x.numpy(force=True)
+        >>>     z_np = x_np + y
+        >>>     return torch.from_numpy(z_np).to(x.device)
+        >>>
+        >>> @numpy_sin.register_fake
+        >>> def _(x, y):
+        >>>     return torch.empty_like(x)
+        >>>
+        >>> def setup_context(ctx, inputs, output)
+        >>>     y, = inputs
+        >>>     ctx.y = y
+        >>>
+        >>> def backward(ctx, grad)
+        >>>     return grad * ctx.y, None
+        >>>
+        >>> numpy_sin.register_autograd(backward, setup_context=setup_context)
+        >>>
+        >>> sample_inputs = [
+        >>>     (torch.randn(3), 3.14),
+        >>>     (torch.randn(2, 3, device='cuda'), 2.718),
+        >>>     (torch.randn(1, 10, requires_grad=True), 1.234),
+        >>>     (torch.randn(64, 64, device='cuda', requires_grad=True), 90.18),
+        >>> ]
+        >>>
+        >>> for args in sample_inputs:
+        >>>     torch.library.opcheck(foo, args)
+
+    """
+    import torch.testing._internal.optests as optests
+    return optests.opcheck(op, args, kwargs, test_utils=test_utils, raise_exception=raise_exception)
