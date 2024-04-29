@@ -3167,7 +3167,7 @@ Args:
 Example:
 
     >>> self = torch.tensor([[0, 0, 0, 0, 0], [0, 0, 0, 0, 0]])
-    >>> mask = torch.tensor([[0, 0, 0, 1, 1], [1, 1, 0, 1, 1]])
+    >>> mask = torch.tensor([[0, 0, 0, 1, 1], [1, 1, 0, 1, 1]], dtype=torch.bool)
     >>> source = torch.tensor([[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]])
     >>> self.masked_scatter_(mask, source)
     tensor([[0, 0, 0, 0, 1],
@@ -4380,7 +4380,7 @@ In-place version of :meth:`~Tensor.rsqrt`
 add_docstr_all(
     "scatter_",
     r"""
-scatter_(dim, index, src, reduce=None) -> Tensor
+scatter_(dim, index, src, *, reduce=None) -> Tensor
 
 Writes all values from the tensor :attr:`src` into :attr:`self` at the indices
 specified in the :attr:`index` tensor. For each value in :attr:`src`, its output
@@ -4443,7 +4443,9 @@ Args:
     index (LongTensor): the indices of elements to scatter, can be either empty
         or of the same dimensionality as ``src``. When empty, the operation
         returns ``self`` unchanged.
-    src (Tensor or float): the source element(s) to scatter.
+    src (Tensor): the source element(s) to scatter.
+
+Keyword args:
     reduce (str, optional): reduction operation to apply, can be either
         ``'add'`` or ``'multiply'``.
 
@@ -4473,6 +4475,32 @@ Example::
     tensor([[2.0000, 2.0000, 3.2300, 2.0000],
             [2.0000, 2.0000, 2.0000, 3.2300]])
 
+.. function:: scatter_(dim, index, value, *, reduce=None) -> Tensor:
+   :noindex:
+
+Writes the value from :attr:`value` into :attr:`self` at the indices
+specified in the :attr:`index` tensor.  This operation is equivalent to the previous version,
+with the :attr:`src` tensor filled entirely with :attr:`value`.
+
+Args:
+    dim (int): the axis along which to index
+    index (LongTensor): the indices of elements to scatter, can be either empty
+        or of the same dimensionality as ``src``. When empty, the operation
+        returns ``self`` unchanged.
+    value (Scalar): the value to scatter.
+
+Keyword args:
+    reduce (str, optional): reduction operation to apply, can be either
+        ``'add'`` or ``'multiply'``.
+
+Example::
+
+    >>> index = torch.tensor([[0, 1]])
+    >>> value = 2
+    >>> torch.zeros(3, 5).scatter_(0, index, value)
+    tensor([[2., 0., 0., 0., 0.],
+            [0., 2., 0., 0., 0.],
+            [0., 0., 0., 0., 0.]])
 """,
 )
 
@@ -6556,7 +6584,7 @@ Out-of-place version of :meth:`torch.Tensor.masked_scatter_`
 Example:
 
     >>> self = torch.tensor([0, 0, 0, 0, 0])
-    >>> mask = torch.tensor([[0, 0, 0, 1, 1], [1, 1, 0, 1, 1]])
+    >>> mask = torch.tensor([[0, 0, 0, 1, 1], [1, 1, 0, 1, 1]], dtype=torch.bool)
     >>> source = torch.tensor([[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]])
     >>> self.masked_scatter(mask, source)
     tensor([[0, 0, 0, 0, 1],

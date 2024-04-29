@@ -2,11 +2,12 @@ from typing import Any, cast, Optional, Union
 
 import typing_extensions
 
+import torch
 import torch.nn as nn
-
 from torch.distributed._composable import contract
 from torch.distributed._tensor import DeviceMesh
-from ._fsdp_api import MixedPrecisionPolicy
+
+from ._fsdp_api import MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo
 from ._fsdp_init import (
     _get_device_from_mesh,
@@ -29,6 +30,7 @@ def fully_shard(
     mesh: Optional[DeviceMesh] = None,
     reshard_after_forward: Union[bool, int] = True,
     mp_policy: MixedPrecisionPolicy = MixedPrecisionPolicy(),
+    offload_policy: OffloadPolicy = OffloadPolicy(),
 ):
     """
     Shard module parameters across data parallel workers.
@@ -89,6 +91,9 @@ def fully_shard(
         mp_policy (MixedPrecisionPolicy): This controls the mixed precision
             policy, which offers parameter/reduction mixed precision for this
             module. See :class:`MixedPrecisionPolicy` for details.
+        offload_policy (OffloadPolicy): This controls the offloading policy,
+            which offers parameter/gradient/optimizer state offloading. See
+            :class:`OffloadPolicy` and its subclasses for details.
     """
     if isinstance(module, (nn.ModuleList, nn.ModuleDict)):
         raise ValueError(
@@ -111,10 +116,16 @@ def fully_shard(
 
     managed_modules = _get_managed_modules(module)
     params, buffers = _get_managed_states(managed_modules)
-    _move_states_to_device(params, buffers, device, mesh_info)
+    _move_states_to_device(params, buffers, device)
     if params:
         state._fsdp_param_group = FSDPParamGroup(
-            params, module, mesh_info, post_forward_mesh_info, device, mp_policy
+            params,
+            module,
+            mesh_info,
+            post_forward_mesh_info,
+            device,
+            mp_policy,
+            offload_policy,
         )
 
     # for dynamo
@@ -125,7 +136,7 @@ def fully_shard(
     # Place FSDP leftmost for highest priority in the method resolution order
     cls = module.__class__
     dct = {"__deepcopy__": unimplemented_deepcopy}
-    new_cls = type(f"FSDP{cls.__name__}", (FSDP, cls), dct)
+    new_cls = type(f"FSDP{cls.__name__}", (FSDPModule, cls), dct)
     module.__class__ = new_cls
     return module
 
@@ -136,14 +147,14 @@ def unimplemented_deepcopy(*args: Any, **kwargs: Any) -> typing_extensions.Never
     )
 
 
-class FSDP:
+class FSDPModule:
     def __new__(cls, *args, **kwargs):
         """
         Override ``__new__`` to remove the FSDP class and directly construct
         the original class for cases like indexing into a container module.
         """
         # Use index 2 since 0 is the dynamically constructed `FSDP<...>` class
-        # and index 1 is the `FSDP` class itself
+        # and index 1 is the `FSDPModule` class itself
         orig_cls = cls.__mro__[2]
         self = orig_cls.__new__(orig_cls, *args, **kwargs)
         self.__init__(*args, **kwargs)
@@ -158,6 +169,33 @@ class FSDP:
         state = self._get_fsdp_state()
         if fsdp_param_group := state._fsdp_param_group:
             fsdp_param_group.reshard()
+
+    def unshard(self, async_op: bool = False) -> Optional["UnshardHandle"]:
+        """
+        Unshards the module's parameters by allocating memory and all-gathering
+        the parameters. This method is *not* recursive.
+
+        Args:
+            async_op (bool): If ``True``, then returns a :class:`UnshardHandle`
+                that has a :meth:`wait` method to wait on the unshard op. If
+                ``False``, then returns ``None`` and waits on the handle inside
+                this function.
+
+        .. note:: If ``async_op=True``, then the user does not have to call
+            :meth:`wait` on the returned handle if waiting on the unshard op
+            in the module's pre-forward is tolerable. FSDP will wait on the
+            pending unshard op in the pre-forward automatically.
+        """
+        state = self._get_fsdp_state()
+        fsdp_param_group = state._fsdp_param_group
+        if fsdp_param_group is not None:
+            fsdp_param_group.lazy_init()
+            fsdp_param_group.unshard(async_op=async_op)
+        handle = UnshardHandle(fsdp_param_group)
+        if async_op:
+            return handle
+        handle.wait()
+        return None
 
     def set_is_last_backward(self, is_last_backward: bool) -> None:
         """
@@ -182,26 +220,97 @@ class FSDP:
             recurse (bool): Whether to set for all submodules or just the
                 passed-in module.
         """
-        for module in cast(nn.Module, self).modules():
-            if isinstance(module, FSDP):
+        self_module = cast(nn.Module, self)
+        modules = list(self_module.modules()) if recurse else [self_module]
+        for module in modules:
+            if isinstance(module, FSDPModule):
                 state = module._get_fsdp_state()
                 if fsdp_param_group := state._fsdp_param_group:
-                    fsdp_param_group.reduce_scatter_grads = requires_gradient_sync
+                    fsdp_param_group.reduce_grads = requires_gradient_sync
                     fsdp_param_group.all_reduce_grads = requires_gradient_sync
 
-    def set_requires_all_reduce(self, requires_all_reduce: bool, recurse: bool = True):
+    def set_requires_all_reduce(
+        self, requires_all_reduce: bool, recurse: bool = True
+    ) -> None:
         """
         Sets if the module should all-reduce gradients. This can be used to
         implement gradient accumulation with only reduce-scatter but not
         all-reduce for HSDP.
         """
-        for module in cast(nn.Module, self).modules():
-            if isinstance(module, FSDP):
+        # TODO: post_reduce_output += fsdp_param.sharded_param.grad
+        # after reduce-scatter and before all-reduce
+        raise NotImplementedError("requires_all_reduce is not yet supported in HSDP")
+        self_module = cast(nn.Module, self)
+        modules = list(self_module.modules()) if recurse else [self_module]
+        for module in modules:
+            if isinstance(module, FSDPModule):
                 state = module._get_fsdp_state()
                 if fsdp_param_group := state._fsdp_param_group:
                     fsdp_param_group.all_reduce_grads = requires_all_reduce
+
+    def set_reshard_after_backward(
+        self, reshard_after_backward: bool, recurse: bool = True
+    ) -> None:
+        """
+        Sets if the module should reshard parameters after backward. This can
+        be used during gradient accumulation to trade off higher memory for
+        reduced communication.
+
+        Args:
+            reshard_after_backward (bool): Whether to reshard parameters after
+                backward.
+            recurse (bool): Whether to set for all submodules or just the
+                passed-in module.
+        """
+        self_module = cast(nn.Module, self)
+        modules = list(self_module.modules()) if recurse else [self_module]
+        for module in modules:
+            if isinstance(module, FSDPModule):
+                state = module._get_fsdp_state()
+                if fsdp_param_group := state._fsdp_param_group:
+                    fsdp_param_group.reshard_after_backward = reshard_after_backward
 
     def _get_fsdp_state(self) -> FSDPState:
         if (state := _get_module_fsdp_state(cast(nn.Module, self))) is None:
             raise AssertionError(f"No FSDP state found on {self}")
         return state
+
+    def _apply(self, *args: Any, **kwargs: Any) -> Any:
+        # Reshard to ensure that sharded parameters are registered
+        self.reshard()
+        ret = super()._apply(*args, **kwargs)  # type: ignore[misc]
+        state = self._get_fsdp_state()
+        if not (fsdp_param_group := state._fsdp_param_group):
+            return ret
+        # TODO: Remove this padding logic once DTensor pads the local tensor:
+        # https://github.com/pytorch/pytorch/issues/113045
+        with torch.no_grad():
+            for fsdp_param in fsdp_param_group.fsdp_params:
+                fsdp_param.reset_sharded_param()
+        return ret
+
+
+class UnshardHandle:
+    """
+    A handle to wait on the unshard op.
+
+    Args:
+        fsdp_param_group (FSDPParamGroup, optional): FSDP parameter group to
+            unshard. This should be ``None`` iff the FSDP module does not
+            manage any parameters, meaning the unshard is a no-op.
+    """
+
+    def __init__(self, fsdp_param_group: Optional[FSDPParamGroup]):
+        self._fsdp_param_group = fsdp_param_group
+
+    def wait(self):
+        """
+        Waits on the unshard op.
+
+        This ensures that the current stream can use the unsharded parameters,
+        which are now registered to the module.
+        """
+        if self._fsdp_param_group is not None:
+            self._fsdp_param_group.wait_for_unshard()
+            # Avoid keeping a reference
+            self._fsdp_param_group = None

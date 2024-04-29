@@ -79,8 +79,7 @@ void _amp_foreach_non_finite_check_and_unscale_cpu_kernel(
                     inv_scale_val == 1.f ? val : val * inv_scale_val);
               },
               [found_inf_ptr, inv_scale_ptr](Vectorized<scalar_t> val_vec) -> Vectorized<scalar_t>{
-                Vectorized<opmath_t> val_vec0, val_vec1;
-                std::tie(val_vec0, val_vec1) = convert_to_float<scalar_t>(val_vec);
+                auto [val_vec0, val_vec1] = convert_to_float<scalar_t>(val_vec);
                 if (val_vec0.has_inf_nan() || val_vec1.has_inf_nan()) {
                   *found_inf_ptr = 1.f;
                 }

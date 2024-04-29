@@ -10,7 +10,6 @@
 #include "caffe2/operators/spatial_batch_norm_op_impl.cuh"
 #include "caffe2/utils/math.h"
 
-#if CUDNN_VERSION_MIN(5, 0, 0)
 
 namespace caffe2 {
 
@@ -63,16 +62,12 @@ class CuDNNSpatialBNOp final : public SpatialBNOp<CUDAContext> {
   CuDNNSpatialBNOp(const OperatorDef& operator_def, Workspace* ws)
       : SpatialBNOp<CUDAContext>(operator_def, ws),
         cudnn_wrapper_(&context_),
-#if CUDNN_VERSION_MIN(7, 0, 0)
         // TODO(T31829456): The new CUDNN_BATCHNORM_SPATIAL_PERSISTENT mode was
         // introduced in CuDNN 7 for performance optimization, but it results in
         // accuracy losses in convolution models such as ResNeXt-101 and
         // video R(2+1)D. We will fall back to the normal
         // CUDNN_BATCHNORM_SPATIAL for now
         mode_(CUDNN_BATCHNORM_SPATIAL) {
-#else
-        mode_(CUDNN_BATCHNORM_SPATIAL) {
-#endif
     CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&data_desc_));
     CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&param_desc_));
     if (epsilon_ < CUDNN_BN_MIN_EPSILON) {
@@ -192,7 +187,6 @@ class CuDNNSpatialBNOp final : public SpatialBNOp<CUDAContext> {
       }
       const double alpha = static_cast<double>(1.0f - momentum_);
 
-#if CUDNN_VERSION_MIN(8, 0, 0)
       // Currently not supporting CUDNN_BATCHNORM_OPS_BN_ADD_ACTIVATION
       auto op = CUDNN_BATCHNORM_OPS_BN;
 
@@ -250,26 +244,6 @@ class CuDNNSpatialBNOp final : public SpatialBNOp<CUDAContext> {
               state->workspace().get(reserve_size),
               reserve_size));
           });
-#else
-      CUDNN_ENFORCE(cudnnBatchNormalizationForwardTraining(
-          cudnn_wrapper_.inline_cudnn_handle(),
-          mode_,
-          cudnnTypeWrapper<T>::kOne(),
-          cudnnTypeWrapper<T>::kZero(),
-          data_desc_,
-          X_data,
-          data_desc_,
-          Y_data,
-          param_desc_,
-          scale_data,
-          bias_data,
-          alpha,
-          running_mean_data,
-          running_var_data,
-          epsilon_,
-          saved_mean_data,
-          saved_inv_std_data));
-#endif // CUDNN_VERSION_MIN(8, 0, 0)
     }
     return true;
   }
@@ -290,16 +264,12 @@ class CuDNNSpatialBNGradientOp final : public SpatialBNGradientOp<CUDAContext> {
   CuDNNSpatialBNGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : SpatialBNGradientOp<CUDAContext>(operator_def, ws),
         cudnn_wrapper_(&context_),
-#if CUDNN_VERSION_MIN(7, 0, 0)
         // TODO(T31829456): The new CUDNN_BATCHNORM_SPATIAL_PERSISTENT mode was
         // introduced in CuDNN 7 for performance optimization, but it results in
         // accuracy losses in convolution models such as ResNeXt-101 and
         // video R(2+1)D. We will fall back to the normal
         // CUDNN_BATCHNORM_SPATIAL for now
         mode_(CUDNN_BATCHNORM_SPATIAL) {
-#else
-        mode_(CUDNN_BATCHNORM_SPATIAL) {
-#endif
     CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&data_desc_));
     CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&param_desc_));
     if (epsilon_ < CUDNN_BN_MIN_EPSILON) {
@@ -375,7 +345,6 @@ class CuDNNSpatialBNGradientOp final : public SpatialBNGradientOp<CUDAContext> {
           data_desc_,
           param_desc_);
     }
-#if CUDNN_VERSION_MIN(8, 0, 0)
     // Currently not supporting CUDNN_BATCHNORM_OPS_BN_ADD_ACTIVATION
     auto op = CUDNN_BATCHNORM_OPS_BN;
 
@@ -439,28 +408,6 @@ class CuDNNSpatialBNGradientOp final : public SpatialBNGradientOp<CUDAContext> {
             state->workspace().get(reserve_size),
             reserve_size));
       });
-#else
-    CUDNN_ENFORCE(cudnnBatchNormalizationBackward(
-        cudnn_wrapper_.inline_cudnn_handle(),
-        mode_,
-        cudnnTypeWrapper<T>::kOne(),
-        cudnnTypeWrapper<T>::kZero(),
-        cudnnTypeWrapper<T>::kOne(),
-        cudnnTypeWrapper<T>::kZero(),
-        data_desc_,
-        X_data,
-        data_desc_,
-        dY_data,
-        data_desc_,
-        dX_data,
-        param_desc_,
-        scale_data,
-        dscale_data,
-        dbias_data,
-        epsilon_,
-        saved_mean_data,
-        saved_rstd_data));
-#endif // CUDNN_VERSION_MIN(8, 0, 0)
     return true;
   }
 
@@ -478,5 +425,3 @@ REGISTER_CUDNN_OPERATOR(SpatialBN, CuDNNSpatialBNOp);
 REGISTER_CUDNN_OPERATOR(SpatialBNGradient, CuDNNSpatialBNGradientOp);
 
 } // namespace caffe2
-
-#endif // CUDNN_VERSION_MIN(5, 0, 0)

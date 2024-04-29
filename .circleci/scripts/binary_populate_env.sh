@@ -3,17 +3,9 @@ set -eux -o pipefail
 export TZ=UTC
 
 tagged_version() {
-  # Grabs version from either the env variable CIRCLE_TAG
-  # or the pytorch git described version
-  if [[ "$OSTYPE" == "msys" &&  -z "${GITHUB_ACTIONS:-}" ]]; then
-    GIT_DIR="${workdir}/p/.git"
-  else
-    GIT_DIR="${workdir}/pytorch/.git"
-  fi
+  GIT_DIR="${workdir}/pytorch/.git"
   GIT_DESCRIBE="git --git-dir ${GIT_DIR} describe --tags --match v[0-9]*.[0-9]*.[0-9]*"
-  if [[ -n "${CIRCLE_TAG:-}" ]]; then
-    echo "${CIRCLE_TAG}"
-  elif [[ ! -d "${GIT_DIR}" ]]; then
+  if [[ ! -d "${GIT_DIR}" ]]; then
     echo "Abort, abort! Git dir ${GIT_DIR} does not exists!"
     kill $$
   elif ${GIT_DESCRIBE} --exact >/dev/null; then
@@ -59,6 +51,7 @@ PIP_UPLOAD_FOLDER='nightly/'
 # We put this here so that OVERRIDE_PACKAGE_VERSION below can read from it
 export DATE="$(date -u +%Y%m%d)"
 BASE_BUILD_VERSION="$(cat ${PYTORCH_ROOT}/version.txt|cut -da -f1).dev${DATE}"
+
 # Change BASE_BUILD_VERSION to git tag when on a git tag
 # Use 'git -C' to make doubly sure we're in the correct directory for checking
 # the git tag
@@ -77,6 +70,35 @@ else
 fi
 
 export PYTORCH_BUILD_NUMBER=1
+
+# Set triton version as part of PYTORCH_EXTRA_INSTALL_REQUIREMENTS
+TRITON_VERSION=$(cat $PYTORCH_ROOT/.ci/docker/triton_version.txt)
+
+# Here PYTORCH_EXTRA_INSTALL_REQUIREMENTS is already set for the all the wheel builds hence append TRITON_CONSTRAINT
+if [[ "$PACKAGE_TYPE" =~ .*wheel.* &&  -n "${PYTORCH_EXTRA_INSTALL_REQUIREMENTS:-}" ]]; then
+  # Only linux Python < 3.12 are supported wheels for triton
+  TRITON_CONSTRAINT="platform_system == 'Linux' and platform_machine == 'x86_64' and python_version < '3.12'"
+  TRITON_REQUIREMENT="triton==${TRITON_VERSION}; ${TRITON_CONSTRAINT}"
+  if [[ -n "$PYTORCH_BUILD_VERSION" && "$PYTORCH_BUILD_VERSION" =~ .*dev.* ]]; then
+      TRITON_SHORTHASH=$(cut -c1-10 $PYTORCH_ROOT/.ci/docker/ci_commit_pins/triton.txt)
+      TRITON_REQUIREMENT="pytorch-triton==${TRITON_VERSION}+${TRITON_SHORTHASH}; ${TRITON_CONSTRAINT}"
+  fi
+  export PYTORCH_EXTRA_INSTALL_REQUIREMENTS="${PYTORCH_EXTRA_INSTALL_REQUIREMENTS} | ${TRITON_REQUIREMENT}"
+fi
+
+# Set triton via PYTORCH_EXTRA_INSTALL_REQUIREMENTS for triton rocm package
+if [[ "$PACKAGE_TYPE" =~ .*wheel.* && -n "$PYTORCH_BUILD_VERSION" && "$PYTORCH_BUILD_VERSION" =~ .*rocm.* && $(uname) == "Linux" && "$DESIRED_PYTHON" != "3.12" ]]; then
+    TRITON_REQUIREMENT="pytorch-triton-rocm==${TRITON_VERSION}"
+    if [[ -n "$PYTORCH_BUILD_VERSION" && "$PYTORCH_BUILD_VERSION" =~ .*dev.* ]]; then
+        TRITON_SHORTHASH=$(cut -c1-10 $PYTORCH_ROOT/.ci/docker/ci_commit_pins/triton-rocm.txt)
+        TRITON_REQUIREMENT="pytorch-triton-rocm==${TRITON_VERSION}+${TRITON_SHORTHASH}"
+    fi
+    if [[ -z "${PYTORCH_EXTRA_INSTALL_REQUIREMENTS:-}" ]]; then
+        export PYTORCH_EXTRA_INSTALL_REQUIREMENTS="${TRITON_REQUIREMENT}"
+    else
+        export PYTORCH_EXTRA_INSTALL_REQUIREMENTS="${PYTORCH_EXTRA_INSTALL_REQUIREMENTS} | ${TRITON_REQUIREMENT}"
+    fi
+fi
 
 JAVA_HOME=
 BUILD_JNI=OFF
@@ -123,12 +145,13 @@ if [[ "${OSTYPE}" == "msys" ]]; then
 else
   export DESIRED_DEVTOOLSET="${DESIRED_DEVTOOLSET:-}"
 fi
-export PYTORCH_EXTRA_INSTALL_REQUIREMENTS="${PYTORCH_EXTRA_INSTALL_REQUIREMENTS:-}"
+
 export DATE="$DATE"
 export NIGHTLIES_DATE_PREAMBLE=1.14.0.dev
 export PYTORCH_BUILD_VERSION="$PYTORCH_BUILD_VERSION"
 export PYTORCH_BUILD_NUMBER="$PYTORCH_BUILD_NUMBER"
 export OVERRIDE_PACKAGE_VERSION="$PYTORCH_BUILD_VERSION"
+export PYTORCH_EXTRA_INSTALL_REQUIREMENTS="${PYTORCH_EXTRA_INSTALL_REQUIREMENTS:-}"
 
 # TODO: We don't need this anymore IIUC
 export TORCH_PACKAGE_NAME='torch'
@@ -158,28 +181,6 @@ if [[ "$(uname)" != Darwin ]]; then
 
   cat >>"$envfile" <<EOL
   export MAX_JOBS="${MAX_JOBS}"
-EOL
-fi
-
-if [[ -z "${GITHUB_ACTIONS:-}" ]]; then
-  cat >>"$envfile" <<EOL
-  export workdir="$workdir"
-  export MAC_PACKAGE_WORK_DIR="$workdir"
-  if [[ "$OSTYPE" == "msys" ]]; then
-    export PYTORCH_ROOT="$workdir/p"
-    export BUILDER_ROOT="$workdir/b"
-  else
-    export PYTORCH_ROOT="$workdir/pytorch"
-    export BUILDER_ROOT="$workdir/builder"
-  fi
-  export MINICONDA_ROOT="$workdir/miniconda"
-  export PYTORCH_FINAL_PACKAGE_DIR="$workdir/final_pkgs"
-
-  export CIRCLE_TAG="${CIRCLE_TAG:-}"
-  export CIRCLE_SHA1="$CIRCLE_SHA1"
-  export CIRCLE_PR_NUMBER="${CIRCLE_PR_NUMBER:-}"
-  export CIRCLE_BRANCH="$CIRCLE_BRANCH"
-  export CIRCLE_WORKFLOW_ID="$CIRCLE_WORKFLOW_ID"
 EOL
 fi
 

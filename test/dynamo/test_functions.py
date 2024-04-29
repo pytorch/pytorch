@@ -54,6 +54,16 @@ def constant3(a, b):
     return a - b + (1.0 + 2)
 
 
+_variable = 0
+
+
+def update_global(x):
+    global _variable
+    _variable += 1
+    # Check that updated global variable value is picked up
+    return x * _variable
+
+
 def func_with_default(a, b, some_default_arg=True):
     if some_default_arg:
         return a - b
@@ -76,6 +86,10 @@ def make_test(fn=None, expected_frame_count=1):
     return test_fn
 
 
+class MyCls:
+    a = 1
+
+
 @torch.jit.script_if_tracing
 def inline_script_if_tracing(x):
     return x + 1.2
@@ -91,6 +105,16 @@ def inline_unused(x):
     return x + 5.6
 
 
+@functools.lru_cache
+def inline_lru_cache_fn_with_default_args(x, y, _=None):
+    return torch.sin(x * y)
+
+
+@torch.jit.script_if_tracing
+def inline_script_if_tracing_fn_with_default_args(x, y, _=None):
+    return torch.cos(x * y)
+
+
 class FunctionTests(torch._dynamo.test_case.TestCase):
     @make_test
     def test_inline_jit_annotations(x):
@@ -98,6 +122,14 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         x = inline_ignore(x)
         x = inline_unused(x)
         return
+
+    @make_test
+    def test_inline_script_if_tracing_fn_with_default_args(a, b):
+        return inline_script_if_tracing_fn_with_default_args(a, 2, b)
+
+    @make_test
+    def test_inline_lru_cache_fn_with_default_args(a, b):
+        return inline_lru_cache_fn_with_default_args(a, 2, b)
 
     @make_test
     def test_add(a, b):
@@ -150,11 +182,73 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return v
 
     @make_test
+    def test_obj_eq(a, b):
+        v = a + b
+        if MyCls() == None:  # noqa: E711
+            return -1
+        if MyCls() != None:  # noqa: E711
+            v = v.sin()
+        if MyCls() == MyCls():
+            return -2
+        if MyCls() != MyCls():
+            return v + 1
+        return -3
+
+    @make_test
+    def test_cls_eq(a, b):
+        v = a + b
+        if MyCls == None:  # noqa: E711
+            return -1
+        if MyCls != None:  # noqa: E711
+            v = v.sin()
+        if MyCls != MyCls:
+            return -2
+        if MyCls == MyCls:
+            return v + 1
+        return -3
+
+    @make_test
+    def test_obj_is(a, b):
+        v = a + b
+        if MyCls() is None:  # noqa: E711
+            return -1
+        if MyCls() is not None:  # noqa: E711
+            v = v.sin()
+        if MyCls() is MyCls():
+            return -2
+        if MyCls() is not MyCls():
+            return v + 1
+        return -3
+
+    @make_test
+    def test_cls_is(a, b):
+        v = a + b
+        if MyCls is None:  # noqa: E711
+            return -1
+        if MyCls is not None:  # noqa: E711
+            v = v.sin()
+        if MyCls is not MyCls:
+            return -2
+        if MyCls is MyCls:
+            return v + 1
+        return -3
+
+    @make_test
     def test_itertools_combinations(a, b):
         combs = []
         for size in itertools.combinations((1, 2, 3, 4), 2):
             combs.append(torch.ones(size))
         return combs
+
+    @make_test
+    def test_np_iinfo(a):
+        max_dim = np.iinfo(np.int16).max
+        return a + max_dim
+
+    @make_test
+    def test_np_finfo(a):
+        min_dim = np.finfo(np.float32).min
+        return a + min_dim
 
     @make_test
     def test_constant1(a, b, c):
@@ -178,6 +272,14 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         if c > d:
             return a - b
         return b - a
+
+    @make_test
+    def test_cls_hasattr(self, x):
+        if hasattr(MyCls, "a"):
+            x = x + 1
+        if hasattr(MyCls, "b"):
+            x = x + 2
+        return x
 
     @make_test
     def test_finfo(a, b):
@@ -541,6 +643,29 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return x.type(dtype)
 
     @make_test
+    def test_list_compare_polyfill(x):
+        for a, b, c in [
+            [(1, 2, 3), (1, 2, 3), 7.77],
+            [(1, 4, 3), (1, 2, 3), 3.33],
+            [(1, 2), (1, 2, 3), 5.55],
+            [(1, 2, 3), (1, 2), 11.11],
+            [(1, -1, 3), (1, 2, 3), 13.33],
+        ]:
+            if a != b:
+                x += 1 * c
+            if a == b:
+                x += 2 * c
+            if a < b:
+                x += 4 * c
+            if a > b:
+                x += 8 * c
+            if a <= b:
+                x += 16 * c
+            if a >= b:
+                x += 32 * c
+        return x
+
+    @make_test
     def test_promote_types(x):
         if x.dtype == torch.promote_types(torch.int32, torch.float32):
             return x + 1
@@ -562,6 +687,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     @make_test
     def test_is_complex(x):
         if torch.is_complex(x):
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
+    def test_tensor_is_complex(x):
+        if x.is_complex():
             return x + 1
         else:
             return x - 1
@@ -1170,6 +1302,22 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return mytuple.add(), mytuple.static_method(), mytuple.class_method()
 
     @make_test
+    def test_namedtuple_hasattr(a, b):
+        mytuple = FunctionTests.MyNamedTuple(a, b)
+
+        def isinstance_namedtuple(obj) -> bool:
+            return (
+                isinstance(obj, tuple)
+                and hasattr(obj, "_asdict")
+                and hasattr(obj, "_fields")
+            )
+
+        if isinstance_namedtuple(mytuple):
+            return a + b
+        else:
+            return a - b
+
+    @make_test
     def test_is_quantized(a, b):
         if not a.is_quantized:
             return a + b
@@ -1440,6 +1588,26 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_partials_udf_arg(x):
         par_mul = functools.partial(udf_mul, torch.ones(10, 10))
         return par_mul(x)
+
+    @make_test
+    def test_list_add_then_mutate(x):
+        my_list = [1, x]
+        y = x / 4.0
+        my_list = my_list + [x / 2.0, 4]
+        my_list.append(y)
+        return sum(my_list)
+
+    @make_test
+    def test_list_expand_lhs(x):
+        return sum(4 * [x])
+
+    @make_test
+    def test_in_not_in(x):
+        mylist = [1, 2, 3, 4, 5, x]
+        myotherlist = [1, 2, 3, 4, 5]
+        assert 3 in mylist
+        assert 6 not in myotherlist
+        return sum(mylist)
 
     @make_test
     def test_partials_udf_kwarg(x):
@@ -2036,6 +2204,17 @@ class GraphModule(torch.nn.Module):
                 opt_fn = torch._dynamo.optimize(nopython=True)(fn)
                 self.assertEqual(opt_fn(), fn())
 
+    def test_unary_fold_op_seq(self):
+        for op in (operator.length_hint,):
+            with self.subTest(op=op):
+
+                def fn():
+                    a = [tuple(range(-10, i)) for i in range(10)]
+                    return tuple(map(op, a))
+
+                opt_fn = torch._dynamo.optimize(nopython=True)(fn)
+                self.assertEqual(opt_fn(), fn())
+
     def test_rand_inlined(self):
         @torch.compile(backend="eager", dynamic=True)
         def fn():
@@ -2073,6 +2252,14 @@ class GraphModule(torch.nn.Module):
             t3 = t1 + t2
 
         func()
+
+    def test_to(self):
+        @torch.compile(backend="eager")
+        def fn():
+            t = torch.ones(2)
+            y = t.to("meta")
+
+        fn()
 
     def test_elipsis(self):
         @torch.compile(backend="eager", fullgraph=True)
@@ -2463,7 +2650,6 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(fn(z), fn_opt(z))
 
-    @torch._dynamo.config.patch(capture_func_transforms=True)
     def test_is_init_in_compile_vmapped_mutated_tensor_tensor(self):
         def fn(z):
             x = z.clone()
@@ -2477,7 +2663,6 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(fn(z), fn_opt(z))
 
-    @torch._dynamo.config.patch(capture_func_transforms=True)
     def test_is_vmapped_mutated_tensor_tensor(self):
         def fn(x):
             y = torch.vmap(torch.Tensor.acos_)(x)
@@ -2489,7 +2674,6 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(fn(z), fn_opt(z))
 
-    @torch._dynamo.config.patch(capture_func_transforms=True)
     def test_is_init_in_compile_vmapped_mutated_tensor_tensor_multi_arg(self):
         def fn(y, z):
             a = y.clone()

@@ -58,6 +58,7 @@ __all__ = [
     'SymBool', 'sym_not', 'unravel_index',
     'sym_int', 'sym_float', 'sym_max', 'sym_min', 'sym_ite', 'compile', 'vmap',
     'export', 'autocast', 'cond', 'GradScaler',
+    'get_device_module',
 ]
 
 ################################################################################
@@ -301,9 +302,8 @@ class SymInt:
         return str(self.node)
 
     def __hash__(self) -> builtins.int:
-        ret = self.node.nested_int()
-        if ret is not None:
-            return hash(ret)
+        if self.node.is_nested_int():
+            return hash(self.node.nested_int())
         else:
             # We could support constant SymInts as well, but not doing it for now
             raise TypeError("unhashable type: non-nested SymInt")
@@ -338,6 +338,9 @@ class SymFloat:
         raise AssertionError("type stub not overridden")
 
     def __ge__(self, other) -> builtins.bool:
+        raise AssertionError("type stub not overridden")
+
+    def __trunc__(self):
         raise AssertionError("type stub not overridden")
 
     def __sym_max__(self, other):
@@ -466,7 +469,7 @@ def sym_int(a):
     if isinstance(a, SymInt):
         return a
     elif isinstance(a, SymFloat):
-        return math.floor(a) if a >= 0 else math.ceil(a)  # type: ignore[arg-type, call-overload]
+        return math.trunc(a)
     return py_int(a)  # type: ignore[operator]
 
 def sym_max(a, b):
@@ -751,17 +754,17 @@ def set_default_tensor_type(t):
 def set_default_dtype(d):
     r"""
 
-    Sets the default floating point dtype to :attr:`d`. Supports torch.float32
-    and torch.float64 as inputs. Other dtypes may be accepted without complaint
-    but are not supported and are unlikely to work as expected.
+    Sets the default floating point dtype to :attr:`d`. Supports floating point dtype
+    as inputs. Other dtypes will cause torch to raise an exception.
 
     When PyTorch is initialized its default floating point dtype is torch.float32,
     and the intent of set_default_dtype(torch.float64) is to facilitate NumPy-like
     type inference. The default floating point dtype is used to:
 
-    1. Implicitly determine the default complex dtype. When the default floating point
-       type is float32 the default complex dtype is complex64, and when the default
-       floating point type is float64 the default complex type is complex128.
+    1. Implicitly determine the default complex dtype. When the default floating type is float16,
+       the default complex dtype is complex32. For float32, the default complex dtype is complex64.
+       For float64, it is complex128. For bfloat16, an exception will be raised because
+       there is no corresponding complex type for bfloat16.
     2. Infer the dtype for tensors constructed using Python floats or complex Python
        numbers. See examples below.
     3. Determine the result of type promotion between bool and integer tensors and
@@ -783,13 +786,20 @@ def set_default_dtype(d):
         torch.complex64
 
         >>> torch.set_default_dtype(torch.float64)
-
         >>> # Python floats are now interpreted as float64
         >>> torch.tensor([1.2, 3]).dtype    # a new floating point tensor
         torch.float64
         >>> # Complex Python numbers are now interpreted as complex128
         >>> torch.tensor([1.2, 3j]).dtype   # a new complex tensor
         torch.complex128
+
+        >>> torch.set_default_dtype(torch.float16)
+        >>> # Python floats are now interpreted as float16
+        >>> torch.tensor([1.2, 3]).dtype    # a new floating point tensor
+        torch.float16
+        >>> # Complex Python numbers are now interpreted as complex128
+        >>> torch.tensor([1.2, 3j]).dtype   # a new complex tensor
+        torch.complex32
 
     """
     _C._set_default_dtype(d)
@@ -885,7 +895,7 @@ def use_deterministic_algorithms(mode: builtins.bool, *, warn_only: builtins.boo
     A handful of CUDA operations are nondeterministic if the CUDA version is
     10.2 or greater, unless the environment variable ``CUBLAS_WORKSPACE_CONFIG=:4096:8``
     or ``CUBLAS_WORKSPACE_CONFIG=:16:8`` is set. See the CUDA documentation for more
-    details: `<https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility>`_
+    details: `<https://docs.nvidia.com/cuda/cublas/index.html#results-reproducibility>`_
     If one of these environment variable configurations is not set, a :class:`RuntimeError`
     will be raised from these operations when called with CUDA tensors:
 
@@ -1257,7 +1267,8 @@ def _check_tensor_all(cond, message=None):  # noqa: F811
 # For Python Array API (https://data-apis.org/array-api/latest/API_specification/constants.html) and
 # NumPy consistency (https://numpy.org/devdocs/reference/constants.html)
 from math import e , nan , inf , pi
-__all__.extend(['e', 'pi', 'nan', 'inf'])
+newaxis: None = None
+__all__.extend(['e', 'pi', 'nan', 'inf', 'newaxis'])
 
 ################################################################################
 # Define Storage and Tensor classes
@@ -1447,7 +1458,7 @@ _storage_classes = {
     TypedStorage
 }
 
-# The _tensor_classes set is initialized by the call to _C._initialize_tensor_type_bindings()
+# The _tensor_classes set is initialized by the call to initialize_python_bindings.
 _tensor_classes: Set[Type] = set()
 
 # If you edit these imports, please update torch/__init__.py.in as well
@@ -1570,6 +1581,7 @@ from torch import cuda as cuda
 from torch import cpu as cpu
 from torch import mps as mps
 from torch import xpu as xpu
+from torch import mtia as mtia
 from torch import autograd as autograd
 from torch.autograd import (
     no_grad as no_grad,
@@ -1613,8 +1625,8 @@ import torch.nn.intrinsic
 _C._init_names(list(torch._storage_classes))
 
 # attach docstrings to torch and tensor functions
-from . import _torch_docs, _tensor_docs, _storage_docs
-del _torch_docs, _tensor_docs, _storage_docs
+from . import _torch_docs, _tensor_docs, _storage_docs, _size_docs
+del _torch_docs, _tensor_docs, _storage_docs, _size_docs
 
 
 def compiled_with_cxx11_abi() -> builtins.bool:
@@ -1679,6 +1691,9 @@ class _TorchCompileInductorWrapper:
         self.apply_mode(mode)
         self.apply_options(options)
 
+        # Stash the compiler_fn to be used for backend match guard.
+        from torch._inductor.compile_fx import compile_fx
+        self.compiler_fn = compile_fx
         if self.config.get("triton.cudagraphs", False):
             os.environ["DISABLE_CUPTI_LAZY_REINIT"] = "1"
             # FIXME: CUDA Graph does not work well with CUPTI teardown.
@@ -1768,6 +1783,10 @@ class _TorchCompileWrapper:
     def __call__(self, model_, inputs_):
         return self.compiler_fn(model_, inputs_, **self.kwargs)
 
+    def reset(self):
+        if hasattr(self.compiler_fn, "reset"):
+            self.compiler_fn.reset()
+
 
 def compile(model: Optional[Callable] = None, *,
             fullgraph: builtins.bool = False,
@@ -1778,6 +1797,8 @@ def compile(model: Optional[Callable] = None, *,
             disable: builtins.bool = False) -> Callable:
     """
     Optimizes given model/function using TorchDynamo and specified backend.
+    If you are compiling an :class:`torch.nn.Module`, you can also use :meth:`torch.nn.Module.compile`
+    to compile the module inplace without changing its structure.
 
     Concretely, for every frame executed within the compiled region, we will attempt
     to compile it and cache the compiled result on the code object for future
@@ -1811,7 +1832,7 @@ def compile(model: Optional[Callable] = None, *,
 
         - Experimental or debug in-tree backends can be seen with `torch._dynamo.list_backends(None)`
 
-        - To register an out-of-tree custom backend: https://pytorch.org/docs/main/compile/custom-backends.html
+        - To register an out-of-tree custom backend: https://pytorch.org/docs/main/torch.compiler_custom_backends.html
        mode (str): Can be either "default", "reduce-overhead", "max-autotune" or "max-autotune-no-cudagraphs"
 
         - "default" is the default mode, which is a good balance between performance and overhead
@@ -1858,9 +1879,8 @@ def compile(model: Optional[Callable] = None, *,
 
     """
     _C._log_api_usage_once("torch.compile")
-    # Temporary until we get proper support for python 3.12
-    if sys.version_info >= (3, 12):
-        raise RuntimeError("Dynamo is not supported on Python 3.12+")
+    if sys.version_info >= (3, 13):
+        raise RuntimeError("Dynamo is not supported on Python 3.13+")
 
     # Decorator mode
     if model is None:
@@ -1999,6 +2019,27 @@ else:
 
         raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
+def get_device_module(device: Optional[Union[torch.device, str]] = None):
+    """
+    Returns the module associated with a given device(e.g., torch.device('cuda'), "mtia:0", "xpu", ...).
+    If no device is given, return the module for the current accelerator or CPU if none is present.
+    """
+    if isinstance(device, torch.device):
+        device_module_name = device.type
+    elif isinstance(device, str):
+        device_module_name = torch.device(device).type
+    elif device is None:
+        # Using default accelerator type. If no accelerator is available, it automatically returns CPU device.
+        device_module_name = torch._C._get_accelerator().type
+    else:
+        raise RuntimeError(f"Invalid value of device '{device}', expect torch.device, str, or None")
+    device_module = getattr(torch, device_module_name, None)
+    if device_module is None:
+        raise RuntimeError(
+            f"Device '{device_module_name}' does not have a corresponding module registered as 'torch.{device_module_name}'."
+        )
+    return device_module
+
 
 def _constrain_as_value(symbol, min: Optional[builtins.int] = None, max: Optional[builtins.int] = None):
     """
@@ -2015,39 +2056,17 @@ def _constrain_as_size(symbol, min: Optional[builtins.int] = None, max: Optional
     which then need to be used as tensor constructors. Providing these assertions to PyTorch can help resolve
       GuardOnDataDependentSymNode errors upon export, since we cannot guard on unbacked SymInts.
 
-    This function has unusual semantics which distinguish it from constrain_as_value.
-    Specifically, at compile-time, we will unsoundly assume that the resulting int is always >= 2.
-    As a result, max value you pass in should always be greater than 2.
-    This makes it easier to use the unbacked int in size contexts, as we will often attempt to guard on a size being zero/one
-    (e.g., when computing the contiguity of a tensor, or testing if broadcasting can occur),
-    which will not work on unbacked SymInts. Assuming that the int is >= 2 allows us to
-    report False to these tests. Although this is technically unsound,
-    in practice we observe that if your program works for all sizes >= 2,
-    it probably works for zero and one too. The reason specifically assume size is >= 2 is because
-    lot of PyTorch code is specialized for 0 and 1 which could result in not general graphs.
-    At runtime, we only assert that the user provided min/max values are respected.
+    This function has unusual semantics which distinguish it from
+    constrain_as_value.  Specifically, in some circumstances in framework
+    code, we will treat this int as >= 2 (when we do a size-oblivious guard).
+    This makes it easier to This makes it easier to use the unbacked int in
+    size contexts, as we will often attempt to guard on a size being zero/one
+    (e.g., when computing the contiguity of a tensor, or testing if
+    broadcasting can occur), which will not work on unbacked SymInts.
+    However, if we conservatively assume that the size is not zero/one, we will
+    end up with a graph that will still work even if the size is zero/one.
 
-    To demonstrate in a scenario, suppose you do
-    ```
-    # Case 1
-    # This will assume symbol is between [2, inf) at compile time, but [0, inf) at runtime
-    constrain_as_size(symbol, min=0)
-
-    # Case 2
-    # This will assume symbol is between [2, N] at compile time, but [0, N] at runtime
-    constrain_as_size(symbol, min=0, max=N)
-
-    # Case 3
-    # This is not valid case as max is <= 2
-    constrain_as_size(symbol, min=0, max=1)
-
-    # Case 4
-    # This will assume symbol is between [2, inf) at compile time, AND [2, inf) at runtime
-    constrain_as_size(symbol, min=2)
-
-    # Case 5
-    # This will assume symbol is between [2, inf) at compile time, but [1, inf) at runtime
-    constrain_as_size(symbol, min=1)
+    For more details, see https://docs.google.com/document/d/1HSuTTVvYH1pTew89Rtpeu84Ht3nQEFTYhAX3Ypa_xJs/edit
     ```
     """
     torch.sym_constrain_range_for_size(symbol, min=min, max=max)

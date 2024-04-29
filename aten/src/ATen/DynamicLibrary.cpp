@@ -25,9 +25,7 @@ static void* checkDL(void* x) {
 
   return x;
 }
-DynamicLibrary::DynamicLibrary(const char* name, const char* alt_name, bool leak_handle_): leak_handle(leak_handle_) {
-  // NOLINTNEXTLINE(hicpp-signed-bitwise)
-  handle = dlopen(name, RTLD_LOCAL | RTLD_NOW);
+DynamicLibrary::DynamicLibrary(const char* name, const char* alt_name, bool leak_handle_): leak_handle(leak_handle_), handle(dlopen(name, RTLD_LOCAL | RTLD_NOW)) {
   if (!handle) {
     if (alt_name) {
       handle = dlopen(alt_name, RTLD_LOCAL | RTLD_NOW);

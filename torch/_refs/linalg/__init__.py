@@ -16,6 +16,7 @@ from torch._prims_common import (
     Dim,
     DimsType,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
+    IntLike,
     NumberType,
     TensorLikeType,
 )
@@ -62,6 +63,8 @@ def _check_norm_dtype(dtype: Optional[torch.dtype], x_dtype: torch.dtype, fn_nam
         )
 
 
+import operator
+
 # Utilities should come BEFORE this import
 from torch._decomp import register_decomposition
 from torch._decomp.decompositions import pw_cast_for_opmath
@@ -101,7 +104,7 @@ def diagonal(
 @out_wrapper(exact_dtype=True)
 def vector_norm(
     x: TensorLikeType,
-    ord: float = 2.0,
+    ord: Union[float, int] = 2,
     dim: Optional[DimsType] = None,
     keepdim: bool = False,
     *,
@@ -148,7 +151,8 @@ def vector_norm(
         x = _maybe_convert_to_dtype(x, computation_dtype)  # type: ignore[assignment]
         reduce_sum = partial(torch.sum, dim=dim, keepdim=keepdim)
 
-        if not (ord % 2.0 == 0.0 and utils.is_float_dtype(x.dtype)):
+        is_ord_even = ord % 2 == 0 if isinstance(ord, IntLike) else ord % 2.0 == 0.0
+        if not (is_ord_even and utils.is_float_dtype(x.dtype)):
             x = torch.abs(x)
         return to_result_dtype(torch.pow(reduce_sum(torch.pow(x, ord)), 1.0 / ord))  # type: ignore[return-value]
 
@@ -163,7 +167,7 @@ def _backshift_permutation(dim0, dim1, ndim):
 
 def _inverse_permutation(perm):
     # Given a permutation, returns its inverse. It's equivalent to argsort on an array
-    return [i for i, j in sorted(enumerate(perm), key=lambda i_j: i_j[1])]
+    return [i for i, j in sorted(enumerate(perm), key=operator.itemgetter(1))]
 
 
 # CompositeImplicitAutograd

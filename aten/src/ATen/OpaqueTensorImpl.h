@@ -33,6 +33,7 @@ struct TORCH_API OpaqueTensorImpl : public TensorImpl {
     set_custom_sizes_strides(SizesStridesPolicy::CustomStrides);
     sizes_and_strides_.set_sizes(sizes);
     refresh_numel();
+    // NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
     is_non_overlapping_and_dense_ = is_non_overlapping_and_dense;
   }
 

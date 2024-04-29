@@ -942,19 +942,19 @@ bool VideoInputOp<Context>::Prefetch() {
     if (!std::is_same<Context, CPUContext>::value) {
       if (get_rgb_) {
         prefetched_clip_rgb_on_device_.CopyFrom(
-            prefetched_clip_rgb_, &context_);
+            prefetched_clip_rgb_, true);
       }
       if (get_optical_flow_) {
-        prefetched_clip_of_on_device_.CopyFrom(prefetched_clip_of_, &context_);
+        prefetched_clip_of_on_device_.CopyFrom(prefetched_clip_of_, true);
       }
-      prefetched_label_on_device_.CopyFrom(prefetched_label_, &context_);
+      prefetched_label_on_device_.CopyFrom(prefetched_label_, true);
       if (get_video_id_) {
         prefetched_video_id_on_device_.CopyFrom(
-            prefetched_video_id_, &context_);
+            prefetched_video_id_, true);
       }
       if (get_start_frame_) {
         prefetched_start_frame_on_device_.CopyFrom(
-            prefetched_start_frame_, &context_);
+            prefetched_start_frame_, true);
       }
     }
   } catch (const std::exception& exc) {
@@ -972,43 +972,43 @@ bool VideoInputOp<Context>::CopyPrefetched() {
     if (get_rgb_) {
       auto* clip_rgb_output = OperatorBase::Output<Tensor>(index++, type);
       if (std::is_same<Context, CPUContext>::value) {
-        clip_rgb_output->CopyFrom(prefetched_clip_rgb_, &context_);
+        clip_rgb_output->CopyFrom(prefetched_clip_rgb_, true);
       } else {
-        clip_rgb_output->CopyFrom(prefetched_clip_rgb_on_device_, &context_);
+        clip_rgb_output->CopyFrom(prefetched_clip_rgb_on_device_, true);
       }
     }
 
     if (get_optical_flow_) {
       auto* clip_of_output = OperatorBase::Output<Tensor>(index++, type);
       if (std::is_same<Context, CPUContext>::value) {
-        clip_of_output->CopyFrom(prefetched_clip_of_, &context_);
+        clip_of_output->CopyFrom(prefetched_clip_of_, true);
       } else {
-        clip_of_output->CopyFrom(prefetched_clip_of_on_device_, &context_);
+        clip_of_output->CopyFrom(prefetched_clip_of_on_device_, true);
       }
     }
 
     auto* label_output = OperatorBase::Output<Tensor>(index++, type);
     if (std::is_same<Context, CPUContext>::value) {
-      label_output->CopyFrom(prefetched_label_, &context_);
+      label_output->CopyFrom(prefetched_label_, true);
     } else {
-      label_output->CopyFrom(prefetched_label_on_device_, &context_);
+      label_output->CopyFrom(prefetched_label_on_device_, true);
     }
 
     if (get_video_id_) {
       auto* video_id_output = OperatorBase::Output<Tensor>(index++, type);
       if (std::is_same<Context, CPUContext>::value) {
-        video_id_output->CopyFrom(prefetched_video_id_, &context_);
+        video_id_output->CopyFrom(prefetched_video_id_, true);
       } else {
-        video_id_output->CopyFrom(prefetched_video_id_on_device_, &context_);
+        video_id_output->CopyFrom(prefetched_video_id_on_device_, true);
       }
     }
     if (get_start_frame_) {
       auto* start_frame_output = OperatorBase::Output<Tensor>(index, type);
       if (std::is_same<Context, CPUContext>::value) {
-        start_frame_output->CopyFrom(prefetched_start_frame_, &context_);
+        start_frame_output->CopyFrom(prefetched_start_frame_, true);
       } else {
         start_frame_output->CopyFrom(
-            prefetched_start_frame_on_device_, &context_);
+            prefetched_start_frame_on_device_, true);
       }
     }
   } catch (const std::exception& exc) {

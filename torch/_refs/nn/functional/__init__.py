@@ -600,7 +600,7 @@ def margin_ranking_loss(
     margin: float = 0.0,
     reduction: str = "mean",
 ) -> TensorLikeType:
-    # loss_without_reduction = max(0, −target * (input1 − input2) + margin)
+    # loss_without_reduction = max(0, -target * (input1 - input2) + margin)
     if input1.ndim != input2.ndim or input1.ndim != target.ndim:
         raise RuntimeError(
             "margin_ranking_loss : All input tensors should have same dimension but got sizes: "
@@ -898,6 +898,9 @@ def triplet_margin_loss(
         # msg = "size_average and reduce args are deprecated, please use reduction argument."
         reduction = _get_string_reduction_arg(size_average=size_average, reduce=reduce)
 
+    if margin <= 0:
+        raise ValueError(f"margin must be greater than 0, got {margin}")
+
     # torch.nn.functional.triplet_margin_with_distance_loss has no ref defined
     # since it's a pure Python implementation.  Use this helper instead.
     return _triplet_margin_with_distance_loss(
@@ -986,6 +989,10 @@ def hardtanh(
             raise RuntimeError(
                 "Cannot do hardtanh on an unsigned type with negative limits"
             )
+
+    if min_val > max_val:  # type: ignore[operator]
+        raise ValueError("min_val cannot be greater than max_val")
+
     return torch.clamp(a, min_val, max_val)  # type: ignore[arg-type]
 
 

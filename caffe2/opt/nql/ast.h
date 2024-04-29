@@ -21,10 +21,12 @@ struct ASTExpr {
     return starInputsFlag;
   }
   void dump(int level = 0) const {
-    for (const auto i : c10::irange(level))std::cout << "  ";
-    if (!isCall())
+    for ([[maybe_unused]] const auto _ : c10::irange(level)) {
+      std::cout << "  ";
+    }
+    if (!isCall()) {
       std::cout << "Var: " << name << std::endl;
-    else {
+    } else {
       std::cout << "Function: " << name << ", args: " << std::endl;
       for (auto* e : children) {
         e->dump(level + 1);
@@ -41,11 +43,14 @@ struct ASTStmt {
     delete rhs;
   }
   void dump(int level = 0) const {
-    for (const auto i : c10::irange(level))std::cout << "  ";
+    for ([[maybe_unused]] const auto _ : c10::irange(level)) {
+      std::cout << "  ";
+    }
     std::cout << "LHS:" << std::endl;
     for (auto s : lhs) {
-      for (int i = 0; i < level + 1; i++)
+      for (int i = 0; i < level + 1; i++) {
         std::cout << "  ";
+      }
       std::cout << s << std::endl;
     }
     rhs->dump(level);

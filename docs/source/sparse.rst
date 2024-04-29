@@ -546,7 +546,7 @@ Let's consider the following example:
 
 As mentioned above, a sparse COO tensor is a :class:`torch.Tensor`
 instance and to distinguish it from the `Tensor` instances that use
-some other layout, on can use :attr:`torch.Tensor.is_sparse` or
+some other layout, one can use :attr:`torch.Tensor.is_sparse` or
 :attr:`torch.Tensor.layout` properties:
 
     >>> isinstance(s, torch.Tensor)

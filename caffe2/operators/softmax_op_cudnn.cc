@@ -5,14 +5,6 @@
 
 namespace caffe2 {
 
-namespace {
-constexpr int NUM_DESCRIPTORS = 2;
-constexpr int GRADIENT_NUM_DESCRIPTORS = 3;
-constexpr int BOTTOM_DESC_ID = 0;
-constexpr int TOP_DESC_ID = 1;
-constexpr int TOP_GRADIENT_DESC_ID = 2;
-} // namespace
-
 class CuDNNSoftmaxOp final : public Operator<CUDAContext> {
  public:
   template <class... Args>

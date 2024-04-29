@@ -1285,6 +1285,11 @@ void initJITBindings(PyObject* module) {
             return node->is_constant();
           })
       .def(
+          "is_nested_int",
+          [](const c10::SymNode& node) {
+            return node->is_nested_int();
+          })
+      .def(
           "is_symbolic",
           [](const c10::SymNode& node) {
             return node->is_symbolic();
@@ -1298,6 +1303,11 @@ void initJITBindings(PyObject* module) {
           "nested_int_coeff",
           [](const c10::SymNode& node) {
             return node->nested_int_coeff();
+          })
+      .def(
+          "__deepcopy__",
+          [](const c10::SymNode& node, py::handle memo) {
+            return node->clone();
           });
 
   // clang-format on
@@ -1378,6 +1388,7 @@ void initJITBindings(PyObject* module) {
           if (size == 0) {
             return size;
           }
+          py::gil_scoped_acquire acquire;
           auto memory_view = py::memoryview::from_memory(
               reinterpret_cast<const char*>(data), size);
           buffer.attr("write")(std::move(memory_view));
@@ -1391,18 +1402,50 @@ void initJITBindings(PyObject* module) {
           [](PyTorchStreamWriter& self,
              const std::string& name,
              const char* data,
-             size_t size) { return self.writeRecord(name, data, size); })
-      .def("write_end_of_file", &PyTorchStreamWriter::writeEndOfFile)
-      .def("set_min_version", &PyTorchStreamWriter::setMinVersion)
+             size_t size) {
+            // Since we don't know where the data come from, we cannot
+            // release the GIL in this overload
+            return self.writeRecord(name, data, size);
+          })
+      .def(
+          "write_record",
+          [](PyTorchStreamWriter& self,
+             const std::string& name,
+             py::bytes data,
+             size_t size) {
+            // It is not clear from the doc but according to CPython own code,
+            // it is ok to use the result of PyBytes_AsString without the GIL
+            // being held
+            // https://github.com/python/cpython/blob/e2a3e4b7488aff6fdc704a0f258bc315e96c1d6e/Objects/stringlib/join.h#L67
+            const char* data_str = PyBytes_AsString(data.ptr());
+            py::gil_scoped_release release;
+            return self.writeRecord(name, data_str, size);
+          })
+      .def(
+          "write_record",
+          [](PyTorchStreamWriter& self,
+             const std::string& name,
+             c10::Storage data,
+             size_t size) {
+            // Reading Tensor data is always ok without the GIL held
+            py::gil_scoped_release release;
+            return self.writeRecord(
+                name, reinterpret_cast<const char*>(data.data()), size);
+          })
       .def(
           "write_record",
           [](PyTorchStreamWriter& self,
              const std::string& name,
              uintptr_t data,
              size_t size) {
+            TORCH_WARN_ONCE(
+                "write_record(): Passing Storage by data pointer is deprecated and will be an error in ",
+                "the future, please pass the Storage object instead.");
             return self.writeRecord(
                 name, reinterpret_cast<const char*>(data), size);
           })
+      .def("write_end_of_file", &PyTorchStreamWriter::writeEndOfFile)
+      .def("set_min_version", &PyTorchStreamWriter::setMinVersion)
       .def("archive_name", &PyTorchStreamWriter::archiveName)
       .def("serialization_id", &PyTorchStreamWriter::serializationId)
       .def(
@@ -1629,6 +1672,14 @@ void initJITBindings(PyObject* module) {
       });
 
   m.def(
+      "_check_schema_allow_fake_script_object",
+      [](const FunctionSchema& schema, py::args args, py::kwargs kwargs) {
+        // checkSchemaAllowFakeScriptObject will throw runtime error if there is
+        // a schema mismatch. Otherwise, it returns true.
+        return checkSchemaAllowFakeScriptObject(schema, args, kwargs);
+      });
+
+  m.def(
       "_jit_resolve_packet",
       [](const char* op_name, py::args args, py::kwargs kwargs) {
         try {
@@ -1695,6 +1746,20 @@ void initJITBindings(PyObject* module) {
         }
       },
       py::arg("qualified_name"));
+
+  m.def(
+      "_maybe_call_torch_function_for_op_packet",
+      [](py::handle op_overload_packet, py::args args, py::kwargs kwargs) {
+        py::list ns_method =
+            op_overload_packet.attr("_qualified_op_name").attr("split")("::");
+        return _maybe_handle_torch_function(
+            py::cast<std::string>(ns_method[0]),
+            py::cast<std::string>(ns_method[1]),
+            "",
+            false,
+            args,
+            kwargs);
+      });
 
   m.def(
       "parse_ir",
@@ -1827,6 +1892,13 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "__str__",
+          [](FunctionSchema& self) {
+            std::stringstream ss;
+            ss << self;
+            return ss.str();
+          })
+      .def(
+          "__repr__",
           [](FunctionSchema& self) {
             std::stringstream ss;
             ss << self;

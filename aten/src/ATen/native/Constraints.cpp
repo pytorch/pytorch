@@ -29,7 +29,7 @@ void sym_constrain_range(
 
     int64_t min_val = min.has_value() ? min.value() : std::numeric_limits<int64_t>::min();
     int64_t max_val = max.has_value() ? max.value() : std::numeric_limits<int64_t>::max();
-    int64_t size_as_int = size.toInt();
+    int64_t size_as_int = size.toLong();
 
     TORCH_CHECK(
       max_val >= min_val,

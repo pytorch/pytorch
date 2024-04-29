@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/xpu/XPUContext.h>
+#include <ATen/xpu/XPUGeneratorImpl.h>
 #include <c10/util/CallOnce.h>
 #include <c10/xpu/XPUCachingAllocator.h>
 #include <c10/xpu/XPUFunctions.h>
@@ -148,6 +149,7 @@ PyObject* THXPModule_setStream_wrap(
           args,
           kwargs,
           "|LLL",
+          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
           const_cast<char**>(kwlist),
           &stream_id,
           &device_index,
@@ -155,7 +157,9 @@ PyObject* THXPModule_setStream_wrap(
   }
 
   auto stream = at::xpu::XPUStream::unpack3(
-      stream_id, device_index, static_cast<c10::DeviceType>(device_type));
+      stream_id,
+      static_cast<c10::DeviceIndex>(device_index),
+      static_cast<c10::DeviceType>(device_type));
 
   auto device = c10::xpu::current_device();
   if (device != stream.device_index()) {
@@ -223,6 +227,9 @@ static void registerXpuDeviceProperties(PyObject* module) {
   py::class_<DeviceProp>(m, "_XpuDeviceProperties")
       .def_readonly("name", &DeviceProp::name)
       .def_readonly("platform_name", &DeviceProp::platform_name)
+      .def_readonly("vendor", &DeviceProp::vendor)
+      .def_readonly("driver_version", &DeviceProp::driver_version)
+      .def_readonly("version", &DeviceProp::version)
       .def_readonly("total_memory", &DeviceProp::global_mem_size)
       .def_readonly("max_compute_units", &DeviceProp::max_compute_units)
       .def_readonly("gpu_eu_count", &DeviceProp::gpu_eu_count)
@@ -230,6 +237,9 @@ static void registerXpuDeviceProperties(PyObject* module) {
       .def_readonly("max_work_group_size", &DeviceProp::max_work_group_size)
       .def_readonly("max_num_sub_groups", &DeviceProp::max_num_sub_groups)
       .def_readonly("sub_group_sizes", &DeviceProp::sub_group_sizes)
+      .def_readonly("has_fp16", &DeviceProp::has_fp16)
+      .def_readonly("has_fp64", &DeviceProp::has_fp64)
+      .def_readonly("has_atomic64", &DeviceProp::has_atomic64)
       .def_property_readonly("type", get_device_type)
       .def(
           "__repr__",
@@ -237,14 +247,18 @@ static void registerXpuDeviceProperties(PyObject* module) {
             std::ostringstream stream;
             stream << "_XpuDeviceProperties(name='" << prop.name
                    << "', platform_name='" << prop.platform_name << "', type='"
-                   << get_device_type(prop)
-                   << ", total_memory=" << prop.global_mem_size / (1024 * 1024)
+                   << get_device_type(prop) << "', driver_version='"
+                   << prop.driver_version << "', total_memory="
+                   << prop.global_mem_size / (1024ull * 1024)
                    << "MB, max_compute_units=" << prop.max_compute_units
                    << ", gpu_eu_count=" << prop.gpu_eu_count
                    << ", gpu_subslice_count=" << gpu_subslice_count(prop)
                    << ", max_work_group_size=" << prop.max_work_group_size
                    << ", max_num_sub_groups=" << prop.max_num_sub_groups
-                   << ", sub_group_sizes=[" << prop.sub_group_sizes << "])";
+                   << ", sub_group_sizes=[" << prop.sub_group_sizes
+                   << "], has_fp16=" << prop.has_fp16
+                   << ", has_fp64=" << prop.has_fp64
+                   << ", has_atomic64=" << prop.has_atomic64 << ")";
             return stream.str();
           });
 }
@@ -254,7 +268,7 @@ static void bindGetDeviceProperties(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
   m.def(
       "_get_device_properties",
-      [](int device) -> c10::xpu::DeviceProp* {
+      [](c10::DeviceIndex device) -> c10::xpu::DeviceProp* {
         return at::xpu::getDeviceProperties(device);
       },
       py::return_value_policy::reference);
@@ -272,15 +286,28 @@ static PyObject* THXPModule_initExtension(PyObject* self, PyObject* noargs) {
   if (!m)
     throw python_error();
 
+  auto set_module_attr = [&](const char* name, PyObject* v) {
+    if (PyObject_SetAttrString(m, name, v) < 0) {
+      throw python_error();
+    }
+  };
+
+  auto num_gpus = c10::xpu::device_count();
+  THPObjectPtr default_xpu_generators(
+      PyTuple_New(static_cast<Py_ssize_t>(num_gpus)));
+  for (const auto i : c10::irange(num_gpus)) {
+    const auto& gen = at::xpu::detail::getDefaultXPUGenerator(i);
+    auto* cast_gen = THPGenerator_initDefaultGenerator(gen);
+    PyTuple_SetItem(default_xpu_generators.get(), i, cast_gen);
+  }
+  set_module_attr("default_generators", default_xpu_generators.get());
   bindGetDeviceProperties(m);
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
-// NOLINTNEXTLINE(modernize-avoid-c-arrays,
-// cppcoreguidelines-avoid-non-const-global-variables,
-// cppcoreguidelines-avoid-c-arrays)
+// NOLINTNEXTLINE(*-c-arrays*, *-global-variables)
 static struct PyMethodDef _THXPModule_methods[] = {
     {"_xpu_init", THXPModule_initExtension, METH_NOARGS, nullptr},
     {"_xpu_setDevice", THXPModule_setDevice_wrap, METH_O, nullptr},

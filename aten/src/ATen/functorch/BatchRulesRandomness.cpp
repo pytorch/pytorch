@@ -16,8 +16,7 @@
 // registered to FuncTorchVmapMode. This is because we need to interpose on
 // random operations even if they're not on a BatchedTensor.
 
-namespace at {
-namespace functorch {
+namespace at::functorch {
 
 template <typename F, F Func, typename... ExtraArgs>
 Tensor random_batching_rule(SymIntArrayRef shape, ExtraArgs... extra_args) {
@@ -200,8 +199,8 @@ static std::tuple<Tensor,Tensor> native_dropout_batching_rule(const Tensor& tens
     }
     auto [output, mask] = at::native_dropout(tensor_value, p, train);
     return std::make_tuple(
-        makeBatched(std::move(output), 0, cur_level),
-        makeBatched(std::move(mask), 0, cur_level));
+        makeBatched(output, 0, cur_level),
+        makeBatched(mask, 0, cur_level));
   }
 
   // repeated code from the CPU kernel since the CUDA one doesn't call bernoulli_ explicitly
@@ -265,7 +264,7 @@ struct RandomBatchRuleHelper<F, Func, typelist<T1, T...>> {
 
 template <typename F, F Func, typename... T>
 Tensor rand_int_wrapper(SymIntArrayRef shape, c10::SymInt high, T... extra_args) {
-  return Func(high, std::move(shape), std::forward<T>(extra_args)...);
+  return Func(high, shape, std::forward<T>(extra_args)...);
 }
 
 template <typename A, A a, typename C>
@@ -491,4 +490,5 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
   #undef UNARY_POINTWISE_RANDOM_LEADING_FLOAT
   #undef TENSOR_LIKE_COMMON_ARG_TYPES
 }
-}} // namespace at::functorch
+
+} // namespace at::functorch

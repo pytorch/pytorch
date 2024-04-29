@@ -30,7 +30,7 @@ static std::unordered_map<std::string, ParameterType> type_map = {
     {"double", ParameterType::DOUBLE},
     {"complex", ParameterType::COMPLEX},
     {"TensorList", ParameterType::TENSOR_LIST},
-    {"c10::List<c10::optional<Tensor>>", ParameterType::TENSOR_LIST},
+    {"c10::List<::std::optional<Tensor>>", ParameterType::TENSOR_LIST},
     {"IntArrayRef", ParameterType::INT_LIST},
     {"SymIntArrayRef", ParameterType::SYM_INT_LIST},
     {"ArrayRef<double>", ParameterType::FLOAT_LIST},
@@ -793,7 +793,7 @@ static bool is_int_or_symint(PyObject* obj) {
   // for regular tensors it's redundant with the test below.
   if (THPVariable_Check(obj)) {
     auto& var = THPVariable_Unpack(obj);
-    if (var.numel() == 1 &&
+    if (TORCH_GUARD_SIZE_OBLIVIOUS(var.sym_numel().sym_eq(1)) &&
         at::isIntegralType(var.dtype().toScalarType(), /*include_bool*/ true)) {
       return true;
     }

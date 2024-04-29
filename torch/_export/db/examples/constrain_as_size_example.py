@@ -24,4 +24,4 @@ class ConstrainAsSizeExample(torch.nn.Module):
     def forward(self, x):
         a = x.item()
         torch._constrain_as_size(a, min=0, max=5)
-        return torch.ones((a, 5))
+        return torch.zeros((a, 5))

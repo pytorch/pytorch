@@ -3,18 +3,37 @@ import types
 import torch
 import torch.nn.functional as F
 
+from torch.ao.quantization.utils import _assert_and_get_unique_device
+
 
 __all__ = [
     "model_is_exported",
+    "_WrapperModule",
 ]
 
 
-def model_is_exported(m: torch.fx.GraphModule) -> bool:
+class _WrapperModule(torch.nn.Module):
+    """Class to wrap a callable in an :class:`torch.nn.Module`. Use this if you
+    are trying to export a callable.
     """
-    Return True if the `torch.fx.GraphModule` was exported,
-    False otherwise (e.g. if the model was FX symbolically traced).
+
+    def __init__(self, fn):
+        super().__init__()
+        self.fn = fn
+
+    def forward(self, *args, **kwargs):
+        """Simple forward that just calls the ``fn`` provided to :meth:`WrapperModule.__init__`."""
+        return self.fn(*args, **kwargs)
+
+
+def model_is_exported(m: torch.nn.Module) -> bool:
     """
-    return any("val" in n.meta for n in m.graph.nodes)
+    Return True if the `torch.nn.Module` was exported, False otherwise
+    (e.g. if the model was FX symbolically traced or not traced at all).
+    """
+    return isinstance(m, torch.fx.GraphModule) and any(
+        "val" in n.meta for n in m.graph.nodes
+    )
 
 
 def _replace_dropout(m: torch.fx.GraphModule, train_to_eval: bool):
@@ -29,7 +48,7 @@ def _replace_dropout(m: torch.fx.GraphModule, train_to_eval: bool):
     See https://github.com/pytorch/pytorch/issues/103681.
     """
     # Avoid circular dependencies
-    from .utils import get_aten_graph_module
+    from .utils import _get_aten_graph_module_for_pattern
 
     # Needed to ensure subgraph matches are self-contained
     m.graph.eliminate_dead_code()
@@ -45,11 +64,19 @@ def _replace_dropout(m: torch.fx.GraphModule, train_to_eval: bool):
 
         example_inputs = (torch.randn(1),)
         if train_to_eval:
-            match_pattern = get_aten_graph_module(dropout_train, example_inputs)
-            replacement_pattern = get_aten_graph_module(dropout_eval, example_inputs)
+            match_pattern = _get_aten_graph_module_for_pattern(
+                _WrapperModule(dropout_train), example_inputs
+            )
+            replacement_pattern = _get_aten_graph_module_for_pattern(
+                _WrapperModule(dropout_eval), example_inputs
+            )
         else:
-            match_pattern = get_aten_graph_module(dropout_eval, example_inputs)
-            replacement_pattern = get_aten_graph_module(dropout_train, example_inputs)
+            match_pattern = _get_aten_graph_module_for_pattern(
+                _WrapperModule(dropout_eval), example_inputs
+            )
+            replacement_pattern = _get_aten_graph_module_for_pattern(
+                _WrapperModule(dropout_train), example_inputs
+            )
 
         from torch.fx.subgraph_rewriter import replace_pattern_with_filters
 
@@ -76,7 +103,7 @@ def _replace_batchnorm(m: torch.fx.GraphModule, train_to_eval: bool):
     # Enable this support in future updates.
 
     # Avoid circular dependencies
-    from .utils import get_aten_graph_module
+    from .utils import _get_aten_graph_module_for_pattern
 
     # Needed to ensure subgraph matches are self-contained
     m.graph.eliminate_dead_code()
@@ -111,12 +138,26 @@ def _replace_batchnorm(m: torch.fx.GraphModule, train_to_eval: bool):
         torch.randn(1),  # bn_running_mean
         torch.randn(1),  # bn_running_var
     )
+
+    device = _assert_and_get_unique_device(m)
+    is_cuda = device is not None and device.type == "cuda"
+    bn_train_aten = _get_aten_graph_module_for_pattern(
+        _WrapperModule(bn_train),
+        example_inputs,
+        is_cuda,
+    )
+    bn_eval_aten = _get_aten_graph_module_for_pattern(
+        _WrapperModule(bn_eval),
+        example_inputs,
+        is_cuda,
+    )
+
     if train_to_eval:
-        match_pattern = get_aten_graph_module(bn_train, example_inputs)
-        replacement_pattern = get_aten_graph_module(bn_eval, example_inputs)
+        match_pattern = bn_train_aten
+        replacement_pattern = bn_eval_aten
     else:
-        match_pattern = get_aten_graph_module(bn_eval, example_inputs)
-        replacement_pattern = get_aten_graph_module(bn_train, example_inputs)
+        match_pattern = bn_eval_aten
+        replacement_pattern = bn_train_aten
 
     from torch.fx.subgraph_rewriter import replace_pattern_with_filters
 

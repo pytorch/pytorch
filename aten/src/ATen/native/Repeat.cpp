@@ -16,8 +16,8 @@
 
 template <typename index_t>
 static void compute_cpu(
-    index_t* repeat_ptr,
-    int64_t* cumsum_ptr,
+    const index_t* repeat_ptr,
+    const int64_t* cumsum_ptr,
     index_t* result_ptr,
     int64_t size,
     int64_t result_size) {

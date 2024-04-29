@@ -76,7 +76,6 @@
 #include <ATen/ops/tanh.h>
 #include <ATen/ops/threshold_backward_native.h>
 #include <ATen/ops/threshold_native.h>
-#include <ATen/ops/zeros_like.h>
 
 #include <utility>
 #endif
@@ -89,8 +88,8 @@ TORCH_META_FUNC(threshold)(const Tensor& self, const Scalar& threshold, const Sc
   build(TensorIteratorConfig()
     .set_check_mem_overlap(false)  // threshold is idempotent, so overlap is okay
     .add_output(result)
-    .add_input(self)
-    .add_input(self) // other
+    .add_const_input(self)
+    .add_const_input(self) // other
     .allow_cpu_scalars(true)
     .promote_inputs_to_common_dtype(true)
     .cast_common_dtype_to_outputs(true)
@@ -103,8 +102,8 @@ TORCH_META_FUNC(threshold_backward)(const Tensor& grad, const Tensor& self, cons
   build(TensorIteratorConfig()
     .set_check_mem_overlap(false)  // threshold is idempotent, so overlap is okay
     .add_output(gradInput)
-    .add_input(self)
-    .add_input(grad)  // other
+    .add_const_input(self)
+    .add_const_input(grad)  // other
     .allow_cpu_scalars(true)
     .promote_inputs_to_common_dtype(true)
     .cast_common_dtype_to_outputs(true)
@@ -393,7 +392,7 @@ TORCH_IMPL_FUNC(gelu_out_cpu) (
 auto approximate_type = get_gelutype_enum(approximate);
 #if AT_MKLDNN_ENABLED()
   if (use_mkldnn(self) && (approximate_type == GeluType::None)) {
-    const ideep::tensor& x = itensor_from_tensor(self);
+    const ideep::tensor& x = itensor_from_tensor(self, /*from_const_data_ptr*/true);
     ideep::tensor y = itensor_from_tensor(result);
     ideep::eltwise_forward::compute(
       x, y, ideep::algorithm::eltwise_gelu_erf, ideep::prop_kind::forward_training, /*alpha*/ 0.0);
@@ -411,8 +410,8 @@ TORCH_IMPL_FUNC(gelu_backward_out_cpu) (
 auto approximate_type = get_gelutype_enum(approximate);
 #if AT_MKLDNN_ENABLED()
   if (use_mkldnn(self) && (approximate_type == GeluType::None)) {
-    const ideep::tensor& x = itensor_from_tensor(self);
-    ideep::tensor grady = itensor_from_tensor(grad);
+    const ideep::tensor& x = itensor_from_tensor(self, /*from_const_data_ptr*/true);
+    ideep::tensor grady = itensor_from_tensor(grad, /*from_const_data_ptr*/true);
     ideep::tensor gradx = itensor_from_tensor(grad_input);
     ideep::eltwise_backward::compute(x, grady, gradx,
       ideep::algorithm::eltwise_gelu_erf, /*alpha*/ 0.0);
@@ -579,7 +578,7 @@ inline void _rrelu_with_noise_train(
   opmath_t upper = upper_.to<opmath_t>();
   Tensor tmp_tensor = output.contiguous();
   scalar_t* output_data = tmp_tensor.data_ptr<scalar_t>();
-  scalar_t* input_data = input.data_ptr<scalar_t>();
+  const scalar_t* input_data = input.const_data_ptr<scalar_t>();
   scalar_t* noise_data = noise.data_ptr<scalar_t>();
   auto gen  = at::get_generator_or_default<CPUGeneratorImpl>(generator, detail::getDefaultCPUGenerator());
   std::lock_guard<std::mutex> lock(gen->mutex_);
@@ -717,8 +716,8 @@ Tensor _prelu_kernel(const Tensor& self, const Tensor& weight) {
   auto result = at::empty_like(self);
   auto iter = TensorIteratorConfig()
     .add_output(result)
-    .add_input(self)
-    .add_input(weight)
+    .add_const_input(self)
+    .add_const_input(weight)
     .build();
   prelu_stub(iter.device_type(), iter);
   return result;
@@ -730,9 +729,9 @@ std::tuple<Tensor, Tensor> _prelu_kernel_backward(const Tensor& grad_out, const 
   auto iter = TensorIteratorConfig()
     .add_output(grad_self)
     .add_output(grad_weight)
-    .add_input(self)
-    .add_input(weight)
-    .add_input(grad_out)
+    .add_const_input(self)
+    .add_const_input(weight)
+    .add_const_input(grad_out)
     .build();
   prelu_backward_stub(iter.device_type(), iter);
   return {grad_self, grad_weight};
@@ -748,9 +747,8 @@ Tensor infinitely_differentiable_gelu_backward(
 }
 
 std::tuple<Tensor, Tensor> log_sigmoid_forward_cpu(const Tensor& input) {
-  // FIXME: do these actually need to be zeros_like or can they be empty_like?
-  auto result = at::zeros_like(input, at::MemoryFormat::Contiguous);
-  auto buffer = at::zeros_like(input, at::MemoryFormat::Contiguous);
+  auto result = at::empty_like(input, at::MemoryFormat::Contiguous);
+  auto buffer = at::empty_like(input, at::MemoryFormat::Contiguous);
   log_sigmoid_cpu_stub(kCPU, result, buffer, input.contiguous());
   return std::make_tuple(result, buffer);
 }
@@ -781,8 +779,8 @@ Tensor log_sigmoid_backward_cuda(const Tensor& grad_output, const Tensor& input,
   // NOTE: buffer is only used by CPU dispatch, we just ignore it here
   auto iter = at::TensorIteratorConfig()
       .add_output(grad_input)
-      .add_input(input)
-      .add_input(grad_output)
+      .add_const_input(input)
+      .add_const_input(grad_output)
       .build();
   log_sigmoid_backward_stub(kCUDA, iter);
   return iter.output();
@@ -792,9 +790,9 @@ Tensor log_sigmoid_backward_cpu(const Tensor& grad_output, const Tensor& input, 
   auto grad_input = at::empty_like(grad_output);
   auto iter = at::TensorIteratorConfig()
       .add_output(grad_input)
-      .add_input(input)
-      .add_input(buffer)
-      .add_input(grad_output)
+      .add_const_input(input)
+      .add_const_input(buffer)
+      .add_const_input(grad_output)
       .build();
   log_sigmoid_backward_stub(kCPU, iter);
   return iter.output();
@@ -804,8 +802,8 @@ Tensor& log_sigmoid_backward_cuda_out(const Tensor& grad_output, const Tensor& i
                                       const Tensor& buffer, Tensor& grad_input) {
   auto iter = TensorIteratorConfig()
       .add_output(grad_input)
-      .add_input(input)
-      .add_input(grad_output)
+      .add_const_input(input)
+      .add_const_input(grad_output)
       .build();
   log_sigmoid_backward_stub(kCUDA, iter);
   return grad_input;
@@ -817,9 +815,9 @@ Tensor& log_sigmoid_backward_cpu_out(const Tensor& grad_output,
     Tensor& grad_input) {
   auto iter = TensorIteratorConfig()
       .add_output(grad_input)
-      .add_input(input)
-      .add_input(buffer)
-      .add_input(grad_output)
+      .add_const_input(input)
+      .add_const_input(buffer)
+      .add_const_input(grad_output)
       .build();
   log_sigmoid_backward_stub(kCPU, iter);
   return grad_input;

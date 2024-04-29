@@ -9,8 +9,8 @@ import torch.distributed as dist
 from torch._inductor import metrics
 from torch._inductor.comm_analysis import estimate_nccl_collective_runtime
 from torch._inductor.compile_fx import compile_fx, count_bytes_inner
+from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import is_collective
-from torch.testing._internal.common_utils import TestCase as TorchTestCase
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 aten = torch.ops.aten
@@ -44,7 +44,7 @@ def T(*size, dtype=torch.float32, device=DEVICE, grad=False) -> torch.Tensor:
     return torch.randn(size, dtype=dtype, device=device, requires_grad=grad)
 
 
-class TestCase(TorchTestCase):
+class TestCase(InductorTestCase):
     device = DEVICE
 
     """
@@ -303,7 +303,7 @@ class TestCommAnalysis(TestCase):
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     if HAS_CUDA:
         run_tests(needs="filelock")

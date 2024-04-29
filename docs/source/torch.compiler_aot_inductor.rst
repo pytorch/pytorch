@@ -114,7 +114,8 @@ previous step, enabling us to conduct model predictions directly within a C++ en
         // The second inference uses a different batch size and it works because we
         // specified that dimension as dynamic when compiling model.so.
         std::cout << "Result from the second inference:"<< std::endl;
-        std::cout << runner.run({torch::randn({2, 10}, at::kCUDA)})[0] << std::endl;
+        std::vector<torch::Tensor> inputs2 = {torch::randn({2, 10}, at::kCUDA)};
+        std::cout << runner.run(inputs2)[0] << std::endl;
 
         return 0;
     }

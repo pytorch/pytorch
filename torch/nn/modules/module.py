@@ -13,6 +13,7 @@ from torch import Tensor, device, dtype
 from typing import Union, Tuple, Any, Callable, Iterator, Set, Optional, overload, TypeVar, Mapping, Dict, List
 from typing_extensions import Self
 from ...utils.hooks import RemovableHandle
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 __all__ = ['register_module_forward_pre_hook', 'register_module_forward_hook',
            'register_module_full_backward_pre_hook', 'register_module_backward_hook',
@@ -430,8 +431,8 @@ class Module:
 
         # Backward compatibility: no args used to be allowed when call_super_init=False
         if self.call_super_init is False and bool(kwargs):
-            raise TypeError("{}.__init__() got an unexpected keyword argument '{}'"
-                            "".format(type(self).__name__, next(iter(kwargs))))
+            raise TypeError(f"{type(self).__name__}.__init__() got an unexpected keyword argument '{next(iter(kwargs))}'"
+                            "")
 
         if self.call_super_init is False and bool(args):
             raise TypeError(f"{type(self).__name__}.__init__() takes 1 positional argument but {len(args) + 1} were"
@@ -756,7 +757,7 @@ class Module:
             "Please file an issue at https://github.com/pytorch/pytorch/issues/new?template=bug-report.yml "
             "to report this bug.")
 
-    def set_extra_state(self, state: Any):
+    def set_extra_state(self, state: Any) -> None:
         """Set extra state contained in the loaded `state_dict`.
 
         This function is called from :func:`load_state_dict` to handle any extra state
@@ -802,24 +803,27 @@ class Module:
             with torch.no_grad():
                 param_applied = fn(param)
             p_should_use_set_data = compute_should_use_set_data(param, param_applied)
+
+            # subclasses may have multiple child tensors so we need to use swap_tensors
+            p_should_use_swap_tensors = should_use_swap_tensors or is_traceable_wrapper_subclass(param_applied)
+
             param_grad = param.grad
-            if p_should_use_set_data:
-                if should_use_swap_tensors:
-                    try:
-                        if param_grad is not None:
-                            # Accessing param.grad makes its at::Tensor's use_count 2, which will prevent swapping.
-                            # Decrement use count of the gradient by setting to None
-                            param.grad = None
-                        param_applied = torch.nn.Parameter(param_applied, requires_grad=param.requires_grad)
-                        torch.utils.swap_tensors(param, param_applied)
-                    except Exception as e:
-                        if param_grad is not None:
-                            param.grad = param_grad
-                        raise RuntimeError(f"_apply(): Couldn't swap {self._get_name()}.{key}") from e
-                    out_param = param
-                else:
-                    param.data = param_applied
-                    out_param = param
+            if p_should_use_swap_tensors:
+                try:
+                    if param_grad is not None:
+                        # Accessing param.grad makes its at::Tensor's use_count 2, which will prevent swapping.
+                        # Decrement use count of the gradient by setting to None
+                        param.grad = None
+                    param_applied = torch.nn.Parameter(param_applied, requires_grad=param.requires_grad)
+                    torch.utils.swap_tensors(param, param_applied)
+                except Exception as e:
+                    if param_grad is not None:
+                        param.grad = param_grad
+                    raise RuntimeError(f"_apply(): Couldn't swap {self._get_name()}.{key}") from e
+                out_param = param
+            elif p_should_use_set_data:
+                param.data = param_applied
+                out_param = param
             else:
                 assert isinstance(param, Parameter)
                 assert param.is_leaf
@@ -830,17 +834,16 @@ class Module:
                 with torch.no_grad():
                     grad_applied = fn(param_grad)
                 g_should_use_set_data = compute_should_use_set_data(param_grad, grad_applied)
-                if g_should_use_set_data:
-                    if should_use_swap_tensors:
-                        grad_applied.requires_grad_(param_grad.requires_grad)
-                        try:
-                            torch.utils.swap_tensors(param_grad, grad_applied)
-                        except Exception as e:
-                            raise RuntimeError(f"_apply(): Couldn't swap {self._get_name()}.{key}.grad") from e
-                        out_param.grad = param_grad
-                    else:
-                        assert out_param.grad is not None
-                        out_param.grad.data = grad_applied
+                if p_should_use_swap_tensors:
+                    grad_applied.requires_grad_(param_grad.requires_grad)
+                    try:
+                        torch.utils.swap_tensors(param_grad, grad_applied)
+                    except Exception as e:
+                        raise RuntimeError(f"_apply(): Couldn't swap {self._get_name()}.{key}.grad") from e
+                    out_param.grad = param_grad
+                elif g_should_use_set_data:
+                    assert out_param.grad is not None
+                    out_param.grad.data = grad_applied
                 else:
                     assert param_grad.is_leaf
                     out_param.grad = grad_applied.requires_grad_(param_grad.requires_grad)
@@ -1648,7 +1651,6 @@ class Module:
             # raise exception raised in try block
             raise
 
-
     __call__ : Callable[..., Any] = _wrapped_call_impl
 
     def __getstate__(self):
@@ -1894,7 +1896,7 @@ class Module:
             # DeprecationWarning is ignored by default
             warnings.warn(
                 "Positional args are being deprecated, use kwargs instead. Refer to "
-                "https://pytorch.org/docs/master/generated/torch.nn.Module.html#torch.nn.Module.state_dict"
+                "https://pytorch.org/docs/main/generated/torch.nn.Module.html#torch.nn.Module.state_dict"
                 " for details.")
 
         if destination is None:
@@ -1967,7 +1969,6 @@ class Module:
         self._load_state_dict_post_hooks[handle.id] = hook
         return handle
 
-
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
         r"""Copy parameters and buffers from :attr:`state_dict` into only this module, but not its descendants.
@@ -2035,9 +2036,8 @@ class Module:
 
                 if not is_param_lazy and input_param.shape != param.shape:
                     # local shape should match the one in checkpoint
-                    error_msgs.append('size mismatch for {}: copying a param with shape {} from checkpoint, '
-                                      'the shape in current model is {}.'
-                                      .format(key, input_param.shape, param.shape))
+                    error_msgs.append(f'size mismatch for {key}: copying a param with shape {input_param.shape} from checkpoint, '
+                                      f'the shape in current model is {param.shape}.')
                     continue
 
                 if param.is_meta and not input_param.is_meta and not assign_to_params_buffers:
@@ -2048,24 +2048,26 @@ class Module:
 
                 try:
                     with torch.no_grad():
-                        if assign_to_params_buffers:
-                            # Shape checks are already done above
-                            if (isinstance(param, torch.nn.Parameter) and
-                                    not isinstance(input_param, torch.nn.Parameter)):
-                                setattr(self, name, torch.nn.Parameter(input_param))
-                            else:
-                                setattr(self, name, input_param)
-                        elif use_swap_tensors:
-                            param_requires_grad = param.requires_grad
-                            new_input_param = param.module_load(input_param)
+                        if use_swap_tensors:
+                            new_input_param = param.module_load(input_param, assign=assign_to_params_buffers)
                             if id(new_input_param) == id(input_param) or id(new_input_param) == id(param):
                                 raise RuntimeError("module_load returned one of self or other, please .detach() "
                                                    "the result if returning one of the inputs in module_load")
-                            if (isinstance(param, torch.nn.Parameter) and
-                                    not isinstance(new_input_param, torch.nn.Parameter)):
-                                new_input_param = torch.nn.Parameter(new_input_param, requires_grad=param_requires_grad)
+                            if (isinstance(param, torch.nn.Parameter)):
+                                if not isinstance(new_input_param, torch.nn.Parameter):
+                                    new_input_param = torch.nn.Parameter(new_input_param, requires_grad=param.requires_grad)
+                                else:
+                                    new_input_param.requires_grad_(param.requires_grad)
                             torch.utils.swap_tensors(param, new_input_param)
                             del new_input_param
+                        elif assign_to_params_buffers:
+                            # Shape checks are already done above
+                            if (isinstance(param, torch.nn.Parameter)):
+                                if not isinstance(input_param, torch.nn.Parameter):
+                                    input_param = torch.nn.Parameter(input_param, requires_grad=param.requires_grad)
+                                else:
+                                    input_param.requires_grad_(param.requires_grad)
+                            setattr(self, name, input_param)
                         else:
                             param.copy_(input_param)
                 except Exception as ex:
@@ -2090,9 +2092,12 @@ class Module:
         if strict:
             for key in state_dict.keys():
                 if key.startswith(prefix) and key != extra_state_key:
-                    input_name = key[len(prefix):]
-                    input_name = input_name.split('.', 1)[0]  # get the name of param/buffer/child
-                    if input_name not in self._modules and input_name not in local_state:
+                    input_name = key[len(prefix):].split(".", 1)
+                    # Must be Module if it have attributes
+                    if len(input_name) > 1:
+                        if input_name[0] not in self._modules:
+                            unexpected_keys.append(key)
+                    elif input_name[0] not in local_state:
                         unexpected_keys.append(key)
 
     def load_state_dict(self, state_dict: Mapping[str, Any],
@@ -2105,7 +2110,8 @@ class Module:
 
         .. warning::
             If :attr:`assign` is ``True`` the optimizer must be created after
-            the call to :attr:`load_state_dict`.
+            the call to :attr:`load_state_dict` unless
+            :func:`~torch.__future__.get_swap_module_params_on_conversion` is ``True``.
 
         Args:
             state_dict (dict): a dict containing parameters and
@@ -2113,18 +2119,19 @@ class Module:
             strict (bool, optional): whether to strictly enforce that the keys
                 in :attr:`state_dict` match the keys returned by this module's
                 :meth:`~torch.nn.Module.state_dict` function. Default: ``True``
-            assign (bool, optional): whether to assign items in the state
-                dictionary to their corresponding keys in the module instead
-                of copying them inplace into the module's current parameters and buffers.
-                When ``False``, the properties of the tensors in the current
-                module are preserved while when ``True``, the properties of the
-                Tensors in the state dict are preserved.
+            assign (bool, optional): When ``False``, the properties of the tensors
+                in the current module are preserved while when ``True``, the
+                properties of the Tensors in the state dict are preserved. The only
+                exception is the ``requires_grad`` field of :class:`~torch.nn.Parameter`s
+                for which the value from the module is preserved.
                 Default: ``False``
 
         Returns:
             ``NamedTuple`` with ``missing_keys`` and ``unexpected_keys`` fields:
-                * **missing_keys** is a list of str containing the missing keys
-                * **unexpected_keys** is a list of str containing the unexpected keys
+                * **missing_keys** is a list of str containing any keys that are expected
+                    by this module but missing from the provided ``state_dict``.
+                * **unexpected_keys** is a list of str containing the keys that are not
+                    expected by this module but present in the provided ``state_dict``.
 
         Note:
             If a parameter or buffer is registered as ``None`` and its corresponding key

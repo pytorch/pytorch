@@ -292,16 +292,21 @@ Tensor _convolution_depthwise3x3_winograd(
                       bias_potentially_undefined :
                       at::zeros({kernel_sizes[0]}, input.options());
 
+  auto input_data = input.const_data_ptr<float>();
+  auto kernel_data = kernel.const_data_ptr<float>();
+  auto bias_data = bias.const_data_ptr<float>();
+  auto output_data = output.data_ptr<float>();
+
   at::parallel_for(0, args.batch * args.out_channels, 0, [&](int64_t start, int64_t end) {
     for (const auto k : c10::irange(start, end)) {
       const int64_t g = k % args.out_channels;
       const int64_t i = k / (args.out_channels / groups);
       convolution_depthwise3x3_winograd_impl(
           args,
-          input.data_ptr<float>() + i * input_hxw,
-          kernel.data_ptr<float>() + g * 3 * 3,
-          bias.data_ptr<float>() + g,
-          output.data_ptr<float>() + k * output_hxw);
+          input_data + i * input_hxw,
+          kernel_data + g * 3 * 3,
+          bias_data + g,
+          output_data + k * output_hxw);
     }
   });
 

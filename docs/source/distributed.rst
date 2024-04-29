@@ -960,6 +960,7 @@ If you are running single node training, it may be convenient to interactively b
 .. py:module:: torch.distributed.tensor.parallel.ddp
 .. py:module:: torch.distributed.tensor.parallel.fsdp
 .. py:module:: torch.distributed.tensor.parallel.input_reshard
+.. py:module:: torch.distributed.tensor.parallel.loss
 .. py:module:: torch.distributed.tensor.parallel.style
 .. py:module:: torch.distributed.utils
 .. py:module:: torch.distributed.checkpoint.state_dict

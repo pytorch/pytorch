@@ -66,7 +66,8 @@ class ProcessGroupNCCLSimulateErrors : public c10d::ProcessGroupNCCL {
       c10d::OpType opType,
       const char* profilingTitle,
       const std::vector<at::Tensor>& inputs = {},
-      const std::vector<at::Tensor>& outputs = {}) override {
+      const std::vector<at::Tensor>& outputs = {},
+      bool record = false) override {
     return c10::make_intrusive<WorkNCCLSimulateErrors>(
         device, simulateError_, rank, opType, seq_);
   }
@@ -127,7 +128,8 @@ class ProcessGroupNCCLTimedOutErrors : public ProcessGroupNCCLSimulateErrors {
       c10d::OpType opType,
       const char* profilingTitle,
       const std::vector<at::Tensor>& inputs = {},
-      const std::vector<at::Tensor>& outputs = {}) override {
+      const std::vector<at::Tensor>& outputs = {},
+      bool record = false) override {
     return c10::make_intrusive<WorkNCCLTimedoutErrors>(
         device, setTimedoutError_, rank, opType, seq_);
   }
@@ -186,7 +188,8 @@ class ProcessGroupNCCLNoHeartbeatCaught
   }
 
   void forceTryWriteDebugInfo() {
-    std::future<bool> asyncDebugDump = launchAsyncDebugDump();
+    std::future<bool> asyncDebugDump = std::async(
+        std::launch::async, [this]() { return this->dumpDebuggingInfo(); });
     asyncDebugDump.wait();
   }
 

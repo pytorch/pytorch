@@ -5,6 +5,7 @@ import torch
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, DTensor
 from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed._tensor.placement_types import _Partial, Replicate, Shard
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorConverter,
@@ -228,6 +229,44 @@ class DistTensorOpsTest(DTensorTestBase):
         zeros_like_dt = torch.zeros_like(dist_tensor)
         zeros_expected = torch.zeros(4, 8)
         self.assertEqual(zeros_expected, zeros_like_dt.to_local())
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_stack(self):
+        mesh_2d = DeviceMesh(
+            self.device_type, torch.arange(self.world_size).reshape(2, 2)
+        )
+        partial_replicate_placement = [_Partial(), Replicate()]
+        partial_placement = [_Partial(), _Partial()]
+
+        partial_replicate_dt = DTensor.from_local(
+            torch.randn(4, 8), mesh_2d, partial_replicate_placement
+        )
+        partial_dt = DTensor.from_local(torch.randn(4, 8), mesh_2d, partial_placement)
+
+        stack_dt = torch.stack([partial_replicate_dt, partial_dt])
+        self.assertEqual(stack_dt.placements, tuple(partial_placement))
+        self.assertEqual(stack_dt.shape, (2, 4, 8))
+
+        mesh_1d = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        # stack before/after shard dim
+        global_input = torch.randn(8, 8)
+        shard1_input = distribute_tensor(global_input, mesh_1d, [Shard(1)])
+        cloned_shard1_input = shard1_input.clone()
+        stack_shard1_dt = torch.stack([shard1_input, cloned_shard1_input])
+        self.assertEqual(stack_shard1_dt.placements, (Shard(2),))
+        self.assertEqual(stack_shard1_dt.shape, (2, 8, 8))
+        self.assertEqual(
+            stack_shard1_dt.full_tensor(), torch.stack([global_input, global_input])
+        )
+
+        stack_dim1_shard1_dt = torch.stack([shard1_input, cloned_shard1_input], dim=1)
+        self.assertEqual(stack_dim1_shard1_dt.placements, (Shard(2),))
+        self.assertEqual(stack_dim1_shard1_dt.shape, (8, 2, 8))
+        self.assertEqual(
+            stack_dim1_shard1_dt.full_tensor(),
+            torch.stack([global_input, global_input], dim=1),
+        )
 
     @with_comms
     def test_equal(self):

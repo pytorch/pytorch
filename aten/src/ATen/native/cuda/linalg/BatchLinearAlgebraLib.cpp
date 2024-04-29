@@ -1078,8 +1078,8 @@ static void apply_ormqr(const Tensor& input, const Tensor& tau, const Tensor& ot
   auto side = left ? CUBLAS_SIDE_LEFT : CUBLAS_SIDE_RIGHT;
   auto trans = transpose ? (input.is_complex() ? CUBLAS_OP_C : CUBLAS_OP_T) : CUBLAS_OP_N;
 
-  auto input_data = input.data_ptr<scalar_t>();
-  auto tau_data = tau.data_ptr<scalar_t>();
+  auto input_data = input.const_data_ptr<scalar_t>();
+  auto tau_data = tau.const_data_ptr<scalar_t>();
   auto other_data = other.data_ptr<scalar_t>();
 
   auto input_matrix_stride = matrixStride(input);
@@ -1101,9 +1101,9 @@ static void apply_ormqr(const Tensor& input, const Tensor& tau, const Tensor& ot
   auto info_data = info.data_ptr<int>();
 
   for (auto i = decltype(batch_size){0}; i < batch_size; i++) {
-    scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
+    const scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
     scalar_t* other_working_ptr = &other_data[i * other_matrix_stride];
-    scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
+    const scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
     auto handle = at::cuda::getCurrentCUDASolverDnHandle();
 
     // allocate workspace storage

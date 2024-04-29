@@ -4,6 +4,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/Parallel.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
@@ -1170,6 +1171,25 @@ std::vector<Tensor> gradient(const Tensor& self, IntArrayRef dim, int64_t edge_o
 
 // ALL REDUCE #################################################################
 
+inline bool should_use_acc_buffer(at::TensorIterator& iter) {
+  const auto ndim = iter.ndim();
+  if (!iter.device().is_cpu() || iter.noutputs() != 1) {
+    return false;
+  }
+  if (!at::isReducedFloatingType(iter.common_dtype())) {
+    return false;
+  }
+  if (ndim < 2) {
+    return false;
+  }
+  auto out_strides = iter.strides(0);
+  for (const auto dim : c10::irange(0, 2)) {
+      if (out_strides[dim] != 0) {
+        return false;
+      }
+  }
+  return true;
+}
 
 TORCH_IMPL_FUNC(sum_out)
 (const Tensor& self,
@@ -1181,7 +1201,19 @@ TORCH_IMPL_FUNC(sum_out)
   if (iter.numel() == 0) {
     result.zero_();
   } else {
-    sum_stub(iter.device_type(), iter);
+    // Here is a limitation of TensorIterator reductions for permuted input with lower precision on CPU.
+    // Consider the case: TensorIterator coalesces such input and output to >= 2 dims tensors,
+    // and the output stride is [0, 0, x, x, ...] with x >= 0 (two reduced dimensions and non-reduced dims).
+    // Since the reduction loop only operates on two dimensions at a time,
+    // the intermediate sums is forced to do accumulation in the second reduced dim with lower precision.
+    // See https://github.com/pytorch/pytorch/issues/83149
+    if (should_use_acc_buffer(iter)) {
+      auto tmp_output = at::empty(result.sizes(), result.options().dtype(kFloat));
+      at::sum_outf(self.to(ScalarType::Float), opt_dim, keepdim, /*dtype=*/c10::nullopt, tmp_output);
+      result.copy_(tmp_output);
+    } else{
+      sum_stub(iter.device_type(), iter);
+    }
   }
 }
 
@@ -2224,7 +2256,7 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
     .promote_inputs_to_common_dtype(true)
     .build();
 
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, iter.input_dtype(), "equal_cpu", [&] {
+  AT_DISPATCH_V2(iter.input_dtype(), "equal_cpu", AT_WRAP([&] {
     iter.for_each([&](char** data, const int64_t *strides, int64_t dim_size) {
       if (!result) {
           return;
@@ -2240,7 +2272,7 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
         other_data += strides[1];
       }
     });
-  });
+  }), kBool, kBFloat16, kHalf, AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
   return result.load();
 }
 

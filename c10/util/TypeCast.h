@@ -40,6 +40,21 @@ struct maybe_real<true, src_t> {
   }
 };
 
+template <bool, typename src_t>
+struct maybe_bool {
+  C10_HOST_DEVICE static inline src_t apply(src_t src) {
+    return src;
+  }
+};
+
+template <typename src_t>
+struct maybe_bool<true, src_t> {
+  C10_HOST_DEVICE static inline decltype(auto) apply(src_t src) {
+    // Don't use bool operator so as to to also compile for ComplexHalf.
+    return src.real() || src.imag();
+  }
+};
+
 // Note: deliberately ignores undefined behavior, consistent with NumPy.
 // PyTorch's type conversions can cause a variety of undefined behavior,
 // including float to integral overflow and signed to unsigned integer overflow.
@@ -51,6 +66,17 @@ struct static_cast_with_inter_type {
     constexpr bool real = needs_real<dest_t, src_t>::value;
     auto r = maybe_real<real, src_t>::apply(src);
     return static_cast<dest_t>(r);
+  }
+};
+
+// Partial template specialization for casting to bool.
+// Need to handle complex types separately, as we don't
+// simply want to cast the real part to bool.
+template <typename src_t>
+struct static_cast_with_inter_type<bool, src_t> {
+  C10_HOST_DEVICE static inline bool apply(src_t src) {
+    constexpr bool complex = needs_real<bool, src_t>::value;
+    return static_cast<bool>(maybe_bool<complex, src_t>::apply(src));
   }
 };
 

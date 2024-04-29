@@ -164,6 +164,24 @@ def mesh_all_to_all(
     return work
 
 
+def pad_tensor(tensor: torch.Tensor, pad_dim: int, pad_size: int) -> torch.Tensor:
+    if pad_size == 0:
+        return tensor
+    pad = [0, 0] * (tensor.ndim - pad_dim)
+    pad[-1] = pad_size
+    return torch.nn.functional.pad(tensor, pad)
+
+
+def unpad_tensor(tensor: torch.Tensor, pad_dim: int, pad_size: int) -> torch.Tensor:
+    if pad_size == 0:
+        return tensor
+    return tensor.narrow(
+        pad_dim,
+        start=0,
+        length=tensor.size(pad_dim) - pad_size,
+    )
+
+
 def spec_to_bytes(spec: "placement_types.DTensorSpec") -> int:
     assert spec.tensor_meta is not None, "spec should have tensor meta defined!"
     return spec.tensor_meta.dtype.itemsize * math.prod(spec.shape)

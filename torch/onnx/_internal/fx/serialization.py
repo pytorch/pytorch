@@ -3,7 +3,7 @@ from __future__ import annotations
 import io
 import logging
 import os
-from typing import Tuple, TYPE_CHECKING, Union
+from typing import Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
 from torch.onnx import _type_utils as jit_type_utils
@@ -17,7 +17,11 @@ log = logging.getLogger(__name__)
 
 @_beartype.beartype
 def _create_tensor_proto_with_external_data(
-    tensor: torch.Tensor, name: str, location: str, basepath: str
+    tensor: torch.Tensor,
+    name: str,
+    location: str,
+    basepath: str,
+    dtype_override: Optional["onnx.TypeProto"] = None,  # type: ignore[name-defined]
 ) -> onnx.TensorProto:  # type: ignore[name-defined]
     """Create a TensorProto with external data from a PyTorch tensor.
     The external data is saved to os.path.join(basepath, location).
@@ -41,11 +45,24 @@ def _create_tensor_proto_with_external_data(
     # FIXME: Avoid importing onnx into torch.onnx.
     import onnx
 
+    scalar_type = (
+        jit_type_utils.JitScalarType.from_onnx_type(
+            dtype_override.tensor_type.elem_type
+        )
+        if dtype_override is not None
+        else jit_type_utils.JitScalarType.from_dtype(tensor.dtype)
+    )
+
+    # Checkpoints can be stored with a different dtype as the model expects because
+    # the user script can explicitly cast the original type to something or maybe
+    # PyTorch's type promotion might do it
+    if dtype_override is not None and scalar_type.dtype() != tensor.dtype:
+        tensor = tensor.to(scalar_type.dtype())
+
     tensor_proto = onnx.TensorProto()  # type: ignore[attr-defined]
     tensor_proto.name = name
-    tensor_proto.data_type = jit_type_utils.JitScalarType.from_dtype(
-        tensor.dtype
-    ).onnx_type()
+    tensor_proto.data_type = scalar_type.onnx_type()
+
     tensor_proto.dims.extend(tensor.shape)
     tensor_proto.data_location = onnx.TensorProto.EXTERNAL  # type: ignore[attr-defined]
 
@@ -81,6 +98,18 @@ def _create_tensor_proto_with_external_data(
         data_file.write(tensor.numpy(force=True).tobytes())
 
     return tensor_proto
+
+
+def _convert_safetensors_to_torch_format(safetensors_file):
+    # It this function is called, safetensors is guaranteed to exist
+    # because the HF model with safetensors was already loaded and exported to ONNX
+    from safetensors import safe_open  # type: ignore[import-not-found]
+
+    tensors = {}
+    with safe_open(safetensors_file, framework="pt", device="cpu") as f:  # type: ignore[attr-defined]
+        for k in f.keys():
+            tensors[k] = f.get_tensor(k).cpu()
+    return tensors
 
 
 # TODO: generalize to allow more checkpoints formats (torch or gguf)
@@ -126,8 +155,10 @@ def save_model_with_external_data(
     # FIXME: Avoid importing onnx into torch.onnx.
     import onnx
 
-    onnx_model_with_initializers = onnx.ModelProto()  # type: ignore[attr-defined]
-    onnx_model_with_initializers.CopyFrom(onnx_model)
+    initializers_to_be_deleted = {}  # Using dict because it is **ordered**
+    existing_initializers = {
+        k.name: idx for idx, k in enumerate(onnx_model.graph.initializer)
+    }
     onnx_input_names = {input.name for input in onnx_model.graph.input}
     for el in torch_state_dicts:
         if isinstance(el, dict):
@@ -135,23 +166,27 @@ def save_model_with_external_data(
             # Using torch.save wouldn't leverage mmap, leading to higher memory usage
             state_dict = el
         else:
-            try:
-                # Loads checkpoint using memory-map on CPU to support really large models
-                # The underlying torch.UntypedStorage is memory mapped, so state_dict is lazy loaded
-                state_dict = torch.load(el, map_location="cpu", mmap=True)
-            except (RuntimeError, ValueError) as e:
-                if "mmap can only be used with files saved with" in str(
-                    e
-                ) or isinstance(el, io.BytesIO):
-                    log.warning(
-                        "Failed to load the checkpoint with memory-map enabled, retrying without memory-map."
-                        "Consider updating the checkpoint with mmap by using torch.save() on PyTorch version >= 1.6."
-                    )
-                    if isinstance(el, io.BytesIO):
-                        el.seek(0)  # torch.load from `try:` has read the file.
-                    state_dict = torch.load(el, map_location="cpu")
-                else:
-                    raise e
+            if isinstance(el, str) and el.endswith(".safetensors"):
+                state_dict = _convert_safetensors_to_torch_format(el)
+            else:
+                try:
+                    # Loads checkpoint using memory-map on CPU to support really large models
+                    # The underlying torch.UntypedStorage is memory mapped, so state_dict is lazy loaded
+                    state_dict = torch.load(el, map_location="cpu", mmap=True)
+                except (RuntimeError, ValueError) as e:
+                    if "mmap can only be used with files saved with" in str(
+                        e
+                    ) or isinstance(el, io.BytesIO):
+                        log.warning(
+                            "Failed to load the checkpoint with memory-map enabled, retrying without memory-map."
+                            "Consider updating the checkpoint with mmap by using torch.save() on PyTorch version >= 1.6."
+                        )
+                        if isinstance(el, io.BytesIO):
+                            el.seek(0)  # torch.load from `try:` has read the file.
+                        state_dict = torch.load(el, map_location="cpu")
+                    else:
+                        raise e
+
         for name, tensor in state_dict.items():
             if rename_initializer:
                 # Basically, "transformer.attention.self.query.weight" is mapped
@@ -185,11 +220,26 @@ def save_model_with_external_data(
             # Create one file per tensor.
             # tensor_proto.raw_data is stored to external file at
             # os.path.join(basepath, relative_tensor_file_path).
+            model_input_types = {k.name: k.type for k in onnx_model.graph.input}
+
+            # Mark for deletion - a replacement will be appended next
+            if name in existing_initializers:
+                initializers_to_be_deleted[existing_initializers[name]] = name
             tensor_proto = _create_tensor_proto_with_external_data(
-                tensor, name, relative_tensor_file_path, basepath
+                tensor,
+                name,
+                relative_tensor_file_path,
+                basepath,
+                model_input_types.pop(name, None),
             )
             # Add the tensor_proto to the ONNX model as an initializer with external data.
-            onnx_model_with_initializers.graph.initializer.append(tensor_proto)
+            onnx_model.graph.initializer.append(tensor_proto)
+    # Remove old duplicated initializers, if any. delete in desc order to not invalidate deletion indices
+    initializers_to_be_deleted = dict(
+        sorted(initializers_to_be_deleted.items(), reverse=True)
+    )
+    for idx in initializers_to_be_deleted.keys():
+        del onnx_model.graph.initializer[idx]
 
     # model_location should be a pure file name such as "file_name.onnx", not "folder/file_name.onnx".
-    onnx.save(onnx_model_with_initializers, os.path.join(basepath, model_location))  # type: ignore[attr-defined]
+    onnx.save(onnx_model, os.path.join(basepath, model_location))  # type: ignore[attr-defined]

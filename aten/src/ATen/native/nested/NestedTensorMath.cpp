@@ -15,7 +15,6 @@
 #include <ATen/native/nested/NestedTensorUtils.h>
 
 #include <tuple>
-#include <iostream>
 
 namespace at {
 namespace native {
@@ -404,7 +403,7 @@ Tensor NestedTensor_sum_dim_CPU(
   AT_DISPATCH_ALL_TYPES_AND2(
     ScalarType::Half, ScalarType::BFloat16, buffer.scalar_type(), "nested_sum_dim_cpu", [&]() {
     auto* output_data = output_buffer.data_ptr<scalar_t>();
-    const auto* input_data = buffer.data_ptr<scalar_t>();
+    const auto* input_data = buffer.const_data_ptr<scalar_t>();
     int64_t out_idx = 0, in_idx = 0;
     for (const auto i : c10::irange(ntensors)) {
       int64_t segments = num_segments[i].item<int64_t>();
@@ -862,53 +861,59 @@ Tensor _nested_view_from_buffer(
     storage_offsets);
 }
 
-Tensor _nested_tensor_buffer(const Tensor& self) {
-  auto nt_self = get_nested_tensor_impl(self);
-  return nt_self->get_buffer();
-}
-
-Tensor _nested_view_from_jagged(
-    const Tensor& values,
-    const Tensor& offsets,
-    const Tensor& dummy,
-    const c10::optional<Tensor>& lengths,
-    const int64_t ragged_idx) {
-  TORCH_INTERNAL_ASSERT(
-      false, "_nested_view_from_jagged(): expected to be implemented from Python");
-  return Tensor();
-}
-
-Tensor _nested_get_values(const Tensor& self) {
-  TORCH_INTERNAL_ASSERT(
-      false, "_nested_get_values(): expected to be implemented from Python");
-  return Tensor();
-}
-
-Tensor _nested_get_offsets(const Tensor& self) {
-  TORCH_INTERNAL_ASSERT(
-      false, "_nested_get_offsets(): expected to be implemented from Python");
-  return Tensor();
-}
-
-Tensor _nested_get_lengths(const Tensor& self) {
-  TORCH_INTERNAL_ASSERT(
-      false, "_nested_get_lengths(): expected to be implemented from Python");
-  return Tensor();
-}
-
-int64_t _nested_get_ragged_idx(const Tensor& self) {
-  TORCH_INTERNAL_ASSERT(
-      false, "_nested_get_ragged_idx(): expected to be implemented from Python");
-  return 0;
+std::tuple<Tensor, Tensor> _nested_compute_contiguous_strides_offsets(const Tensor& nested_size) {
+  return std::make_tuple(
+      construct_nested_strides(nested_size),
+      construct_offsets(nested_size));
 }
 
 Tensor _nested_strided_to_jagged(const Tensor& self, const Tensor& dummy) {
-  TORCH_INTERNAL_ASSERT(
-      false, "_nested_strided_to_jagged(): expected to be implemented from Python");
-  return Tensor();
+  auto self_ptr = get_nested_tensor_impl(self);
+
+  // All jagged NT can be converted into strided NTs, but the opposite is not True
+  // Only strided NTs with a single jagged dimension might be converted into
+  // jagged NTs, so first we check for that
+  int ragged_dims_count = 0;
+  int ragged_idx = -1;
+  for (size_t i = 0; i < self_ptr->dim(); ++i) {
+    if (!self_ptr->opt_size(i).has_value()) {
+      ragged_dims_count++;
+      ragged_idx = i;
+    }
+  }
+  TORCH_INTERNAL_ASSERT(ragged_dims_count == 1, "Only strided NTs with 1 jagged dim can be converted to jagged NT");
+
+  // Once that's checked, we convert the offsets + sizes in strided NT to
+  // offsets + (optionally) lengths for the jagged NT
+  auto ragged_offsets = self_ptr->get_storage_offsets();
+  auto ragged_sizes = self_ptr->get_nested_sizes();
+  size_t post_ragged_stride = 1;
+  for (size_t i = ragged_idx; i < ragged_sizes.size(1); ++i) {
+    post_ragged_stride *= ragged_sizes[0][i].item().toInt();
+  }
+  auto ragged_offsets_sizes = ragged_offsets.sizes();
+  auto metadata_tensor_options = self_ptr->get_buffer().options().dtype(kInt);
+  auto jagged_offsets = at::empty({ragged_offsets_sizes[0]+1}, metadata_tensor_options);
+  auto jagged_lengths = at::empty({ragged_offsets_sizes[0]}, metadata_tensor_options);
+  bool lengths_needed = false;
+  for (size_t i = 0; i < ragged_offsets.size(0); ++i) {
+    jagged_offsets[i] = ragged_offsets[i] / post_ragged_stride;
+    if (i > 0) {
+      auto offsets_diff = (ragged_offsets[i] - ragged_offsets[i-1]) / post_ragged_stride;
+      jagged_lengths[i-1] = ragged_sizes[i][ragged_idx];
+      if ((offsets_diff != ragged_sizes[i][ragged_idx]).item().toBool()) {
+        lengths_needed = true;
+      }
+    }
+  }
+  jagged_offsets[-1] = jagged_offsets[-2] + ragged_sizes[-1][ragged_idx];
+  jagged_lengths[-1] = ragged_sizes[-1][ragged_idx];
+  c10::optional<at::Tensor> jagged_lengths_arg = lengths_needed ? c10::optional(jagged_lengths) : c10::nullopt;
+
+  return at::_nested_view_from_jagged(self_ptr->get_buffer(), jagged_offsets, dummy, jagged_lengths_arg, ragged_idx);
 }
 
-Tensor _nested_get_jagged_dummy(const Tensor& any) {
+Tensor _nested_get_jagged_dummy() {
   TORCH_INTERNAL_ASSERT(
       false, "_nested_get_jagged_dummy(): expected to be implemented from Python");
   return Tensor();

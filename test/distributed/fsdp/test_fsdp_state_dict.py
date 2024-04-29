@@ -34,6 +34,7 @@ from torch.distributed.fsdp import (
     ShardedStateDictConfig,
     StateDictType,
 )
+from torch.distributed.fsdp._common_utils import FSDP_PREFIX
 from torch.distributed.fsdp._unshard_param_utils import FLAT_PARAM
 from torch.distributed.fsdp.wrap import enable_wrap, ModuleWrapPolicy, wrap
 from torch.nn import Linear, Module, TransformerDecoderLayer, TransformerEncoderLayer
@@ -152,7 +153,7 @@ class TestDummyModel(torch.nn.Module):
 class TestFSDPStateDict(FSDPTest):
     @property
     def world_size(self):
-        return 2
+        return min(torch.cuda.device_count(), 2)
 
     def _broadcast_state_dict(self, model, state_dict):
         # TODO (rohan-varma): remove model
@@ -1180,6 +1181,20 @@ class TestFSDPStateDict(FSDPTest):
             self.assertEqual(state_dict["net2.0.weight"], state_dict["net3.0.weight"])
 
     @skip_if_lt_x_gpu(2)
+    def test_full_state_dict_missing_unexpected_keys_cleaned(self):
+        model = self._get_simple_nested_model()
+        sd = model.state_dict()
+        # Create a missing key
+        sd.pop(next(iter(sd.keys())))
+        # Create an unexpected key
+        sd["unexpected"] = torch.ones(1)
+        missing, unexpected = model.load_state_dict(sd, strict=False)
+        assert len(missing) == 1
+        assert len(unexpected) == 1
+        self.assertTrue(FSDP_PREFIX not in missing[0])
+        self.assertTrue(FSDP_PREFIX not in unexpected[0])
+
+    @skip_if_lt_x_gpu(2)
     def test_sharded_load_multi_backend_pg(self):
         auto_wrap_policy = ModuleWrapPolicy(
             {TransformerEncoderLayer, TransformerDecoderLayer}
@@ -1236,7 +1251,7 @@ class TestFSDPStateDict(FSDPTest):
 class TestFSDPStateDict4GPUs(FSDPTest):
     @property
     def world_size(self):
-        return max(torch.cuda.device_count(), 2)
+        return torch.cuda.device_count()
 
     @skip_if_lt_x_gpu(4)
     def test_local_state_dict_reshard(self):

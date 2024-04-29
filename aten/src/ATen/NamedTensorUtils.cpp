@@ -297,7 +297,7 @@ static int64_t num_batch_dims(DimnameList names) {
   if (names.size() <= 2) {
     return 0;
   }
-  return names.size() - 2;
+  return static_cast<int64_t>(names.size() - 2);
 }
 
 static std::vector<Dimname> compute_matmul_outnames(
