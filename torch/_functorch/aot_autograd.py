@@ -544,6 +544,9 @@ def create_aot_dispatcher_function(
             any(x.requires_grad for x in fake_flat_args if isinstance(x, Tensor))
             and torch.is_grad_enabled()
         )
+        if torch._dynamo.compiled_autograd.compiled_autograd_enabled:
+            print(f"Fwd is called within compiled autograd ctx, assume bwd will be handled by compiled autograd")
+            needs_autograd = False
 
         with enable_python_dispatcher():
             # Patch set_rng_state as set_rng_state with fake tensors is
