@@ -219,11 +219,9 @@ CI_SERIAL_LIST = [
     "test_cpp_api_parity",
     "test_reductions",
     "test_fx_backends",
-    "test_linalg",
     "test_cpp_extensions_jit",
     "test_torch",
     "test_tensor_creation_ops",
-    "test_sparse_csr",
     "test_dispatch",
     "test_python_dispatch",  # torch.library creation and deletion must be serialized
     "test_spectral_ops",  # Cause CUDA illegal memory access https://github.com/pytorch/pytorch/issues/88916
