@@ -1160,7 +1160,7 @@ def gen_pyi(
             "is_meta": ["is_meta: _bool"],
             "is_mps": ["is_mps: _bool"],
             "is_mtia": ["is_mtia: _bool"],
-            "is_ort": ["is_ort: _bool"],
+            "is_maia": ["is_maia: _bool"],
             "is_mkldnn": ["is_mkldnn: _bool"],
             "is_vulkan": ["is_vulkan: _bool"],
             "is_ipu": ["is_ipu: _bool"],

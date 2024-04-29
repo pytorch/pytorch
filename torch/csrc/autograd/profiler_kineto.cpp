@@ -555,7 +555,9 @@ void prepareProfiler(
           config.state == ProfilerState::KINETO_PRIVATEUSE1_FALLBACK,
       "Supported only in Kineto profiler");
   torch::profiler::impl::kineto::prepareTrace(
-      /*cpuOnly=*/!(at::hasCUDA() || at::hasXPU() || at::hasMTIA()),
+      /*cpuOnly=*/!(
+          at::hasCUDA() || at::hasXPU() || at::hasMTIA() ||
+          c10::get_privateuse1_backend() != "privateuseone"),
       activities,
       config.experimental_config);
 
