@@ -5,7 +5,6 @@ from typing import Any, cast, List, NamedTuple, Optional, Tuple
 
 import torch
 import torch.distributed._functional_collectives as funcol
-import torch.distributed.distributed_c10d as c10d
 
 from torch.distributed._tensor._collective_utils import mesh_broadcast, mesh_scatter
 from torch.distributed.device_mesh import DeviceMesh
@@ -173,7 +172,7 @@ class Shard(Placement):
         self,
         tensor: torch.Tensor,
         mesh: DeviceMesh,
-        reduce_op: c10d.ReduceOp.RedOpType,
+        reduce_op: str,
         mesh_dim: int,
     ) -> torch.Tensor:
         """
@@ -197,7 +196,7 @@ class Shard(Placement):
             tensor = tensor.contiguous()
 
         output = funcol.reduce_scatter_tensor(
-            tensor, reduce_op.name, scatter_dim=self.dim, group=(mesh, mesh_dim)
+            tensor, reduce_op, scatter_dim=self.dim, group=(mesh, mesh_dim)
         )
 
         if is_padded:
@@ -329,13 +328,13 @@ class _Partial(Placement):
     # 3. _partition_value: partition the value of a replicated tensor on the mesh dimension
     # We can implement custom reductions as needed by subclassing this
     # class and override those contracts.
-    reduce_op: c10d.ReduceOp.RedOpType = c10d.ReduceOp.SUM
+    reduce_op: str = "sum"
 
     def _reduce_value(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
     ) -> torch.Tensor:
         return funcol.all_reduce(
-            tensor, reduceOp=self.reduce_op.name, group=(mesh, mesh_dim)
+            tensor, reduceOp=self.reduce_op, group=(mesh, mesh_dim)
         )
 
     def _reduce_shard_value(
@@ -357,9 +356,7 @@ class _Partial(Placement):
         # - the _reduce_value on a sum reduce op would just be a sum(allreduce) operation
         # TODO: if the reduce_op is min/max, etc. the _partition_value should be a
         # different operation
-        assert (
-            self.reduce_op == c10d.ReduceOp.SUM
-        ), "only support replicate to PartialSUM for now!"
+        assert self.reduce_op == "sum", "only support replicate to PartialSUM for now!"
         num_chunks = mesh.size(mesh_dim=mesh_dim)
         return tensor / num_chunks
 
@@ -375,7 +372,7 @@ class _Partial(Placement):
         """
         machine readable representation of the Partial placement
         """
-        return f"_Partial(reduce_op={self.reduce_op})"
+        return f"_Partial({self.reduce_op})"
 
     def __str__(self) -> str:
         """
