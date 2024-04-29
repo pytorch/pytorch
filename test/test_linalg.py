@@ -6237,7 +6237,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @onlyCUDA
     def test__int_mm_errors(self, device):
         version = _get_torch_cuda_version()
-        if version < (11, 7) and not TEST_WITH_ROCM:
+        if torch.version.cuda and version < (11, 7):
             self.skipTest("_int_mm only compiled for CUDA 11.7")
 
         def genf_int(x, y):
