@@ -743,7 +743,7 @@ class OutputGraph:
         *names,
         **options,
     ):
-        if is_dynamic_nn_module(target):
+        if is_dynamic_nn_module(target, self.root_tx.export):
             return variables.UnspecializedNNModuleVariable(target, **options)
 
         options = dict(options)
