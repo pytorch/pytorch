@@ -43,7 +43,11 @@
 #include <ATen/native/transformers/cuda/mem_eff_attention/pytorch_utils.h>
 #endif
 
+#ifdef __HIP_PLATFORM_AMD__
+#include <ATen/native/cudnn/hip/MHA.h>
+#else
 #include <ATen/native/cudnn/MHA.h>
+#endif
 
 namespace at::native {
 

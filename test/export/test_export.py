@@ -1902,6 +1902,50 @@ class TestExport(TestCase):
             ):
                 _ = export(mod, inp, strict=True)
 
+    def test_device_to_static(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return x.to("cpu")
+
+        ep = export(Module(), (torch.tensor(1, device="cpu"),))
+        ops = []
+        for node in ep.graph.nodes:
+            if node.op == "call_function":
+                ops.append(node.target)
+        self.assertGreater(len(ops), 0)
+        for op in ops:
+            self.assertIn(op, (torch.ops.aten._to_copy.default,))
+
+    def test_device_to_dynamic(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return x.to("cpu")
+
+        ep = export(
+            Module(),
+            (torch.tensor([1, 2], device="cpu"),),
+            dynamic_shapes={"x": {0: Dim("i")}},
+        )
+        ops = []
+        for node in ep.graph.nodes:
+            if node.op == "call_function":
+                ops.append(node.target)
+        self.assertGreater(len(ops), 0)
+        for op in ops:
+            self.assertIn(op, (torch.ops.aten._to_copy.default,))
+
+    def test_device_to_mutation(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                y = x.to("cpu")
+                y.add_(1)
+                return y, x
+
+        with self.assertRaisesRegex(
+            RuntimeError, "cannot mutate tensors with frozen storage"
+        ):
+            export(Module(), (torch.tensor(1, device="cpu"),))
+
     def test_module(self):
         class MyLinear(torch.nn.Module):
             def __init__(self):
@@ -3987,6 +4031,32 @@ def forward(self, b_t, x, y):
             node for node in grad_subgraph.graph.nodes if node.op == "call_function"
         ][0]
         self.assertEqual(op_node.target._name, "aten::add.Tensor")
+
+    @testing.expectedFailureRetraceability
+    def test_layer_sharing(self):
+        N, C, H, W = 1, 2, 2, 3
+
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                layer = torch.nn.LayerNorm([C, H, W])
+                self.norms = torch.nn.ModuleList(
+                    [
+                        layer,
+                        layer,
+                    ]
+                )
+
+            def forward(self, x):
+                for norm in self.norms:
+                    x = norm(x)
+                return x
+
+        m = Module()
+        copied_m = copy.deepcopy(m)
+        ep = export(copied_m, (torch.randn(N, C, H, W),))
+        self.assertEqual(copied_m.state_dict(), m.state_dict())
+        self.assertEqual(ep.state_dict, m.state_dict())
 
     def test_non_persistent_buffer(self):
         class MyModule(torch.nn.Module):
