@@ -10,7 +10,6 @@ import tempfile
 import warnings
 from contextlib import closing, contextmanager
 from enum import Enum
-from mmap import MAP_SHARED, MAP_PRIVATE
 from ._utils import _import_dotted_name
 from torch._sources import get_source_lines_and_file
 from torch.types import Storage
@@ -34,6 +33,11 @@ STORAGE_KEY_SEPARATOR = ','
 FILE_LIKE: TypeAlias = Union[str, os.PathLike, BinaryIO, IO[bytes]]
 MAP_LOCATION: TypeAlias = Optional[Union[Callable[[torch.Tensor, str], torch.Tensor], torch.device, str, Dict[str, str]]]
 STORAGE: TypeAlias = Union[Storage, torch.storage.TypedStorage, torch.UntypedStorage]
+
+IS_WINDOWS = sys.platform == "win32"
+
+if not IS_WINDOWS:
+    from mmap import MAP_SHARED, MAP_PRIVATE
 
 __all__ = [
     'SourceChangeWarning',
@@ -115,6 +119,7 @@ def get_default_mmap_options() -> int:
 
     Defaults to ``mmap.MAP_PRIVATE``.
 
+
     Returns:
         default_mmap_options: int
     '''
@@ -127,10 +132,15 @@ def set_default_mmap_options(flags: int):
     For now, only either ``mmap.MAP_PRIVATE`` or ``mmap.MAP_SHARED`` are supported.
     Please open an issue if you need any other option to be added here.
 
+    .. note::
+        This feature is currently not supported for Windows.
+
     Args:
         flags: ``mmap.MAP_PRIVATE`` or ``mmap.MAP_SHARED``
     '''
     global _default_mmap_options
+    if IS_WINDOWS:
+        raise RuntimeError("Changing the default mmap options is currently not supported for Windows")
     if (flags != MAP_PRIVATE and flags != MAP_SHARED):
         raise ValueError("Invalid argument in function set_default_mmap_options, "
                          f"expected mmap.MAP_PRIVATE or mmap.MAP_SHARED, but got {flags}")
@@ -1043,7 +1053,10 @@ def load(
                     if not _is_path(f):
                         raise ValueError("f must be a file path in order to use the mmap argument")
                     size = os.path.getsize(f)
-                    shared = get_default_mmap_options() == MAP_SHARED
+                    if not IS_WINDOWS:
+                        shared = get_default_mmap_options() == MAP_SHARED
+                    else:
+                        shared = False
                     overall_storage = torch.UntypedStorage.from_file(os.fspath(f), shared, size)
                 if weights_only:
                     try:

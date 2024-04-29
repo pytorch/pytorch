@@ -16,7 +16,6 @@ import shutil
 import pathlib
 import platform
 from copy import deepcopy
-from mmap import MAP_SHARED, MAP_PRIVATE
 from itertools import product
 
 from torch._utils_internal import get_file_path_2
@@ -31,6 +30,9 @@ from torch.testing._internal.common_utils import (
     parametrize, instantiate_parametrized_tests, AlwaysWarnTypedStorageRemoval, serialTest)
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_dtype import all_types_and_complex_and
+
+if not IS_WINDOWS:
+    from mmap import MAP_SHARED, MAP_PRIVATE
 
 # These tests were all copied from `test/test_torch.py` at some point, so see
 # the actual blame, see this revision
@@ -3955,6 +3957,10 @@ class TestSerialization(TestCase, SerializationMixin):
                 self.assertTrue(v.is_cuda)
 
     def test_serialization_mmap_loading_options(self):
+        if IS_WINDOWS:
+            with self.assertRaisesRegex(RuntimeError, "Changing the default mmap options is currently not supported"):
+                torch.serialization.set_default_mmap_options(2)
+            return
         m = torch.nn.Linear(3, 5)
         sd = m.state_dict()
         with tempfile.NamedTemporaryFile() as f:
