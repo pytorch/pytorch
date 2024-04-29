@@ -918,8 +918,11 @@ class WrapperCodeGen(CodeGen):
     def finalize_prefix(self):
         pass
 
-    def codegen_python_sizevar(self, x: Expr) -> str:
-        return pexpr(V.graph.sizevars.simplify(x))
+    def codegen_python_sizevar(self, x: Expr, *, simplify: bool = True) -> str:
+        if simplify:
+            return pexpr(V.graph.sizevars.simplify(x))
+        else:
+            return pexpr(x)
 
     def codegen_sizevar(self, x: Expr) -> str:
         return self.codegen_python_sizevar(x)
@@ -1138,7 +1141,7 @@ class WrapperCodeGen(CodeGen):
             # https://github.com/openai/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
             "constants": {
                 **constants,
-                **{idx: 1 for idx in equal_to_1_arg_idx},
+                **dict.fromkeys(equal_to_1_arg_idx, 1),
             },
             "configs": [
                 config_of(

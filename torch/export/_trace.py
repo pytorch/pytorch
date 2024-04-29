@@ -496,11 +496,11 @@ def _export_non_strict(
 ):
     # [NOTE] If the user is exporting under training mode, we want to detect if there is any
     # state change in the autograd global state and error. If the user is exporting under inference
-    # mode, we don't care.
+    # mode, we don't care. At predispatch level, we don't care about the state change.
     is_grad_enabled = torch._C.is_grad_enabled()
-    grad_safe_guard = (
-        AutogradStateOpsFailSafeguard() if is_grad_enabled else nullcontext()
-    )
+    grad_safe_guard = nullcontext()
+    if not pre_dispatch and is_grad_enabled:
+        grad_safe_guard = AutogradStateOpsFailSafeguard()  # type: ignore[assignment]
 
     @contextmanager
     def _compiling_state_context():
@@ -589,10 +589,13 @@ def _export_non_strict(
             return CustomObjArgument(
                 name=node.name, class_fqn=val._type().qualified_name()  # type: ignore[attr-defined]
             )
-        else:
-            # TODO: this branch is likely wrong, all permissible ConstantArgument type
-            # should have been handled already
+        elif isinstance(val, (int, bool, str, float, type(None))):
             return ConstantArgument(name=node.name, value=val)
+        else:
+            raise AssertionError(
+                f"Encountered an unsupported object of type {type(val)} "
+                f"while writing the metadata for exported program"
+            )
 
     input_specs, output_specs = _sig_to_specs(
         user_inputs=set(graph_signature.user_inputs),

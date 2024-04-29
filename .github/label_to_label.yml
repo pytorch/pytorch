@@ -1,0 +1,13 @@
+# Use this to auto apply labels based on other labels.  Applies to both PRs and
+# issues. Currently only supports any and all
+- any:
+  - "module: custom operators"
+  - "module: aotdispatch"
+  then:
+  - "module: pt2-dispatcher"
+- any:
+  - "module: dynamo"
+  - "module: pt2-dispatcher"
+  - "module: inductor"
+  then:
+  - "oncall: pt2"

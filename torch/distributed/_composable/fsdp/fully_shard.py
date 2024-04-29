@@ -136,7 +136,7 @@ def fully_shard(
     # Place FSDP leftmost for highest priority in the method resolution order
     cls = module.__class__
     dct = {"__deepcopy__": unimplemented_deepcopy}
-    new_cls = type(f"FSDP{cls.__name__}", (FSDP, cls), dct)
+    new_cls = type(f"FSDP{cls.__name__}", (FSDPModule, cls), dct)
     module.__class__ = new_cls
     return module
 
@@ -147,14 +147,14 @@ def unimplemented_deepcopy(*args: Any, **kwargs: Any) -> typing_extensions.Never
     )
 
 
-class FSDP:
+class FSDPModule:
     def __new__(cls, *args, **kwargs):
         """
         Override ``__new__`` to remove the FSDP class and directly construct
         the original class for cases like indexing into a container module.
         """
         # Use index 2 since 0 is the dynamically constructed `FSDP<...>` class
-        # and index 1 is the `FSDP` class itself
+        # and index 1 is the `FSDPModule` class itself
         orig_cls = cls.__mro__[2]
         self = orig_cls.__new__(orig_cls, *args, **kwargs)
         self.__init__(*args, **kwargs)
@@ -223,7 +223,7 @@ class FSDP:
         self_module = cast(nn.Module, self)
         modules = list(self_module.modules()) if recurse else [self_module]
         for module in modules:
-            if isinstance(module, FSDP):
+            if isinstance(module, FSDPModule):
                 state = module._get_fsdp_state()
                 if fsdp_param_group := state._fsdp_param_group:
                     fsdp_param_group.reduce_grads = requires_gradient_sync
@@ -243,7 +243,7 @@ class FSDP:
         self_module = cast(nn.Module, self)
         modules = list(self_module.modules()) if recurse else [self_module]
         for module in modules:
-            if isinstance(module, FSDP):
+            if isinstance(module, FSDPModule):
                 state = module._get_fsdp_state()
                 if fsdp_param_group := state._fsdp_param_group:
                     fsdp_param_group.all_reduce_grads = requires_all_reduce
@@ -265,7 +265,7 @@ class FSDP:
         self_module = cast(nn.Module, self)
         modules = list(self_module.modules()) if recurse else [self_module]
         for module in modules:
-            if isinstance(module, FSDP):
+            if isinstance(module, FSDPModule):
                 state = module._get_fsdp_state()
                 if fsdp_param_group := state._fsdp_param_group:
                     fsdp_param_group.reshard_after_backward = reshard_after_backward
