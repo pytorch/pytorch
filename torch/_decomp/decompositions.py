@@ -744,7 +744,7 @@ def slice_forward(
         raise RuntimeError("slice step must be positive")
 
     start_val = start if start is not None else 0
-    end_val = end if end is not None else sys.maxsize  # 2^63 – 1
+    end_val = end if end is not None else sys.maxsize  # 2^63 - 1
 
     if start_val < 0:
         start_val += sizes[dim]
