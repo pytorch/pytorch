@@ -1,5 +1,6 @@
 import abc
 import io
+import operator
 from dataclasses import dataclass
 from enum import auto, Enum
 from functools import reduce
@@ -67,7 +68,7 @@ class WriteItem:
         if self.tensor_data is None:
             return None
 
-        numels = reduce(lambda x, y: x * y, self.tensor_data.size, 1)
+        numels = reduce(operator.mul, self.tensor_data.size, 1)
         dtype_size = torch._utils._element_size(self.tensor_data.properties.dtype)
         return numels * dtype_size
 
@@ -377,6 +378,14 @@ class LoadPlanner:
         the checkpoint being loaded.
         """
         pass
+
+    def resolve_bytes(self, read_item: ReadItem) -> io.BytesIO:
+        """
+        Return the BytesIO to be used by the StorageReader to load `read_item`.
+
+        The BytesIO should alias with one on the underlying state_dict as StorageReader will replace its contents.
+        """
+        raise NotImplementedError("LoadPlanner.resolve_bytes is not implemented")
 
     @abc.abstractmethod
     def resolve_tensor(self, read_item: ReadItem) -> torch.Tensor:

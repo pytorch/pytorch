@@ -121,7 +121,7 @@ def collate(batch, *, collate_fn_map: Optional[Dict[Union[Type, Tuple[Type, ...]
 
     Examples:
         >>> def collate_tensor_fn(batch, *, collate_fn_map):
-        >>> # Extend this function to handle batch of tensors
+        ...     # Extend this function to handle batch of tensors
         ...     return torch.stack(batch, 0)
         >>> def custom_collate(batch):
         ...     collate_map = {torch.Tensor: collate_tensor_fn}
@@ -310,7 +310,7 @@ def default_collate(batch):
         >>> # Option 2: In-place modify `default_collate_fn_map`
         >>> def collate_customtype_fn(batch, *, collate_fn_map=None):
         ...     return ...
-        >>> default_collate_fn_map.update(CustoType, collate_customtype_fn)
+        >>> default_collate_fn_map.update(CustomType, collate_customtype_fn)
         >>> default_collate(batch)  # Handle `CustomType` automatically
     """
     return collate(batch, collate_fn_map=default_collate_fn_map)

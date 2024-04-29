@@ -210,12 +210,12 @@ __device__ __forceinline__ void welford_merge_block_vertical(C& count,
 
 template <typename input_scalar_t, typename stat_scalar_t, typename stat_accscalar_t, bool train, typename index_t>
 __global__ void batch_norm_transform_input_kernel(
-    const GenericPackedTensorAccessor<input_scalar_t, 3, RestrictPtrTraits, index_t> input,
+    const GenericPackedTensorAccessor<const input_scalar_t, 3, RestrictPtrTraits, index_t> input,
     GenericPackedTensorAccessor<input_scalar_t, 3, RestrictPtrTraits, index_t> output,
     const GenericPackedTensorAccessor<typename std::conditional<train, stat_accscalar_t, stat_scalar_t>::type, 1, RestrictPtrTraits, index_t> mean_,
     const GenericPackedTensorAccessor<typename std::conditional<train, stat_accscalar_t, stat_scalar_t>::type, 1, RestrictPtrTraits, index_t> var_or_invstd,
-    const GenericPackedTensorAccessor<stat_scalar_t, 1, RestrictPtrTraits, index_t> weight,
-    const GenericPackedTensorAccessor<stat_scalar_t, 1, RestrictPtrTraits, index_t> bias,
+    const GenericPackedTensorAccessor<const stat_scalar_t, 1, RestrictPtrTraits, index_t> weight,
+    const GenericPackedTensorAccessor<const stat_scalar_t, 1, RestrictPtrTraits, index_t> bias,
     stat_accscalar_t epsilon) {
 
   index_t plane = blockIdx.x;
@@ -267,7 +267,7 @@ struct Var {
 
 template <typename VarTransform, typename input_scalar_t, typename stat_scalar_t, typename stat_accscalar_t, typename index_t>
 __global__ void batch_norm_collect_statistics_kernel(
-    const GenericPackedTensorAccessor<input_scalar_t, 3, RestrictPtrTraits, index_t> input,
+    const GenericPackedTensorAccessor<const input_scalar_t, 3, RestrictPtrTraits, index_t> input,
     const stat_accscalar_t epsilon,
     const stat_accscalar_t momentum,
     GenericPackedTensorAccessor<stat_accscalar_t, 1, RestrictPtrTraits, index_t> save_mean,
@@ -354,16 +354,16 @@ __global__ void batch_norm_collect_statistics_kernel(
 
 template <typename input_scalar_t, typename stat_scalar_t, typename stat_accscalar_t, typename index_t>
 __global__ void batch_norm_backward_kernel(
-    const GenericPackedTensorAccessor<input_scalar_t, 3, DefaultPtrTraits, index_t> input,
-    const GenericPackedTensorAccessor<input_scalar_t, 3, DefaultPtrTraits, index_t> grad_output,
+    const GenericPackedTensorAccessor<const input_scalar_t, 3, DefaultPtrTraits, index_t> input,
+    const GenericPackedTensorAccessor<const input_scalar_t, 3, DefaultPtrTraits, index_t> grad_output,
     GenericPackedTensorAccessor<input_scalar_t, 3, DefaultPtrTraits, index_t> grad_input,
     GenericPackedTensorAccessor<stat_scalar_t, 1, DefaultPtrTraits, index_t> grad_weight,
     GenericPackedTensorAccessor<stat_scalar_t, 1, DefaultPtrTraits, index_t> grad_bias,
-    const GenericPackedTensorAccessor<stat_scalar_t, 1, DefaultPtrTraits, index_t> weight,
-    const GenericPackedTensorAccessor<stat_scalar_t, 1, DefaultPtrTraits, index_t> running_mean,
-    const GenericPackedTensorAccessor<stat_scalar_t, 1, DefaultPtrTraits, index_t> running_var,
-    const GenericPackedTensorAccessor<stat_accscalar_t, 1, DefaultPtrTraits, index_t> save_mean,
-    const GenericPackedTensorAccessor<stat_accscalar_t, 1, DefaultPtrTraits, index_t> save_invstd,
+    const GenericPackedTensorAccessor<const stat_scalar_t, 1, DefaultPtrTraits, index_t> weight,
+    const GenericPackedTensorAccessor<const stat_scalar_t, 1, DefaultPtrTraits, index_t> running_mean,
+    const GenericPackedTensorAccessor<const stat_scalar_t, 1, DefaultPtrTraits, index_t> running_var,
+    const GenericPackedTensorAccessor<const stat_accscalar_t, 1, DefaultPtrTraits, index_t> save_mean,
+    const GenericPackedTensorAccessor<const stat_accscalar_t, 1, DefaultPtrTraits, index_t> save_invstd,
     bool train,
     stat_accscalar_t epsilon) {
 
@@ -385,7 +385,7 @@ __global__ void batch_norm_backward_kernel(
   // Compute two values across (batch, x/y/z) in one pass:
   // 1. Sum(grad_output)
   // 2. DotProduct(input - mean, grad_output)
-  GradOp<input_scalar_t, stat_accscalar_t, GenericPackedTensorAccessor<input_scalar_t, 3, DefaultPtrTraits, index_t>> g(mean, input, grad_output);
+  GradOp<input_scalar_t, stat_accscalar_t, GenericPackedTensorAccessor<const input_scalar_t, 3, DefaultPtrTraits, index_t>> g(mean, input, grad_output);
   auto res = reduce<Float2<input_scalar_t, stat_accscalar_t>>(g, grad_output, plane);
 
   stat_accscalar_t grad_output_sum = res.v1;
@@ -582,7 +582,7 @@ __global__ void batch_norm_backward_elemt_kernel(
 template <typename scalar_t, int64_t dim, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
 static GenericPackedTensorAccessor<scalar_t, dim, PtrTraits, index_t> get_packed_accessor(
     const Tensor& t, c10::string_view var_name) {
-  constexpr auto expect_type = c10::CppTypeToScalarType<scalar_t>::value;
+  constexpr auto expect_type = c10::CppTypeToScalarType<typename std::remove_const<scalar_t>::type>::value;
   const auto actual_type = t.scalar_type();
   TORCH_CHECK(actual_type == expect_type, "Expected ", var_name,
               " to have type ", expect_type, " but got ", actual_type);
@@ -624,25 +624,25 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda_template(const Tenso
   }
 
   auto input = get_packed_accessor<
-      input_scalar_t, 3, DefaultPtrTraits, index_t>(input_reshaped, "input");
+      const input_scalar_t, 3, DefaultPtrTraits, index_t>(input_reshaped, "input");
   auto grad_output = get_packed_accessor<
-      input_scalar_t, 3, DefaultPtrTraits, index_t>(grad_output_reshaped, "grad_output");
+      const input_scalar_t, 3, DefaultPtrTraits, index_t>(grad_output_reshaped, "grad_output");
   auto grad_input = packed_accessor_or_dummy<
       input_scalar_t, 3, DefaultPtrTraits, index_t>(grad_input_reshaped, "grad_input");
   auto weight = packed_accessor_or_dummy<
-      stat_scalar_t, 1, DefaultPtrTraits, index_t>(weight_, "weight");
+      const stat_scalar_t, 1, DefaultPtrTraits, index_t>(weight_, "weight");
   auto grad_weight = packed_accessor_or_dummy<
       stat_scalar_t, 1, DefaultPtrTraits, index_t>(grad_weight_, "grad_weight");
   auto grad_bias = packed_accessor_or_dummy<
       stat_scalar_t, 1, DefaultPtrTraits, index_t>(grad_bias_, "grad_bias");
   auto running_mean = packed_accessor_or_dummy<
-      stat_scalar_t, 1, DefaultPtrTraits, index_t>(running_mean_, "running_mean");
+      const stat_scalar_t, 1, DefaultPtrTraits, index_t>(running_mean_, "running_mean");
   auto running_var = packed_accessor_or_dummy<
-      stat_scalar_t, 1, DefaultPtrTraits, index_t>(running_var_, "running_var");
+      const stat_scalar_t, 1, DefaultPtrTraits, index_t>(running_var_, "running_var");
   auto save_mean = packed_accessor_or_dummy<
-      accscalar_t, 1, DefaultPtrTraits, index_t>(save_mean_, "save_mean");
+      const accscalar_t, 1, DefaultPtrTraits, index_t>(save_mean_, "save_mean");
   auto save_invstd = packed_accessor_or_dummy<
-      accscalar_t, 1, DefaultPtrTraits, index_t>(save_invstd_, "save_invstd");
+      const accscalar_t, 1, DefaultPtrTraits, index_t>(save_invstd_, "save_invstd");
 
   auto stream = at::cuda::getCurrentCUDAStream();
   dim3 blocks(input.size(1));
@@ -670,7 +670,7 @@ void batch_norm_stats_cuda_template(
   resize_output(out_mean, {n_input});
   resize_output(out_invstd, {n_input});
   auto input = get_packed_accessor<
-      scalar_t, 3, RestrictPtrTraits, index_t>(input_reshaped, "input");
+      const scalar_t, 3, RestrictPtrTraits, index_t>(input_reshaped, "input");
   TORCH_INTERNAL_ASSERT(out_invstd.dim() == 1 && out_invstd.is_contiguous() &&
                         out_invstd.sizes()[0]);
   TORCH_INTERNAL_ASSERT(out_mean.dim() == 1 && out_mean.is_contiguous() &&
@@ -700,13 +700,13 @@ void batch_norm_elemt_cuda_template(const Tensor& output_, const Tensor& input_,
   auto output_reshaped = output_.view({input_.size(0), input_.size(1), -1});
 
   auto input = get_packed_accessor<
-      input_scalar_t, 3, RestrictPtrTraits, index_t>(input_reshaped, "input");
+      const input_scalar_t, 3, RestrictPtrTraits, index_t>(input_reshaped, "input");
   auto output = get_packed_accessor<
       input_scalar_t, 3, RestrictPtrTraits, index_t>(output_reshaped, "output");
   auto weight = packed_accessor_or_dummy<
-    stat_scalar_t, 1, RestrictPtrTraits, index_t>(weight_, "weight");
+    const stat_scalar_t, 1, RestrictPtrTraits, index_t>(weight_, "weight");
   auto bias = packed_accessor_or_dummy<
-      stat_scalar_t, 1, RestrictPtrTraits, index_t>(bias_, "bias");
+      const stat_scalar_t, 1, RestrictPtrTraits, index_t>(bias_, "bias");
   auto mean = packed_accessor_or_dummy<
       stat_accscalar_t, 1, RestrictPtrTraits, index_t>(mean_, "mean");
   auto invstd = packed_accessor_or_dummy<

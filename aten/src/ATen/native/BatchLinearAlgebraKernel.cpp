@@ -649,8 +649,8 @@ void apply_ormqr(const Tensor& input, const Tensor& tau, const Tensor& other, bo
   char side = left ? 'L' : 'R';
   char trans = transpose ? (input.is_complex() ? 'C' : 'T') : 'N';
 
-  auto input_data = input.data_ptr<scalar_t>();
-  auto tau_data = tau.data_ptr<scalar_t>();
+  auto input_data = input.const_data_ptr<scalar_t>();
+  auto tau_data = tau.const_data_ptr<scalar_t>();
   auto other_data = other.data_ptr<scalar_t>();
 
   auto input_matrix_stride = matrixStride(input);
@@ -670,21 +670,21 @@ void apply_ormqr(const Tensor& input, const Tensor& tau, const Tensor& other, bo
   // Query for the optimal size of the workspace tensor
   int lwork = -1;
   scalar_t wkopt;
-  lapackOrmqr<scalar_t>(side, trans, m, n, k, input_data, lda, tau_data, other_data, ldc, &wkopt, lwork, &info);
+  lapackOrmqr<scalar_t>(side, trans, m, n, k, const_cast<scalar_t*>(input_data), lda, const_cast<scalar_t*>(tau_data), other_data, ldc, &wkopt, lwork, &info);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info == 0);
   lwork = std::max<int>(1, real_impl<scalar_t, value_t>(wkopt));
   Tensor work = at::empty({lwork}, input.options());
 
   for (const auto i : c10::irange(batch_size)) {
-    scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
+    const scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
     scalar_t* other_working_ptr = &other_data[i * other_matrix_stride];
-    scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
+    const scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
 
     // now compute the actual result
     lapackOrmqr<scalar_t>(
         side, trans, m, n, k,
-        input_working_ptr, lda,
-        tau_working_ptr,
+        const_cast<scalar_t*>(input_working_ptr), lda,
+        const_cast<scalar_t*>(tau_working_ptr),
         other_working_ptr, ldc,
         work.data_ptr<scalar_t>(), lwork, &info);
 

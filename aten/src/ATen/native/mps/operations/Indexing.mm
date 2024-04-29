@@ -39,6 +39,7 @@
 #include <ATen/ops/masked_select_native.h>
 #include <ATen/ops/nonzero.h>
 #include <ATen/ops/nonzero_native.h>
+#include <ATen/ops/view_as_real.h>
 #endif
 
 namespace at::native {
@@ -265,7 +266,7 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
 
   TORCH_CHECK(self.numel() < std::numeric_limits<int>::max(),
               "nonzero is not supported for tensors with more than INT_MAX elements, \
-  file a support request");
+  See https://github.com/pytorch/pytorch/issues/51871");
   TORCH_CHECK(
       out_.dtype() == at::kLong, "Expected object of scalar type ", at::kLong, " as out, but got ", out_.dtype());
   TORCH_CHECK(self.device() == out_.device(),
@@ -602,7 +603,6 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
               " and ",
               output.size(dim),
               ".");
-  TORCH_CHECK(!self.is_complex(), "index_select(): Yet not supported for complex");
 
   for (const auto i : irange(self.dim())) {
     if (i == dim)
@@ -625,6 +625,14 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
   // Scalar input
   if (self.dim() == 0 && self.numel() == 1) {
     output.copy_(self);
+    return output;
+  }
+
+  // As of MacOS 14.4 gatherWithUpdatesTensor: still does not support complex
+  // So back to old view_as_real trick
+  if (self.is_complex()) {
+    auto out_view = at::view_as_real(output);
+    index_select_out_mps(at::view_as_real(self), dim, index, out_view);
     return output;
   }
 

@@ -1,6 +1,12 @@
-from typing import List
+from typing import List, Union
 
-from ..scheduler import BaseSchedulerNode, BaseScheduling, Scheduler, SchedulerNode
+from ..scheduler import (
+    BaseSchedulerNode,
+    BaseScheduling,
+    FusedSchedulerNode,
+    Scheduler,
+    SchedulerNode,
+)
 from .cuda.cuda_cpp_scheduling import CUDACPPScheduling
 
 from .triton import TritonScheduling
@@ -23,9 +29,7 @@ class CUDACombinedScheduling(BaseScheduling):
         self._cuda_cpp_scheduling = CUDACPPScheduling(scheduler)
 
     def choose_node_backend(self, node: BaseSchedulerNode) -> BaseScheduling:
-        if self._cuda_cpp_scheduling.is_cuda_cpp_template(
-            node
-        ) or self._cuda_cpp_scheduling.is_cuda_cpp_fused_template(node):
+        if self._cuda_cpp_scheduling.is_cuda_cpp_template(node):
             return self._cuda_cpp_scheduling
         return self._triton_scheduling
 
@@ -36,9 +40,7 @@ class CUDACombinedScheduling(BaseScheduling):
 
     def can_fuse_horizontal(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode):
         for node in (node1, node2):
-            if self._cuda_cpp_scheduling.is_cuda_cpp_template(
-                node
-            ) or self._cuda_cpp_scheduling.is_cuda_cpp_fused_template(node):
+            if self._cuda_cpp_scheduling.is_cuda_cpp_template(node):
                 return self._cuda_cpp_scheduling.can_fuse_horizontal(
                     node1, node2
                 )  # always False at the moment
@@ -59,8 +61,8 @@ class CUDACombinedScheduling(BaseScheduling):
                 template_node, epilogue_nodes
             )
 
-    def codegen_nodes(self, nodes: List[SchedulerNode]):
-        return self._triton_scheduling.codegen_nodes(nodes)
+    def codegen_node(self, node: Union[FusedSchedulerNode, SchedulerNode]):
+        return self._triton_scheduling.codegen_node(node)
 
     def codegen_sync(self):
         return self._triton_scheduling.codegen_sync()

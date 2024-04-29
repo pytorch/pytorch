@@ -8,12 +8,12 @@
 # LICENSE file in the root directory of this source tree.
 import pytest
 import torch
-from torch import nn
 import torch.nn.functional as F
+from torch import nn
 
 from torch.distributed.pipeline.sync import Pipe
-from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
+from torch.testing._internal.common_utils import run_tests
 
 
 def test_python_autograd_function(setup_rpc):
@@ -63,7 +63,7 @@ def test_exception_no_hang(setup_rpc):
 
     class Raise(nn.Module):
         def forward(self, x):
-            raise ExpectedException()
+            raise ExpectedException
 
     model = nn.Sequential(Pass(), Pass(), Raise())
     model = Pipe(model, chunks=3)

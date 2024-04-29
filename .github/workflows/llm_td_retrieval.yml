@@ -84,6 +84,7 @@ jobs:
 
       - name: Run Retriever
         id: run_retriever
+        continue-on-error: true  # ghstack not currently supported due to problems getting git diff
         shell: bash -l {0}
         run: |
           set -euxo pipefail
@@ -101,6 +102,7 @@ jobs:
 
       - name: Upload results to s3
         uses: seemethere/upload-artifact-s3@v5
+        if: ${{ steps.run_retriever.outcome == 'success' }}
         with:
           name: llm_results
           retention-days: 14

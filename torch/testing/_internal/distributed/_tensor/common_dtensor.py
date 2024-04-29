@@ -78,6 +78,17 @@ class MLPModule(nn.Module):
         self.net2.reset_parameters()
 
 
+class MLPStacked(nn.Module):
+    def __init__(self, device, n_layers: int = 2):
+        super().__init__()
+        self.layers = nn.ModuleList([MLPModule(device) for i in range(n_layers)])
+
+    def forward(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        return x
+
+
 @dataclass
 class ModelArgs:
     n_layers: int = 2

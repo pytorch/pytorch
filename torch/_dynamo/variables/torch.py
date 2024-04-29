@@ -51,11 +51,14 @@ log = logging.getLogger(__name__)
 supported_ctx_manager_classes = dict.fromkeys(
     [
         torch.profiler.profiler.profile,
+        torch.autograd.forward_ad._set_fwd_grad_enabled,
+        torch.autograd.forward_ad.dual_level,
         torch.autograd.profiler.profile,
         torch.autograd.profiler.record_function,
         torch._C.DisableTorchFunctionSubclass,
         torch._functorch.vmap.vmap_increment_nesting,
         torch._functorch.eager_transforms.grad_increment_nesting,
+        torch._functorch.eager_transforms.jvp_increment_nesting,
         torch._functorch.eager_transforms.enable_inplace_requires_grad,
         torch.amp.autocast_mode.autocast,
         torch.autograd.grad_mode.enable_grad,
@@ -178,17 +181,27 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
         # We can't do isinstance(value, type) check because some ctx managers
         # are implemented as a function decorated by contextlib.contextmanager,
         # E.g., torch._functorch.vmap.vmap_increment_nesting.
-        return hashable(value) and value in supported_ctx_manager_classes
+        return (
+            # Context manager type or function with @contextmanager is callable
+            callable(value)
+            and (
+                hashable(value)  # accesses value.__hash__()
+                and value in supported_ctx_manager_classes
+            )
+        )
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from . import (
             DisabledSavedTensorsHooksVariable,
+            DualLevelContextManager,
             GradIncrementNestingCtxManagerVariable,
             GradInplaceRequiresGradCtxManagerVariable,
             GradModeVariable,
             InferenceModeVariable,
+            JvpIncrementNestingCtxManagerVariable,
+            SetFwdGradEnabledContextManager,
             StreamVariable,
             VmapIncrementNestingCtxManagerVariable,
         )
@@ -252,6 +265,18 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 tx,
                 [guard_if_dyn(x) for x in args],
             )
+        elif self.value is torch._functorch.eager_transforms.jvp_increment_nesting:
+            assert len(args) == 0
+            return JvpIncrementNestingCtxManagerVariable.create(tx)
+        elif self.value is torch.autograd.forward_ad._set_fwd_grad_enabled:
+            assert len(args) == 1
+            return SetFwdGradEnabledContextManager.create(
+                tx,
+                [guard_if_dyn(x) for x in args],
+            )
+        elif self.value is torch.autograd.forward_ad.dual_level:
+            assert len(args) == 0
+            return DualLevelContextManager.create(tx)
         elif self.value is torch._functorch.eager_transforms.grad_increment_nesting:
             assert len(args) == 0
             return GradIncrementNestingCtxManagerVariable.create(tx)
@@ -615,7 +640,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 and args[1].is_python_constant()
                 and args[1].as_python_constant() == -1
             ):
-                raise unimplemented(
+                unimplemented(
                     "torch.nn.functional.one_hot with data-dependent output shape"
                 )
 
@@ -629,6 +654,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         expr.sym_num
                     )
                 )
+            elif isinstance(expr, ConstantVariable):
+                return expr
 
         @register(torch._C._autograd._unsafe_set_version_counter)
         def handle_unsafe_set_version_counter(self, tx, *args, **kwargs):
@@ -711,7 +738,7 @@ To support this behavior, we need to allow const-propping tensors that store sym
 For now, dynamo will explicitly graph break when it encounters user code with this behavior.
 """
                 log.warning(msg)
-                raise unimplemented(msg)
+                unimplemented(msg)
 
             # TODO(voz): Replace w/ dynamic shape rewrite table.
             # Ideally, we would be able to do this at ctor time, but alas we need a combination

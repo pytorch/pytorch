@@ -73,6 +73,16 @@ quantization_inplace_add_fn_list = [
 ]
 
 
+def get_default_quantizer(is_qat, is_dynamic):
+    quantizer = X86InductorQuantizer()
+    quantizer.set_global(
+        xiq.get_default_x86_inductor_quantization_config(
+            is_qat=is_qat, is_dynamic=is_dynamic
+        )
+    )
+    return quantizer
+
+
 @config.patch({"freezing": True})
 class TestPatternMatcherBase(TestCase):
     def _check_unary_is_decomposed(self, unary_fn):
@@ -90,7 +100,7 @@ class TestPatternMatcherBase(TestCase):
         return tuple(clone(x) for x in inputs)
 
     def _generate_qdq_quantized_model(
-        self, mod, inputs, is_qat=False, is_dynamic=False
+        self, mod, inputs, is_qat=False, is_dynamic=False, quantizer=None
     ):
         maybe_no_grad = contextlib.nullcontext() if is_qat else torch.no_grad()
         with maybe_no_grad:
@@ -98,11 +108,8 @@ class TestPatternMatcherBase(TestCase):
                 mod,
                 inputs,
             )
-            quantizer = X86InductorQuantizer()
-            quantizer.set_global(
-                xiq.get_default_x86_inductor_quantization_config(
-                    is_qat=is_qat, is_dynamic=is_dynamic
-                )
+            quantizer = (
+                quantizer if quantizer else get_default_quantizer(is_qat, is_dynamic)
             )
             prepare_model = (
                 prepare_qat_pt2e(export_model, quantizer)
@@ -128,6 +135,7 @@ class TestPatternMatcherBase(TestCase):
         matcher_check_fn=None,
         dtype=None,
         is_dynamic=False,
+        quantizer=None,
     ):
         counters.clear()
         torch._dynamo.reset()
@@ -152,7 +160,7 @@ class TestPatternMatcherBase(TestCase):
 
         if check_quantization:
             convert_model = self._generate_qdq_quantized_model(
-                mod, inputs, is_qat, is_dynamic
+                mod, inputs, is_qat, is_dynamic, quantizer
             )
             with torch.no_grad(), maybe_autocast:
                 _ = torch.compile(convert_model)(*inputs)
@@ -558,6 +566,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         self,
         int8_mixed_bf16=False,
         unary_op=torch.nn.ReLU(),
+        qconv2d_unary_matcher_nodes=None,
     ):
         class M(torch.nn.Module):
             def __init__(
@@ -584,6 +593,11 @@ class TestPatternMatcher(TestPatternMatcherBase):
             )
             # 2. QConv2D Unary fusion in post-grad fusion pass * 2
             self.assertEqual(counters["inductor"]["qconv2d_unary_matcher_count"], 2)
+            if qconv2d_unary_matcher_nodes:
+                self.assertEqual(
+                    counters["inductor"]["qconv2d_unary_matcher_nodes"],
+                    qconv2d_unary_matcher_nodes,
+                )
 
         self._test_common(
             mod,
@@ -631,6 +645,24 @@ class TestPatternMatcher(TestPatternMatcherBase):
         self._qconv2d_unary_cpu_test_helper(unary_op=torch.nn.Hardtanh())
 
     @skipIfNoDynamoSupport
+    @skipIfNoONEDNNBF16
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_qconv2d_hardtanh_int8_mixed_bf16_cpu(self):
+        r"""
+        This testcase will quantize Conv2d->Hardtanh pattern.
+        Match.nodes:
+            [qconv2d_pointwise_default_1, convert_element_type_5, clamp_min_1, clamp_max_1, mul_2, round_2, add_1, clamp_min_2,
+             clamp_max_1, mul_2, round_2, add_1, clamp_min_2, clamp_max_2, convert_element_type_8
+            [qconv2d_pointwise_default, convert_element_type_13, clamp_min_3, clamp_max_3]
+        """
+        self._qconv2d_unary_cpu_test_helper(
+            unary_op=torch.nn.Hardtanh(),
+            int8_mixed_bf16=True,
+            qconv2d_unary_matcher_nodes=14,
+        )
+
+    @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
     def test_qconv2d_hardswish_cpu(self):
@@ -638,6 +670,51 @@ class TestPatternMatcher(TestPatternMatcherBase):
         This testcase will quantize Conv2d->Hardswish pattern.
         """
         self._qconv2d_unary_cpu_test_helper(unary_op=torch.nn.Hardswish())
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNNBF16
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_qconv2d_hardswish_int8_mixed_bf16_cpu(self):
+        r"""
+        This testcase will quantize Conv2d->Hardswish pattern.
+        Match.nodes:
+            [qconv2d_pointwise_default_1, convert_element_type_5, add_1, clamp_min_1,
+             clamp_max_1, mul_2, div, mul_3, round_2, add_2, clamp_min_2, clamp_max_2, convert_element_type_8]
+            [qconv2d_pointwise_default, convert_element_type_13, add_3, clamp_min_3, clamp_max_3, mul_5, div_1]
+        """
+        self._qconv2d_unary_cpu_test_helper(
+            unary_op=torch.nn.Hardswish(),
+            int8_mixed_bf16=True,
+            qconv2d_unary_matcher_nodes=20,
+        )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_qconv2d_silu_cpu(self):
+        r"""
+        This testcase will quantize Conv2d->SiLU pattern.
+        """
+        self._qconv2d_unary_cpu_test_helper(unary_op=torch.nn.SiLU())
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNNBF16
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_qconv2d_silu_int8_mixed_bf16_cpu(self):
+        r"""
+        This testcase will quantize Conv2d->SiLU pattern.
+        Match.nodes:
+            [qconv2d_pointwise_default_1, convert_element_type_5, sigmoid, mul_2,
+             mul_3, round_2, add_1, clamp_min_1, clamp_max_1, convert_element_type_8]
+            [qconv2d_pointwise_default, convert_element_type_13, sigmoid_1, mul_5]
+        """
+        self._qconv2d_unary_cpu_test_helper(
+            unary_op=torch.nn.SiLU(),
+            int8_mixed_bf16=True,
+            qconv2d_unary_matcher_nodes=14,
+        )
 
     def _qconv2d_add_cpu_test_helper(self, use_relu=False, int8_mixed_bf16=False):
         r"""
@@ -1011,6 +1088,16 @@ class TestPatternMatcher(TestPatternMatcherBase):
         """
 
         self._qat_qconv2d_unary_cpu_test_helper(unary_op=torch.nn.Hardtanh())
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_qat_qconv2d_silu(self):
+        r"""
+        This testcase will quantize Conv2d->SiLU pattern with qat flow.
+        """
+
+        self._qat_qconv2d_unary_cpu_test_helper(unary_op=torch.nn.SiLU())
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
@@ -2175,26 +2262,30 @@ class TestPatternMatcher(TestPatternMatcherBase):
             def forward(self, x, weight, scales):
                 return torch.nn.functional.linear(x, weight.to(dtype=x.dtype)) * scales
 
-        torch.manual_seed(1234)
         mod = M().eval()
         x_shape = (1, 1, 256)
         w_shape = (12, 256)
         s_shape = 12
-        x = torch.randn(x_shape, dtype=torch.bfloat16)
-        w = torch.randint(-128, 127, w_shape, dtype=torch.int8)
-        s = torch.randn(s_shape, dtype=torch.bfloat16)
+        x_strides = [
+            (256, 256, 1),  # linear dispatching to mm
+            (256, 32, 1),  # linear dispatching to bmm
+        ]
+        for x_stride in x_strides:
+            x = torch.randn(x_shape, dtype=torch.bfloat16).as_strided(x_shape, x_stride)
+            w = torch.randint(-128, 127, w_shape, dtype=torch.int8)
+            s = torch.randn(s_shape, dtype=torch.bfloat16)
 
-        def matcher_check_fn():
-            self.assertEqual(counters["inductor"]["woq_matcher_count"], 1)
+            def matcher_check_fn():
+                self.assertEqual(counters["inductor"]["woq_matcher_count"], 1)
 
-        self._test_common(
-            mod,
-            (x, w, s),
-            matcher_check_fn=matcher_check_fn,
-            check_quantization=False,
-            atol=0.001,
-            rtol=0.07,
-        )
+            self._test_common(
+                mod,
+                (x, w, s),
+                matcher_check_fn=matcher_check_fn,
+                check_quantization=False,
+                atol=0.001,
+                rtol=0.07,
+            )
 
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
@@ -2332,6 +2423,85 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
             is_qat=True,
             matcher_check_fn=matcher_check_fn,
         )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_q_attention_block(self):
+        class SelfAttnLikeModule(torch.nn.Module):
+            def __init__(
+                self,
+                input_dim,
+                transpose_for_score=False,
+                num_attention_heads=None,
+                attention_head_size=None,
+            ) -> None:
+                super().__init__()
+                self.input_dim = input_dim
+                self.q_proj = torch.nn.Linear(input_dim, input_dim, bias=False)
+                self.k_proj = torch.nn.Linear(input_dim, input_dim, bias=False)
+                self.v_proj = torch.nn.Linear(input_dim, input_dim, bias=False)
+                self.softmax = torch.nn.Softmax(dim=-1)
+                self.transpose_for_score = transpose_for_score
+                if self.transpose_for_score:
+                    assert num_attention_heads is not None
+                    assert attention_head_size is not None
+                    self.num_attention_heads = num_attention_heads
+                    self.attention_head_size = attention_head_size
+
+            def transpose_for_scores(self, x: torch.Tensor) -> torch.Tensor:
+                new_x_shape = x.size()[:-1] + (
+                    self.num_attention_heads,
+                    self.attention_head_size,
+                )
+                x = x.view(new_x_shape)
+                return x.permute(0, 2, 1, 3)
+
+            def forward(self, x):
+                q = self.q_proj(x)
+                k = self.k_proj(x)
+                v = self.v_proj(x)
+                if self.transpose_for_score:
+                    q = self.transpose_for_scores(q)
+                    k = self.transpose_for_scores(k)
+                    v = self.transpose_for_scores(v)
+                scores = torch.matmul(q, k.transpose(-1, -2)) / (self.input_dim**0.5)
+                attention = self.softmax(scores)
+                weighted = torch.matmul(attention, v)
+                return weighted
+
+        for annotate_matmul in [False, True]:
+            mod = SelfAttnLikeModule(
+                input_dim=64 * 16,
+                transpose_for_score=True,
+                num_attention_heads=16,
+                attention_head_size=64,
+            ).eval()
+            v = torch.randn(2, 384, 1024)
+
+            def matcher_check_fn():
+                self.assertEqual(
+                    counters["inductor"]["qlinear_weight_prepack_matcher_count"], 3
+                )
+                self.assertEqual(
+                    counters["inductor"]["qlinear_unary_matcher_count"],
+                    3 if annotate_matmul else 0,
+                )
+
+            quantizer = X86InductorQuantizer()
+            quantizer.set_global(xiq.get_default_x86_inductor_quantization_config())
+            if annotate_matmul:
+                quantizer.set_function_type_qconfig(
+                    torch.matmul, quantizer.get_global_quantization_config()
+                )
+
+            self._test_common(
+                mod,
+                (v,),
+                check_quantization=True,
+                matcher_check_fn=matcher_check_fn,
+                quantizer=quantizer,
+            )
 
 
 if __name__ == "__main__":

@@ -1443,7 +1443,7 @@ SKIP_XFAIL_SUBTESTS_WITH_MATCHER_AND_MODEL_TYPE: tuple[
     ),
     skip(
         "linalg.multi_dot",
-        matcher=lambda sample: sum([torch.numel(input) for input in sample.input]) == 0,
+        matcher=lambda sample: sum(torch.numel(input) for input in sample.input) == 0,
         reason="fixme: Undefined",
     ),
     skip(
@@ -1586,14 +1586,6 @@ SKIP_XFAIL_SUBTESTS_WITH_MATCHER_AND_MODEL_TYPE: tuple[
         and sample.kwargs.get("as_tuple", False) is False,
         reason="Output 'shape' do not match: torch.Size([0, 1]) != torch.Size([0, 0]).",
         model_type=pytorch_test_common.TorchModelType.TORCH_NN_MODULE,
-    ),
-    xfail(
-        "nonzero",
-        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
-        reason=onnx_test_common.reason_onnx_script_does_not_support(
-            "aten::_assert_async.msg",
-            "https://github.com/pytorch/pytorch/issues/112443",
-        ),
     ),
     xfail(
         "scatter_add",
@@ -2009,6 +2001,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
         "nn.functional.multilabel_soft_margin_loss": [4e-2, 5e-3],
         "nn.functional.local_response_norm": [1e-2, 5e-3],
         "nn.functional.poisson_nll_loss": [3e-2, 1e-3],
+        "nn.functional.nll_loss": [3e-2, 1e-3],
         "native_batch_norm": [3e-2, 1e-3],
         "dot": [3e-2, 1e-3],
         "logit": [3e-2, 1e-3],

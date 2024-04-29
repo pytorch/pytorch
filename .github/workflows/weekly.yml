@@ -25,7 +25,7 @@ jobs:
         with:
           repo-name: xla
           branch: master
-          pin-folder: .ci/docker/ci_commit_pins
+          pin-folder: .github/ci_commit_pins
           test-infra-ref: main
           updatebot-token: ${{ secrets.UPDATEBOT_TOKEN }}
           pytorchbot-token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}

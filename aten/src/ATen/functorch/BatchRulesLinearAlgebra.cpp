@@ -370,7 +370,7 @@ fourOutputs solve_ex_batch_rule(
   TORCH_CHECK(A_logical_rank >= 2,
             "linalg.solve: The input tensor A must have at least 2 dimensions.");
 
-  int b_logical_rank = max_logical_rank;
+  auto b_logical_rank = max_logical_rank;
   if (A_logical_rank > B_logical_rank) {  // vector case: B was a vector or batched vector
     // not accurate but matches linalg error message
     TORCH_CHECK(B_logical_rank >= 1, "linalg.solve: The input tensor B must have at least 2 dimensions.");
@@ -574,6 +574,7 @@ pinv_batch_rule(
   }
 
 // These need to be outside. String constant must be declared outside of a macro to be used as template param
+// NOLINTBEGIN(*array*)
 LINALG_CHECK_MATRIX_UNARY_ONE_OUT(cholesky, cholesky);
 LINALG_CHECK_MATRIX_UNARY_ONE_OUT(cholesky_inverse, cholesky_inverse);
 LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_cholesky_ex, linalg.cholesky);
@@ -590,6 +591,7 @@ LINALG_CHECK_MATRIX_UNARY_THREE_OUT(_linalg_det, linalg.det);
 LINALG_CHECK_MATRIX_UNARY_TWO_OUT(_linalg_eigh, linalg.eigh);
 LINALG_CHECK_MATRIX_UNARY_FOUR_OUT(_linalg_slogdet, linalg.slogdet);
 LINALG_CHECK_MATRIX_UNARY_THREE_OUT(_linalg_svd, linalg.svd);
+// NOLINTEND(*array*)
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(bmm, bmm_batch_rule);
