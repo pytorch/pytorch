@@ -11,7 +11,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from torch.distributed._composable import checkpoint, replicate
-from torch.distributed._composable.fsdp import FSDP, fully_shard, MixedPrecisionPolicy
+from torch.distributed._composable.fsdp import (
+    FSDPModule,
+    fully_shard,
+    MixedPrecisionPolicy,
+    OffloadPolicy,
+)
 from torch.distributed._composable.fsdp._fsdp_collectives import (
     foreach_all_gather,
     foreach_all_gather_copy_out,
@@ -99,6 +104,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             post_forward_mesh_info,
             self.device,
             MixedPrecisionPolicy(),
+            OffloadPolicy(),
         )
         fsdp_param_group.lazy_init()
         return fsdp_param_group
@@ -624,13 +630,13 @@ class TestFullyShardUnshardMultiProcess(FSDPTest):
 
             def forward(self, x: torch.Tensor):
                 y1, work1 = self.reduce_module1(x)
-                if isinstance(self.mlps.mlp1, FSDP):
+                if isinstance(self.mlps.mlp1, FSDPModule):
                     self.mlps.mlp1.unshard(async_op=True)
                 y2, work2 = self.reduce_module2(x)
-                if isinstance(self.mlps.mlp2, FSDP):
+                if isinstance(self.mlps.mlp2, FSDPModule):
                     self.mlps.mlp2.unshard(async_op=True)
                 y3, work3 = self.reduce_module3(x)
-                if isinstance(self.mlps.mlp3, FSDP):
+                if isinstance(self.mlps.mlp3, FSDPModule):
                     self.mlps.mlp3.unshard(async_op=True)
                 return self.mlps([y1, y2, y3], [work1, work2, work3])
 
