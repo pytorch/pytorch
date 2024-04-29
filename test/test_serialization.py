@@ -33,6 +33,8 @@ from torch.testing._internal.common_dtype import all_types_and_complex_and
 
 if not IS_WINDOWS:
     from mmap import MAP_SHARED, MAP_PRIVATE
+else:
+    MAP_SHARED, MAP_PRIVATE = None, None
 
 # These tests were all copied from `test/test_torch.py` at some point, so see
 # the actual blame, see this revision
