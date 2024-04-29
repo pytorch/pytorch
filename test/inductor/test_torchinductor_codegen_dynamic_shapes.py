@@ -333,6 +333,9 @@ test_failures = {
     "test_mutations_loop_fusion_dynamic_shapes": TestFailure(
         ("cpu", "cuda"), is_skip=True
     ),
+    # Refinement means we don't actually generate dynamic shapes (but only on
+    # cpu apparently?!)
+    "test_nonzero_unbacked_refinement_dynamic_shapes": TestFailure(("cpu",)),
 }
 
 if TEST_WITH_ROCM:
