@@ -208,6 +208,9 @@ class TORCH_API PyTorchStreamWriter final {
   explicit PyTorchStreamWriter(const std::string& archive_name);
   explicit PyTorchStreamWriter(
       const std::function<size_t(const void*, size_t)> writer_func);
+  explicit PyTorchStreamWriter(
+      const std::function<size_t(const void*, size_t)> writer_func,
+      const std::function<size_t(size_t)> seek_func);
 
   void setMinVersion(const uint64_t version);
 
@@ -246,6 +249,7 @@ class TORCH_API PyTorchStreamWriter final {
   std::string padding_;
   std::ofstream file_stream_;
   std::function<size_t(const void*, size_t)> writer_func_;
+  std::function<size_t(size_t)> seek_func_;
   uint64_t combined_uncomp_crc32_ = 0;
   std::string serialization_id_;
 
@@ -258,6 +262,10 @@ class TORCH_API PyTorchStreamWriter final {
       void* pOpaque,
       uint64_t file_ofs,
       const void* pBuf,
+      size_t n);
+  friend size_t ostream_seek_func(
+      void* pOpaque,
+      uint64_t file_ofs,
       size_t n);
 };
 
