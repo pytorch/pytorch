@@ -3622,10 +3622,6 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
     # This indicates that the dimension's length should be inferred
     shape = utils.infer_size(shape, a.numel())
 
-    # Short-circuits if shape is the same
-    if guard_size_oblivious(sym_eq(tuple(a.shape), tuple(shape))):
-        return prims.view_of(a)
-
     # Special-cases tensors with no elements
     if guard_size_oblivious(a.numel() == 0):
         return as_strided(a, shape, utils.make_contiguous_strides_for(shape))
