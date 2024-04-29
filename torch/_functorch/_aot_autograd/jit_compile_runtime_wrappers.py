@@ -292,8 +292,7 @@ def aot_dispatch_autograd(
             )
             key = "test"
             AOTAutogradCache._save(key, fw_module, None)
-            results = AOTAutogradCache._lookup(key)
-            breakpoint()
+            fw_module = AOTAutogradCache._lookup(key)
 
             # See Note [Side-Effectful Tokens in AOTAutograd]
             if num_tokens != 0 and config.unlift_effect_tokens:

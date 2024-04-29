@@ -8,6 +8,8 @@ import logging
 import os
 import dataclasses
 from copy import copy
+from torch._guards import detect_fake_mode
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 import torch
 import pickle
 from torch._inductor.codecache import (
@@ -17,10 +19,26 @@ from torch._inductor.codecache import (
     get_inductor_root,
     write_atomic
 )
-from torch._inductor.utils import cache_dir
+import tempfile
 from torch.fx.node import Node
 
 from .schemas import AOTConfig  # noqa: F401
+from typing import cast
+
+def fake_tensor_from_meta(tensor_meta):
+    fake_mode = detect_fake_mode()
+    with fake_mode:
+        return cast(
+            FakeTensor,
+            torch.empty_strided(
+                tensor_meta.shape,
+                tensor_meta.stride,
+                device="meta",
+                dtype=tensor_meta.dtype,
+                requires_grad=tensor_meta.requires_grad,
+            ),
+        )
+
 
 log = logging.getLogger(__name__)
 
@@ -28,6 +46,11 @@ log = logging.getLogger(__name__)
 class BypassAOTAutogradCache(Exception):
     pass
 
+cache = tempfile.mkdtemp()
+
+def cache_dir():
+    """Returns the directory where we store AOTAutograd cache entries."""
+    return cache
 
 def check_node_safe(node: Node):
     """
@@ -172,20 +195,30 @@ class AOTAutogradCache:
             return None
         path = os.path.join(subdir, "fw_module")
         try:
-            content = pickle.load(open(path, "rb"))
-            return content
+            (fw_module, node_metas) = pickle.load(open(path, "rb"))
+            for node, meta in zip(fw_module.graph.nodes, node_metas):
+                node.meta = meta
+                if "tensor_meta" in node.meta:
+                    node.meta["val"] = fake_tensor_from_meta(node.meta["tensor_meta"])
+            return fw_module
         except Exception as e:
-            log.debug("AOTAutograd cache unable to load compiled graph: %s", e)
-            return None
+            print("AOTAutograd cache unable to load compiled graph:", e)
+            raise e
 
     @staticmethod
     def _save(key: str, fw_module, bw_module = None):
         """Save forward and backward modules to the cache."""
         fw_module = copy(fw_module)
+        node_metas = []
+        for node in fw_module.graph.nodes:
+            meta = {}
+            if "tensor_meta" in node.meta:
+                meta["tensor_meta"] = node.meta["tensor_meta"]
+            node_metas.append(meta)
         try:
-            content = pickle.dumps(fw_module)
+            content = pickle.dumps((fw_module, node_metas))
         except Exception as e:
-            log.debug("AOTAutograd cache unable to serialize compiled graph: %s", e)
+            print("AOTAutograd cache unable to serialize compiled graph: %s", e)
             return
         subdir = os.path.join(AOTAutogradCache._get_tmp_dir(), key)
         if not os.path.exists(subdir):
