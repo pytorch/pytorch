@@ -24,7 +24,7 @@ except ImportError:
 
 import torch._inductor.config as config
 from torch._inductor import codecache, metrics
-from torch._inductor.codegen import cpp
+from torch._inductor.codegen import cpp_utils
 from torch._inductor.codegen.common import (
     get_scheduling_for_device,
     get_wrapper_codegen_for_device,
@@ -140,7 +140,7 @@ class ExtensionBackendTests(TestCase):
         def fn(a, b, c):
             return a * b + c
 
-        cpp.DEVICE_TO_ATEN["extension_device"] = "at::kPrivateUse1"
+        cpp_utils.DEVICE_TO_ATEN["extension_device"] = "at::kPrivateUse1"
         for cpp_wrapper_flag in [True, False]:
             with config.patch({"cpp_wrapper": cpp_wrapper_flag}):
                 metrics.reset()
