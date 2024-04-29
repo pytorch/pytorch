@@ -78,7 +78,6 @@ from .utils import (
     convert_shape_to_symint,
     developer_warning,
     get_kernel_metadata,
-    is_cpu_device,
     is_dynamic,
     is_gpu,
     pad_listlike,
@@ -86,7 +85,6 @@ from .utils import (
     sympy_index_symbol,
     sympy_product,
     sympy_subs,
-    timed,
 )
 from .virtualized import ops, V
 
@@ -1950,12 +1948,12 @@ class ExpandView(BaseView):
             elif old_size[i] is None or old_size[i] == 1:
                 pass
             else:
-                # Expect broadcast compatibility
-                new_size[i] = V.graph.sizevars.expect_equals(
-                    new_size[i],
-                    old_size[i],
-                    msg=f"Broadcast failed in ExpandView({x.get_size()}, {new_size}) on dimension {i}",
-                )
+                # NB: new_size[i] == old_size[i] is known because the meta
+                # formula was expected to have taught us this equality.
+                # We can't conveniently check it right now because
+                # statically_known_equals doesn't know to consult preexisting
+                # guards
+                pass
         return new_size
 
     @classmethod
@@ -3020,7 +3018,7 @@ class Buffer(IRNode):
         return self.layout.make_indexer()
 
     def get_name(self) -> str:
-        assert self.name
+        assert self.name, self
         return self.name
 
     def get_device(self):
@@ -3621,10 +3619,7 @@ class ChoiceCaller:
 
     def benchmark(self, *args, out) -> float:
         algo = self.to_callable()
-        if is_cpu_device(args):
-            return timed(lambda: algo(*args, out=out), ())
-        else:
-            return do_bench(lambda: algo(*args, out=out))
+        return do_bench(lambda: algo(*args, out=out))
 
     def call_name(self) -> str:
         raise NotImplementedError
@@ -3713,13 +3708,6 @@ class CUDATemplateBuffer(TemplateBuffer):
 
     def get_workspace_size(self):
         return self.workspace_size if self.workspace_size is not None else 0
-
-
-class CppTemplateBuffer(TemplateBuffer):
-    def __init__(self, layout, inputs, make_kernel_render, template, choice):
-        super().__init__(layout, inputs, make_kernel_render)
-        self.template = template
-        self.choice = choice
 
 
 @dataclasses.dataclass
@@ -5085,8 +5073,15 @@ class AssertScalar(ExternKernel):
         if V.graph.cpp_wrapper:
             pass
         else:
+            # NB: It is EXTREMELY important not to simplify the scalar under
+            # assertion here, because simplify is done with respect to
+            # runtime asserts.  So if you have "u0 == 0" in the runtime
+            # asserts, if you subsequently try to simplify(u0 == 0), you will
+            # get True (because we've already runtime assert'ed that it's
+            # true).  But we're code generating the actual runtime assert
+            # here!!
             wrapper.writeline(
-                f"if not {V.graph.wrapper_code.codegen_python_sizevar(self.scalar)}:"
+                f"if not {V.graph.wrapper_code.codegen_python_sizevar(self.scalar, simplify=False)}:"
             )
             wrapper.writeline(f"    raise RuntimeError({repr(self.msg)})")
             # No one should ever use this buffer, but for uniformity
@@ -6259,7 +6254,7 @@ class MKLPackedLinear(ExternKernelAlloc):
         )
 
     @classmethod
-    def create(cls, x, packed_w, orig_w, B, batch_size):
+    def create(cls, x, packed_w, orig_w, batch_size):
         x = cls.require_stride1(cls.realize_input(x))
         orig_w = cls.require_stride1(cls.realize_input(orig_w))
         *m, _ = x.get_size()
@@ -6267,11 +6262,7 @@ class MKLPackedLinear(ExternKernelAlloc):
         output_size = list(m) + [oc]
         output_stride = make_contiguous_strides_for(output_size)
         inputs = [x, packed_w, orig_w]
-        constant_args = [batch_size]
-        if B is not None:
-            inputs += [B]
-        else:
-            constant_args.insert(0, None)
+        constant_args = [None, batch_size]
 
         return MKLPackedLinear(
             layout=FixedLayout(
