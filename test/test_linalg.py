@@ -219,8 +219,8 @@ class TestLinalg(TestCase):
             if a.numel() > 0:
                 for i in range(batch_size):
                     sol, residuals, rank, singular_values = ref(
-                        a_3d.select(0, i).numpy(),
-                        b_3d.select(0, i).numpy()
+                        a_3d.select(0, i).cpu().numpy(),
+                        b_3d.select(0, i).cpu().numpy()
                     )
                     # Singular values are None when lapack_driver='gelsy' in SciPy
                     if singular_values is None:
@@ -261,13 +261,12 @@ class TestLinalg(TestCase):
 
         def check_correctness_scipy(a, b, res, driver, cond):
             # SciPy provides 3 driver options: gelsd, gelss, gelsy
-            if device == 'cpu':
-                if TEST_SCIPY and driver in ('gelsd', 'gelss', 'gelsy'):
-                    import scipy.linalg
+            if TEST_SCIPY and driver in ('gelsd', 'gelss', 'gelsy'):
+                import scipy.linalg
 
-                    def scipy_ref(a, b):
-                        return scipy.linalg.lstsq(a, b, lapack_driver=driver, cond=cond)
-                    check_correctness_ref(a, b, res, scipy_ref, driver=driver)
+                def scipy_ref(a, b):
+                    return scipy.linalg.lstsq(a, b, lapack_driver=driver, cond=cond)
+                check_correctness_ref(a, b, res, scipy_ref, driver=driver)
 
         def check_correctness_numpy(a, b, res, driver, rcond):
             # NumPy uses only gelsd routine

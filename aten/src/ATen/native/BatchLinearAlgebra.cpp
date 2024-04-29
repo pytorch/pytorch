@@ -3433,9 +3433,12 @@ static void linalg_lstsq_out_info(
     if (input.numel() == 0 || input.size(-2) == 0 || input.size(-1) == 0) {
         auto output_shape = input.sizes().vec();
         output_shape.back() = other.size(-1);
+        rank.fill_(0);
         solution = at::zeros(output_shape, input.options());
     } else {
         auto [U, S, Vh] = at::_linalg_svd(input, false, true, "gesvd");
+        rank = at::zeros({1}, at::kLong);
+        rank[0] = (S > rcond).sum();
         auto S_pinv = S.reciprocal();
         auto s1 = at::narrow(S, /*dim=*/-1, /*start=*/0, /*length=*/1);  // singular values are sorted in descending order
         S_pinv.masked_fill_(S < rcond * s1, 0);
@@ -3456,7 +3459,7 @@ static void linalg_lstsq_out_info(
     bool compute_residuals = true;
     if (driver == "gelss" || driver == "gelsd") {
       if (input.dim() == 2) {
-        compute_residuals = (rank.item().toDouble() == n);
+        compute_residuals = (rank.item().toInt() == n);
       } else {
         // it is not clear what to do if some matrices have rank < n in case of batched input
         // For now let's compute the residuals only if all matrices have rank equal to n
