@@ -10173,7 +10173,7 @@ fn
                 self.fc_ref = fc
 
             def forward(self, x):
-                return self.fc(x[0])
+                return self.fc_ref(x[0])
 
         cleared = False
 
