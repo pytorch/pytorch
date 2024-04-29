@@ -55,7 +55,7 @@ jobs:
               else
                 # Use ARC runners for everyone.
                 echo "workflow-type=$WORKFLOW_TYPE_RG" >> "$GITHUB_OUTPUT"
-              if
+              fi
             elif echo "$USER_LIST" | grep -q "${{ inputs.user_name }}"; then
               if [[ "$RUN_TYPE" == "$WORKFLOW_TYPE_BOTH" ]]; then
                 # Use ARC runners and old runners for a specific user.
@@ -63,7 +63,7 @@ jobs:
               else
                 # Use ARC runners for a specific user.
                 echo "workflow-type=$WORKFLOW_TYPE_RG" >> "$GITHUB_OUTPUT"
-              if
+              fi
             else
               # Use old runners by default.
               echo "workflow-type=$WORKFLOW_TYPE_LABEL" >> "$GITHUB_OUTPUT"
