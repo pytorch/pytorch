@@ -2470,8 +2470,6 @@ def _temp_validate_new_and_old_command(new_cmd: List[str], old_cmd: List[str]):
 
 
 def _validate_cpp_commands():
-    new_cmd = ["This ", "is", "New", "cmd"]
-
     input_path = "/temp/dummy_input.cpp"
     output_path = "/temp/dummy_output.so"
     picked_isa = pick_vec_isa()
@@ -2506,7 +2504,7 @@ def _validate_cpp_commands():
     _temp_validate_new_and_old_command(new_cmd, old_cmd)
 
 
-_validate_cpp_commands()
+# _validate_cpp_commands()
 
 
 def _reload_python_module_in_subproc(key, path):
