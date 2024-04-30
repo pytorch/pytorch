@@ -44,6 +44,7 @@ from torch._dynamo.testing import (
     same,
     skipIfNotPy311,
     unsupported,
+    xfailIfPy312,
 )
 from torch._dynamo.utils import CompileProfiler, counters, ifdynstaticdefault
 from torch._inductor.utils import run_and_get_code
@@ -10153,22 +10154,16 @@ fn
             lambda mod: mod,
         )
 
+    # The following 2 tests fail due to https://github.com/python/cpython/issues/118013.
+    # Tracked by https://github.com/pytorch/pytorch/issues/124302.
+    # The xfails can be removed once Python 3.12 is updated on CI.
+    @xfailIfPy312
     def test_outside_linear_module_free(self):
         # Compared to test_linear_module_free, the linear
         # layer is not the code object that is directly compiled.
 
         # This test does not use _test_compile_model_free because of difficulty
         # in handling variable fc.
-
-        fc = torch.nn.Linear(100, 100)
-
-        class Mod(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.fc_ref = fc
-
-            def forward(self, x):
-                return fc(x[0])
 
         cleared = False
 
@@ -10177,17 +10172,27 @@ fn
             cleared = True
 
         def run():
+            fc = torch.nn.Linear(100, 100)
+
+            class Mod(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.fc_ref = fc
+
+                def forward(self, x):
+                    return self.fc_ref(x)
+
             mod = Mod()
             inp = torch.randn(100, 100)
-            weakref.finalize(mod.fc_ref, finalize)
+            weakref.finalize(fc, finalize)
             torch.compile(mod, backend="eager")(inp)
 
         run()
-        del fc  # This should delete all the references
+        # del fc  # This should delete all the references
         gc.collect()
         self.assertTrue(cleared)
 
-    @unittest.skipIf(sys.version_info >= (3, 12), "leaks in 3.12+")
+    @xfailIfPy312
     def test_parameter_free(self):
         def model_inp_ctr():
             param = torch.nn.Parameter(torch.randn(100, 100))
