@@ -1,5 +1,5 @@
 from collections import namedtuple
-from typing import Dict, List, Type
+from typing import Dict, List, Optional, Type
 
 import sympy
 
@@ -308,7 +308,7 @@ def create_micro_gemm(
     alpha=1,
     num_threads=-1,
     use_ref=False,
-) -> CppMicroGemm:
+) -> Optional[CppMicroGemm]:
     def create_from_config(cls, config: CppMicroGemmConfig):
         return cls(
             name,
@@ -322,6 +322,7 @@ def create_micro_gemm(
     assert isinstance(n, int) or n.is_number, n
     assert isinstance(k, int) or k.is_number, k
     m = V.graph.sizevars.size_hint(m) if isinstance(m, sympy.Expr) else m
+    assert isinstance(m, int), m
     if output_dtype is None:
         output_dtype = input_dtype
     if compute_dtype is None:
@@ -340,6 +341,7 @@ def create_micro_gemm(
                 and config.compute_dtype == compute_dtype
             ):
                 block_m, block_n, block_k = config.register_blocking
+                # TODO(jgong5): support n % n_block_size != 0
                 if n % block_n != 0:
                     continue
                 # Criteria on the ranking of configurations
@@ -365,7 +367,12 @@ def create_micro_gemm(
                         config,
                     )
                 )
-    if len(matched_configs) == 0 or use_ref:
-        return CppMicroGemmRef(name, input_dtype, output_dtype, compute_dtype, alpha)
+    if len(matched_configs) == 0:
+        if use_ref:
+            return CppMicroGemmRef(
+                name, input_dtype, output_dtype, compute_dtype, alpha
+            )
+        else:
+            return None
     # TODO(jgong5): allow autotuning on choices of configs
     return create_from_config(*max(matched_configs, key=lambda x: x[0])[1:])

@@ -238,6 +238,7 @@ class CppPackedGemmTemplate(CppTemplate):
         micro_gemm = create_micro_gemm(
             "micro_gemm", m, n, k, layout.dtype, alpha=alpha, num_threads=num_threads
         )
+        assert micro_gemm is not None
         _, block_n, _ = micro_gemm.register_blocking
 
         def pack_weight(inputs, layout_or_out):
@@ -351,6 +352,7 @@ class CppPackedGemmTemplate(CppTemplate):
             alpha=self.alpha,
             num_threads=self.num_threads,
         )
+        assert micro_gemm is not None
         assert self.register_blocking == micro_gemm.register_blocking
 
         options = dict(
