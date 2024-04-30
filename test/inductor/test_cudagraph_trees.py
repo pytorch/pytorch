@@ -1473,6 +1473,23 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             with self.assertRaisesRegex(Exception, "overwritten by a subsequent run."):
                 out2 + out2
 
+        def test_error_on_dealloc_use2(self):
+            @torch.compile()
+            def foo(x):
+                return x * x * x
+
+            inp = torch.rand([4], device="cuda")
+            out = foo(inp).detach()
+            out2 = foo(inp).detach()
+
+            with self.assertRaisesRegex(Exception, "overwritten by a subsequent run."):
+                out + out
+
+            foo(inp)
+
+            with self.assertRaisesRegex(Exception, "overwritten by a subsequent run."):
+                out2 + out2
+
         @skipIfRocm
         @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
         def test_conv_benchmark(self):

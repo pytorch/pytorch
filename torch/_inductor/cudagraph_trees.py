@@ -2203,7 +2203,13 @@ class CUDAGraphTreeManager:
         for storage_ref in self.current_node.path_live_weakrefs():
             if storage_ref() and storage_ref.data_ptr() not in deleted:
                 deleted.add(storage_ref.data_ptr())
+                msg = (
+                    "Error: accessing tensor output of CUDAGraphs that has been overwritten by a subsequent run. "
+                    "To prevent overwriting, clone the tensor outside of torch.compile() "
+                    "or call torch.compiler.cudagraph_mark_step_begin() before each model invocation."
+                )
                 torch._C._free_And_Remove_DeleterFn(storage_ref())
+                torch._C._set_storage_data_ptr_access_error_msg(storage_ref(), msg)
 
     def clear_current_path_state_and_set_to_none(self):
         self.current_node.clear_path_state()
