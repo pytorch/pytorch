@@ -1,8 +1,10 @@
+import contextlib
 import inspect
 from collections import defaultdict
 from typing import Any, Callable, Dict, List, Tuple, Union
 
 import torch
+import torch.utils._pytree as pytree
 from torch._dynamo.source import (
     AttrSource,
     GetItemSource,
@@ -12,12 +14,13 @@ from torch._dynamo.source import (
 )
 from torch._dynamo.variables.builder import TrackedFake
 from torch._export.passes.add_runtime_assertions_for_constraints_pass import InputDim
+from torch._export.passes.lift_constants_pass import ConstantAttrMap
 from torch._guards import Source
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._library.fake_class_registry import FakeScriptObject
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.export import Constraint
 from torch.export.dynamic_shapes import _Dim
-from torch.export.exported_program import InputKind
-from torch.export.graph_signature import CustomObjArgument, InputSpec, TensorArgument
+from torch.export.graph_signature import CustomObjArgument
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     DimDynamic,
@@ -68,6 +71,7 @@ def fakify(
     source = key_path_to_source(kp)
     if _is_constant_argument(t) or isinstance(t, torch.ScriptObject):
         return t
+
     if not isinstance(t, torch.Tensor):
         raise ValueError(f"Unsupported input type {type(t)}")
     n_dims = len(t.shape)
@@ -93,9 +97,15 @@ def make_fake_params_buffers(
     params_buffers: Dict[str, torch.Tensor],
 ) -> Dict[str, Union[torch.Tensor, torch.nn.Parameter]]:
     faked_params_buffers = {}
+    memo: Dict[int, FakeTensor] = {}
     for key, value in params_buffers.items():
-        faked_params_buffers[key] = fake_mode.from_tensor(value, static_shapes=True)
-    return faked_params_buffers
+        if id(value) in memo:
+            fake_tensor = memo[id(value)]
+        else:
+            fake_tensor = fake_mode.from_tensor(value, static_shapes=True)
+            memo[id(value)] = fake_tensor
+        faked_params_buffers[key] = fake_tensor
+    return faked_params_buffers  # type: ignore[return-value]
 
 
 def make_fake_inputs(nn_module, args, kwargs, dynamic_shapes):
@@ -179,51 +189,47 @@ def make_fake_inputs(nn_module, args, kwargs, dynamic_shapes):
         return fake_mode, fake_args, fake_kwargs, equalities_inputs, original_signature
 
 
-def make_constraints(
+def _flatten_dynamic_shapes(
+    dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any]]
+):
+    def _is_dynamic_shape_leaf(x):
+        if isinstance(x, dict):
+            x = list(x.values())
+        return x is None or all(isinstance(y, (_Dim, int)) or y is None for y in x)
+
+    if isinstance(dynamic_shapes, (list, tuple)):
+        flat_dynamic_shapes = []
+        for item in dynamic_shapes:
+            flat_shapes, _ = tree_flatten(
+                dynamic_shapes, is_leaf=_is_dynamic_shape_leaf
+            )
+            flat_dynamic_shapes += flat_shapes
+    else:
+        flat_dynamic_shapes, _ = tree_flatten(
+            dynamic_shapes, is_leaf=_is_dynamic_shape_leaf
+        )
+    return flat_dynamic_shapes
+
+
+def produce_guards_and_solve_constraints(
     fake_mode: FakeTensorMode,
-    equalities_inputs: EqualityConstraint,
-    dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any]],
-    input_specs: List[InputSpec],
-    original_signature: inspect.Signature,
     gm: torch.fx.GraphModule,
+    equalities_inputs: EqualityConstraint,
+    original_signature: inspect.Signature,
 ):
     """
     Given a fake mode, sources pairs corresponding to equal dynamic shape dimensions,
     and a graph module, produce guards on the fake mode's shape env (raising constraint
-    violations if any), solve (to suggest simplifications or fixes), and return the
-    resulting range constraints and equality constraints.
+    violations if any), solve (to suggest simplifications or fixes).
+    Dynamo already performs this, so this is for non-strict mode.
+
+    Additional inputs:
+        equalities_inputs: the equality constraints to use for guards
+        original_signature: the signature of the forward method
     """
-    # TODO(avik): refactor Dynamo to avoid duplication of the following code
-    # between non-strict and strict.
-    # Specifically, here (non-strict) we do the following post-tracing steps:
-    #   - Produce guards.
-    #   - Solve constraints.
-    #   - Install shape metadata in IR.
-    # In strict, these steps are spread across multiple files:
-    #   - guards.py produces guards.
-    #   - eval_frame.py solves constraints
-    #   - _trace.py installs shape metadata in IR.
-
-    inline_constraints = gm.meta.get("inline_constraints", [])
-    range_constraints = {
-        symbol: inline_constraints[symbol] for symbol in inline_constraints
-    }
-    if dynamic_shapes == []:
-        return range_constraints
-
-    def _is_dynamic_shape_leaf(x):
-        if x is None:
-            return True
-        if isinstance(x, dict):
-            x = list(x.values())
-        return all(isinstance(y, (_Dim, int)) or y is None for y in x)
-
-    flat_dynamic_shapes, _ = tree_flatten(
-        dynamic_shapes, is_leaf=_is_dynamic_shape_leaf
-    )
-
     shape_env = fake_mode.shape_env
     assert shape_env.tracked_fakes is not None
+
     placeholders = [tf.fake for tf in shape_env.tracked_fakes]
     sources = [tf.source for tf in shape_env.tracked_fakes]
     input_contexts = [tf.symbolic_context for tf in shape_env.tracked_fakes]
@@ -262,23 +268,41 @@ def make_constraints(
     if constraint_violation_error:
         raise constraint_violation_error
 
-    user_tensor_input_names = {
-        spec.arg.name
-        for spec in input_specs
-        if spec.kind == InputKind.USER_INPUT and isinstance(spec.arg, TensorArgument)
-    }
 
+def make_constraints(
+    fake_mode: FakeTensorMode,
+    gm: torch.fx.GraphModule,
+    dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any], None],
+    num_lifted_inputs: int,
+):
+    """
+    Given a fake mode's shape env and user-specified dynamic shapes,
+    return the resulting range constraints and equality constraints.
+
+    Additional args:
+        num_lifted_inputs: the number of non-user-input placeholder nodes in the graph
+        (used only to enumerate the user-input nodes)
+    """
+
+    shape_env = fake_mode.shape_env
+    inline_constraints = gm.meta.get("inline_constraints", [])
+    range_constraints = {
+        symbol: inline_constraints[symbol] for symbol in inline_constraints
+    }
+    if not dynamic_shapes:
+        return range_constraints
+
+    flat_dynamic_shapes = _flatten_dynamic_shapes(dynamic_shapes)
     input_dims = defaultdict(list)
     free_symbols = set()
-    input_index = 0
-    for node in gm.graph.nodes:
-        if node.name not in user_tensor_input_names:
+    for input_index, node in enumerate(gm.graph.nodes):
+        if input_index < num_lifted_inputs or node.op != "placeholder":
             continue
         if _is_constant_argument(node.meta["val"]) or isinstance(
             node.meta["val"], CustomObjArgument
         ):
             continue
-        shape_spec = flat_dynamic_shapes[input_index]
+        shape_spec = flat_dynamic_shapes[input_index - num_lifted_inputs]
         for i, d in enumerate(node.meta["val"].shape):
             if isinstance(d, torch.SymInt):
                 # Look up the range constraint for the symbol corresponding to this shape dimension
@@ -297,7 +321,6 @@ def make_constraints(
                     ]
                 input_dims[d.node.expr].append(InputDim(input_name=node.name, dim=i))
                 free_symbols.update(d.node.expr.free_symbols)
-        input_index += 1
 
     for symbol in free_symbols:
         if symbol not in range_constraints:
@@ -308,3 +331,115 @@ def make_constraints(
             range_constraints[symbol] = shape_env.var_to_range[symbol]
 
     return range_constraints
+
+
+def _gather_constant_attrs(m: torch.nn.Module) -> ConstantAttrMap:
+    """Search the module hierarchy, gathering up all tensor and ScriptObject constants.
+
+    Returns a dictionary mapping hash(value) to the name of the constant. We
+    have to abuse `hash` here unfortunately, see: [ScriptObject hash].
+    """
+    constants = ConstantAttrMap()
+    buffers_parameters = set(m.buffers())
+    buffers_parameters.update(m.parameters())
+
+    def inner(m: torch.nn.Module, prefix_atoms: List[str], constants):
+        for k, v in m.__dict__.items():
+            if isinstance(
+                v,
+                (
+                    torch.Tensor,
+                    torch.ScriptObject,
+                    FakeScriptObject,
+                ),
+            ):
+                if v in buffers_parameters:
+                    # filter out buffers and parameters, leaving only constants
+                    continue
+
+                fqn = ".".join(prefix_atoms + [k])
+                if v in constants:
+                    raise ValueError(
+                        f"Duplicate reference to constant attribute found: '{constants[v]}' and '{fqn}'."
+                    )
+
+                constants[v] = fqn
+        for k, v in m.named_children():
+            inner(v, prefix_atoms + [k], constants)
+
+    inner(m, [], constants)
+    return constants
+
+
+@contextlib.contextmanager
+def _fakify_script_objects(
+    mod: torch.nn.Module,
+    args: Tuple[Any],
+    kwargs: Dict[Any, Any],
+    fake_mode: torch._subclasses.fake_tensor.FakeTensorMode,
+):
+    # This context manager is used to fakify script objects into FakeScriptObject.
+    # Inputs:
+    #   mod: the module to be exported, it (and its recursive submodules)'s script object attrs haven't been fakified.
+    #   args, kwargs: the args and kwargs inputs for mod, script object inputs haven't been fakified.
+    #   fake_mode: the fake mode to be used for fakifying script objects. It's the same mode that fakify input tensors.
+    #
+    # Returns:
+    #   mod: the patched module, its (and its recursive submodules) script object attrs have been fakified.
+    #   fake_args, fake_kwargs: new fakified args and kwargs.
+    #        Script object inputs have been fakified. Don't touch the tensors.
+    #   fake_constant_attrs: a new map from FakeScriptObject to the fqn of the original script object.
+    #   fake_to_real: a mapping between FakeScriptObject and the original script object in order to un-do the patching.
+
+    constant_attrs: ConstantAttrMap = _gather_constant_attrs(mod)
+    assert not any(
+        isinstance(obj, FakeScriptObject) for obj in constant_attrs.values()
+    ), "Mod shouldn't contain any FakeScriptObject."
+    assert not pytree.tree_any(
+        lambda obj: isinstance(obj, FakeScriptObject), (args, kwargs)
+    ), "args and kwargs shouldn't contain any FakeScriptObject."
+
+    patched_attr = {}
+    fake_constant_attrs = ConstantAttrMap()
+    fake_to_real = {}
+
+    def _fakify_obj(obj):
+        fake_obj = torch._library.fake_class_registry.to_fake_obj(fake_mode, obj)
+        fake_to_real[fake_obj] = obj
+        return fake_obj
+
+    def _leaf_mod_and_attr(
+        mod: torch.nn.Module, attr_fqn: str
+    ) -> Tuple[torch.nn.Module, str]:
+        *prefix_attr, last_attr = attr_fqn.split(".")
+        cur_mod = mod
+        for attr in prefix_attr:
+            cur_mod = getattr(cur_mod, attr)
+        return cur_mod, last_attr
+
+    try:
+        for obj, fqn in constant_attrs.items():
+            if isinstance(obj, torch.ScriptObject):
+                cur_mod, attr = _leaf_mod_and_attr(mod, fqn)
+                assert obj is getattr(cur_mod, attr)
+                fake_script_obj = _fakify_obj(obj)
+                setattr(cur_mod, attr, fake_script_obj)
+                fake_constant_attrs[fake_script_obj] = fqn
+                patched_attr[fqn] = obj
+            else:
+                fake_constant_attrs[obj] = fqn
+
+        fake_args, fake_kwargs = pytree.tree_map_only(
+            torch.ScriptObject, _fakify_obj, (args, kwargs)
+        )
+        assert not any(
+            isinstance(obj, torch.ScriptObject) for obj in fake_constant_attrs.values()
+        ), "Patched mod shouldn't contain any torch.ScriptObject."
+        assert not pytree.tree_any(
+            lambda obj: isinstance(obj, torch.ScriptObject), (fake_args, fake_kwargs)
+        ), "Fakfied args and kwargs shouldn't contain any torch.ScriptObject."
+        yield (mod, fake_args, fake_kwargs, fake_constant_attrs, fake_to_real)
+    finally:
+        for fqn, orig_obj in patched_attr.items():
+            cur_mod, attr = _leaf_mod_and_attr(mod, fqn)
+            setattr(cur_mod, attr, orig_obj)
