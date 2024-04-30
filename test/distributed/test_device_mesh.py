@@ -9,6 +9,7 @@ from torch.distributed._tensor._collective_utils import (
     mesh_all_to_all,
     mesh_broadcast,
     mesh_scatter,
+    unpad_tensor,
 )
 from torch.distributed._tensor.placement_types import _Partial, Shard
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh, init_device_mesh
@@ -490,8 +491,8 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             mesh_scatter(scattered_tensor, padded_tensor_list, device_mesh, mesh_dim=0)
 
             if pad_sizes[my_rank] != 0:
-                scattered_tensor = shard_placement._unpad_tensor(
-                    scattered_tensor, pad_sizes[my_rank]
+                scattered_tensor = unpad_tensor(
+                    scattered_tensor, shard_dim, pad_sizes[my_rank]
                 )
 
             if scattered_tensor.numel() == 0:
@@ -533,7 +534,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             )
             unpadded_list = [
                 (
-                    shard_placement._unpad_tensor(big_tensor_chunks[i], pad_sizes[i])
+                    unpad_tensor(big_tensor_chunks[i], shard_dim, pad_sizes[i])
                     if pad_sizes[i] > 0
                     else big_tensor_chunks[i]
                 )
@@ -629,8 +630,8 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
 
             # unpad scattered_tensor
             if pad_sizes[my_rank] > 0:
-                scattered_tensor = shard_placement._unpad_tensor(
-                    scattered_tensor, pad_sizes[my_rank]
+                scattered_tensor = unpad_tensor(
+                    scattered_tensor, shard_dim, pad_sizes[my_rank]
                 )
 
             if scattered_tensor.numel() == 0:
