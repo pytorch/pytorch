@@ -861,8 +861,10 @@ class TestIndexing(TestCase):
         )
         uint8Indices = torch.tensor([1, 0, 0], dtype=torch.uint8, device=device)
         with warnings.catch_warnings(record=True) as w:
-            self.assertEqual(v[boolIndices].shape, v[uint8Indices].shape)
-            self.assertEqual(v[boolIndices], v[uint8Indices])
+            v1 = v[boolIndices]
+            v2 = v[uint8Indices]
+            self.assertEqual(v1.shape, v2.shape)
+            self.assertEqual(v1, v2)
             self.assertEqual(
                 v[boolIndices], tensor([True], dtype=torch.bool, device=device)
             )
@@ -885,8 +887,9 @@ class TestIndexing(TestCase):
         v = torch.randn(5, 7, 3, device=device)
         mask = torch.ByteTensor([1, 0, 1, 1, 0]).to(device)
         with warnings.catch_warnings(record=True) as w:
-            self.assertEqual(v[mask].shape, (3, 7, 3))
-            self.assertEqual(v[mask], torch.stack([v[0], v[2], v[3]]))
+            res = v[mask]
+            self.assertEqual(res.shape, (3, 7, 3))
+            self.assertEqual(res, torch.stack([v[0], v[2], v[3]]))
             self.assertEqual(len(w), 1)
 
         v = torch.tensor([1.0], device=device)
