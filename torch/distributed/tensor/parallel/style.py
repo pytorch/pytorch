@@ -203,7 +203,9 @@ class RowwiseParallel(ParallelStyle):
         module.register_parameter("weight", nn.Parameter(
             distribute_tensor(module.weight, device_mesh, [Shard(1)])
         ))
-        if module.bias is not None:
+        # TODO(whc) traced/unflattened modules that came from Linear but did not have a Bias fail here
+        # without hasattr check. Should be solved after https://github.com/pytorch/pytorch/issues/125245 is completed.
+        if hasattr(module, "bias") and module.bias is not None:
             module.register_parameter("bias", nn.Parameter(
                 distribute_tensor(module.bias, device_mesh, [Replicate()])
             ))

@@ -1,3 +1,4 @@
+import importlib
 import warnings
 from typing import Tuple, Union
 
@@ -54,11 +55,11 @@ def _validate_tp_mesh_dim(
         #     )
 
         tp_mesh_dim = _mesh_resources.get_parent_mesh_dim(device_mesh)
-        if tp_mesh_dim != 1:
-            raise RuntimeError(
-                f"Found TP device_mesh on the {tp_mesh_dim} dimension of its parent mesh.",
-                "Currently we only support intranode TP and TP needs to be the innermost dimension on its parent mesh.",
-            )
+        # if tp_mesh_dim != 1:
+        #     raise RuntimeError(
+        #         f"Found TP device_mesh on the {tp_mesh_dim} dimension of its parent mesh.",
+        #         "Currently we only support intranode TP and TP needs to be the innermost dimension on its parent mesh.",
+        #     )
 
 def _check_tp_module_type(module, allowed_type):
     """
@@ -67,6 +68,10 @@ def _check_tp_module_type(module, allowed_type):
     Logically similar to running `isinstance(module, allowed_type)` but makes an additional check for module
     of type InterpreterModule (from Pipeline Parallel tracing frontend) to find metadata on the node indicating it
     was of the allowed type before tracing.
+
+    TODO(whc) this checker may be updated or not needed after changes in
+    https://github.com/pytorch/pytorch/issues/125245 land, which may restore the actual 'nn.Linear' object and restore
+    isinstance() functionality.
     """
 
     # foo = list(module.graph.nodes)[2]
@@ -79,6 +84,7 @@ def _check_tp_module_type(module, allowed_type):
 
     def has_allowed_metadata(module):
         if isinstance(module, InterpreterModule):
+            found = False
             for node in module.graph.nodes:
                 if hasattr(node, "meta"):
                     meta = node.meta
@@ -86,12 +92,9 @@ def _check_tp_module_type(module, allowed_type):
                         continue
                     submod_name, submod_type = list(meta['nn_module_stack'].values())[-1]
                     module, classname = submod_type.rsplit('.', 1)
-                    import importlib
                     submod_class = getattr(importlib.import_module(module), classname)
-                    ret = issubclass(submod_class, allowed_type)
-                    print(f"moduleof type {submod_type} is instance of {allowed_type}: {ret}")
-                    # import torch
-                    # torch.distributed.breakpoint()
-                    # print(1)
-                    return ret
+                    found |= issubclass(submod_class, allowed_type)
+                    if found:
+                        break
+            return found
     return isinstance(module, allowed_type) or has_allowed_metadata(module)
