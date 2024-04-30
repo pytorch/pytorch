@@ -1,7 +1,10 @@
 #pragma once
 
 #include <torch/csrc/distributed/c10d/Backend.hpp>
+#include <condition_variable>
 #include <memory>
+#include <mutex>
+#include <stdexcept>
 #include <unordered_map>
 #include <utility>
 #include <vector>

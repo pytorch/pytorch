@@ -8,10 +8,10 @@ from typing import Any, List, Optional
 import sympy
 
 import torch
+
+from ...codecache import cache_dir
 from ...config import cuda as inductor_cuda_config
 from ...ir import Layout
-
-from ...runtime.runtime_utils import cache_dir
 from .cuda_env import get_cuda_arch, get_cuda_version
 
 log = logging.getLogger(__name__)

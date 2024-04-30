@@ -112,8 +112,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         if name == "__name__":
             return ConstantVariable.create(self.value.__name__)
-        elif name == "__qualname__":
-            return ConstantVariable.create(self.value.__qualname__)
 
         source = AttrSource(self.source, name) if self.source is not None else None
         try:
@@ -574,7 +572,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 keys = list(self.value.keys())
                 assert all(map(ConstantVariable.is_literal, keys))
                 install_guard(self.source.make_guard(GuardBuilder.DICT_CONST_KEYS))
-                tx.output.guard_on_key_order.add(self.source.name())
                 return TupleVariable([ConstantVariable.create(k) for k in keys])
 
             if (
@@ -586,8 +583,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ):
                 assert not kwargs
                 assert self.source  # OrderedDict, dict subtypes must always have source
-
-                # TODO(anijain2305) - Why do we need to guard on all keys?
                 install_guard(self.source.make_guard(GuardBuilder.DICT_CONST_KEYS))
                 return ConstantVariable.create(
                     args[0].as_python_constant() in self.value
@@ -606,7 +601,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                             [key, self.odict_getitem(tx, key)],
                         )
                     )
-                tx.output.guard_on_key_order.add(self.source.name())
                 return TupleVariable(items)
 
             if method is collections.OrderedDict.__getitem__ and len(args) == 1:

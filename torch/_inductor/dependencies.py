@@ -1,4 +1,3 @@
-import abc
 import collections
 import dataclasses
 import itertools
@@ -26,37 +25,12 @@ from .virtualized import OpsHandler, ReductionType, V
 
 log = logging.getLogger(__name__)
 is_indirect = re.compile(r"indirect|tmp").search
+Dep = Union["MemoryDep", "StarDep", "WeakDep"]
 
 
-class Dep(abc.ABC):
+class MemoryDep(typing.NamedTuple):
     name: str
-    index: sympy.Expr
-
-    @abc.abstractmethod
-    def rename(self, renames: Dict[str, str]) -> "Dep":
-        pass
-
-    @abc.abstractmethod
-    def get_numel(self) -> sympy.Expr:
-        pass
-
-    @abc.abstractmethod
-    def numbytes_hint(self):
-        pass
-
-    @abc.abstractmethod
-    def has_unbacked_symbols(self) -> bool:
-        pass
-
-    @abc.abstractmethod
-    def is_contiguous(self) -> bool:
-        pass
-
-
-@dataclasses.dataclass(frozen=True)
-class MemoryDep(Dep):
-    name: str
-    index: sympy.Expr
+    index: sympy.Expr  # type: ignore[assignment]
     var_names: Tuple[sympy.Symbol, ...]
     size: Tuple[sympy.Expr, ...]
 
@@ -135,11 +109,10 @@ class MemoryDep(Dep):
         return any(is_indirect(v.name) for v in self.index.free_symbols)  # type: ignore[attr-defined]
 
 
-@dataclasses.dataclass(frozen=True)
-class StarDep(Dep):
+class StarDep(typing.NamedTuple):
+    # depends on the entire buffer
     name: str
 
-    # depends on the entire buffer
     @property
     def index(self):
         raise NotImplementedError("StarDep does not have an index")
@@ -176,8 +149,7 @@ class StarDep(Dep):
 #
 # It is weak because if it turns out A's read is never used, we can still
 # eliminate it
-@dataclasses.dataclass(frozen=True)
-class WeakDep(Dep):
+class WeakDep(typing.NamedTuple):
     name: str
 
     @property
@@ -202,8 +174,7 @@ class WeakDep(Dep):
         return False
 
 
-@dataclasses.dataclass(frozen=True)
-class IndexExprDep:
+class IndexExprDep(typing.NamedTuple):
     index: sympy.Expr  # type: ignore[assignment]
     var_names: Tuple[sympy.Symbol, ...]
     size: Tuple[sympy.Expr, ...]

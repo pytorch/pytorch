@@ -8,7 +8,6 @@
 #endif
 
 #include <ATen/ATen.h>
-#include <ATen/BlasBackend.h>
 #include <ATen/DLConvertor.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/LegacyVmapMode.h>
@@ -40,7 +39,6 @@
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/DynamicTypes.h>
-#include <torch/csrc/Event.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/MemoryFormat.h>
@@ -1605,7 +1603,6 @@ PyObject* initModule() {
   THPQScheme_init(module);
   THPDevice_init(module);
   THPStream_init(module);
-  THPEvent_init(module);
   ASSERT_TRUE(THPVariable_initModule(module));
   ASSERT_TRUE(THPFunction_initModule(module));
   ASSERT_TRUE(THPEngine_initModule(module));
@@ -1934,17 +1931,6 @@ Call this whenever a new thread is created in order to propagate values from
   });
   py_module.def("_get_linalg_preferred_backend", []() {
     return at::globalContext().linalgPreferredBackend();
-  });
-
-  py::enum_<at::BlasBackend>(py_module, "_BlasBackend")
-      .value("Cublas", at::BlasBackend::Cublas)
-      .value("Cublaslt", at::BlasBackend::Cublaslt);
-
-  py_module.def("_set_blas_preferred_backend", [](at::BlasBackend b) {
-    at::globalContext().setBlasPreferredBackend(b);
-  });
-  py_module.def("_get_blas_preferred_backend", []() {
-    return at::globalContext().blasPreferredBackend();
   });
 
   py_module.def(
