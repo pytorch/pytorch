@@ -809,6 +809,7 @@ def make_propagate_real_tensors_cls(cls):
         xfail_prop="_expected_failure_propagate_real_tensors",
     )
     cls.__file__ = __file__
+    cls.__module__ = __name__
     globals()[cls.__name__] = cls
 
 
@@ -925,11 +926,9 @@ class FakeTensorOpInfoTest(TestCase):
             optests.fake_check(op, args, kwargs)
 
 
+make_propagate_real_tensors_cls(FakeTensorOpInfoTest)
 instantiate_device_type_tests(FakeTensorOpInfoTest, globals(), only_for=("cpu", "cuda"))
-
-
-# CPU only for efficiency ig
-make_propagate_real_tensors_cls(FakeTensorOpInfoTestCPU)  # noqa: F821
+instantiate_device_type_tests(PropagateRealTensorsFakeTensorOpInfoTest, globals(), only_for=("cpu",))  # noqa: F821
 
 
 class FakeTensorConverterTest(TestCase):

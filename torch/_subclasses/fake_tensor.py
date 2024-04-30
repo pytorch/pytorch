@@ -1517,7 +1517,7 @@ class FakeTensorMode(TorchDispatchMode):
                     t.real_tensor = real_t
                 elif isinstance(t, SymTypes) and free_unbacked_symbols(t):
                     if isinstance(t.node.expr, sympy.Symbol):
-                        self.shape_env.unbacked_var_to_val[t.node.expr] = real_t
+                        self.shape_env.set_unbacked_var_to_val(t.node.expr, real_t)
 
             if real_out is not nil:
                 tree_map_(go, fake_out, real_out)

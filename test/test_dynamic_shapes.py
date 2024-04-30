@@ -515,7 +515,7 @@ def forward(self, x_1):
     def test_data_dependent_guard_propagate_real_tensors(self):
         shape_env = ShapeEnv()
         s0 = shape_env.create_unbacked_symint()
-        shape_env.unbacked_var_to_val[s0.node.expr] = 0
+        shape_env.set_unbacked_var_to_val(s0.node.expr, 0)
         self.assertEqual(bool(s0 == 0), True)
 
     def test_expect_true_basic(self):

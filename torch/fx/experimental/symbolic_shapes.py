@@ -562,7 +562,7 @@ def compute_unbacked_bindings(shape_env, example_value, old_example_value=None, 
             ):
                 r[s] = path
                 if real is not None:
-                    shape_env.unbacked_var_to_val[s] = real
+                    shape_env.set_unbacked_var_to_val(s, real)
                 pending.remove(s)
             # When an unbacked SymInt is perfectly divisible by an integer
             # constant, we replace it with the integer constant to improve
@@ -580,7 +580,7 @@ def compute_unbacked_bindings(shape_env, example_value, old_example_value=None, 
                 # TODO: DivideByKey needs to test divisibility at runtime!
                 r[s] = path + (DivideByKey(int(lhs)),)
                 if real is not None:
-                    shape_env.unbacked_var_to_val[s] = real // int(lhs)
+                    shape_env.set_unbacked_var_to_val(s, real // int(lhs))
                 pending.remove(rhs)
             # The annoyance here arises from the fact that SymBool is
             # allocated by allocating a SymInt and then testing if it's equal
@@ -595,7 +595,7 @@ def compute_unbacked_bindings(shape_env, example_value, old_example_value=None, 
             ):
                 r[s.lhs] = path + (ConvertIntKey(),)
                 if real is not None:
-                    shape_env.unbacked_var_to_val[s] = int(real)
+                    shape_env.set_unbacked_var_to_val(s, int(real))
                 pending.remove(s.lhs)
 
             return r
@@ -2426,6 +2426,12 @@ class ShapeEnv:
             yield
         finally:
             self.is_recording = False
+
+    @record_shapeenv_event()
+    def set_unbacked_var_to_val(self, k: sympy.Symbol, v: int) -> None:
+        """Used only when propagate_real_tensors; registers a value for an
+        unbacked symbol, which can be used last resort to resolve hints."""
+        self.unbacked_var_to_val[k] = v
 
     # Unlike set_replacement, this records a shapeenv event
     @record_shapeenv_event()
