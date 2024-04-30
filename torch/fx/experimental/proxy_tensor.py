@@ -1145,7 +1145,8 @@ class _ModuleStackTracer(PythonKeyTracer):
 
 
 class MakefxTracer:
-    def __init__(self,
+    def __init__(
+        self,
         decomposition_table: Dict[Callable, Callable],
         tracing_mode: str,
         _allow_non_fake_inputs: bool,
@@ -1183,7 +1184,10 @@ class MakefxTracer:
             _error_on_data_dependent_ops,
         )
 
-    def _construct_decomposition_table(self, decomposition_table: Optional[Dict[Callable, Callable]] = None) -> Dict[Callable, Callable]:
+    def _construct_decomposition_table(
+        self,
+        decomposition_table: Optional[Dict[Callable, Callable]] = None
+    ) -> Dict[Callable, Callable]:
         if decomposition_table is None:
             decomposition_table = {}
         # Avoid importing sympy at a module level
@@ -1343,15 +1347,17 @@ def make_fx(
 
 
 
-def make_fx_old(f,
-            decomposition_table=None,
-            tracing_mode="real",
-            _allow_non_fake_inputs=False,
-            *,
-            pre_dispatch=False,
-            record_module_stack=False,
-            _allow_fake_constant=False,
-            _error_on_data_dependent_ops=True):
+def make_fx_old(
+    f,
+    decomposition_table=None,
+    tracing_mode="real",
+    _allow_non_fake_inputs=False,
+    *,
+    pre_dispatch=False,
+    record_module_stack=False,
+    _allow_fake_constant=False,
+    _error_on_data_dependent_ops=True
+):
     assert tracing_mode in ["real", "fake", "symbolic"]
 
     if decomposition_table is None:
