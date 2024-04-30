@@ -340,9 +340,10 @@ class NNModuleVariable(VariableTracker):
                     # If so at least some changes are needed, we don't allow inlining
                     # the call_wrapped currently, and maybe other issues too
                     fn = mod.forward
+                    fn_source = AttrSource(self.source, "forward")
                 else:
                     fn = mod._call_impl
-                fn_source = AttrSource(self.source, "__call__")
+                    fn_source = AttrSource(self.source, "_call_impl")
                 if istype(fn, types.MethodType):
                     fn = fn.__func__
                     fn_source = AttrSource(fn_source, "__func__")
@@ -791,7 +792,10 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                     kwargs,
                 )
 
-            if id(method.__code__) in self._nn_module_method_ids():
+            if (
+                hasattr(method, "__code__")
+                and id(method.__code__) in self._nn_module_method_ids()
+            ):
                 unimplemented(f"UnspecializedNNModuleVariable missing {name}")
 
             # "_parameters" in self.value.__dict__ checks that module is initialized

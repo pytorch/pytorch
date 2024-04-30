@@ -223,6 +223,7 @@ def set_logs(
     modules: Optional[Dict[str, Union[int, bool]]] = None,
     cudagraphs: bool = False,
     sym_node: bool = False,
+    compiled_autograd_verbose: bool = False,
 ):
     """
     Sets the log level for individual components and toggles individual log
@@ -476,6 +477,7 @@ def set_logs(
         sym_node=sym_node,
         export=export,
         cudagraphs=cudagraphs,
+        compiled_autograd_verbose=compiled_autograd_verbose,
     )
 
 
