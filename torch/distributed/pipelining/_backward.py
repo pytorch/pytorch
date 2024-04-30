@@ -3,7 +3,7 @@ from typing import List, Optional
 
 import torch
 
-from .debug import map_debug_info
+from ._debug import map_debug_info
 
 
 def stage_backward(

@@ -3,7 +3,7 @@
 import copy
 
 import torch
-from torch.distributed.pipelining.backward import stage_backward
+from torch.distributed.pipelining._backward import stage_backward
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
