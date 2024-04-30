@@ -38,14 +38,14 @@ class TestUnbackedSymints(InductorTestCase):
 
     @skipCUDAIf(not HAS_CUDA, "requires cuda")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
-    def test_expand_mismatch(self, device):
+    def test_expand_ok_with_runtime_assert(self, device):
         def fn(x):
             nz = x.nonzero()
-            return nz.expand([-1, 128])
+            torch._check(nz.size(0) == 128)
+            return nz.expand([128, -1, 2])
 
         x = make_tensor(32, 4, device=device, dtype=torch.float32, exclude_zero=True)
-        with self.assertRaises(torch._dynamo.exc.TorchRuntimeError):
-            actual = torch.compile(fn, fullgraph=True)(x)
+        actual = torch.compile(fn, fullgraph=True)(x)
 
     @skipCUDAIf(not HAS_CUDA, "requires cuda")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})

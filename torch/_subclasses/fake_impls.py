@@ -285,8 +285,8 @@ def unique2(
             # symint cannot equal zero).  We could also unconditionally
             # allocate an unbacked SymInt and not refine its range,
             # but this seems more precise.
-            nnz = arg._nonzero_memo = 0
-            arg._nonzero_memo_vc = arg._version
+            nnz = arg._unique_memo = 0
+            arg._unique_memo_vc = arg._version
         else:
             nnz = fake_mode.shape_env.create_unbacked_symint()
 
@@ -377,6 +377,7 @@ def nonzero(fake_mode, func, arg):
             # but this seems more precise.
             nnz = arg._nonzero_memo = 0
             arg._nonzero_memo_vc = arg._version
+            arg._nonzero_memo_epoch = fake_mode.epoch
         else:
             nnz = fake_mode.shape_env.create_unbacked_symint()
 
@@ -391,6 +392,7 @@ def nonzero(fake_mode, func, arg):
                 # arg._version N/A in inference mode
                 arg._nonzero_memo = nnz
                 arg._nonzero_memo_vc = arg._version
+                arg._nonzero_memo_epoch = fake_mode.epoch
 
     return arg.new_empty((nnz, arg.dim()), dtype=torch.int64)
 
