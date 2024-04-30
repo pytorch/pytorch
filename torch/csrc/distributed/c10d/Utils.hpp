@@ -4,7 +4,6 @@
 #include <c10/util/Exception.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
-#include <fmt/format.h>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 
 #ifdef _WIN32
@@ -67,7 +66,7 @@ inline void assertSameType(
       const std::string expected = type.toString();
       const std::string actual = tensors[i].toString();
       throw std::invalid_argument(
-          fmt::format("mixed types ({} and {})", expected, actual));
+          "mixed types (" + expected + " and " + actual + ")");
     }
   }
 }
@@ -97,7 +96,7 @@ inline std::string getCvarString(
   /* parse environment variable in reverse order, so the early
    * versions of a variable get higher priority than the latter
    * versions of the same variable */
-  for (ssize_t i = static_cast<ssize_t>(env.size()) - 1; i >= 0; i--) {
+  for (int i = env.size() - 1; i >= 0; i--) {
     const char* val = std::getenv(env[i].c_str());
     if (val == nullptr) {
       continue;
@@ -124,7 +123,7 @@ inline int getCvarInt(const std::vector<std::string>& env, int def) {
   /* parse environment variable in reverse order, so the early
    * versions of a variable get higher priority than the latter
    * versions of the same variable */
-  for (ssize_t i = static_cast<ssize_t>(env.size()) - 1; i >= 0; i--) {
+  for (int i = env.size() - 1; i >= 0; i--) {
     char* val = std::getenv(env[i].c_str());
     if (val == nullptr) {
       continue;
@@ -155,7 +154,7 @@ inline bool getCvarBool(const std::vector<std::string>& env, bool def) {
   /* parse environment variable in reverse order, so the early
    * versions of a variable get higher priority than the latter
    * versions of the same variable */
-  for (ssize_t i = static_cast<ssize_t>(env.size()) - 1; i >= 0; i--) {
+  for (int i = env.size() - 1; i >= 0; i--) {
     char* val_ = std::getenv(env[i].c_str());
     if (val_ == nullptr) {
       continue;
@@ -167,7 +166,6 @@ inline bool getCvarBool(const std::vector<std::string>& env, bool def) {
 
     std::string val = std::string(val_);
     for (auto& x : val) {
-      // NOLINTNEXTLINE(*-narrowing-conversions)
       x = std::tolower(x);
     }
 
@@ -195,7 +193,7 @@ inline void assertSameSizes(
       const auto expected = toString(sizes);
       const auto actual = toString(tensors[i].sizes());
       throw std::invalid_argument(
-          fmt::format("mixed sizes ({} and {})", expected, actual));
+          "mixed sizes (" + expected + " and " + actual + ")");
     }
   }
 }
@@ -213,20 +211,22 @@ inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
     if (!tensors[i].options().type_equal(options)) {
       const auto expected = toString(options);
       const auto actual = toString(tensors[i].options());
-      throw std::invalid_argument(fmt::format(
-          "argument contains mixed types ({} and {})", expected, actual));
+      throw std::invalid_argument(
+          "argument contains mixed types (" + expected + " and " + actual +
+          ")");
     }
     if (!tensors[i].sizes().equals(sizes)) {
       const auto expected = toString(sizes);
       const auto actual = toString(tensors[i].sizes());
-      throw std::invalid_argument(fmt::format(
-          "argument contains mixed types ({} and {})", expected, actual));
+      throw std::invalid_argument(
+          "argument contains mixed sizes (" + expected + " and " + actual +
+          ")");
     }
   }
 }
 
 inline void assertTypeMatch(
-    const std::function<void(const std::string&)>& fn,
+    std::function<void(const std::string&)> fn,
     const at::DeprecatedTypeProperties& type,
     const at::ArrayRef<at::Tensor> tensors,
     size_t index) {
@@ -237,7 +237,7 @@ inline void assertTypeMatch(
 }
 
 inline void assertTypeMatch(
-    const std::function<void(const std::string&)>& fn,
+    std::function<void(const std::string&)> fn,
     const at::TensorOptions& options,
     const at::ArrayRef<at::Tensor> tensors,
     size_t index) {
@@ -248,7 +248,7 @@ inline void assertTypeMatch(
 }
 
 inline void assertSizesMatch(
-    const std::function<void(const std::string&)>& fn,
+    std::function<void(const std::string&)> fn,
     const at::IntArrayRef& sizes,
     const at::ArrayRef<at::Tensor> tensors,
     size_t index) {
@@ -259,7 +259,7 @@ inline void assertSizesMatch(
 }
 
 inline void assertLayoutMatch(
-    const std::function<void(const std::string&)>& fn,
+    std::function<void(const std::string&)> fn,
     const c10::Layout& expected,
     const at::ArrayRef<at::Tensor> tensors,
     size_t index) {
@@ -271,7 +271,7 @@ inline void assertLayoutMatch(
 }
 
 inline void assertLayoutMatch(
-    const std::function<void(const std::string&)>& fn,
+    std::function<void(const std::string&)> fn,
     const at::ArrayRef<at::Tensor> tensors) {
   const auto& layout = tensors[0].layout();
   for (const auto i : c10::irange(1, tensors.size())) {
@@ -362,7 +362,7 @@ inline void assertSameDevice(
 }
 
 inline void assertTypeAndSizesMatch(
-    const std::function<void(const std::string&)>& fn,
+    std::function<void(const std::string&)> fn,
     const at::ArrayRef<at::Tensor> tensors,
     const at::DeprecatedTypeProperties& type,
     const at::IntArrayRef& sizes) {
@@ -373,7 +373,7 @@ inline void assertTypeAndSizesMatch(
 }
 
 inline void assertTypeAndSizesMatch(
-    const std::function<void(const std::string&)>& fn,
+    std::function<void(const std::string&)> fn,
     const at::ArrayRef<at::Tensor> tensors,
     const at::TensorOptions& options,
     const at::IntArrayRef& sizes) {
@@ -384,7 +384,7 @@ inline void assertTypeAndSizesMatch(
 }
 
 inline void assertTypeAndSizesMatch(
-    const std::function<void(const std::string&)>& fn,
+    std::function<void(const std::string&)> fn,
     const at::ArrayRef<at::Tensor> tensors) {
   const auto& options = tensors[0].options();
   const auto sizes = tensors[0].sizes();
@@ -463,7 +463,6 @@ inline std::vector<int> getDevices(const std::vector<at::Tensor>& tensors) {
   std::vector<int> devices(tensors.size(), -1);
   if (tensors[0].device().is_cuda()) {
     for (const auto i : c10::irange(tensors.size())) {
-      // NOLINTNEXTLINE(bugprone-signed-char-misuse)
       devices[i] = tensors[i].storage().device().index();
     }
   }
@@ -621,7 +620,8 @@ void sendBytes(
     return;
   }
 
-  auto currentBytes = reinterpret_cast<const char*>(buffer);
+  auto bytes = reinterpret_cast<const uint8_t*>(buffer);
+  uint8_t* currentBytes = const_cast<uint8_t*>(bytes);
 
   int flags = 0;
 
@@ -637,9 +637,10 @@ void sendBytes(
 #endif
 
   while (bytesToSend > 0) {
-    ssize_t bytesSent = 0;
+    ssize_t bytesSent;
     SYSCHECK_ERR_RETURN_NEG1(
-        bytesSent = ::send(socket, currentBytes, bytesToSend, flags))
+        bytesSent =
+            ::send(socket, (const char*)currentBytes, bytesToSend, flags))
     if (bytesSent == 0) {
       C10_THROW_ERROR(DistNetworkError, std::strerror(ECONNRESET));
     }
@@ -656,12 +657,13 @@ void recvBytes(int socket, T* buffer, size_t length) {
     return;
   }
 
-  auto currentBytes = reinterpret_cast<char*>(buffer);
+  auto bytes = reinterpret_cast<uint8_t*>(buffer);
+  uint8_t* currentBytes = bytes;
 
   while (bytesToReceive > 0) {
-    ssize_t bytesReceived = 0;
+    ssize_t bytesReceived;
     SYSCHECK_ERR_RETURN_NEG1(
-        bytesReceived = recv(socket, currentBytes, bytesToReceive, 0))
+        bytesReceived = recv(socket, (char*)currentBytes, bytesToReceive, 0))
     if (bytesReceived == 0) {
       C10_THROW_ERROR(DistNetworkError, std::strerror(ECONNRESET));
     }
@@ -682,7 +684,7 @@ void sendVector(int socket, const std::vector<T>& vec, bool moreData = false) {
 // receive a vector as sent in sendVector
 template <typename T>
 std::vector<T> recvVector(int socket) {
-  SizeType valueSize = 0;
+  SizeType valueSize;
   recvBytes<SizeType>(socket, &valueSize, 1);
   std::vector<T> value(valueSize);
   recvBytes<T>(socket, value.data(), value.size());
@@ -714,7 +716,7 @@ inline void sendString(
 
 // receive a string as sent in sendString
 inline std::string recvString(int socket) {
-  SizeType valueSize = 0;
+  SizeType valueSize;
   recvBytes<SizeType>(socket, &valueSize, 1);
   std::vector<char> value(valueSize);
   recvBytes<char>(socket, value.data(), value.size());
