@@ -2,6 +2,7 @@
 
 import collections
 import contextlib
+import enum
 import functools
 import importlib
 import inspect
@@ -107,7 +108,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         from .. import trace_rules
-        from . import ConstantVariable
+        from . import ConstantVariable, EnumVariable
         from .builder import VariableBuilder
 
         if name == "__name__":
@@ -144,14 +145,16 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if self.value is collections.OrderedDict and name == "fromkeys":
             return super().var_getattr(tx, name)
 
-        if name in getattr(self.value, "__dict__", {}) or (
+        if ConstantVariable.is_literal(obj):
+            return ConstantVariable.create(obj)
+        elif isinstance(obj, enum.Enum):
+            return EnumVariable(obj)
+        elif name in getattr(self.value, "__dict__", {}) or (
             self.value.__module__.startswith("torch.")
             or self.value.__module__ == "torch"
         ):
             if source:
                 return VariableBuilder(tx, source)(obj)
-        elif ConstantVariable.is_literal(obj):
-            return ConstantVariable.create(obj)
 
         return super().var_getattr(tx, name)
 
@@ -574,6 +577,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 keys = list(self.value.keys())
                 assert all(map(ConstantVariable.is_literal, keys))
                 install_guard(self.source.make_guard(GuardBuilder.DICT_CONST_KEYS))
+                tx.output.guard_on_key_order.add(self.source.name())
                 return TupleVariable([ConstantVariable.create(k) for k in keys])
 
             if (
@@ -585,6 +589,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ):
                 assert not kwargs
                 assert self.source  # OrderedDict, dict subtypes must always have source
+
+                # TODO(anijain2305) - Why do we need to guard on all keys?
                 install_guard(self.source.make_guard(GuardBuilder.DICT_CONST_KEYS))
                 return ConstantVariable.create(
                     args[0].as_python_constant() in self.value
@@ -603,6 +609,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                             [key, self.odict_getitem(tx, key)],
                         )
                     )
+                tx.output.guard_on_key_order.add(self.source.name())
                 return TupleVariable(items)
 
             if method is collections.OrderedDict.__getitem__ and len(args) == 1:

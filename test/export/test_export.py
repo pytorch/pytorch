@@ -2094,8 +2094,8 @@ class TestExport(TestCase):
         self.assertExpectedInline(
             str(gm.code).strip(),
             """\
-def forward(self, arg_0):
-    x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+def forward(self, x):
+    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     conv_weight = self.conv.weight
     conv_bias = self.conv.bias
     bn_weight = self.bn.weight
@@ -2113,8 +2113,8 @@ def forward(self, arg_0):
         self.assertExpectedInline(
             str(gm_train.code).strip(),
             """\
-def forward(self, arg_0):
-    x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+def forward(self, x):
+    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     conv_weight = self.conv.weight
     conv_bias = self.conv.bias
     bn_weight = self.bn.weight
@@ -4032,6 +4032,32 @@ def forward(self, b_t, x, y):
         ][0]
         self.assertEqual(op_node.target._name, "aten::add.Tensor")
 
+    @testing.expectedFailureRetraceability
+    def test_layer_sharing(self):
+        N, C, H, W = 1, 2, 2, 3
+
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                layer = torch.nn.LayerNorm([C, H, W])
+                self.norms = torch.nn.ModuleList(
+                    [
+                        layer,
+                        layer,
+                    ]
+                )
+
+            def forward(self, x):
+                for norm in self.norms:
+                    x = norm(x)
+                return x
+
+        m = Module()
+        copied_m = copy.deepcopy(m)
+        ep = export(copied_m, (torch.randn(N, C, H, W),))
+        self.assertEqual(copied_m.state_dict(), m.state_dict())
+        self.assertEqual(ep.state_dict, m.state_dict())
+
     def test_non_persistent_buffer(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -4439,9 +4465,6 @@ def forward(self, x):
         ]
         self.assertEqual(expected_getattr_names, real_getattr_names)
 
-    # original input names aren't retraceable:
-    # compilation will succeed, but names won't match forward() signature.
-    @testing.expectedFailureRetraceability
     def test_constant_input_naming(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y, div="floor"):

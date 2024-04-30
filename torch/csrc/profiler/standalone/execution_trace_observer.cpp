@@ -284,15 +284,7 @@ static void writeJsonNode(
       "id": {}, "name": "{}", "ctrl_deps": {},
       "inputs": {{"values": {}, "shapes": {}, "types": {}}},
       "outputs": {{"values": {}, "shapes": {}, "types": {}}},
-      "attrs": [{{"name": "rf_id", "type": "uint64", "value": {}}},
-                {{"name": "fw_parent", "type": "uint64", "value": {}}},
-                {{"name": "seq_id", "type": "int64", "value": {}}},
-                {{"name": "scope", "type": "uint64", "value": {}}},
-                {{"name": "tid", "type": "uint64", "value": {}}},
-                {{"name": "fw_tid", "type": "uint64", "value": {}}},
-                {{"name": "op_schema", "type": "string", "value": "{}"}},
-                {{"name": "kernel_backend", "type": "string", "value": "{}"}},
-                {{"name": "kernel_file", "type": "string", "value": "{}"}}]
+      "attrs": [{{"name": "rf_id", "type": "uint64", "value": {}}},{{"name": "fw_parent", "type": "uint64", "value": {}}},{{"name": "seq_id", "type": "int64", "value": {}}},{{"name": "scope", "type": "uint64", "value": {}}},{{"name": "tid", "type": "uint64", "value": {}}},{{"name": "fw_tid", "type": "uint64", "value": {}}},{{"name": "op_schema", "type": "string", "value": "{}"}},{{"name": "kernel_backend", "type": "string", "value": "{}"}},{{"name": "kernel_file", "type": "string", "value": "{}"}}]
     }})JSON",
       id,
       name,

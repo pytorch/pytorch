@@ -25,6 +25,8 @@ from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
     free_unbacked_symbols,
     has_free_symbols,
+    resolve_unbacked_bindings,
+    RuntimeAssert,
     ShapeEnv,
     SymTypes,
 )
@@ -73,6 +75,8 @@ from .utils import (
     gather_origins,
     get_cloned_parameter_buffer_name,
     get_sympy_Expr_dtype,
+    maybe_get_suppress_shape_guards_ctx,
+    should_assume_input_aligned,
 )
 from .virtualized import V
 
@@ -313,6 +317,14 @@ class GraphLowering(torch.fx.Interpreter):
             self._shape_env = shape_env
             self.reuse_shape_env = True
         self._shape_env = shape_env
+        # We are going to start code generating runtime asserts, so make sure
+        # you don't start adding new ones in the lowering process
+        shape_env.freeze_runtime_asserts()
+        # We're going to mutate ras_by_symbol as we finish generating them
+        self.ras_by_symbol: Dict[
+            sympy.Symbol, List[RuntimeAssert]
+        ] = shape_env.deferred_runtime_asserts.copy()
+        self.bound_unbacked_symbols: Set[sympy.Symbol] = set()
         self.sizevars = SizeVarAllocator(shape_env)
         self.graph_input_names: List[str] = []
         self.graph_inputs: Dict[str, TensorBox] = {}
@@ -395,6 +407,8 @@ class GraphLowering(torch.fx.Interpreter):
         self.init_backend_registration()
 
         self.effectful_ops: Dict[_EffectType, ir.Buffer] = {}
+
+        self.aligned_inputs: Set[str] = set()
 
     @staticmethod
     def decide_layout_opt(gm, *, is_inference) -> bool:
@@ -700,7 +714,7 @@ class GraphLowering(torch.fx.Interpreter):
     def run(self, *args):
         return super().run(*args)
 
-    def register_buffer(self, buffer: ir.Buffer):
+    def register_buffer(self, buffer: ir.Buffer, *, set_name: bool = False):
         name = self.qualify_name(f"buf{len(self.buffers)}")
         self.buffers.append(buffer)
         self.name_to_buffer[name] = buffer
@@ -710,6 +724,9 @@ class GraphLowering(torch.fx.Interpreter):
             and buffer.get_device() is not None
         ):
             self.add_device_info(buffer.get_device())
+
+        if set_name:
+            buffer.name = name
         return name
 
     def register_list(self, buffer_names: List[str]):
@@ -780,6 +797,7 @@ class GraphLowering(torch.fx.Interpreter):
                         and data.device == value.device
                         and data.untyped_storage().data_ptr()
                         == value.untyped_storage().data_ptr()
+                        and data.storage_offset() == value.storage_offset()
                     ):
                         return constant_name
 
@@ -863,6 +881,22 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_inputs[target] = tensor
         self.graph_inputs_original[target] = tensor.data.data
         self.add_device_info(example.device)
+
+        # Note: [Input Alignment handling in Inductor]
+        # Alignment matters for generating efficient code. Some operations,
+        # e.g. vectorized loads, can only be performed on aligned inputs.
+        #
+        # But if we codegen assuming aligned inputs and then get unaligned
+        # inputs at runtime, then we are forced to clone - which is bad for
+        # both perf and memory usage.
+        #
+        # One option would be to guard on storage_offset%ALIGNMENT, and then
+        # codegen based on this. But storage_offset guards turned out to be
+        # expensive and cause recompiles; Instead, we're generating code
+        # based on the alignment of the example input without guarding.
+        with maybe_get_suppress_shape_guards_ctx():
+            if should_assume_input_aligned(example):
+                self.aligned_inputs.add(target)
         return tensor
 
     def call_function(self, target, args, kwargs):
@@ -1115,6 +1149,8 @@ class GraphLowering(torch.fx.Interpreter):
         def debug(msg):
             log.debug("lowering %s %s", LazyString(n.format_node), msg)
 
+        buffer_watermark = len(self.buffers)
+
         origins = {n}
         if n.op == "call_function":
             args, kwargs = self.fetch_args_kwargs_from_env(n)
@@ -1318,6 +1354,104 @@ class GraphLowering(torch.fx.Interpreter):
                         result.data.data.inputs[0].origin_node = n
 
         self.register_users_of(result)
+
+        new_unbacked_defs = set()
+        for i in range(buffer_watermark, len(self.buffers)):
+            new_unbacked_defs |= self.buffers[i].get_unbacked_symbol_defs()
+
+        def format_buffers():
+            r = []
+            for b in self.buffers[buffer_watermark:]:
+                r.append(
+                    f"unbacked_symbol_defs={b.get_unbacked_symbol_defs()} in:\n{b}\n"
+                )
+            return "***\n".join(r)
+
+        if n.op != "placeholder":
+            # Note [Backwards runtime asserts]
+            # Backwards poses an interesting problem for deferred runtime
+            # asserts.  In the easy case, we may solely close over data
+            # dependent sized tensors, and there are no binding sites for
+            # unbacked SymInts.  In this case, we can just drop all the
+            # runtime asserts on the floor: no non-placeholder bindings, no
+            # problem.
+            #
+            # However, it is *possible* for a fresh runtime assert to show up
+            # between forwards and backwards.  Right now, the freezing process
+            # that happens when we lower forwards means that we will freeze
+            # runtime asserts, and then the moment the backwards lowering
+            # process attempts to add a new deferred runtime assert, we will
+            # fail.  Let's say you remove that assert.  Now when we get here,
+            # we need to make sure we actually emit these asserts (because we
+            # can't emit them in forwards, we already compiled it).  So we
+            # have to do something here.  But we don't want to reemit ALL
+            # deferred runtime asserts, we only want to emit the NEW ones.
+            # Therefore needing some sort of stratification in the ShapeEnv.
+            # This is all doable, it just hasn't been done yet.
+            shape_env = V.graph.sizevars.shape_env
+
+            for i0 in new_unbacked_defs:
+                ras = self.ras_by_symbol.pop(i0, [])
+                # NB: size-like not needed, we won't retrace
+                vr = shape_env.var_to_range[i0]
+                if not shape_env._default_unspecified_value_range().issubset(vr):
+
+                    def convert(s):
+                        try:
+                            return int(s)
+                        except TypeError:
+                            return None
+
+                    if (lower := convert(vr.lower)) is not None:
+                        self.register_buffer(
+                            ir.AssertScalar(i0 >= vr.lower, f"{i0} >= {vr.lower}"),
+                            set_name=True,
+                        )
+                    if (upper := convert(vr.upper)) is not None:
+                        self.register_buffer(
+                            ir.AssertScalar(i0 <= vr.upper, f"{i0} <= {vr.upper}"),
+                            set_name=True,
+                        )
+
+                for ra in ras:
+                    fvs = free_unbacked_symbols(ra.expr)
+                    missing = fvs - self.bound_unbacked_symbols
+                    if missing:
+                        i1 = sorted(missing, key=lambda x: str(x))[0]
+                        self.ras_by_symbol.setdefault(i1, []).append(ra)
+                    else:
+                        self.register_buffer(
+                            ir.AssertScalar(ra.expr, f"{ra.expr}"), set_name=True
+                        )
+
+            self.bound_unbacked_symbols |= new_unbacked_defs
+
+            unbacked_bindings = resolve_unbacked_bindings(
+                V.graph.sizevars.shape_env, n.meta.get("unbacked_bindings", {})
+            )
+            # When we do lowering, it is possible we reallocate unbacked SymInts.
+            # So we need to line up the unbacked SymInts when performing the test
+            # here
+            #
+            # In principle, we could permit lowering to introduce MORE unbacked
+            # SymInts: as long as all the old unbacked ones are accounted for,
+            # it's fine for inductor to introduce extra calls to item()/unbacked()
+            # whatever.  This actually happens in practice when an unbacked SymInt
+            # gets memoized away; naively, when Inductor reprocesses a kernel, it
+            # doesn't know that the memo still applies, and ends up allocating a
+            # new symbol.  However, this is generally a bad thing: we may still
+            # end up needing to test equalities on the symbols, and a fresh
+            # symbol is likely to hit lots of GuardOnDataDependent errors that
+            # we already know facts for.
+            renamed_unbacked_bindings = {
+                V.fake_mode.shape_env.unbacked_renamings.get(s, s)
+                for s in unbacked_bindings.keys()
+            }
+            assert new_unbacked_defs >= renamed_unbacked_bindings, (
+                f"failed {new_unbacked_defs} >= {renamed_unbacked_bindings} (inductor >= fx)\n"
+                f"fx node is: {n.format_node()}\n"
+                f"new buffers are:\n\n{format_buffers()}"
+            )
 
         return result
 

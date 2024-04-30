@@ -223,13 +223,19 @@ class ConstDictVariable(VariableTracker):
             return self.getitem_const(args[0])
         elif name == "items":
             assert not (args or kwargs)
+            if self.source:
+                tx.output.guard_on_key_order.add(self.source.name())
             return TupleVariable(
                 [TupleVariable([k.vt, v]) for k, v in self.items.items()]
             )
         elif name == "keys":
+            if self.source:
+                tx.output.guard_on_key_order.add(self.source.name())
             assert not (args or kwargs)
             return DictKeys(self)
         elif name == "values":
+            if self.source:
+                tx.output.guard_on_key_order.add(self.source.name())
             assert not (args or kwargs)
             return DictValues(self)
         elif name == "copy":
@@ -242,6 +248,10 @@ class ConstDictVariable(VariableTracker):
             assert not kwargs and len(args) == 2
             tx.output.side_effects.mutation(self)
             self.items[Hashable(args[0])] = args[1]
+            return ConstantVariable.create(None)
+        elif name == "__delitem__" and arg_hashable and self.mutable_local:
+            tx.output.side_effects.mutation(self)
+            self.items.__delitem__(Hashable(args[0]))
             return ConstantVariable.create(None)
         elif name in ("pop", "get") and len(args) in (1, 2) and args[0] not in self:
             # missing item, return the default value
@@ -883,18 +893,13 @@ class PythonSysModulesVariable(VariableTracker):
     def call_method(
         self, tx, name, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ):
-        from .builder import VariableBuilder
-
         if name == "__getitem__":
             return self.call_getitem(tx, *args, **kwargs)
         elif name == "get":
             return self.call_get(tx, *args, **kwargs)
         elif name == "__contains__":
             return self.call_contains(tx, *args, **kwargs)
-
-        # Fallback to dict implementation
-        real_dict = VariableBuilder(tx, self.source)(sys.modules)
-        return real_dict.call_method(tx, name, args, kwargs)
+        unimplemented(f"sys.modules.{name}(*{args}, **{kwargs})")
 
     def _contains_helper(self, tx, key: VariableTracker):
         k = key.as_python_constant()
