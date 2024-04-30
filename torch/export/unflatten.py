@@ -9,6 +9,7 @@ from typing import Any, cast, Dict, List, Optional, Union
 import torch
 import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
+from torch._library.fake_class_registry import FakeScriptObject
 from torch.export._tree_utils import reorder_kwargs
 from torch.export.exported_program import (
     ConstantArgument,
@@ -54,7 +55,16 @@ def _assign_attr(
         assert isinstance(from_obj, torch.Tensor)
         to_module.register_buffer(field, from_obj, persistent=persistent)
     elif attr_kind == _AttrKind.CONSTANT:
-        assert isinstance(from_obj, (torch.Tensor, torch.ScriptObject))
+        assert not isinstance(
+            from_obj, FakeScriptObject
+        ), "FakeScriptObject should only exist during tracing."
+        assert isinstance(
+            from_obj,
+            (
+                torch.Tensor,
+                torch.ScriptObject,
+            ),
+        )
         setattr(to_module, field, from_obj)
 
 
@@ -619,6 +629,7 @@ class _ModuleFrame:
             self.parent_call_module.kwargs = kwarg_nodes
 
     def add_placeholder(self, x):
+        assert self.fqn != "", f"Cannot add placeholder {x} to root module"
         assert x.graph is self.flat_graph
         # x is not in subgraph, create a new placeholder for subgraph
         with self.graph.inserting_before(None):
@@ -839,7 +850,7 @@ def _reorder_submodules(
         _reorder_submodules(child, fqn_order, prefix=fqn + ".")
         delattr(parent, name)
         children.append((fqn_order[fqn], name, child))
-    children.sort(key=lambda x: x[0])
+    children.sort(key=operator.itemgetter(0))
     for _, name, child in children:
         parent.register_module(name, child)
 

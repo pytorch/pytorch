@@ -263,6 +263,8 @@ manual_torch_name_rule_map = {
     "torch.autograd.forward_ad.exit_dual_level": UserFunctionVariable,
     "torch.autograd.forward_ad.make_dual": UserFunctionVariable,
     "torch.autograd.forward_ad.unpack_dual": UserFunctionVariable,
+    # functorch/linearize
+    "torch._functorch.eager_transforms.linearize": FunctorchHigherOrderVariable,
     # functorch/jacfwd
     "torch._functorch.eager_transforms.jacfwd": FunctorchHigherOrderVariable,
     "torch._functorch.eager_transforms._construct_standard_basis_for": UserFunctionVariable,
@@ -565,6 +567,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._get_autograd_fallback_mode",
         "torch._C._get_backcompat_broadcast_warn",
         "torch._C._get_backcompat_keepdim_warn",
+        "torch._C._get_blas_preferred_backend",
         "torch._C._get_caught_jit_exception_class_name",
         "torch._C._get_caught_jit_exception_original_msg",
         "torch._C._get_constant_bool_symnode",
@@ -1093,6 +1096,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._set_autograd_fallback_mode",
         "torch._C._set_backcompat_broadcast_warn",
         "torch._C._set_backcompat_keepdim_warn",
+        "torch._C._set_blas_preferred_backend",
         "torch._C._set_cached_tensors_enabled",
         "torch._C._set_check_sparse_tensor_invariants",
         "torch._C._set_conj",
@@ -2239,6 +2243,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._functorch.eager_transforms._vjp_treespec_compare",
         "torch._functorch.eager_transforms._set_tensor_requires_grad",
         "torch._functorch.eager_transforms._jvp_treespec_compare",
+        "torch._functorch.eager_transforms._linearize_treespec_compare",
         "torch._functorch.eager_transforms._is_differentiable",
         "torch._functorch.eager_transforms._maybe_unwrap_functional_tensor",
         "torch._functorch.eager_transforms._maybe_wrap_functional_tensor",
@@ -2247,7 +2252,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._functorch.eager_transforms.assert_flat_tuple_of_tensors",
         "torch._functorch.eager_transforms.functionalize",
         "torch._functorch.eager_transforms.lazy_dynamo_disable",
-        "torch._functorch.eager_transforms.linearize",
         "torch._functorch.eager_transforms.noop",
         "torch._functorch.functional_call.construct_stacked_leaf",
         "torch._functorch.functional_call.functional_call",
@@ -2386,6 +2390,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.backends.cuda.mem_efficient_sdp_enabled",
         "torch.backends.cuda.cudnn_sdp_enabled",
         "torch.backends.cuda.enable_cudnn_sdp",
+        "torch.backends.cuda.preferred_blas_library",
         "torch.backends.cuda.preferred_linalg_library",
         "torch.backends.cuda.sdp_kernel",
         "torch.backends.cudnn._init",
@@ -2585,6 +2590,8 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.functional.unravel_index",
         "torch.futures.collect_all",
         "torch.futures.wait_all",
+        "torch.fx.experimental.const_fold.split_const_subgraphs",
+        "torch.fx.experimental.proxy_tensor.make_fx",
         "torch.get_deterministic_debug_mode",
         "torch.get_float32_matmul_precision",
         "torch.is_deterministic_algorithms_warn_only_enabled",
@@ -3199,6 +3206,7 @@ MOD_INLINELIST = {
     "torch._dynamo.comptime",
     "torch._dynamo.polyfill",
     "torch._functorch.vmap",
+    "torch._functorch.autograd_function",
     "torch._library.custom_ops",
     "torch._functorch.eager_transforms",
     "torch._inductor.test_operators",
@@ -3223,6 +3231,7 @@ MOD_INLINELIST = {
     "torch._tensor",
     "torch._higher_order_ops.strict_mode",
     "torch._higher_order_ops.while_loop",
+    "torch._higher_order_ops.associative_scan",
 }
 
 
