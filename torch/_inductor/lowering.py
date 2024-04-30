@@ -1244,16 +1244,18 @@ def quantized_decomposed_quantize_per_tensor_tensor(
     zero_point_loader = zero_point.make_loader()
 
     def inner_fn(idx):
-        input = input_loader(idx)
+        _input = input_loader(idx)
         _scale = scale_loader((0,) if len(scale.get_size()) == 1 else ())
         _zero_point = zero_point_loader((0,) if len(scale.get_size()) == 1 else ())
-        if scale.dtype != torch.float32:
-            _scale = ops.to_dtype(_scale, torch.float32)
+        if input.dtype != scale.dtype:
+            _input = ops.to_dtype(_input, scale.dtype)
         if zero_point.dtype != torch.float32:
             _zero_point = ops.to_dtype(_zero_point, torch.float32)
-        val = ops.round(input * ops.reciprocal(_scale)) + _zero_point
+        val = ops.round(_input * ops.reciprocal(_scale))
+        if scale.dtype != torch.float32:
+            val = ops.to_dtype(val, torch.float32)
         qmin, qmax = _create_constants(quant_min, quant_max, dtype=torch.float32)
-        clamped = ops.minimum(ops.maximum(val, qmin), qmax)
+        clamped = ops.minimum(ops.maximum(val + _zero_point, qmin), qmax)
         return ops.to_dtype(clamped, dtype)
 
     return Pointwise.create(
