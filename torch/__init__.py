@@ -1682,6 +1682,9 @@ from ._linalg_utils import (  # type: ignore[misc]
 )
 from ._linalg_utils import _symeig as symeig  # type: ignore[misc]
 
+# Import sparse fake tensors support
+import torch.sparse._ops
+
 class _TorchCompileInductorWrapper:
     compiler_name = "inductor"
 
