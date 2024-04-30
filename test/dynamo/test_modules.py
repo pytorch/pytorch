@@ -1210,7 +1210,9 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         out4 = [opt_m4(i), opt_m4(i), opt_m4(i)]
         self.assertTrue(torch._dynamo.testing.same(out2, out3))
         self.assertTrue(torch._dynamo.testing.same(out2, out4))
-        self.assertEqual(cnt.frame_count, 3)
+        # m3 and m4 are different instances, and therefore wrap_inline creates
+        # new wrapper.
+        self.assertEqual(cnt.frame_count, 6)
 
     @patch.object(torch._dynamo.config, "raise_on_ctx_manager_usage", False)
     def test_generation_tag(self):
