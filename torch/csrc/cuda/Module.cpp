@@ -910,7 +910,9 @@ static void registerCudaDeviceProperties(PyObject* module) {
   // Add _cudaDevicePropertires class to torch._C
   auto m = py::handle(module).cast<py::module>();
   py::class_<CUuuid>(m, "_CUuuid")
-      .def_readonly("bytes", &CUuuid::bytes)
+      .def_property_readonly("bytes", [](const CUuuid& uuid) {
+        return py::bytes(uuid.bytes);
+      })
       .def("__repr__", [](const CUuuid& uuid) {
         constexpr size_t size = 36 + 1;
         char device_path_str[size] = {0};
