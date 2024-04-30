@@ -253,11 +253,11 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
     def test_linear_setup_context(self):
         model = ModuleLinear()
-        opt_model = torch._dynamo.optimize("eager")(model)
+        opt_model = torch._dynamo.optimize("eager", nopython=True)(model)
         input = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
         weight = torch.randn(3, 2, dtype=torch.double, requires_grad=True)
-        optim_result = opt_model(input, weight)
         eager_result = model(input, weight)
+        optim_result = opt_model(input, weight)
         self.assertEqual(optim_result, eager_result)
 
     def test_materialize_grad(self):

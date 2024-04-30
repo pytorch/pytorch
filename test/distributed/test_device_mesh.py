@@ -9,11 +9,13 @@ from torch.distributed._tensor._collective_utils import (
     mesh_all_to_all,
     mesh_broadcast,
     mesh_scatter,
+    unpad_tensor,
 )
 from torch.distributed._tensor.placement_types import _Partial, Shard
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh, init_device_mesh
 
 from torch.distributed.distributed_c10d import (
+    _get_default_group,
     _world,
     get_global_rank,
     get_world_size,
@@ -165,6 +167,30 @@ class DeviceMeshTest(DTensorTestBase):
             local_tensor, gather_dim=0, group=(mesh, 0)
         )
         self.assertEqual(global_tensor.shape, (self.world_size * 2, 8))
+
+    @with_comms
+    def test_from_group(self):
+        # Simple test: check `from_group` for a global PG vs. directly
+        # initializing via `init_device_mesh`
+        global_pg = _get_default_group()
+        ref_global_mesh = init_device_mesh("cuda", (self.world_size,))
+        global_mesh = DeviceMesh.from_group(global_pg, "cuda")
+        self.assertEqual(ref_global_mesh, global_mesh)
+        self.assertEqual(ref_global_mesh._dim_group_infos, global_mesh._dim_group_infos)
+        self.assertEqual(
+            ref_global_mesh._coordinate_on_dim, global_mesh._coordinate_on_dim
+        )
+
+    def test_raises_invalid_device_type(self):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Device type with GPU index is not supported",
+        ):
+            # test init_device_mesh with an invalid device type that contains a GPU index
+            mesh_shape = (2, self.world_size // 2)
+            mesh_2d = init_device_mesh(
+                "cuda:0", mesh_shape=mesh_shape, mesh_dim_names=("dp", "tp")
+            )
 
 
 class DeviceMeshTestNDim(DTensorTestBase):
@@ -476,8 +502,8 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             mesh_scatter(scattered_tensor, padded_tensor_list, device_mesh, mesh_dim=0)
 
             if pad_sizes[my_rank] != 0:
-                scattered_tensor = shard_placement._unpad_tensor(
-                    scattered_tensor, pad_sizes[my_rank]
+                scattered_tensor = unpad_tensor(
+                    scattered_tensor, shard_dim, pad_sizes[my_rank]
                 )
 
             if scattered_tensor.numel() == 0:
@@ -519,7 +545,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             )
             unpadded_list = [
                 (
-                    shard_placement._unpad_tensor(big_tensor_chunks[i], pad_sizes[i])
+                    unpad_tensor(big_tensor_chunks[i], shard_dim, pad_sizes[i])
                     if pad_sizes[i] > 0
                     else big_tensor_chunks[i]
                 )
@@ -615,8 +641,8 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
 
             # unpad scattered_tensor
             if pad_sizes[my_rank] > 0:
-                scattered_tensor = shard_placement._unpad_tensor(
-                    scattered_tensor, pad_sizes[my_rank]
+                scattered_tensor = unpad_tensor(
+                    scattered_tensor, shard_dim, pad_sizes[my_rank]
                 )
 
             if scattered_tensor.numel() == 0:

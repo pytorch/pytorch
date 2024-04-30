@@ -3,7 +3,7 @@ import logging
 from typing import Any, List
 
 import torch
-from .. import config
+from .. import config, utils
 from ..lowering import empty_strided, lowerings, register_lowering
 from ..select_algorithm import autotune_select_algorithm, TritonTemplate
 
@@ -173,6 +173,24 @@ sdpa_template = TritonTemplate(
 )
 
 
+def _get_default_config(query):
+    default_config = None
+    is_big_shared_mem = utils.get_gpu_shared_memory() > 128 * 1024
+
+    if is_big_shared_mem:
+        if query.get_dtype() == torch.float32:
+            default_config = (64, 64, 4, 3)
+        else:
+            default_config = (128, 64, 4, 3)
+    else:
+        if query.get_dtype() == torch.float32:
+            default_config = (32, 32, 4, 3)
+        else:
+            default_config = (64, 32, 4, 3)
+
+    return default_config
+
+
 # TODO: We probably also need a layout constraint?
 @register_lowering(torch.ops.higher_order.templated_attention, type_promotion_kind=None)
 def templated_attention(*args, **kwargs):
@@ -274,16 +292,14 @@ def templated_attention(*args, **kwargs):
             )
             choices: List[Any] = []
             configs: List[Any] = []
-            if query.get_dtype() == torch.float32:
-                configs.append((64, 64, 4, 3))
-            else:
-                configs.append((128, 64, 4, 3))
+            configs.append(_get_default_config(query))
             if config.max_autotune:
                 configs += [
                     (128, 64, 4, 3),
                     (128, 128, 4, 3),
                     (128, 128, 8, 2),
                     (64, 128, 4, 3),
+                    (64, 64, 4, 3),
                 ]
             # Note, we don't need to pass in the captured buffers explicitly
             # because they're implicitly added by the score_mod function
