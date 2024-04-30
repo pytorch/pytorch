@@ -112,7 +112,6 @@ def set_default_load_endianness(endianness):
         raise TypeError("Invalid argument type in function set_default_load_endianness")
     _default_load_endian = endianness
 
-
 _default_mmap_options: int = MAP_PRIVATE
 
 def get_default_mmap_options() -> int:
