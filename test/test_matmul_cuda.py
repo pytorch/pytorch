@@ -204,7 +204,6 @@ class TestMatmulCuda(TestCase):
         self.assertEqual(out1_gpu, out2_gpu[0])
 
 
-
 f8_msg = "FP8 is only supported on H100+ and sm_89 and MI300+ devices"
 
 if torch.version.hip:
@@ -352,8 +351,6 @@ def to_fp8_saturated(
 
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA not found")
 class TestFP8MatmulCuda(TestCase):
-
-
 
     @unittest.skipIf(not scaled_mm_supported_device(), f8_msg)
     def _test_tautological_mm(self, device: str = "cuda",
@@ -534,6 +531,32 @@ class TestFP8MatmulCuda(TestCase):
         self.assertEqual(out_fp8.to(torch.float), torch.full(size, 4., device=device))
         out_fp8_s = torch._scaled_mm(x, y, scale_a=scale_a, scale_b=scale_b, use_fast_accum=True)
         self.assertEqual(out_fp8, out_fp8_s)
+
+    @unittest.skipIf(not scaled_mm_supported_device(), f8_msg)
+    @skipIfRocm()
+    @parametrize("use_fast_accum", [True, False])
+    def test_float8_rowwise_scaling_sanity(self, device, use_fast_accum: bool) -> None:
+        M, K, N = (1024, 1024, 1024)
+        x = torch.full((M, K), 0.5, device=device)
+        y = torch.full((N, K), 0.5, device=device)
+
+        x_scales = torch.ones(x.shape[0], device=device, dtype=torch.float32)
+        y_scales = torch.ones(y.shape[0], device=device, dtype=torch.float32)
+
+        x_fp8 = x.to(torch.float8_e4m3fn)
+        y_fp8 = y.to(torch.float8_e4m3fn).t()
+
+        out_fp8, _ = torch._scaled_mm(
+            x_fp8,
+            y_fp8,
+            scale_a=x_scales,
+            scale_b=y_scales,
+            out_dtype=torch.bfloat16,
+            use_fast_accum=use_fast_accum,
+        )
+        self.assertEqual(
+            out_fp8.to(torch.float32), torch.full((M, N), 256.0, device=device)
+        )
 
 
 @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
