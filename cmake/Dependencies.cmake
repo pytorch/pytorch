@@ -875,7 +875,6 @@ if(USE_OPENCL)
   message(INFO "USING OPENCL")
   find_package(OpenCL REQUIRED)
   include_directories(SYSTEM ${OpenCL_INCLUDE_DIRS})
-  include_directories(${CMAKE_CURRENT_LIST_DIR}/../caffe2/contrib/opencl)
   list(APPEND Caffe2_DEPENDENCY_LIBS ${OpenCL_LIBRARIES})
 endif()
 
@@ -1314,6 +1313,9 @@ if(USE_ROCM)
        list(APPEND HIP_HIPCC_FLAGS -fdebug-info-for-profiling)
     endif(CMAKE_BUILD_TYPE MATCHES Debug)
 
+    # needed for compat with newer versions of hip-clang that introduced C++20 mangling rules
+    list(APPEND HIP_HIPCC_FLAGS -fclang-abi-compat=17)
+
     set(HIP_CLANG_FLAGS ${HIP_CXX_FLAGS})
     # Ask hcc to generate device code during compilation so we can use
     # host linker to link.
@@ -1529,16 +1531,6 @@ endif()
 if(USE_NNAPI AND NOT ANDROID)
   message(WARNING "NNApi is only used in android builds.")
   caffe2_update_option(USE_NNAPI OFF)
-endif()
-
-if(NOT INTERN_BUILD_MOBILE AND BUILD_CAFFE2_OPS)
-  if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
-    list(APPEND Caffe2_DEPENDENCY_LIBS aten_op_header_gen)
-    if(USE_CUDA)
-      list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS aten_op_header_gen)
-    endif()
-    include_directories(${PROJECT_BINARY_DIR}/caffe2/contrib/aten)
-  endif()
 endif()
 
 if(USE_ZSTD)
@@ -1987,7 +1979,7 @@ if(USE_KINETO)
     set_property(TARGET kineto PROPERTY POSITION_INDEPENDENT_CODE ON)
   endif()
   list(APPEND Caffe2_DEPENDENCY_LIBS kineto)
-  string(APPEND CMAKE_CXX_FLAGS " -DUSE_KINETO" " -DTMP_LIBKINETO_NANOSECOND")
+  string(APPEND CMAKE_CXX_FLAGS " -DUSE_KINETO")
   if(LIBKINETO_NOCUPTI)
     string(APPEND CMAKE_CXX_FLAGS " -DLIBKINETO_NOCUPTI")
   endif()
