@@ -3,11 +3,11 @@
 
 #include <ATen/ops/from_blob.h>
 #include <c10/core/CPUAllocator.h>
+#include <opentelemetry/common/timestamp.h>
+#include <opentelemetry/metrics/noop.h>
+#include <opentelemetry/trace/tracer.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/serialization.h>
-#include <opentelemetry/common/timestamp.h>
-#include <opentelemetry/trace/tracer.h>
-#include <opentelemetry/metrics/noop.h>
 
 using opentelemetry::common::SystemTimestamp;
 
@@ -35,7 +35,8 @@ Py_ssize_t doPartialRead<int>(int fildes, void* buf, size_t nbytes) {
   opentelemetry::trace::StartSpanOptions start;
   start.start_system_time = SystemTimestamp(std::chrono::nanoseconds(300));
   std::shared_ptr<opentelemetry::metrics::Counter<uint64_t>> counter{
-          new opentelemetry::metrics::NoopCounter<uint64_t>("testi2", "none", "unitless")};
+      new opentelemetry::metrics::NoopCounter<uint64_t>(
+          "testi2", "none", "unitless")};
 
   std::map<std::string, std::string> labels = {{"k1", "v1"}};
   counter->Add(10, labels);

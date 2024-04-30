@@ -5,13 +5,11 @@ from typing import Any, cast, List, NamedTuple, Optional, Tuple
 
 import torch
 import torch.distributed._functional_collectives as funcol
-import torch.distributed.distributed_c10d as c10d
 
 from torch.distributed._tensor._collective_utils import (
     mesh_broadcast,
     mesh_scatter,
     pad_tensor,
-    shard_dim_alltoall,
     unpad_tensor,
 )
 from torch.distributed.device_mesh import DeviceMesh
@@ -155,7 +153,7 @@ class Shard(Placement):
         self,
         tensor: torch.Tensor,
         mesh: DeviceMesh,
-        reduce_op: c10d.ReduceOp.RedOpType,
+        reduce_op: str,
         mesh_dim: int,
     ) -> torch.Tensor:
         """
@@ -179,7 +177,7 @@ class Shard(Placement):
             tensor = tensor.contiguous()
 
         output = funcol.reduce_scatter_tensor(
-            tensor, reduce_op.name, scatter_dim=self.dim, group=(mesh, mesh_dim)
+            tensor, reduce_op, scatter_dim=self.dim, group=(mesh, mesh_dim)
         )
 
         if is_padded:
@@ -241,67 +239,6 @@ class Shard(Placement):
             contiguous=False,
         )
         return shards[shard_index].clone()
-
-    def _to_new_shard_dim(
-        self,
-        local_tensor: torch.Tensor,
-        mesh: DeviceMesh,
-        mesh_dim: int,
-        current_logical_shape: List[int],
-        new_shard_dim: int,
-    ) -> torch.Tensor:
-        """
-        transform from existing sharded tensor to a new sharded tensor on
-        that shard on a new dimension, which performs an alltoall
-        """
-        my_coordinate = mesh.get_coordinate()
-        if my_coordinate is None:
-            # if rank is not part of mesh, we simply return local_tensor,
-            # which should be an empty tensor
-            return local_tensor
-
-        num_chunks = mesh.size(mesh_dim=mesh_dim)
-
-        old_dim_logical_size = current_logical_shape[self.dim]
-        new_dim_logical_size = current_logical_shape[new_shard_dim]
-        old_dim_padding = old_dim_logical_size % num_chunks != 0
-        new_dim_padding = new_dim_logical_size % num_chunks != 0
-        if old_dim_padding:
-            old_dim_full_chunk_size = (
-                old_dim_logical_size + num_chunks - 1
-            ) // num_chunks
-            old_dim_pad_size = old_dim_full_chunk_size - local_tensor.size(self.dim)
-            local_tensor = pad_tensor(local_tensor, self.dim, old_dim_pad_size)
-        if new_dim_padding:
-            new_dim_full_chunk_size = (
-                new_dim_logical_size + num_chunks - 1
-            ) // num_chunks
-            new_dim_pad_size = new_dim_full_chunk_size * num_chunks - local_tensor.size(
-                new_shard_dim
-            )
-            local_tensor = pad_tensor(local_tensor, new_shard_dim, new_dim_pad_size)
-
-        if not local_tensor.is_contiguous():
-            local_tensor = local_tensor.contiguous()
-
-        new_tensor = shard_dim_alltoall(
-            local_tensor, self.dim, new_shard_dim, mesh, mesh_dim
-        )
-
-        if old_dim_padding:
-            old_dim_unpad_size = (
-                old_dim_full_chunk_size * num_chunks - current_logical_shape[self.dim]  # type: ignore[possibly-undefined]
-            )
-            new_tensor = unpad_tensor(new_tensor, self.dim, old_dim_unpad_size)  # type: ignore[possibly-undefined]
-
-        if new_dim_padding:
-            local_shard_size_on_new_dim = self._local_shard_size_on_dim(
-                new_dim_logical_size, num_chunks, my_coordinate[mesh_dim]
-            )[0]
-            new_dim_unpad_size = new_dim_full_chunk_size - local_shard_size_on_new_dim  # type: ignore[possibly-undefined]
-            new_tensor = unpad_tensor(new_tensor, new_shard_dim, new_dim_unpad_size)  # type: ignore[possibly-undefined]
-
-        return new_tensor
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Shard):
@@ -372,13 +309,13 @@ class _Partial(Placement):
     # 3. _partition_value: partition the value of a replicated tensor on the mesh dimension
     # We can implement custom reductions as needed by subclassing this
     # class and override those contracts.
-    reduce_op: c10d.ReduceOp.RedOpType = c10d.ReduceOp.SUM
+    reduce_op: str = "sum"
 
     def _reduce_value(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
     ) -> torch.Tensor:
         return funcol.all_reduce(
-            tensor, reduceOp=self.reduce_op.name, group=(mesh, mesh_dim)
+            tensor, reduceOp=self.reduce_op, group=(mesh, mesh_dim)
         )
 
     def _reduce_shard_value(
@@ -400,9 +337,7 @@ class _Partial(Placement):
         # - the _reduce_value on a sum reduce op would just be a sum(allreduce) operation
         # TODO: if the reduce_op is min/max, etc. the _partition_value should be a
         # different operation
-        assert (
-            self.reduce_op == c10d.ReduceOp.SUM
-        ), "only support replicate to PartialSUM for now!"
+        assert self.reduce_op == "sum", "only support replicate to PartialSUM for now!"
         num_chunks = mesh.size(mesh_dim=mesh_dim)
         return tensor / num_chunks
 
@@ -418,7 +353,7 @@ class _Partial(Placement):
         """
         machine readable representation of the Partial placement
         """
-        return f"_Partial(reduce_op={self.reduce_op})"
+        return f"_Partial({self.reduce_op})"
 
     def __str__(self) -> str:
         """
