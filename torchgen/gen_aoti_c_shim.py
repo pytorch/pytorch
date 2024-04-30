@@ -18,7 +18,7 @@ from torchgen.model import (
     OptionalType,
     Type,
 )
-from torchgen.utils import mapMaybe
+from torchgen.utils import get_backend_str, mapMaybe
 
 
 def returns_are_all_tensor(schema: FunctionSchema) -> bool:
@@ -338,13 +338,14 @@ def gen_c_shim(
     dispatch_key: DispatchKey,
     backend_indices: Dict[DispatchKey, BackendIndex],
     header: bool,
+    rocm: bool,
 ) -> Optional[str]:
     backend_index = get_backend_index_for_aoti(f, dispatch_key, backend_indices)
     if backend_index is None:
         return None
 
     schema = f.func
-    device = dispatch_key.lower()
+    device_str = get_backend_str(dispatch_key, rocm)
     backend_call = gen_static_dispatch_backend_call(
         f,
         backend_index,
@@ -353,11 +354,13 @@ def gen_c_shim(
     try:
         if header:
             declaration, _ = gen_declaration_and_definition(
-                schema, device, backend_call
+                schema, device_str, backend_call
             )
             return f"AOTI_TORCH_EXPORT {declaration};"
         else:
-            _, definition = gen_declaration_and_definition(schema, device, backend_call)
+            _, definition = gen_declaration_and_definition(
+                schema, device_str, backend_call
+            )
             return definition
 
     except NotImplementedError:
@@ -369,10 +372,13 @@ class ShimGenerator:
     dispatch_key: DispatchKey
     backend_indices: Dict[DispatchKey, BackendIndex]
     header: bool  # True to generate .h and False to generate .cpp
+    rocm: bool
 
     @method_with_native_function
     def __call__(self, f: NativeFunction) -> Optional[str]:
-        result = gen_c_shim(f, self.dispatch_key, self.backend_indices, self.header)
+        result = gen_c_shim(
+            f, self.dispatch_key, self.backend_indices, self.header, self.rocm
+        )
         return result
 
 
@@ -382,11 +388,12 @@ def gen_aoti_c_shim(
     backend_indices: Dict[DispatchKey, BackendIndex],
     header: bool,
     includes: str = "",
+    rocm: bool = False,
 ) -> str:
     body = "\n".join(
         list(
             mapMaybe(
-                ShimGenerator(dispatch_key, backend_indices, header),
+                ShimGenerator(dispatch_key, backend_indices, header, rocm),
                 native_functions,
             )
         )
@@ -410,10 +417,9 @@ extern "C" {{
 
 """
     else:
-        device = dispatch_key.lower()
         return f"""
 #include <torch/csrc/inductor/aoti_torch/utils.h>
-#include <torch/csrc/inductor/aoti_torch/generated/c_shim_{device}.h>
+#include <torch/csrc/inductor/aoti_torch/generated/c_shim_{get_backend_str(dispatch_key, rocm)}.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/{str(dispatch_key)}Functions.h>

@@ -409,9 +409,15 @@ set(GENERATED_TESTING_PYTHON
   "${TORCH_SRC_DIR}/testing/_internal/generated/annotated_fn_args.py"
   )
 
-set(GENERATED_CXX_TORCH_CUDA
-  "${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/generated/c_shim_cuda.cpp"
-  )
+if(USE_ROCM)
+  set(GENERATED_CXX_TORCH_CUDA
+    "${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/generated/c_shim_hip.cpp"
+    )
+else()
+  set(GENERATED_CXX_TORCH_CUDA
+    "${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/generated/c_shim_cuda.cpp"
+    )
+endif()
 
 set(TORCH_GENERATED_CODE
   ${GENERATED_CXX_TORCH}

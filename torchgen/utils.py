@@ -121,6 +121,15 @@ def string_stable_hash(s: str) -> int:
     return int.from_bytes(sha1, byteorder="little")
 
 
+def get_backend_str(dispatch_key, rocm: bool) -> str:
+    if dispatch_key is None:
+        return ""
+    backend_str = dispatch_key.lower()
+    if backend_str == "cuda" and rocm:
+        backend_str = "hip"
+    return backend_str
+
+
 # A small abstraction for writing out generated files and keeping track
 # of what files have been written (so you can write out a list of output
 # files)

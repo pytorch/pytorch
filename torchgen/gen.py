@@ -95,6 +95,7 @@ from torchgen.utils import (
     concatMap,
     context,
     FileManager,
+    get_backend_str,
     make_file_manager,
     mapMaybe,
     NamespaceHelper,
@@ -2357,11 +2358,10 @@ def gen_source_files(
                 backend_index = get_backend_index_for_aoti(
                     f, dispatch_key, backend_indices
                 )
-                return (
-                    None
-                    if backend_index is None
-                    else f"#include <ATen/ops/{f.root_name}_{backend_index.dispatch_key.lower()}_dispatch.h>"
-                )
+                if backend_index is None:
+                    return None
+                backend_suffix = get_backend_str(backend_index.dispatch_key, rocm)
+                return f"#include <ATen/ops/{f.root_name}_{backend_suffix}_dispatch.h>"
 
             def headers_for_aoti() -> str:
                 headers = []
@@ -2383,23 +2383,25 @@ def gen_source_files(
             )
 
             aoti_fm.write(
-                f"c_shim_{dispatch_key.lower()}.h",
+                f"c_shim_{get_backend_str(dispatch_key, rocm)}.h",
                 lambda: gen_aoti_c_shim(
                     native_functions,
                     dispatch_key,
                     backend_indices,
                     header=True,
                     includes="",
+                    rocm=rocm,
                 ),
             )
             aoti_fm.write(
-                f"c_shim_{dispatch_key.lower()}.cpp",
+                f"c_shim_{get_backend_str(dispatch_key, rocm)}.cpp",
                 lambda: gen_aoti_c_shim(
                     native_functions,
                     dispatch_key,
                     backend_indices,
                     header=False,
                     includes=headers_for_aoti() + "\n" + extra_headers,
+                    rocm=rocm,
                 ),
             )
 
