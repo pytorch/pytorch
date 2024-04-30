@@ -39,6 +39,7 @@ from torch._utils import render_call
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.overrides import TorchFunctionMode
+from torch.types import _bool
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
@@ -56,11 +57,13 @@ class _Unassigned:
     pass
 
 
+_UNASSIGNED = _Unassigned()
+
+
 class _Unhashable:
     pass
 
 
-_UNASSIGNED = _Unassigned()
 _UNHASHABLE = _Unhashable()
 
 DimList = List
@@ -403,6 +406,11 @@ class FakeTensor(torch.Tensor):
     # TODO: Generalize this as needed, e.g., into a trie of memos
     _nonzero_memo: Optional[torch.SymInt]
     _nonzero_memo_vc: Optional[int]
+    # When we retrace, we need to invalidate all the memos so that we can
+    # accurately identify the first time unbacked SymInts are allocated.
+    # This is only relevant for inputs; for intermediates, they will get fresh
+    # fake tensors so you won't have a memo anyway
+    _nonzero_memo_epoch: Optional[int]
 
     # Indicates to our torch_dispatch dispatching infra that
     # this is an "infra" mode with lower dispatching precedence.
@@ -414,7 +422,10 @@ class FakeTensor(torch.Tensor):
             return None
         # Version counter based tracking isn't 100% sound but it's close
         # enough
-        if self._nonzero_memo_vc != self._version:
+        if (
+            self._nonzero_memo_vc != self._version
+            or self._nonzero_memo_epoch != self.fake_mode.epoch
+        ):
             self._nonzero_memo = None
             return None
         return self._nonzero_memo
@@ -562,6 +573,18 @@ class FakeTensor(torch.Tensor):
             else:
                 return args[0].fake_device
 
+        # this handler must be done inside FakeTensor subclass, not mode, because
+        # we can end up dispatching here when we have a fake tensor with
+        # symbolic sizes running under in_kernel_invocation_manager.
+        # The subclass is asked to handle this query because size (not
+        # sym_size) was called, but we are unable to serve it directly because
+        # there are symbolic sizes in the class.  The use of
+        # in_kernel_invocation_manager means it's incorrect to activate a
+        # mode to actually handle this (this caused
+        # https://github.com/pytorch/pytorch/issues/122772).
+        if handler := _DISPATCH_META_HANDLERS.get(func):
+            return handler(args)
+
         # Because fake mode can return NotImplemented (if it sees a subclass
         # it doesn't know how to deal with), this test here is important
         # because the next dispatch after a fake mode will attempt to use
@@ -601,6 +624,8 @@ class FakeTensor(torch.Tensor):
                 maybe_cur_fake_mode,
             )
             return NotImplemented
+
+        assert not fake_mode.in_kernel_invocation
 
         with fake_mode:  # type: ignore[attr-defined]
             return func(*args, **kwargs)
@@ -782,6 +807,17 @@ class _BypassDispatchCache(Exception):
 
 
 @dataclass(frozen=True)
+class _BypassDispatchCacheEntry:
+    """
+    The cache entry indicating that a previous cache attempt raised
+    _BypassDispatchCacheEntry. We don't use _BypassDispatchCache directly
+    because it hangs onto extra Exception information we don't want to persist.
+    """
+    reason: str
+
+
+
+@dataclass(frozen=True)
 class DispatchCacheInfo:
     """
     Information about the state of the FakeTensor dispatch cache.
@@ -801,12 +837,14 @@ class DispatchCacheInfo:
 # new allocations of Tensors which have non-meta storage so
 # memory should not significantly increase.
 
-
 class FakeTensorMode(TorchDispatchMode):
-    cache: Dict[_DispatchCacheKey, Union[_DispatchCacheEntry, _BypassDispatchCache]] = {}
+    cache: Dict[_DispatchCacheKey, Union[_DispatchCacheEntry, _BypassDispatchCacheEntry]] = {}
     cache_hits: int = 0
     cache_misses: int = 0
     cache_bypasses: Dict[str, int] = defaultdict(int)
+    # Every time you retrace using the same fake tensor mode, you should
+    # advance the epoch so we don't reuse unbacked memos
+    epoch: int = 0
     in_kernel_invocation: bool = False
 
     def __init__(
@@ -858,7 +896,9 @@ class FakeTensorMode(TorchDispatchMode):
         # in_kernel_invocation
         # If another fake mode was already active when we enter, we also stash it here.
         # That way when we exit, we know to re-enable the previous fake mode.
-        self.enter_stack: List[Tuple[bool, Optional[FakeTensorMode]]] = []
+        self.enter_stack: List[
+            Tuple[bool, Optional[TorchDispatchMode], Optional[_bool]]
+        ] = []
 
         self.shape_env: ShapeEnv = shape_env
 
@@ -988,7 +1028,7 @@ class FakeTensorMode(TorchDispatchMode):
                 # synthesized from the cache matches the output created
                 # by normal dispatch.
                 self._crosscheck_cache_output(output, func, types, args, kwargs)
-        elif isinstance(entry, _BypassDispatchCache):
+        elif isinstance(entry, _BypassDispatchCacheEntry):
             FakeTensorMode.cache_bypasses[entry.reason] += 1
         else:
             # `entry` Must be 'None' - we don't have an entry in the cache
@@ -1007,7 +1047,7 @@ class FakeTensorMode(TorchDispatchMode):
                 # time and mark the cache as invalid and next time drop below to
                 # recompute it.
                 FakeTensorMode.cache_bypasses[e.reason] += 1
-                FakeTensorMode.cache[key] = e
+                FakeTensorMode.cache[key] = _BypassDispatchCacheEntry(e.reason)
             else:
                 FakeTensorMode.cache[key] = entry
                 FakeTensorMode.cache_misses += 1
@@ -1562,6 +1602,9 @@ class FakeTensorMode(TorchDispatchMode):
                 r = func(*args, **kwargs)
         except NotImplementedError as not_implemented_error:
             return maybe_run_unsafe_fallback(not_implemented_error)
+        except Exception:
+            log.exception("failed while attempting to run meta for %s", func)
+            raise
 
         return self.wrap_meta_outputs_with_default_device_logic(
             r, func, flat_args, device=kwargs.get("device")

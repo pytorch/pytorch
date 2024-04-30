@@ -5,19 +5,12 @@ from ...._dynamo.utils import counters
 
 from ... import config, ir
 from ...codecache import code_hash, get_path
-from ...ir import ComputedBuffer, CUDATemplateBuffer, Pointwise
-from ...scheduler import (
-    BaseSchedulerNode,
-    BaseScheduling,
-    FusedSchedulerNode,
-    Scheduler,
-    SchedulerNode,
-)
+from ...ir import CUDATemplateBuffer
+from ...scheduler import BaseSchedulerNode, BaseScheduling, Scheduler, SchedulerNode
 from ...utils import get_fused_kernel_name, get_kernel_metadata, sympy_product
 from ...virtualized import V
 from ..common import IndentedBuffer
 
-from .cutlass_epilogue_gen import CUTLASSEVTOpNotImplementedError
 
 log = logging.getLogger(__name__)
 
@@ -38,116 +31,15 @@ class CUDACPPScheduling(BaseScheduling):
     def group_fn(self, sizes):
         return tuple(V.graph.sizevars.simplify(sympy_product(s)) for s in sizes)
 
-    def is_cuda_cpp_template(self, node: BaseSchedulerNode) -> bool:
+    @staticmethod
+    def is_cuda_cpp_template(node: BaseSchedulerNode) -> bool:
         return isinstance(node, SchedulerNode) and isinstance(
             node.node, CUDATemplateBuffer
         )
 
-    def is_cuda_cpp_fused_template(self, node: BaseSchedulerNode) -> bool:
-        return isinstance(node, FusedSchedulerNode) and self.is_cuda_cpp_template(
-            node.get_template_node()
-        )
-
-    def _can_fuse_epilogue_impl(
-        self,
-        cuda_template_buffer: CUDATemplateBuffer,
-        epilogue_nodes: List[ir.IRNode],
-        additional_node: ir.IRNode,
-    ) -> bool:
-        """
-        Check if the given node can be fused with the epilogue. At the moment, Kernels
-        support fusion with Pointwise operations, wrapped in (named) ComputedBuffer nodes.
-
-        Args:
-            cuda_template_buffer : A CUDATemplateBuffer object representing the CUDA template and it's result buffer
-            epilogue_nodes : List[ir.Buffer]: The list of already fused epilogue nodes.
-            additional_node: The ir.Buffer node to be checked if it can be fused with the epilogue.
-        Returns:
-        - bool: True if the given node can be fused with the epilogue, False otherwise.
-
-        """
-        if not isinstance(cuda_template_buffer, CUDATemplateBuffer):
-            return False
-        if not cuda_template_buffer.template.can_fuse_epilogue:
-            # The used GEMM op does not support fusing epilogues
-            return False
-        if not isinstance(additional_node, ComputedBuffer):
-            return False
-        if not isinstance(additional_node.data, Pointwise):
-            return False
-        # We can fuse a Pointwise op that depends on the last fused epilogue node
-        # if any. If there is no epilogue node yet, it needs to depend on the template
-        # node
-        node_name = additional_node.get_computed_buffer_name()
-        if node_name is None:
-            return False
-
-        if len(epilogue_nodes) == 0:
-            if cuda_template_buffer.name not in additional_node.get_read_names():
-                return False
-        else:
-            last_epilogue_node = epilogue_nodes[-1]
-            assert isinstance(last_epilogue_node, ir.ComputedBuffer)  # for mypy
-            last_epilogue_name = (
-                last_epilogue_node.name
-                if last_epilogue_node.name is not None
-                else last_epilogue_node.data.name  # type: ignore[attr-defined]
-            )
-            if last_epilogue_name not in additional_node.get_read_names():
-                return False
-        if additional_node.layout != cuda_template_buffer.layout:
-            return False
-        try:
-            from torch._inductor.codegen.cuda.cutlass_epilogue_gen import (
-                CutlassEVTEpilogueArgumentFormatter,
-                CutlassEVTEpilogueTypeFormatter,
-            )
-
-            CutlassEVTEpilogueTypeFormatter.ir_to_evt_string(
-                cast(str, cuda_template_buffer.name), "anything", [additional_node]
-            )
-            CutlassEVTEpilogueArgumentFormatter.ir_to_evt_argument_string(
-                cast(str, cuda_template_buffer.name), [additional_node]
-            )
-        except CUTLASSEVTOpNotImplementedError as e:
-            not_implemented_op = str(e)
-            if not_implemented_op.startswith("_op_"):
-                not_implemented_op = not_implemented_op[4:]
-                log.warning(
-                    f"Cannot fuse epilogue node {additional_node} into {cuda_template_buffer.name}, likely due to unsupported operation: {not_implemented_op}"  # noqa: G004, B950
-                )
-                return False
-            else:
-                # Likely due to unsupported dtype.
-                log.warning(
-                    f"Cannot fuse epilogue node {additional_node} into {cuda_template_buffer.name}. Reason: {not_implemented_op}"  # noqa: G004, B950
-                )
-                return False
-        return True
-
-    @staticmethod
-    def _unwrap_epilogue_nodes(fused_node: FusedSchedulerNode) -> List[ir.IRNode]:
-        nodes = fused_node.get_nodes()
-        template_node = fused_node.get_template_node()
-        nodes.remove(template_node)
-        return [n.node for n in nodes]
-
     def can_fuse_vertical(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
-        if self.is_cuda_cpp_template(node1) and isinstance(node2, SchedulerNode):
-            return self._can_fuse_epilogue_impl(
-                cast(CUDATemplateBuffer, node1.node), [], node2.node
-            )
-        elif self.is_cuda_cpp_fused_template(node1) and isinstance(
-            node2, SchedulerNode
-        ):
-            fnode1 = cast(FusedSchedulerNode, node1)
-            return self._can_fuse_epilogue_impl(
-                fnode1.get_template_node().node,
-                self._unwrap_epilogue_nodes(fnode1),
-                node2.node,
-            )
         return False
 
     def define_kernel(self, src_code: str, node_schedule) -> str:
