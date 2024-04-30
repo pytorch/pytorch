@@ -2559,7 +2559,9 @@ class CppVecKernel(CppKernel):
                 self.tiling_factor if self.tiling_idx >= self.reduction_depth else 1
             )
             weight_num_range = weight_num_range - weight_num_range % weights_factor
-            self.weight_recp_vec_range = (weight_num_range + weights_factor - 1) // weights_factor
+            self.weight_recp_vec_range = (
+                weight_num_range + weights_factor - 1
+            ) // weights_factor
             self.reduction_weight_recps.writeline(
                 self.welford_weight_reciprocal_vec(dtype, None)
             )
@@ -2571,7 +2573,10 @@ class CppVecKernel(CppKernel):
                 f"{acc_vec} = {self.reduction_combine_vec(reduction_type, acc_vec, value)};"
             )
         self._gen_parallel_reduction_buffers(
-            acc, acc_type, reduction_type, dtype,
+            acc,
+            acc_type,
+            reduction_type,
+            dtype,
         )
         self._gen_parallel_reduction_buffers(
             acc_vec,
@@ -2696,7 +2701,9 @@ class CppVecKernel(CppKernel):
         )
         return f"static WeightRecp<{self._get_vec_type(dtype)}> weight_recps({vec_range_thread});"
 
-    def reduction_combine_vec(self, reduction_type, var, next_value, use_weight_recps=False):
+    def reduction_combine_vec(
+        self, reduction_type, var, next_value, use_weight_recps=False
+    ):
         if reduction_type == "max":
             return f"at::vec::maximum({var}, {next_value})"
         elif reduction_type == "min":

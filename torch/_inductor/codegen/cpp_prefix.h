@@ -65,6 +65,7 @@ struct WeightRecp {
   int64_t N;
   std::vector<T> weight_recps;
   WeightRecp(int64_t N) : N(N) {
+    weights_recps.reserve(N);
     for (const auto i : c10::irange(N)) {
       weight_recps.push_back(T(scalar_t(1) / static_cast<scalar_t>(i + 1)));
     }
@@ -104,7 +105,7 @@ Welford<T> welford_combine(const Welford<T> &acc, T data, const WeightRecp<T>* w
   auto delta = data - acc.mean;
   auto new_weight = acc.weight + T(1);
   T new_mean;
-    if constexpr (!IsVecType<T>::value) {
+  if constexpr (!IsVecType<T>::value) {
     new_mean = acc.mean + delta / new_weight;
   } else {
     new_mean = acc.mean +
