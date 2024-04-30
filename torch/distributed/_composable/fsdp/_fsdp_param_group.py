@@ -305,13 +305,11 @@ class FSDPParamGroup:
         self.comm_ctx.post_forward_order.append(self)
         self._post_forward_indices.append(post_forward_index)
 
-    def pre_backward(self, forward_grad_fns: Tuple[Any, ...], *unused: Any):
+    def pre_backward(self, *unused: Any):
         with torch.profiler.record_function("FSDP::pre_backward"):
             self._training_state = TrainingState.PRE_BACKWARD
             self.unshard()  # no-op if prefetched
             self.wait_for_unshard()
-            # Can be already removed if running multiple `backward`s
-            self.all_forward_output_grad_fns.discard(forward_grad_fns)
             self._prefetch_unshard()
 
     def post_backward(self, *unused: Any):

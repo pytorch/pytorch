@@ -199,11 +199,11 @@ class FSDPState(_State):
                 )
         return output
 
-    def _pre_backward(self, forward_grad_fns: Tuple[Node, ...], *unused: Any) -> None:
+    def _pre_backward(self: Tuple[Node, ...], *unused: Any) -> None:
         self._training_state = TrainingState.PRE_BACKWARD
         self._register_root_post_backward_final_callback()
         if self._fsdp_param_group:
-            self._fsdp_param_group.pre_backward(forward_grad_fns, *unused)
+            self._fsdp_param_group.pre_backward(*unused)
 
     def _root_post_backward_final_callback(self) -> None:
         with torch.profiler.record_function("FSDP::root_post_backward_callback"):
@@ -233,8 +233,7 @@ class FSDPState(_State):
         tensors = tuple(t for t in flat_outputs if (t is not None and t.requires_grad))
         if tensors:
             grad_fns = tuple(t.grad_fn for t in tensors if t.grad_fn is not None)
-            pre_backward = functools.partial(self._pre_backward, grad_fns)
-            register_multi_grad_hook(tensors, pre_backward, mode="any")
+            register_multi_grad_hook(tensors, self._pre_backward, mode="any")
             if self._fsdp_param_group:
                 self._fsdp_param_group.all_forward_output_grad_fns.add(grad_fns)
         return output
