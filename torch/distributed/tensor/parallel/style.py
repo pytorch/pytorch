@@ -6,7 +6,7 @@ from functools import partial
 import torch
 import torch.nn as nn
 from torch.distributed._tensor import DeviceMesh, DTensor, Placement, Replicate, Shard, distribute_tensor, distribute_module
-
+from ._utils import _check_tp_module_type
 
 __all__ = [
     "ParallelStyle",
@@ -125,9 +125,9 @@ class ColwiseParallel(ParallelStyle):
         return outputs.to_local() if use_local_output else outputs
 
     def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
-        if isinstance(module, nn.Linear):
+        if _check_tp_module_type(module, nn.Linear):
             partition_fn = self._partition_linear_fn
-        elif isinstance(module, nn.Embedding):
+        elif _check_tp_module_type(module, nn.Embedding):
             partition_fn = self._partition_embedding_fn
         else:
             raise NotImplementedError("ColwiseParallel currently only support nn.Linear and nn.Embedding!")
@@ -227,16 +227,16 @@ class RowwiseParallel(ParallelStyle):
         return outputs.to_local() if use_local_output else outputs
 
     def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
-        if isinstance(module, nn.Linear):
+        if _check_tp_module_type(module, nn.Linear):
             partition_fn = self._partition_linear_fn
             # rowwise linear runtime sharding requires input tensor shard on last dim
             self.desired_input_layouts: Tuple[Placement, ...] = (Shard(-1), )
-        elif isinstance(module, nn.Embedding):
+        elif _check_tp_module_type(module, nn.Embedding):
             partition_fn = self._partition_embedding_fn
             # rowwise embedding runtime sharding requires input tensor replicated
             self.desired_input_layouts = (Replicate(), )
         else:
-            raise NotImplementedError("RowwiseParallel currently only support nn.Linear and nn.Embedding!")
+            raise NotImplementedError(f"RowwiseParallel currently only support nn.Linear and nn.Embedding, but found {type(module)}!")
 
         return distribute_module(
             module,
