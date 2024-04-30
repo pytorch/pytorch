@@ -2336,7 +2336,7 @@ class CppVecKernel(CppKernel):
             assert vec_var.is_vec
             code = BracesBuffer()
             code.writeline("[&]")
-            with self.swap_buffers(code), code.indent():
+            with code.indent():
                 vec_dtype = vec_var.dtype
                 assert vec_dtype is not None
                 if vec_dtype == torch.bool:
@@ -2357,7 +2357,7 @@ class CppVecKernel(CppKernel):
         assert opt_ctx is not None
         code = BracesBuffer()
         code.writeline("[&]")
-        with self.swap_buffers(code), code.indent():
+        with code.indent():
             result_size = get_result_size(dtype)
             result_declare = (
                 f"__at_align__ std::array<{DTYPE_TO_CPP[dtype]}, {result_size}> tmpbuf;"

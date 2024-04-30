@@ -592,7 +592,7 @@ def any_is_symbolic(*args: Any) -> bool:
     return any(is_symbolic(a) for a in args)
 
 
-def has_incompatible_cudagraph_ops(gm):
+def get_first_incompatible_cudagraph_node(gm):
     from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
     forbidden_set = {
@@ -628,10 +628,14 @@ def has_incompatible_cudagraph_ops(gm):
         )
     for node in gm.graph.nodes:
         if str(node.target) in forbidden_set:
-            return True
+            return node
         if (val := node.meta.get("val")) is not None and free_unbacked_symbols(val):
-            return True
-    return False
+            return node
+    return None
+
+
+def has_incompatible_cudagraph_ops(gm):
+    return get_first_incompatible_cudagraph_node(gm) is not None
 
 
 def output_node(gm: torch.fx.GraphModule):
@@ -1191,6 +1195,12 @@ def get_gpu_dram_gbps():
     from triton.testing import get_dram_gbps
 
     return get_dram_gbps()
+
+
+def get_gpu_shared_memory():
+    from triton.runtime import driver
+
+    return driver.active.utils.get_device_properties(0).get("max_shared_mem", 0)
 
 
 def is_welford_reduction(reduction_type):
