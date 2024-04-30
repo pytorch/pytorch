@@ -1,17 +1,21 @@
 from collections import namedtuple
 from typing import Dict, List, Type
 
+import sympy
+
 import torch
 
 from .. import ir
 from ..codecache import pick_vec_isa, VecAVX2, VecAVX512
 from ..utils import IndentedBuffer, parallel_num_threads
+from ..virtualized import V
 from .common import KernelTemplate
 from .cpp_template_kernel import CppTemplateKernel
 from .cpp_utils import DTYPE_TO_CPP, GemmBlocking, value_to_cpp
 
 
 class CppMicroGemm:
+    # TODO(jgong5): support constant shapes and lds as template args.
     DECLARE_KERNEL = r"""
 template <bool accum>
 inline void {{kernel_name}}(
@@ -148,10 +152,16 @@ class CppMicroGemmRef(CppMicroGemm):
 
 @register_micro_gemm(
     CppMicroGemmConfig(
+        torch.float32, torch.float32, torch.float32, VecAVX512, GemmBlocking(8, 48, 1)
+    ),
+    CppMicroGemmConfig(
         torch.float32, torch.float32, torch.float32, VecAVX512, GemmBlocking(8, 32, 1)
     ),
     CppMicroGemmConfig(
         torch.float32, torch.float32, torch.float32, VecAVX512, GemmBlocking(16, 16, 1)
+    ),
+    CppMicroGemmConfig(
+        torch.float32, torch.float32, torch.float32, VecAVX2, GemmBlocking(4, 24, 1)
     ),
     CppMicroGemmConfig(
         torch.float32, torch.float32, torch.float32, VecAVX2, GemmBlocking(4, 16, 1)
@@ -169,10 +179,8 @@ class CppMicroGemmFP32AVX(CppMicroGemm):
     for (int64_t m = 0; m < M; m += {{block_m}}) {
         int64_t block_m = std::min<int64_t>(M - m, {{block_m}});
         for (int64_t n = 0; n < N; n += {{block_n}}) {
-            switch (block_m) {
-            {%- for b in range(block_m, 0, -1) %}
-            case {{b}}:
-                {{kernel_name}}_kernel<{{b}}, {{block_n}}, accum>(
+            if (block_m == {{block_m}}) {
+                {{kernel_name}}_kernel<{{block_m}}, {{block_n}}, accum>(
                     A + m * lda,
                     B + n,
                     C + m * ldc + n,
@@ -181,10 +189,24 @@ class CppMicroGemmFP32AVX(CppMicroGemm):
                     ldb,
                     ldc
                 );
-                break;
-            {%- endfor %}
-            default:
-                {{kernel.assert_function}}(false, "Unsupported block_m: ", block_m);
+            } else {
+                switch (block_m) {
+                {%- for b in range(block_m - 1, 0, -1) %}
+                case {{b}}:
+                    {{kernel_name}}_kernel<{{b}}, {{block_n}}, accum>(
+                        A + m * lda,
+                        B + n,
+                        C + m * ldc + n,
+                        K,
+                        lda,
+                        ldb,
+                        ldc
+                    );
+                    break;
+                {%- endfor %}
+                default:
+                    {{kernel.assert_function}}(false, "Unsupported block_m: ", block_m);
+                }
             }
         }
     }
@@ -242,7 +264,7 @@ inline void {{kernel_name}}_kernel(
         vc[idx] = at::vec::fmadd(va, vb[col], vc[idx]);
     };
 
-    // TODO(jgong5): unroll k
+    {{kernel.unroll_pragma(4)}}
     for (int k = 0; k < K; ++k) {
         c10::ForcedUnroll<ROWS * COLS>{}(compute, k);
     }
@@ -299,6 +321,7 @@ def create_micro_gemm(
 
     assert isinstance(n, int) or n.is_number, n
     assert isinstance(k, int) or k.is_number, k
+    m = V.graph.sizevars.size_hint(m) if isinstance(m, sympy.Expr) else m
     if output_dtype is None:
         output_dtype = input_dtype
     if compute_dtype is None:
@@ -316,18 +339,33 @@ def create_micro_gemm(
                 and config.output_dtype == output_dtype
                 and config.compute_dtype == compute_dtype
             ):
-                score = 0
                 block_m, block_n, block_k = config.register_blocking
-                if n % block_n == 0:
-                    score += 1
+                if n % block_n != 0:
+                    continue
+                # Criteria on the ranking of configurations
+                # 1. Dividable by block sizes (block_m, block_k)
+                # 2. Number of mxn blocks is large enough to occupy all the threads
+                # 3. Register blocks are larger
+                dividable_score = 0
                 if k % block_k == 0:
-                    score += 1
+                    dividable_score += 1
                 if m % block_m == 0:
-                    score += 1
-                n_blocks = (n + block_n - 1) // block_n
+                    dividable_score += 1
+                occupancy_score = 0
+                n_blocks = n // block_n
+                total_mxn_blocks = n // block_n * ((m + block_m - 1) // block_m)
                 if n_blocks >= num_threads:
-                    score += 1
-                matched_configs.append((score, cls, config))
+                    occupancy_score += 1
+                if total_mxn_blocks >= num_threads:
+                    occupancy_score += 1
+                matched_configs.append(
+                    (
+                        (dividable_score, occupancy_score, block_m * block_n * block_k),
+                        cls,
+                        config,
+                    )
+                )
     if len(matched_configs) == 0 or use_ref:
         return CppMicroGemmRef(name, input_dtype, output_dtype, compute_dtype, alpha)
+    # TODO(jgong5): allow autotuning on choices of configs
     return create_from_config(*max(matched_configs, key=lambda x: x[0])[1:])

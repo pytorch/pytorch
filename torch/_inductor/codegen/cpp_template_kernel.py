@@ -8,7 +8,7 @@ import torch
 
 from torch._inductor.autotune_process import CppBenchmarkRequest
 from torch._inductor.utils import sympy_index_symbol
-from .. import config, ir, lowering as L
+from .. import codecache, config, ir, lowering as L
 from ..virtualized import V
 from .common import Kernel, OpOverrides
 from .cpp_utils import cexpr_index, DTYPE_TO_CPP
@@ -128,6 +128,12 @@ class CppTemplateKernel(Kernel):
             return f'RECORD_FUNCTION("{prefix}{self.kernel_name}", c10::ArrayRef<c10::IValue>({{}}));'
         else:
             return ""
+
+    def unroll_pragma(self, unroll):
+        if codecache.is_gcc():
+            return f"#pragma GCC unroll {unroll}"
+        else:
+            return f"#pragma unroll {unroll}"
 
 
 class CppTemplateCaller(ir.ChoiceCaller):
