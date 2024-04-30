@@ -591,8 +591,9 @@ SparseTensor& add_out_sparse_cpu(const SparseTensor& t, const SparseTensor& src,
   TORCH_CHECK(is_same_density(t, src), "add: expected 'self' and 'other' to have same density, but 'self' has ", t.sparse_dim(), " sparse dimensions while 'other' has ", src.sparse_dim(), " sparse dimensions");
 
   r.resize_as_(src);
-
-  if (src._values().is_contiguous() && t._values().is_contiguous()) {
+  if (r.is_meta()) {
+    return r;
+  } else if (src._values().is_contiguous() && t._values().is_contiguous()) {
     return add_out_sparse_contiguous(r, t, src, value, commonDtype);
   } else {
     return add_out_sparse_non_contiguous(r, t, src, value, commonDtype);
@@ -1311,7 +1312,7 @@ static Tensor& s_addmm_out_sparse_dense_cpu(
   Tensor indices = sparse_._indices();
   Tensor values      = sparse_._values();
 
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf,
       values.scalar_type(), "addmm_sparse_dense", [&] {
         s_addmm_out_sparse_dense_worker<scalar_t>(nnz, dim_i, dim_j, dim_k, r, beta, t, alpha, indices, values, dense);
       }

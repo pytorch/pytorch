@@ -24,3 +24,4 @@ retryable_workflows:
 - linux-binary
 - windows-binary
 labeler_config: labeler.yml
+label_to_label_config: label_to_label.yml
