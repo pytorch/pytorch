@@ -1342,10 +1342,10 @@ class CommonTemplate:
         def fn(a):
             return torch.var(a)
 
-        # There is a gap between the accuracy of inductor and eager with ATEN_CPU_CAPABILITY=default 
+        # There is a gap between the accuracy of inductor and eager with ATEN_CPU_CAPABILITY=default
         # since eager uses double as the accumulation type.
         self.common(fn, (torch.rand((16, 16, 352, 352), dtype=torch.float16),), rtol=1e-3, atol=1e-3)
-        self.common(fn, (torch.rand((14923), dtype=torch.float16),))
+        self.common(fn, (torch.rand((14923), dtype=torch.float16),), rtol=1e-4, atol=1e-4)
 
     def test_split_cumsum(self):
         def fn(a):
