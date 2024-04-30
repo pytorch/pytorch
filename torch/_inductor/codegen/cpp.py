@@ -3108,6 +3108,15 @@ class CppKernelDispatcher(CppKernel):
         self.reduction_var_dict = {}
         self.need_arr_acc_var = False
         self.loops = loops
+
+        if len(loops) == 1:
+            loop = loops[0]
+            step_expr = loop.steps
+            size_expr = loop.size
+            if step_expr > size_expr:
+                loop.steps = 1
+                split = False
+        self.split = split
         if split:
             for loop in loops:
                 self.itervars.append(loop.var)
@@ -3313,8 +3322,9 @@ class CppKernelDispatcher(CppKernel):
             assert scalar_kernel.call_ranges == vec_kernel.call_ranges
         if tile2d_kernel:
             assert scalar_kernel.call_ranges == tile2d_kernel.call_ranges
-        self.vec_kernel = vec_kernel
-        self.tile2d_kernel = tile2d_kernel
+        if self.split:
+            self.vec_kernel = vec_kernel
+            self.tile2d_kernel = tile2d_kernel
         self.aggregate_reduction_buffers()
 
     def aggregate_reduction_buffers(self):
@@ -4478,7 +4488,7 @@ class LoopNestWithSplit:
 
         # not split
         inner_most = root
-        while inner_most:
+        while inner_most.inner:
             inner_most = inner_most.inner
         _kernel = CppKernelDispatcher([inner_most])
         _kernel.set_kernels(kernel)
