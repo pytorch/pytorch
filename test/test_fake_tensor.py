@@ -88,18 +88,22 @@ class FakeTensorTest(TestCase):
     def test_custom_op_fallback(self):
         from torch.library import Library, impl
 
-        test_lib = Library("my_test_op", "DEF")  # noqa: TOR901
-        test_lib.define('foo(Tensor self) -> Tensor')
+        try:
+            test_lib = Library("my_test_op", "DEF")  # noqa: TOR901
+            test_lib.define('foo(Tensor self) -> Tensor')
 
-        @impl(test_lib, 'foo', 'CPU')
-        def foo_impl(self):
-            return self.cos()
+            @impl(test_lib, 'foo', 'CPU')
+            def foo_impl(self):
+                return self.cos()
 
-        x = torch.empty(2, 2, device="cpu")
-        with self.assertRaisesRegex(UnsupportedOperatorException, "my_test_op.foo.default"):
-            with FakeTensorMode(allow_fallback_kernels=True) as mode:
-                x = mode.from_tensor(x)
-                torch.ops.my_test_op.foo(x)
+            x = torch.empty(2, 2, device="cpu")
+            with self.assertRaisesRegex(UnsupportedOperatorException, "my_test_op.foo.default"):
+                with FakeTensorMode(allow_fallback_kernels=True) as mode:
+                    x = mode.from_tensor(x)
+                    torch.ops.my_test_op.foo(x)
+
+        finally:
+            test_lib._destroy()
 
     def test_parameter_instantiation(self):
         with FakeTensorMode():
@@ -801,6 +805,22 @@ class FakeTensorTest(TestCase):
             ep = torch.export.export(MyNumpyModel(), args=(torch.randn(1000),))
             self.assertTrue(isinstance(ep, torch.export.ExportedProgram))
 
+    def test_alias_call(self):
+        fwAD = torch.autograd.forward_ad
+
+        def f(x):
+            return 4312491 * x
+
+        with torch._subclasses.fake_tensor.FakeTensorMode():
+            with fwAD.dual_level():
+                x = torch.randn(3, device="cpu")
+                y = torch.ones_like(x)
+                dual = fwAD.make_dual(x, y)
+                r = f(dual)
+
+        self.assertIsInstance(r, FakeTensor)
+        self.assertEqual(r.size(), [3])
+
 
 instantiate_parametrized_tests(FakeTensorTest)
 
@@ -1274,8 +1294,6 @@ make_propagate_real_tensors_cls(FakeTensorOperatorInvariants)
 
 
 class FakeTensorPropTest(TestCase):
-    # Propagate real tensors doesn't work with fake-on-fake
-    @expectedFailurePropagateRealTensors
     def test_fake_tensor_prop_on_nn_module(self):
         class ToyNnModuleWithParameters(torch.nn.Module):
             def __init__(self):
@@ -1333,6 +1351,8 @@ class FakeTensorPropTest(TestCase):
                 self.assertTrue(failed)
 
 
+    # Propagate real tensors doesn't work with fake-on-fake
+    @expectedFailurePropagateRealTensors
     def test_fake_tensor_prop_on_nn_module_with_optional_args(self):
         class OptionalArgumentInBetween(torch.nn.Module):
             def __init__(self):
