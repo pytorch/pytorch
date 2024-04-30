@@ -174,14 +174,18 @@ sdpa_template = TritonTemplate(
 
 
 def _get_default_config(query):
+    head_dim = query.get_size()[-1]
     default_config = None
     is_big_shared_mem = utils.get_gpu_shared_memory() > 128 * 1024
 
     if is_big_shared_mem:
         if query.get_dtype() == torch.float32:
-            default_config = (64, 64, 4, 3)
+            default_config = (128, 32, 4, 3)
         else:
-            default_config = (128, 64, 4, 3)
+            if head_dim == 64:
+                default_config = (128, 64, 4, 3)
+            else:
+                default_config = (128, 32, 4, 3)
     else:
         if query.get_dtype() == torch.float32:
             default_config = (32, 32, 4, 3)
