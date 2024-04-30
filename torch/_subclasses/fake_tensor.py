@@ -8,7 +8,6 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import (
     Any,
-    Callable,
     cast,
     Dict,
     List,
@@ -1214,20 +1213,16 @@ class FakeTensorMode(TorchDispatchMode):
         if metadata.is_neg:
             torch._C._set_neg(empty, True)
 
-        maybe_suppress: Callable[[], Any] = contextlib.nullcontext
-        if self.shape_env is not None:
-            maybe_suppress = self.shape_env.suppress_guards
-
         if func.is_view:
             # For view ops, the storage should be the same as the tensor input.
             storage = args[cast(int, entry.view_idx)].untyped_storage()
-            with in_kernel_invocation_manager(self), maybe_suppress():
+            with in_kernel_invocation_manager(self):
                 empty.set_(
                     storage, metadata.storage_offset, metadata.shape, metadata.stride
                 )
         elif metadata.storage_offset != 0:
             storage = empty.untyped_storage()
-            with in_kernel_invocation_manager(self), maybe_suppress():
+            with in_kernel_invocation_manager(self):
                 empty.set_(
                     storage, metadata.storage_offset, metadata.shape, metadata.stride
                 )
