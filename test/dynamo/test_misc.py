@@ -2753,7 +2753,10 @@ utils_device.CURRENT_DEVICE == None""".split(
 
     def test_dict_order_keys(self):
         def fn(d):
-            return d["a"] - d["b"]
+            c = 0
+            for v in d.values():
+                c += v
+            return c
 
         args1 = {}
         args1["a"] = torch.rand(10)
@@ -2762,7 +2765,8 @@ utils_device.CURRENT_DEVICE == None""".split(
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         self.assertEqual(fn(args1), opt_fn(args1))
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 1)
+        self.assertEqual(cnts.op_count, 2)
+
         # A different order of keys recompiles
         args2 = {}
         args2["b"] = args1["b"]
@@ -8489,8 +8493,6 @@ def ___make_guard_fn():
 
         f(torch.tensor([2, 3, 4]), torch.randn(9))
 
-    # See https://github.com/pytorch/pytorch/issues/119689
-    @unittest.expectedFailure
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_runtime_assert_replacement(self):
         @torch.compile(backend="aot_eager")
@@ -10154,21 +10156,36 @@ fn
     def test_outside_linear_module_free(self):
         # Compared to test_linear_module_free, the linear
         # layer is not the code object that is directly compiled.
-        def model_inp_ctr():
-            fc = torch.nn.Linear(100, 100)
 
-            class Mod(torch.nn.Module):
-                def __init__(self):
-                    super().__init__()
-                    self.fc_ref = fc
+        # This test does not use _test_compile_model_free because of difficulty
+        # in handling variable fc.
 
-                def forward(self, x):
-                    return fc(x[0])
+        fc = torch.nn.Linear(100, 100)
 
-            # return fc to keep it alive in _test_compile_model_free
-            return Mod(), (torch.randn(100, 100), fc)
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc_ref = fc
 
-        self._test_compile_model_free(model_inp_ctr, lambda mod: mod.fc_ref)
+            def forward(self, x):
+                return fc(x[0])
+
+        cleared = False
+
+        def finalize():
+            nonlocal cleared
+            cleared = True
+
+        def run():
+            mod = Mod()
+            inp = torch.randn(100, 100)
+            weakref.finalize(mod.fc_ref, finalize)
+            torch.compile(mod, backend="eager")(inp)
+
+        run()
+        del fc  # This should delete all the references
+        gc.collect()
+        self.assertTrue(cleared)
 
     @unittest.skipIf(sys.version_info >= (3, 12), "leaks in 3.12+")
     def test_parameter_free(self):
@@ -10538,6 +10555,63 @@ fn
         fn(torch.randn(4), d)
         with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
             fn(torch.randn(4), d)
+
+    def test_dict_guard_on_keys_order(self):
+        d = {
+            2: 4,
+            3: 5,
+        }
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(x, d):
+            for key, value in d.items():
+                x = x * key + value
+            return x
+
+        opt_fn = torch.compile(fn, backend=cnts)
+        opt_fn(torch.randn(4), d)
+        opt_fn(torch.randn(4), d)
+        # No recompilation
+        self.assertEqual(cnts.frame_count, 1)
+
+        # move 2 to the end
+        d[2] = d.pop(2)
+
+        x = torch.randn(4)
+        res = opt_fn(x, d)
+        # Check recompilation
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(res, fn(x, d))
+
+    def test_dict_guard_on_keys_order2(self):
+        d = {
+            2: 4,
+            3: 5,
+        }
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(x, d):
+            for key in d:
+                value = d[key]
+                x = x * key + value
+            return x
+
+        opt_fn = torch.compile(fn, backend=cnts)
+        opt_fn(torch.randn(4), d)
+        opt_fn(torch.randn(4), d)
+        # No recompilation
+        self.assertEqual(cnts.frame_count, 1)
+
+        # move 2 to the end
+        d[2] = d.pop(2)
+
+        x = torch.randn(4)
+        res = opt_fn(x, d)
+        # Check recompilation
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(res, fn(x, d))
 
 
 class TestTracer(JitTestCase):

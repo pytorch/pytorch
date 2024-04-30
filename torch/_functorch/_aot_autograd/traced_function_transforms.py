@@ -25,7 +25,7 @@ from torch._guards import detect_fake_mode
 from torch._prims_common import CUDARngStateHelper
 from torch.fx.experimental.symbolic_shapes import (
     definitely_false,
-    rebind_unbacked,
+    PropagateUnbackedSymInts,
     sym_eq,
 )
 from torch.nn.utils import stateless
@@ -376,8 +376,8 @@ def create_functionalized_fn(
 
             # Populate the current FunctionalTensorMode with the tokens per
             # operator. See Note [FunctionalTensorMode is Stateful]
-            functional_tensor_mode = torch.utils._python_dispatch._detect_infra_mode(
-                torch._C._TorchDispatchModeKey.FUNCTIONAL
+            functional_tensor_mode = (
+                torch.utils._python_dispatch._detect_functional_mode()
             )
             assert functional_tensor_mode is not None
             for i, k in enumerate(meta.tokens.keys()):
@@ -677,13 +677,6 @@ def aot_dispatch_subclass(
     )
 
 
-class PropagateUnbackedSymInts(torch.fx.Interpreter):
-    def run_node(self, n: torch.fx.Node):
-        result = super().run_node(n)
-        rebind_unbacked(detect_fake_mode().shape_env, n, result)
-        return result
-
-
 def create_functional_call(mod, params_spec, params_len, store_orig_mod=False):
     # Redundant with dynamo, but worth having in case this gets invoked elsewhere.
     # https://github.com/pytorch/pytorch/issues/103569
@@ -698,6 +691,7 @@ def create_functional_call(mod, params_spec, params_len, store_orig_mod=False):
                         "ignore", "Anomaly Detection has been enabled."
                     )
                     with torch.autograd.detect_anomaly(check_nan=False):
+                        detect_fake_mode().epoch += 1
                         out = PropagateUnbackedSymInts(mod).run(
                             *args[params_len:], **kwargs
                         )
