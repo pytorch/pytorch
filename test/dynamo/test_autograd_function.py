@@ -287,7 +287,9 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, res)
         self.assertEqual(cnt.frame_count, 1)
         # graph break: Illegal getattr invocation stride in strict mod.
-        self.assertEqual(len(torch._dynamo.utils.counters["graph_break"]), 1)
+        self.assertEqual(
+            list(torch._dynamo.utils.counters["graph_break"].values()), [1]
+        )
 
     def test_enum_arg(self):
         from enum import Enum

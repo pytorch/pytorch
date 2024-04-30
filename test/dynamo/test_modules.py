@@ -1306,6 +1306,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
 
         run()
 
+    @patch.object(torch._dynamo.config, "raise_on_ctx_manager_usage", False)
     def test_nn_moduledict_contains(self):
         class M(torch.nn.Module):
             def __init__(self, module_dict):
@@ -1328,37 +1329,33 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.op_count, 2)
         self.assertTrue(torch._dynamo.testing.same(out1, out2))
 
-        torch._dynamo.reset()
         module_dict = torch.nn.ModuleDict({"bar": torch.nn.Conv2d(1, 1, 1)})
         m = M(module_dict)
         data = torch.randn(1)
         out1 = m(data)
         cnt = torch._dynamo.testing.CompileCounter()
+        torch._dynamo.reset()
         opt_m = torch._dynamo.optimize(cnt, nopython=True)(m)
         out2 = opt_m(data)
+
         self.assertEqual(cnt.op_count, 1)
         self.assertTrue(torch._dynamo.testing.same(out1, out2))
 
-        torch._dynamo.reset()
-        cnt = torch._dynamo.testing.CompileCounter()
-        data = torch.randn(1)
-        module_dict1 = torch.nn.ModuleDict({"cat": torch.nn.Conv2d(1, 1, 1)})
-        module_dict2 = torch.nn.ModuleDict({"foo": torch.nn.Conv2d(1, 1, 1)})
+        module_dict = torch.nn.ModuleDict({"cat": torch.nn.Conv2d(1, 1, 1)})
+        pre = m(data)
+        cnt.clear()
 
-        m1 = M(module_dict1)
-        m2 = M(module_dict2)
+        with torch._dynamo.optimize(cnt, nopython=False):
+            opt_pre = m(data)
+            m = M(module_dict)
+            data = torch.randn(1)
+            out1 = m(data)
 
-        def fn():
-            out1 = m1(data)
-            out2 = m2(data)
-            return out1
-
-        opt_fn = torch.compile(fn, backend=cnt)
-        opt_fn()
-
+        out_post = m(data)
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 3)
-        self.assertTrue(torch._dynamo.testing.same(fn(), opt_fn()))
+        self.assertEqual(cnt.op_count, 1)
+        self.assertTrue(torch._dynamo.testing.same(pre, opt_pre))
+        self.assertTrue(torch._dynamo.testing.same(out1, out_post))
 
     # RuntimeError: SymIntArrayRef expected to contain only concrete integers
     @expectedFailureDynamic
@@ -1768,9 +1765,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             ]:
                 x = torch.randn(size)
                 mod(x)
-        # The extra recompilations happen because _wrapped_call_impl is now
-        # falling back to eager, and Dynamo is triggering on forward method.
-        self.assertEqual(cnts.frame_count, 3 * num_submodules)
+        self.assertEqual(cnts.frame_count, 2 * num_submodules)
 
     def test_recursion(self):
         mod = MockModule()
@@ -2143,15 +2138,15 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         loss_bwd = loss.backward()
 
         self.assertEqual(eager_loss_bwd, loss_bwd)
-        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.frame_count, 2)
 
         # Ndim change, recompile
         pred = model(torch.randn([10, 10, 10]))
-        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.frame_count, 4)
 
         # Stable
         pred = model(torch.randn([10, 10, 10]))
-        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.frame_count, 4)
 
     def test_dunder_call_explicitly(self):
         # hooks should be triggered if explicit calling `__call__`
