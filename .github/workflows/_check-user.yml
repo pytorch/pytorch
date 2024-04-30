@@ -29,6 +29,7 @@ jobs:
         id: set-condition
         run: |
           curr_branch="${{ inputs.curr_branch }}"
+          echo "Current branch is '$curr_branch'"
 
           if [[ "$curr_branch" == "nightly" || "$curr_branch" == "main" || "$curr_branch" == "release/"* || "$curr_branch" == "landchecks/"* ]]; then
             echo "workflow-type=label" >> "$GITHUB_OUTPUT"

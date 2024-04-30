@@ -40,7 +40,7 @@ jobs:
     uses: ./.github/workflows/_check-user.yml
     with:
       user_name: ${{ github.actor }}
-      curr_branch: ${{ github.ref_name }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
 
   linux-jammy-py3_8-gcc11-build-rg:
     name: linux-jammy-py3.8-gcc11-rg
