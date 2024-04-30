@@ -2121,7 +2121,12 @@ class Scheduler:
             rhs_dep = node2_name2dep[buf_name]
 
             if lhs_dep.get_numel() != rhs_dep.get_numel():
-                reasons[buf_name] = "different numel"
+                reasons[buf_name] = f"different numel: {lhs_dep.get_numel()} v.s. {rhs_dep.get_numel()}"
+                continue
+
+            # same numel but different MemoryDep.size. Should be broadcasting
+            if sympy_product(lhs_dep.size) != sympy_product(rhs_dep.size):
+                reasons[buf_name] = "broadcast"
                 continue
 
             # Add more rules here
