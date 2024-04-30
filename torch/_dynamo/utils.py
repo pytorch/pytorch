@@ -50,6 +50,8 @@ from typing import (
     ValuesView,
 )
 
+from torch._utils_internal import maybe_upload_prof_stats_to_manifold
+
 from ..utils.hooks import RemovableHandle
 
 try:
@@ -144,7 +146,7 @@ def cprofile_wrapper(func):
     def profile_wrapper(*args, **kwargs):
         global timer_counter
         profile_cnt = next(timer_counter)
-        profile_path = Path(func.__name__ + f"{profile_cnt}.profile")
+        profile_path = Path("/tmp/" + func.__name__ + f"{profile_cnt}.profile")
         prof = cProfile.Profile()
         prof.enable()
         start_ts = time.time()
@@ -182,6 +184,9 @@ def cprofile_wrapper(func):
             )
             ps.sort_stats(pstats.SortKey.TIME).print_stats(20)
             ps.sort_stats(pstats.SortKey.CUMULATIVE).print_stats(20)
+
+        maybe_upload_prof_stats_to_manifold(str(profile_path))  # fb-only
+
         return retval
 
     return profile_wrapper
