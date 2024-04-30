@@ -223,16 +223,9 @@ class NNModuleVariable(VariableTracker):
             return VariableBuilder(tx, NNModuleSource(source))(subobj)
         else:
             if istype(subobj, property):
-                # Get the source of the property object
-                new_source = None
-                if self.source:
-                    # Read the class attribute to reach the property
-                    new_source = AttrSource(AttrSource(self.source, "__class__"), name)
-                    # Get the getter function
-                    source = AttrSource(new_source, "fget")
                 return variables.UserFunctionVariable(
                     subobj.fget,
-                    source=new_source,
+                    source=source,
                 ).call_function(tx, [(self)], {})
             elif istype(subobj, classmethod):
                 return variables.UserMethodVariable(
@@ -245,11 +238,7 @@ class NNModuleVariable(VariableTracker):
                     subobj.__get__(base), source=source
                 )
             elif istype(subobj, types.FunctionType):
-                return variables.UserMethodVariable(
-                    subobj,
-                    self,
-                    source=source,
-                )
+                return variables.UserMethodVariable(subobj, self, source=source)
             elif is_safe_constant(subobj) or istensor(subobj):
                 # Support possibly common cases of class members
                 return VariableBuilder(tx, NNModuleSource(source))(subobj)
@@ -330,14 +319,6 @@ class NNModuleVariable(VariableTracker):
                 if mod.__module__ == "torch.nn.utils.parametrize":
                     # End of fn, this bubbles up and restarts tracing.
                     self.convert_to_unspecialized(tx)
-
-                # Guard on the id of forward method. Though its uncommon, there
-                # are cases where users monkeypatch the forward method after the
-                # model has already been torch.compile'd.
-                forward_method_source = AttrSource(self.source, "forward")
-                install_guard(
-                    forward_method_source.make_guard(GuardBuilder.CLOSURE_MATCH)
-                )
 
                 from .builder import wrap_fx_proxy
 
