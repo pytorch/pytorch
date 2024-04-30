@@ -500,7 +500,9 @@ class FxGraphCachePickler(pickle.Pickler):
     dispatch_table[FakeTensor] = _reduce_fake_tensor
     dispatch_table[torch.Tensor] = _reduce_tensor
     dispatch_table[torch.SymInt] = _reduce_symint
-    dispatch_table[torch.fx.experimental._backward_state.BackwardState] = _reduce_unsupported
+    dispatch_table[
+        torch.fx.experimental._backward_state.BackwardState
+    ] = _reduce_unsupported
 
     @staticmethod
     def dumps(obj) -> bytes:
