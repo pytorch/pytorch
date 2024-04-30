@@ -566,6 +566,8 @@ class FakeTensorTest(TestCase):
             x = torch.rand([10])
             x.tolist()
 
+    # Propagate real tensors doesn't work with fake-on-fake
+    @expectedFailurePropagateRealTensors
     def test_same_shape_env_preserved(self):
         shape_env = ShapeEnv()
         mode1 = FakeTensorMode(shape_env=shape_env)
@@ -786,6 +788,9 @@ class FakeTensorTest(TestCase):
             grad_in = torch.ops.aten._adaptive_avg_pool2d_backward(grad_out, inp)
             self.assertTrue(torch._prims_common.suggest_memory_format(grad_in) == torch.channels_last)
 
+    # Propagate real tensors doesn't work when original input arguments are
+    # fake
+    @expectedFailurePropagateRealTensors
     def test_export_numpy(self):
         class MyNumpyModel(torch.nn.Module):
             def forward(self, input):
@@ -1269,6 +1274,8 @@ make_propagate_real_tensors_cls(FakeTensorOperatorInvariants)
 
 
 class FakeTensorPropTest(TestCase):
+    # Propagate real tensors doesn't work with fake-on-fake
+    @expectedFailurePropagateRealTensors
     def test_fake_tensor_prop_on_nn_module(self):
         class ToyNnModuleWithParameters(torch.nn.Module):
             def __init__(self):
