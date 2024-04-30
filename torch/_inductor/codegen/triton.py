@@ -34,7 +34,7 @@ import torch.utils._pytree as pytree
 from torch._dynamo.utils import preserve_rng_state
 
 from torch._inductor.metrics import is_metric_table_enabled, log_kernel_metadata
-from torch._inductor.runtime.hints import AutotuneHint
+from torch._inductor.runtime.hints import AutotuneHint, DeviceProperties
 from torch._prims_common import is_integer_dtype
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.value_ranges import ValueRanges
@@ -125,7 +125,7 @@ def gen_common_triton_imports():
         """
         from torch._inductor.runtime import triton_helpers, triton_heuristics
         from torch._inductor.runtime.triton_helpers import libdevice, math as tl_math
-        from torch._inductor.runtime.hints import AutotuneHint, ReductionHint, TileHint, instance_descriptor
+        from torch._inductor.runtime.hints import AutotuneHint, ReductionHint, TileHint, instance_descriptor, DeviceProperties
         """
     )
     return imports.getvalue()
@@ -1360,7 +1360,7 @@ class TritonKernel(Kernel):
         }.get(self.reduction_hint, 64)
 
         # If multi_kernel is enabled, we do more aggressive persistent reduction.
-        # This may result in some persisent reductions slower than the
+        # This may result in some persistent reductions slower than the
         # corresponding non-persistent reductions. MultiKernel will do benchmarking
         # to pick the faster one.
         if config.triton.multi_kernel:
@@ -2833,8 +2833,7 @@ class TritonKernel(Kernel):
         )
         triton_meta = {
             "signature": triton_meta_signature,
-            "device": V.graph.scheduler.current_device.index,
-            "device_type": V.graph.scheduler.current_device.type,
+            "device": DeviceProperties.create(V.graph.scheduler.current_device),
             "constants": {},
         }
 
@@ -3921,8 +3920,7 @@ class TritonScheduling(BaseScheduling):
     def ready_to_flush(self) -> bool:
         return False
 
-    @preserve_rng_state()
-    def benchmark_fused_nodes(self, nodes):
+    def generate_kernel_code_from_nodes(self, nodes, benchmark_kernel=False):
         @dataclasses.dataclass
         class LastUsageHolder:
             n: Any
@@ -3954,18 +3952,25 @@ class TritonScheduling(BaseScheduling):
             )
 
             self.codegen_node_schedule_with_kernel(node_schedule, kernel)
-            with config.patch("benchmark_kernel", True), V.set_kernel_handler(kernel):
+            with config.patch(
+                "benchmark_kernel", benchmark_kernel
+            ), V.set_kernel_handler(kernel):
                 src_code = kernel.codegen_kernel()
         else:
             template_node = nodes[0]
             epilogue_nodes = nodes[1:]
 
-            with config.patch("benchmark_kernel", True):
+            with config.patch("benchmark_kernel", benchmark_kernel):
                 src_code = self.codegen_template(
                     template_node, epilogue_nodes, only_gen_src_code=True
                 )
 
         src_code = src_code.replace(str(Placeholder.KERNEL_NAME), "triton_")
+        return src_code
+
+    @preserve_rng_state()
+    def benchmark_fused_nodes(self, nodes):
+        src_code = self.generate_kernel_code_from_nodes(nodes, benchmark_kernel=True)
         mod = PyCodeCache.load(src_code)
 
         def cache_file_path():
