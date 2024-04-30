@@ -9,6 +9,7 @@ from typing import Any, cast, Dict, List, Optional, Union
 import torch
 import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
+from torch._library.fake_class_registry import FakeScriptObject
 from torch.export._tree_utils import reorder_kwargs
 from torch.export.exported_program import (
     ConstantArgument,
@@ -54,7 +55,16 @@ def _assign_attr(
         assert isinstance(from_obj, torch.Tensor)
         to_module.register_buffer(field, from_obj, persistent=persistent)
     elif attr_kind == _AttrKind.CONSTANT:
-        assert isinstance(from_obj, (torch.Tensor, torch.ScriptObject))
+        assert not isinstance(
+            from_obj, FakeScriptObject
+        ), "FakeScriptObject should only exist during tracing."
+        assert isinstance(
+            from_obj,
+            (
+                torch.Tensor,
+                torch.ScriptObject,
+            ),
+        )
         setattr(to_module, field, from_obj)
 
 
