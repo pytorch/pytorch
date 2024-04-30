@@ -829,12 +829,14 @@ class MLP(nn.Module):
         self,
         dim: int,
         device: Optional[torch.device] = None,
+        *,
+        bias: bool = True,
         with_buffer: bool = False,
         dim_multiplier: int = 4,
     ):
         super().__init__()
-        self.in_proj = nn.Linear(dim, dim_multiplier * dim, device=device)
-        self.out_proj = nn.Linear(dim_multiplier * dim, dim, device=device)
+        self.in_proj = nn.Linear(dim, dim_multiplier * dim, device=device, bias=bias)
+        self.out_proj = nn.Linear(dim_multiplier * dim, dim, device=device, bias=bias)
         if with_buffer:
             self.register_buffer("buffer", torch.randn((dim,), device=device))
         else:
