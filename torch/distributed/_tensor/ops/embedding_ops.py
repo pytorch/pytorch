@@ -114,7 +114,7 @@ class _MaskPartial(_Partial):
 
         # perform sum reduction
         return funcol.all_reduce(
-            tensor, reduceOp=self.reduce_op.name, group=(mesh, mesh_dim)
+            tensor, reduceOp=self.reduce_op, group=(mesh, mesh_dim)
         )
 
     def _reduce_shard_value(
