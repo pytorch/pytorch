@@ -619,6 +619,7 @@ class _ModuleFrame:
             self.parent_call_module.kwargs = kwarg_nodes
 
     def add_placeholder(self, x):
+        assert self.fqn != "", f"Cannot add placeholder {x} to root module"
         assert x.graph is self.flat_graph
         # x is not in subgraph, create a new placeholder for subgraph
         with self.graph.inserting_before(None):
@@ -839,7 +840,7 @@ def _reorder_submodules(
         _reorder_submodules(child, fqn_order, prefix=fqn + ".")
         delattr(parent, name)
         children.append((fqn_order[fqn], name, child))
-    children.sort(key=lambda x: x[0])
+    children.sort(key=operator.itemgetter(0))
     for _, name, child in children:
         parent.register_module(name, child)
 

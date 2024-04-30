@@ -582,8 +582,8 @@ class TestPasses(TestCase):
         self.assertExpectedInline(
             mod.code.strip("\n"),
             """\
-def forward(self, arg_0):
-    x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+def forward(self, x):
+    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     sin = torch.ops.aten.sin.default(add);  add = None
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
@@ -597,8 +597,8 @@ def forward(self, arg_0):
         self.assertExpectedInline(
             mod.code.strip("\n"),
             """\
-def forward(self, arg_0):
-    x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+def forward(self, x):
+    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     sin = torch.ops.aten.sin.default(add);  add = None
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
@@ -613,8 +613,8 @@ def forward(self, arg_0):
         self.assertExpectedInline(
             mod.code.strip("\n"),
             """\
-def forward(self, arg_0):
-    x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+def forward(self, x):
+    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     sin = torch.ops.aten.sin.default(add);  add = None
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
@@ -628,8 +628,8 @@ def forward(self, arg_0):
         self.assertExpectedInline(
             mod.code.strip("\n"),
             """\
-def forward(self, arg_0):
-    x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+def forward(self, x):
+    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     submod_5 = self.submod_1
     sum_1 = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(True, submod_5, add);  submod_5 = add = None
@@ -643,8 +643,8 @@ def forward(self, arg_0):
         self.assertExpectedInline(
             mod.code.strip("\n"),
             """\
-def forward(self, arg_0):
-    x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+def forward(self, x):
+    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     sin = torch.ops.aten.sin.default(add)
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
@@ -663,8 +663,8 @@ def forward(self, arg_0):
         self.assertExpectedInline(
             mod.code.strip("\n"),
             """\
-def forward(self, arg_0):
-    x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+def forward(self, x):
+    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     submod_5 = self.submod_1
     wrap_with_set_grad_enabled = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(True, submod_5, add);  submod_5 = add = None
@@ -698,8 +698,8 @@ def forward(self, arg_0):
         self.assertExpectedInline(
             new_gm.code.strip("\n"),
             """\
-def forward(self, arg_0, arg_1):
-    x1, x2, = fx_pytree.tree_flatten_spec(([arg_0, arg_1], {}), self._in_spec)
+def forward(self, x1, x2):
+    x1, x2, = fx_pytree.tree_flatten_spec(([x1, x2], {}), self._in_spec)
     submod_1 = self.submod_1(x1, x2);  x1 = x2 = None
     getitem = submod_1[0]
     getitem_1 = submod_1[1];  submod_1 = None
