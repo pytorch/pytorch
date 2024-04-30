@@ -13,7 +13,6 @@ from torch.distributed._composable_state import (
 )
 from torch.distributed.utils import _to_kwargs
 from torch.utils._pytree import tree_flatten, tree_map
-from torch.utils.hooks import RemovableHandle
 from ._fsdp_api import MixedPrecisionPolicy
 from ._fsdp_common import _cast_fp_tensor, TrainingState
 from ._fsdp_param import FSDPParam
@@ -55,7 +54,6 @@ class FSDPState(_State):
         self._state_ctx = FSDPStateContext()
         self._comm_ctx = FSDPCommContext()
         self._training_state: TrainingState = TrainingState.IDLE
-        self._pre_backward_hook_handles: List[RemovableHandle] = []
 
     # Define a separate init since `__init__` is called in the contract
     def init(
@@ -224,9 +222,6 @@ class FSDPState(_State):
             self._state_ctx.post_backward_final_callback_queued = False
 
     def _finalize_backward(self) -> None:
-        for handle in self._pre_backward_hook_handles:
-            handle.remove()
-        self._pre_backward_hook_handles.clear()
         if self._fsdp_param_group:
             self._fsdp_param_group.finalize_backward()
 
@@ -239,8 +234,7 @@ class FSDPState(_State):
         if tensors:
             grad_fns = tuple(t.grad_fn for t in tensors if t.grad_fn is not None)
             pre_backward = functools.partial(self._pre_backward, grad_fns)
-            handle = register_multi_grad_hook(tensors, pre_backward, mode="any")
-            self._pre_backward_hook_handles.append(handle)
+            register_multi_grad_hook(tensors, pre_backward, mode="any")
             if self._fsdp_param_group:
                 self._fsdp_param_group.all_forward_output_grad_fns.add(grad_fns)
         return output
