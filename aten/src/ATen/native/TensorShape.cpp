@@ -421,19 +421,9 @@ Tensor& set_storage_meta__symint(Tensor& result, Storage storage, c10::SymInt st
     // it.  TODO: Actually this might not quite be correct if we use special
     // pointers to track whether or not fake cuda tensors are pinned or not
     const auto itemsize = result.dtype().itemsize();
-    c10::SymInt new_size_bytes = at::detail::computeStorageNbytes(
+    c10::SymInt size_bytes = at::detail::computeStorageNbytes(
         size, stride, itemsize, std::move(storage_offset));
-    // TODO: When there are unbacked SymInts, we unconditionally skip the
-    // setter.  This is technically wrong, but we cannot conveniently test
-    // the real condition in many cases, because a lot of people are using
-    // set_ just to swizzle metadata on a tensor, they didn't actually want
-    // to see if they need to resize the storage.
-    //
-    // The old behavior was to unconditionally set_nbytes, but I think not
-    // setting it is more safe.
-    if (new_size_bytes.has_hint() && storage.sym_nbytes().has_hint() && TORCH_GUARD_SIZE_OBLIVIOUS(new_size_bytes.sym_gt(storage.sym_nbytes()))) {
-      storage.set_nbytes(std::move(new_size_bytes));
-    }
+    storage.set_nbytes(std::move(size_bytes));
   }
   return result;
 }
