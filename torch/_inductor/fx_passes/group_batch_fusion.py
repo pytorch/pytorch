@@ -302,7 +302,6 @@ class GroupLinearFusion(GroupFusion):
 
         if all(bias is None for bias in group_biases):
             group_biases = None  # type: ignore[assignment]
-        group_biases: Optional[List[Any]]
 
         with graph.inserting_before(subset[0]):
             fused_mm = graph.call_function(
@@ -649,10 +648,8 @@ class BatchLayernormFusion(BatchFusion):
 
         if all(bias is None for bias in group_biases):
             group_biases = None  # type: ignore[assignment]
-        group_biases: Optional[List[Any]]
         if all(weight is None for weight in group_weights):
             group_weights = None  # type: ignore[assignment]
-        group_weights: Optional[List[Any]]
         assert all(
             eps == group_epss[0] for eps in group_epss
         ), "all epsilon values must be equal"
