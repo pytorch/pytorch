@@ -35,7 +35,7 @@ constexpr static std::unordered_map<std::string, hipsparseLtDatatype_t> sparseLt
     {"HIP_R_16BF", HIPSPARSELT_R_16BF},
 };
 
-static bool isSupportedHipSparseLtArch(int idx) {
+static bool isHipSparseLtSupported(int idx) {
     static std::unordered_map<int, bool> cache;
     if (cache.find(idx) != cache.end()) {
         return cache[idx];
@@ -43,10 +43,10 @@ static bool isSupportedHipSparseLtArch(int idx) {
     hipDeviceProp_t prop = at::cuda::getCurrentDeviceProperties(idx);
     std::string_view arch = prop.gcnArchName;
     constexpr std::set<std::string> supported_archs = {"gfx940", "gfx941", "gfx942", "gfx1200", "gfx1201"};
-    bool result = (supported_archs.find(arch) != supported_archs.end());
+    bool result = (supported_archs.find(arch) != supported_archs.end()) && (ROCM_VERSION >= 61000);
     cache[idx] = result;
     if (!result) {
-        TORCH_CHECK(false, "hipSPARSELt not supported on your machine.");
+        TORCH_CHECK(false, "hipSPARSELt not supported on this platform.");
     }
     return result;
 }
@@ -84,7 +84,7 @@ at::Tensor _cslt_compress(const Tensor& sparse_input)
             type = sparseLtDataTypes.at("CUDA_R_16F");
             break;
         case at::ScalarType::BFloat16:
-            type = sparseLtDataTypes.at("CUDA_R_16BF";
+            type = sparseLtDataTypes.at("CUDA_R_16BF");
             break;
 #ifndef USE_ROCM
     case at::ScalarType::Float:
@@ -164,7 +164,9 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
   cusparseComputeType compute_type;
   auto compression_factor = 9;
 
-
+#ifdef USE_ROCM
+    auto isHipSparseLtSupported = isHipSparseLtSupported(at::cuda::getCurrentDevice());
+#endif
   switch(compressed_A.scalar_type())
   {
     case at::ScalarType::Char:
@@ -175,7 +177,7 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
         break;
 
 // cuSPARSELt v0.5.2 onwards changes CUSPARSE_COMPUTE_TF32, CUSPARSE_COMPUT_16F to CUSPARSE_COMPUTE_32F
-#if ((defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 502) || (defined(USE_ROCM) && ROCM_VERSION >= 61000))
+#if ((defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 502) || isHipSparseLtSupported)
     case at::ScalarType::Half:
         input_type = sparseLtDataTypes.at("CUDA_R_16F");
         output_type = sparseLtDataTypes.at("CUDA_R_16F");
