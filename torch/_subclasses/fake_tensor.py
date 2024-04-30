@@ -813,8 +813,8 @@ class _BypassDispatchCacheEntry:
     _BypassDispatchCacheEntry. We don't use _BypassDispatchCache directly
     because it hangs onto extra Exception information we don't want to persist.
     """
-    reason: str
 
+    reason: str
 
 
 @dataclass(frozen=True)
@@ -837,8 +837,11 @@ class DispatchCacheInfo:
 # new allocations of Tensors which have non-meta storage so
 # memory should not significantly increase.
 
+
 class FakeTensorMode(TorchDispatchMode):
-    cache: Dict[_DispatchCacheKey, Union[_DispatchCacheEntry, _BypassDispatchCacheEntry]] = {}
+    cache: Dict[
+        _DispatchCacheKey, Union[_DispatchCacheEntry, _BypassDispatchCacheEntry]
+    ] = {}
     cache_hits: int = 0
     cache_misses: int = 0
     cache_bypasses: Dict[str, int] = defaultdict(int)
