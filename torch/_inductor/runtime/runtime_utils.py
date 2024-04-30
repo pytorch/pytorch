@@ -101,7 +101,7 @@ def do_bench(*args, **kwargs):
     return triton_do_bench(*args, **kwargs)[0]
 
 
-def do_bench_cpu(fn, warmup=3, times=10):
+def do_bench_cpu(fn, warmup=5, times=20):
     assert times > 0
     for _ in range(warmup):
         fn()
