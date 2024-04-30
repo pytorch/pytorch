@@ -65,7 +65,7 @@ struct WeightRecp {
   int64_t N;
   std::vector<T> weight_recps;
   WeightRecp(int64_t N) : N(N) {
-    weights_recps.reserve(N);
+    weight_recps.reserve(N);
     for (const auto i : c10::irange(N)) {
       weight_recps.push_back(T(scalar_t(1) / static_cast<scalar_t>(i + 1)));
     }
