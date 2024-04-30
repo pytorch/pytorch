@@ -26,7 +26,7 @@ from typing import (
 import sympy
 
 import torch
-from torch._dynamo.utils import dynamo_timed
+from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.utils._triton import has_triton
 
@@ -627,9 +627,15 @@ class BaseSchedulerNode:
                 from torch._subclasses.fake_tensor import FakeTensorMode
                 from torch.utils.flop_counter import FlopCounterMode
 
-                with FakeTensorMode(), FlopCounterMode(
+                assert self.node.fx_node is not None
+                with FakeTensorMode() as fake_mode, FlopCounterMode(
                     display=False
-                ) as flop_counter_mode:
+                ) as flop_counter_mode, V.set_current_node(
+                    self.node.fx_node
+                ), V.set_fake_mode(
+                    fake_mode
+                ):
+                    assert V.current_node is not None
                     from .ir import ir_node_to_tensor
 
                     fake_inputs = [
@@ -736,6 +742,10 @@ class SchedulerNode(BaseSchedulerNode):
             f"{name}.group.iteration = {self.group[1]}",
             f"{name}.sizes = {self._sizes}",
         ]
+        for dep in self.read_writes.reads_and_writes():
+            buf_name = dep.name
+            buf = V.graph.get_buffer(buf_name)
+            lines.append(f"{buf_name}_layout = {pformat(buf.layout)}")
         if self.get_aliases():
             lines.append(f"{name}.aliases = {pformat(self.get_aliases())}")
         if self.get_mutations():
@@ -743,6 +753,20 @@ class SchedulerNode(BaseSchedulerNode):
         if isinstance(self._body, ir.LoopBody):
             lines.append(f"class {name}_loop_body:")
             lines.append(textwrap.indent(self._body.debug_str(), "    "))
+
+        if ir.is_triton(self.node.get_device()):
+            backend = self.scheduler.get_backend(self.node.get_device())
+            V.graph.scheduler.current_device = self.node.get_device()
+
+            # Don't increment kernel count when generating debug string.
+            # This will confuse some unit tests that check the number of
+            # generated kernels.
+            old_generated_kernel_count = metrics.generated_kernel_count
+            triton_code = backend.generate_kernel_code_from_nodes((self,)).strip()
+            metrics.generated_kernel_count = old_generated_kernel_count
+
+            lines.append(f"{self.get_name()} Triton code:")
+            lines.append(textwrap.indent(triton_code, "    "))
         return "\n".join(lines)
 
     def get_ranges(self):
@@ -900,6 +924,16 @@ class FusedSchedulerNode(BaseSchedulerNode):
             f"{self.get_name()}.snodes[{i}] =\n{node.debug_str()}"
             for i, node in enumerate(self.snodes)
         ]
+        device = self.snodes[0].node.get_device()
+        if ir.is_triton(device):
+            backend = self.scheduler.get_backend(device)
+            V.graph.scheduler.current_device = device
+            old_generated_kernel_count = metrics.generated_kernel_count
+            triton_code = backend.generate_kernel_code_from_nodes(self.snodes).strip()
+            metrics.generated_kernel_count = old_generated_kernel_count
+            lines.append(f"{self.get_name()} Triton code:")
+            lines.append(textwrap.indent(triton_code, "    "))
+
         return textwrap.indent("\n".join(lines).rstrip(), "    ")
 
     def set_last_usage(
@@ -1271,6 +1305,7 @@ class Scheduler:
     @dynamo_timed
     def __init__(self, nodes):
         super().__init__()
+        V.graph.scheduler = self
         self.backends = {}
         self.fuse_cache = {}
         self.post_grad_graph_id = next(_post_grad_graph_counter)
@@ -1493,6 +1528,13 @@ class Scheduler:
 
         unbacked_symbol_to_origin_node = {}
 
+        # NB: None means that the dependency is on an input.  Don't actually
+        # generate a dependency because if we do, Inductor will start trying
+        # to free the unbacked int but that's pointless
+        for name, val in V.graph.graph_inputs.items():
+            if isinstance(val, sympy.Symbol):
+                unbacked_symbol_to_origin_node[val] = None
+
         for node in self.nodes:
             log.debug("scheduling %s", node.node)
 
@@ -1507,7 +1549,7 @@ class Scheduler:
                 # because if a MultiOutputLayout buffer propagates an unbacked
                 # symint to multiple outputs, they will all claim to def it.
                 if s not in unbacked_symbol_to_origin_node:
-                    unbacked_symbol_to_origin_node[s] = node
+                    unbacked_symbol_to_origin_node[s] = node.get_name()
 
             unbacked_symbol_uses = sorted(
                 node.node.get_unbacked_symbol_uses(), key=lambda x: x.name
@@ -1517,7 +1559,8 @@ class Scheduler:
                 assert (
                     s in unbacked_symbol_to_origin_node
                 ), f"{s} not in {unbacked_symbol_to_origin_node}"
-                node.add_fake_dep(StarDep(unbacked_symbol_to_origin_node[s].get_name()))
+                if (r := unbacked_symbol_to_origin_node[s]) is not None:
+                    node.add_fake_dep(StarDep(r))
 
             # a node will mutate either 0 or 1 buffers
             assert len(node.get_mutations()) <= 1
@@ -1562,9 +1605,11 @@ class Scheduler:
                 assert (
                     s in unbacked_symbol_to_origin_node
                 ), f"{s} not in {unbacked_symbol_to_origin_node.keys()}"
-                node_name = unbacked_symbol_to_origin_node[s].node.name
-                log.debug("scheduling output %s for unbacked symint %s", node_name, s)
-                add_user(node_name, OutputNode(StarDep(node_name)))
+                if (node_name := unbacked_symbol_to_origin_node[s]) is not None:
+                    log.debug(
+                        "scheduling output %s for unbacked symint %s", node_name, s
+                    )
+                    add_user(node_name, OutputNode(StarDep(node_name)))
 
         # make sure input mutation isn't dead-code-eliminated
         for name in self.mutation_renames:
@@ -1725,7 +1770,6 @@ class Scheduler:
         """
         assert len(nodes) > 0
         device = nodes[0].get_device()
-        V.graph.scheduler = self
         self.current_device = device
         backend = self.get_backend(device)
         return backend.benchmark_fused_nodes(nodes)
@@ -2283,10 +2327,10 @@ class Scheduler:
                 possible_fusions_group_by_priority[fusion_pair_priority].append(
                     (node1, node2)
                 )
-        # Sorted by fusion_pair_priority and return the possible fusions with highest priority
-        possible_fusions_with_highest_priority = sorted(
-            possible_fusions_group_by_priority.items(), key=lambda item: item[0]
-        )[0][1]
+        # return the possible fusions with highest priority
+        possible_fusions_with_highest_priority = min(
+            possible_fusions_group_by_priority.items(), key=operator.itemgetter(0)
+        )[1]
         assert len(possible_fusions_with_highest_priority) > 0
         return possible_fusions_with_highest_priority
 
@@ -2392,6 +2436,7 @@ class Scheduler:
         # the current kernel from where 'allocate' retrieve those decisions.
         # We have to make sure there is a non-NULL kernel handler to store
         # those inplace update decisions.
+        counters["inductor"]["extern_calls"] += 1
         with V.set_kernel_handler(Kernel(increase_kernel_count=False)):
             scheduler_node.decide_inplace_update()
             scheduler_node.allocate()

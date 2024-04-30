@@ -316,17 +316,28 @@ class FSDPParamGroup:
 
     def post_backward(self, *unused: Any):
         self._training_state = TrainingState.POST_BACKWARD
+        with torch.profiler.record_function("FSDP::post_backward_accumulate"):
+            for fsdp_param in self.fsdp_params:
+                fsdp_param.accumulate_unsharded_grad_if_needed()
         with torch.profiler.record_function("FSDP::post_backward_reshard"):
             if not self.reduce_grads:
                 if self.reshard_after_backward:
                     self.reshard()
+                for fsdp_param in self.fsdp_params:
+                    fsdp_param.to_accumulated_grad_if_needed()
                 return
             # Save the autograd-computed gradients before resharding to only
             # access the unsharded parameters when their data is present
             fsdp_params_with_grad: List[FSDPParam] = []
             unsharded_grads: List[torch.Tensor] = []
             for fsdp_param in self.fsdp_params:
-                if fsdp_param.unsharded_param.grad is not None:
+                # May have an accumulated gradient of the reduce dtype if the
+                # previous backward did not reduce-scatter
+                if fsdp_param.unsharded_accumulated_grad is not None:
+                    fsdp_params_with_grad.append(fsdp_param)
+                    unsharded_grads.append(fsdp_param.unsharded_accumulated_grad_data)
+                    fsdp_param.unsharded_accumulated_grad = None
+                elif fsdp_param.unsharded_param.grad is not None:
                     fsdp_params_with_grad.append(fsdp_param)
                     unsharded_grads.append(fsdp_param.unsharded_grad_data)
                     fsdp_param.unsharded_param.grad = None
