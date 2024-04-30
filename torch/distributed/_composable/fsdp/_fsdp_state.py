@@ -228,14 +228,12 @@ class FSDPState(_State):
     def _register_pre_backward_hook(self, output: Any) -> Any:
         if not torch.is_grad_enabled():
             return output
-
         flat_outputs, _ = tree_flatten(output)
-        tensors = tuple(t for t in flat_outputs if (t is not None and t.requires_grad))
+        tensors = tuple(
+            t for t in flat_outputs if (torch.is_tensor(t) and t.requires_grad)
+        )
         if tensors:
-            grad_fns = tuple(t.grad_fn for t in tensors if t.grad_fn is not None)
             register_multi_grad_hook(tensors, self._pre_backward, mode="any")
-            if self._fsdp_param_group:
-                self._fsdp_param_group.all_forward_output_grad_fns.add(grad_fns)
         return output
 
     def _register_root_post_backward_final_callback(self):
