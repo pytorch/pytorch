@@ -50,6 +50,8 @@ from typing import (
     ValuesView,
 )
 
+from torch._utils_internal import maybe_upload_prof_stats_to_manifold
+
 from ..utils.hooks import RemovableHandle
 
 try:
@@ -144,7 +146,7 @@ def cprofile_wrapper(func):
     def profile_wrapper(*args, **kwargs):
         global timer_counter
         profile_cnt = next(timer_counter)
-        profile_path = Path(func.__name__ + f"{profile_cnt}.profile")
+        profile_path = Path("/tmp/" + func.__name__ + f"{profile_cnt}.profile")
         prof = cProfile.Profile()
         prof.enable()
         start_ts = time.time()
@@ -182,6 +184,9 @@ def cprofile_wrapper(func):
             )
             ps.sort_stats(pstats.SortKey.TIME).print_stats(20)
             ps.sort_stats(pstats.SortKey.CUMULATIVE).print_stats(20)
+
+        maybe_upload_prof_stats_to_manifold(str(profile_path))  # fb-only
+
         return retval
 
     return profile_wrapper
@@ -1153,7 +1158,11 @@ def set_example_value(node, example_value):
     # this to accurately reflect what the state of the value was at the time
     # the program was traced).
     node.meta["example_value"] = example_value
-    assert TracingContext.try_get() is not None
+    shape_env = TracingContext.get().fake_mode.shape_env
+    if symbol_to_path := torch.fx.experimental.symbolic_shapes.compute_unbacked_bindings(
+        shape_env, example_value
+    ):
+        node.meta["unbacked_bindings"] = symbol_to_path
 
 
 def _get_fake_tensor(vt):
