@@ -181,11 +181,6 @@ if [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
   export PATH="$HOME/.local/bin:$PATH"
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *aarch64* ]]; then
-  # TODO: revisit this once the CI is stabilized on aarch64 linux
-  export VALGRIND=OFF
-fi
-
 install_tlparse
 
 # DANGER WILL ROBINSON.  The LD_PRELOAD here could cause you problems
