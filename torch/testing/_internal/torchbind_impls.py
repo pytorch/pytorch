@@ -1,11 +1,12 @@
 import contextlib
+from typing import Optional
 
 import torch
 
 
 _TORCHBIND_IMPLS_INITIALIZED = False
 
-_TENSOR_QUEUE_GLOBAL_TEST = None
+_TENSOR_QUEUE_GLOBAL_TEST: Optional[torch.ScriptObject] = None
 
 
 def init_torchbind_implementations():

@@ -1070,18 +1070,18 @@ def forward(self, L_tq_ : torch.ScriptObject, L_x_ : torch.Tensor):
             self.assertExpectedInline(
                 backend.graphs[0].code.strip(),
                 """\
-    def forward(self, L_x_ : torch.Tensor, L_tq_ : torch.ScriptObject):
-        l_x_ = L_x_
-        l_tq_ = L_tq_
-        x1 = l_x_.view(-1)
-        x2 = l_x_.permute(1, 0);  l_x_ = None
-        call_torchbind = torch.ops.higher_order.call_torchbind(l_tq_, 'push', x1)
-        call_torchbind_1 = torch.ops.higher_order.call_torchbind(l_tq_, 'push', x2)
-        call_torchbind_2 = torch.ops.higher_order.call_torchbind(l_tq_, 'size')
-        sub = x1 - 2;  x1 = None
-        call_torchbind_3 = torch.ops.higher_order.call_torchbind(l_tq_, 'size');  l_tq_ = None
-        add = x2 + 2;  x2 = None
-        return (sub, add)""",
+def forward(self, L_x_ : torch.Tensor, L_tq_ : torch.ScriptObject):
+    l_x_ = L_x_
+    l_tq_ = L_tq_
+    x1 = l_x_.view(-1)
+    x2 = l_x_.permute(1, 0);  l_x_ = None
+    call_torchbind = torch.ops.higher_order.call_torchbind(l_tq_, 'push', x1)
+    call_torchbind_1 = torch.ops.higher_order.call_torchbind(l_tq_, 'push', x2)
+    call_torchbind_2 = torch.ops.higher_order.call_torchbind(l_tq_, 'size')
+    sub = x1 - 2;  x1 = None
+    call_torchbind_3 = torch.ops.higher_order.call_torchbind(l_tq_, 'size');  l_tq_ = None
+    add = x2 + 2;  x2 = None
+    return (sub, add)""",
             )
 
     def test_compile_error_on_non_fakified_method(self):

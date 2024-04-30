@@ -81,7 +81,7 @@ def _check_valid_flat_script_obj(flat_x):
 def to_fake_obj(fake_mode, x: torch.ScriptObject) -> FakeScriptObject:
     import torch.utils._pytree as pytree
 
-    flat_x = x.__obj_flatten__()
+    flat_x = x.__obj_flatten__()  # type: ignore[attr-defined]
 
     _check_valid_flat_script_obj(flat_x)
 
