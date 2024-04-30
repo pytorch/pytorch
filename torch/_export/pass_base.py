@@ -18,6 +18,7 @@ from torch.fx.graph import CodeGen
 from torch.fx.passes.infra.pass_base import PassBase, PassResult
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.utils import _pytree as pytree
+from torch.fx.experimental.symbolic_shapes import PropagateUnbackedSymInts, compute_unbacked_bindings
 
 
 __all__ = ["_ExportPassBaseDeprecatedDoNotUse"]
@@ -238,7 +239,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
             return super().run_node(n)
 
     def __init__(self) -> None:
-        self.interpreter = torch.fx.Interpreter(
+        self.interpreter = PropagateUnbackedSymInts(
             torch.fx.GraphModule(torch.nn.Module(), torch.fx.Graph())
         )
         self.tracer = self.ExportTracer(self, CodeGen())
@@ -268,6 +269,9 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
 
         res_proxy = self.tracer.create_proxy(kind, target, args_proxy, kwargs_proxy, name=name)
         res_proxy.node.meta.update(meta.data)
+        if self.fake_tensor_mode and (shape_env := self.fake_tensor_mode.shape_env):
+            if symbol_to_path := compute_unbacked_bindings(shape_env, res_data):
+                res_proxy.node.meta["unbacked_bindings"] = symbol_to_path
         self.tracer.set_metadata(res_proxy.node, res_data)
         return ProxyValue(res_data, res_proxy)
 
