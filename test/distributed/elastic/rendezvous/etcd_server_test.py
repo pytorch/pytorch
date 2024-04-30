@@ -41,19 +41,22 @@ class EtcdServerTest(unittest.TestCase):
         server = EtcdServer()
         server.start()
 
-        client = etcd.Client(server.get_host(), server.get_port())
+        try:
+            client = etcd.Client(server.get_host(), server.get_port())
 
-        rdzv = EtcdRendezvous(
-            client=client,
-            prefix="test",
-            run_id=1,
-            num_min_workers=1,
-            num_max_workers=1,
-            timeout=60,
-            last_call_timeout=30,
-        )
-        rdzv_handler = EtcdRendezvousHandler(rdzv)
-        store, rank, world_size = rdzv_handler.next_rendezvous()
-        self.assertIsNotNone(store)
-        self.assertEqual(0, rank)
-        self.assertEqual(1, world_size)
+            rdzv = EtcdRendezvous(
+                client=client,
+                prefix="test",
+                run_id=1,
+                num_min_workers=1,
+                num_max_workers=1,
+                timeout=60,
+                last_call_timeout=30,
+            )
+            rdzv_handler = EtcdRendezvousHandler(rdzv)
+            store, rank, world_size = rdzv_handler.next_rendezvous()
+            self.assertIsNotNone(store)
+            self.assertEqual(0, rank)
+            self.assertEqual(1, world_size)
+        finally:
+            server.stop()
