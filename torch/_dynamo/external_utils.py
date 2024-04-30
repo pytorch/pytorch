@@ -1,6 +1,8 @@
 # This module contains functions that *will be allowed* by dynamo
 
 import functools
+
+import threading
 import types
 
 import torch
@@ -27,6 +29,12 @@ def is_compiling() -> bool:
     return torch.compiler.is_compiling()
 
 
+_TLS = threading.local()
+
+_TLS.cached_wrappers = {}
+
+
+@functools.lru_cache(None)
 def create_new_fn(fn):
     from .bytecode_transformation import transform_code_object
 
@@ -50,6 +58,18 @@ def wrap_inline(fn):
     Create an extra frame around fn that is not in skipfiles
     """
 
+    # If the code object has already been wrapped before, return the cached
+    # wrapper.
+    cached_wrappers = _TLS.cached_wrappers
+
+    if isinstance(fn, torch.nn.Module):
+        key = fn.forward.__code__
+    else:
+        key = fn.__code__
+
+    if cached_wrapper := cached_wrappers.get(key):
+        return cached_wrapper
+
     def inner(*args, **kwargs):
         return fn(*args, **kwargs)
 
@@ -58,6 +78,8 @@ def wrap_inline(fn):
     # functools.wraps is really important to ensure that __dict__ of the old
     # function is propagated to the new function.
     new_fn = functools.wraps(fn)(create_new_fn(inner))
+
+    cached_wrappers[key] = new_fn
 
     return new_fn
 
