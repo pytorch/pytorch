@@ -1674,6 +1674,8 @@ def cpp_compile_command(
 
 def run_command_and_check(cmd: str):
     cmd = shlex.split(cmd)
+    print("!!! current working dir: ", os.getcwd())
+    print("!!! run_command_and_check --> cmd: ", cmd)
     try:
         subprocess.check_call(cmd)
     except subprocess.CalledProcessError as e:
@@ -2013,6 +2015,8 @@ def cpp_prefix() -> str:
 def compile_file(
     input_path: Union[str, List[str]], output_path: str, cmd: List[str]
 ) -> None:
+    print("!!! current working dir: ", os.getcwd())
+    print("!!! compile_file --> cmd: ", cmd)
     input_paths = [input_path] if isinstance(input_path, str) else input_path
     input_files = [
         os.path.basename(ip) if config.is_fbcode() else ip for ip in input_paths
