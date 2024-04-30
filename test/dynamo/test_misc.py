@@ -26,9 +26,9 @@ from unittest.mock import patch
 
 import numpy as np
 import torch
-
-import torch._dynamo.test_case
 import torch._dynamo.testing
+
+import torch._inductor.test_case
 import torch.onnx.operators
 
 import torch.utils._pytree as pytree
@@ -150,7 +150,7 @@ class UserDefineSetAttr:
         return self.__dict__[f"pfx_{key}"]
 
 
-class MiscTests(torch._dynamo.test_case.TestCase):
+class MiscTests(torch._inductor.test_case.TestCase):
     def test_get_cache_entry(self):
         def f(x):
             return x + 1

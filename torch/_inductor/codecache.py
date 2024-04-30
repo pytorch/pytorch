@@ -480,6 +480,14 @@ def _reduce_symint(s):
     return (_ident, (str(s),))
 
 
+def _reduce_unsupported(s):
+    """
+    See FxGraphCachePickler. Custom reducer to handle any objects that we don't
+    support and therefore raise to bypass caching.
+    """
+    raise BypassFxGraphCache
+
+
 class FxGraphCachePickler(pickle.Pickler):
     """
     Custom pickler to customize the pickling of some objects (Tensors), only for the
@@ -492,6 +500,9 @@ class FxGraphCachePickler(pickle.Pickler):
     dispatch_table[FakeTensor] = _reduce_fake_tensor
     dispatch_table[torch.Tensor] = _reduce_tensor
     dispatch_table[torch.SymInt] = _reduce_symint
+    dispatch_table[
+        torch.fx.experimental._backward_state.BackwardState
+    ] = _reduce_unsupported
 
     @staticmethod
     def dumps(obj) -> bytes:
@@ -878,7 +889,6 @@ class FxGraphCache:
         Load a compiled graph from the cache. If a cached entry does not exist,
         compile the graph and save it to the cache.
         """
-
         compiled_graph = None
         try:
             FxGraphCache._check_can_cache(gm)
