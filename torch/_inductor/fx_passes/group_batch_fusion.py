@@ -753,7 +753,7 @@ class BatchLayernormFusion(BatchFusion):
 
 class BatchPointwiseOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
     """
-    Batch poinwise ops (e.g., sigmoid, relu, tanh) fusion in pre grad pass.
+    Batch pointwise ops (e.g., sigmoid, relu, tanh) fusion in pre grad pass.
     We fuse it in random place, and the introduced stack node may be merged in split cat.
     """
 
