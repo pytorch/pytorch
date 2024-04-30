@@ -52,22 +52,12 @@ inline PyObject* wrap(void* value) {
   return THPUtils_packInt64(reinterpret_cast<intptr_t>(value));
 }
 
-inline PyObject* wrap(THPDtype* dtype) {
-  Py_INCREF(dtype);
-  return (PyObject*)dtype;
-}
-
 inline PyObject* wrap(at::ScalarType scalarType) {
-  return wrap(getTHPDtype(scalarType));
-}
-
-inline PyObject* wrap(THPLayout* layout) {
-  Py_INCREF(layout);
-  return (PyObject*)layout;
+  return Py_NewRef(getTHPDtype(scalarType));
 }
 
 inline PyObject* wrap(at::Layout layout) {
-  return wrap(getTHPLayout(layout));
+  return Py_NewRef(getTHPLayout(layout));
 }
 
 inline PyObject* wrap(at::Tensor tensor) {

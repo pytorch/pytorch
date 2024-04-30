@@ -155,7 +155,7 @@ struct type_caster<at::MemoryFormat> {
       at::MemoryFormat src,
       return_value_policy /* policy */,
       handle /* parent */) {
-    return handle(torch::utils::getTHPMemoryFormat(src));
+    return handle(Py_NewRef(torch::utils::getTHPMemoryFormat(src)));
   }
 };
 
