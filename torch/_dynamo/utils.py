@@ -672,6 +672,10 @@ class CompilationMetrics:
     compliant_custom_ops: Set[str]
     restart_reasons: Set[str]
     dynamo_time_before_restart_s: float
+    # Sometimes, we will finish analyzing a frame but conclude we don't want
+    # to install any guarded code.  True means we actually decided to install
+    # a compiled frame
+    has_guarded_code: bool
 
 
 DEFAULT_COMPILATION_METRICS_LIMIT = 64
