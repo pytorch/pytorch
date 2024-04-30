@@ -27,12 +27,28 @@ kernel void int4pack_mm(
     device   T                 * outputData     [[buffer(3)]],
     constant uint3             & sizes          [[buffer(4)]],
     uint                         thread_index   [[thread_position_in_grid]]) {
-    uint y = thread_index / sizes.x;
-    uint x = thread_index % sizes.x;
-    if (x >= sizes.x || y >= sizes.z) {
+    const uint lda = sizes.y;
+    const uint ldb = groupSize;
+    const uint ldc = sizes.x;
+    const uint m = thread_index / sizes.x;
+    const uint n = thread_index % sizes.x;
+    if (n >= sizes.x || m >= sizes.z) {
         return;
     }
-    outputData[x + y * sizes.x] = 0;
+    const uint32_t n_block = sizes.y / groupSize;
+    float rc = 0.0;
+    uint k = 0;
+    for (uint32_t kb = 0; kb < n_block ; kb ++) {
+      const T scale = scalesAndZeros[(kb * ldc + n) * 2 + 0];
+      const T zero = scalesAndZeros[(kb * ldc + n) * 2 + 1] - scale * T(8);
+      for(uint idx = 0; idx < groupSize; idx++, k++) {
+        const auto a_val = float(A[m * lda + k]);
+        uchar b_val = B[(k * ldb + n)/2];
+        b_val = (n & 1) == 0 ? (b_val >> 4) & 0x0f : b_val & 0x0f;
+        rc += a_val * float(scale * T(b_val) + zero);
+      }
+    }
+    outputData[thread_index] = T(rc);
 }
 
 #define INSTANTIATE_INT4MM(DTYPE, GSIZE)                                 \
@@ -119,9 +135,9 @@ Tensor _weight_int4pack_mm_mps(const Tensor& A, const Tensor& B, int64_t qGroupS
   auto C = at::empty({M, N}, A.options());
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* mpsStream = getCurrentMPSStream();
-  std::array<uint32_t, 3> sizes = {static_cast<uint32_t>(A.size(0)),
-                                   static_cast<uint32_t>(A.size(1)),
-                                   static_cast<uint32_t>(C.size(1))};
+  std::array<uint32_t, 3> sizes = {static_cast<uint32_t>(M),
+                                   static_cast<uint32_t>(K),
+                                   static_cast<uint32_t>(N)};
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
