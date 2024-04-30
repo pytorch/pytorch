@@ -3157,6 +3157,15 @@ class TestMPS(TestCaseMPS):
         helper((2, 3, 4))
         helper((2, 8, 4, 5))
 
+    def test_rand_like(self):
+        t = torch.ones(3,2,2).to('mps').permute(2,0,1)
+        t_rand = torch.rand_like(t)
+
+        self.assertFalse(torch.allclose(t_rand, t))
+
+        self.assertTrue(torch.all(t_rand >= 0))
+        self.assertTrue(torch.all(t_rand < 1))
+
     def test_threshold(self):
         def helper(threshold, value, num_elems, inplace=False, requires_grad=True):
             m = nn.Threshold(threshold=threshold, value=value, inplace=inplace)
