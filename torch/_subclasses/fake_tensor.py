@@ -1148,18 +1148,21 @@ class FakeTensorMode(TorchDispatchMode):
             return
 
         for arg in args:
-            if isinstance(arg, FakeTensor):
-                if arg._has_symbolic_sizes_strides:
-                    # This will get caught by _verify_args_for_hash later. We
-                    # can't just ignore it because it's an unhashable value. Use
-                    # a sentinel to indicate the unhashable value (so we don't
-                    # collide with a "good" hash).
+            if isinstance(arg, torch.Tensor):
+                if isinstance(arg, FakeTensor):
+                    if arg._has_symbolic_sizes_strides:
+                        # This will get caught by _verify_args_for_hash later. We
+                        # can't just ignore it because it's an unhashable value. Use
+                        # a sentinel to indicate the unhashable value (so we don't
+                        # collide with a "good" hash).
+                        output.append(_UNHASHABLE)
+                    elif arg.fake_mode is not self:
+                        output.append(_UNHASHABLE)
+                    else:
+                        output.append(extract_tensor_metadata(arg))
+                else:
+                    # Caught by _verify_args_for_hash later.
                     output.append(_UNHASHABLE)
-                    continue
-                if arg.fake_mode is not self:
-                    output.append(_UNHASHABLE)
-                    continue
-                output.append(extract_tensor_metadata(arg))
             elif isinstance(arg, (torch.SymBool, torch.SymInt, torch.SymFloat)):
                 # Caught by _verify_args_for_hash later.
                 output.append(_UNHASHABLE)
@@ -1185,19 +1188,21 @@ class FakeTensorMode(TorchDispatchMode):
             return
 
         for arg in args:
-            if isinstance(arg, FakeTensor):
-                if not self.is_our_fake(arg):
-                    raise _BypassDispatchCache("not our fake")
-                if arg._has_symbolic_sizes_strides:
-                    raise _BypassDispatchCache("symbolic sizes")
-                if arg.constant is not None:
-                    raise _BypassDispatchCache("constant attribute")
-                if arg.is_sparse:
-                    raise _BypassDispatchCache("sparse tensor")
-                if is_sparse_compressed(arg):
-                    raise _BypassDispatchCache("sparse compressed tensor")
-            elif isinstance(arg, torch.Tensor):
-                raise _BypassDispatchCache("non-fake tensor")
+            if isinstance(arg, torch.Tensor):
+                if isinstance(arg, FakeTensor):
+                    if not self.is_our_fake(arg):
+                        raise _BypassDispatchCache("not our fake")
+                    if arg._has_symbolic_sizes_strides:
+                        raise _BypassDispatchCache("symbolic sizes")
+                    if arg.constant is not None:
+                        raise _BypassDispatchCache("constant attribute")
+                    if arg.is_sparse:
+                        raise _BypassDispatchCache("sparse tensor")
+                    if is_sparse_compressed(arg):
+                        raise _BypassDispatchCache("sparse compressed tensor")
+                    # This FakeTensor is fine to cache.
+                else:
+                    raise _BypassDispatchCache("non-fake tensor")
             elif isinstance(arg, (torch.SymBool, torch.SymInt, torch.SymFloat)):
                 raise _BypassDispatchCache("symbolic shape")
             elif isinstance(arg, (list, tuple, dict)):
