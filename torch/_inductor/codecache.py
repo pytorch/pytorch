@@ -2469,7 +2469,7 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
     )
 
 
-# Will remove the temp code after switch to new cpp_builder
+# TODO: Will remove the temp code after switch to new cpp_builder
 def _temp_validate_new_and_old_command(new_cmd: List[str], old_cmd: List[str]):
     new_diff: List[str] = [x for x in new_cmd if x not in old_cmd]
     old_diff: List[str] = [y for y in old_cmd if y not in new_cmd]
@@ -2527,6 +2527,8 @@ def _do_validate_cpp_commands(
     _temp_validate_new_and_old_command(new_cmd, old_cmd)
 
 
+# TODO: Will remove the temp code after switch to new cpp_builder
+# It could help on sync new cpp_builder generate same command line as the old one.
 def validate_new_cpp_commands():
     cuda = [True, False]
     use_mmap_weights = [True, False]
