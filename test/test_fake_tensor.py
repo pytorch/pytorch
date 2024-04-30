@@ -784,6 +784,22 @@ class FakeTensorTest(TestCase):
             ep = torch.export.export(MyNumpyModel(), args=(torch.randn(1000),))
             self.assertTrue(isinstance(ep, torch.export.ExportedProgram))
 
+    def test_alias_call(self):
+        fwAD = torch.autograd.forward_ad
+
+        def f(x):
+            return 4312491 * x
+
+        with torch._subclasses.fake_tensor.FakeTensorMode():
+            with fwAD.dual_level():
+                x = torch.randn(3, device="cpu")
+                y = torch.ones_like(x)
+                dual = fwAD.make_dual(x, y)
+                r = f(dual)
+
+        self.assertIsInstance(r, FakeTensor)
+        self.assertEqual(r.size(), [3])
+
 
 class FakeTensorConstHandling(TestCase):
     def assertConst(self, *args):
