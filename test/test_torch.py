@@ -8046,7 +8046,7 @@ class TestTorch(TestCase):
             assert_with_filename(fname)
 
         if IS_FILESYSTEM_UTF8_ENCODING:
-            with TemporaryDirectoryName(suffix='中文') as dname, TemporaryFileName(dir=dname) as fname:
+            with TemporaryDirectoryName(suffix='\u4e2d\u6587') as dname, TemporaryFileName(dir=dname) as fname:
                 assert_with_filename(fname)
 
     def test_torch_from_file(self):
@@ -8077,7 +8077,7 @@ class TestTorch(TestCase):
             assert_with_filename(fname)
 
         if IS_FILESYSTEM_UTF8_ENCODING:
-            with TemporaryDirectoryName(suffix='中文') as dname, TemporaryFileName(dir=dname) as fname:
+            with TemporaryDirectoryName(suffix='\u4e2d\u6587') as dname, TemporaryFileName(dir=dname) as fname:
                 assert_with_filename(fname)
 
     def test_print(self):
@@ -8847,7 +8847,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         out = torch.empty(4, 3, 16, 16, device='meta', dtype=torch.double)
         self.assertExpectedRaisesInline(
             RuntimeError, lambda: torch._C._nn.upsample_nearest2d(x, (16, 16), out=out),
-            """Expected out tensor to have dtype float, but got double instead"""
+            """Expected out tensor to have dtype torch.float32 but got torch.float64 instead"""
         )
 
         # Complain if out device mismatch
@@ -8857,7 +8857,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         if not TEST_WITH_TORCHINDUCTOR:
             self.assertExpectedRaisesInline(
                 RuntimeError, lambda: torch._C._nn.upsample_nearest2d(x, (16, 16), out=out),
-                """Expected out tensor to have device meta, but got cpu instead"""
+                """Attempting to copy from device meta to device cpu, but cross-device copies are not allowed!"""
             )
 
     def test_add_meta_scalar(self):
@@ -9396,6 +9396,23 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                     self.assertFalse(expect.eq(t).all().item())
 
             torch.split_with_sizes_copy(x, split_sizes, dim=dim, out=out)
+            for expect, t in zip(expects, out):
+                self.assertTrue(expect.eq(t).all().item())
+
+            if not torch.cuda.is_available():
+                continue
+
+            # Test with cuda graph
+            out = [torch.zeros_like(v) for v in views]
+            for expect, t in zip(expects, out):
+                if expect.numel() != 0:
+                    self.assertFalse(expect.eq(t).all().item())
+
+            g = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(g):
+                torch.split_with_sizes_copy(x, split_sizes, dim=dim, out=out)
+
+            g.replay()
             for expect, t in zip(expects, out):
                 self.assertTrue(expect.eq(t).all().item())
 

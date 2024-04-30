@@ -809,8 +809,10 @@ class TestDTensorPlacementTypes(DTensorTestBase):
                 ]
                 assert_array_equal(expected_pad_sizes, pad_sizes)
 
+                from torch.distributed._tensor._collective_utils import unpad_tensor
+
                 unpadded_list = [
-                    shard_placement._unpad_tensor(tensor, pad_sizes[i])
+                    unpad_tensor(tensor, shard_placement.dim, pad_sizes[i])
                     if pad_sizes[i] > 0
                     else tensor
                     for i, tensor in enumerate(splitted_tensor_list)
