@@ -1227,12 +1227,16 @@ class TestForeach(TestCase):
         "inplace", (False, True), name_fn=lambda x: "inplace" if x else "outplace"
     )
     def test_autodiff(self, device, dtype, op, inplace):
-        if not (op.supports_autograd or op.supports_forward_ad):
-            self.skipTest("neither reverse mode nor forward mode supported")
         if (not inplace) and not op.supports_out:
             self.skipTest("out-of-place not implemented")
         if inplace and op.has_no_in_place:
             self.skipTest("in-place not implemented")
+        if not (
+            op.supports_autograd
+            or op.supports_inplace_autograd
+            or op.supports_forward_ad
+        ):
+            self.skipTest("neither reverse mode nor forward mode supported")
 
         # note(crcrpar): without this, some unary functions fail, unlike inplace and/or complex.
         if (
@@ -1377,6 +1381,12 @@ def check_autodiff_sample(op, sample, dtype, is_inplace):
         or isinstance(sample.args[0], bool)
     ):
         return False, _BOOL_SUB_ERR_MSG
+    if op.name == "_foreach_norm" and (not is_inplace):
+        return (
+            False,
+            "Trying to set a forward gradient that has a different size than that of the original Tensor, "
+            "this is not supported. Tensor is of size [] while the given forward gradient is of size [1, 1].",
+        )
     rhs_arg_has_complex_number = sample.args and (
         (
             isinstance(sample.args[0], list)
