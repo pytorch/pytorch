@@ -54,9 +54,9 @@ DEVICE_TO_ATEN = {
     "cuda": "at::kCUDA",
 }
 
-GemmBlocking = namedtuple("GemmBlocking", ["block_m", "block_n", "block_k"])
-
 INDEX_TYPE = "long"
+
+GemmBlocking = namedtuple("GemmBlocking", ["block_m", "block_n", "block_k"])
 
 
 class CppPrinter(ExprPrinter):
