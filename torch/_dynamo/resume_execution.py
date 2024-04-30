@@ -321,6 +321,7 @@ def _load_tuple_and_call(tup):
     insts = []
     if sys.version_info >= (3, 11):
         insts.append(create_instruction("PUSH_NULL"))
+        insts.append(create_instruction("SWAP", arg=2))
     for val in tup:
         insts.append(create_instruction("LOAD_CONST", argval=val))
     insts.extend(create_call_function(len(tup), False))
