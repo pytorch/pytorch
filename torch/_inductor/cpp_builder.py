@@ -325,8 +325,8 @@ def _get_optimization_cflags() -> List[str]:
                 cflags.append("march=native")
 
         # Internal cannot find libgomp.so
-        # if not config.is_fbcode():
-        #     cflags.append("fopenmp")
+        if not config.is_fbcode():
+            cflags.append("fopenmp")
 
         return cflags
 
