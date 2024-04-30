@@ -362,16 +362,16 @@ def verify_skippables(module: nn.Sequential) -> None:
         # Layer3 pops "1to3".
 
         nn.Sequential(Layer1(), Layer2())
-        #               └──── ?
+        #               +---- ?
 
         nn.Sequential(Layer2(), Layer3())
-        #                   ? ────┘
+        #                   ? ----+
 
         nn.Sequential(Layer1(), Layer2(), Layer3(), Layer3())
-        #               └───────────────────┘       ^^^^^^
+        #               +-------------------+       ^^^^^^
 
         nn.Sequential(Layer1(), Layer1(), Layer2(), Layer3())
-        #             ^^^^^^      └───────────────────┘
+        #             ^^^^^^      +-------------------+
 
     To use the same name for multiple skip tensors, they must be isolated by
     different namespaces. See :meth:`isolate()
