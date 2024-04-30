@@ -1,6 +1,10 @@
 #pragma once
 
+#include <condition_variable>
 #include <memory>
+#include <mutex>
+#include <stdexcept>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 

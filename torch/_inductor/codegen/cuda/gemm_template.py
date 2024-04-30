@@ -1,11 +1,10 @@
 import copy
 import logging
 import re
-from typing import cast, Dict, List, Optional, Tuple, Union
+from typing import cast, Dict, List, Optional, Tuple
 
-from ... import ir
 from ...config import cuda as inductor_cuda_config
-from ...ir import Buffer, ChoiceCaller, CUDATemplateBuffer, FixedLayout, IRNode, Layout
+from ...ir import Buffer, CUDATemplateBuffer, FixedLayout, IRNode, Layout
 from ..common import IndentedBuffer
 
 from . import cutlass_utils
@@ -187,52 +186,60 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
     @staticmethod
     def add_cutlass_gemm_choices(
-        choices: List[ChoiceCaller],
-        layout: ir.Layout,
-        input_nodes: List[ir.IRNode],
-        alpha: Union[float, int] = 1,
-        beta: Union[float, int] = 0,
-        input_reorder: Optional[List[int]] = None,
-        **extra_kwargs,
-    ) -> None:
-        """
-        Adds Cutlass GEMM configurations choices to the auto-tuning list.
+        choices,
+        layout,
+        input_nodes,
+        alpha=1,
+        beta=0,
+        input_reorder=None,
+        fuseable=True,
+        non_fuseable=True,
+    ):
+        if non_fuseable:
+            if fuseable:
+                # list both fuseable and non-fuseable ops, and treat them all as non-fuseable
+                can_fuse_epilogue = False
+            else:
+                can_fuse_epilogue = None
 
-        This function mutates the passed list of choices by appending the choices for Cutlass GEMM configs to it.
-
-        Args:
-            choices (list): The list to which choices are appended.
-            layout (ir.Layout): The layout configuration.
-            input_nodes (list): The list of input nodes.
-            alpha (float,int): Scaling factor, defaults to 1.
-            beta (float,int): Offset, defaults to 0.
-            input_reorder (list, optional): Order of the inputs, defaults to None.
-            **extra_kwargs: Additional keyword arguments.
-
-        """
-
-        cutlass_template = CUTLASSGemmTemplate(
-            input_nodes,  # type: ignore[arg-type]
-            layout,
-            alpha=alpha,
-            beta=beta,
-            input_reorder=input_reorder,
-        )
-        ops = cutlass_template.gen_ops()
-        for op in ops:
-            cutlass_template.maybe_append_choice(
-                choices,
-                op=op,
+            cutlass_template = CUTLASSGemmTemplate(
+                input_nodes,
+                layout,
+                alpha=alpha,
+                beta=beta,
+                input_reorder=input_reorder,
+                can_fuse_epilogue=can_fuse_epilogue,
             )
-        if len(ops) == 0:
-            input_layouts = [node.get_layout() for node in input_nodes]
-            input_strides = [node.get_stride() for node in input_nodes]
-            output_layout = layout
-            warning_msg = f"No suitable Cutlass GEMM configs found, fallbacks used ( {len(ops)=}, {output_layout=}, {input_layouts=}, {input_strides=} )"  # noqa: B950
-            log.warning(warning_msg)
+            ops = cutlass_template.gen_ops()
+            for op in ops:
+                cutlass_template.maybe_append_choice(
+                    choices,
+                    op=op,
+                )
+        else:
+            ops = []
+        if fuseable:
+            cutlass_template_evt = CUTLASSGemmTemplate(
+                input_nodes,
+                layout,
+                alpha=alpha,
+                beta=beta,
+                input_reorder=input_reorder,
+                can_fuse_epilogue=True,
+            )
+            # This will list only ops capable of EVT fusion
+            ops_evt = cutlass_template_evt.gen_ops()
+            for op in ops_evt:
+                cutlass_template_evt.maybe_append_choice(
+                    choices,
+                    op=op,
+                )
+        else:
+            ops_evt = []
         log.debug(
-            "Added %d Cutlass gemm configs.",
+            "Added %d cutlass gemm configs and %d fuseable gemm configs.",
             len(ops),
+            len(ops_evt),
         )
 
     def header(self) -> IndentedBuffer:
@@ -417,19 +424,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         self,
         op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
     ) -> "cutlass_library.gemm_op.GemmOperation":  # type: ignore[name-defined]  # noqa: F821
-        """
-        Helper method:
-
-        Determines whether a given Cutlass GEMM op definition is suitable for the current
-        input / output of the operation that this template is supposed to implement.
-
-        Takes memory layout, dtype and support for EVT operations into account,
-        and filters potentially problematic ops.
-
-        Returns None if the op is not suitable, otherwise returns the op to be used, which might
-        have been mutated.
-        """
-
         assert cutlass_utils.try_import_cutlass()
         import cutlass_library.library as cutlass_lib
 
@@ -442,6 +436,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
         # Only keep GemmUniversal kernels
         if op.gemm_kind not in {
+            cutlass_lib.GemmKind.Universal,
             cutlass_lib.GemmKind.Universal3x,
         }:
             return None
@@ -487,16 +482,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         # Set epilogue.
         # TODO: update epilogue functor according to epilogues.
         op.element_epilogue = op.accumulator_type()
-        if inductor_cuda_config.cutlass_op_allowlist_regex is not None:
-            if not re.search(
-                inductor_cuda_config.cutlass_op_allowlist_regex, op.configuration_name()
-            ):
-                return None
-        if inductor_cuda_config.cutlass_op_denylist_regex is not None:
-            if re.search(
-                inductor_cuda_config.cutlass_op_denylist_regex, op.configuration_name()
-            ):
-                return None
+
         # Set bias layout and alignment.
         if len(self.input_nodes) >= 3 and self.input_nodes[2] is not None:
             Bias = self.input_nodes[2]
@@ -518,6 +504,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         if (self.can_fuse_epilogue is not None) and (
             self.can_fuse_epilogue != supports_evt
         ):
+            return None
+        if inductor_cuda_config.cutlass_only_evt_capable_ops and not supports_evt:
             return None
         return op
 

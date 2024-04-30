@@ -349,32 +349,4 @@ bool binary_valid(
   return false;
 }
 
-static inline bool is_channels_last(at::MemoryFormat fmt){
-  return (at::MemoryFormat::ChannelsLast == fmt) || (at::MemoryFormat::ChannelsLast3d == fmt);
-}
-
-static inline bool is_smf_channels_last(const Tensor& t){
-  return is_channels_last(t.suggest_memory_format());
-}
-
-bool use_channels_last_for_conv(
-    const at::Tensor& src,
-    const at::Tensor& weight,
-    bool is_transpose){
-
-  if (!src.defined() || src.is_sparse()) {
-    // suggest channels_first
-    return false;
-  }
-
-  auto suggest_channels_last_format =
-      (is_smf_channels_last(src) || is_smf_channels_last(weight));
-  if (suggest_channels_last_format) {
-    // suggest channels_last
-    return true;
-  }
-
-  return false;
-}
-
 }
