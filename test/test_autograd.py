@@ -6916,7 +6916,7 @@ for shape in [(1,), ()]:
         a = torch.randn(2, 2, requires_grad=True)
 
         with self.assertRaisesRegex(
-            Exception, "Checkpointing is not compatible with .grad()"
+            Exception, "torch.utils.checkpoint is incompatible"
         ):
             b = checkpoint(torch.exp, a, use_reentrant=True).sum()
             torch.autograd.grad(b, (a,))
