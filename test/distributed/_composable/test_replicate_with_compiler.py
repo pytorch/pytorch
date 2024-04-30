@@ -116,17 +116,13 @@ class ReplicateTest(MultiProcessTestCase):
         model = Net().to(device)
         input = torch.randn([1, DIM], device=device)
 
-        compiled_replicate_model = replicate(deepcopy(model))
-        if not no_compile_forward:
-            compiled_replicate_model = torch.compile(
-                compiled_replicate_model, fullgraph=False
-            )
+        compiled_replicate_model = torch.compile(
+            replicate(deepcopy(model)), fullgraph=True
+        )
         compiled_replicate_optim = torch.optim.Adam(
             compiled_replicate_model.parameters()
         )
-        compiled_ddp_model = DDP(deepcopy(model))
-        if not no_compile_forward:
-            compiled_ddp_model = torch.compile(compiled_ddp_model, fullgraph=True)
+        compiled_ddp_model = torch.compile(DDP(deepcopy(model)), fullgraph=True)
         compiled_ddp_optim = torch.optim.Adam(compiled_ddp_model.parameters())
         model = replicate(model)
         optim = torch.optim.Adam(model.parameters())
@@ -137,8 +133,8 @@ class ReplicateTest(MultiProcessTestCase):
         models = [model, compiled_replicate_model, compiled_ddp_model]
         optims = [optim, compiled_replicate_optim, compiled_ddp_optim]
         sync_contexts = [
-            contextlib.nullcontext(),
-            contextlib.nullcontext(),
+            replicate.state(model)._ddp.no_sync(),
+            replicate.state(compiled_replicate_model._orig_mod)._ddp.no_sync(),
             compiled_ddp_model.no_sync(),
         ]
 
@@ -153,13 +149,8 @@ class ReplicateTest(MultiProcessTestCase):
             for model_idx in range(3):
                 if no_sync and i % 2 == 0:
                     context = sync_contexts[model_idx]
-                    if model_idx <= 1:
-                        models[model_idx].set_requires_gradient_sync(False)
                 else:
                     context = contextlib.nullcontext()
-                    if model_idx <= 1:
-                        models[model_idx].set_requires_gradient_sync(True)
-                context = contextlib.nullcontext()
 
                 with context:
                     bwd_context = (
@@ -217,9 +208,13 @@ class ReplicateTest(MultiProcessTestCase):
     @skip_if_lt_x_gpu(2)
     def test_compile_bf16(self):
         def setup(model, compiled_replicate_model, compiled_ddp_model) -> None:
-            model.register_comm_hook(None, ddp_default_hooks.bf16_compress_hook)
+            replicate.state(model)._ddp.register_comm_hook(
+                None, ddp_default_hooks.bf16_compress_hook
+            )
             compiled_m = compiled_replicate_model._orig_mod
-            compiled_m.register_comm_hook(None, ddp_default_hooks.bf16_compress_hook)
+            replicate.state(compiled_m)._ddp.register_comm_hook(
+                None, ddp_default_hooks.bf16_compress_hook
+            )
             compiled_ddp_model.register_comm_hook(
                 None, ddp_default_hooks.bf16_compress_hook
             )
@@ -231,9 +226,13 @@ class ReplicateTest(MultiProcessTestCase):
     @skip_if_lt_x_gpu(2)
     def test_compile_fp16(self):
         def setup(model, compiled_replicate_model, compiled_ddp_model) -> None:
-            model.register_comm_hook(None, ddp_default_hooks.fp16_compress_hook)
+            replicate.state(model)._ddp.register_comm_hook(
+                None, ddp_default_hooks.fp16_compress_hook
+            )
             compiled_m = compiled_replicate_model._orig_mod
-            compiled_m.register_comm_hook(None, ddp_default_hooks.fp16_compress_hook)
+            replicate.state(compiled_m)._ddp.register_comm_hook(
+                None, ddp_default_hooks.fp16_compress_hook
+            )
             compiled_ddp_model.register_comm_hook(
                 None, ddp_default_hooks.fp16_compress_hook
             )
@@ -261,7 +260,7 @@ class ReplicateTest(MultiProcessTestCase):
         input = torch.randn([1, DIM])
         torch._dynamo.config.optimize_ddp = "python_reducer"
         compiled_replicate_model = torch.compile(
-            replicate(deepcopy(model)), fullgraph=False
+            replicate(deepcopy(model)), fullgraph=True
         )
 
         def bwd(loss):

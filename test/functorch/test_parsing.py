@@ -107,7 +107,7 @@ class TestParsedExpression(TestCase):
             ParsedExpression("(a) ((b c) (d ...))")
 
         # invalid identifiers
-        ParsedExpression("camelCase under_scored cApiTaLs \u00DF ...")
+        ParsedExpression("camelCase under_scored cApiTaLs ß ...")
         with self.assertRaises(ValueError):
             ParsedExpression("1a")
         with self.assertRaises(ValueError):

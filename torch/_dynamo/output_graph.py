@@ -400,8 +400,6 @@ class OutputGraph:
             self.install_builtins_dict_in_fglobals()
         )
 
-        self.guard_on_key_order: Set[str] = set()
-
     def install_builtins_dict_in_fglobals(self):
         # f_globals["__builtins__"] can be a dict or a module. This is an
         # implemenation detail -
@@ -597,30 +595,21 @@ class OutputGraph:
             self.torch_function_enabled,
         )
         global_state["grad_enabled"] = (torch.set_grad_enabled, torch.is_grad_enabled())
-
-        def autocast_specific_backend(
-            device_type: str, func: Callable[[str, Any], None]
-        ):
-            def decorator(value):
-                return func(device_type, value)
-
-            return decorator
-
         global_state["autocast_enabled"] = (
-            autocast_specific_backend("cuda", torch.set_autocast_enabled),
-            torch.is_autocast_enabled("cuda"),
+            torch.set_autocast_enabled,
+            torch.is_autocast_enabled(),
         )
         global_state["autocast_cpu_enabled"] = (
-            autocast_specific_backend("cpu", torch.set_autocast_enabled),
-            torch.is_autocast_enabled("cpu"),
+            torch.set_autocast_cpu_enabled,
+            torch.is_autocast_cpu_enabled(),
         )
         global_state["autocast_gpu_dtype"] = (
-            autocast_specific_backend("cuda", torch.set_autocast_dtype),
-            torch.get_autocast_dtype("cuda"),
+            torch.set_autocast_gpu_dtype,
+            torch.get_autocast_gpu_dtype(),
         )
         global_state["autocast_cpu_dtype"] = (
-            autocast_specific_backend("cpu", torch.set_autocast_dtype),
-            torch.get_autocast_dtype("cpu"),
+            torch.set_autocast_cpu_dtype,
+            torch.get_autocast_cpu_dtype(),
         )
         global_state["autocast_cache_enabled"] = (
             torch.set_autocast_cache_enabled,
@@ -743,7 +732,7 @@ class OutputGraph:
         *names,
         **options,
     ):
-        if is_dynamic_nn_module(target, self.root_tx.export):
+        if is_dynamic_nn_module(target):
             return variables.UnspecializedNNModuleVariable(target, **options)
 
         options = dict(options)

@@ -8,6 +8,7 @@ import re
 import textwrap
 import traceback
 from contextlib import nullcontext
+from enum import Enum
 from functools import partial
 from typing import (
     Any,
@@ -48,15 +49,7 @@ from torch._prims_common import (
     StrideType,
 )
 from torch._subclasses.fake_tensor import get_schema_info
-from torch.fx.experimental.symbolic_shapes import (
-    CallMethodKey,
-    compute_unbacked_bindings,
-    DivideByKey,
-    free_unbacked_symbols,
-    rebind_unbacked,
-    resolve_unbacked_bindings,
-    SymTypes,
-)
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymTypes
 from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 
 from . import config, dependencies
@@ -68,8 +61,6 @@ from .dependencies import (
     var_builder,
 )
 from .ops_handler import OpCounterCSE
-from .runtime.hints import ReductionHint
-from .runtime.runtime_utils import do_bench
 from .utils import (
     argsort,
     cache_on_self,
@@ -77,6 +68,7 @@ from .utils import (
     convert_shape_to_inductor,
     convert_shape_to_symint,
     developer_warning,
+    do_bench,
     get_kernel_metadata,
     is_dynamic,
     is_gpu,
@@ -539,6 +531,18 @@ class Scatter(Pointwise):
             loader(vars),
             mode=self.scatter_mode,
         )
+
+
+class ReductionHint(Enum):
+    INNER = 0
+    OUTER = 1
+    OUTER_TINY = 2
+    DEFAULT = 3
+
+
+class TileHint(Enum):
+    SQUARE = 0
+    DEFAULT = 1
 
 
 REDUCTION_COMBINE_FN = {
@@ -3109,7 +3113,46 @@ class Buffer(IRNode):
         return self.get_read_writes().reads
 
     def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
-        return set()
+        """
+        Returns the unbacked symbols which are defined by this IR node,
+        because this is a data-dependent IR node, or item()
+        """
+        # So this is a little unusual.  In principle, you could imagine
+        # defining a MultiOutputLayout buffer so that it DOES define
+        # unbacked symints.  However, we can't easily tell what symints
+        # such a buffer defines, because MultiOutputLayout doesn't actually
+        # define any useful information about what it returns.
+        #
+        # An easier and better approach is to delay the symint allocation
+        # to the MultiOutput IR nodes, which are when we actually extract
+        # out the buffers and know what their sizes are.
+        #
+        # There are two subleties here:
+        #
+        # 1. Suppose you have a kernel that produces out1: (i0,), out2: (i0,)
+        #    Both of these actually count as defs!  The scheduler will just
+        #    arbitrarily pick one of these as the canonical definer and
+        #    ensure it stays live.  It's not a big deal if we pick the
+        #    wrong one because tuple accesses are cheap, and all this means
+        #    is we accidentally keep a MultiOutput node live when it wasn't
+        #    strictly necessary.
+        #
+        # 2. Suppose you have a MultiOutput buffer whose size is (i0,), but
+        #    the MultiOutputLayout buffer it is projecting from isn't actually
+        #    dynamic; it has i0 as one of the arguments.  We cannot tell this
+        #    directly from MultiOutput, we have to look at the input buffer's
+        #    uses to work this out.  No big deal.
+        if isinstance(self.layout, (NoneLayout, MultiOutputLayout)):
+            return set()
+
+        # This kernel defines all unbacked symbols... that it didn't get in as
+        # arguments!
+        defs = (
+            free_unbacked_symbols(self.get_size())
+            | free_unbacked_symbols(self.get_stride())
+            | free_unbacked_symbols(self.get_offset())
+        )
+        return defs - self.get_unbacked_symbol_uses()
 
     def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
         """
@@ -3127,6 +3170,32 @@ class Buffer(IRNode):
         necessary.
         """
         return set()
+
+    def codegen_unbacked_symbol_defs(self, wrapper):
+        # NB: If it is possible for other ir node types to return unbacked
+        # symints, you need to make sure their codegen calls this method.
+        # Don't forget to update get_unbacked_symbol_defs too.
+        symbols_to_define = self.get_unbacked_symbol_defs()
+        for i, s in enumerate(self.get_size()):
+            if s in symbols_to_define:
+                wrapper.writeline(
+                    f"{wrapper.codegen_unbacked_symbol_decl(s)} = {self.get_name()}.size({i}){wrapper.ending}"
+                )
+                symbols_to_define.remove(s)
+        for i, s in enumerate(self.get_stride()):
+            if s in symbols_to_define:
+                wrapper.writeline(
+                    f"{wrapper.codegen_unbacked_symbol_decl(s)} = {self.get_name()}.stride({i}){wrapper.ending}"
+                )
+                symbols_to_define.remove(s)
+        if (s := self.get_offset()) in symbols_to_define:
+            wrapper.writeline(
+                f"{wrapper.codegen_unbacked_symbol_decl(s)} = {self.get_name()}.storage_offset(){wrapper.ending}"
+            )
+            symbols_to_define.remove(s)
+        assert (
+            not symbols_to_define
+        ), f"unbacked symint {symbols_to_define} not written out, check comment above"
 
     def realize(self):
         pass
@@ -3931,9 +4000,6 @@ class ExternKernel(InputsKernel):
     ] = None
     arg_properties: Optional[List[Dict[str, Any]]] = None
     kwarg_properties: Optional[Dict[str, Dict[str, Any]]] = None
-    unbacked_bindings: Dict[sympy.Symbol, pytree.KeyPath] = dataclasses.field(
-        default_factory=dict
-    )
 
     def __init__(
         self,
@@ -3961,11 +4027,6 @@ class ExternKernel(InputsKernel):
         self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
         self.op_overload = op_overload
         self.collect_arg_kwarg_properties()
-        self.unbacked_bindings = {}
-        self.fx_node = V.graph.current_node
-
-    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
-        return set()
 
     def collect_arg_kwarg_properties(self):
         # if self.op_overload is torch._ops.OpOverload, we can use its schema to collect additional
@@ -4030,15 +4091,7 @@ class ExternKernel(InputsKernel):
         return pw
 
     @classmethod
-    def process_kernel(
-        cls, kernel, *args, **kwargs
-    ) -> Tuple[
-        Any,
-        List[Any],
-        List[Any],
-        Callable[[Any, Any], Any],
-        Optional[Dict[sympy.Symbol, pytree.KeyPath]],
-    ]:
+    def process_kernel(cls, kernel, *args, **kwargs):
         binded_args = {"args": args, "kwargs": kwargs}
 
         args_flat, args_spec = pytree.tree_flatten(binded_args)
@@ -4075,9 +4128,9 @@ class ExternKernel(InputsKernel):
             if is_storage_and_layout(x):
                 as_storage_and_layout(x, freeze=True)
 
-        # Rerun fake tensor propagation, because Inductor may have changed the
-        # strides of inputs and we need to determine accurately what the
-        # output stride will be.
+        # We don't have generic shape formulas, so just burn in the
+        # shapes and run an example input.
+        # TODO(jansel): replace this with dynamic shape formulas
         example_args = []
 
         # We need to retain the constant values of fake tensors that we originally
@@ -4092,13 +4145,6 @@ class ExternKernel(InputsKernel):
         new_args, new_kwargs = unflatten_args(example_args, non_tensor_args)
         example_output = kernel(*new_args, **new_kwargs)
 
-        unbacked_bindings: Optional[Dict[sympy.Symbol, pytree.KeyPath]] = None
-        if shape_env := V.fake_mode.shape_env:
-            rebind_unbacked(shape_env, V.current_node, example_output)
-            unbacked_bindings = compute_unbacked_bindings(
-                shape_env, example_output, V.current_node.meta.get("val")
-            )
-
         example_out_li = (
             [example_output]
             if not isinstance(example_output, (list, tuple))
@@ -4111,13 +4157,12 @@ class ExternKernel(InputsKernel):
                     msg = f"{msg} Found from : \n {stack_trace}"
                 V.graph.disable_cudagraphs_reason = msg
 
-        return (
-            example_output,
-            tensor_args,
-            non_tensor_args,
-            unflatten_args,
-            unbacked_bindings,
-        )
+        # TODO: Unconditionally do this, not just when example_output has
+        # unbacked symbols
+        if maybe_free_unbacked_symbols(example_output):
+            example_output = V.graph.current_node.meta["val"]
+
+        return example_output, tensor_args, non_tensor_args, unflatten_args
 
     @classmethod
     def convert_to_reinterpret_view(cls, x):
@@ -4601,11 +4646,6 @@ class UserDefinedTritonKernel(ExternKernel):
         # modifies input in place, do not let it get DCEd
         return True
 
-    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
-        # add unbacked symbols used in the grid to the ones used
-        # in the kwargs (the latter is generated by ExternKernel)
-        return super().get_unbacked_symbol_uses() | free_unbacked_symbols(self.grid)
-
     def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
         return set()
 
@@ -4877,7 +4917,7 @@ class ScatterFallback(ExternKernel):
         wrapper.generate_scatter_fallback(
             x,
             [x, self.constant_args[0], index, src],
-            self.cpp_kernel_name,
+            self.get_kernel_name(),
             self.python_kernel_name,
             self.src_is_tensor,
             reduce,
@@ -4886,6 +4926,25 @@ class ScatterFallback(ExternKernel):
 
     def should_allocate(self):
         return False
+
+    def get_cpp_kernel(self):
+        reduce = self.kwargs["reduce"]
+        if self.python_kernel_name == "aten.scatter_":
+            if self.src_is_tensor:
+                kernel = (
+                    "at::scatter_out" if reduce is None else "at::scatter_reduce_out"
+                )
+            else:
+                assert (
+                    reduce is None
+                ), "Expect reduce to be None for aten.scatter_ with scalar src"
+                kernel = "at::scatter_out"
+        else:
+            assert (
+                reduce is not None
+            ), "Expect reduce to be not None for aten.scatter_reduce_"
+            kernel = "at::scatter_reduce_out"
+        return kernel
 
     def get_mutation_names(self):
         return [self.inputs[0].get_name()]
@@ -4896,6 +4955,7 @@ class ScatterFallback(ExternKernel):
     def __init__(
         self,
         op_overload,
+        python_kernel_name,
         x,
         dim: int,
         index,
@@ -4904,6 +4964,7 @@ class ScatterFallback(ExternKernel):
         reduce: Optional[str] = None,
         include_self: bool = True,
     ):
+        assert python_kernel_name in {"aten.scatter_", "aten.scatter_reduce_"}
         self.src_is_tensor = isinstance(src, TensorBox)
 
         constant_args: Tuple[Any, ...]
@@ -4920,11 +4981,11 @@ class ScatterFallback(ExternKernel):
             self.unwrap_storage(tensors),
             constant_args,
             {"reduce": reduce, "include_self": include_self},
-            python_kernel_name=str(op_overload),
+            python_kernel_name=python_kernel_name,
             ordered_kwargs_for_cpp_kernel=["reduce", "include_self"],
             op_overload=op_overload,
         )
-        self.cpp_kernel_name = get_aten_cpp_kernel_name(op_overload)
+        self.cpp_kernel_name = self.get_cpp_kernel()
         self.name = V.graph.register_buffer(self)
         mark_node_as_mutating(self, x)
 
@@ -5023,11 +5084,25 @@ class DynamicScalar(ExternKernel):
     def should_allocate(self):
         return False
 
-    def __init__(self, sym, keypath, data):
+    # TODO: handle bools carefully
+    def __init__(self, sym, data):
         data.realize()
         super().__init__(None, NoneLayout(torch.device("cpu")), self.unwrap_storage([data]))  # type: ignore[arg-type]
-        self.sym = sym
-        self.keypath = keypath
+        if isinstance(sym, sympy.Symbol):
+            self.sym = sym
+            self.is_bool = False
+        else:
+            # Special case for boolean.  For Reasons(TM), we don't represent
+            # boolean variables directly in sympy; instead, we generate an
+            # indicator integer variable which we then convert to a boolean by
+            # testing i0 == 1.  We have to identify the underlying indicator
+            # variable, and then bind i0 to the appropriate integer value
+            # based on the runtime boolean.
+            assert isinstance(sym, sympy.Eq), sym
+            assert isinstance(sym.args[0], sympy.Symbol), sym
+            assert sym.args[1] == 1, sym
+            self.sym = sym.args[0]
+            self.is_bool = True
 
     def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
         return {self.sym}
@@ -5127,8 +5202,6 @@ class FallbackKernel(ExternKernelAlloc):
         nontensor_args,
         unflatten_args,
         kwargs=None,
-        *,
-        unbacked_bindings=None,
     ):
         super().__init__(
             layout,
@@ -5141,7 +5214,6 @@ class FallbackKernel(ExternKernelAlloc):
         # output through the abi-compatible interface.
         self.outputs: Sequence[Any] = []
         self.use_runtime_dispatch = False
-        self.unbacked_bindings = unbacked_bindings
 
         assert isinstance(
             kernel,
@@ -5225,68 +5297,6 @@ class FallbackKernel(ExternKernelAlloc):
 
         for info, arg in torch._library.utils.zip_schema(schema, args, kwargs):
             handle_aliasing_and_mutation(info, arg)
-
-    def codegen_unbacked_symbol_defs(self, wrapper):
-        if not hasattr(self, "unbacked_bindings"):
-            return
-
-        unbacked_bindings = resolve_unbacked_bindings(
-            V.graph.sizevars.shape_env, self.unbacked_bindings
-        )
-
-        if not unbacked_bindings:
-            return
-
-        for s, keypath in unbacked_bindings.items():
-
-            def go(expr, keypath):
-                if keypath == ():
-                    return expr
-
-                if (
-                    len(keypath) >= 2
-                    and isinstance(keypath[0], CallMethodKey)
-                    and isinstance(keypath[1], pytree.SequenceKey)
-                ):
-                    return go(
-                        f"{expr}.{keypath[0].name}({keypath[1].idx})", keypath[2:]
-                    )
-                elif isinstance(keypath[0], CallMethodKey):
-                    return go(f"{expr}.{keypath[0].name}()", keypath[1:])
-                elif isinstance(keypath[0], pytree.SequenceKey):
-                    return go(f"{expr}[{keypath[0].idx}]", keypath[1:])
-                elif isinstance(keypath[0], DivideByKey):
-                    # TODO: need to assert divisibility
-                    # TODO: this is invalid C++ codegen
-                    return go(f"{expr}.__floordiv__({keypath[0].divisor})", keypath[1:])
-                else:
-                    raise AssertionError(f"unrecognized keypath {keypath}")
-
-            def go_outer():
-                if V.graph.cpp_wrapper and config.abi_compatible:
-                    # Special handling for the top level buffer access,
-                    # because self.get_name() is actually never bound; the
-                    # individual output arguments are bound by
-                    # generate_c_shim_fallback_kernel
-                    if len(self.outputs) == 1:
-                        return go(self.outputs[0].get_name(), keypath)
-                    else:
-                        assert isinstance(keypath[0], pytree.SequenceKey)
-                        return go(self.outputs[keypath[0].idx].get_name(), keypath[1:])
-                else:
-                    return go(self.get_name(), keypath)
-
-            wrapper.writeline(
-                f"{wrapper.codegen_unbacked_symbol_decl(s)} = {go_outer()}{wrapper.ending}"
-            )
-
-    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
-        if unbacked_bindings := getattr(self, "unbacked_bindings", None):
-            return resolve_unbacked_bindings(
-                V.graph.sizevars.shape_env, unbacked_bindings
-            ).keys()
-        else:
-            return set()
 
     def set_cpp_kernel(self, kernel):
         from .codegen.wrapper import get_cpp_op_schema
@@ -5577,8 +5587,6 @@ class FallbackKernel(ExternKernelAlloc):
             if isinstance(self.layout, Layout):
                 self.codegen_size_asserts(wrapper)
 
-        self.codegen_unbacked_symbol_defs(wrapper)
-
     @staticmethod
     def tensor_to_layout(output: torch.Tensor):
         return FixedLayout(
@@ -5600,7 +5608,6 @@ class FallbackKernel(ExternKernelAlloc):
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,
-                unbacked_bindings,
             ) = cls.process_kernel(kernel, *args, **kwargs)
 
         if example_output is None:
@@ -5610,7 +5617,6 @@ class FallbackKernel(ExternKernelAlloc):
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,
-                unbacked_bindings=unbacked_bindings,
             )
 
         else:
@@ -5623,7 +5629,6 @@ class FallbackKernel(ExternKernelAlloc):
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,
-                unbacked_bindings=unbacked_bindings,
             )
 
         def generate_output(output, indices):
@@ -5682,8 +5687,6 @@ class ComplexView(FallbackKernel):
         tensor_args,
         nontensor_args,
         unflatten_args,
-        *,
-        unbacked_bindings=None,
     ):
         super().__init__(
             layout,
@@ -5691,7 +5694,6 @@ class ComplexView(FallbackKernel):
             tensor_args,
             nontensor_args,
             unflatten_args,
-            unbacked_bindings=unbacked_bindings,
         )
 
 
@@ -5727,6 +5729,7 @@ class MultiOutput(ExternKernel):
             self.get_name(),
             self.codegen_list_tuple_access(self.inputs[0].get_name(), self.indices),
         )
+        self.codegen_unbacked_symbol_defs(wrapper)
 
     def __init__(self, layout, input, indices: List[Tuple[Any, ...]]):
         super().__init__(None, layout, [input], ())
@@ -7601,8 +7604,6 @@ class EffectfulKernel(FallbackKernel):
         nontensor_args,
         unflatten_args,
         kwargs=None,
-        *,
-        unbacked_bindings=None,
     ):
         super().__init__(
             NoneLayout(layout.device),
@@ -7611,7 +7612,6 @@ class EffectfulKernel(FallbackKernel):
             nontensor_args,
             unflatten_args,
             kwargs=None,
-            unbacked_bindings=unbacked_bindings,
         )
 
         from torch._higher_order_ops.effects import get_effect_key
@@ -8480,9 +8480,7 @@ class _CollectiveKernel(FallbackKernel):
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,
-                unbacked_bindings,
             ) = cls.process_kernel(kernel, inputs, *args, **kwargs)
-        assert not unbacked_bindings, f"{kernel} {unbacked_bindings}"
         for tensor_arg in tensor_args:
             tensor_arg.realize()
 
@@ -8537,9 +8535,7 @@ class _CollectiveKernel(FallbackKernel):
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,
-                unbacked_bindings,
             ) = cls.process_kernel(kernel, inputs, *args, **kwargs)
-        assert not unbacked_bindings, f"{kernel}, {unbacked_bindings}"
         for tensor_arg in tensor_args:
             tensor_arg.realize()
 
@@ -8607,9 +8603,7 @@ class _WaitKernel(_CollectiveKernel):
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,
-                unbacked_bindings,
             ) = cls.process_kernel(kernel, inp)
-        assert not unbacked_bindings, f"{kernel} {unbacked_bindings}"
         packed = cls(
             NoneLayout(inp.get_device()),
             kernel,

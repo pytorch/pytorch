@@ -214,6 +214,8 @@ CI_SERIAL_LIST = [
     "test_fake_tensor",
     "test_cpp_api_parity",
     "test_reductions",
+    "test_cuda",
+    "test_cuda_expandable_segments",
     "test_fx_backends",
     "test_linalg",
     "test_cpp_extensions_jit",
@@ -485,12 +487,7 @@ def run_test(
         os.close(log_fd)
 
     command = (launcher_cmd or []) + executable + argv
-    should_retry = (
-        "--subprocess" not in command
-        and not RERUN_DISABLED_TESTS
-        and not is_cpp_test
-        and "-n" not in command
-    )
+    should_retry = "--subprocess" not in command and not RERUN_DISABLED_TESTS
     is_slow = "slow" in os.environ.get("TEST_CONFIG", "") or "slow" in os.environ.get(
         "BUILD_ENVRIONMENT", ""
     )

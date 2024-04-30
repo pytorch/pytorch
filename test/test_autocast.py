@@ -336,7 +336,7 @@ class TestTorchAutocast(TestCase):
 
     def test_invalid_device(self):
         dev = "not a real device"
-        msg = f"Invalid device string: '{dev}'"
+        msg = f"unsupported autocast device_type '{dev}'"
         with self.assertRaisesRegex(RuntimeError, msg):
             with torch.autocast(device_type=dev):
                 _ = torch.tensor(1)

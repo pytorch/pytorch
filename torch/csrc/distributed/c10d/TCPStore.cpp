@@ -5,9 +5,13 @@
 #include <torch/csrc/distributed/c10d/logging.h>
 
 #include <fcntl.h>
+#include <algorithm>
+#include <array>
 #include <chrono>
 #include <fstream>
 #include <random>
+#include <streambuf>
+#include <system_error>
 #include <thread>
 #include <unordered_map>
 #include <utility>

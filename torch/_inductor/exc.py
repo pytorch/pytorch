@@ -58,10 +58,6 @@ class LoweringException(OperatorIssue):
         )
 
 
-class SubgraphLoweringException(RuntimeError):
-    pass
-
-
 class InvalidCxxCompiler(RuntimeError):
     def __init__(self):
         from . import config

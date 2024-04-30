@@ -190,8 +190,8 @@ std::string show_config() {
     ss << detail::getCUDAHooks().showConfig();
   }
 
-  if (hasMAIA()) {
-    ss << detail::getMAIAHooks().showConfig();
+  if (hasORT()) {
+    ss << detail::getORTHooks().showConfig();
   }
 
   if (hasXPU()) {

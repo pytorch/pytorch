@@ -924,7 +924,7 @@ class TestSerialization(TestCase, SerializationMixin):
             test(fname)
 
         if IS_FILESYSTEM_UTF8_ENCODING:
-            with TemporaryDirectoryName(suffix='\u975eASCII\u30d1\u30b9') as dname:
+            with TemporaryDirectoryName(suffix='非ASCIIパス') as dname:
                 with TemporaryFileName(dir=dname) as fname:
                     test(fname)
 
@@ -988,8 +988,7 @@ class TestSerialization(TestCase, SerializationMixin):
             self.assertTrue('_anneal_func_type' in lr_scheduler_state)
         self.assertTrue(size < 1024 * 1024)  # Must be less than 1MB
 
-    @parametrize('weights_only', (True, False))
-    def test_serialization_python_attr(self, weights_only):
+    def test_serialization_python_attr(self):
         def _test_save_load_attr(t):
             t.foo = 'foo'
             t.pi = 3.14
@@ -997,7 +996,7 @@ class TestSerialization(TestCase, SerializationMixin):
             with BytesIOContext() as f:
                 torch.save(t, f)
                 f.seek(0)
-                loaded_t = torch.load(f, weights_only=weights_only)
+                loaded_t = torch.load(f)
 
             self.assertEqual(t, loaded_t)
             self.assertEqual(t.foo, loaded_t.foo)
@@ -3968,6 +3967,7 @@ class TestSerialization(TestCase, SerializationMixin):
             y['odd'][0] = torch.tensor(0.25, dtype=dtype)
             y['even'][0] = torch.tensor(-0.25, dtype=dtype)
             self.assertEqual(y['x'][:2].to(dtype=torch.float32), torch.tensor([-0.25, 0.25]))
+
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):

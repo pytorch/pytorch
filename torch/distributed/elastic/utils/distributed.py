@@ -6,10 +6,8 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 import datetime
-import functools
 import socket
 from contextlib import closing
-from typing import Optional
 
 import torch.distributed as dist
 from torch.distributed.elastic.utils.logging import get_logger
@@ -32,7 +30,6 @@ def create_c10d_store(
     timeout: float = (60 * 10),  # 10 min
     wait_for_workers: bool = True,
     retries=3,
-    use_libuv: Optional[bool] = None,
 ):
     if server_port == -1 and world_size > 1:
         raise ValueError(
@@ -59,8 +56,7 @@ def create_c10d_store(
         )
 
         try:
-            store_builder = functools.partial(
-                dist.TCPStore,
+            store = dist.TCPStore(
                 host_name=server_addr,
                 port=port,
                 world_size=world_size,
@@ -68,11 +64,6 @@ def create_c10d_store(
                 timeout=datetime.timedelta(seconds=timeout),
                 wait_for_workers=wait_for_workers,
             )
-            if use_libuv is None:
-                # TCPStore default backend may change, don't specify it unless we explicity told to do so.
-                store = store_builder()
-            else:
-                store = store_builder(use_libuv=use_libuv)
             # skips full rank check when we don't have to wait for all workers
             if wait_for_workers:
                 _check_full_rank(store, world_size)

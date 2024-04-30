@@ -6,6 +6,7 @@
 #include <deque>
 #include <mutex>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 #include <gloo/algorithm.h>
@@ -78,7 +79,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
 
     ~AsyncWork() override = default;
 
-    static void execute(const c10::intrusive_ptr<AsyncWork>& work);
+    static void execute(c10::intrusive_ptr<AsyncWork> work);
 
     virtual void run() = 0;
 
@@ -92,7 +93,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
 
    private:
     void finishWorkGloo();
-    void finishWorkGlooError(const std::exception_ptr& eptr);
+    void finishWorkGlooError(std::exception_ptr eptr);
     inline void recordAsyncWorkProfilingInfo(
         const char* profilingTitle,
         const c10::optional<std::vector<at::Tensor>>& inputTensors);
