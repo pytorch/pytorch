@@ -262,7 +262,7 @@ class ShardedTensor(ShardedTensorBase):
 
         self._metadata.tensor_properties.memory_format = memory_format
 
-        current_rank = dist.get_rank(self._process_group)
+        current_rank = dist.get_rank()  # global rank
 
         for shard_metadata in self._metadata.shards_metadata:
             rank, device = _parse_and_validate_remote_device(self._process_group, shard_metadata.placement)

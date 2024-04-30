@@ -79,7 +79,7 @@ class Sampler(Generic[T_co]):
     #     Calling `len(subclass_instance)` raises:
     #       TypeError: 'NotImplementedType' object cannot be interpreted as an integer
     #
-    #   + `raise NotImplementedError()`:
+    #   + `raise NotImplementedError`:
     #     This prevents triggering some fallback behavior. E.g., the built-in
     #     `list(X)` tries to call `len(X)` first, and executes a different code
     #     path if the method is not found or `NotImplemented` is returned, while
