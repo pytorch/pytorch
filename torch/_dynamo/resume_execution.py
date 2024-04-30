@@ -457,7 +457,7 @@ class ContinueExecutionCache:
                 if real_i in stack_ctx_vars_d:
                     # current stack variable is a context var -
                     # load args for context variable and construct it
-                    prefix.extend(_load_tuple_and_call(stack_ctx_vars[real_i]))
+                    prefix.extend(_load_tuple_and_call(stack_ctx_vars_d[real_i]))
 
             if is_py311_plus:
                 # reverse the mapping since targets of later/nested contexts are inserted
