@@ -3430,7 +3430,7 @@ static void linalg_lstsq_out_info(
 
   // now the actual call that computes the result in-place (apply_lstsq)
   if (driver == "gelss" && input.device() != at::kCPU) {
-    if (input.numel() == 0 || input.size(-2) == 0 || input.size(-1) == 0) {
+    if (input.numel() == 0) {
         auto output_shape = input.sizes().vec();
         output_shape.back() = other.size(-1);
         rank.fill_(0);
