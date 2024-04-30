@@ -673,6 +673,12 @@ TEST(StaticRuntime, LayerNorm) {
         return torch.layer_norm(input, normalized_shape, None, None, 1e-05, False).clone()
   )JIT";
 
+  const std::string layer_norm_with_noncontiguous_input = R"JIT(
+    def forward(self, input: Tensor, normalized_shape: List[int], weight: Tensor, bias: Tensor):
+        input = torch.transpose(input, 1, 2)
+        return torch.layer_norm(input, normalized_shape, weight, bias, 1e-05, False).clone()
+  )JIT";
+
   const auto a = torch::rand({1, 2, 2, 2});
   const auto b = torch::rand({3, 2, 2, 2});
   for (int normalized_size : {2, 3}) {
@@ -684,6 +690,7 @@ TEST(StaticRuntime, LayerNorm) {
     std::vector<IValue> args1{b, normalized_shape, weight, bias};
     testStaticRuntime(layer_norm_with_weights, args);
     testStaticRuntime(layer_norm_with_weights, args, args1);
+    testStaticRuntime(layer_norm_with_noncontiguous_input, args);
 
     args = {a, normalized_shape};
     testStaticRuntime(layer_norm_without_weights, args);

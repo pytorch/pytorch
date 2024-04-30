@@ -186,7 +186,7 @@ PackedLinearWeightQnnp::PackedLinearWeightQnnp(
 
   std::tie(w_zero_points_, w_scales_) =
       make_zero_points_and_scales_tensor(weight_contig);
-  const float* weight_scales_data = w_scales_.data_ptr<float>();
+  const float* weight_scales_data = w_scales_.const_data_ptr<float>();
   at::Tensor qnnp_weight = at::_empty_affine_quantized(
       weight_contig.sizes(),
       at::device(c10::kCPU).dtype(c10::kQUInt8),

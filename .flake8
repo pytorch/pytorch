@@ -13,8 +13,6 @@ ignore =
     EXE001,
     # these ignores are from flake8-bugbear; please fix!
     B007,B008,B017,B019,B023,B028,B903,B904,B905,B906,B907
-    # Coding magic comment not found - do we really want to add encoding to every file?
-    C101,
     # these ignores are from flake8-comprehensions; please fix!
     C407,
     # these ignores are from flake8-logging-format; please fix!
@@ -56,6 +54,7 @@ per-file-ignores =
     torch/ao/quantization/fx/_decomposed.py: TOR901
     torch/distributed/_functional_collectives.py: TOR901
     torch/distributed/_spmd/data_parallel.py: TOR901
+    torch/distributed/_tensor/_collective_utils.py: TOR901
 optional-ascii-coding = True
 exclude =
     ./.git,
