@@ -1,13 +1,13 @@
 #pragma once
 
+#ifdef USE_C10D_NCCL
+
 #if defined(__linux__)
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 #endif
-
-#ifdef USE_C10D_NCCL
 
 #include <atomic>
 #include <chrono>
@@ -36,6 +36,10 @@
 #include <torch/custom_class.h>
 
 namespace c10d {
+
+// Control whether to always use high priority streams
+static std::vector<std::string> TORCH_NCCL_HIGH_PRIORITY = {
+    "TORCH_NCCL_HIGH_PRIORITY"};
 
 // Control whether or not wait() is blocking or non-blocking.
 static std::vector<std::string> TORCH_NCCL_BLOCKING_WAIT = {
@@ -96,15 +100,9 @@ static std::vector<std::string> TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC = {
 static std::vector<std::string> TORCH_NCCL_COORD_CHECK_MILSEC = {
     "TORCH_NCCL_COORD_CHECK_MILSEC"};
 
-// Whether to abort the communicators when users call destroy_process_group().
-// If yes, communicators will be aborted when destroy_process_group is called,
-// but not in destructor.
-static std::vector<std::string> TORCH_NCCL_ABORT_IN_DESTROY_PG = {
-    "TORCH_NCCL_ABORT_IN_DESTROY_PG"};
-
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
-constexpr const char* TIMEOUT_DUMP = "timeout_dump";
+constexpr const char* EXCEPTION_DUMP = "exception_dump";
 
 constexpr const int kWorkStatusUpdatePeriodMs = 30 * 1000; // 30 seconds
 
@@ -430,6 +428,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     std::shared_ptr<ProcessGroupNCCL> split_from;
     int64_t split_color{0};
     std::vector<uint64_t> global_ranks_in_group;
+    std::string group_name;
   };
 
   // If you wish to create multiple process groups, each with a potentially
@@ -1010,11 +1009,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // for the operation to complete.
   bool blockingWait_ = false;
 
-  // Whether to abort the communicators when users call destroy_process_group().
-  // If yes, communicators will be aborted when destroy_process_group is called,
-  // but not in destructor.
-  bool abortInDestroyProcessGroup_ = false;
-
   // Whether or not to hook the cache allocator to register all allocated
   // tensors
   bool useTensorRegisterAllocatorHook_ = false;
@@ -1026,8 +1020,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Whether or not to enable timeout root cause analysis.
   bool desyncDebug_;
 
-  // Whether or not to dump debug info on timeout
-  bool dumpOnTimeout_;
+  // Whether or not to dump debug info on exception including both watchdog
+  // timeout and nccl errors.
+  bool dumpOnException_;
 
   // Whether or not to create start CUDAEvent and enable timing for start
   // and end events. Note that enableTiming_ is always true if desyncDebug_
@@ -1066,10 +1061,22 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // initialized to be -1 to indicate no collective has been enqueued
   int64_t lastEnqueuedSeq_{-1};
 
+  // the name of the last collective enqueued into workMetaList_
+  std::string lastEnqueuedWorkName_;
+
+  // the sequential number of the last colletive started as the kernal
+  int64_t lastStartedSeq_{-1};
+
+  // the name of the last collective started as the kernal
+  std::string lastStartedWorkName_;
+
   // the sequential number of the last colletive completed marked by
   // the watchdog thread
   // initialized to be -1 to indicate no collective has been completed
   int64_t lastCompletedSeq_{-1};
+
+  // the name of the last collective completed
+  std::string lastCompletedWorkName_;
 
   std::exception_ptr watchDogException_ = nullptr;
 
@@ -1083,10 +1090,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 TORCH_API std::string dump_nccl_trace();
 
 // Gets a mutable reference to a global optional function.  Heartbeat Monitor
-// will query this function and if available, call it to dump traces. Inside
-// fbcode, we store a function here that uses an internal tool for process
-// tracing
-TORCH_API c10::optional<std::function<std::string()>>& get_cpp_trace_dumper();
+// will use this function to dump traces, if available. Inside fbcode, we store
+// a function here that uses an internal tool for process tracing
+TORCH_API c10::optional<
+    std::function<void(std::function<void(const std::string&)>)>>&
+get_cpp_trace_dumper();
 
 // Similar to get_cpp_trace_dumper, this stores a function defined in
 // torch-python layer that lets us check whether the GIL can be acquired,

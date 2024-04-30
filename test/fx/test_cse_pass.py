@@ -1,18 +1,18 @@
 # Owner(s): ["oncall: fx"]
 
-import torch
+import random
 
-from torch.testing._internal.common_utils import (
-    TestCase, run_tests)
+import torch
+from torch.fx import symbolic_trace
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.dialect.common.cse_pass import CSEPass, get_CSE_banned_ops
-from torch.fx import symbolic_trace
 
-import random
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 banned_ops = get_CSE_banned_ops()
 P_default = CSEPass(banned_ops=banned_ops)
+
 
 def check(self, f, t, delta, check_val=True, graph_input=False, P=None):
     """
@@ -47,34 +47,50 @@ def check(self, f, t, delta, check_val=True, graph_input=False, P=None):
     old_num_nodes = len(fx_g.graph.nodes)
     new_num_nodes = len(new_graph.nodes)
 
-    assert (new_num_nodes < old_num_nodes) == modified, "modified should be True if the number of nodes decrease"
+    assert (
+        new_num_nodes < old_num_nodes
+    ) == modified, "modified should be True if the number of nodes decrease"
 
     if delta == -1:
-        self.assertTrue(old_num_nodes >= new_num_nodes, (
-            f"number of nodes increased {old_num_nodes}, {new_num_nodes}"))
+        self.assertTrue(
+            old_num_nodes >= new_num_nodes,
+            (f"number of nodes increased {old_num_nodes}, {new_num_nodes}"),
+        )
     else:
-        self.assertTrue(old_num_nodes == new_num_nodes + delta, (
-            f"number of nodes not the same {old_num_nodes - delta}, {new_num_nodes}\n {fx_g.graph} \n {new_graph}"))
+        self.assertTrue(
+            old_num_nodes == new_num_nodes + delta,
+            (
+                f"number of nodes not the same {old_num_nodes - delta}, {new_num_nodes}\n {fx_g.graph} \n {new_graph}"
+            ),
+        )
 
     # a second pass should not reduce more nodes
     res = P(new_g)
     pass_2_graph = res.graph_module.graph
     pass_2_num_nodes = len(pass_2_graph.nodes)
-    self.assertTrue(pass_2_num_nodes == new_num_nodes, (
-        f"second pass graph has less node {pass_2_num_nodes}, {new_num_nodes}\n {new_graph} \n {pass_2_graph}"))
+    self.assertTrue(
+        pass_2_num_nodes == new_num_nodes,
+        (
+            f"second pass graph has less node {pass_2_num_nodes}, {new_num_nodes}\n {new_graph} \n {pass_2_graph}"
+        ),
+    )
 
     # check correctness
     if check_val:
         true_result = fx_g(t)
         our_result = new_g(t)
         if true_result is None:  # both return None
-            self.assertTrue(our_result is None, f"true result is None, CSE result is {our_result}")
+            self.assertTrue(
+                our_result is None, f"true result is None, CSE result is {our_result}"
+            )
         else:  # results returned are the same
-            self.assertTrue(torch.all(true_result == our_result), (
-                f"results are different {true_result}, {our_result}"))  # check results are the same
+            self.assertTrue(
+                torch.all(true_result == our_result),
+                (f"results are different {true_result}, {our_result}"),
+            )  # check results are the same
+
 
 class TestCSEPass(TestCase):
-
     def test_nochange(self):
         def f(x):
             a = x + 1
@@ -82,15 +98,16 @@ class TestCSEPass(TestCase):
             a = x
             d = x + a
             return b + d
+
         t = torch.randn(2, 2)
         check(self, f, t, 0)
 
     def test_empty(self):
         def f(x):
             pass
+
         t = torch.randn(2, 2)
         check(self, f, t, 0)
-
 
     def test_immutable_list_type(self):
         def f(x):
@@ -99,6 +116,7 @@ class TestCSEPass(TestCase):
             c = x.sum()
             d = x.sum()
             return a + b + c + d
+
         t = torch.randn(2, 2)
         check(self, f, t, 2)
 
@@ -109,6 +127,7 @@ class TestCSEPass(TestCase):
             c = x.sum(dim=1)
             d = x.sum(dim=1)
             return a + b + c + d
+
         t = torch.randn(2, 2)
         check(self, f, t, 2)
 
@@ -119,6 +138,7 @@ class TestCSEPass(TestCase):
             c = a + a
             d = b + b
             return c + d
+
         t = torch.randn(2, 2)
         check(self, f, t, 2)
 
@@ -129,6 +149,7 @@ class TestCSEPass(TestCase):
             c = a + a
             d = b + b
             return c + d
+
         t = torch.randn(1)
         check(self, f, t, 3)
 
@@ -139,6 +160,7 @@ class TestCSEPass(TestCase):
             c = x.sum(dim=1, keepdim=False)
             d = x.sum(dim=1)
             return a + b + c + d
+
         t = torch.randn(2, 2)
         check(self, f, t, 3)
 
@@ -149,6 +171,7 @@ class TestCSEPass(TestCase):
             c = x.sum(dim=1, keepdim=True)
             d = x.sum(dim=1)
             return a + b + c + d
+
         t = torch.randn(2, 2)
         check(self, f, t, 2)
 
@@ -159,6 +182,7 @@ class TestCSEPass(TestCase):
             c = x.sum()
             d = x.sum()
             return a + b + c + d
+
         t = torch.randn(2, 2)
         check(self, f, t, 3)
 
@@ -167,6 +191,7 @@ class TestCSEPass(TestCase):
             a = torch.cat((x, x))
             b = torch.cat((x, x))
             return a + b
+
         t = torch.randn(2, 2)
         check(self, f, t, 1)
 
@@ -175,12 +200,14 @@ class TestCSEPass(TestCase):
             a = torch.ones_like(x)
             b = torch.ones_like(x)
             return a + b
+
         t = torch.randn(2, 2)
         check(self, f, t, 1)
 
     """
     Generate function with random ops and check if the result is the same
     """
+
     def test_random(self):
         def f(x):
             vals = [x]
@@ -201,6 +228,7 @@ class TestCSEPass(TestCase):
     """
     Test that banned list ban ops as expected.
     """
+
     def test_banned_list(self):
         def f(x):
             a = x + 1
@@ -217,6 +245,7 @@ class TestCSEPass(TestCase):
             a = torch.rand_like(x)
             b = torch.rand_like(x)
             return a + b
+
         t = torch.randn(2, 2)
         check(self, f, t, 0, check_val=False)
 
@@ -225,9 +254,10 @@ class TestCSEPass(TestCase):
             a = torch.randn(4)
             b = torch.randn(4)
             return a + b
+
         t = torch.randn(2, 2)
         check(self, f, t, 0, check_val=False)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_tests()

@@ -102,7 +102,7 @@ __global__ void upsample_bicubic2d_backward_out_frame(
     const accscalar_t width_scale,
     const bool align_corners,
     PackedTensorAccessor64<scalar_t, 4> idata,
-    const PackedTensorAccessor64<scalar_t, 4> odata) {
+    const PackedTensorAccessor64<const scalar_t, 4> odata) {
   int index = threadIdx.x + blockIdx.x * blockDim.x;
 
   const int batchsize = idata.size(0);
@@ -252,7 +252,7 @@ static void upsample_bicubic2d_backward_out_cuda_template(
         using accscalar_t = at::acc_type<scalar_t, true>;
 
         auto idata = grad_input.packed_accessor64<scalar_t, 4>();
-        auto odata = grad_output.packed_accessor64<scalar_t, 4>();
+        auto odata = grad_output.packed_accessor64<const scalar_t, 4>();
 
         const accscalar_t rheight = area_pixel_compute_scale<accscalar_t>(
             input_height, output_height, align_corners, scales_h);

@@ -7,7 +7,8 @@
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/irange.h>
 
-#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX2)
+#define SLEEF_STATIC_LIBS
 #include <sleef.h>
 #endif
 
@@ -18,7 +19,18 @@ namespace at::vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 
-#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX2)
+
+#ifndef SLEEF_CONST
+#if (defined(__GNUC__) || defined(__CLANG__)) && !defined(__INTEL_COMPILER)
+#define SLEEF_CONST const
+#else
+#define SLEEF_CONST
+#endif
+#define SLEEF_CONST_OLD SLEEF_CONST
+#else
+#define SLEEF_CONST_OLD
+#endif
 
 // bfloat16 conversion
 static inline void cvtbf16_fp32(const __m128i& a, __m256& o) {
@@ -292,7 +304,8 @@ public:
     }
     return b;
   }
-  Vectorized<T> map(const __m256 (*const vop)(__m256)) const {
+
+  Vectorized<T> map(SLEEF_CONST __m256 (*SLEEF_CONST_OLD vop)(__m256)) const {
     __m256 lo, hi;
     cvt_to_fp32<T>(values, lo, hi);
     const auto o1 = vop(lo);
@@ -1053,7 +1066,7 @@ inline Vectorized<type> convert_float_##name(const Vectorized<float>& a, const V
 CONVERT_VECTORIZED_INIT(BFloat16, bfloat16);
 CONVERT_VECTORIZED_INIT(Half, half);
 
-#else // defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#else // defined(CPU_CAPABILITY_AVX2)
 
 #define CONVERT_NON_VECTORIZED_INIT(type, name) \
 inline std::tuple<Vectorized<float>, Vectorized<float>> convert_##name##_float(const Vectorized<type>& a) { \
@@ -1079,11 +1092,17 @@ CONVERT_NON_VECTORIZED_INIT(BFloat16, bfloat16);
 #if defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__)
 inline std::tuple<Vectorized<float>, Vectorized<float>> convert_half_float(const Vectorized<Half>& a) {
   static_assert(Vectorized<Half>::size() == 2 * Vectorized<float>::size());
+#if defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC)
+  float16x8x2_t arr = a;
+  float16x8_t x = arr.val[0];
+  float16x8_t y = arr.val[1];
+#else
   auto arr = reinterpret_cast<const float16_t*>(a.operator const Half*());
   float16x8_t x = vld1q_f16(arr);
+  float16x8_t y = vld1q_f16(arr + Vectorized<float>::size());
+#endif
   float32x4_t x1 = vcvt_f32_f16(vget_low_f16(x));
   float32x4_t x2 = vcvt_f32_f16(vget_high_f16(x));
-  float16x8_t y = vld1q_f16(arr + Vectorized<float>::size());
   float32x4_t y1 = vcvt_f32_f16(vget_low_f16(y));
   float32x4_t y2 = vcvt_f32_f16(vget_high_f16(y));
   return { Vectorized<float>(x1, x2), Vectorized<float>(y1, y2) };
@@ -1096,19 +1115,23 @@ inline Vectorized<Half> convert_float_half(const Vectorized<float>& a, const Vec
   float16x4_t x2 = vcvt_f16_f32(x.val[1]);
   float16x4_t y1 = vcvt_f16_f32(y.val[0]);
   float16x4_t y2 = vcvt_f16_f32(y.val[1]);
+#if defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC)
+  return Vectorized<Half>(vcombine_f16(x1, x2), vcombine_f16(y1, y2));
+#else
   Vectorized<Half> rc;
   auto arr = reinterpret_cast<float16_t*>(rc.operator Half*());
   vst1q_f16(arr, vcombine_f16(x1, x2));
   vst1q_f16(arr + Vectorized<float>::size(), vcombine_f16(y1, y2));
   return rc;
+#endif
 }
 #else
 CONVERT_NON_VECTORIZED_INIT(Half, half);
 #endif
 
-#endif // defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#endif // defined(CPU_CAPABILITY_AVX2)
 
-#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX2)
 #define LOAD_FP32_VECTORIZED_INIT(type, name) \
 inline void load_fp32_from_##name(const type *data, Vectorized<float>& out) { \
   auto values = _mm_loadu_si128(reinterpret_cast<const __m128i*>(data)); \
@@ -1127,7 +1150,7 @@ inline void load_fp32_from_##name(const type *data, Vectorized<float>& out1, Vec
 LOAD_FP32_VECTORIZED_INIT(BFloat16, bf16);
 LOAD_FP32_VECTORIZED_INIT(Half, fp16);
 
-#else // defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#else // defined(CPU_CAPABILITY_AVX2)
 #define LOAD_FP32_NON_VECTORIZED_INIT(type, name) \
 inline void load_fp32_from_##name(const type *data, Vectorized<float>& out) { \
   __at_align__ float values[Vectorized<float>::size()]; \

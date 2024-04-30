@@ -192,7 +192,7 @@ def reorder_compute_for_overlap(
                     all_nodes.remove(node)
                     progress = True
             if not progress:
-                raise Exception(
+                raise Exception(  # noqa: TRY002
                     "Unable to find a free node (indeg == 0). This is an impossible state to reach. "
                     "Please report a bug to PyTorch."
                 )
@@ -215,10 +215,8 @@ def reorder_compute_for_overlap(
         assert_no_comm_nodes(needed_by_next_comm_and_ready_compute_nodes)
 
         total_compute_runtime_cost = rolled_over_compute_cost + sum(
-            [
-                estimate_op_runtime(node)
-                for node in needed_by_next_comm_and_ready_compute_nodes
-            ]
+            estimate_op_runtime(node)
+            for node in needed_by_next_comm_and_ready_compute_nodes
         )
         prev_comm_runtime_cost = estimate_op_runtime(comm_nodes[idx - 1])
         schedule_nodes(tuple_sorted(needed_by_next_comm_and_ready_compute_nodes))
@@ -314,7 +312,7 @@ def visualize_overlap(order):
                 total_est_runtime += estimate_op_runtime(snode)
                 cur_comm_node = snode.node
             elif is_wait(snode.node):
-                raise Exception(
+                raise Exception(  # noqa: TRY002
                     "Wait is not expected when there is no collective running"
                 )
             else:  # exposed compute op
@@ -322,7 +320,7 @@ def visualize_overlap(order):
             overlap_log.debug(f"{node_summary(snode)}")  # noqa: G004
         else:  # cur_comm_node is not None
             if is_collective(snode.node):
-                raise Exception(
+                raise Exception(  # noqa: TRY002
                     "Found two collectives running at the same time. "
                     "`visualize_overlap` needs to be updated to handle this case"
                 )
