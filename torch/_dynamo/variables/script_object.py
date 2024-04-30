@@ -1,9 +1,25 @@
+import functools
 from typing import Dict
 
 import torch
+from ..exc import unimplemented, UnsafeScriptObjectError, Unsupported
 
 from .base import VariableTracker
 from .user_defined import UserDefinedObjectVariable
+
+
+def _raise_hard_error_if_graph_break(reason):
+    def deco(fn):
+        @functools.wraps(fn)
+        def graph_break_as_hard_error(*args, **kwargs):
+            try:
+                return fn(*args, **kwargs)
+            except Unsupported as e:
+                raise UnsafeScriptObjectError(e.msg) from e
+
+        return graph_break_as_hard_error
+
+    return deco
 
 
 class TorchScriptObjectVariable(UserDefinedObjectVariable):
@@ -26,6 +42,9 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
     def as_proxy(self):
         return self.proxy
 
+    @_raise_hard_error_if_graph_break(
+        "Dynamo cannot safely trace script object due to graph break."
+    )
     def var_getattr(self, tx, name: str) -> VariableTracker:
         from torch._higher_order_ops.torchbind import call_torchbind
         from ..source import AttrSource
@@ -33,13 +52,14 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
 
         method = getattr(self.value, name, None)
         if method is None:
-            raise RuntimeError(
+            unimplemented(
                 f"FakeScriptObject doesn't define method {name}. Did you forget to implement it in the fake class?"
             )
 
         if not callable(method):
-            raise RuntimeError(
-                "Only method calls on TorchScript objects are supported. Please file a feature request if you need this."
+            unimplemented(
+                "Only method calls on TorchScript objects can be supported safely."
+                " Please use method calls instead of attribute access."
             )
 
         return TorchHigherOrderOperatorVariable.make(
@@ -48,3 +68,11 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
             script_obj_var=self,
             method_name=name,
         )
+
+    @_raise_hard_error_if_graph_break(
+        "Dynamo cannot safely trace script object due to graph break."
+    )
+    def call_method(self, tx, name, args, kwargs):
+        if name == "__setattr__":
+            unimplemented("Setattr on script object is not safe.")
+        return super().call_method(tx, name, args, kwargs)

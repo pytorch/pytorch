@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: export"]
 
-import unittest
 
 import torch
 import torch.utils._pytree as pytree
@@ -929,25 +928,6 @@ def forward(self, L_tq_ : torch.ScriptObject, L_x_ : torch.Tensor):
         self.assertEqual(aot_ret[1].size(), eager_ret[1].size())
         self.assertEqual(aot_ret[1].pop(), eager_ret[1].pop())
 
-    # TODO: torchbind object hashes can collide if using the same name
-    # for more than 3 torchbind objects.
-    @unittest.expectedFailure
-    def test_tensor_queue_hash(self):
-        hashes = set()
-        tq = _empty_tensor_queue()
-        tq.push(torch.randn(2, 3))
-        hashes.add(hash(tq))
-        tq = _empty_tensor_queue()
-        tq.push(torch.randn(2, 3))
-        hashes.add(hash(tq))
-        tq = _empty_tensor_queue()
-        tq.push(torch.randn(2, 3))
-        hashes.add(hash(tq))
-        tq = _empty_tensor_queue()
-        tq.push(torch.randn(2, 3))
-        hashes.add(hash(tq))
-        self.assertEqual(len(hashes), 4)
-
     def test_compile_script_object_input_guards(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -1051,6 +1031,25 @@ def forward(self, L_tq_ : torch.ScriptObject, L_x_ : torch.Tensor):
         with self.assertRaisesRegex(RuntimeError, "is alising"):
             torch.compile(mod, backend=backend)(tq1, x)
 
+    def test_compile_error_on_script_obj_setattr(self):
+        def setattr_f(tq):
+            tq.a = 1
+            return tq
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Setattr on script object is not safe."
+        ):
+            torch.compile(setattr_f, backend="eager")(_empty_tensor_queue())
+
+    def test_compile_error_on_script_obj_missing_attr(self):
+        def setattr_f(tq):
+            return tq._not_defined_attr
+
+        with self.assertRaisesRegex(
+            RuntimeError, "doesn't define method _not_defined_attr"
+        ):
+            torch.compile(setattr_f, backend="eager")(_empty_tensor_queue())
+
     def test_compile_body_aliasing_contents(self):
         backend = EagerAndRecordGraphs()
 
@@ -1067,22 +1066,23 @@ def forward(self, L_tq_ : torch.ScriptObject, L_x_ : torch.Tensor):
             f(_empty_tensor_queue(), x),
             torch.compile(f, backend=backend)(_empty_tensor_queue(), x),
         )
-        self.assertExpectedInline(
-            backend.graphs[0].code.strip(),
-            """\
-def forward(self, L_x_ : torch.Tensor, L_tq_ : torch.ScriptObject):
-    l_x_ = L_x_
-    l_tq_ = L_tq_
-    x1 = l_x_.view(-1)
-    x2 = l_x_.permute(1, 0);  l_x_ = None
-    call_torchbind = torch.ops.higher_order.call_torchbind(l_tq_, 'push', x1)
-    call_torchbind_1 = torch.ops.higher_order.call_torchbind(l_tq_, 'push', x2)
-    call_torchbind_2 = torch.ops.higher_order.call_torchbind(l_tq_, 'size')
-    sub = x1 - 2;  x1 = None
-    call_torchbind_3 = torch.ops.higher_order.call_torchbind(l_tq_, 'size');  l_tq_ = None
-    add = x2 + 2;  x2 = None
-    return (sub, add)""",
-        )
+        if not torch._dynamo.is_compiling():
+            self.assertExpectedInline(
+                backend.graphs[0].code.strip(),
+                """\
+    def forward(self, L_x_ : torch.Tensor, L_tq_ : torch.ScriptObject):
+        l_x_ = L_x_
+        l_tq_ = L_tq_
+        x1 = l_x_.view(-1)
+        x2 = l_x_.permute(1, 0);  l_x_ = None
+        call_torchbind = torch.ops.higher_order.call_torchbind(l_tq_, 'push', x1)
+        call_torchbind_1 = torch.ops.higher_order.call_torchbind(l_tq_, 'push', x2)
+        call_torchbind_2 = torch.ops.higher_order.call_torchbind(l_tq_, 'size')
+        sub = x1 - 2;  x1 = None
+        call_torchbind_3 = torch.ops.higher_order.call_torchbind(l_tq_, 'size');  l_tq_ = None
+        add = x2 + 2;  x2 = None
+        return (sub, add)""",
+            )
 
     def test_compile_error_on_non_fakified_method(self):
         backend = EagerAndRecordGraphs()

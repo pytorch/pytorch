@@ -13,7 +13,7 @@ import operator
 import re
 import sys
 import types
-from typing import List, NamedTuple, Optional, Union
+from typing import Any, List, NamedTuple, Optional, Union
 
 from torch.utils._sympy.value_ranges import ValueRanges
 
@@ -893,13 +893,21 @@ class VariableBuilder:
         elif TorchScriptObjectVariable.is_matching_cls(type(value)):
             from ..source import FlattenScriptObjectSource
 
-            # different torch.ScriptObjects can point to the same underlying value
-            # (but we guarantee that they will `hash()` to the same value if that's the case).
+            # This exists to allow a smoother transition.
+            # The script objects won't be tracked as proxies.
+            # Methods on these objects won't show up in the graph.
+            # The original script object might be mutated.
+            # TODO(yidi): gradually adding support for more script objects.
+            if not hasattr(value, "__obj_flatten__"):
+                return self.wrap_user_defined(value)
 
-            # Install the guards on the content of value
-            convert_source = FlattenScriptObjectSource(self.source)
+            # TODO:(yidi) also guard on the type of the script object
+            # Install the guards on the content of the script object by setting the source
+            # to be FlattenScriptObjectSource, which calls __obj_flatten__() to get the contents.
             LazyVariableTracker.realize_all(
-                VariableBuilder(self.tx, convert_source)(value.__obj_flatten__())
+                VariableBuilder(self.tx, FlattenScriptObjectSource(self.source))(
+                    value.__obj_flatten__()
+                )
             )
 
             fake_script_obj = torch._library.fake_class_registry.to_fake_obj(
@@ -909,26 +917,31 @@ class VariableBuilder:
             proxy = self.tx.output.root_tracer.create_graph_input(
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
                 type(value),
-                source=convert_source,
+                source=self.source,
             )
+
+            # TODO:(yidi) add comment to each individual argument
             # setting is_unspecialized=False to not insert a as_tensor call in reconstruct by default
             # seting example to be real value because these example values will be used
             # as example_inputs for user compiler.
             proxy.node.meta["grapharg"] = GraphArg(
-                convert_source, value, False, None, False, fake_script_obj
+                self.source, value, False, None, False, fake_script_obj
             )
             return TorchScriptObjectVariable.create(
                 proxy,
                 fake_script_obj,
-                source=convert_source,
+                source=self.source,
             )
         else:
-            self.install_guards(GuardBuilder.TYPE_MATCH)
-            result = UserDefinedObjectVariable(value, source=self.source)
-            if not SideEffects.cls_supports_mutation_side_effects(type(value)):
-                # don't allow STORE_ATTR mutation with custom __setattr__
-                return result
-            return self.tx.output.side_effects.track_object_existing(value, result)
+            return self.wrap_user_defined(value)
+
+    def wrap_user_defined(self, value: Any):
+        self.install_guards(GuardBuilder.TYPE_MATCH)
+        result = UserDefinedObjectVariable(value, source=self.source)
+        if not SideEffects.cls_supports_mutation_side_effects(type(value)):
+            # don't allow STORE_ATTR mutation with custom __setattr__
+            return result
+        return self.tx.output.side_effects.track_object_existing(value, result)
 
     def wrap_listlike(self, value: Union[tuple, list, odict_values, NamedTuple]):
         if config.specialize_int and type(value) is torch.Size:

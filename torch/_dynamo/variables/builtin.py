@@ -952,6 +952,7 @@ class BuiltinVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        breakpoint()
         if self.fn == object and name == "__setattr__":
             assert len(args) == 3
             assert len(kwargs) == 0
