@@ -81,6 +81,110 @@ c10::List<std::string> splitNoneSeparator(const std::string& string) {
   return splits;
 }
 
+bool isSortableTupleType(
+    const TupleTypePtr& tuple_type,
+    std::stringstream& why_not) {
+  for (const TypePtr& ele_type : tuple_type->containedTypes()) {
+    switch (ele_type->kind()) {
+      case TypeKind::IntType:
+      case TypeKind::BoolType:
+      case TypeKind::FloatType:
+      case TypeKind::StringType:
+      case TypeKind::TensorType:
+        continue;
+      case TypeKind::TupleType:
+        if (!isSortableTupleType(ele_type->expect<TupleType>(), why_not)) {
+          return false;
+        }
+        continue;
+      case TypeKind::ClassType:
+        if (!c10::checkObjectSortSchema(
+                ele_type->expect<ClassType>(), why_not)) {
+          return false;
+        }
+        continue;
+      default:
+        why_not << "Contained elements in " << *tuple_type
+                << " are not sortable. Only Int, Bool, Float, String, Tensor, "
+                << "a User Defined Class with __lt__ method defined or Tuples "
+                << "of aforementionted types can be sorted.";
+        return false;
+    }
+  }
+
+  return true;
+}
+
+bool isSortableListOfObjectsOrTuples(
+    c10::List<IValue>& ivalues,
+    std::stringstream& why_not) {
+  if (ivalues.empty()) {
+    return true;
+  }
+
+  auto type = ivalues.get(0).type();
+  // We assume lists have homogenous types, use first element to determine
+  // best sorting methods. If in the future we need to support heterogenous
+  // types inside list, then sorting needs to have runtime sortable checks.
+  const size_t n = ivalues.size();
+  for (const auto i : c10::irange(n)) {
+    const IValue& v = ivalues.get(i);
+    auto curr_type = v.type();
+    if (*curr_type != *type) {
+      why_not << "Only values of same type can be compared. "
+              << "Found " << type->repr_str() << " and "
+              << curr_type->repr_str();
+      return false;
+    }
+  }
+
+  if (auto tuple_type = type->cast<TupleType>()) {
+    return isSortableTupleType(tuple_type, why_not);
+  }
+
+  if (auto class_type = type->cast<ClassType>()) {
+    return c10::checkObjectSortSchema(class_type, why_not) != nullptr;
+  }
+
+  // Basic types like tensors/ints/floats/bools/strs are not checked in this
+  // method because they should have been schema matched to specialized
+  // aten::sort kernels using listSort<T>.
+  why_not << "Only list of Tensors, ints, floats, bools, strs, "
+          << "a User Defined Class that defines the __lt__ compare method "
+          << "or Tuples of aforementioned types can be sorted, got list of "
+          << type->repr_str() << "\n";
+  return false;
+}
+
+template <bool has_reverse_arg, bool copy_return_list>
+void sort_op(Stack& stack) {
+  bool reverse = has_reverse_arg ? pop(stack).toBool() : false;
+  auto g_list = pop(stack).toList();
+
+  if (copy_return_list) {
+    g_list = g_list.copy();
+  }
+
+  if (!g_list.empty()) {
+    std::stringstream error_str;
+    if (!isSortableListOfObjectsOrTuples(g_list, error_str)) {
+      throw std::runtime_error(error_str.str());
+    }
+
+    c10::IValueComparator comparator;
+    if (reverse) {
+      comparator = c10::getGreaterThanComparator(g_list.get(0));
+    } else {
+      comparator = c10::getLessThanComparator(g_list.get(0));
+    }
+    std::sort(g_list.begin(), g_list.end(), comparator);
+  }
+
+  if (copy_return_list) {
+    push(stack, g_list);
+  }
+}
+
 template <typename T, typename U>
 auto powWrapper(T a, U b) {
   TORCH_CHECK(
@@ -695,7 +799,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
 #if defined BUILD_LITE_INTERPRETER || defined C10_MOBILE
           bool enabled = false;
 #else
-          bool enabled = at::autocast::is_enabled();
+          bool enabled = at::autocast::is_autocast_enabled(at::kCUDA);
 #endif
           push(stack, enabled);
         },
@@ -706,7 +810,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
 #if defined BUILD_LITE_INTERPRETER || defined C10_MOBILE
           bool enabled = false;
 #else
-          bool enabled = at::autocast::is_cpu_enabled();
+          bool enabled = at::autocast::is_autocast_enabled(at::kCPU);
 #endif
           push(stack, enabled);
         },
@@ -2431,11 +2535,11 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA("prim::is_ort(Tensor a) -> bool"),
+        TORCH_SELECTIVE_SCHEMA("prim::is_maia(Tensor a) -> bool"),
         [](Stack& stack) {
           at::Tensor a;
           pop(stack, a);
-          push(stack, a.is_ort());
+          push(stack, a.is_maia());
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
@@ -2877,6 +2981,15 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs2{
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::ne.str_list(str[] a, str[] b) -> bool"),
         listNe<std::string>,
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::sorted.any(t[](a) self) -> (t[])"),
+        sort_op</*has_reverse_arg*/ false, /*copy_return_list*/ true>,
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::sort.any(t[](a!) self, bool reverse=False) -> ()"),
+        sort_op</*has_reverse_arg*/ true, /*copy_return_list*/ false>,
         aliasAnalysisFromSchema()),
 
 #define DEFINE_CONVERT_BASE_OP(op_name, prefix, char_op) \

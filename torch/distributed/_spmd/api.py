@@ -294,8 +294,8 @@ SPMD_DECOMP_TABLE = {
 
 
 DEDUP_TARGETS: Set[torch._ops.OpOverload] = {
-    torch.ops.c10d_functional.all_reduce.default,
-    torch.ops.c10d_functional.wait_tensor.default,
+    torch.ops._c10d_functional.all_reduce.default,
+    torch.ops._c10d_functional.wait_tensor.default,
 }
 
 

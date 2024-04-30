@@ -55,6 +55,7 @@ from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
 from torch.testing._internal.common_utils import TemporaryFileName
 
 from torch.autograd.profiler_legacy import profile as _profile
+import operator
 
 
 def foo_add():
@@ -4605,22 +4606,22 @@ class CudaRpcTest(RpcAgentTestFixture):
         function_events = p.function_events
         for event in function_events:
             if event.is_async:
-                self.assertEqual(0, event.cuda_time_total)
+                self.assertEqual(0, event.device_time_total)
                 self.assertEqual([], event.kernels)
-                self.assertEqual(0, event.cuda_time)
+                self.assertEqual(0, event.device_time)
             else:
                 if event.node_id == 1:
                     continue
                 self.assertTrue(event.node_id in [dst_cuda_0, dst_cuda_1])
                 if get_name(event) in EXPECTED_REMOTE_EVENTS:
-                    self.assertGreater(event.cuda_time_total, 0)
+                    self.assertGreater(event.device_time_total, 0)
                     self.assertEqual(1, len(event.kernels))
                     kernel = event.kernels[0]
                     if event.node_id == dst_cuda_0:
                         self.assertEqual(kernel.device, 0)
                     if event.node_id == dst_cuda_1:
                         self.assertEqual(kernel.device, 1)
-                    self.assertGreater(event.cuda_time, 0)
+                    self.assertGreater(event.device_time, 0)
 
         # Validate that EXPECTED_REMOTE_EVENTS is a subset of remotely profiled
         # events.
@@ -6309,7 +6310,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
     @skip_if_lt_x_gpu(1)
     def test_cuda_future_can_extract_list_with_cuda_tensor(self):
         self._test_cuda_future_extraction(
-            wrapper=lambda t: [t], unwrapper=lambda v: v[0], sparse_tensor=False
+            wrapper=lambda t: [t], unwrapper=operator.itemgetter(0), sparse_tensor=False
         )
 
     @skip_if_lt_x_gpu(1)
@@ -6484,7 +6485,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
     @skip_if_lt_x_gpu(1)
     def test_cuda_future_can_extract_list_with_cuda_sparse_tensor(self):
         self._test_cuda_future_extraction(
-            wrapper=lambda t: [t], unwrapper=lambda v: v[0], sparse_tensor=True
+            wrapper=lambda t: [t], unwrapper=operator.itemgetter(0), sparse_tensor=True
         )
 
     @skip_if_lt_x_gpu(1)
