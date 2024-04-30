@@ -1,8 +1,7 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include <chrono>
-#include <mutex>
+#include <stdexcept>
 #include <vector>
 
 constexpr auto kNoTimeout = std::chrono::milliseconds(0);

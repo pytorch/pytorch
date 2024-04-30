@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ATen/BlasBackend.h>
 #include <ATen/CPUGeneratorImpl.h>
 #include <ATen/DeviceAccelerator.h>
 #include <ATen/LinalgBackend.h>
@@ -12,9 +11,9 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/detail/HIPHooksInterface.h>
 #include <ATen/detail/IPUHooksInterface.h>
-#include <ATen/detail/MAIAHooksInterface.h>
 #include <ATen/detail/MPSHooksInterface.h>
 #include <ATen/detail/MTIAHooksInterface.h>
+#include <ATen/detail/ORTHooksInterface.h>
 #include <ATen/detail/PrivateUse1HooksInterface.h>
 #include <ATen/detail/XPUHooksInterface.h>
 #include <c10/core/QEngine.h>
@@ -121,9 +120,6 @@ class TORCH_API Context {
   static bool hasCuSOLVER() {
     return detail::getCUDAHooks().hasCuSOLVER();
   }
-  static bool hasCuBLASLt() {
-    return detail::getCUDAHooks().hasCuBLASLt();
-  }
   static bool hasHIP() {
     return detail::getHIPHooks().hasHIP();
   }
@@ -142,8 +138,8 @@ class TORCH_API Context {
   static bool hasLazy() {
     return c10::impl::hasDeviceGuardImpl(c10::DeviceType::Lazy);
   }
-  static bool hasMAIA() {
-    return c10::impl::hasDeviceGuardImpl(c10::DeviceType::MAIA);
+  static bool hasORT() {
+    return c10::impl::hasDeviceGuardImpl(c10::DeviceType::ORT);
   }
   // defined in header so that getNonVariableType has ability to inline
   // call_once check. getNonVariableType is called fairly frequently
@@ -211,9 +207,6 @@ class TORCH_API Context {
 
   at::LinalgBackend linalgPreferredBackend() const;
   void setLinalgPreferredBackend(at::LinalgBackend);
-
-  at::BlasBackend blasPreferredBackend() const;
-  void setBlasPreferredBackend(at::BlasBackend);
 
   // Note [Enabling Deterministic Operations]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -378,11 +371,6 @@ class TORCH_API Context {
       c10::utils::check_env("TORCH_LINALG_PREFER_CUSOLVER") == true
       ? at::LinalgBackend::Cusolver
       : at::LinalgBackend::Default;
-  at::BlasBackend blas_preferred_backend =
-      (c10::utils::check_env("TORCH_BLAS_PREFER_CUBLASLT") == true ||
-       c10::utils::check_env("TORCH_BLAS_PREFER_HIPBLASLT") == true)
-      ? at::BlasBackend::Cublaslt
-      : at::BlasBackend::Cublas;
 #ifdef C10_MOBILE
   bool release_original_weights = true;
 #else
@@ -455,8 +443,8 @@ static inline bool hasMPS() {
   return globalContext().hasMPS();
 }
 
-static inline bool hasMAIA() {
-  return globalContext().hasMAIA();
+static inline bool hasORT() {
+  return globalContext().hasORT();
 }
 
 static inline bool hasXPU() {

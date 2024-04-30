@@ -67,16 +67,13 @@ class Directory:
         return "".join(str_list)
 
     def _stringify_tree(
-        self,
-        str_list: List[str],
-        preamble: str = "",
-        dir_ptr: str = "\u2500\u2500\u2500 ",
+        self, str_list: List[str], preamble: str = "", dir_ptr: str = "─── "
     ):
         """Recursive method to generate print-friendly version of a Directory."""
         space = "    "
-        branch = "\u2502   "
-        tee = "\u251c\u2500\u2500 "
-        last = "\u2514\u2500\u2500 "
+        branch = "│   "
+        tee = "├── "
+        last = "└── "
 
         # add this directory's representation
         str_list.append(f"{preamble}{dir_ptr}{self.name}\n")

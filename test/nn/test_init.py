@@ -14,7 +14,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfNoLapack,
     skipIfTorchDynamo,
-    slowTest,
     TEST_SCIPY,
     TestCase,
 )
@@ -319,7 +318,6 @@ class TestNNInit(TestCase):
                 init.xavier_normal_(tensor)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
-    @slowTest
     def test_xavier_uniform(self):
         for use_gain in [True, False]:
             for dims in [2, 4]:
