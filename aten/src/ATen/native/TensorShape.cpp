@@ -4072,11 +4072,13 @@ void unbind_copy_int_out(const at::Tensor & self, int64_t dim, at::TensorList  o
   }
 }
 
-int64_t sparse_dim_strided(const at::Tensor& self) {
+int64_t sparse_dim_default(const Tensor& self) {
+  TORCH_CHECK(self.layout() == kStrided, "sparse_dim expected sparse or strided tensor layout but got ", self.layout());
   return 0;
 }
 
-int64_t dense_dim_strided(const at::Tensor& self) {
+int64_t dense_dim_default(const Tensor& self) {
+  TORCH_CHECK(self.layout() == kStrided, "dense_dim expected sparse or strided tensor layout but got ", self.layout());
   return self.dim();
 }
 
