@@ -465,6 +465,7 @@ def _export_non_strict(
     *,
     transform=lambda x: x,  # TODO(zhxchen17) Revisit if this is needed later.
     pre_dispatch=False,
+    _is_torch_jit_trace=False,
 ):
     assert not any(
         isinstance(obj, torch.ScriptObject) for obj in constant_attrs
@@ -609,16 +610,17 @@ def _export_non_strict(
     ), "We expect all script objects have been replaced by FakeScriptObjects."
 
     # FIXME(ycao): Skipping this because traced modules do not have signature yet
-    # # prettify names for placeholder nodes
-    # placeholder_naming_pass(
-    #     gm,
-    #     export_graph_signature,
-    #     mod,
-    #     fake_args,
-    #     fake_kwargs,
-    #     fake_params_buffers,
-    #     constants,
-    # )
+    if not _is_torch_jit_trace:
+        # prettify names for placeholder nodes
+        placeholder_naming_pass(
+            gm,
+            export_graph_signature,
+            mod,
+            fake_args,
+            fake_kwargs,
+            fake_params_buffers,
+            constants,
+        )
 
     @dataclasses.dataclass
     class _ExportedProgramNonStrict:
@@ -876,6 +878,7 @@ def _export(
     strict: bool = True,
     preserve_module_call_signature: Tuple[str, ...] = (),
     pre_dispatch: bool = False,
+    _is_torch_jit_trace: bool = False,
 ) -> ExportedProgram:
     """
     Traces either an nn.Module's forward function or just a callable with PyTorch
@@ -930,7 +933,10 @@ def _export(
 
     flat_args, orig_in_spec = pytree.tree_flatten((args, kwargs))
     original_state_dict = mod.state_dict(keep_vars=True)
-    forward_arg_names = _get_forward_arg_names(mod, args, kwargs)
+    if not _is_torch_jit_trace:
+        forward_arg_names = _get_forward_arg_names(mod, args, kwargs)
+    else:
+        forward_arg_names = None
 
     if not strict:
         out_spec = None
@@ -1009,7 +1015,7 @@ def _export(
             fake_kwargs,
             equalities_inputs,
             original_signature,
-        ) = make_fake_inputs(mod, args, kwargs, dynamic_shapes)
+        ) = make_fake_inputs(mod, args, kwargs, dynamic_shapes, _is_torch_jit_trace=_is_torch_jit_trace)
 
         fake_params_buffers = make_fake_params_buffers(
             fake_mode, _get_params_buffers(mod)
@@ -1031,6 +1037,7 @@ def _export(
                     new_fake_constant_attrs,
                     pre_dispatch=pre_dispatch,
                     transform=_tuplify_outputs,
+                    _is_torch_jit_trace=_is_torch_jit_trace,
                 )
                 # ep_non_strict.constants contains only fake script objects, we need to map them back
                 ep_non_strict.constants = {
@@ -1058,6 +1065,7 @@ def _export(
                 ep_non_strict.gm,
                 equalities_inputs,
                 original_signature,
+                _is_torch_jit_trace=_is_torch_jit_trace,
             )
         except (ConstraintViolationError, ValueRangeError) as e:
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: TRY200
@@ -1105,7 +1113,8 @@ def _export(
         _rewrite_non_persistent_buffers(mod, ep_non_strict.sig, ep_non_strict.constants)
         _verify_nn_module_stack(gm)
         _verify_stack_trace(gm)
-        _verify_placeholder_names(gm, ep_non_strict.sig)
+        if not _is_torch_jit_trace:
+            _verify_placeholder_names(gm, ep_non_strict.sig)
         exported_program = ExportedProgram(
             root=gm,
             graph=gm.graph,
