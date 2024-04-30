@@ -22,7 +22,7 @@ CUDA_ARCHES_FULL_VERSION = {"11.8": "11.8.0", "12.1": "12.1.1"}
 CUDA_ARCHES_CUDNN_VERSION = {"11.8": "8", "12.1": "8"}
 
 
-ROCM_ARCHES = ["5.7", "6.0"]
+ROCM_ARCHES = ["6.0", "6.1"]
 
 
 CPU_CXX11_ABI_ARCH = ["cpu-cxx11-abi"]
