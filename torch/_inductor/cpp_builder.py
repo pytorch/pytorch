@@ -498,7 +498,7 @@ def _get_build_args_of_chosen_isa(chosen_isa: VecISA):
     return macros, build_flags
 
 
-def _get_torch_related_args(aot_mode: bool):
+def _get_torch_related_args(include_pytorch: bool, aot_mode: bool):
     from torch.utils.cpp_extension import _TORCH_PATH, TORCH_LIB_PATH
 
     include_dirs = [
@@ -510,9 +510,11 @@ def _get_torch_related_args(aot_mode: bool):
         os.path.join(_TORCH_PATH, "include", "THC"),
     ]
     libraries_dirs = [TORCH_LIB_PATH]
-    libraries = ["torch", "torch_cpu"]
-    if not aot_mode:
-        libraries.append("torch_python")
+    libraries = []
+    if sys.platform != "darwin":
+        libraries = ["torch", "torch_cpu"]
+        if not aot_mode:
+            libraries.append("torch_python")
 
     # Unconditionally import c10 for non-abi-compatible mode to use TORCH_CHECK - See PyTorch #108690
     if not config.abi_compatible:
@@ -625,6 +627,7 @@ def get_mmap_self_macro(use_mmap_weights: bool) -> List[str]:
 def get_cpp_torch_options(
     cpp_compiler,
     chosen_isa: VecISA,
+    include_pytorch: bool,
     aot_mode: bool,
     compile_only: bool,
     use_mmap_weights: bool,
@@ -648,7 +651,7 @@ def get_cpp_torch_options(
         torch_include_dirs,
         torch_libraries_dirs,
         torch_libraries,
-    ) = _get_torch_related_args(aot_mode)
+    ) = _get_torch_related_args(include_pytorch=include_pytorch, aot_mode=aot_mode)
 
     python_include_dirs, python_libraries_dirs = _get_python_related_args()
 
@@ -710,6 +713,7 @@ class CppTorchOptions(CppOptions):
     def __init__(
         self,
         chosen_isa: VecISA,
+        include_pytorch: bool = False,
         warning_all: bool = True,
         aot_mode: bool = False,
         compile_only: bool = False,
@@ -730,6 +734,7 @@ class CppTorchOptions(CppOptions):
         ) = get_cpp_torch_options(
             cpp_compiler=self._compiler,
             chosen_isa=chosen_isa,
+            include_pytorch=include_pytorch,
             aot_mode=aot_mode,
             compile_only=compile_only,
             use_mmap_weights=use_mmap_weights,
@@ -869,6 +874,7 @@ class CppTorchCudaOptions(CppTorchOptions):
     def __init__(
         self,
         chosen_isa: VecISA,
+        include_pytorch: bool = False,
         use_cuda: bool = True,
         aot_mode: bool = False,
         compile_only: bool = False,
@@ -878,6 +884,7 @@ class CppTorchCudaOptions(CppTorchOptions):
 
         super().__init__(
             chosen_isa=chosen_isa,
+            include_pytorch=include_pytorch,
             aot_mode=aot_mode,
             compile_only=compile_only,
             use_mmap_weights=use_mmap_weights,

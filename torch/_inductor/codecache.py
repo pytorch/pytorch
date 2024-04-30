@@ -2509,6 +2509,7 @@ def _do_validate_cpp_commands(
 
     dummy_build_option = CppTorchCudaOptions(
         chosen_isa=picked_isa,
+        include_pytorch=include_pytorch,
         use_cuda=test_cuda,
         compile_only=compile_only,
         use_mmap_weights=mmap_weights,
@@ -2539,6 +2540,9 @@ def validate_new_cpp_commands():
         for y in use_mmap_weights:
             for z in compile_only:
                 for m in include_pytorch:
+                    print(
+                        f"!!! cuda:{x}, use_mmap_weights:{y}, compile_only:{z}, include_pytorch:{m}"
+                    )
                     _do_validate_cpp_commands(
                         include_pytorch=m, cuda=x, mmap_weights=y, compile_only=z
                     )
