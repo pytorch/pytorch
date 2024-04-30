@@ -165,8 +165,8 @@ class TestExportTorchbind(TestCase):
         self.assertExpectedInline(
             ep.module().code.strip(),
             """\
-def forward(self, arg_0, arg_1):
-    x, n, = fx_pytree.tree_flatten_spec(([arg_0, arg_1], {}), self._in_spec)
+def forward(self, x, n):
+    x, n, = fx_pytree.tree_flatten_spec(([x, n], {}), self._in_spec)
     attr = self.attr
     call_torchbind = torch.ops.higher_order.call_torchbind(attr, 'add_tensor', x);  attr = None
     add = torch.ops.aten.add.Tensor(x, call_torchbind);  x = call_torchbind = None
@@ -197,8 +197,8 @@ def forward(self, obj_attr, x, n):
         self.assertExpectedInline(
             ep.module().code.strip(),
             """\
-def forward(self, arg_0):
-    x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+def forward(self, x):
+    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     attr = self.attr
     call_torchbind = torch.ops.higher_order.call_torchbind(attr, 'add_tensor', x);  attr = None
     add = torch.ops.aten.add.Tensor(x, call_torchbind);  x = call_torchbind = None
@@ -229,8 +229,8 @@ def forward(self, obj_attr, x):
         self.assertExpectedInline(
             ep.module().code.strip(),
             """\
-def forward(self, arg_0):
-    x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+def forward(self, x):
+    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     attr = self.attr
     takes_foo_default = torch.ops._TorchScriptTesting.takes_foo.default(attr, x);  attr = None
     add = torch.ops.aten.add.Tensor(x, takes_foo_default);  x = takes_foo_default = None
@@ -263,8 +263,8 @@ def forward(self, token, obj_attr, x):
         self.assertExpectedInline(
             ep.module().code.strip(),
             """\
-def forward(self, arg_0, arg_1):
-    x, cc, = fx_pytree.tree_flatten_spec(([arg_0, arg_1], {}), self._in_spec)
+def forward(self, x, cc):
+    x, cc, = fx_pytree.tree_flatten_spec(([x, cc], {}), self._in_spec)
     call_torchbind = torch.ops.higher_order.call_torchbind(cc, 'add_tensor', x);  cc = None
     add = torch.ops.aten.add.Tensor(x, call_torchbind);  x = call_torchbind = None
     return pytree.tree_unflatten((add,), self._out_spec)""",
@@ -294,8 +294,8 @@ def forward(self, x, cc):
         self.assertExpectedInline(
             ep.module().code.strip(),
             """\
-def forward(self, arg_0, arg_1):
-    x, cc, = fx_pytree.tree_flatten_spec(([arg_0, arg_1], {}), self._in_spec)
+def forward(self, x, cc):
+    x, cc, = fx_pytree.tree_flatten_spec(([x, cc], {}), self._in_spec)
     takes_foo_default = torch.ops._TorchScriptTesting.takes_foo.default(cc, x);  cc = None
     add = torch.ops.aten.add.Tensor(x, takes_foo_default);  x = takes_foo_default = None
     return pytree.tree_unflatten((add,), self._out_spec)""",
@@ -330,8 +330,8 @@ def forward(self, token, x, cc):
         self.assertExpectedInline(
             ep.module().code.strip(),
             """\
-def forward(self, arg_0):
-    x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+def forward(self, x):
+    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     attr = self.attr
     takes_foo_default_1 = torch.ops._TorchScriptTesting.takes_foo.default(attr, x)
     takes_foo_default = torch.ops._TorchScriptTesting.takes_foo.default(attr, takes_foo_default_1);  attr = takes_foo_default_1 = None
@@ -372,8 +372,8 @@ def forward(self, token, obj_attr, x):
         self.assertExpectedInline(
             ep.module().code.strip(),
             """\
-def forward(self, arg_0):
-    x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+def forward(self, x):
+    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     attr = self.attr
     takes_foo_list_return_default = torch.ops._TorchScriptTesting.takes_foo_list_return.default(attr, x)
     getitem_2 = takes_foo_list_return_default[0]
@@ -424,8 +424,8 @@ def forward(self, token, obj_attr, x):
         self.assertExpectedInline(
             ep.module().code.strip(),
             """\
-def forward(self, arg_0):
-    x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+def forward(self, x):
+    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     attr = self.attr
     takes_foo_tuple_return_default = torch.ops._TorchScriptTesting.takes_foo_tuple_return.default(attr, x)
     getitem_1 = takes_foo_tuple_return_default[0]
