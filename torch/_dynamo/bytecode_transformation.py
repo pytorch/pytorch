@@ -1196,3 +1196,23 @@ def unique_id(name) -> str:
 def is_generator(code: types.CodeType) -> bool:
     co_generator = 0x20
     return (code.co_flags & co_generator) > 0
+
+
+def create_new_fn(fn):
+    """
+    Creates new code object. This avoid Dynamo cache collisions.
+    """
+
+    def nothing(*args):
+        pass
+
+    new_code = transform_code_object(fn.__code__, nothing)
+    new_fn = types.FunctionType(
+        new_code,
+        fn.__globals__,
+        fn.__name__,
+        fn.__defaults__,
+        fn.__closure__,
+    )
+    new_fn.__kwdefaults__ = fn.__kwdefaults__
+    return new_fn

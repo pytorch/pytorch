@@ -3,7 +3,6 @@
 import functools
 
 import threading
-import types
 
 import torch
 import torch.utils._pytree as pytree
@@ -34,25 +33,8 @@ _TLS = threading.local()
 _TLS.cached_wrappers = {}
 
 
-@functools.lru_cache(None)
-def create_new_fn(fn):
-    from .bytecode_transformation import transform_code_object
-
-    def nothing(*args):
-        pass
-
-    new_code = transform_code_object(fn.__code__, nothing)
-    new_fn = types.FunctionType(
-        new_code,
-        fn.__globals__,
-        fn.__name__,
-        fn.__defaults__,
-        fn.__closure__,
-    )
-    new_fn.__kwdefaults__ = fn.__kwdefaults__
-    return new_fn
-
-
+# Skip tracing this frame. To avoid circular imports, apply the skip lazily.
+@torch._disable_dynamo(recursive=False)
 def wrap_inline(fn):
     """
     Create an extra frame around fn that is not in skipfiles
@@ -64,11 +46,15 @@ def wrap_inline(fn):
 
     if isinstance(fn, torch.nn.Module):
         key = fn.forward.__code__
-    else:
+    elif hasattr(fn, "__code__"):
         key = fn.__code__
+    else:
+        key = fn
 
     if cached_wrapper := cached_wrappers.get(key):
         return cached_wrapper
+
+    from .bytecode_transformation import create_new_fn
 
     def inner(*args, **kwargs):
         return fn(*args, **kwargs)
