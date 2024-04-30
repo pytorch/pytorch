@@ -1152,11 +1152,18 @@ test_executorch() {
   assert_git_not_dirty
 }
 
+test_linux_aarch64(){
+  # TODO: extend unit tests list
+  python test/run_test.py --include test_modules test_mkldnn test_mkldnn_fusion test_openmp --verbose
+}
+
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 fi
-if [[ "${TEST_CONFIG}" == *backward* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *aarch64* ]]; then
+  test_linux_aarch64
+elif [[ "${TEST_CONFIG}" == *backward* ]]; then
   test_forward_backward_compatibility
   # Do NOT add tests after bc check tests, see its comment.
 elif [[ "${TEST_CONFIG}" == *xla* ]]; then
