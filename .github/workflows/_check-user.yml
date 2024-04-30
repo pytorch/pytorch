@@ -39,7 +39,7 @@ jobs:
 
             COMMENTS=$(curl -H "Authorization: token $GITHUB_TOKEN" "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/issues/$ISSUE_NUMBER/comments")
             USER_LIST=$(echo "$COMMENTS" | tr -d '\r\n' | jq '.[0].body' -r)
-            RUN_TYPE=$(echo $COMMENTS | tr -d '\r\n' | jq '.[1].body' --raw-output)
+            RUN_OPTION=$(echo "$COMMENTS" | tr -d '\r\n' | jq '.[1].body' --raw-output)
 
             WORKFLOW_TYPE_RG="rg"
             WORKFLOW_TYPE_LABEL="label"
@@ -49,19 +49,19 @@ jobs:
               # Disable ARC runners for everyone.
               echo "workflow-type=$WORKFLOW_TYPE_LABEL" >> "$GITHUB_OUTPUT"
             elif [[ ${USER_LIST:0:1} == "*" ]]; then
-              if [[ "$RUN_TYPE" == "$WORKFLOW_TYPE_BOTH" ]]; then
+              if [[ "$RUN_OPTION" == "$WORKFLOW_TYPE_BOTH" ]]; then
                 # Use ARC runners and old runners for everyone.
                 echo "workflow-type=$WORKFLOW_TYPE_BOTH" >> "$GITHUB_OUTPUT"
               else
-                # Use ARC runners for everyone.
+                # Use only ARC runners for everyone.
                 echo "workflow-type=$WORKFLOW_TYPE_RG" >> "$GITHUB_OUTPUT"
               fi
             elif echo "$USER_LIST" | grep -q "${{ inputs.user_name }}"; then
-              if [[ "$RUN_TYPE" == "$WORKFLOW_TYPE_BOTH" ]]; then
+              if [[ "$RUN_OPTION" == "$WORKFLOW_TYPE_BOTH" ]]; then
                 # Use ARC runners and old runners for a specific user.
                 echo "workflow-type=$WORKFLOW_TYPE_BOTH" >> "$GITHUB_OUTPUT"
               else
-                # Use ARC runners for a specific user.
+                # Use only ARC runners for a specific user.
                 echo "workflow-type=$WORKFLOW_TYPE_RG" >> "$GITHUB_OUTPUT"
               fi
             else
