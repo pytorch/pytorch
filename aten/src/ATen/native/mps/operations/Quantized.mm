@@ -9,10 +9,84 @@
 #include <ATen/ops/empty.h>
 #endif
 #include <ATen/native/mps/OperationUtils.h>
+#include <fmt/format.h>
 
 namespace at::native {
 
 using namespace mps;
+
+static const char* METAL_QUANTIZED = R"BINARY_QUANTIZED(
+#include <metal_stdlib>
+using namespace metal;
+
+template<typename T, unsigned groupSize>
+kernel void int4pack_mm(
+    constant T                 * A              [[buffer(0)]],
+    constant uchar             * B              [[buffer(1)]],
+    constant T                 * scalesAndZeros [[buffer(2)]],
+    device   T                 * outputData     [[buffer(3)]],
+    constant uint3             & sizes          [[buffer(4)]],
+    uint                         thread_index   [[thread_position_in_grid]]) {
+    uint y = thread_index / sizes.x;
+    uint x = thread_index % sizes.x;
+    if (x >= sizes.x || y >= sizes.z) {
+        return;
+    }
+    outputData[x + y * sizes.x] = 0;
+}
+
+#define INSTANTIATE_INT4MM(DTYPE, GSIZE)                                 \
+template                                                                 \
+[[host_name("int4pack_mm_" #GSIZE "_" #DTYPE)]]                          \
+kernel void int4pack_mm<DTYPE, GSIZE>(                                   \
+    constant DTYPE             * A              [[buffer(0)]],           \
+    constant uchar             * B              [[buffer(1)]],           \
+    constant DTYPE             * scalesAndZeros [[buffer(2)]],           \
+    device   DTYPE             * outputData     [[buffer(3)]],           \
+    constant uint3             & sizes          [[buffer(4)]],           \
+    uint                         thread_index [[thread_position_in_grid]])
+
+INSTANTIATE_INT4MM(float, 32);
+INSTANTIATE_INT4MM(half, 32);
+#if __METAL_VERSION__ >= 310
+INSTANTIATE_INT4MM(bfloat, 32);
+#endif
+)BINARY_QUANTIZED";
+
+static id<MTLLibrary> compileQuantizedOpsLibrary(id<MTLDevice> device) {
+  static id<MTLLibrary> binaryLibrary = nil;
+  if (binaryLibrary) {
+    return binaryLibrary;
+  }
+
+  NSError* error = nil;
+  MTLCompileOptions* options = [[MTLCompileOptions new] autorelease];
+  [options setLanguageVersion:is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS) ? MTLLanguageVersion3_1
+                                                                                      : MTLLanguageVersion2_3];
+  binaryLibrary = [device newLibraryWithSource:[NSString stringWithCString:METAL_QUANTIZED encoding:NSASCIIStringEncoding]
+                                       options:options
+                                         error:&error];
+  TORCH_CHECK(binaryLibrary, "Failed to create metal quantized library, error: ", [[error description] UTF8String]);
+  return binaryLibrary;
+}
+
+static id<MTLComputePipelineState> quantizedPipelineState(id<MTLDevice> device, const std::string& kernel) {
+  static std::unordered_map<std::string, id<MTLComputePipelineState>> psoCache;
+  id<MTLComputePipelineState> pso = psoCache[kernel];
+  if (pso) {
+    return pso;
+  }
+
+  NSError* error = nil;
+  id<MTLLibrary> binaryLib = compileQuantizedOpsLibrary(device);
+  id<MTLFunction> binaryFunc = [binaryLib newFunctionWithName:[NSString stringWithUTF8String:kernel.c_str()]];
+  TORCH_CHECK(binaryFunc, "Failed to create function state object for: ", kernel);
+  pso = [device newComputePipelineStateWithFunction:binaryFunc error:&error];
+  TORCH_CHECK(pso, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
+
+  psoCache[kernel] = pso;
+  return pso;
+}
 
 Tensor _weight_int4pack_mm_mps(const Tensor& A, const Tensor& B, int64_t qGroupSize, const Tensor& qScaleAndZeros) {
   constexpr int64_t kNTileSize = 8;
@@ -43,7 +117,25 @@ Tensor _weight_int4pack_mm_mps(const Tensor& A, const Tensor& B, int64_t qGroupS
               ", 2]");
 
   auto C = at::empty({M, N}, A.options());
-
+  id<MTLDevice> device = MPSDevice::getInstance()->device();
+  MPSStream* mpsStream = getCurrentMPSStream();
+  std::array<uint32_t, 3> sizes = {static_cast<uint32_t>(A.size(0)),
+                                   static_cast<uint32_t>(A.size(1)),
+                                   static_cast<uint32_t>(C.size(1))};
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
+      const std::string kernel =  fmt::format("int4pack_mm_{}_{}",qGroupSize, scalarToMetalTypeString(A.scalar_type()));
+      id<MTLComputePipelineState> quantizedPSO = quantizedPipelineState(device, kernel);
+      [computeEncoder setComputePipelineState:quantizedPSO];
+      mtl_setBuffer(computeEncoder, A, 0);
+      mtl_setBuffer(computeEncoder, B, 1);
+      mtl_setBuffer(computeEncoder, qScaleAndZeros, 2);
+      mtl_setBuffer(computeEncoder, C, 3);
+      [computeEncoder setBytes:sizes.data() length:sizeof(uint32_t) * sizes.size() atIndex:4];
+      mtl_dispatch1DJob(computeEncoder, quantizedPSO, C.numel());
+    }
+  });
   return C;
 }
 
