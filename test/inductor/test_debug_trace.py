@@ -59,6 +59,8 @@ buf0.users = [NodeUser(node=SchedulerNode(name='buf1'), can_inplace=True, is_wea
 buf0.group.device = cpu
 buf0.group.iteration = ((256,), ())
 buf0.sizes = ([256], [])
+arg0_1_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
+buf0_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
 class buf0_loop_body:
     var_ranges = {z0: 256}
     index0 = z0
@@ -80,6 +82,8 @@ buf1.users = [NodeUser(node=ExternKernelSchedulerNode(name='buf2'), can_inplace=
 buf1.group.device = cpu
 buf1.group.iteration = ((256,), ())
 buf1.sizes = ([256], [])
+buf0_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
+buf1_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
 class buf1_loop_body:
     var_ranges = {z0: 256}
     index0 = z0
@@ -117,6 +121,8 @@ buf0_buf1.users = []
     buf0.group.device = cpu
     buf0.group.iteration = ((256,), ())
     buf0.sizes = ([256], [])
+    arg0_1_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
+    buf0_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
     class buf0_loop_body:
         var_ranges = {z0: 256}
         index0 = z0
@@ -137,6 +143,8 @@ buf0_buf1.users = []
     buf1.group.device = cpu
     buf1.group.iteration = ((256,), ())
     buf1.sizes = ([256], [])
+    buf0_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
+    buf1_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
     class buf1_loop_body:
         var_ranges = {z0: 256}
         index0 = z0
