@@ -102,6 +102,7 @@ Features described in this documentation are classified by release status:
    optim
    complex_numbers
    ddp_comm_hooks
+   pipeline
    quantization
    rpc
    torch.random <random>
