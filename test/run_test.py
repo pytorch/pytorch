@@ -26,10 +26,9 @@ from torch.multiprocessing import current_process, get_context
 from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
     get_report_path,
-    IS_ARM64,
     IS_CI,
-    IS_LINUX,
     IS_MACOS,
+    IS_WINDOWS,
     parser as common_parser,
     retry_shell,
     set_cwd,
@@ -219,11 +218,9 @@ CI_SERIAL_LIST = [
     "test_cpp_api_parity",
     "test_reductions",
     "test_fx_backends",
-    "test_linalg",
     "test_cpp_extensions_jit",
     "test_torch",
     "test_tensor_creation_ops",
-    "test_sparse_csr",
     "test_dispatch",
     "test_python_dispatch",  # torch.library creation and deletion must be serialized
     "test_spectral_ops",  # Cause CUDA illegal memory access https://github.com/pytorch/pytorch/issues/88916
@@ -267,10 +264,6 @@ CORE_TEST_LIST = [
     "test_torch",
 ]
 
-# A subset of the TEST list for aarch64 linux platform
-ARM64_LINUX_TEST_LIST = [
-    "test_modules",
-]
 
 # if a test file takes longer than 5 min, we add it to TARGET_DET_LIST
 SLOW_TEST_THRESHOLD = 300
@@ -1194,9 +1187,12 @@ def parse_args():
                 and os.getenv("TEST_CONFIG") == "distributed"
                 and TEST_CUDA
             )
+            or (IS_WINDOWS and not TEST_CUDA)
         )
         and os.getenv("BRANCH", "") != "main"
-        and not strtobool(os.environ.get("NO_TD", "False")),
+        and not strtobool(os.environ.get("NO_TD", "False"))
+        and "slow" not in os.getenv("TEST_CONFIG", "")
+        and "slow" not in os.getenv("BUILD_ENVIRONMENT", ""),
     )
     parser.add_argument(
         "additional_unittest_args",
@@ -1304,10 +1300,6 @@ def can_run_in_pytest(test):
 
 
 def get_selected_tests(options) -> List[str]:
-    if IS_ARM64 and IS_LINUX:
-        selected_tests = ARM64_LINUX_TEST_LIST
-        return selected_tests
-
     selected_tests = options.include
 
     # filter if there's JIT only and distributed only test options
