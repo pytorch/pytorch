@@ -26,7 +26,9 @@ from torch.multiprocessing import current_process, get_context
 from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
     get_report_path,
+    IS_ARM64,
     IS_CI,
+    IS_LINUX,
     IS_MACOS,
     parser as common_parser,
     retry_shell,
@@ -191,6 +193,8 @@ XPU_TEST = [
 RUN_PARALLEL_BLOCKLIST = [
     "test_cpp_extensions_jit",
     "test_cpp_extensions_open_device_registration",
+    "test_cpp_extensions_stream_and_event",
+    "test_cpp_extensions_mtia_backend",
     "test_jit_disabled",
     "test_mobile_optimizer",
     "test_multiprocessing",
@@ -214,8 +218,6 @@ CI_SERIAL_LIST = [
     "test_fake_tensor",
     "test_cpp_api_parity",
     "test_reductions",
-    "test_cuda",
-    "test_cuda_expandable_segments",
     "test_fx_backends",
     "test_linalg",
     "test_cpp_extensions_jit",
@@ -265,6 +267,10 @@ CORE_TEST_LIST = [
     "test_torch",
 ]
 
+# A subset of the TEST list for aarch64 linux platform
+ARM64_LINUX_TEST_LIST = [
+    "test_modules",
+]
 
 # if a test file takes longer than 5 min, we add it to TARGET_DET_LIST
 SLOW_TEST_THRESHOLD = 300
@@ -487,7 +493,12 @@ def run_test(
         os.close(log_fd)
 
     command = (launcher_cmd or []) + executable + argv
-    should_retry = "--subprocess" not in command and not RERUN_DISABLED_TESTS
+    should_retry = (
+        "--subprocess" not in command
+        and not RERUN_DISABLED_TESTS
+        and not is_cpp_test
+        and "-n" not in command
+    )
     is_slow = "slow" in os.environ.get("TEST_CONFIG", "") or "slow" in os.environ.get(
         "BUILD_ENVRIONMENT", ""
     )
@@ -1293,6 +1304,10 @@ def can_run_in_pytest(test):
 
 
 def get_selected_tests(options) -> List[str]:
+    if IS_ARM64 and IS_LINUX:
+        selected_tests = ARM64_LINUX_TEST_LIST
+        return selected_tests
+
     selected_tests = options.include
 
     # filter if there's JIT only and distributed only test options

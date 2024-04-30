@@ -539,7 +539,9 @@ class FlopCounterMode(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
         out = func(*args, **kwargs)
-        func_packet = func._overloadpacket
+        return self._count_flops(func._overloadpacket, out, args, kwargs)
+
+    def _count_flops(self, func_packet, out, args, kwargs):
         if func_packet in self.flop_registry:
             flop_count_func = self.flop_registry[func_packet]
             flop_count = flop_count_func(*args, **kwargs, out_val=out)  # type: ignore[operator]
