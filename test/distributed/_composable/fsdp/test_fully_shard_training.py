@@ -13,7 +13,7 @@ import torch.nn as nn
 from torch.distributed._composable import checkpoint, replicate
 from torch.distributed._composable.fsdp import (
     CPUOffloadPolicy,
-    FSDPModule,
+    FSDP,
     fully_shard,
     OffloadPolicy,
 )
@@ -144,7 +144,7 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
             self._assert_tensor_params(root_params)
             self._assert_same_params(model.parameters(), ref_model.parameters())
             for module in model.modules():
-                if isinstance(module, FSDPModule):
+                if isinstance(module, FSDP):
                     module.reshard()  # however, we can manually reshard
             self._assert_dtensor_params(model.parameters())
             self._assert_same_params(model.parameters(), ref_model.parameters())
@@ -854,7 +854,7 @@ class TestFullyShardGradientAccumulation(FSDPTest):
         # memory usage since we do not reshard after forward
         if use_explicit_unshard:
             for module in model.modules():
-                if isinstance(module, FSDPModule):
+                if isinstance(module, FSDP):
                     module.unshard(async_op=True)
 
         # Emulate the 1f1b pipeline schedule and only reduce gradients on the
