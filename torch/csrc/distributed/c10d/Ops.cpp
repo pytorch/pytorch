@@ -220,7 +220,6 @@ IMPL_ALLREDUCE_COALESCED(PrivateUse1)
             output_tensors, work);                                             \
   }
 
-// NOLINTBEGIN(cppcoreguidelines-pro-type-const-cast)
 IMPL_ALLGATHER(CPU)
 IMPL_ALLGATHER(CUDA)
 IMPL_ALLGATHER(PrivateUse1)
@@ -441,7 +440,6 @@ IMPL_ALLTOALL_BASE(PrivateUse1)
 IMPL_BARRIER(CPU)
 IMPL_BARRIER(CUDA)
 IMPL_BARRIER(PrivateUse1)
-// NOLINTEND(cppcoreguidelines-pro-type-const-cast)
 
 void monitored_barrier_CPU(
     at::Tensor /* unused */,
@@ -467,7 +465,7 @@ allreduce_sparse_cuda_(
                   ->allreduce_sparse(
                       tensor_vec,
                       AllreduceOptions{
-                          *reduce_op,
+                          *reduce_op.get(),
                           std::chrono::milliseconds(timeout),
                           sparse_indices});
 

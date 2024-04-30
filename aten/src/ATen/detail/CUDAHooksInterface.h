@@ -101,10 +101,6 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
     return false;
   }
 
-  virtual bool hasCuBLASLt() const {
-    return false;
-  }
-
   virtual bool hasROCM() const {
     return false;
   }

@@ -84,7 +84,7 @@ class GenerationTracker:
         )
 
 
-def is_dynamic_nn_module(obj, is_export):
+def is_dynamic_nn_module(obj):
     """Check for nn.Modules() created dynamically or mutated"""
     if isinstance(obj, torch.nn.Module) and "forward" in obj.__dict__:
         # A monkey patched `.forward` indicates something wacky is going on
@@ -93,11 +93,7 @@ def is_dynamic_nn_module(obj, is_export):
         return obj.torchdynamo_force_dynamic
     if is_lazy_module(obj):
         return False
-    # For export, we will have to fix
-    # 1) Input signature problem because params are lifted as inputs
-    # 2) nn module stack info changes
-    # 3) adjust failing tests
-    if config.inline_inbuilt_nn_modules and not is_export:
+    if config.inline_inbuilt_nn_modules:
         return True
     dyn = GenerationTracker.dynamic_classes.get(type(obj)) or GenerationTracker.check(
         obj

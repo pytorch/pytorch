@@ -1738,10 +1738,7 @@ optim_db: List[OptimizerInfo] = [
             },
             [lambda opt: StepLR(opt, gamma=0.99999, step_size=300)],
         ),
-        supports_fused_on=(
-            "cpu",
-            "cuda",
-        ),
+        supports_fused_on=("cuda",),
         skips=(
             DecorateInfo(
                 skipIfTorchDynamo("initial_value is incorrect in dynamo, see #123202"),

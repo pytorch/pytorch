@@ -3,6 +3,7 @@
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/util/Backtrace.h>
 #include <c10/util/Exception.h>
+#include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <cuda_runtime.h>
 
@@ -80,8 +81,8 @@ bool dsa_check_if_all_devices_support_managed_memory() {
 }
 
 bool env_flag_set(const char* env_var_name) {
-  const char* const env_string = std::getenv(env_var_name);
-  return (env_string == nullptr) ? false : std::strcmp(env_string, "0");
+  const auto env_flag = c10::utils::check_env(env_var_name);
+  return env_flag.has_value() && env_flag.value();
 }
 
 /// Deleter for UVM/managed memory pointers

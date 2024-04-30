@@ -7,7 +7,6 @@ torch.mps
     :toctree: generated
     :nosignatures:
 
-    device_count
     synchronize
     get_rng_state
     set_rng_state
