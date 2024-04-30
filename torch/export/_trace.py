@@ -922,8 +922,6 @@ def _export(
     Returns:
         An ExportedProgram containing the traced method.
     """
-    from .dynamic_shapes import _process_dynamic_shapes
-
     if not isinstance(args, tuple):
         raise UserError(
             UserErrorType.INVALID_INPUT,
@@ -940,7 +938,8 @@ def _export(
     _EXPORT_FLAGS = flags
 
     kwargs = kwargs or {}
-    _process_dynamic_shapes(mod, args, kwargs, dynamic_shapes)  # TODO(avik): remove
+    if isinstance(dynamic_shapes, torch.export.ShapesCollection):
+        dynamic_shapes = dynamic_shapes.dynamic_shapes(mod, args, kwargs)
 
     constant_attrs = _gather_constant_attrs(mod)
 
