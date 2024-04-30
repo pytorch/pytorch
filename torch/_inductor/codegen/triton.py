@@ -3921,8 +3921,7 @@ class TritonScheduling(BaseScheduling):
     def ready_to_flush(self) -> bool:
         return False
 
-    @preserve_rng_state()
-    def benchmark_fused_nodes(self, nodes):
+    def generate_kernel_code_from_nodes(self, nodes, benchmark_kernel=False):
         @dataclasses.dataclass
         class LastUsageHolder:
             n: Any
@@ -3954,18 +3953,25 @@ class TritonScheduling(BaseScheduling):
             )
 
             self.codegen_node_schedule_with_kernel(node_schedule, kernel)
-            with config.patch("benchmark_kernel", True), V.set_kernel_handler(kernel):
+            with config.patch(
+                "benchmark_kernel", benchmark_kernel
+            ), V.set_kernel_handler(kernel):
                 src_code = kernel.codegen_kernel()
         else:
             template_node = nodes[0]
             epilogue_nodes = nodes[1:]
 
-            with config.patch("benchmark_kernel", True):
+            with config.patch("benchmark_kernel", benchmark_kernel):
                 src_code = self.codegen_template(
                     template_node, epilogue_nodes, only_gen_src_code=True
                 )
 
         src_code = src_code.replace(str(Placeholder.KERNEL_NAME), "triton_")
+        return src_code
+
+    @preserve_rng_state()
+    def benchmark_fused_nodes(self, nodes):
+        src_code = self.generate_kernel_code_from_nodes(nodes, benchmark_kernel=True)
         mod = PyCodeCache.load(src_code)
 
         def cache_file_path():
