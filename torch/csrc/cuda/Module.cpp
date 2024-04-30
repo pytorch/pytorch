@@ -910,26 +910,35 @@ static void registerCudaDeviceProperties(PyObject* module) {
   // Add _cudaDevicePropertires class to torch._C
   auto m = py::handle(module).cast<py::module>();
   py::class_<CUuuid>(m, "_CUuuid")
-      .def_property_readonly("bytes", [](const CUuuid& uuid) {
-        return py::bytes(uuid.bytes);
-      })
+      .def_property_readonly(
+          "bytes", [](const CUuuid& uuid) { return py::bytes(uuid.bytes); })
       .def("__repr__", [](const CUuuid& uuid) {
         constexpr size_t size = 36 + 1;
         char device_path_str[size] = {0};
-        snprintf(device_path_str, sizeof(device_path_str),
-                 "%02x%02x%02x%02x-"
-                 "%02x%02x-"
-                 "%02x%02x-"
-                 "%02x%02x-"
-                 "%02x%02x%02x%02x%02x%02x",
-                 (uint8_t)uuid.bytes[0], (uint8_t)uuid.bytes[1],
-                 (uint8_t)uuid.bytes[2], (uint8_t)uuid.bytes[3],
-                 (uint8_t)uuid.bytes[4], (uint8_t)uuid.bytes[5],
-                 (uint8_t)uuid.bytes[6], (uint8_t)uuid.bytes[7],
-                 (uint8_t)uuid.bytes[8], (uint8_t)uuid.bytes[9],
-                 (uint8_t)uuid.bytes[10], (uint8_t)uuid.bytes[11],
-                 (uint8_t)uuid.bytes[12], (uint8_t)uuid.bytes[13],
-                 (uint8_t)uuid.bytes[14], (uint8_t)uuid.bytes[15]);
+        snprintf(
+            device_path_str,
+            sizeof(device_path_str),
+            "%02x%02x%02x%02x-"
+            "%02x%02x-"
+            "%02x%02x-"
+            "%02x%02x-"
+            "%02x%02x%02x%02x%02x%02x",
+            (uint8_t)uuid.bytes[0],
+            (uint8_t)uuid.bytes[1],
+            (uint8_t)uuid.bytes[2],
+            (uint8_t)uuid.bytes[3],
+            (uint8_t)uuid.bytes[4],
+            (uint8_t)uuid.bytes[5],
+            (uint8_t)uuid.bytes[6],
+            (uint8_t)uuid.bytes[7],
+            (uint8_t)uuid.bytes[8],
+            (uint8_t)uuid.bytes[9],
+            (uint8_t)uuid.bytes[10],
+            (uint8_t)uuid.bytes[11],
+            (uint8_t)uuid.bytes[12],
+            (uint8_t)uuid.bytes[13],
+            (uint8_t)uuid.bytes[14],
+            (uint8_t)uuid.bytes[15]);
         return std::string(device_path_str);
       });
   py::class_<cudaDeviceProp>(m, "_CudaDeviceProperties")
