@@ -2116,6 +2116,7 @@ class ShapeEnv:
         self.events: List[ShapeEnvEvent] = (
             [ShapeEnvEvent(ShapeEnv, kwargs=kwargs)] if self.should_record_events else []
         )
+        self.union_find_id_map = dict()
 
     # Pro-tip: if you add new field to ShapeEnv, this affects some accept
     # tests.  Accept their output with:

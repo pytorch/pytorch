@@ -3231,6 +3231,7 @@ MOD_INLINELIST = {
     "torch._higher_order_ops.strict_mode",
     "torch._higher_order_ops.while_loop",
     "torch._higher_order_ops.associative_scan",
+    "torch.nested._internal.union_find",
 }
 
 
