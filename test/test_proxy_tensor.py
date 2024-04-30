@@ -24,6 +24,7 @@ import torch.testing._internal.optests as optests
 from torch._C import _disabled_torch_function_impl
 from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter, get_isolated_graphmodule
 from torch.utils._pytree import tree_map
+from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch import nn
 import re
 
@@ -1449,11 +1450,6 @@ def forward(self, x_1, y_1):
     add = torch.ops.aten.add.Tensor(y_1, 2);  y_1 = None
     return add""")  # noqa: B950
 
-    # This is due to https://github.com/pytorch/pytorch/pull/124316 which bans
-    # i0 = i1 refinement.  To work around it, you should assert i1 = s0 by
-    # hand.  This particular example the refinement is OK because i0 is always
-    # available when i1 and vice versa, but it is difficult to tell if it
-    # is safe in general.
     @unittest.expectedFailure
     def test_unbacked_unify_guard_transitivity(self):
         def f(x1, x2, y):
@@ -1466,7 +1462,36 @@ def forward(self, x_1, y_1):
             else:
                 return y + 2
 
-        make_fx(f, tracing_mode="symbolic")(torch.tensor(10), torch.tensor(10), torch.randn(10))
+        gm = make_fx(f, tracing_mode="symbolic")(torch.tensor(10), torch.tensor(10), torch.randn(10))
+        insert_deferred_runtime_asserts(gm, gm.shape_env, "test")
+        gm.recompile()
+        r = str(gm.code).strip()
+        # self.assertExpectedInline(
+        #     r, """"""  # noqa: B950
+        # )
+
+    def test_unbacked_unify_dependency_violation(self):
+        def f(x1, x2, x3, y):
+            z1 = x1.item()
+            torch._check(z1 // 9 == 1)
+            z2 = x2.item()
+            z3 = x3.item()
+            torch._check(z1 == z2 + z3)
+            return y * 2
+            if z2 + z3 == z1:
+                return y * 2
+            else:
+                return y + 3
+
+        # NB:
+
+        gm = make_fx(f, tracing_mode="symbolic")(torch.tensor(10), torch.tensor(5), torch.tensor(5), torch.randn(1))
+        insert_deferred_runtime_asserts(gm, gm.shape_env, "test")
+        gm.recompile()
+        self.assertEqual(gm(torch.tensor(12), torch.tensor(6), torch.tensor(6), torch.tensor([1.0])), torch.tensor([2.0]))
+        with self.assertRaises(RuntimeError):
+            gm(torch.tensor(20), torch.tensor(10), torch.tensor(10), torch.tensor([1.0]))
+
 
     def test_split_unbacked_sizes(self):
         def f(lengths, values):
