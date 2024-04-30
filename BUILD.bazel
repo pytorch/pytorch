@@ -443,6 +443,16 @@ cu_library(
     alwayslink = True,
 )
 
+# caffe2
+CAFFE2_COPTS = COMMON_COPTS + [
+    "-Dcaffe2_EXPORTS",
+    "-DCAFFE2_USE_CUDNN",
+    "-DCAFFE2_BUILD_MAIN_LIB",
+    "-fvisibility-inlines-hidden",
+    "-fno-math-errno",
+    "-fno-trapping-math",
+]
+
 filegroup(
     name = "caffe2_core_srcs",
     srcs = [
