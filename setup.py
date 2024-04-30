@@ -247,7 +247,7 @@ BUILD_LIBTORCH_WHL = os.getenv("BUILD_LIBTORCH_WHL", "0") == "1"
 if BUILD_LIBTORCH_WHL:
     # Set up environment variables for ONLY building libtorch.so and not libtorch_python.so
     os.environ["BUILD_FUNCTORCH"] = "OFF"
-    os.environ["BUILD_PYTHONLESS"] = "OFF"
+    os.environ["BUILD_PYTHONLESS"] = "ON"
 
 python_min_version = (3, 8, 0)
 python_min_version_str = ".".join(map(str, python_min_version))
@@ -354,7 +354,7 @@ cmake_python_include_dir = sysconfig.get_path("include")
 # Version, create_version_file, and package_name
 ################################################################################
 
-DEFAULT_PACKAGE_NAME = "torch" if not BUILD_LIBTORCH_WHL else "libtorch"
+DEFAULT_PACKAGE_NAME = "libtorch" if BUILD_LIBTORCH_WHL else "torch"
 
 package_name = os.getenv("TORCH_PACKAGE_NAME", DEFAULT_PACKAGE_NAME)
 package_type = os.getenv("PACKAGE_TYPE", "wheel")
@@ -480,10 +480,12 @@ def build_deps():
     check_submodules()
     check_pydep("yaml", "pyyaml")
 
+    build_python = not BUILD_LIBTORCH_WHL
+
     build_caffe2(
         version=version,
         cmake_python_library=cmake_python_library,
-        build_python=True,
+        build_python=build_python,
         rerun_cmake=RERUN_CMAKE,
         cmake_only=CMAKE_ONLY,
         cmake=cmake,
@@ -740,6 +742,8 @@ class build_ext(setuptools.command.build_ext.build_ext):
             "caffe2.python.caffe2_pybind11_state_gpu",
             "caffe2.python.caffe2_pybind11_state_hip",
         ]
+        if BUILD_LIBTORCH_WHL:
+            caffe2_pybind_exts = []
         i = 0
         while i < len(self.extensions):
             ext = self.extensions[i]
@@ -976,7 +980,7 @@ def configure_extension_build():
     main_sources = ["torch/csrc/stub.c"]
 
     if BUILD_LIBTORCH_WHL:
-        main_libraries = []
+        main_libraries = ["torch"]
         main_sources = []
 
     if cmake_cache_vars["USE_CUDA"]:
@@ -1413,6 +1417,10 @@ def main():
         "packaged/**/*.h",
         "packaged/**/*.yaml",
     ]
+    torch_package_dir_name = "libtorch" if BUILD_LIBTORCH_WHL else "wrong_torch"
+
+
+
     setup(
         name=package_name,
         version=version,
@@ -1428,12 +1436,13 @@ def main():
         entry_points=entry_points,
         install_requires=install_requires,
         extras_require=extras_require,
+        package_dir={torch_package_dir_name: "torch"},
         package_data={
-            "torch": torch_package_data,
-            "torchgen": torchgen_package_data,
-            "caffe2": [
-                "python/serialized_test/data/operator_test/*.zip",
-            ],
+            torch_package_dir_name: torch_package_data,
+            # "torchgen": torchgen_package_data,
+            # "caffe2": [
+            #     "python/serialized_test/data/operator_test/*.zip",
+            # ],
         },
         url="https://pytorch.org/",
         download_url="https://github.com/pytorch/pytorch/tags",
