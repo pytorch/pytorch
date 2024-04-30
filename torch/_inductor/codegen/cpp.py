@@ -2694,12 +2694,12 @@ class CppVecKernel(CppKernel):
         return vec_type
 
     def welford_weight_reciprocal_vec(self, dtype, num_threads=None):
-        vec_range_thread = (
+        vec_num_range_thread = (
             (self.weight_recp_vec_range + num_threads - 1) // num_threads
             if num_threads
             else self.weight_recp_vec_range
         )
-        return f"static WeightRecp<{self._get_vec_type(dtype)}> weight_recps({vec_range_thread});"
+        return f"static WeightRecp<{self._get_vec_type(dtype)}> weight_recps({vec_num_range_thread});"
 
     def reduction_combine_vec(
         self, reduction_type, var, next_value, use_weight_recps=False
