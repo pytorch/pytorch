@@ -139,6 +139,7 @@ class TestPublicBindings(TestCase):
             "Generator",
             "GeneratorType",
             "get_autocast_cpu_dtype",
+            "get_autocast_dtype",
             "get_autocast_ipu_dtype",
             "get_default_dtype",
             "get_num_interop_threads",
@@ -216,6 +217,7 @@ class TestPublicBindings(TestCase):
             "set_anomaly_enabled",
             "set_autocast_cache_enabled",
             "set_autocast_cpu_dtype",
+            "set_autocast_dtype",
             "set_autocast_ipu_dtype",
             "set_autocast_cpu_enabled",
             "set_autocast_ipu_enabled",
@@ -228,6 +230,7 @@ class TestPublicBindings(TestCase):
             "StaticModule",
             "Stream",
             "StreamObjType",
+            "Event",
             "StringType",
             "SUM",
             "SymFloat",
@@ -425,7 +428,7 @@ class TestPublicBindings(TestCase):
     def test_correct_module_names(self):
         '''
         An API is considered public, if  its  `__module__` starts with `torch.`
-        and there is no name in `__module__` or the object itself that starts with “_”.
+        and there is no name in `__module__` or the object itself that starts with "_".
         Each public package should either:
         - (preferred) Define `__all__` and all callables and classes in there must have their
          `__module__` start with the current submodule's path. Things not in `__all__` should

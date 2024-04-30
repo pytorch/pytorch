@@ -76,7 +76,7 @@ def get_td_exclusions(
             unzip(path)
 
         grouped: Dict[str, Any] = defaultdict(lambda: defaultdict(set))
-        for td_exclusions in Path(".").glob("**/td_exclusions.json"):
+        for td_exclusions in Path(".").glob("**/td_exclusions*.json"):
             with open(td_exclusions) as f:
                 exclusions = json.load(f)
                 for exclusion in exclusions["excluded"]:
