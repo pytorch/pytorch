@@ -181,6 +181,17 @@ class DeviceMeshTest(DTensorTestBase):
             ref_global_mesh._coordinate_on_dim, global_mesh._coordinate_on_dim
         )
 
+    def test_raises_invalid_device_type(self):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Device type with GPU index is not supported",
+        ):
+            # test init_device_mesh with an invalid device type that contains a GPU index
+            mesh_shape = (2, self.world_size // 2)
+            mesh_2d = init_device_mesh(
+                "cuda:0", mesh_shape=mesh_shape, mesh_dim_names=("dp", "tp")
+            )
+
 
 class DeviceMeshTestNDim(DTensorTestBase):
     @property
