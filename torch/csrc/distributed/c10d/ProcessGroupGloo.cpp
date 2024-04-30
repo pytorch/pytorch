@@ -975,8 +975,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::broadcast(
   };
 
   assertRootRank(invalidArgument, opts.rootRank, size_);
-  assertRootTensor(
-      invalidArgument, opts.rootTensor, static_cast<int64_t>(inputs.size()));
+  assertRootTensor(invalidArgument, opts.rootTensor, inputs.size());
   assertDense(invalidArgument, inputs);
   assertTypeAndSizesMatch(invalidArgument, inputs);
 
@@ -1301,9 +1300,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     // Allgatherv indices.
     gloo::AllgathervOptions opts(context);
     opts.setInput(
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-        const_cast<int64_t*>(input.const_data_ptr<int64_t>()),
-        input.numel());
+        const_cast<int64_t*>(input.const_data_ptr<int64_t>()), input.numel());
     opts.setOutput(output.mutable_data_ptr<int64_t>(), counts);
     opts.setTag(tag);
     gloo::allgatherv(opts);
@@ -1311,7 +1308,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     // Compile indices tensor per rank.
     std::vector<at::Tensor> indices;
     indices.reserve(metadata.size());
-    int64_t offset = 0;
+    size_t offset = 0;
     for (const auto& i : metadata) {
       const auto nnz = i.nnz();
       const auto numel = sparseDim * nnz;
@@ -1328,7 +1325,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
       const std::vector<SparseTensorMetadata>& metadata) {
     // There are nnz #dense_dim()-dimensional tensors per rank.
     const auto valueShape = tensor.sizes().slice(tensor.sparse_dim());
-    int64_t denseNumel = 1;
+    size_t denseNumel = 1;
     for (auto dim : valueShape) {
       denseNumel *= dim;
     }
@@ -1337,7 +1334,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     int64_t totalSize = 0;
     for (const auto i : c10::irange(metadata.size())) {
       counts[i] = metadata[i].nnz() * denseNumel;
-      totalSize += static_cast<int64_t>(counts[i]);
+      totalSize += counts[i];
     }
 
     auto output = at::empty({totalSize}, tensor.scalar_type());
@@ -1356,7 +1353,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     // Compile values tensor per rank.
     std::vector<at::Tensor> values;
     values.reserve(metadata.size());
-    int64_t offset = 0;
+    size_t offset = 0;
     for (const auto& i : metadata) {
       const auto nnz = i.nnz();
       const auto numel = denseNumel * nnz;
@@ -1743,8 +1740,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::reduce(
   };
 
   assertRootRank(invalidArgument, opts.rootRank, size_);
-  assertRootTensor(
-      invalidArgument, opts.rootTensor, static_cast<int64_t>(inputs.size()));
+  assertRootTensor(invalidArgument, opts.rootTensor, inputs.size());
   assertSingleElement(invalidArgument, inputs);
   assertDense(invalidArgument, inputs);
 
@@ -1836,7 +1832,7 @@ class AsyncAllgatherWork : public ProcessGroupGloo::AsyncWork {
     // Unflatten into output tensors.
     for (auto& outputgroup : outputs) {
       for (const auto j : c10::irange(outputgroup.size())) {
-        outputgroup[j].copy_(flatOutputTensor[static_cast<int64_t>(j)]);
+        outputgroup[j].copy_(flatOutputTensor[j]);
       }
     }
   }
@@ -2106,7 +2102,7 @@ class AsyncAllgatherCoalescedWork : public ProcessGroupGloo::AsyncWork {
     for (const auto& t : output_lists[0]) {
       output_numel += t.numel();
     }
-    output_numel *= static_cast<int64_t>(output_lists.size());
+    output_numel *= output_lists.size();
     // Use single flat output tensor.
     at::Tensor flatOutputTensor =
         at::empty({output_numel}, output_lists[0][0].options());
@@ -2255,7 +2251,7 @@ class AsyncGatherWork : public ProcessGroupGloo::AsyncWork {
     // Unflatten into output tensors on root process.
     if (context->rank == root) {
       for (const auto i : c10::irange(outputs[0].size())) {
-        outputs[0][i].copy_(flatOutputTensor[static_cast<int64_t>(i)]);
+        outputs[0][i].copy_(flatOutputTensor[i]);
       }
     }
   }
@@ -2809,7 +2805,6 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::send(
 
   // Construct unbound buffer.
   auto context = getContext(tag);
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   auto buf = context->createUnboundBuffer(const_cast<void*>(ptr), size);
   buf->send(dstRank, utag);
   ++seq_;
@@ -2950,8 +2945,8 @@ void ProcessGroupGloo::monitoredBarrier(
   // only enforce timeout on rank 0. This is so that other ranks aren't timed
   // out first, bringing down the job without reporting which rank timed out.
   if (rank != 0) {
-    auto sendWork = send(commTensor, 0, static_cast<int>(t1));
-    auto recvWork = recv(commTensor, 0, static_cast<int>(t2));
+    auto sendWork = send(commTensor, 0, t1);
+    auto recvWork = recv(commTensor, 0, t2);
     try {
       sendWork->wait();
       recvWork->wait();
@@ -2975,8 +2970,7 @@ void ProcessGroupGloo::monitoredBarrier(
   // Failed/hanging ranks will not ack this call, letting rank 0 know about the
   // failure.
   for (const auto dstRank : c10::irange(1, worldSize)) {
-    recvWorkMap.emplace(
-        dstRank, recv(commTensor, dstRank, static_cast<int>(t1)));
+    recvWorkMap.insert({dstRank, recv(commTensor, dstRank, t1)});
   }
 
   auto waitLoop = [&](const std::map<int, c10::intrusive_ptr<Work>>& works) {
@@ -3048,8 +3042,7 @@ void ProcessGroupGloo::monitoredBarrier(
   // ensures that this is a true barrier in that all ranks  exit it successfully
   // or none of them do.
   for (const auto dstRank : c10::irange(1, worldSize)) {
-    sendWorkMap.emplace(
-        dstRank, send(commTensor, dstRank, static_cast<int>(t2)));
+    sendWorkMap.insert({dstRank, send(commTensor, dstRank, t2)});
   }
 
   waitLoop(sendWorkMap);
