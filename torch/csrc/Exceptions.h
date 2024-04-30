@@ -107,16 +107,16 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
     throw;                                                          \
   }                                                                 \
   }                                                                 \
-  catch (py::error_already_set & e) {                               \
+  catch (py::error_already_set&) {                                  \
     throw;                                                          \
   }                                                                 \
-  catch (py::builtin_exception & e) {                               \
+  catch (py::builtin_exception&) {                                  \
     throw;                                                          \
   }                                                                 \
-  catch (torch::jit::JITException & e) {                            \
+  catch (torch::jit::JITException&) {                               \
     throw;                                                          \
   }                                                                 \
-  catch (const std::exception& e) {                                 \
+  catch (const std::exception&) {                                   \
     torch::translate_exception_to_python(std::current_exception()); \
     throw py::error_already_set();                                  \
   }
@@ -128,7 +128,7 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
     throw;                                                          \
   }                                                                 \
   }                                                                 \
-  catch (const std::exception& e) {                                 \
+  catch (const std::exception&) {                                   \
     torch::translate_exception_to_python(std::current_exception()); \
     return retval;                                                  \
   }
