@@ -383,7 +383,9 @@ def get_type_hint_captures(fn):
         try:
             src = inspect.getsource(fn)
         except OSError as e:
-            raise OSError(f"Failed to get source for {fn} using inspect.getsource") from e
+            raise OSError(
+                f"Failed to get source for {fn} using inspect.getsource"
+            ) from e
 
     # Gather a dictionary of parameter name -> type, skipping any parameters whose annotated
     # types are strings. These are only understood by TorchScript in the context of a type annotation
