@@ -5,8 +5,7 @@ import sympy
 import torch
 
 from .. import config
-from ..runtime.hints import instance_descriptor
-from ..utils import _type_of
+from ..utils import _type_of, instance_descriptor
 from ..virtualized import V
 from .common import KernelArgType, SizeArg, TensorArg, WorkspaceArg
 

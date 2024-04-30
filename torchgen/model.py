@@ -79,7 +79,7 @@ class DispatchKey(Enum):
     CatchAll = Undefined
 
     FPGA = auto()
-    MAIA = auto()
+    ORT = auto()
     Vulkan = auto()
     Metal = auto()
     MKLDNN = auto()

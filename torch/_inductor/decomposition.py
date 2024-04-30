@@ -728,7 +728,7 @@ def index_reduce(
         return out / counts if true_division else out // counts
 
     if use_scatter_fallback(
-        aten.scatter_reduce_.two,
+        "aten.scatter_reduce_",
         reduction_type,
         self.dtype,
         src.dtype,

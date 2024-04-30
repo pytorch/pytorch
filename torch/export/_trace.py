@@ -18,7 +18,6 @@ from torch._export.non_strict_utils import (
     make_constraints,
     make_fake_inputs,
     make_fake_params_buffers,
-    produce_guards_and_solve_constraints,
 )
 from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
     _AddRuntimeAssertionsForInlineConstraintsPass,
@@ -51,6 +50,7 @@ from torch.utils._sympy.value_ranges import ValueRangeError
 
 from ._safeguard import AutogradStateOpsFailSafeguard
 
+from .dynamic_shapes import _process_constraints
 from .exported_program import (
     _disable_prexisiting_fake_mode,
     ExportedProgram,
@@ -1010,30 +1010,18 @@ def _export(
             for k, v in fake_mode.shape_env.var_to_range.items()
             if free_unbacked_symbols(k)
         }
-        num_lifted = len(
-            [
-                spec
-                for spec in ep_non_strict.sig.input_specs
-                if spec.kind != InputKind.USER_INPUT
-            ]
-        )
         try:
-            produce_guards_and_solve_constraints(
+            range_constraints = make_constraints(
                 fake_mode,
-                ep_non_strict.gm,
                 equalities_inputs,
+                dynamic_shapes if dynamic_shapes else [],
+                ep_non_strict.sig.input_specs,
                 original_signature,
+                ep_non_strict.gm,
                 _is_torch_jit_trace=_is_torch_jit_trace,
             )
         except (ConstraintViolationError, ValueRangeError) as e:
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: TRY200
-
-        range_constraints = make_constraints(
-            fake_mode,
-            ep_non_strict.gm,
-            dynamic_shapes,
-            num_lifted,
-        )
 
         assert out_spec is not None
 
@@ -1059,7 +1047,6 @@ def _export(
                                     "kind": node.kwargs["kind"],
                                 },
                             )
-                            new_node.meta = node.meta
                             node.replace_all_uses_with(new_node)
                             gm.graph.erase_node(node)
 
@@ -1070,7 +1057,8 @@ def _export(
         _rewrite_non_persistent_buffers(mod, ep_non_strict.sig, ep_non_strict.constants)
         _verify_nn_module_stack(gm)
         _verify_stack_trace(gm)
-        _verify_placeholder_names(gm, ep_non_strict.sig)
+        if not _is_torch_jit_trace:
+            _verify_placeholder_names(gm, ep_non_strict.sig)
         exported_program = ExportedProgram(
             root=gm,
             graph=gm.graph,
@@ -1234,11 +1222,11 @@ def _export(
         ),
         len(export_graph_signature.input_specs),
     )
-    range_constraints = make_constraints(
+    range_constraints = _process_constraints(
         dynamo_fake_mode,
         gm,
-        dynamic_shapes,
         num_lifted,
+        flat_args,
     )
 
     # Do some cleanups on the graph module to restore the state dict to the
@@ -1273,11 +1261,6 @@ def _export(
         assert res is not None
         gm = res.graph_module
 
-    if len(range_constraints) > 0:
-        res = _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints)(gm)
-        assert res is not None
-        gm = res.graph_module
-
     assert orig_out_spec is not None
     _verify_nn_module_stack(gm)
     _verify_stack_trace(gm)
@@ -1298,5 +1281,10 @@ def _export(
         constants=constants,
     )
     log.debug("Exported program from AOTAutograd:\n%s", exported_program)
+
+    if len(range_constraints) > 0:
+        exported_program = exported_program._transform_do_not_use(
+            _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints)
+        )
 
     return exported_program

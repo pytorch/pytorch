@@ -160,8 +160,9 @@ def get_meta(op, key, device_name=None, version=(0, torch.float16, 0.5), exact=F
         values = op_data.get(key)
         if values is not None:
             matching_data[key] = values
+
     matching_meta = {}
-    for op_key, values in matching_data.items():
+    for key, values in matching_data.items():
         if op == "scatter_mm":
             names = (
                 "GROUP_SIZE",
@@ -181,7 +182,7 @@ def get_meta(op, key, device_name=None, version=(0, torch.float16, 0.5), exact=F
         if "*" not in key:
             return meta
 
-        matching_meta[op_key] = meta
+        matching_meta[key] = meta
 
     if "*" in key:
         return matching_meta

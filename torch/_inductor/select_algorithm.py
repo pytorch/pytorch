@@ -35,8 +35,14 @@ from .codegen.triton import (
 from .codegen.triton_utils import config_of, signature_to_meta
 from .exc import CUDACompileError
 from .ir import ChoiceCaller, PrimitiveInfoType
-from .runtime.runtime_utils import do_bench
-from .utils import get_dtype_size, Placeholder, sympy_dot, sympy_product, unique
+from .utils import (
+    do_bench,
+    get_dtype_size,
+    Placeholder,
+    sympy_dot,
+    sympy_product,
+    unique,
+)
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -162,7 +168,7 @@ class TritonTemplateKernel(TritonKernel):
 
         inductor_meta = {
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
-            **TritonKernel.inductor_meta_common(),
+            "backend_hash": torch.utils._triton.triton_hash_with_backend(),
         }
         if config.profile_bandwidth or config.benchmark_kernel:
             num_gb = self.estimate_kernel_num_bytes() / 1e9
@@ -880,10 +886,6 @@ class ErrorFromChoice(RuntimeError):
         self.choice = choice
 
 
-class NoValidChoicesError(RuntimeError):
-    pass
-
-
 class AlgorithmSelectorCache(PersistentCache):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -969,11 +971,6 @@ class AlgorithmSelectorCache(PersistentCache):
             )
 
             if timings:
-                return no_op
-
-            if config.search_autotune_cache and not (
-                config.max_autotune or config.max_autotune_gemm
-            ):
                 return no_op
 
             precompile_key = (

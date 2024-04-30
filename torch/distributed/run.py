@@ -499,7 +499,7 @@ def get_args_parser() -> ArgumentParser:
         "--monitor_interval",
         action=env,
         type=float,
-        default=0.1,
+        default=5,
         help="Interval, in seconds, to monitor the state of workers.",
     )
     parser.add_argument(
