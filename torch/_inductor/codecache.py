@@ -391,7 +391,7 @@ def write(
     specified_dir: str = "",
 ) -> Tuple[str, str]:
     # use striped content to compute hash so we don't end up with different
-    # hashes just because the content begins/ends with differnet number of
+    # hashes just because the content begins/ends with different number of
     # spaces.
     key: str = get_hash(content.strip(), extra, hash_type)
     basename, subdir, path = get_path(key, extension, specified_dir)
@@ -1304,7 +1304,7 @@ def pick_vec_isa() -> VecISA:
     if not _valid_vec_isa_list:
         return invalid_vec_isa
 
-    # If the simdlen is None, it indicates determin the vectorization length automatically
+    # If the simdlen is None, it indicates determine the vectorization length automatically
     if config.cpp.simdlen is None:
         assert _valid_vec_isa_list
         return _valid_vec_isa_list[0]
