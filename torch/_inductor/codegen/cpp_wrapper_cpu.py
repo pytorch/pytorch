@@ -2047,30 +2047,16 @@ class CppWrapperCpu(WrapperCodeGen):
             if isinstance(output_args, str):
                 output_args = [output_args]
 
-        if config.is_fbcode():
-            assert op_overload is not None
-            assert raw_args is not None
-            assert outputs is not None
+        assert op_overload is not None
+        assert raw_args is not None
+        assert outputs is not None
 
-            return self.generate_extern_kernel_alloc_and_find_schema_if_needed_fbcode(
-                cpp_kernel_key,
-                op_overload,
-                raw_args,
-                output_args,
-            )
-        else:
-            return self.generate_extern_kernel_alloc_and_find_schema_if_needed_oss(
-                buf_name,
-                python_kernel_name,
-                cpp_kernel_name,
-                codegen_args,
-                cpp_op_schema,
-                cpp_kernel_key,
-                cpp_kernel_overload_name,
-                op_overload,
-                raw_args,
-                output_args,
-            )
+        return self.generate_extern_kernel_alloc_and_find_schema_if_needed_fbcode(
+            cpp_kernel_key,
+            op_overload,
+            raw_args,
+            output_args,
+        )
 
     def generate_scoped_gil_acquire(self, declarations_before_scope, lines_in_scope):
         scoped_lines = IndentedBuffer()

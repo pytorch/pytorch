@@ -1,0 +1,16 @@
+load("@fbcode_macros//build_defs:cpp_binary.bzl", "cpp_binary")
+load("@fbcode_macros//build_defs:link_group_registry.bzl", "EVICT_MKL_GROUP_MAP")
+
+oncall("aml_ai_platform")
+
+cpp_binary(
+    name = "custom_ops",
+    srcs = [
+        "custom_ops.cpp",
+    ],
+    link_group_map = EVICT_MKL_GROUP_MAP,
+    keep_gpu_sections = True,
+    deps = [
+        "//caffe2:torch_extension",
+    ],
+)

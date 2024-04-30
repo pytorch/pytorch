@@ -1872,7 +1872,7 @@ class AotCodeCompiler:
         with lock:
             # Currently, this only support serializing extern nodes in fbcode
             # Eventually, we should also have a serializer for OSS.
-            if config.is_fbcode() and serialized_extern_kernel_nodes:
+            if serialized_extern_kernel_nodes:
                 output_json = os.path.splitext(input_path)[0] + ".json"
                 with open(output_json, "w") as f:
                     f.write(serialized_extern_kernel_nodes)

@@ -2177,6 +2177,18 @@ class AOTInductorTestsTemplate:
         model.weight += 1
         self.check_model(model, example_inputs)
 
+    def test_custom_op_add(self) -> None:
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.ops.aoti_custom_ops.custom_add(x, y)
+
+        m = M().to(device=self.device)
+        args = (
+            torch.randn(3, 3, device=self.device),
+            torch.randn(3, 3, device=self.device),
+        )
+        self.check_model(m, args)
+
     def test_triton_kernel_extern_kernel_arg(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
@@ -2690,7 +2702,21 @@ class AOTInductorTestsTemplate:
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
 
 
-class AOTInductorTestABICompatibleCpu(TestCase):
+class CustomTestCase(TestCase):
+    def setUp(self):
+        if IS_SANDCASTLE or IS_FBCODE:
+            torch.ops.load_library("//caffe2/test/inductor:custom_ops")
+        elif IS_MACOS:
+            raise unittest.SkipTest("non-portable load_library call used in test")
+        else:
+            lib_file_path = find_library_location("libaoti_custom_ops.so")
+            if IS_WINDOWS:
+                lib_file_path = find_library_location("aoti_custom_ops.dll")
+            torch.ops.load_library(str(lib_file_path))
+        super().setUp()
+
+
+class AOTInductorTestABICompatibleCpu(CustomTestCase):
     device = "cpu"
     abi_compatible = True
     check_model = check_model
@@ -2933,7 +2959,7 @@ copy_tests(
 )
 
 
-class AOTInductorTestABICompatibleCpuWithStackAllocation(TestCase):
+class AOTInductorTestABICompatibleCpuWithStackAllocation(CustomTestCase):
     device = "cpu"
     abi_compatible = True
     check_model = check_model
@@ -2970,7 +2996,7 @@ copy_tests(
 
 
 @unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
-class AOTInductorTestABICompatibleCuda(TestCase):
+class AOTInductorTestABICompatibleCuda(CustomTestCase):
     device = "cuda"
     abi_compatible = True
     check_model = check_model
@@ -2991,7 +3017,7 @@ copy_tests(
     IS_FBCODE or sys.platform == "darwin",
     "NonABI mode should not be used in fbcode nor on MacOS",
 )
-class AOTInductorTestNonABICompatibleCpu(TestCase):
+class AOTInductorTestNonABICompatibleCpu(CustomTestCase):
     device = "cpu"
     abi_compatible = False
     check_model = check_model
@@ -3028,7 +3054,7 @@ copy_tests(
     IS_FBCODE or sys.platform == "darwin",
     "NonABI mode should not be used in fbcode nor on MacOS",
 )
-class AOTInductorTestNonABICompatibleCuda(TestCase):
+class AOTInductorTestNonABICompatibleCuda(CustomTestCase):
     device = "cuda"
     abi_compatible = False
     check_model = check_model

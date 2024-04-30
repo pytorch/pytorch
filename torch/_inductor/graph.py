@@ -1671,12 +1671,17 @@ class GraphLowering(torch.fx.Interpreter):
             output_code_log.debug("Output code: \n%s", code)
 
             serialized_extern_kernel_nodes = None
-            if (
-                config.is_fbcode()
-                and self.extern_kernel_nodes
-                and self.extern_node_serializer
-            ):
-                serialized_extern_kernel_nodes = self.extern_node_serializer(
+            if self.extern_kernel_nodes:
+                from torch._inductor.extern_node_serializer import (
+                    extern_node_json_serializer,
+                )
+
+                extern_node_serializer = (
+                    self.extern_node_serializer
+                    if config.is_fbcode() and self.extern_node_serializer
+                    else extern_node_json_serializer
+                )
+                serialized_extern_kernel_nodes = extern_node_serializer(
                     self.extern_kernel_nodes
                 )
                 output_code_log.debug(
