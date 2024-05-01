@@ -2705,22 +2705,33 @@ def get_foreach_method_names(name):
     return op, inplace_op, ref, ref_inplace
 
 
-@dataclass
 class ForeachFuncInfo(OpInfo):
     """Early version of a specialized OpInfo for foreach functions"""
 
-    supports_alpha_param: bool = False
-    supports_scalar_self_arg: bool = False
-    backward_requires_result: bool = False
-
-    def __post_init__(self):
+    def __init__(
+        self,
+        name,
+        sample_inputs_func,
+        *,
+        dtypes=floating_and_complex_types(),
+        dtypesIfCUDA=None,
+        dtypesIfROCM=None,
+        supports_alpha_param=False,
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_scalar_self_arg=False,
+        supports_forward_ad=True,
+        backward_requires_result=False,
+        supports_out=True,
+        **kwargs,
+    ):
         (
             foreach_method,
             foreach_method_inplace,
             torch_ref_method,
             torch_ref_inplace,
-        ) = get_foreach_method_names(self.name)
-        if not self.supports_out:
+        ) = get_foreach_method_names(name)
+        if not supports_out:
             # note(crcrpar): `foreach_method` for `"zero"` is `None` but `None` would call
             # `_getattr_qual` in `OpInfo.__post_init__` which should fail since `_foreach_zero`
             # is not defined at the moment. Thus to skip the qualification, set a similar torch
@@ -2729,16 +2740,29 @@ class ForeachFuncInfo(OpInfo):
             assert torch_ref_method is None
             foreach_method = foreach_method_inplace
             torch_ref_method = torch_ref_inplace
+        super().__init__(
+            name="_foreach_" + name,
+            op=foreach_method,
+            ref=torch_ref_method,
+            method_variant=foreach_method,
+            inplace_variant=foreach_method_inplace,
+            dtypes=dtypes,
+            dtypesIfCUDA=dtypesIfCUDA,
+            dtypesIfROCM=dtypesIfROCM,
+            sample_inputs_func=sample_inputs_func,
+            supports_autograd=supports_autograd,
+            supports_forward_ad=supports_forward_ad,
+            supports_out=supports_out,
+            **kwargs,
+        )
+        self.supports_scalar_self_arg = supports_scalar_self_arg
 
-        self.op = foreach_method
-        self.method_variant = foreach_method
-        self.ref = torch_ref_method
-        self.inplace_variant = foreach_method_inplace
         self.ref_inplace = torch_ref_inplace
+        self.supports_alpha_param = supports_alpha_param
+        self.backward_requires_result = backward_requires_result
         self.has_no_in_place = self.inplace_variant is None
+        self.supports_inplace_autograd = supports_inplace_autograd
 
-        name = self.name
-        self.name = f"_foreach_{name}"
         if name == "norm":
             self.ref = torch.linalg.vector_norm
         elif name == "minimum":
