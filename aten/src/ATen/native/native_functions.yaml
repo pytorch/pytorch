@@ -6172,12 +6172,12 @@
     CompositeExplicitAutogradNonFunctional: _nested_view_from_buffer_copy
   autogen: _nested_view_from_buffer_copy.out
 
-- func: _nested_view_from_jagged(Tensor(a) self, Tensor offsets, Tensor dummy, Tensor? lengths=None, int ragged_idx=1, SymInt min_seqlen=-1, SymInt max_seqlen=-1) -> Tensor(a)
+- func: _nested_view_from_jagged(Tensor(a) self, Tensor offsets, Tensor dummy, Tensor? lengths=None, int ragged_idx=1, Tensor? min_seqlen=None, Tensor? max_seqlen=None) -> Tensor(a)
   variants: function
   device_check: NoCheck
   dispatch: {}
 
-- func: _nested_view_from_jagged_copy(Tensor self, Tensor offsets, Tensor dummy, Tensor? lengths=None, int ragged_idx=1, SymInt min_seqlen=-1, SymInt max_seqlen=-1) -> Tensor
+- func: _nested_view_from_jagged_copy(Tensor self, Tensor offsets, Tensor dummy, Tensor? lengths=None, int ragged_idx=1, Tensor? min_seqlen=None, Tensor? max_seqlen=None) -> Tensor
   variants: function
   device_check: NoCheck
   tags: view_copy
@@ -6214,12 +6214,12 @@
   device_check: NoCheck
   dispatch: {}
 
-- func: _nested_get_min_seqlen(Tensor self) -> SymInt
+- func: _nested_get_min_seqlen(Tensor self) -> Tensor
   variants: function
   device_check: NoCheck
   dispatch: {}
 
-- func: _nested_get_max_seqlen(Tensor self) -> SymInt
+- func: _nested_get_max_seqlen(Tensor self) -> Tensor
   variants: function
   device_check: NoCheck
   dispatch: {}

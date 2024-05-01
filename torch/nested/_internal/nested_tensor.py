@@ -26,6 +26,11 @@ def _get_sdpa_extreme_seqlen(func, tensor):
     return int(func(tensor).item())
 
 
+def _store_val_in_tensor(val) -> torch.Tensor:
+    # hack to get dynamic shapes support: store in a (val, 0) shaped tensor
+    return torch.zeros(val, 0)
+
+
 class NestedTensor(torch.Tensor):
     _values: torch.Tensor  # type: ignore[assignment]
     _offsets: torch.Tensor
@@ -113,6 +118,14 @@ class NestedTensor(torch.Tensor):
         torch._dynamo.mark_dynamic(self, self._ragged_idx)
         torch._dynamo.mark_dynamic(self._values, self._ragged_idx - 1)
 
+        # min / max sequence length should be dynamic if present
+        max_seqlen_tensor = self._metadata_cache.get("max_seqlen", None)
+        if max_seqlen_tensor is not None:
+            torch._dynamo.mark_dynamic(max_seqlen_tensor, 0)
+        min_seqlen_tensor = self._metadata_cache.get("min_seqlen", None)
+        if min_seqlen_tensor is not None:
+            torch._dynamo.mark_dynamic(min_seqlen_tensor, 0)
+
     def values(self):
         # dispatch to get proper view relationship
         return torch._nested_get_values(self)  # type: ignore[attr-defined]
@@ -123,25 +136,65 @@ class NestedTensor(torch.Tensor):
     def lengths(self):
         return self._lengths
 
-    @property
-    def _max_seqlen(self):
-        if "max_seqlen" not in self._metadata_cache:
+    # public accessors; purposefully not @properties because those don't work with PT2
+    def max_seqlen(self):
+        max_seqlen_tensor = self._max_seqlen_tensor
+        if max_seqlen_tensor is None:
             # compute & cache
-            self._metadata_cache["max_seqlen"] = _get_sdpa_extreme_seqlen(
+            max_val = _get_sdpa_extreme_seqlen(
                 torch.max,
                 self._offsets.diff() if self._lengths is None else self._lengths,
             )
-        return self._metadata_cache["max_seqlen"]
+            max_seqlen_tensor = _store_val_in_tensor(max_val)
+            self._metadata_cache["max_seqlen"] = max_seqlen_tensor
+        return max_seqlen_tensor.shape[0]
 
-    @property
-    def _min_seqlen(self):
-        if "min_seqlen" not in self._metadata_cache:
+    def min_seqlen(self):
+        min_seqlen_tensor = self._min_seqlen_tensor
+        if min_seqlen_tensor is None:
             # compute & cache
-            self._metadata_cache["min_seqlen"] = _get_sdpa_extreme_seqlen(
+            min_val = _get_sdpa_extreme_seqlen(
                 torch.min,
                 self._offsets.diff() if self._lengths is None else self._lengths,
             )
-        return self._metadata_cache["min_seqlen"]
+            min_seqlen_tensor = _store_val_in_tensor(min_val)
+            self._metadata_cache["min_seqlen"] = min_seqlen_tensor
+        return min_seqlen_tensor.shape[0]
+
+    # Private accessors used for treating min / max seqlen as inner tensors for
+    # flatten / unflatten. These do not compute / cache if not present.
+    @property
+    def _max_seqlen_tensor(self) -> Optional[torch.Tensor]:
+        return self._metadata_cache.get("max_seqlen", None)
+
+    @property
+    def _min_seqlen_tensor(self) -> Optional[torch.Tensor]:
+        return self._metadata_cache.get("min_seqlen", None)
+
+    # TODO: Remove these @property accessors (subject to BC issues ofc)
+    @property
+    def _max_seqlen(self):
+        max_seqlen_tensor = self._max_seqlen_tensor
+        if max_seqlen_tensor is None:
+            # compute & cache
+            max_val = _get_sdpa_extreme_seqlen(
+                torch.max,
+                self._offsets.diff() if self._lengths is None else self._lengths,
+            )
+            self._metadata_cache["max_seqlen"] = _store_val_in_tensor(max_val)
+        return max_seqlen_tensor.shape[0]
+
+    @property
+    def _min_seqlen(self):
+        min_seqlen_tensor = self._min_seqlen_tensor
+        if min_seqlen_tensor is None:
+            # compute & cache
+            min_val = _get_sdpa_extreme_seqlen(
+                torch.min,
+                self._offsets.diff() if self._lengths is None else self._lengths,
+            )
+            self._metadata_cache["min_seqlen"] = _store_val_in_tensor(min_val)
+        return min_seqlen_tensor.shape[0]
 
     def __repr__(self):
         # We should implement this in torch/_tensor_str.py instead
@@ -161,6 +214,7 @@ class NestedTensor(torch.Tensor):
         del state["_size"]
         del state["_strides"]
 
+        # TODO: Update this to handle the other inner tensors
         func = NestedTensor
         args = (self._values, self._offsets)
         return (torch._tensor._rebuild_from_type_v2, (func, type(self), args, state))
@@ -168,22 +222,33 @@ class NestedTensor(torch.Tensor):
     def __tensor_flatten__(self):
         ctx = {
             "requires_grad": self.requires_grad,
-            # TODO: Don't guard on this!
-            "metadata_cache": self._metadata_cache,
             "ragged_idx": self._ragged_idx,
         }
         inner_tensors = ["_values", "_offsets"]
         if self._lengths is not None:
             inner_tensors.append("_lengths")
+        if self._min_seqlen_tensor is not None:
+            inner_tensors.append("_min_seqlen_tensor")
+        if self._max_seqlen_tensor is not None:
+            inner_tensors.append("_max_seqlen_tensor")
         return inner_tensors, ctx
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors: Dict, meta, outer_size, outer_stride):
-        # inner tensors: _values, _offsets, [_lengths]
-        assert len(inner_tensors) >= 2 and len(inner_tensors) <= 3
+        # inner tensors: _values, _offsets, [_lengths], [_min_seqlen], [_max_seqlen]
+        assert len(inner_tensors) >= 2 and len(inner_tensors) <= 5
         values = inner_tensors["_values"]
         offsets = inner_tensors["_offsets"]
         lengths = inner_tensors.get("_lengths", None)
+        min_seqlen_tensor = inner_tensors.get("_min_seqlen_tensor", None)
+        max_seqlen_tensor = inner_tensors.get("_max_seqlen_tensor", None)
+
+        metadata_cache = {}
+        if min_seqlen_tensor is not None:
+            metadata_cache["min_seqlen"] = min_seqlen_tensor
+        if max_seqlen_tensor is not None:
+            metadata_cache["max_seqlen"] = max_seqlen_tensor
+
         ragged_idx = meta["ragged_idx"]
 
         # Note that we cannot simply check if is_fake(values) because
@@ -202,7 +267,7 @@ class NestedTensor(torch.Tensor):
             lengths=lengths,
             requires_grad=meta["requires_grad"],
             _ragged_idx=ragged_idx,
-            _metadata_cache=meta["metadata_cache"],
+            _metadata_cache=metadata_cache,
         )
 
     @classmethod
@@ -431,16 +496,44 @@ def _nt_view_dummy() -> torch.Tensor:
 
 
 def nested_view_from_values_offsets(
-    values, offsets, ragged_idx=1, min_seqlen=-1, max_seqlen=-1
+    values, offsets, ragged_idx=1, min_seqlen=None, max_seqlen=None
 ):
+    min_seqlen_tensor = None
+    if min_seqlen is not None:
+        min_seqlen_tensor = _store_val_in_tensor(min_seqlen)
+
+    max_seqlen_tensor = None
+    if max_seqlen is not None:
+        max_seqlen_tensor = _store_val_in_tensor(max_seqlen)
+
     return torch._nested_view_from_jagged(  # type: ignore[attr-defined]
-        values, offsets, _nt_view_dummy(), None, ragged_idx, min_seqlen, max_seqlen
+        values,
+        offsets,
+        _nt_view_dummy(),
+        None,
+        ragged_idx,
+        min_seqlen_tensor,
+        max_seqlen_tensor,
     )  # type: ignore[return-value]
 
 
 def nested_view_from_values_offsets_lengths(
-    values, offsets, lengths, ragged_idx=1, min_seqlen=-1, max_seqlen=-1
+    values, offsets, lengths, ragged_idx=1, min_seqlen=None, max_seqlen=None
 ):
+    min_seqlen_tensor = None
+    if min_seqlen is not None:
+        min_seqlen_tensor = _store_val_in_tensor(min_seqlen)
+
+    max_seqlen_tensor = None
+    if max_seqlen is not None:
+        max_seqlen_tensor = _store_val_in_tensor(max_seqlen)
+
     return torch._nested_view_from_jagged(  # type: ignore[attr-defined]
-        values, offsets, _nt_view_dummy(), lengths, ragged_idx, min_seqlen, max_seqlen
+        values,
+        offsets,
+        _nt_view_dummy(),
+        lengths,
+        ragged_idx,
+        min_seqlen_tensor,
+        max_seqlen_tensor,
     )  # type: ignore[return-value]

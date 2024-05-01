@@ -82,8 +82,6 @@ FUNCTIONAL_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
     "_fused_sdp_choice",  # returns an int
     "_print",  # no return
     "_nested_get_ragged_idx",  # returns an int
-    "_nested_get_min_seqlen",  # returns a SymInt
-    "_nested_get_max_seqlen",  # returns a SymInt
 ]
 
 INPLACE_OPS_THAT_DONT_GET_GROUPED_PROPERLY = [
