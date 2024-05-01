@@ -3,7 +3,7 @@ import logging
 from typing import Any, List
 
 import torch
-from .. import config, utils
+from .. import config
 from ..lowering import empty_strided, lowerings, register_lowering
 from ..select_algorithm import autotune_select_algorithm, TritonTemplate
 
@@ -176,9 +176,19 @@ sdpa_template = TritonTemplate(
 def _get_default_config(query):
     head_dim = query.get_size()[-1]
     default_config = None
-    is_big_shared_mem = utils.get_gpu_shared_memory() > 128 * 1024
 
-    if is_big_shared_mem:
+    if torch.cuda.get_device_capability() >= (9, 0):  # H100
+        if query.get_dtype() == torch.float32:
+            if head_dim == 64:
+                default_config = (128, 32, 4, 3)
+            else:
+                default_config = (32, 64, 4, 3)
+        else:
+            if head_dim == 64:
+                default_config = (128, 64, 4, 3)
+            else:
+                default_config = (64, 32, 4, 3)
+    elif torch.cuda.get_device_capability() >= (8, 0):  # A100
         if query.get_dtype() == torch.float32:
             default_config = (128, 32, 4, 3)
         else:
@@ -188,7 +198,7 @@ def _get_default_config(query):
                 default_config = (128, 32, 4, 3)
     else:
         if query.get_dtype() == torch.float32:
-            default_config = (32, 32, 4, 3)
+            default_config = (32, 16, 4, 3)
         else:
             default_config = (64, 32, 4, 3)
 
