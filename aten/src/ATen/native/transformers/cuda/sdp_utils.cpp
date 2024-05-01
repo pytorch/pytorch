@@ -451,17 +451,6 @@ bool check_cudnn_hardware_support(sdp_params const& params, bool debug) {
   return true;
 }
 
-bool check_is_causal(sdp_params const& params, bool debug) {
-  // Check that the input is causal
-  if (!params.is_causal) {
-    if (debug) {
-      TORCH_WARN("CuDNN requires is_causal=True.");
-    }
-    return false;
-  }
-  return true;
-}
-
 bool check_for_nested_inputs(sdp_params const& params, bool debug) {
   // Check that the input is nested
   if (has_for_nested_inputs(params)) {
