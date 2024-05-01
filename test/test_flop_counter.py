@@ -29,9 +29,8 @@ def T(*shape, requires_grad=False):
 @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "torchdynamo doesn't work with __torch_dispatch__ right now")
 class TestFlopCounter(TestCase):
     def test_flop_counter_variety(self):
-        mode = FlopCounterMode()
         mod = torch.nn.Linear(9, 10)
-        with mode:
+        with FlopCounterMode() as mode:
             torch.mm(T(4, 5), T(5, 6))
             torch.addmm(T(4, 6), T(4, 5), T(5, 6), beta=0.5, alpha=0.5)
             torch.matmul(T(5, 6), T(6, 7))
@@ -41,8 +40,7 @@ class TestFlopCounter(TestCase):
         self.assertExpectedInline(get_total_flops(mode), """3012""")
 
     def test_op(self):
-        mode = FlopCounterMode()
-        with mode:
+        with FlopCounterMode() as mode:
             torch.mm(T(4, 5), T(5, 6))
         # 4 * 6 * 2 * 5 = 240
         self.assertExpectedInline(get_total_flops(mode), """240""")
@@ -91,8 +89,7 @@ class TestFlopCounter(TestCase):
         self.assertExpectedInline(get_total_flops(mode), """1440""")
 
     def test_backward(self):
-        mode = FlopCounterMode()
-        with mode:
+        with FlopCounterMode() as mode:
             a = T(4, 5, requires_grad=True)
             a = torch.mm(a, T(5, 6))
             a = a.unsqueeze(0).expand(7, 4, 6)
@@ -104,8 +101,7 @@ class TestFlopCounter(TestCase):
     def test_torchscript(self):
         def foo(x):
             return torch.mm(x, x)
-        mode = FlopCounterMode()
-        with mode:
+        with FlopCounterMode() as mode:
             foo(T(5, 5))
         unscripted_flops = get_total_flops(mode)
         ts_foo = torch.jit.script(foo)
@@ -124,8 +120,7 @@ class TestFlopCounter(TestCase):
                 return torch.mm(grad_output, grad_output) + torch.mm(grad_output, grad_output)
 
         a = T(5, 5, requires_grad=True)
-        mode = FlopCounterMode()
-        with mode:
+        with FlopCounterMode() as mode:
             a = _CustomOp.apply(a)
             a.sum().backward()
 
@@ -182,8 +177,7 @@ class TestFlopCounter(TestCase):
 
     def test_convs(self):
         def assert_equivalence(f, expected_forward=None):
-            mode = FlopCounterMode()
-            with mode:
+            with FlopCounterMode() as mode:
                 f()
             conv_forward_flops = mode.get_flop_counts()['Global'][torch.ops.aten.convolution]
             conv_backward_flops = mode.get_flop_counts()['Global'][torch.ops.aten.convolution_backward]
@@ -217,8 +211,7 @@ class TestFlopCounter(TestCase):
     @skipIfNoTorchVision
     def test_module(self):
         resnet18 = torchvision_models.resnet18()
-        mode = FlopCounterMode(resnet18)
-        with mode:
+        with FlopCounterMode(resnet18) as mode:
             a = T(1, 3, 224, 224, requires_grad=True)
             resnet18(a).sum().backward()
 
@@ -260,8 +253,7 @@ class TestFlopCounter(TestCase):
         self.assertExpectedInline(get_total_flops(mode), """20""")
 
     def test_noop(self):
-        mode = FlopCounterMode()
-        with mode:
+        with FlopCounterMode() as mode:
             T(4, 5).cos()
 
     @unittest.skipIf(not HAS_CUDA, "CUDA not available")
@@ -333,8 +325,7 @@ class TestFlopCounter(TestCase):
             y = torch.zeros(10, 10)
             return torch.mm(x, x, out=y)
 
-        mode = FlopCounterMode()
-        with mode:
+        with FlopCounterMode() as mode:
             f(torch.randn(10, 10))
 
         self.assertExpectedInline(get_total_flops(mode), """2000""")

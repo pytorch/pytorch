@@ -348,8 +348,7 @@ class FlopCounterMode(TorchDispatchMode):
     .. code-block:: python
 
         mod = ...
-        flop_counter = FlopCounterMode(mod)
-        with flop_counter:
+        with FlopCounterMode(mod) as flop_counter:
             mod.sum().backward()
 
     """
