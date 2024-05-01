@@ -276,6 +276,8 @@ static void isin_Tensor_Tensor_out_mps(const Tensor& elements,
                                        bool invert,
                                        const Tensor& out,
                                        string op_name) {
+  TORCH_CHECK(is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS),
+              "isin_Tensor_Tensor_out supported on MPS from MacOs_14_0 onwards");
   if (elements.numel() == 0) {
     return;
   }
