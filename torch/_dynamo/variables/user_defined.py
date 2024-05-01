@@ -829,10 +829,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return tx.output.side_effects.load_attr(self, name)
 
         if name == "__dict__":
-            dict_source = None
             if self.source:
                 dict_source = AttrSource(self.source, "__dict__")
-            return VariableBuilder(tx, dict_source)(self.value.__dict__)
+                return VariableBuilder(tx, dict_source)(self.value.__dict__)
+            else:
+                from .builder import SourcelessBuilder
+
+                return SourcelessBuilder.create(tx, self.value.__dict__)
 
         try:
             subobj = self._getattr_static(name)
