@@ -3,11 +3,10 @@ import os
 import re
 import time
 from collections import defaultdict
-import contextlib
 from functools import lru_cache
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, cast, Dict, List, Tuple
+from typing import Any, cast, Dict, List
 
 import requests
 
@@ -54,58 +53,6 @@ def get_test_config(job_name: str) -> str:
     except AttributeError:
         print(f"Failed to match job name: {job_name}")
         return "NoTestConfig"
-
-
-def get_tests(
-    workflow_run_id: int, workflow_run_attempt: int
-) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
-    start = time.time()
-    temp_dir = f"/Users/csl/zzzzzzzz/tmp/{workflow_run_id}"
-    current_dir = os.getcwd()
-    if not os.path.exists(temp_dir):
-        os.makedirs(temp_dir)
-        print("Using temporary directory:", temp_dir)
-        os.chdir(temp_dir)
-
-        # Download and extract all the reports (both GHA and S3)
-        s3_paths = download_s3_artifacts(
-            "test-jsons", workflow_run_id, workflow_run_attempt
-        )
-        for path in s3_paths:
-            unzip(path)
-
-        artifact_paths = download_gha_artifacts(
-            "test-jsons", workflow_run_id, workflow_run_attempt
-        )
-        for path in artifact_paths:
-            unzip(path)
-    if True:
-        os.chdir(temp_dir)
-
-        # Parse the reports and transform them to JSON
-        test_cases = []
-        mp = Pool(20)
-        for xml_report in Path(".").glob("**/*.xml"):
-            test_cases.append(
-                mp.apply_async(
-                    parse_xml_report,
-                    args=(
-                        "testcase",
-                        xml_report,
-                        workflow_run_id,
-                        workflow_run_attempt,
-                    ),
-                )
-            )
-        mp.close()
-        mp.join()
-        test_cases = [tc.get() for tc in test_cases]
-        flattened = [item for sublist in test_cases for item in sublist]
-        exclusions = get_td_exclusions()
-        os.chdir(current_dir)
-        print(f"Time taken to get tests: {time.time() - start}")
-
-        return flattened, exclusions
 
 
 def get_td_exclusions(
