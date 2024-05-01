@@ -1009,6 +1009,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
 @dataclass
 class CKGemmOperation:
+    """
+    A python dataclass storing the template parameters of a CK Universal Gemm template instance
+    """
     a_layout: str
     b_layout: str
     c_layout: str
@@ -1043,12 +1046,11 @@ class CKGemmOperation:
 
     a_block_transfer_thread_cluster_lengths_ak0_m_ak1: Tuple[
         int, int, int
-    ]  # or sequence[int]?
+    ]  
     a_block_transfer_thread_cluster_arrange_order: Tuple[
         int, int, int
-    ]  # or sequence[int]?
-    a_block_transfer_src_access_order: Tuple[int, int, int]  # or sequence[int]?
-
+    ]  
+    a_block_transfer_src_access_order: Tuple[int, int, int] 
     a_block_transfer_src_vector_dim: int
     a_block_transfer_src_scalar_per_vector: int
     a_block_transfer_dst_scalar_per_vector_ak1: int
@@ -1056,11 +1058,11 @@ class CKGemmOperation:
 
     b_block_transfer_thread_cluster_lengths_bk0_n_bk1: Tuple[
         int, int, int
-    ]  # or sequence[int]?
+    ]  
     b_block_transfer_thread_cluster_arrange_order: Tuple[
         int, int, int
-    ]  # or sequence[int]?
-    b_block_transfer_src_access_order: Tuple[int, int, int]  # or sequence[int]?
+    ] 
+    b_block_transfer_src_access_order: Tuple[int, int, int]  
 
     b_block_transfer_src_vector_dim: int
     b_block_transfer_src_scalar_per_vector: int
@@ -1091,6 +1093,7 @@ class CKGemmOperation:
 
 
 class CKGemmTemplate(CKTemplate):
+    # the JINJA template for rendering CK Universal GEMMs
     gemm_template = r"""
     {{headers}}
     {{globals}}
@@ -1136,6 +1139,7 @@ class CKGemmTemplate(CKTemplate):
     } // extern C
     """
 
+    # manually selected (through benchmarking) F16/F16/F16 Row/Col/Row instances
     preselected_instances = r"""
     # Compute-friendly, 7 instances
     DeviceGemm_Xdl_CShuffleV3<Row, Col, Row, F16, F16, F16, F32, F16, PassThrough, PassThrough, PassThrough, GemmSpecialization::MNKPadding, 256, 224, 256, 64, 8, 8, 16, 16, 7, 8, S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0, S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0, 1, 2, S<1, 32, 1, 8>, 8, BlockGemmPipelineScheduler::Intrawave, BlockGemmPipelineVersion::v3>,
@@ -1262,6 +1266,7 @@ class CKGemmTemplate(CKTemplate):
         return op
 
     def emit_ck_instance(self, op: CKGemmOperation):
+        # The Jinja template for generating a C++ type alias *definition* for a Universal GEMM instance
         template_definition = r"""
     // Gemm operator {{operation_name}}
     using Operation_{{operation_name}} = 
@@ -1269,6 +1274,7 @@ class CKGemmTemplate(CKTemplate):
             {{template_params}}>;
 
 """
+        # The Jinja template for generating a C++ type alias *usage* for a Universal GEMM instance   
         template_type = r"""
     Operation_{{operation_name}}
 """
@@ -1323,7 +1329,10 @@ class CKGemmTemplate(CKTemplate):
             c_layout=op.c_layout,
         )
 
-    def _parse_instances(self, str_instances: List[str]):
+    def _parse_instances(self, str_instances: List[str]) -> List[CKGemmOperation]:
+        """
+        Parse the lines containing Universal Gemm template instances into `CKGemmOperation` instances
+        """
         def maybe_int(s):
             try:
                 return int(s)
@@ -1362,10 +1371,13 @@ class CKGemmTemplate(CKTemplate):
                         i_current = i_next + 1
                 if i_next == -1:
                     break
+            # pad with `None`s for the fields which are not defined in the instance
             new_instance = CKGemmOperation(
                 *template_args,
                 *((None,) * (len(fields(CKGemmOperation)) - len(template_args))),
             )
+            # the last 2 template parameters are optional
+            # if they are absent, substitute them with default values from Universal Gemm C++ template declaration
             if new_instance.a_compute_dtype is None:
                 new_instance.a_compute_dtype = new_instance.c_element_dtype
             if new_instance.b_compute_dtype is None:
@@ -1374,7 +1386,7 @@ class CKGemmTemplate(CKTemplate):
             op_instances.append(new_instance)
         return op_instances
 
-    def _default_instances(self):
+    def _default_instances(self) -> List[CKGemmOperation]:
         # fallback: known working op instance for problem size M=2240 K=256 N=2048
         # all string attributes must be either type aliases or global constants in C++
 
@@ -1424,7 +1436,10 @@ class CKGemmTemplate(CKTemplate):
             block_gemm_pipeline_scheduler="BlockGemmPipelineScheduler::Intrawave",
             block_gemm_pipeline_version="BlockGemmPipelineVersion::v3")]
 
-    def _gen_ops_library(self):
+    def _gen_ops_library(self) -> List[CKGemmOperation]:
+        """
+        Parse the Universal Gemm instances defined in the composable kernel library folder.
+        """
         grep_result = subprocess.run(
             [
                 "grep",
@@ -1483,7 +1498,10 @@ class CKGemmTemplate(CKTemplate):
 
         return chosen_instances
 
-    def _gen_ops_preselected(self):
+    def _gen_ops_preselected(self) -> List[CKGemmOperation]:
+        """
+        Parse the preselected Universal Gemm instances
+        """
         unfiltered_instances = self._parse_instances(self.preselected_instances.split('\n'))
         filtered_instances = list(filter(lambda op: self.filter_op(op), unfiltered_instances))
         log.debug(f"ck instances filtered: {len(filtered_instances)}")
