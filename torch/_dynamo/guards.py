@@ -1044,13 +1044,28 @@ class GuardBuilder(GuardBuilderBase):
                 # Just install a getattr manager. GetAttrGuardAccessor itself
                 # acts as hasattr guard.
                 example_value = self.get(source.name())
+                base_example_value = self.get(base)
                 guard_manager_enum = self.get_guard_manager_type(source, example_value)
-                base_manager.getattr_manager(
-                    attr=attr,
-                    source=guard.name,
-                    example_value=example_value,
-                    guard_manager_enum=guard_manager_enum,
-                )
+
+                # if the base value is nn.Module, check if we can speedup the
+                # guard by going through __dict__ attrs.
+                if isinstance(base_example_value, torch.nn.Module):
+                    return self.getattr_on_nn_module(
+                        source,
+                        base_manager,
+                        base_example_value,
+                        example_value,
+                        base,
+                        source.name(),
+                        guard_manager_enum,
+                    )
+                else:
+                    base_manager.getattr_manager(
+                        attr=attr,
+                        source=guard.name,
+                        example_value=example_value,
+                        guard_manager_enum=guard_manager_enum,
+                    )
             else:
                 base_manager.add_no_hasattr_guard(
                     attr, get_verbose_code_parts(code, guard)
