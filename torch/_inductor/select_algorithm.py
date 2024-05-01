@@ -975,9 +975,10 @@ class AlgorithmSelectorCache(PersistentCache):
             if num_workers <= 0:
                 return no_op
 
-            # TODO - debug issue
-            if torch.version.hip:
-                return no_op
+            log.debug(f"Precompiling {len(choices)} choices with {num_workers} workers")
+            # TODO(eelison) - debug issue
+            # if torch.version.hip:
+            #     return no_op
 
             # check local and global cache before precompiling
             timings = self.lookup(
