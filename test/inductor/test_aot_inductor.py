@@ -2876,6 +2876,7 @@ CUDA_TEST_FAILURES = {
     "test_runtime_checks_shape_failed": fail_non_abi_compatible_cuda(is_skip=True),
     # quantized unsupported for GPU
     "test_quantized_linear": fail_cuda(is_skip=True),
+    "test_custom_op_add": fail_non_abi_compatible_cuda(is_skip=True),
 }
 
 if TEST_WITH_ROCM:
@@ -2951,6 +2952,7 @@ if not IS_FBCODE:
             "test_with_offset": fail_minimal_arrayref_interface(is_skip=True),
             "test_with_profiler": fail_minimal_arrayref_interface(is_skip=True),
             "test_zero_size_weight": fail_minimal_arrayref_interface(is_skip=True),
+            "test_custom_op_add": fail_minimal_arrayref_interface(is_skip=True),
         }
     )
 
@@ -3049,6 +3051,7 @@ copy_tests(
         "test_runtime_checks_shape_failed": TestFailure(
             ("non_abi_compatible_cpu",), is_skip=True
         ),
+        "test_custom_op_add": TestFailure(("non_abi_compatible_cpu",), is_skip=True),
     },
 )
 

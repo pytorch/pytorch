@@ -3,9 +3,9 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/ivalue.h>
 #include <c10/macros/Export.h>
+#include <nlohmann/json.hpp>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/inductor/aoti_torch/proxy_executor.h>
-#include <nlohmann/json.hpp>
 
 using json = nlohmann::json;
 
@@ -31,15 +31,15 @@ struct DynamicArg {
       int arg_index,
       DynamicArgType arg_type,
       int length,
-      std::string serialized_arg_type)
+      json serialized_arg_val)
       : arg_index(arg_index),
         arg_type(arg_type),
         length(length),
-        serialized_arg_type(serialized_arg_type) {}
+        serialized_arg_val(serialized_arg_val) {}
   int arg_index;
   DynamicArgType arg_type;
   int length;
-  std::string serialized_arg_type;
+  json serialized_arg_val;
 };
 
 struct OpKernel {
@@ -63,7 +63,7 @@ struct OpKernel {
   }
 };
 
-class OSSProxyExecutor: public ProxyExecutor {
+class OSSProxyExecutor : public ProxyExecutor {
  public:
   explicit OSSProxyExecutor(const std::string& json_path, bool is_cpu);
 

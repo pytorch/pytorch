@@ -1,11 +1,10 @@
+#include <nlohmann/json.hpp>
 #include <fstream>
 #include <iostream>
-#include <nlohmann/json.hpp>
 
 #include <torch/csrc/inductor/aoti_torch/oss_proxy_executor.h>
 
 using json = nlohmann::json;
-
 
 namespace {
 at::Tensor* tensor_handle_to_tensor_pointer(AtenTensorHandle handle) {
@@ -15,7 +14,6 @@ at::Tensor* tensor_handle_to_tensor_pointer(AtenTensorHandle handle) {
 
 namespace torch {
 namespace aot_inductor {
-
 
 void OSSProxyExecutor::prefill_stack_with_static_arguments(
     int index,
@@ -34,14 +32,7 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
       TORCH_CHECK(serialized_arg_type == "as_tensor");
       stack.emplace_back();
       dynamic_args.emplace_back(
-          index, DynamicArgType::TensorType, 1, serialized_arg_type);
-      break;
-    }
-    case c10::TypeKind::IntType: {
-      TORCH_CHECK(serialized_arg_type == "as_int");
-      stack.emplace_back(c10::IValue());
-      dynamic_args.emplace_back(
-          index, DynamicArgType::IntType, 1, "");
+          index, DynamicArgType::TensorType, 1, serialized_arg_val);
       break;
     }
     // TODO: handle the other input types
@@ -95,7 +86,10 @@ void OSSProxyExecutor::get_output_info_from_serialized(
             " got serialized_output_type of ",
             serialized_output_type);
         outputs.emplace_back(
-            output_index, DynamicArgType::TensorType, 1, serialized_output_type);
+            output_index,
+            DynamicArgType::TensorType,
+            1,
+            serialized_output_type);
         break;
       }
       case c10::TypeKind::ListType: {
@@ -166,8 +160,9 @@ OSSProxyExecutor::OSSProxyExecutor(const std::string& json_path, bool is_cpu) {
       overloadName = target.substr(pos + 1, target.length() - pos);
     }
 
-    c10::OperatorHandle op_handle = c10::Dispatcher::singleton().findSchemaOrThrow(
-        opName.c_str(), overloadName.c_str());
+    c10::OperatorHandle op_handle =
+        c10::Dispatcher::singleton().findSchemaOrThrow(
+            opName.c_str(), overloadName.c_str());
     const c10::FunctionSchema& schema = op_handle.schema();
 
     const auto& schema_args = schema.arguments();
@@ -187,8 +182,9 @@ void OSSProxyExecutor::call_function(
     int64_t* flatten_int_args,
     int num_tensors,
     AtenTensorHandle* flatten_tensor_args) {
-
-  TORCH_CHECK(extern_node_index < op_kernels_.size(), "Invalid extern node index");
+  TORCH_CHECK(
+      extern_node_index < static_cast<int>(op_kernels_.size()),
+      "Invalid extern node index");
   OpKernel& op_kernel = op_kernels_[extern_node_index];
 
   std::vector<c10::IValue> stack = op_kernel.stack_;
@@ -251,7 +247,10 @@ void OSSProxyExecutor::call_function(
       *tensor = stack[index++].toTensor();
       // TODO: handle tensor list returns
     } else {
-      TORCH_CHECK(false, "NYI: Unsupported return type for schema: ", schema_return.type()->repr_str());
+      TORCH_CHECK(
+          false,
+          "NYI: Unsupported return type for schema: ",
+          schema_return.type()->repr_str());
     }
   }
 
