@@ -156,11 +156,8 @@ def build_triton(
         shutil.copy(whl_path, Path.cwd())
 
         if build_rocm:
-            check_call(
-                [f"{SCRIPT_DIR}/amd/patch_triton_wheel.sh"],
-                cwd=triton_basedir,
-                shell=True,
-            )
+            check_call([f"{SCRIPT_DIR}/amd/patch_triton_wheel.sh", Path.cwd()], cwd=triton_basedir)
+
         return Path.cwd() / whl_path.name
 
 
