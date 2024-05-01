@@ -738,7 +738,7 @@ class TensorMetadata:
     sparse_dim: Optional[int]
 
 
-def extract_tensor_metadata(t: torch.Tensor) -> "TensorMetadata":
+def extract_tensor_metadata(t: torch.Tensor) -> TensorMetadata:
     """
     Extract the TensorMetadata of a tensor.
     """
@@ -1020,7 +1020,8 @@ class FakeTensorMode(TorchDispatchMode):
         and cache the result (if the result is eligible for caching).
         """
         output: Union[FakeTensor, _Unassigned] = _UNASSIGNED
-        key = self._cache_key(func, args, kwargs)
+        key = self._cache_key(func, args, kwargs)  # XYZZY
+        # key = torch._C._FakeTensor_compute_cache_key(self, func, args, kwargs)
         entry = FakeTensorMode.cache.get(key, None)
         if isinstance(entry, _DispatchCacheEntry):
             output = self._output_from_cache_entry(entry, func, args)
@@ -1158,7 +1159,7 @@ class FakeTensorMode(TorchDispatchMode):
                     elif arg.fake_mode is not self:
                         output.append(_UNHASHABLE)
                     else:
-                        output.append(extract_tensor_metadata(arg))
+                        output.append(torch._C._FakeTensor_extract_tensor_metadata(arg))
                 else:
                     # Caught by _verify_args_for_hash later.
                     output.append(_UNHASHABLE)
@@ -1404,7 +1405,9 @@ class FakeTensorMode(TorchDispatchMode):
             assert all(
                 t.constant is not None for t in flat_arg_fake_tensors
             ), f"{func} should not have fake inputs without constants"
-            const_flat_args = [a.constant if self.is_our_fake(a) else a for a in flat_args]
+            const_flat_args = [
+                a.constant if self.is_our_fake(a) else a for a in flat_args
+            ]
             const_args, const_kwargs = pytree.tree_unflatten(const_flat_args, args_spec)
             out = func(*const_args, **const_kwargs)
             if type(out) is torch.Tensor and self.may_turn_const(out):
@@ -1483,7 +1486,9 @@ class FakeTensorMode(TorchDispatchMode):
             and not has_symbolic_sizes
             and not avoiding_device_init
         ):
-            const_flat_args = [a.constant if self.is_our_fake(a) else a for a in flat_args]
+            const_flat_args = [
+                a.constant if self.is_our_fake(a) else a for a in flat_args
+            ]
             const_args, const_kwargs = pytree.tree_unflatten(const_flat_args, args_spec)
 
             # NB: not in_kernel_invocation_manager(self) as we want to do REAL

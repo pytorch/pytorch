@@ -79,6 +79,7 @@
 #include <torch/csrc/multiprocessing/init.h>
 #include <torch/csrc/onnx/init.h>
 #include <torch/csrc/profiler/python/init.h>
+#include <torch/csrc/tensor/fake_tensor.h>
 #include <torch/csrc/tensor/python_tensor.h>
 #include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/init.h>
@@ -1634,6 +1635,7 @@ PyObject* initModule() {
   torch::python::init_bindings(module);
   torch::lazy::initLazyBindings(module);
   torch::inductor::initAOTIRunnerBindings(module);
+  torch::fake_tensor::initialize(module);
 #ifdef USE_ITT
   torch::profiler::initIttBindings(module);
 #endif
