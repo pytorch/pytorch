@@ -11,7 +11,7 @@ import os
 import pickle
 import tempfile
 from copy import copy
-from typing import Any, cast, List, Optional
+from typing import Any, cast, Dict, Optional, Str
 
 import torch
 from torch._guards import detect_fake_mode
@@ -26,11 +26,12 @@ from torch._subclasses.fake_tensor import (
     extract_tensor_metadata,
     FakeTensor,
     TensorMetadata,
-    FakeTensorMode,
 )
 from torch.fx.node import Node
 
 from .schemas import AOTConfig  # noqa: F401
+
+log = logging.getLogger(__name__)
 
 
 def fake_tensor_from_meta(tensor_meta):
@@ -47,11 +48,10 @@ def fake_tensor_from_meta(tensor_meta):
             ),
         )
 
-log = logging.getLogger(__name__)
-
 
 class BypassAOTAutogradCache(Exception):
     pass
+
 
 cache = tempfile.mkdtemp()
 
@@ -211,7 +211,8 @@ class NodeMetaSerializer:
                     )
             except AttributeError as e:
                 raise BypassAOTAutogradCache(
-                    f"No serialization implemented for meta field {key} with value {node_meta[key]}. Implement serialize_{key} and deserialize_{key}"
+                    f"No serialization implemented for meta field {key} with value {node_meta[key]}."
+                    "Implement serialize_{key} and deserialize_{key}"
                 ) from e
             except Exception as e:
                 raise BypassAOTAutogradCache(
@@ -227,6 +228,7 @@ class NodeMetaSerializer:
         return extract_tensor_metadata(val)
 
     """ TODO: implement serialization for these fields """
+
     @staticmethod
     def serialize_source_fn_stack(val):
         return None
@@ -281,8 +283,6 @@ class NodeMetaSerializer:
 
 
 def serialize_graph_module(module: torch.fx.GraphModule) -> SerializedAOTGraphModule:
-    if module is None:
-        return None
     module = copy(module)
     module.recompile()
     node_metas = {}
@@ -293,8 +293,6 @@ def serialize_graph_module(module: torch.fx.GraphModule) -> SerializedAOTGraphMo
 
 
 def deserialize_graph_module(module: SerializedAOTGraphModule) -> torch.fx.GraphModule:
-    if module is None:
-        return None
     new_module = module.module
     node_metas = module.node_metas
     for node in new_module.graph.nodes:
@@ -327,7 +325,11 @@ class AOTAutogradCache:
         try:
             entry: AOTAutogradCacheEntry = pickle.load(open(path, "rb"))
             fw_module = deserialize_graph_module(entry.fw_module)
-            bw_module = deserialize_graph_module(entry.bw_module)
+            bw_module = (
+                deserialize_graph_module(entry.bw_module)
+                if entry.bw_module is not None
+                else None
+            )
             return (fw_module, bw_module)
         except Exception as e:
             print("AOTAutograd cache unable to load compiled graph:", e)
@@ -337,7 +339,9 @@ class AOTAutogradCache:
     def _save(key: str, fw_module, bw_module=None):
         """Save forward and backward modules to the cache."""
         serialized_fw = serialize_graph_module(fw_module)
-        serialized_bw = serialize_graph_module(bw_module)
+        serialized_bw = (
+            serialize_graph_module(bw_module) if bw_module is not None else None
+        )
         entry = AOTAutogradCacheEntry(serialized_fw, serialized_bw)
         try:
             content = pickle.dumps(entry)
