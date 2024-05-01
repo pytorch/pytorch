@@ -1293,7 +1293,10 @@ class CKGemmTemplate(CKTemplate):
             template_params=(",\n" + 12 * " ").join(template_params),
         ), self._template_from_string(template_type).render(operation_name=op.name())
 
-    def render(self, kernel: CUDATemplateKernel, op: CKGemmOperation, **kwargs):
+    def render(self, kernel: CUDATemplateKernel, op: CKGemmOperation, **kwargs) -> str:
+        """
+        The primary entry point for the code rendering process used in this template.
+        """
         epilogue_nodes = kwargs.get("epilogue_nodes", None)
         assert epilogue_nodes is None or 0 == len(epilogue_nodes)
         template_buffer_node = kwargs.get("template_buffer_node", None)
@@ -1519,6 +1522,9 @@ class CKGemmTemplate(CKTemplate):
         beta=0,
         input_reorder=None,
     ):
+        """
+        Add Composable Kernel Universal GEMM instance choices to the auto-tuning list.
+        """
         template = CKGemmTemplate(
             input_nodes,
             layout,
