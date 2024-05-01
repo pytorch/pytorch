@@ -162,7 +162,7 @@ def _shard_dict_of_args(
 
                     sharded_arg_flat.append(expanded_chunks)
                 else:
-                    sharded_arg_flat.append(chunk_tensors)
+                    sharded_arg_flat.append(chunk_tensors)  # type: ignore[arg-type]
 
                 first_tensor = False
             else:
