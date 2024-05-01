@@ -43,12 +43,12 @@ nn/qat/ @jerryzh168
 /torch/csrc/distributed/rpc/tensorpipe_agent.h @jiayisuse @osalpekar @lw
 
 # ONNX Export
-/torch/_dynamo/backends/onnxrt.py @bowenbao @abock @thiagocrepaldi @wschin
-/torch/csrc/jit/passes/onnx.h @bowenbao @abock @thiagocrepaldi
-/torch/csrc/jit/passes/onnx.cpp @bowenbao @abock @thiagocrepaldi
-/torch/csrc/jit/passes/onnx/ @bowenbao @abock @thiagocrepaldi
-/torch/onnx/ @bowenbao @abock @thiagocrepaldi @wschin
-/test/onnx/ @bowenbao @abock @thiagocrepaldi @wschin
+/torch/_dynamo/backends/onnxrt.py @bowenbao @thiagocrepaldi @wschin
+/torch/csrc/jit/passes/onnx.h @bowenbao @thiagocrepaldi
+/torch/csrc/jit/passes/onnx.cpp @bowenbao @thiagocrepaldi
+/torch/csrc/jit/passes/onnx/ @bowenbao @thiagocrepaldi
+/torch/onnx/ @bowenbao @thiagocrepaldi @wschin
+/test/onnx/ @bowenbao @thiagocrepaldi @wschin
 
 # CI
 /.ci  @pytorch/pytorch-dev-infra
@@ -101,6 +101,10 @@ test/functorch/test_vmap.py @zou3519 @chillee @kshitij12345
 test/test_mps.py @kulinseth @malfet
 aten/src/ATen/mps/ @kulinseth @malfet
 aten/src/ATen/native/mps/ @kulinseth @malfet
+
+# MTIA
+aten/src/ATen/detail/MTIAHooksInterface.h @egienvalue
+torch/csrc/mtia/ @egienvalue
 
 # Profiler
 torch/csrc/autograd/profiler* @aaronenyeshi

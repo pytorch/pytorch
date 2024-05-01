@@ -632,7 +632,7 @@ void spmm(
   auto algorithm = CUSPARSE_SPMM_CSR_ALG2;
 #endif
 
-  auto descB = at::cuda::sparse::CuSparseDnMatDescriptor(
+  auto descB = at::cuda::sparse::CuSparseConstDnMatDescriptor(
       transpose_B ? mat2_->mT() : *mat2_);
   auto descC = at::cuda::sparse::CuSparseDnMatDescriptor(*result_);
 
@@ -655,7 +655,7 @@ void spmm(
             opB,
             &alpha_,
             descA.descriptor(),
-            descB.descriptor(),
+            descB.unsafe_mutable_descriptor(),
             &beta_,
             descC.descriptor(),
             compute_type,
@@ -672,7 +672,7 @@ void spmm(
             opB,
             &alpha_,
             descA.descriptor(),
-            descB.descriptor(),
+            descB.unsafe_mutable_descriptor(),
             &beta_,
             descC.descriptor(),
             compute_type,

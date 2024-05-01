@@ -2,16 +2,16 @@
 import typing
 import unittest
 
-from torch.testing._internal.common_utils import (
-    TestCase,
-    run_tests,
-    instantiate_parametrized_tests,
-    parametrize,
-    subtest
-)
-
 from torch._C import (
     _dispatch_get_registrations_for_dispatch_key as get_registrations_for_dispatch_key,
+)
+
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    subtest,
+    TestCase,
 )
 
 xfail_functorch_batched = {
@@ -226,17 +226,21 @@ xfail_not_implemented = {
     "aten::var_mean.correction_names",
     "aten::var_mean.names_dim",
     "aten::where",
-
 }
 
 
 def dispatch_registrations(
-        dispatch_key: str, xfails: set, filter_func: typing.Callable = lambda reg: True):
+    dispatch_key: str, xfails: set, filter_func: typing.Callable = lambda reg: True
+):
     registrations = sorted(get_registrations_for_dispatch_key(dispatch_key))
     subtests = [
-        subtest(reg, name=f"[{reg}]",
-                decorators=([unittest.expectedFailure] if reg in xfails else []))
-        for reg in registrations if filter_func(reg)
+        subtest(
+            reg,
+            name=f"[{reg}]",
+            decorators=([unittest.expectedFailure] if reg in xfails else []),
+        )
+        for reg in registrations
+        if filter_func(reg)
     ]
     return parametrize("registration", subtests)
 
@@ -262,17 +266,17 @@ def filter_vmap_implementable(reg):
         return False
     if reg.endswith("_out"):
         return False
-    if '.dimname' in reg:
+    if ".dimname" in reg:
         return False
     if "_dimname" in reg:
         return False
-    if 'fbgemm' in reg:
+    if "fbgemm" in reg:
         return False
-    if 'quantize' in reg:
+    if "quantize" in reg:
         return False
-    if 'sparse' in reg:
+    if "sparse" in reg:
         return False
-    if '::is_' in reg:
+    if "::is_" in reg:
         return False
     return True
 

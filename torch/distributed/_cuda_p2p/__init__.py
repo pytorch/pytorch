@@ -15,12 +15,15 @@ def _create_cuda_p2p_group(
     options: Union[ProcessGroupCudaP2P.Options, ProcessGroupNCCL.Options, None],
 ) -> Backend:
     if options is None:
-        nccl_options = ProcessGroupNCCL.Options()
-        options = ProcessGroupCudaP2P.Options(nccl_options)
+        options = ProcessGroupCudaP2P.Options()
+        options.nccl_options = ProcessGroupNCCL.Options()
     elif isinstance(options, ProcessGroupNCCL.Options):
-        options = ProcessGroupCudaP2P.Options(options)
+        nccl_options = options
+        options = ProcessGroupCudaP2P.Options()
+        options.nccl_options = nccl_options
     elif isinstance(options, ProcessGroupCudaP2P.Options):
-        pass
+        if options.nccl_options is None:
+            options.nccl_options = ProcessGroupNCCL.Options()
     else:
         raise TypeError(
             "options for cuda_p2p must be ProcessGroupCudaP2P.Options "

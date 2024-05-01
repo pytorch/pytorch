@@ -1,7 +1,6 @@
 import contextlib
 import importlib
 import logging
-import sys
 
 import torch
 import torch.testing
@@ -20,12 +19,7 @@ log = logging.getLogger(__name__)
 def run_tests(needs=()):
     from torch.testing._internal.common_utils import run_tests
 
-    if (
-        TEST_WITH_TORCHDYNAMO
-        or IS_WINDOWS
-        or TEST_WITH_CROSSREF
-        or sys.version_info >= (3, 12)
-    ):
+    if TEST_WITH_TORCHDYNAMO or IS_WINDOWS or TEST_WITH_CROSSREF:
         return  # skip testing
 
     if isinstance(needs, str):

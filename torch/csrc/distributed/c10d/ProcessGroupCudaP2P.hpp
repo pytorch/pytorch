@@ -13,13 +13,16 @@ class TORCH_API ProcessGroupCudaP2P : public Backend {
  public:
   struct Options : Backend::Options {
     c10::intrusive_ptr<ProcessGroupNCCL::Options> ncclOptions;
+    c10::optional<size_t> bufferSize;
 
-    explicit Options(c10::intrusive_ptr<ProcessGroupNCCL::Options> ncclOptions)
-        : Backend::Options("cuda_p2p", kProcessGroupCudaP2PDefaultTimeout),
-          ncclOptions(ncclOptions) {}
+    explicit Options()
+        : Backend::Options("cuda_p2p", kProcessGroupCudaP2PDefaultTimeout) {}
   };
 
+  // TODO: lower case
   bool isP2PAvailable();
+
+  c10::Stream stream();
 
   ProcessGroupCudaP2P(
       const c10::intrusive_ptr<Store>& store,
@@ -119,12 +122,25 @@ class TORCH_API ProcessGroupCudaP2P : public Backend {
       std::vector<at::Tensor>& tensors,
       int tag) override;
 
+  /* P2P-only */
   c10::intrusive_ptr<Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override;
+
+  c10::intrusive_ptr<Work> intra_node_barrier(
+      c10::optional<std::vector<int64_t>> ranks = c10::nullopt);
+
+  at::Tensor get_p2p_buffer(
+      size_t rank,
+      const std::vector<int64_t>& sizes,
+      c10::ScalarType dtype,
+      int64_t storage_offest = 0);
+
+  void shutdown(c10::optional<std::string> reason = c10::nullopt);
 
  private:
   c10::intrusive_ptr<ProcessGroupNCCL> ncclBackend_;
   c10::intrusive_ptr<c10d::intra_node_comm::IntraNodeComm> p2pBackend_;
+  c10::Stream stream_;
 };
 
 } // namespace c10d

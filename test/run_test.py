@@ -26,12 +26,15 @@ from torch.multiprocessing import current_process, get_context
 from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
     get_report_path,
+    IS_ARM64,
     IS_CI,
+    IS_LINUX,
     IS_MACOS,
     parser as common_parser,
     retry_shell,
     set_cwd,
     shell,
+    TEST_CUDA,
     TEST_WITH_ASAN,
     TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
@@ -56,6 +59,7 @@ from tools.testing.discover_tests import (
     TESTS,
 )
 from tools.testing.do_target_determination_for_s3 import import_results
+from tools.testing.target_determination.gen_artifact import gen_ci_artifact
 
 from tools.testing.test_run import TestRun
 from tools.testing.test_selections import (
@@ -74,7 +78,6 @@ sys.path.remove(str(REPO_ROOT))
 RERUN_DISABLED_TESTS = os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1"
 DISTRIBUTED_TEST_PREFIX = "distributed"
 INDUCTOR_TEST_PREFIX = "inductor"
-DYNAMO_TEST_PREFIX = "dynamo"
 
 
 # Note [ROCm parallel CI testing]
@@ -190,6 +193,8 @@ XPU_TEST = [
 RUN_PARALLEL_BLOCKLIST = [
     "test_cpp_extensions_jit",
     "test_cpp_extensions_open_device_registration",
+    "test_cpp_extensions_stream_and_event",
+    "test_cpp_extensions_mtia_backend",
     "test_jit_disabled",
     "test_mobile_optimizer",
     "test_multiprocessing",
@@ -213,9 +218,6 @@ CI_SERIAL_LIST = [
     "test_fake_tensor",
     "test_cpp_api_parity",
     "test_reductions",
-    "test_cuda",
-    "test_cuda_expandable_segments",
-    "test_indexing",
     "test_fx_backends",
     "test_linalg",
     "test_cpp_extensions_jit",
@@ -228,13 +230,10 @@ CI_SERIAL_LIST = [
     "nn/test_pooling",
     "nn/test_convolution",  # Doesn't respect set_per_process_memory_fraction, results in OOM for other tests in slow gradcheck
     "distributions/test_distributions",
-    "test_autograd",  # slow gradcheck runs a test that checks the cuda memory allocator
-    "test_prims",  # slow gradcheck runs a test that checks the cuda memory allocator
     "test_modules",  # failed test due to mismatched elements
     "functorch/test_vmap",  # OOM
     "test_fx",  # gets SIGKILL
     "test_dataloader",  # frequently hangs for ROCm
-    "test_serialization",  # test_serialization_2gb_file allocates a tensor of 2GB, and could cause OOM
     "test_schema_check",  # Cause CUDA illegal memory access https://github.com/pytorch/pytorch/issues/95749
     "functorch/test_memory_efficient_fusion",  # Cause CUDA OOM on ROCm
     "test_utils",  # OOM
@@ -245,9 +244,6 @@ CI_SERIAL_LIST = [
     "test_module_hooks",  # OOM
     "inductor/test_max_autotune",
     "inductor/test_cutlass_backend",  # slow due to many nvcc compilation steps
-    "inductor/test_torchinductor",  # OOM on test_large_block_sizes
-    "inductor/test_torchinductor_dynamic_shapes",  # OOM on test_large_block_sizes
-    "inductor/test_torchinductor_codegen_dynamic_shapes",  # OOM on test_large_block_sizes
 ]
 # A subset of onnx tests that cannot run in parallel due to high memory usage.
 ONNX_SERIAL_LIST = [
@@ -271,6 +267,10 @@ CORE_TEST_LIST = [
     "test_torch",
 ]
 
+# A subset of the TEST list for aarch64 linux platform
+ARM64_LINUX_TEST_LIST = [
+    "test_modules",
+]
 
 # if a test file takes longer than 5 min, we add it to TARGET_DET_LIST
 SLOW_TEST_THRESHOLD = 300
@@ -326,7 +326,6 @@ JIT_EXECUTOR_TESTS = [
 ]
 
 INDUCTOR_TESTS = [test for test in TESTS if test.startswith(INDUCTOR_TEST_PREFIX)]
-DYNAMO_TESTS = [test for test in TESTS if test.startswith(DYNAMO_TEST_PREFIX)]
 DISTRIBUTED_TESTS = [test for test in TESTS if test.startswith(DISTRIBUTED_TEST_PREFIX)]
 TORCH_EXPORT_TESTS = [test for test in TESTS if test.startswith("export")]
 FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
@@ -494,7 +493,12 @@ def run_test(
         os.close(log_fd)
 
     command = (launcher_cmd or []) + executable + argv
-    should_retry = "--subprocess" not in command and not RERUN_DISABLED_TESTS
+    should_retry = (
+        "--subprocess" not in command
+        and not RERUN_DISABLED_TESTS
+        and not is_cpp_test
+        and "-n" not in command
+    )
     is_slow = "slow" in os.environ.get("TEST_CONFIG", "") or "slow" in os.environ.get(
         "BUILD_ENVRIONMENT", ""
     )
@@ -1182,7 +1186,15 @@ def parse_args():
         action="store_true",
         help="Enables removing tests based on TD",
         default=IS_CI
-        and (TEST_WITH_CROSSREF or TEST_WITH_ASAN)
+        and (
+            TEST_WITH_CROSSREF
+            or TEST_WITH_ASAN
+            or (
+                strtobool(os.environ.get("TD_DISTRIBUTED", "False"))
+                and os.getenv("TEST_CONFIG") == "distributed"
+                and TEST_CUDA
+            )
+        )
         and os.getenv("BRANCH", "") != "main"
         and not strtobool(os.environ.get("NO_TD", "False")),
     )
@@ -1292,6 +1304,10 @@ def can_run_in_pytest(test):
 
 
 def get_selected_tests(options) -> List[str]:
+    if IS_ARM64 and IS_LINUX:
+        selected_tests = ARM64_LINUX_TEST_LIST
+        return selected_tests
+
     selected_tests = options.include
 
     # filter if there's JIT only and distributed only test options
@@ -1361,8 +1377,6 @@ def get_selected_tests(options) -> List[str]:
 
     # these tests failing in Python 3.12 temporarily disabling
     if sys.version_info >= (3, 12):
-        options.exclude.extend(INDUCTOR_TESTS)
-        options.exclude.extend(DYNAMO_TESTS)
         options.exclude.extend(
             [
                 "functorch/test_dims",
@@ -1584,6 +1598,11 @@ def run_tests(
         ):
             pool.terminate()
 
+    keep_going_message = (
+        "\n\nTip: You can keep running tests even on failure by passing --keep-going to run_test.py.\n"
+        "If running on CI, add the 'keep-going' label to your PR and rerun your jobs."
+    )
+
     try:
         for test in selected_tests_serial:
             options_clone = copy.deepcopy(options)
@@ -1596,19 +1615,29 @@ def run_tests(
                 and not options.continue_through_error
                 and not RERUN_DISABLED_TESTS
             ):
-                raise RuntimeError(
-                    failure.message
-                    + "\n\nTip: You can keep running tests even on failure by "
-                    "passing --keep-going to run_test.py.\n"
-                    "If running on CI, add the 'keep-going' label to "
-                    "your PR and rerun your jobs."
-                )
+                raise RuntimeError(failure.message + keep_going_message)
+
+        # Run tests marked as serial first
+        for test in selected_tests_parallel:
+            options_clone = copy.deepcopy(options)
+            if can_run_in_pytest(test):
+                options_clone.pytest = True
+            options_clone.additional_unittest_args.extend(["-m", "serial"])
+            failure = run_test_module(test, test_directory, options_clone)
+            test_failed = handle_error_messages(failure)
+            if (
+                test_failed
+                and not options.continue_through_error
+                and not RERUN_DISABLED_TESTS
+            ):
+                raise RuntimeError(failure.message + keep_going_message)
 
         os.environ["NUM_PARALLEL_PROCS"] = str(NUM_PROCS)
         for test in selected_tests_parallel:
             options_clone = copy.deepcopy(options)
             if can_run_in_pytest(test):
                 options_clone.pytest = True
+            options_clone.additional_unittest_args.extend(["-m", "not serial"])
             pool.apply_async(
                 run_test_module,
                 args=(test, test_directory, options_clone),
@@ -1708,7 +1737,10 @@ def main():
 
     test_batch = TestBatch("tests to run", include, False)
     test_batch_exclude = TestBatch("excluded", exclude, True)
+    if IS_CI:
+        gen_ci_artifact([x.to_json() for x in include], [x.to_json() for x in exclude])
 
+    print_to_stderr(f"Running parallel tests on {NUM_PROCS} processes")
     print_to_stderr(test_batch)
     print_to_stderr(test_batch_exclude)
 

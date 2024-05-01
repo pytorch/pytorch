@@ -11,7 +11,7 @@ ProcessGroupCudaP2P::ProcessGroupCudaP2P(
     int rank,
     int size,
     c10::intrusive_ptr<Options> options)
-    : Backend(rank, size) {
+    : Backend(rank, size), stream_(c10::cuda::getStreamFromPool()) {
   ncclBackend_ = c10::make_intrusive<ProcessGroupNCCL>(
       c10::make_intrusive<PrefixStore>("nccl", store),
       rank,
@@ -20,7 +20,10 @@ ProcessGroupCudaP2P::ProcessGroupCudaP2P(
   ncclBackend_->setSequenceNumberForGroup();
 
   p2pBackend_ = c10::make_intrusive<IntraNodeComm>(
-      c10::make_intrusive<PrefixStore>("p2p", store), rank, size);
+      c10::make_intrusive<PrefixStore>("p2p", store),
+      rank,
+      size,
+      options->bufferSize);
   if (!p2pBackend_->rendezvous()) {
     p2pBackend_ = nullptr;
   }
@@ -28,6 +31,10 @@ ProcessGroupCudaP2P::ProcessGroupCudaP2P(
 
 bool ProcessGroupCudaP2P::isP2PAvailable() {
   return p2pBackend_ != nullptr;
+}
+
+c10::Stream ProcessGroupCudaP2P::stream() {
+  return stream_;
 }
 
 c10::intrusive_ptr<Work> ProcessGroupCudaP2P::broadcast(
@@ -164,6 +171,26 @@ c10::intrusive_ptr<Work> ProcessGroupCudaP2P::recvAnysource(
 c10::intrusive_ptr<Work> ProcessGroupCudaP2P::barrier(
     const BarrierOptions& opts) {
   return ncclBackend_->barrier(opts);
+}
+
+c10::intrusive_ptr<Work> ProcessGroupCudaP2P::intra_node_barrier(
+    c10::optional<std::vector<int64_t>> ranks) {
+  TORCH_CHECK(p2pBackend_ != nullptr);
+  p2pBackend_->barrier(ranks);
+  return c10::make_intrusive<IntraNodeCommWork>();
+}
+
+at::Tensor ProcessGroupCudaP2P::get_p2p_buffer(
+    size_t rank,
+    const std::vector<int64_t>& sizes,
+    c10::ScalarType dtype,
+    int64_t storage_offset) {
+  TORCH_CHECK(p2pBackend_ != nullptr);
+  return p2pBackend_->get_buffer(rank, sizes, dtype, storage_offset);
+}
+
+void ProcessGroupCudaP2P::shutdown(c10::optional<std::string> reason) {
+  ncclBackend_->shutdown(reason);
 }
 
 } // namespace c10d

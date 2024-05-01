@@ -1636,7 +1636,8 @@ namespace {
         CACHE_ALIGN dst_t y[N];                                        \
         CACHE_ALIGN dst_t ref[N];                                      \
         auto seed = TestSeed();                                        \
-        ValueGen<src_t> generator(src_t(-100), src_t(100), seed);      \
+        auto low = std::is_signed_v<dst_t> ? src_t(-100) : 0;          \
+        ValueGen<src_t> generator(low, src_t(100), seed);              \
         for (const auto i : c10::irange(N)) {                          \
           x[i] = generator.get();                                      \
         }                                                              \
@@ -1650,7 +1651,8 @@ namespace {
         y_vec.store(y, num_dst_elements);                              \
         for (const auto i : c10::irange(num_dst_elements)) {           \
           ASSERT_EQ(y[i], ref[i])                                      \
-              << "Failure Details:\nTest Seed to reproduce: " << seed; \
+              << "Failure Details:\nTest Seed to reproduce: " << seed  \
+              << " x[" << i << "]=" << x[i] << " dst_t=" #dst_t;       \
         }                                                              \
         constexpr int dst_n = N / num_dst_elements;                    \
         auto y_vec_n = at::vec::convert<dst_t, dst_n, src_t, 1>(       \
@@ -1658,7 +1660,8 @@ namespace {
         y_vec_n.store(y, N);                                           \
         for (const auto i : c10::irange(N)) {                          \
           ASSERT_EQ(y[i], ref[i])                                      \
-              << "Failure Details:\nTest Seed to reproduce: " << seed; \
+              << "Failure Details:\nTest Seed to reproduce: " << seed  \
+              << " x[" << i << "]=" << x[i] << " dst_t=" #dst_t;       \
         }                                                              \
       } while (0)
       TEST_CONVERT_TO(int8_t);

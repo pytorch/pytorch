@@ -233,7 +233,7 @@ class StructuredTraceTest(TestCase):
         import torch._inductor.lowering
 
         def throw(x):
-            raise AssertionError()
+            raise AssertionError
 
         # inject an error in the lowerings
         dict_entries = {}
