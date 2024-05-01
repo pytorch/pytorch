@@ -10002,7 +10002,9 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
                 return a[y.to(torch.int64)]
 
             def fn2(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-                torch._constrain_as_size(b.shape[0], 2, 100)
+                torch._check_is_size(b.shape[0])
+                torch._check(b.shape[0] >= 2)
+                torch._check(b.shape[0] <= 100)
                 return fn1(a, b)
 
             fn1_opt = torch._dynamo.optimize("inductor")(fn1)
