@@ -921,7 +921,7 @@ class ops(_TestParametrizer):
             elif self.opinfo_dtypes == OpDTypes.unsupported:
                 dtypes = set(get_all_dtypes()).difference(op.supported_dtypes(device_cls.device_type))
             elif self.opinfo_dtypes == OpDTypes.supported:
-                dtypes = set(op.supported_dtypes(device_cls.device_type))
+                dtypes = op.supported_dtypes(device_cls.device_type)
             elif self.opinfo_dtypes == OpDTypes.any_one:
                 # Tries to pick a dtype that supports both forward or backward
                 supported = op.supported_dtypes(device_cls.device_type)
@@ -936,7 +936,7 @@ class ops(_TestParametrizer):
                     dtypes = {}
             elif self.opinfo_dtypes == OpDTypes.any_common_cpu_cuda_one:
                 # Tries to pick a dtype that supports both CPU and CUDA
-                supported = set(op.dtypes).intersection(op.dtypesIfCUDA)
+                supported = op.dtypes.intersection(op.dtypesIfCUDA)
                 if supported:
                     dtypes = {next(dtype for dtype in ANY_DTYPE_ORDER if dtype in supported)}
                 else:
