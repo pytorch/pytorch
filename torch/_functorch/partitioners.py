@@ -407,7 +407,7 @@ def _count_ops(graph):
     for node in graph.nodes:
         if node.op == "call_function":
             cnt[node.target.__name__] += 1
-    print(sorted(cnt.items(), key=lambda x: x[1], reverse=True))
+    print(sorted(cnt.items(), key=operator.itemgetter(1), reverse=True))
 
 
 @functools.lru_cache(None)
@@ -432,7 +432,7 @@ def sort_depths(args, depth_map):
     arg_depths = {
         arg: depth_map[arg] for arg in args if isinstance(arg, torch.fx.node.Node)
     }
-    return sorted(arg_depths.items(), key=lambda x: x[1], reverse=True)
+    return sorted(arg_depths.items(), key=operator.itemgetter(1), reverse=True)
 
 
 def reordering_to_mimic_autograd_engine(gm):
@@ -744,8 +744,7 @@ def min_cut_rematerialization_partition(
             if node.op == "placeholder" and "tangents" in node.target:
                 required_bw_nodes.add(node)
             if node in required_bw_nodes:
-                for user in node.users:
-                    required_bw_nodes.add(user)
+                required_bw_nodes.update(node.users)
 
         primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
         fwd_seed_offset_inputs = list(
@@ -1316,7 +1315,7 @@ def min_cut_rematerialization_partition(
         )
         print(
             "Count of Ops Rematerialized: ",
-            sorted(counts.items(), key=lambda x: x[1], reverse=True),
+            sorted(counts.items(), key=operator.itemgetter(1), reverse=True),
         )
     return fw_module, bw_module
 

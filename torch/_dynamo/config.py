@@ -289,6 +289,8 @@ optimize_ddp_lazy_compile = False
 
 # Whether to skip guarding on FSDP-managed modules
 skip_fsdp_guards = True
+# Whether to apply torch._dynamo.disable() to per-param FSDP hooks
+skip_fsdp_hooks = False
 
 # Make dynamo skip guarding on hooks on nn modules
 # Note: unsafe: if your model actually has hooks and you remove them, or doesn't and  you add them,
@@ -381,6 +383,9 @@ _save_config_ignore = {
 # or replayed in aot_autograd epilogue. default is False because mutation on inputs
 # can prevent cudagraphing.
 cudagraph_backend_keep_input_mutation = False
+
+# enable cudagraph support for mutated inputs from prior cudagraph pool
+cudagraph_backend_support_input_mutation = False
 
 # When True, only ops that have the torch.Tag.pt2_compliant tag
 # will be allowed into the graph; all other ops will be disallowed

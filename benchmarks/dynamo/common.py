@@ -53,6 +53,7 @@ import torch._export
 import torch.distributed
 import torch.multiprocessing as mp
 from scipy.stats import gmean, ttest_ind
+from torch._C import _has_cuda as HAS_CUDA, _has_xpu as HAS_XPU
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import (
     dummy_fx_compile,
@@ -258,6 +259,15 @@ CI_USE_SGD = {
 DO_NOT_CAST_INPUTS = {"stable_diffusion"}
 
 
+# Maps a benchmark model name to a list of status codes. For any listed entry, we'll
+# capture TORCH_COMPILE_DEBUG logs in CI runs and preseve them (i.e., for upload) if
+# the result status matches one listed.
+CI_PRESERVE_COMPILE_DEBUG = {
+    # For example:
+    # "mnasnet1_0": ["fail_accuracy"],
+}
+
+
 def model_specified_by_path(path_and_class_str):
     return ":" in path_and_class_str
 
@@ -324,10 +334,16 @@ def patch_torch_manual_seed():
         from torch._C import default_generator
 
         seed = 1337
-        import torch.cuda
+        if HAS_CUDA:
+            import torch.cuda
 
-        if not torch.cuda._is_in_bad_fork():
-            torch.cuda.manual_seed_all(seed)
+            if not torch.cuda._is_in_bad_fork():
+                torch.cuda.manual_seed_all(seed)
+        if HAS_XPU:
+            import torch.xpu
+
+            if not torch.xpu._is_in_bad_fork():
+                torch.xpu.manual_seed_all(seed)
         return default_generator.manual_seed(seed)
 
     torch.manual_seed = deterministic_torch_manual_seed
@@ -1858,7 +1874,7 @@ class TimeOutException(Exception):
 
 
 def alarm_handler(signum, frame):
-    raise TimeOutException()
+    raise TimeOutException
 
 
 def exit_after(s):
@@ -1947,6 +1963,9 @@ def get_dynamo_stats():
             "autograd_compiles": torch._dynamo.utils.counters["compiled_autograd"][
                 "compiles"
             ],
+            "cudagraph_skips": torch._dynamo.utils.counters["inductor"][
+                "cudagraph_skips"
+            ],
         }
     )
 
@@ -1992,6 +2011,29 @@ def maybe_init_distributed(should_init_distributed, rank, world_size, port="6789
     finally:
         if should_init_distributed:
             torch.distributed.destroy_process_group()
+
+
+@contextmanager
+def maybe_snapshot_memory(should_snapshot_memory, suffix):
+    # Enables Memory Snapshot tool for memory deep dives:
+    # https://pytorch.org/blog/understanding-gpu-memory-1/
+    try:
+        if should_snapshot_memory:
+            torch.cuda.memory._record_memory_history(max_entries=100000)
+        yield
+    finally:
+        if should_snapshot_memory:
+            try:
+                torch.cuda.memory._dump_snapshot(
+                    os.path.join(
+                        torch._dynamo.config.base_dir,
+                        f"{output_filename.rstrip('.csv')}_{suffix}.pickle",
+                    )
+                )
+            except Exception as e:
+                logging.error("Failed to save memory snapshot, %s", e)
+
+            torch.cuda.memory._record_memory_history(enabled=None)
 
 
 class BenchmarkRunner:
@@ -2136,7 +2178,7 @@ class BenchmarkRunner:
         return set()
 
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @property
     def equal_nan(self):
@@ -2436,7 +2478,7 @@ class BenchmarkRunner:
                     if isinstance(e, torch.cuda.OutOfMemoryError)
                     else "eager_1st_run_fail"
                 )
-                log.exception(e)
+                log.exception("")
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
             finally:
                 del model_copy
@@ -2457,7 +2499,7 @@ class BenchmarkRunner:
                     if isinstance(e, torch.cuda.OutOfMemoryError)
                     else "eager_2nd_run_fail"
                 )
-                log.exception(e)
+                log.exception("")
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
             finally:
                 del model_copy
@@ -2509,7 +2551,7 @@ class BenchmarkRunner:
                     with maybe_enable_compiled_autograd(self.args.compiled_autograd):
                         new_result = optimized_model_iter_fn(model_copy, example_inputs)
             except Exception as e:
-                log.exception(e)
+                log.exception("")
                 print(
                     "TorchDynamo optimized model failed to run because of following error"
                 )
@@ -2546,6 +2588,14 @@ class BenchmarkRunner:
                 # E.g., the output order might not match, None might be part of output, etc.
 
             try:
+                if self.args.training and self.args.amp:
+                    if process_fn := self.get_output_amp_train_process_func.get(
+                        name, None
+                    ):
+                        correct_result = process_fn(correct_result)
+                        new_result = process_fn(new_result)
+                        fp64_outputs = process_fn(fp64_outputs)
+
                 if not same(
                     correct_result,
                     new_result,
@@ -2603,7 +2653,7 @@ class BenchmarkRunner:
                 optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
                 new_result = optimized_model_iter_fn(model, example_inputs)
             except Exception as e:
-                log.exception(e)
+                log.exception("")
                 print(
                     "TorchDynamo optimized model failed to run because of following error"
                 )
@@ -2695,9 +2745,16 @@ class BenchmarkRunner:
             if tag is not None:
                 experiment_kwargs["tag"] = tag
             results = []
-            eager_latency, eager_peak_mem, _ = warmup(
-                self.model_iter_fn, model, example_inputs, "eager"
-            )
+            with maybe_snapshot_memory(
+                self.args.snapshot_memory, f"eager_{self.args.only}"
+            ):
+                eager_latency, eager_peak_mem, _ = warmup(
+                    self.model_iter_fn, model, example_inputs, "eager"
+                )
+                if self.args.use_warm_peak_memory:
+                    _, eager_peak_mem, _ = warmup(
+                        self.model_iter_fn, model, example_inputs, "eager", niters=1
+                    )
 
             if self.args.export_aot_inductor:
                 t_0 = time.perf_counter()
@@ -2708,10 +2765,22 @@ class BenchmarkRunner:
                 optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
                 aot_compilation_time = 0
 
-            with maybe_enable_compiled_autograd(self.args.compiled_autograd):
+            with maybe_enable_compiled_autograd(
+                self.args.compiled_autograd
+            ), maybe_snapshot_memory(
+                self.args.snapshot_memory, f"compiled_{self.args.only}"
+            ):
                 dynamo_latency, dynamo_peak_mem, dynamo_stats = warmup(
                     optimized_model_iter_fn, model, example_inputs, "dynamo"
                 )
+                if self.args.use_warm_peak_memory:
+                    _, dynamo_peak_mem, _ = warmup(
+                        optimized_model_iter_fn,
+                        model,
+                        example_inputs,
+                        "dynamo",
+                        niters=1,
+                    )
 
             if self.args.profile_dynamo_cache_lookup:
                 with torch.profiler.profile(
@@ -2812,6 +2881,24 @@ class BenchmarkRunner:
                 repro_dir,
             )
 
+    def maybe_preserve_compile_debug(self, name, status):
+        if (
+            name in CI_PRESERVE_COMPILE_DEBUG
+            and status in CI_PRESERVE_COMPILE_DEBUG[name]
+        ):
+            src_dir = torch._dynamo.utils.get_debug_dir()
+            if os.path.isdir(src_dir):
+                dbg_dir = os.path.join(
+                    os.getcwd(), "test", "debug", "torch_compile_debug"
+                )
+                dst_dir = os.path.join(dbg_dir, os.path.basename(src_dir))
+                try:
+                    os.makedirs(dbg_dir, exist_ok=True)
+                    os.rename(src_dir, dst_dir)
+                    log.warning("Moved %s to %s", src_dir, dst_dir)
+                except OSError:
+                    log.exception("Failed to preserve %s", src_dir)
+
     def run_one_model(
         self,
         name,
@@ -2848,6 +2935,8 @@ class BenchmarkRunner:
             )
             print(status)
         torch.cuda.empty_cache()
+
+        self.maybe_preserve_compile_debug(name, status)
 
         if self.args.timing:
             from torch._dynamo.utils import op_count, print_time_report
@@ -3145,6 +3234,12 @@ def parse_args(args=None):
         help="print graph counter stats",
     )
     parser.add_argument(
+        "--use-warm-peak-memory",
+        "--use_warm_peak_memory",
+        action="store_true",
+        help="Measure peak memory using a warm run to reduce autotuning noise",
+    )
+    parser.add_argument(
         "--print-memory",
         action="store_true",
         help="print extra memory statistics",
@@ -3268,6 +3363,13 @@ def parse_args(args=None):
         "--profile-dynamo-cache-lookup",
         action="store_true",
         help="profiles TorchDynamo cache lookup",
+    )
+
+    parser.add_argument(
+        "--snapshot-memory",
+        "--snapshot_memory",
+        action="store_true",
+        help="Enables Memory Snapshot tool for memory deep dives: https://pytorch.org/blog/understanding-gpu-memory-1/",
     )
 
     group_fuser = parser.add_mutually_exclusive_group()
@@ -3595,9 +3697,9 @@ def run(runner, args, original_dir=None):
             log.warning("torch.cuda.is_available() == False, using CPU")
             args.devices = ["cpu"]
 
-    if args.devices != ["cpu"] and torch.cuda.is_available():
+    if args.devices != ["cpu"] and (HAS_CUDA or HAS_XPU):
         global synchronize
-        synchronize = torch.cuda.synchronize
+        synchronize = torch.cuda.synchronize if HAS_CUDA else torch.xpu.synchronize
 
     if (
         args.devices == ["cuda"]
@@ -4013,8 +4115,13 @@ def run(runner, args, original_dir=None):
                 timeout = args.timeout
                 if should_diff_branch(args):
                     timeout *= 2
+                env = os.environ.copy()
+                if args.ci and name in CI_PRESERVE_COMPILE_DEBUG:
+                    env["TORCH_COMPILE_DEBUG"] = "1"
                 subprocess.check_call(
-                    [sys.executable] + sys.argv + [f"--only={name}"], timeout=timeout
+                    [sys.executable] + sys.argv + [f"--only={name}"],
+                    timeout=timeout,
+                    env=env,
                 )
             except subprocess.TimeoutExpired:
                 write_csv_when_exception(args, name, "timeout")
