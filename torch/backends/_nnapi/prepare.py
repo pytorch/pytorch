@@ -75,7 +75,7 @@ class NnapiModule(torch.nn.Module):
             elif fmt == 1:
                 fixed_args.append(args[idx].permute(0, 2, 3, 1).contiguous())
             else:
-                raise Exception("Invalid mem_fmt")
+                raise Exception("Invalid mem_fmt")  # noqa: TRY002
         comp.run(fixed_args, outs)
         assert len(outs) == len(self.out_mem_fmts)
         for idx in range(len(self.out_templates)):
@@ -87,7 +87,7 @@ class NnapiModule(torch.nn.Module):
             elif fmt == 1:
                 outs[idx] = outs[idx].permute(0, 3, 1, 2)
             else:
-                raise Exception("Invalid mem_fmt")
+                raise Exception("Invalid mem_fmt")  # noqa: TRY002
         return outs
 
 

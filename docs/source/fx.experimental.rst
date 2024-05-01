@@ -26,6 +26,10 @@ torch.fx.experimental.symbolic_shapes
     SubclassSymbolicContext
     DimConstraints
     ShapeEnvSettings
+    ConvertIntKey
+    CallMethodKey
+    PropagateUnbackedSymInts
+    DivideByKey
 
     hint_int
     is_concrete_int
@@ -43,3 +47,6 @@ torch.fx.experimental.symbolic_shapes
     statically_known_true
     lru_cache
     check_consistent
+    compute_unbacked_bindings
+    rebind_unbacked
+    resolve_unbacked_bindings
