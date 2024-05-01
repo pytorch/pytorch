@@ -23,6 +23,7 @@ from torch._higher_order_ops.out_dtype import out_dtype
 from torch._prims_common import (
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
+    Number,
     type_to_dtype,
 )
 
@@ -754,3 +755,11 @@ def index_reduce(
         reduction_type,
         include_self=include_self,
     )
+
+
+@register_decomposition(aten.mul.Tensor)
+def mul_tensor(x, y):
+    if isinstance(y, Number):
+        # cpp wrapper codegen needs to use a more type-accurate overload
+        return aten.mul.Scalar(x, y)
+    return NotImplemented

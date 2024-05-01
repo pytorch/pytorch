@@ -173,6 +173,7 @@ if RUN_CPU:
         code_string_count: dict = {}
 
     for item in [
+        BaseTest("test_add_complex"),
         BaseTest("test_add_complex4"),
         BaseTest("test_as_strided"),  # buffer reuse
         BaseTest("test_bernoulli1"),
