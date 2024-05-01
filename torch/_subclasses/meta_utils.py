@@ -1265,7 +1265,7 @@ class MetaConverter:
                         mb_fake_mode = maybe_get_fake_mode(r)
                         if mb_fake_mode is not None:
                             maybe_fake_mgr = in_kernel_invocation_manager(mb_fake_mode)
-                        with maybe_fake_mgr, torch.no_grad():
+                        with maybe_fake_mgr, torch.no_grad(), maybe_suppress():
                             r.set_(r_s, storage_offset, sizes, strides)
 
                 if t.grad is not None:

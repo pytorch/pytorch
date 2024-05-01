@@ -3091,10 +3091,7 @@ def is_numpy(obj) -> bool:
 def is_numpy_dtype(obj) -> bool:
     if np is None:
         return False
-    try:
-        return np.dtype(obj) is obj
-    except TypeError:
-        return False
+    return isinstance(obj, np.dtype)
 
 
 def is_numpy_type_info(obj) -> bool:
@@ -3220,6 +3217,7 @@ MOD_INLINELIST = {
     "torch._dynamo.comptime",
     "torch._dynamo.polyfill",
     "torch._functorch.vmap",
+    "torch._functorch.autograd_function",
     "torch._library.custom_ops",
     "torch._functorch.eager_transforms",
     "torch._inductor.test_operators",
