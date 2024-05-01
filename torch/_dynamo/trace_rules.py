@@ -7,7 +7,6 @@ import contextlib
 import copy
 import copyreg
 import dataclasses
-import dis
 import enum
 import functools
 import importlib
@@ -3114,7 +3113,6 @@ BUILTIN_SKIPLIST = (
     contextlib,
     copy,
     copyreg,
-    dis,
     dataclasses,
     enum,
     functools,
