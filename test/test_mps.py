@@ -2635,7 +2635,7 @@ class TestMPS(TestCaseMPS):
         fft_result = torch.fft.rfft(signal)
         ifft_result = torch.fft.irfft(fft_result, n=signal.shape[0])
 
-        #Expecting the inverted to yield the original signal
+        # Expecting the inverted to yield the original signal
         self.assertEqual(ifft_result, signal)
 
     def test_instance_norm(self):
