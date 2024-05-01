@@ -1160,6 +1160,11 @@ test_executorch() {
 test_linux_aarch64(){
   python test/run_test.py --include test_modules test_mkldnn test_mkldnn_fusion test_openmp test_torch test_dynamic_shapes \
        test_transformers test_multiprocessing test_numpy_interop --verbose
+
+  # Dynamo tests
+  python test/run_test.py --include dynamo/test_compile dynamo/test_backends dynamo/test_comptime dynamo/test_config \
+       dynamo/test_functions dynamo/test_fx_passes_pre_grad dynamo/test_interop dynamo/test_model_output dynamo/test_modules \
+       dynamo/test_optimizers dynamo/test_recompile_ux dynamo/test_recompiles --verbose
 }
 
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
