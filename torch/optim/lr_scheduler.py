@@ -77,14 +77,12 @@ class LRScheduler:
         # We would like to ensure that `lr_scheduler.step()` is called after
         # `optimizer.step()`
         def patch_track_step_called(opt):
-            if hasattr(opt, "_wrapped_step"):
+            if hasattr(opt.step, "_wrapped_by_lr_sched"):
                 # we've already patched
-                return
-            opt._wrapped_step = True
+                return opt.step
 
             def wrap_step(step_fn):
                 opt_ref = ref(self.optimizer)
-                step_ref = ref(step_fn)
                 func = step_fn.__func__
 
                 def wrapper(*args, **kwargs):
@@ -92,8 +90,7 @@ class LRScheduler:
                     opt._opt_called = True
                     return func.__get__(opt, opt.__class__)(*args, **kwargs)
 
-                # Include this for BC (see where it is used below)
-                wrapper._with_counter = True
+                wrapper._wrapped_by_lr_sched = True
                 return wrapper
 
             opt.step = wrap_step(opt.step)
@@ -149,7 +146,7 @@ class LRScheduler:
         # Raise a warning if old pattern is detected
         # https://github.com/pytorch/pytorch/issues/20124
         if self._step_count == 1:
-            if not hasattr(self.optimizer.step, "_with_counter"):
+            if not hasattr(self.optimizer.step, "_wrapped_by_lr_sched"):
                 warnings.warn(
                     "Seems like `optimizer.step()` has been overridden after learning rate scheduler "
                     "initialization. Please, make sure to call `optimizer.step()` before "
