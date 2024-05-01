@@ -1,3 +1,4 @@
+import functools
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -79,13 +80,23 @@ def _maybe_run_with_interpreter(fn):
 # We'll use the current decomposition table to make sure operators in subgraphs are
 # decomposed properly.
 # We also need to maybe run with interpreter for propagating stack_trace
+# def reenter_make_fx(fn, pre_dispatch=False):
+#     decomp_table = torch.fx.experimental.proxy_tensor.CURRENT_DECOMPOSITION_TABLE
+#     return make_fx(
+#         _maybe_run_with_interpreter(fn),
+#         decomposition_table=decomp_table,
+#         pre_dispatch=pre_dispatch,
+#     )
 def reenter_make_fx(fn, pre_dispatch=False):
-    decomp_table = torch.fx.experimental.proxy_tensor.CURRENT_DECOMPOSITION_TABLE
-    return make_fx(
-        _maybe_run_with_interpreter(fn),
-        decomposition_table=decomp_table,
-        pre_dispatch=pre_dispatch,
-    )
+    from torch.fx.experimental.proxy_tensor import _CURRENT_MAKE_FX_TRACER
+
+    @functools.wraps(fn)
+    def wrapped(*args):
+        return _CURRENT_MAKE_FX_TRACER.trace_subgraph(
+            _maybe_run_with_interpreter(fn), *args
+        )
+
+    return wrapped
 
 
 @contextmanager
