@@ -22,6 +22,7 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._state_dict_utils import (
+    _broadcast_state_dict,
     _gather_state_dict,
     _offload_state_dict_to_cpu,
 )
@@ -110,6 +111,13 @@ class StateDictOptions:
     - ``strict``: the ``strict`` option when ``set_state_dict`` calls
       model.load_state_dict().
       The default value is False.
+
+    - ``broadcast_from_rank0``: when the option is True, rank0 should receive a
+       full state_dict and will broadcast the tensors in the state_dict/
+       optim_state_dict one by one to other ranks. Other ranks will receive
+       the tensors and shard according to the local shards in the model and
+       optimizer. ``full_state_dict`` must be set to True when using this option.
+       This option currently only supports DTensor, not the legacy ShardedTensor.
     """
 
     full_state_dict: bool = False
@@ -117,6 +125,7 @@ class StateDictOptions:
     ignore_frozen_params: bool = False
     keep_submodule_prefixes: bool = True
     strict: bool = True
+    broadcast_from_rank0: bool = False
 
 
 @dataclass
@@ -185,9 +194,48 @@ def _get_fqns(
                 fqn_obj_names.append(curr_obj_name)
         else:
             fqn_obj_names.append(curr_obj_name)
-            curr_obj = getattr(curr_obj, curr_obj_name)
+            if curr_obj_name == nn.modules.module._EXTRA_STATE_KEY_SUFFIX:
+                if i != len(obj_names) - 1:
+                    raise RuntimeError("Expect `_extra_state` to be the last obj name")
+            else:
+                curr_obj = getattr(curr_obj, curr_obj_name)
 
     return {".".join(fqn_obj_names).replace(_CHECKPOINT_PREFIX, "")}
+
+
+class _EXTRA_STATE:
+    pass
+
+
+def _iterate_valid_model_state(model):
+    visited_modules: Set[nn.Module] = set()
+
+    def recurse(module: nn.Module, curr_fqn: str) -> Tuple[str, Any]:
+        visited_modules.add(module)
+
+        curr_fqn = f"{curr_fqn}." if curr_fqn else ""
+        for name, submodule in module.named_children():
+            if submodule in visited_modules:
+                continue
+            new_fqn = f"{curr_fqn}{name}"
+            yield from recurse(submodule, new_fqn)
+
+        for name, obj in chain(
+            module.named_buffers(recurse=False), module.named_parameters(recurse=False)
+        ):
+            if name in module._non_persistent_buffers_set:
+                continue
+            new_fqn = f"{curr_fqn}{name}"
+            yield new_fqn, obj
+
+        if (
+            getattr(module.__class__, "get_extra_state", nn.Module.get_extra_state)
+            != nn.Module.get_extra_state
+        ):
+            new_fqn = f"{curr_fqn}{nn.modules.module._EXTRA_STATE_KEY_SUFFIX}"
+            yield new_fqn, _EXTRA_STATE()
+
+    yield from recurse(model, "")
 
 
 def _verify_options(
@@ -212,11 +260,13 @@ def _verify_options(
         Union[str, torch.Tensor], Union[Set[str], torch.Tensor]
     ] = {}
     all_fqns = set()
-    for name, param in chain(model.named_parameters(), model.named_buffers()):
+    for name, param in _iterate_valid_model_state(model):
         fqns = _get_fqns(model, name)
-        fqn_param_mapping[param] = fqns
+        if not isinstance(param, _EXTRA_STATE):
+            fqn_param_mapping[param] = fqns
         for fqn in fqns:
-            fqn_param_mapping[fqn] = param
+            if not isinstance(param, _EXTRA_STATE):
+                fqn_param_mapping[fqn] = param
             all_fqns.add(fqn)
 
     submodule_prefixes: Set[str] = set()
@@ -229,6 +279,10 @@ def _verify_options(
             assert len(fqns) == 1, "Submodule FQN should only have 1 instance"
             submodule_prefixes.update(f"{fqn}." for fqn in fqns)
 
+    if options.broadcast_from_rank0 and not options.full_state_dict:
+        raise ValueError(
+            "full_state_dict must be True when broadcast_from_rank0 is True."
+        )
     fsdp_modules = FSDP.fsdp_modules(model)
     state_dict_config: StateDictConfig
     optim_state_dict_config: OptimStateDictConfig
@@ -292,6 +346,7 @@ def _verify_state_dict(
         and not info.ignore_frozen_params
         and not (info.cpu_offload and info.full_state_dict)
         and info.strict
+        and not info.broadcast_from_rank0
     ):
         raise RuntimeError(
             "The option indicates that model state_dict is required to save "
@@ -384,7 +439,7 @@ def _get_model_state_dict(
                 state_dict.pop(fqn)
 
     for key, p in list(state_dict.items()):
-        if p.is_meta:
+        if torch.is_tensor(p) and p.is_meta:
             state_dict.pop(key)
 
     if info.full_state_dict:
@@ -403,17 +458,35 @@ def _load_model_state_dict(
     state_dict: Dict[str, ValueType],
     info: _StateDictInfo,
 ) -> _IncompatibleKeys:
-    if not info.handle_model or not state_dict:
+    if not info.handle_model or (not state_dict and not info.broadcast_from_rank0):
         return _IncompatibleKeys({}, {})
 
-    for key, _ in chain(model.named_parameters(), model.named_buffers()):
+    local_state_dict = {}
+    for key, value in _iterate_valid_model_state(model):
         fqns = _get_fqns(model, key)
         fqns_with_prefix = _get_fqns(
             model, key, skip_ddp_prefix=False, skip_compiler_prefix=False
         )
+
         for fqn, fqn_with_prefix in zip(fqns, fqns_with_prefix):
-            if fqn != fqn_with_prefix:
+            if (
+                not info.broadcast_from_rank0 or dist.get_rank() == 0
+            ) and fqn != fqn_with_prefix:
                 state_dict[fqn_with_prefix] = state_dict.pop(fqn)
+            local_state_dict[fqn_with_prefix] = value
+
+    if info.broadcast_from_rank0:
+        device = None
+        for key, value in local_state_dict.items():
+            if torch.is_tensor(value) and value.dim() > 0:
+                if device is None:
+                    device = value.device
+                else:
+                    assert device == value.device
+        assert device is not None
+        _broadcast_state_dict(state_dict, local_state_dict, device=device)
+        for fqn, local_state in local_state_dict.items():
+            state_dict[fqn] = local_state
 
     with info.fsdp_context():
         return cast(

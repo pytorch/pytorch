@@ -30,11 +30,15 @@ class TestTraverse(TestCase):
         self.assertIn(("key0",), data)
         self.assertEqual(data[("key0",)], 1)
 
-        self.assertIn(("key1",), data)
-        self.assertEqual(data[("key1",)], [1, 2])
+        self.assertIn(("key1", 0), data)
+        self.assertEqual(data[("key1", 0)], 1)
+        self.assertIn(("key1", 1), data)
+        self.assertEqual(data[("key1", 1)], 2)
 
-        self.assertIn(("key2",), data)
-        self.assertEqual(data[("key2",)], {1: 2, 2: 3})
+        self.assertIn(("key2", "1"), data)
+        self.assertEqual(data[("key2", "1")], 2)
+        self.assertIn(("key2", "2"), data)
+        self.assertEqual(data[("key2", "2")], 3)
 
         self.assertIn(("key3",), data)
         self.assertEqual(data[("key3",)], torch.tensor([1]))
@@ -67,12 +71,16 @@ class TestTraverse(TestCase):
         self.assertIn(("key1", 1, 1), data)
         self.assertEqual(data[("key1", 1, 1)], torch.tensor([2]))
 
-        self.assertIn(("key1", 1, 2), data)
-        self.assertEqual(data[("key1", 1, 2)], [44, 55])
-        self.assertNotIn(("key1", 1, 2, 0), data)
+        self.assertIn(("key1", 1, 2, 0), data)
+        self.assertEqual(data[("key1", 1, 2, 0)], 44)
+        self.assertIn(("key1", 1, 2, 1), data)
+        self.assertEqual(data[("key1", 1, 2, 1)], 55)
+        self.assertNotIn(("key1", 1, 2), data)
 
-        self.assertIn(("key1", 2), data)
-        self.assertEqual(data[("key1", 2)], [66, 77])
+        self.assertIn(("key1", 2, 0), data)
+        self.assertEqual(data[("key1", 2, 0)], 66)
+        self.assertIn(("key1", 2, 1), data)
+        self.assertEqual(data[("key1", 2, 1)], 77)
 
     def test_traverse_nested_dict(self) -> None:
         state_dict = {
