@@ -732,10 +732,6 @@ class SchedulerNode(BaseSchedulerNode):
             f"{name}.group.iteration = {self.group[1]}",
             f"{name}.sizes = {self._sizes}",
         ]
-        for dep in self.read_writes.reads_and_writes():
-            buf_name = dep.name
-            buf = V.graph.get_buffer(buf_name)
-            lines.append(f"{buf_name}_layout = {pformat(buf.layout)}")
         if self.get_aliases():
             lines.append(f"{name}.aliases = {pformat(self.get_aliases())}")
         if self.get_mutations():
@@ -743,20 +739,6 @@ class SchedulerNode(BaseSchedulerNode):
         if isinstance(self._body, ir.LoopBody):
             lines.append(f"class {name}_loop_body:")
             lines.append(textwrap.indent(self._body.debug_str(), "    "))
-
-        if ir.is_triton(self.node.get_device()):
-            backend = self.scheduler.get_backend(self.node.get_device())
-            V.graph.scheduler.current_device = self.node.get_device()
-
-            # Don't increment kernel count when generating debug string.
-            # This will confuse some unit tests that check the number of
-            # generated kernels.
-            old_generated_kernel_count = metrics.generated_kernel_count
-            triton_code = backend.generate_kernel_code_from_nodes((self,)).strip()
-            metrics.generated_kernel_count = old_generated_kernel_count
-
-            lines.append(f"{self.get_name()} Triton code:")
-            lines.append(textwrap.indent(triton_code, "    "))
         return "\n".join(lines)
 
     def get_ranges(self):
@@ -914,16 +896,6 @@ class FusedSchedulerNode(BaseSchedulerNode):
             f"{self.get_name()}.snodes[{i}] =\n{node.debug_str()}"
             for i, node in enumerate(self.snodes)
         ]
-        device = self.snodes[0].node.get_device()
-        if ir.is_triton(device):
-            backend = self.scheduler.get_backend(device)
-            V.graph.scheduler.current_device = device
-            old_generated_kernel_count = metrics.generated_kernel_count
-            triton_code = backend.generate_kernel_code_from_nodes(self.snodes).strip()
-            metrics.generated_kernel_count = old_generated_kernel_count
-            lines.append(f"{self.get_name()} Triton code:")
-            lines.append(textwrap.indent(triton_code, "    "))
-
         return textwrap.indent("\n".join(lines).rstrip(), "    ")
 
     def set_last_usage(
@@ -1295,7 +1267,6 @@ class Scheduler:
     @dynamo_timed
     def __init__(self, nodes):
         super().__init__()
-        V.graph.scheduler = self
         self.backends = {}
         self.fuse_cache = {}
         self.post_grad_graph_id = next(_post_grad_graph_counter)
@@ -1759,6 +1730,7 @@ class Scheduler:
         """
         assert len(nodes) > 0
         device = nodes[0].get_device()
+        V.graph.scheduler = self
         self.current_device = device
         backend = self.get_backend(device)
         return backend.benchmark_fused_nodes(nodes)
