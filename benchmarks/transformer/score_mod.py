@@ -113,7 +113,7 @@ def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:
     def eager_sdpa(query, key, value, _):
         return F.scaled_dot_product_attention(query, key, value)
 
-    compiled_sdpa = torch.compile(_flex_attention)
+    compiled_sdpa = torch.compile(_flex_attention, mode="max-autotune-no-cudagraphs")
 
     score_mod = config.score_mod
 
