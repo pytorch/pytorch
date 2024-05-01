@@ -6,8 +6,8 @@ import torch.distributed as c10d
 from torch.distributed.collective_utils import all_gather, broadcast
 from torch.testing._internal.common_distributed import MultiProcessTestCase
 
-class TestCollectiveUtils(MultiProcessTestCase):
 
+class TestCollectiveUtils(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
         self._spawn_processes()
@@ -26,7 +26,9 @@ class TestCollectiveUtils(MultiProcessTestCase):
         Basic unit test for broadcast using a process group of default world size.
         """
         store = c10d.FileStore(self.file_name, self.world_size)
-        c10d.init_process_group(backend="gloo", store=store, rank=self.rank, world_size=self.world_size)
+        c10d.init_process_group(
+            backend="gloo", store=store, rank=self.rank, world_size=self.world_size
+        )
         pg = c10d.new_group(pg_options=self.opts())
 
         func = mock.MagicMock()
@@ -77,7 +79,9 @@ class TestCollectiveUtils(MultiProcessTestCase):
         Basic unit test for all_gather using a process group of default world size.
         """
         store = c10d.FileStore(self.file_name, self.world_size)
-        c10d.init_process_group(backend="gloo", store=store, rank=self.rank, world_size=self.world_size)
+        c10d.init_process_group(
+            backend="gloo", store=store, rank=self.rank, world_size=self.world_size
+        )
         pg = c10d.new_group(pg_options=self.opts())
 
         func = mock.MagicMock()
@@ -85,7 +89,9 @@ class TestCollectiveUtils(MultiProcessTestCase):
 
         res = all_gather(data_or_fn=func, pg=pg)
         func.assert_called_once()
-        assert res == list(range(self.world_size)), f"Expect res to be list of 0 through {self.world_size} (got {res})"
+        assert res == list(
+            range(self.world_size)
+        ), f"Expect res to be list of 0 through {self.world_size} (got {res})"
 
     def test_all_gather_result_no_pg(self) -> None:
         """

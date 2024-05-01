@@ -18,10 +18,11 @@
 
 #if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
 #else
-#define CUTLASS_STATUS_CHECK(status)                                      \
-  {                                                                       \
-    TORCH_CHECK(status == cutlass::Status::kSuccess,                      \
-                "Got CUTLASS error: ", cutlassGetStatusString(status));   \
+#define CUTLASS_STATUS_CHECK(status)                                    \
+  {                                                                     \
+    TORCH_CHECK(status == cutlass::Status::kSuccess,                    \
+                __func__, " : CUTLASS error: ",                         \
+                cutlassGetStatusString(status));                        \
   }
 #endif
 
@@ -186,11 +187,11 @@ void spgemm_cutlass(
         tensor_e_dtype = at::kInt;
         break;
     default:
-        AT_ERROR("spgemm_cutlass: invalid size of meta tensor datatype "
+        AT_ERROR(__func__, ": invalid size of meta tensor datatype "
                  "encountered");
     }
     TORCH_CHECK(tensor_e.dtype() == tensor_e_dtype,
-                "spgemm_cutlass: Expected meta datatype ", tensor_e_dtype,
+                __func__, " : Expected meta datatype ", tensor_e_dtype,
                 ", but got ", tensor_e.dtype());
 
     // Prepare arguments for CUTLASS sparse GEMM kernel.
@@ -423,7 +424,7 @@ void spgemm_cutlass_dispatch_layouts(
         }
     }
 
-    AT_ERROR("spgemm_cutlass_dispatch_layouts: Combination of ",
+    AT_ERROR(__func__, "_dispatch_layouts: Combination of ",
              tensor_a_row_major ? "row-major" : "column_major", " and ",
              tensor_b_row_major ? "row-major" : "column_major",
              " layouts for input tensors is not supported");
@@ -524,7 +525,7 @@ Tensor sparse_semi_structured_mad_op(
       const c10::optional<Tensor>& input_opt, const Scalar& alpha,
       const Scalar& beta, const c10::optional<c10::ScalarType> out_dtype_opt) {
 #if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
-    AT_ERROR("sparse_semi_structured_mad_op: CUTLASS not supported");
+    AT_ERROR(__func__, " : CUTLASS not supported");
     return Tensor{};
 #else
     // No need to check that all tensors are on CUDA device, as this
@@ -537,66 +538,63 @@ Tensor sparse_semi_structured_mad_op(
     const auto dprops = at::cuda::getCurrentDeviceProperties();
     const auto is_sm8x = dprops->major == 8;
     TORCH_CHECK(is_sm8x,
-                "sparse_semi_structured_mad_op: Supported only on GPUs with "
-                "compute capability 8.x");
+                __func__, " : Supported only on GPUs with compute capability "
+                "8.x");
 
     // Validate datatypes of input tensors.
     TORCH_CHECK(mat2.dtype() == at::kChar ||
                 mat2.dtype() == at::kHalf ||
                 mat2.dtype() == at::kBFloat16 ||
                 mat2.dtype() == at::kFloat,
-                "sparse_semi_structured_mad_op: The mat2 datatype ",
-                mat2.dtype(), " is not supported");
+                __func__, " : The mat2 datatype ", mat2.dtype(),
+                " is not supported");
     TORCH_CHECK(mat1.dtype() == mat2.dtype(),
-                "sparse_semi_structured_mad_op: Expected mat1 datatype ",
-                mat2.dtype(), ", but got ", mat1.dtype());
+                __func__, " : Expected mat1 datatype ", mat2.dtype(),
+                ", but got ", mat1.dtype());
     if (input.numel() != 0) {
         TORCH_CHECK(input.dtype() == out_dtype,
-                    "sparse_semi_structured_mad_op: Expected input datatype ",
-                    out_dtype, ", but got ", input.dtype());
+                    __func__, " : Expected input datatype ", out_dtype,
+                    ", but got ", input.dtype());
     }
 
     // Validate layouts of input tensors.
     TORCH_CHECK(mat1.layout() == Layout::Strided,
-                "sparse_semi_structured_mad_op: Expected mat1 argument to be "
-                "strided, but got layout ", mat1.layout());
+                __func__, " : Expected mat1 argument to be strided, but got "
+                "layout ", mat1.layout());
     TORCH_CHECK(mat1.dim() == 2,
-                "sparse_semi_structured_mad_op: Expected mat1 argument to be "
-                "2D tensor, got ", mat1.dim(), " dims");
+                __func__, " : Expected mat1 argument to be 2D tensor, got ",
+                mat1.dim(), " dims");
     const auto strides_a = mat1.strides();
     TORCH_CHECK(strides_a[0] == 1 || strides_a[1] == 1,
-                "sparse_semi_structured_mad_op: Invalid strides for mat1 "
-                "argument: row stride = ", strides_a[0], ", column stride = ",
-                strides_a[1]);
+                __func__, " : Invalid strides for mat1 argument: row stride = ",
+                strides_a[0], ", column stride = ", strides_a[1]);
     TORCH_CHECK(mat2.layout() == Layout::Strided,
-                "sparse_semi_structured_mad_op: Expected mat2 argument to be "
+                __func__, " : Expected mat2 argument to be "
                 "strided, but got layout ", mat2.layout());
     TORCH_CHECK(mat2.dim() == 2,
-                "sparse_semi_structured_mad_op: Expected mat2 argument to be "
-                "2D tensor, got ", mat2.dim(), " dims");
+                __func__, " : Expected mat2 argument to be 2D tensor, got ",
+                mat2.dim(), " dims");
     const auto strides_b = mat2.strides();
     TORCH_CHECK(strides_b[0] == 1 || strides_b[1] == 1,
-                "sparse_semi_structured_mad_op: Invalid strides for mat2 "
-                "argument: row stride = ", strides_b[0], ", column stride = ",
-                strides_b[1]);
+                __func__, " : Invalid strides for mat2 argument: row stride = ",
+                strides_b[0], ", column stride = ", strides_b[1]);
     if (input.numel() != 0) {
         TORCH_CHECK(input.layout() == Layout::Strided,
-                    "sparse_semi_structured_mad_op: Expected input argument to "
-                    "be strided, but got layout ", input.layout());
+                    __func__, " : Expected input argument to be strided, but "
+                    "got layout ", input.layout());
         TORCH_CHECK(input.dim() == 1,
-                    "sparse_semi_structured_mad_op: Expected input argument to "
-                    "be 1D tensor, got ", input.dim(), " dims");
+                    __func__, " : Expected input argument to be 1D tensor, "
+                    "got ", input.dim(), " dims");
     }
 
     // Validate sizes of input tensors.
     TORCH_CHECK(mat1.size(1) == mat2.size(0) / 2,
-                "sparse_semi_structured_mad_op: Expected mat1 argument to "
-                "have ", mat2.size(0) / 2, " columns, but got ", mat1.size(1));
+                __func__, " : Expected mat1 argument to have ",
+                mat2.size(0) / 2, " columns, but got ", mat1.size(1));
     if (input.numel() != 0) {
         TORCH_CHECK(input.size(0) == mat1.size(0),
-                    "sparse_semi_structured_mad_op: Expected input argument to "
-                    "have ", mat1.size(0), " elements, but got ",
-                    input.size(0));
+                    __func__, " : Expected input argument to have ",
+                    mat1.size(0), " elements, but got ", input.size(0));
     }
 
     // Introduce alias names for arguments, according to the CUTLASS
@@ -848,13 +846,13 @@ static void reorder_meta(cutlass::TensorRef<Element, LayoutDest> dest,
 std::tuple<Tensor, Tensor>
 _to_sparse_semi_structured(const Tensor& dense) {
 #if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
-  AT_ERROR("_to_sparse_semi_structured: CUTLASS not supported");
+  AT_ERROR(__func__, " : CUTLASS not supported");
   return std::make_tuple(Tensor{}, Tensor{});
 #else
   // Check dimensions of the dense matrix.
   TORCH_CHECK(dense.dim() == 2,
-              "_to_sparse_semi_structured: Expected dense argument to be 2D "
-              "tensor, got ", dense.dim(), " dims");
+              __func__, " : Expected dense argument to be 2D tensor, got ",
+              dense.dim(), " dims");
 
   // Determine PyTorch datatype for the metadata matrix.
   auto meta_dtype = at::kChar;
