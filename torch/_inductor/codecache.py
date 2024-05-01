@@ -11,7 +11,6 @@ import json
 import logging
 import multiprocessing
 import os
-import pathlib
 import pickle
 import pkgutil
 import platform
@@ -408,7 +407,7 @@ def write_atomic(
     assert isinstance(
         content, (str, bytes)
     ), "Only strings and byte arrays can be saved in the cache"
-    path = pathlib.Path(path)
+    path = Path(path)
     if make_dirs:
         path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.parent / f".{os.getpid()}.{threading.get_ident()}.tmp"
