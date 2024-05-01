@@ -11173,6 +11173,18 @@ class TestAdvancedIndexing(TestCaseMPS):
         out = x[idx]  # index
         self.assertEqual(out, torch.zeros(2, device=device), atol=0, rtol=0)
 
+    def test_nextafter(self, device="mps"):
+        for dtype in [torch.float16, torch.float32]:
+            x = torch.tensor([1, -1, 0, 0, 2, -2], device=device, dtype=dtype)
+            y = torch.tensor([2, -2, -1, 1, -3, 3], device=device, dtype=dtype)
+            na = torch.nextafter(x, y)
+            na_cpu = torch.nextafter(x.cpu(), y.cpu())
+            na_ge_x_mps = na.cpu() > x.cpu()
+            # greater is broken on MPS, see https://github.com/pytorch/pytorch/issues/125051
+            na_ge_x_cpu = na_cpu > x.cpu()
+            self.assertEqual(na_ge_x_mps, na_ge_x_cpu)
+
+
 class TestRNNMPS(TestCaseMPS):
     def _lstm_helper(self, num_layers, dtype, device, bidirectional=False, bias=True, batch_first=False,
                      seq_len=3, batch_size=5, hidden_size=7, input_size=11, backward=False):

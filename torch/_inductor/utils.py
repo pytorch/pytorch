@@ -660,6 +660,14 @@ def clear_on_fresh_inductor_cache(obj: Any):
     return obj
 
 
+def clear_inductor_caches():
+    """
+    Clear all registered caches.
+    """
+    for obj in _registered_caches:
+        obj.cache_clear()
+
+
 @contextlib.contextmanager
 def fresh_inductor_cache(cache_entries=None):
     """
@@ -668,8 +676,7 @@ def fresh_inductor_cache(cache_entries=None):
     Optionally, pass a dict as 'cache_entries' to get a list of filenames and sizes
     generated with this cache instance.
     """
-    for obj in _registered_caches:
-        obj.cache_clear()
+    clear_inductor_caches()
 
     inductor_cache_dir = tempfile.mkdtemp()
     try:
@@ -1195,6 +1202,12 @@ def get_gpu_dram_gbps():
     from triton.testing import get_dram_gbps
 
     return get_dram_gbps()
+
+
+def get_gpu_shared_memory():
+    from triton.runtime import driver
+
+    return driver.active.utils.get_device_properties(0).get("max_shared_mem", 0)
 
 
 def is_welford_reduction(reduction_type):
