@@ -793,7 +793,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def _getattr_static(self, name):
         if (
-            isinstance(self.value, (torch.nn.Module, PyTreeSpec))
+            (
+                isinstance(self.value, torch.nn.Module)
+                and self.value.__getattr__ is torch.nn.Module.__getattr__
+            )
+            or isinstance(self.value, PyTreeSpec)
             or "__slots__" in self.value.__class__.__dict__
             or type(self.value) == threading.local
         ):
@@ -824,14 +828,25 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
             return tx.output.side_effects.load_attr(self, name)
 
+        if name == "__dict__":
+            dict_source = None
+            if self.source:
+                dict_source = AttrSource(self.source, "__dict__")
+            return VariableBuilder(tx, dict_source)(self.value.__dict__)
+
         try:
             subobj = self._getattr_static(name)
         except AttributeError:
             subobj = NO_SUCH_SUBOBJ
             getattr_fn = self._check_for_getattr()
             if isinstance(getattr_fn, types.FunctionType):
+                # Dynamo is going to trace the __getattr__ function with
+                # args=name. Set the source accordingly.
+                new_source = None
+                if self.source:
+                    new_source = AttrSource(self.source, "__getattr__")
                 return variables.UserMethodVariable(
-                    getattr_fn, self, source=source
+                    getattr_fn, self, source=new_source
                 ).call_function(tx, [ConstantVariable.create(name)], {})
             elif getattr_fn is not None:
                 unimplemented("UserDefined with non-function __getattr__")
@@ -978,14 +993,34 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             install_guard(
                 AttrSource(self.source, name).make_guard(GuardBuilder.HASATTR)
             )
-        if self._check_for_getattribute() or self._check_for_getattr():
-            unimplemented("hasattr with custom __getattr__")
+
+        self._check_for_getattribute()
 
         try:
-            self._getattr_static(name)
+            subobj = self._getattr_static(name)
             return variables.ConstantVariable.create(True)
         except AttributeError:
-            return variables.ConstantVariable.create(False)
+            subobj = NO_SUCH_SUBOBJ
+            getattr_fn = self._check_for_getattr()
+            if isinstance(getattr_fn, types.FunctionType):
+                # Dynamo is going to trace the __getattr__ function with
+                # args=name. Set the source accordingly.
+                new_source = None
+                if self.source:
+                    new_source = AttrSource(self.source, "__getattr__")
+
+                variables.UserMethodVariable(
+                    getattr_fn, self, source=new_source
+                ).call_function(tx, [variables.ConstantVariable.create(name)], {})
+
+                # Reaching here means that the __getattr__ function returned a
+                # value, which means the attribute is present.
+                return variables.ConstantVariable.create(True)
+            elif getattr_fn is not None:
+                unimplemented("UserDefined with non-function __getattr__")
+            else:
+                # attribute not present in the object
+                return variables.ConstantVariable.create(False)
 
     def odict_getitem(self, tx, key):
         from .builder import VariableBuilder

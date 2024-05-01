@@ -10620,6 +10620,57 @@ fn
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(res, fn(x, d))
 
+    def test_custom_getattr_for_hasattr(self):
+        class Foo(object):
+            def __init__(self):
+                self.a = 3
+
+            def __getattr__(self, name):
+                if name == "a_copy":
+                    return self.a
+                return self.__getattribute__(name)
+
+        obj = Foo()
+
+        def fn(x):
+            c = 1
+            # TODO(anijain2305) - Can we support this?
+            # if not hasattr(obj, "b"):
+            #     c *= 2
+            if hasattr(obj, "a_copy"):
+                c = 2
+            return x * obj.a_copy * c
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        x = torch.ones(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    @unittest.skip("exception is not supported in __getattr__")
+    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
+    def test_custom_getattr_on_module_exception(self):
+        class Foo(torch.nn.Module):
+            def __init__(self, a=3):
+                super().__init__()
+                self.register_parameter("a", torch.nn.Parameter(torch.ones(4) * 2))
+
+            def __getattr__(self, name):
+                try:
+                    return super().__getattr__(name)  # defer to nn.Module's logic
+                except AttributeError:
+                    if name == "a_copy":
+                        return self.a
+                    raise
+
+            def forward(self, x):
+                return x * self.a * self.a_copy
+
+        mod = Foo()
+        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+
+        x = torch.ones(4)
+        self.assertEqual(mod(x), opt_mod(x))
+
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):
