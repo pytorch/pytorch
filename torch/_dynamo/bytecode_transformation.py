@@ -244,6 +244,11 @@ def create_load_method(name) -> Instruction:
     return create_instruction("LOAD_METHOD", argval=name)
 
 
+def create_setup_with(target) -> Instruction:
+    opname = "BEFORE_WITH" if sys.version_info >= (3, 11) else "SETUP_WITH"
+    return create_instruction(opname, target=target)
+
+
 def lnotab_writer(
     lineno: int, byteno: int = 0
 ) -> Tuple[List[int], Callable[[int, int], None]]:
