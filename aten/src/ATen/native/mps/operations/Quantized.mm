@@ -1,3 +1,4 @@
+#include <stdexcept>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -10,6 +11,8 @@
 #endif
 #include <ATen/native/mps/OperationUtils.h>
 #include <fmt/format.h>
+
+#include <Metal/MTLCaptureManager.h>
 
 namespace at::native {
 
@@ -138,8 +141,20 @@ Tensor _weight_int4pack_mm_mps(const Tensor& A, const Tensor& B, int64_t qGroupS
   std::array<uint32_t, 3> sizes = {static_cast<uint32_t>(M),
                                    static_cast<uint32_t>(K),
                                    static_cast<uint32_t>(N)};
+  static bool firstCapture = true;
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
+      NSError *err = nil;
+      MTLCaptureManager *manager = [MTLCaptureManager sharedCaptureManager];
+      if (firstCapture) {
+        //mpsStream->synchronize(SyncType::COMMIT);
+        MTLCaptureDescriptor* captureDescriptor = [MTLCaptureDescriptor new];
+        captureDescriptor.captureObject = device;
+        captureDescriptor.destination = MTLCaptureDestinationGPUTraceDocument;
+        captureDescriptor.outputURL = [NSURL fileURLWithPath:@"int4packmm.gputrace"];
+        auto rc = [manager startCaptureWithDescriptor:captureDescriptor error:&err];
+        TORCH_CHECK(rc, "Failed to start capture, error :", [[err description] UTF8String]);
+      }
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
       const std::string kernel =  fmt::format("int4pack_mm_{}_{}",qGroupSize, scalarToMetalTypeString(A.scalar_type()));
       id<MTLComputePipelineState> quantizedPSO = quantizedPipelineState(device, kernel);
@@ -150,6 +165,11 @@ Tensor _weight_int4pack_mm_mps(const Tensor& A, const Tensor& B, int64_t qGroupS
       mtl_setBuffer(computeEncoder, C, 3);
       [computeEncoder setBytes:sizes.data() length:sizeof(uint32_t) * sizes.size() atIndex:4];
       mtl_dispatch1DJob(computeEncoder, quantizedPSO, C.numel());
+      if (firstCapture) {
+        mpsStream->synchronize(SyncType::COMMIT);
+        [manager stopCapture];
+        firstCapture = false;
+      }
     }
   });
   return C;

@@ -22,9 +22,9 @@ MPSStream::MPSStream(Stream stream) : _stream(stream) {
   _compilationDescriptor = [MPSGraphCompilationDescriptor new];
 
   // disable commitAndContinue if Signpost tracing is enabled
-  if (getMPSProfiler().isSignpostTracingEnabled()) {
+  //if (getMPSProfiler().isSignpostTracingEnabled()) {
     _enableCommitAndContinue = false;
-  }
+  //}
   _executionDescriptor.enableCommitAndContinue = _enableCommitAndContinue;
 
   // Choose level which optimizes for GPU
