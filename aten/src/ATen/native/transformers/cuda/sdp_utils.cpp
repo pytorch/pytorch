@@ -441,17 +441,6 @@ bool check_cudnn_hardware_support(sdp_params const& params, bool debug) {
   return true;
 }
 
-bool check_is_causal(sdp_params const& params, bool debug) {
-  // Check that the input is causal
-  if (!params.is_causal) {
-    if (debug) {
-      TORCH_WARN("CuDNN requires is_causal=True.");
-    }
-    return false;
-  }
-  return true;
-}
-
 bool check_for_nested_inputs(sdp_params const& params, bool debug) {
   // Check that the input is nested
   if (has_for_nested_inputs(params)) {
@@ -503,17 +492,6 @@ bool check_runtime_disabled_cudnn(sdp_params const& params, bool debug) {
   return true;
 }
 
-bool check_cudnn_requires_grad(sdp_params const& params, bool debug) {
-  // Check that the input is causal
-  if (input_requires_grad(params)) {
-    if (debug) {
-      TORCH_WARN("CuDNN does not currently support inputs with requires_grad=True.");
-    }
-    return false;
-  }
-  return true;
-}
-
 } // namespace
 
 bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
@@ -528,10 +506,11 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
           check_all_tensors_on_device,
           check_cudnn_tensor_shapes,
           check_cudnn_layout,
-          // check_is_causal,
           check_for_nested_inputs,
-          check_cudnn_requires_grad,
-          check_dtypes_low_precision);
+          check_for_attn_mask,
+          check_dtypes_low_precision
+	  );
+          // check_cudnn_layout,
   for (auto& constraint : general_constraints) {
     if (!constraint(params, debug)) {
       return false;
