@@ -74,7 +74,6 @@ except ValueError as e:
         raise e
 
 pytree = torch.utils._pytree
-
 T = TypeVar("T")
 TensorWeakRef = Any
 
@@ -1302,12 +1301,6 @@ class FakeTensorMode(TorchDispatchMode):
         else:
             return self._dispatch_impl(func, types, args, kwargs)
 
-    def _maybe_to_constant(self, t):
-        if self.is_our_fake(t):
-            return t.constant
-        else:
-            return t
-
     def _dispatch_impl(self, func, types, args, kwargs) -> FakeTensor:
         flat_args, args_spec = pytree.tree_flatten((args, kwargs))
 
@@ -1336,7 +1329,7 @@ class FakeTensorMode(TorchDispatchMode):
             assert all(
                 t.constant is not None for t in flat_arg_fake_tensors
             ), f"{func} should not have fake inputs without constants"
-            const_flat_args = [self._maybe_to_constant(a) for a in flat_args]
+            const_flat_args = [a.constant if self.is_our_fake(a) else a for a in flat_args]
             const_args, const_kwargs = pytree.tree_unflatten(const_flat_args, args_spec)
             out = func(*const_args, **const_kwargs)
             if type(out) is torch.Tensor and self.may_turn_const(out):
@@ -1415,7 +1408,7 @@ class FakeTensorMode(TorchDispatchMode):
             and not has_symbolic_sizes
             and not avoiding_device_init
         ):
-            const_flat_args = [self._maybe_to_constant(a) for a in flat_args]
+            const_flat_args = [a.constant if self.is_our_fake(a) else a for a in flat_args]
             const_args, const_kwargs = pytree.tree_unflatten(const_flat_args, args_spec)
 
             # NB: not in_kernel_invocation_manager(self) as we want to do REAL
@@ -1634,8 +1627,8 @@ class FakeTensorMode(TorchDispatchMode):
                     e.device == common_device,
                     lambda: f"FakeTensor is wrapped to wrong device, found {e.device}, expected {common_device}",
                 )
-
-            if not is_our_fake and converter is not None:
+                return e
+            elif converter is not None:
                 if has_scalar_only_inputs:
                     # Under FakeTensorMode, op accepts scalar only inputs, such as aten.add/sub/mul/div,
                     # returns a real scalar tensor on CPU. See TensorMeta() in _prims/__init__.py for details.
@@ -1645,8 +1638,8 @@ class FakeTensorMode(TorchDispatchMode):
                     return converter.from_meta_and_device(
                         self, e, device or common_device
                     )
-
-            return e
+            else:
+                return e
 
         return tree_map(wrap, r)
 
