@@ -3713,9 +3713,7 @@ class TestTake(TestCase):
         y = np.take(x, [1, 2, 3], out=x[2:5], mode="wrap")
         assert_equal(y, np.array([1, 2, 3]))
 
-    @parametrize(
-        "shape", [(1, 2), (1,), ()]
-    )
+    @parametrize("shape", [(1, 2), (1,), ()])
     def test_ret_is_out(self, shape):
         # 0d arrays should not be an exception to this rule
         x = np.arange(5)
