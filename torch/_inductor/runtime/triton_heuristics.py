@@ -192,7 +192,6 @@ class CachingAutotuner(KernelInterface):
             compiled_binaries = []
             if not self.configs:
                 raise RuntimeError("No triton configs are available")
-
             for c in self.configs:
                 try:
                     compiled_binary, launcher = self._precompile_config(
@@ -200,11 +199,8 @@ class CachingAutotuner(KernelInterface):
                     )
                 except OutOfResources as e:
                     if len(self.configs) == 1:
-                        raise RuntimeError(
-                            f"Failed to compile triton config: {c}. "
-                            f"Report a fatal compilation error. "
-                            f"{e}"
-                        )
+                        # There are no valid Triton configs
+                        raise e
                     # Skip the config if we run out of resource
                     continue
                 self.launchers.append(launcher)
@@ -707,7 +703,7 @@ class CachingAutotuner(KernelInterface):
 
         binary = (
             launcher.bin.asm["cubin"]
-            if torch.version.hip is None
+            if self.device_props.type != "hip"
             else launcher.bin.asm["hsaco"]
         )
         CudaKernelParamCache.set(key, params, binary)
@@ -722,7 +718,7 @@ class CachingAutotuner(KernelInterface):
         E.g., assuming regular autotune only get one config C1; while max-autotune get 4 configs C1, C2, C3, C4
         and max-autotune figure out C3 is the best.
 
-        Then if coordinate descnt tuning is run with max-autotune disabled, it will start from C1;
+        Then if coordinate desecnt tuning is run with max-autotune disabled, it will start from C1;
         while if coordinate descent tuning is run with max-autotune enabled, it will start from C3.
         """
         if (
@@ -806,7 +802,7 @@ class CachingAutotuner(KernelInterface):
                 args,
                 {
                     "kernel_file": self.filename,
-                    "kernel_type": "triton",
+                    "kernel_backend": "triton",
                     "grid": grid_info,
                     "stream": stream,
                 },
@@ -1273,7 +1269,11 @@ def triton_config_reduction(size_hints, x, r, num_stages=1, num_warps=None) -> C
     cfg = {"XBLOCK": x, "RBLOCK": r}
     if num_warps is None:
         num_warps = conditional_product(x, r) // 128
-    num_warps = next_power_of_2(min(max(num_warps, 2), 8))
+    # On AMD GPU each warp has 64 lanes which is double the size on NV GPU,
+    # therefore using half the number of warps here correspondingly.
+    default_num_warps = 4 if torch.version.hip else 8
+    min_num_warps = 1 if torch.version.hip else 2
+    num_warps = next_power_of_2(min(max(num_warps, min_num_warps), default_num_warps))
     check_config(cfg, xnumel=size_hints[0])
     assert r <= TRITON_MAX_BLOCK["R"], f"increase TRITON_MAX_BLOCK['r'] to {r}"
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)

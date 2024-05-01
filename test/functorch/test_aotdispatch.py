@@ -609,7 +609,7 @@ def forward(self, primals_1, primals_2):
             torch.ones(3, 3, requires_grad=True),
         ]
         with self.assertRaisesRegex(
-            AssertionError, "prevented us from including it in the graph"
+            AssertionError, "but the input has other mutations that we cannot"
         ):
             fw_graph = self.verify_aot_autograd(
                 f, inp, test_mutation=True, keep_inp_mutations=True
@@ -817,7 +817,9 @@ def forward(self, arg0_1, arg1_1):
         fw_graph_cell = [None]
         compiled_f = aot_function(
             f,
-            fw_compiler=make_boxed_compiler(partial(extract_graph, graph_cell=fw_graph_cell)),
+            fw_compiler=make_boxed_compiler(
+                partial(extract_graph, graph_cell=fw_graph_cell)
+            ),
             bw_compiler=nop,
             decompositions={},
             keep_inference_input_mutations=True,
@@ -827,14 +829,17 @@ def forward(self, arg0_1, arg1_1):
         # Final functionalized graph has two mutation ops:
         # (1) a resize_() to resize input tensor up
         # (2) a copy_() to fill in the resized input with valid data
-        self.assertExpectedInline(fw_graph_cell[0].code.strip(), """\
+        self.assertExpectedInline(
+            fw_graph_cell[0].code.strip(),
+            """\
 def forward(self, primals_1):
     ones = torch.ops.aten.ones.default([8], device = device(type='cpu'), pin_memory = False)
     copy = torch.ops.aten.copy.default(primals_1, ones);  ones = None
     add = torch.ops.aten.add.Tensor(copy, 1)
     resize_storage_bytes_ = torch.ops.inductor.resize_storage_bytes_.default(primals_1, 32)
     copy_ = torch.ops.aten.copy_.default(primals_1, copy);  primals_1 = copy = None
-    return [add]""")
+    return [add]""",
+        )
 
     def test_input_mutation_storage_resize_down(self):
         def f(a):
@@ -847,7 +852,9 @@ def forward(self, primals_1):
         fw_graph_cell = [None]
         compiled_f = aot_function(
             f,
-            fw_compiler=make_boxed_compiler(partial(extract_graph, graph_cell=fw_graph_cell)),
+            fw_compiler=make_boxed_compiler(
+                partial(extract_graph, graph_cell=fw_graph_cell)
+            ),
             bw_compiler=nop,
             decompositions={},
             keep_inference_input_mutations=True,
@@ -858,11 +865,14 @@ def forward(self, primals_1):
         # (1) a resize_() to resize input tensor down
         # Even though there was technically a "data mutation" on the input (from a.copy_()),
         # We don't include it in the graph since the final input size has zero storage
-        self.assertExpectedInline(fw_graph_cell[0].code.strip(), """\
+        self.assertExpectedInline(
+            fw_graph_cell[0].code.strip(),
+            """\
 def forward(self, primals_1):
     sin = torch.ops.aten.sin.default(primals_1)
     resize_storage_bytes_ = torch.ops.inductor.resize_storage_bytes_.default(primals_1, 0)
-    return [sin, primals_1]""")
+    return [sin, primals_1]""",
+        )
 
     def test_input_mutation_storage_resize_up_down(self):
         def f(a):
@@ -881,7 +891,9 @@ def forward(self, primals_1):
         fw_graph_cell = [None]
         compiled_f = aot_function(
             f,
-            fw_compiler=make_boxed_compiler(partial(extract_graph, graph_cell=fw_graph_cell)),
+            fw_compiler=make_boxed_compiler(
+                partial(extract_graph, graph_cell=fw_graph_cell)
+            ),
             bw_compiler=nop,
             decompositions={},
             keep_inference_input_mutations=True,
@@ -893,15 +905,17 @@ def forward(self, primals_1):
         #     and the final size is zero
         # (2) no copy_ in the functional graph, even though we copied data into the input,
         #     because the input has no storage at the end of graph execution (so no data to copy)
-        self.assertExpectedInline(fw_graph_cell[0].code.strip(), """\
+        self.assertExpectedInline(
+            fw_graph_cell[0].code.strip(),
+            """\
 def forward(self, primals_1):
     ones = torch.ops.aten.ones.default([8], device = device(type='cpu'), pin_memory = False)
     copy = torch.ops.aten.copy.default(primals_1, ones);  primals_1 = ones = None
     sin = torch.ops.aten.sin.default(copy)
-    return [sin, copy]""")
+    return [sin, copy]""",
+        )
 
     def test_input_mutation_storage_resize_down_and_set_(self):
-
         # Meant to mimic ppFSDP
         class TracableCreateParameter(torch.autograd.Function):
             @staticmethod
@@ -918,7 +932,9 @@ def forward(self, primals_1):
             with torch.no_grad():
                 allgather_param = torch.cat([param_shard, param_shard])
             # simulate propagating grad state through dummy param, using data of allgather param
-            dummy_param_with_grad_state = TracableCreateParameter.apply(allgather_param, dummy_param)
+            dummy_param_with_grad_state = TracableCreateParameter.apply(
+                allgather_param, dummy_param
+            )
             out = dummy_param.sin()
             # Resize out dummy param, which now has the allgather data
             torch.ops.inductor.resize_storage_bytes_(dummy_param, 0)
@@ -933,7 +949,9 @@ def forward(self, primals_1):
         fw_graph_cell = [None]
         compiled_f = aot_function(
             f,
-            fw_compiler=make_boxed_compiler(partial(extract_graph, graph_cell=fw_graph_cell)),
+            fw_compiler=make_boxed_compiler(
+                partial(extract_graph, graph_cell=fw_graph_cell)
+            ),
             bw_compiler=nop,
             decompositions={},
             keep_inference_input_mutations=True,
@@ -946,13 +964,16 @@ def forward(self, primals_1):
         #     dummy_param actually contains the `cat` tensor due to the set_() call
         # (2) We emit a cat.resize_storage_(0) in the graph.
         #     After the set_(), cat is the actually data of dummy_param, which is what we call resize_() on
-        self.assertExpectedInline(fw_graph_cell[0].code.strip(), """\
+        self.assertExpectedInline(
+            fw_graph_cell[0].code.strip(),
+            """\
 def forward(self, primals_1, primals_2):
     cat = torch.ops.aten.cat.default([primals_2, primals_2]);  primals_2 = None
     sin = torch.ops.aten.sin.default(cat)
     set_ = torch.ops.aten.set_.source_Tensor(primals_1, cat);  primals_1 = None
     resize_storage_bytes_ = torch.ops.inductor.resize_storage_bytes_.default(set_, 0);  set_ = None
-    return [sin, cat]""")
+    return [sin, cat]""",
+        )
 
     def test_input_mutation_storage_resize_before_set__not_supported(self):
         def f(a):
@@ -982,7 +1003,9 @@ def forward(self, primals_1, primals_2):
 
         inp = torch.zeros(8, requires_grad=True)
 
-        with self.assertRaisesRegex(AssertionError, "the input has other mutations that we cannot"):
+        with self.assertRaisesRegex(
+            AssertionError, "the input has other mutations that we cannot"
+        ):
             compiled_f = aot_function(
                 f,
                 fw_compiler=nop,
@@ -992,7 +1015,6 @@ def forward(self, primals_1, primals_2):
                 dynamic=False,
             )
             out = compiled_f(inp)
-
 
     def test_input_output_aliase_custom_autograd_function(self):
         class Foo(torch.autograd.Function):
@@ -3453,6 +3475,7 @@ def forward(self, tangents_1):
 
         return lambda f: aot_function(f, fw_compiler=lambda g, _: partial(wrapper, g))
 
+    @patch("functorch.compile.config.view_replay_for_aliased_outputs", True)
     def test_output_aliases_input_view_meta_replay(self):
         @self._compile_and_erase_bases(0)
         def f(a):
@@ -3466,6 +3489,7 @@ def forward(self, tangents_1):
             str(out.grad_fn.__class__), """<class 'ViewBackward0'>"""
         )
 
+    @patch("functorch.compile.config.view_replay_for_aliased_outputs", True)
     def test_output_aliases_intermediate_view_meta_replay(self):
         @self._compile_and_erase_bases(0, 1)
         def f(a):
@@ -3485,6 +3509,7 @@ def forward(self, tangents_1):
             str(out2.grad_fn.__class__), """<class 'ViewBackward0'>"""
         )
 
+    @patch("functorch.compile.config.view_replay_for_aliased_outputs", True)
     def test_output_aliases_output_view_meta_replay(self):
         @self._compile_and_erase_bases(1)
         def f(a):
@@ -5597,9 +5622,6 @@ symbolic_aot_autograd_failures = {
         "nn.functional.embedding_bag", ""
     ),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail(
-        "nn.functional.fractional_max_pool2d", ""
-    ),  # rand() received an invalid combination of arguments - g...
-    xfail(
         "nn.functional.fractional_max_pool3d", ""
     ),  # rand() received an invalid combination of arguments - g...
     xfail(
@@ -5800,7 +5822,6 @@ symbolic_aot_autograd_module_failures = {
     torch.nn.GaussianNLLLoss,  # NotImplementedError: local_scalar_dense/item NYI for torch.bool
     torch.nn.GroupNorm,  # in native_group_norm_backward cpg, _rem = divmod(C, group)
     # TypeError: unsupported operand type(s) for divmod(): 'SymInt' and 'int'
-    torch.nn.FractionalMaxPool2d,  # int() argument must be a string, a bytes-like object or a number, not 'SymFloat'
     torch.nn.FractionalMaxPool3d,  # int() argument must be a string, a bytes-like object or a number, not 'SymFloat'
     torch.nn.BCELoss,  # new_size = _infer_size(target.size(), weight.size())
     # RuntimeError: expected int at position 0, but got: SymInt
