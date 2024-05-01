@@ -8,6 +8,7 @@ import sys
 import textwrap
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from io import StringIO
 
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
@@ -1007,15 +1008,38 @@ class AlgorithmSelectorCache(PersistentCache):
                 num_workers,
             )
 
+            # In rare circumstances, because python threads inherit global state,
+            # thread pool executor can race and leave stdout/stderr in a state
+            # different than the original values. we explicitly restore the state
+            # here to avoid this issue.
+
+            original_stdout = sys.stdout
+            original_stderr = sys.stderr
+
+            @contextmanager
+            def restore_stdout_stderr():
+                try:
+                    yield
+                finally:
+                    a = sys.stdout
+                    sys.stdout = original_stdout
+                    sys.stderr = original_stderr
+                    print(a)
+
+            def precompile_with_captured_stdout(choice):
+                with restore_stdout_stderr():
+                    return choice.precompile()
+
             executor = ThreadPoolExecutor(max_workers=num_workers)
             futures = executor.map(
-                lambda c: c.precompile(),
+                lambda c: precompile_with_captured_stdout(c),
                 [c for c in choices if hasattr(c, "precompile")],
                 timeout=precompilation_timeout_seconds,
             )
             from triton.runtime.autotuner import OutOfResources
 
             @functools.lru_cache(None)
+            @restore_stdout_stderr()
             def wait_on_futures():
                 counters["inductor"]["select_algorithm_precompile"] += 1
                 try:
