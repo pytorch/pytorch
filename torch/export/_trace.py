@@ -111,7 +111,7 @@ def _ignore_backend_decomps(_enable_mkldnn=False):
         yield
     finally:
         if not _enable_mkldnn:
-            torch.backends.mkldnn.set_flags(*orig_mkldnn_flag)
+            torch.backends.mkldnn.set_flags(*orig_mkldnn_flag)  # type: ignore[attr-defined]
         torch.backends.nnpack.set_flags(*orig_nnpack_flag)
 
 
