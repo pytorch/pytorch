@@ -52,8 +52,16 @@ inline PyObject* wrap(void* value) {
   return THPUtils_packInt64(reinterpret_cast<intptr_t>(value));
 }
 
+inline PyObject* wrap(THPDtype* dtype) {
+  return Py_NewRef(dtype);
+}
+
 inline PyObject* wrap(at::ScalarType scalarType) {
   return Py_NewRef(getTHPDtype(scalarType));
+}
+
+inline PyObject* wrap(THPLayout* layout) {
+  return Py_NewRef(layout);
 }
 
 inline PyObject* wrap(at::Layout layout) {
