@@ -340,9 +340,10 @@ class NNModuleVariable(VariableTracker):
                     # If so at least some changes are needed, we don't allow inlining
                     # the call_wrapped currently, and maybe other issues too
                     fn = mod.forward
+                    fn_source = AttrSource(self.source, "forward")
                 else:
                     fn = mod._call_impl
-                fn_source = AttrSource(self.source, "__call__")
+                    fn_source = AttrSource(self.source, "_call_impl")
                 if istype(fn, types.MethodType):
                     fn = fn.__func__
                     fn_source = AttrSource(fn_source, "__func__")

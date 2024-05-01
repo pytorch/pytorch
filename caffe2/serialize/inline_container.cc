@@ -612,8 +612,8 @@ size_t ostream_write_func(
   return ret;
 }
 
-// This seeking function pretends to behave like m_pWrite, but will actually
-// seek n bytes from the current offset
+// This func will not update combined_uncomp_crc32_ with the uncomp_crc32
+// since there is no way to get the uncomp_crc32 when no buffer is provided.
 size_t ostream_seek_func(
   void* pOpaque,
   mz_uint64 file_ofs,
@@ -633,13 +633,6 @@ size_t ostream_seek_func(
 PyTorchStreamWriter::PyTorchStreamWriter(const std::string& file_name)
     : archive_name_(basename(file_name)) {
   setup(file_name);
-}
-
-PyTorchStreamWriter::PyTorchStreamWriter(
-    const std::function<size_t(const void*, size_t)> writer_func)
-    : archive_name_("archive"),
-      writer_func_(writer_func) {
-  setup(archive_name_);
 }
 
 PyTorchStreamWriter::PyTorchStreamWriter(
@@ -678,14 +671,7 @@ void PyTorchStreamWriter::setup(const string& file_name) {
     };
     seek_func_ = [this](size_t nbytes) -> size_t {
       file_stream_.seekp(nbytes, std::ios_base::cur);
-      return !file_stream_ ? -1L : static_cast<size_t>(file_stream_.tellp());
-    };
-  }
-
-  if (!seek_func_) {
-    seek_func_ = [=](size_t nbytes) -> size_t {
-      TORCH_CHECK(false, "seek func unimplemented");
-      return 0;
+      return file_stream_.tellp();
     };
   }
 
