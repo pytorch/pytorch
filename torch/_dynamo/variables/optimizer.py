@@ -48,14 +48,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         tensor_to_source=None,
         **kwargs,
     ):
-        from ..decorators import mark_static_address
-
         super().__init__(value, **kwargs)
-
-        for group in self.value.param_groups:
-            for p in group["params"]:
-                mark_static_address(p)
-
         self.grad_to_source = grad_to_source or {}
         self.tensor_to_source = tensor_to_source or {}
         self.static_tensor_names = static_tensor_names or set()
@@ -101,6 +94,12 @@ class OptimizerVariable(UserDefinedObjectVariable):
             return GetAttrVariable(self, name, source=AttrSource(self.source, name))
 
         if name == "param_groups":
+            from ..decorators import mark_static_address
+
+            for group in self.value.param_groups:
+                for p in group["params"]:
+                    mark_static_address(p)
+
             self._set_capturable(tx)
 
         return super().var_getattr(tx, name)
