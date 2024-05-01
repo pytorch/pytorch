@@ -613,8 +613,6 @@ class TestExport(TestCase):
                 actual_result.append(node.meta.get("torch_fn"))
         self.assertEqual(actual_result, expected_result)
 
-    # TODO(yidi)
-    @unittest.expectedFailure
     def test_export_cond_preserve_torch_fn_for_subgraphs(self):
         class MySubModule(torch.nn.Module):
             def foo(self, x):
@@ -644,7 +642,6 @@ class TestExport(TestCase):
             for node in mod.graph.nodes:
                 if node.name in {"sin", "cos"}:
                     torch_fn = node.meta.get("torch_fn")
-                    print(torch_fn)
                     actual_torch_fns.append(torch_fn)
         exp_torch_fns = [
             ("cos_1", "method_descriptor.cos"),

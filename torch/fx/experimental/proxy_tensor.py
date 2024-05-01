@@ -1143,11 +1143,10 @@ class _ModuleStackTracer(PythonKeyTracer):
 
         return node
 
-
 class _MakefxTracer:
     def __init__(
         self,
-        decomposition_table: Dict[Callable, Callable],
+        decomposition_table: Optional[Dict[Callable, Callable]],
         tracing_mode: str,
         _allow_non_fake_inputs: bool,
         pre_dispatch: bool,
@@ -1155,9 +1154,9 @@ class _MakefxTracer:
         _allow_fake_constant: bool,
         _error_on_data_dependent_ops: bool
     ):
-        self.decomposition_table = self._construct_decomposition_table(decomposition_table)
-        # pre-autograd tracing uses per-dispatch-key modes,
-        # which requires the python dispatcher
+
+        self.decomposition_table = decomposition_table or {}
+        self.decomposition_table.setdefault(torch.ops.aten.sym_numel.default, torch._decomp.decompositions.sym_numel)
         self.tracing_mode = tracing_mode
         self._allow_non_fake_inputs = _allow_non_fake_inputs
         self.pre_dispatch = pre_dispatch
@@ -1166,49 +1165,14 @@ class _MakefxTracer:
         self._error_on_data_dependent_ops = _error_on_data_dependent_ops
 
         self.python_dispatcher_mode: Any = nullcontext()
-        self.fake_tensor_mode = nullcontext()
+        self.fake_tensor_mode: FakeTensorMode = nullcontext()
         self.proxy_mode: Any = nullcontext()
         self.proxy_function_mode = nullcontext()
-        self.fx_tracer = PythonKeyTracer()
+        self.fx_tracer: Optional[Tracer] = None
+        # pre-autograd tracing uses per-dispatch-key modes,
+        # which requires the python dispatcher
         if self.tracing_mode == "symbolic" or self.pre_dispatch:
             self.python_dispatcher_mode = enable_python_dispatcher()
-
-
-    @classmethod
-    def from_config(
-        cls,
-        decomposition_table: Optional[Dict[Callable, Callable]],
-        tracing_mode: str,
-        _allow_non_fake_inputs: bool,
-        pre_dispatch: bool,
-        record_module_stack: bool,
-        _allow_fake_constant: bool,
-        _error_on_data_dependent_ops: bool,
-    ):
-        return cls(
-            decomposition_table,
-            tracing_mode,
-            _allow_non_fake_inputs,
-            pre_dispatch,
-            record_module_stack,
-            _allow_fake_constant,
-            _error_on_data_dependent_ops,
-        )
-
-    def _construct_decomposition_table(
-        self,
-        decomposition_table: Optional[Dict[Callable, Callable]] = None
-    ) -> Dict[Callable, Callable]:
-        if decomposition_table is None:
-            decomposition_table = {}
-        # Avoid importing sympy at a module level
-
-        if torch.ops.aten.sym_numel.default not in decomposition_table:
-            decomposition_table = {
-                **decomposition_table,
-                torch.ops.aten.sym_numel.default: torch._decomp.decompositions.sym_numel
-            }
-        return decomposition_table
 
     # TODO: change to a context mananer _override_defaults_based_on_inputs(f, args)
     # dep graph
@@ -1218,6 +1182,8 @@ class _MakefxTracer:
         if hasattr(f, "_orig_mod") and self.record_module_stack:
             scope_root = f._orig_mod
             self.fx_tracer = _ModuleStackTracer(scope_root)
+        else:
+            self.fx_tracer = PythonKeyTracer()
 
         if self.tracing_mode == "real":
             pass
@@ -1261,6 +1227,45 @@ class _MakefxTracer:
         self.torch_fn_metadata_mode = TorchFunctionMetadataMode(self.fx_tracer)
         if self.pre_dispatch:
             self.proxy_function_mode = PreDispatchTorchFunctionMode(self.fx_tracer)
+
+    def _init_modes_from_parent(self, parent_tracer):
+        # We want example values of parent graph and subgraphs to share the same fake_tensor_mode
+        self.fake_tensor_mode = parent_tracer.fake_tensor_mode
+
+        # Tracer maintains a bunch of states while tracing.
+        # These states are mostly useful for metadata and etc.
+        # We copy them over but reset some pf the states that
+        # are necessary for subgraphs
+        def _create_sub_fx_tracer(parent_tracer):
+            if type(parent_tracer) == PythonKeyTracer:
+                sub_tracer = PythonKeyTracer()
+            elif type(parent_tracer) == _ModuleStackTracer:
+                sub_tracer = _ModuleStackTracer(parent_tracer.scope_root)
+                # We want sub_tracer to share the same states as parent tracer
+                # for below states to correctly compute the metadata
+                sub_tracer.scope_root = parent_tracer.scope_root
+                sub_tracer.proxy_paths = parent_tracer.proxy_paths
+                sub_tracer.proxy_modules = parent_tracer.proxy_modules
+            else:
+                raise RuntimeError(f"Unexpected tracer type: {type(parent_tracer)}.")
+
+            sub_tracer.torch_fn_metadata = parent_tracer.torch_fn_metadata
+            sub_tracer.torch_fn_counts = parent_tracer.torch_fn_counts
+            return sub_tracer
+
+        self.fx_tracer = _create_sub_fx_tracer(parent_tracer.fx_tracer)
+        # These modes are re-constructed based on fx_tracer
+        if self.pre_dispatch:
+            self.proxy_function_mode = PreDispatchTorchFunctionMode(self.fx_tracer)
+        self.proxy_mode = ProxyTorchDispatchMode(
+            self.fx_tracer,
+            self.tracing_mode,
+            pre_dispatch=self.pre_dispatch,
+            _allow_fake_constant=self._allow_fake_constant,
+            _error_on_data_dependent_ops=self._error_on_data_dependent_ops
+        )
+        self.torch_fn_metadata_mode = TorchFunctionMetadataMode(self.fx_tracer)
+
 
     def _wrap_fake(self, args: Tuple[Any]) -> Tuple[Any]:
         arg_count = 0
@@ -1327,54 +1332,13 @@ class _MakefxTracer:
             t.shape_env = self.fake_tensor_mode.shape_env  # type: ignore[assignment]
         return t
 
-    def _init_modes_from_parent(self, parent_tracer):
-        self.fake_tensor_mode = parent_tracer.fake_tensor_mode
-        # Just a c++ binding context mangaer
-
-        # Tracer maintains a bunch of states while tracing.
-        # These states are mostly useful for metadata and etc.
-        # We copy them over but reset some pf the states that
-        # are necessary for subgraphs
-        def _create_sub_fx_tracer(parent_tracer):
-            if isinstance(parent_tracer, PythonKeyTracer):
-                sub_tracer = PythonKeyTracer()
-            elif isinstance(parent_tracer, _ModuleStackTracer):
-                sub_tracer = _ModuleStackTracer(parent_tracer.scope_root)
-                # aliasing these states to allow them to be mutated in subgraphs
-                sub_tracer.scope_root = parent_tracer.scope_root
-                sub_tracer.proxy_paths = parent_tracer.proxy_paths
-                sub_tracer.proxy_modules = parent_tracer.proxy_modules
-
-            parent_graph = parent_tracer.graph
-            # create a new graph
-            sub_tracer.graph = torch.fx.Graph(
-                parent_graph.owning_module, parent_graph._tracer_cls, parent_graph._tracer_extras
-            )
-            # Create an empty root module.
-            sub_tracer.root = torch.nn.Module()
-            return sub_tracer
-
-        self.fx_tracer = _create_sub_fx_tracer(parent_tracer.fx_tracer)
-        # These modes are re-constructed based on fx_tracer
-        self.proxy_function_mode = nullcontext()
-        if self.pre_dispatch:
-            self.proxy_function_mode = PreDispatchTorchFunctionMode(self.fx_tracer)
-        self.proxy_mode = ProxyTorchDispatchMode(
-            self.fx_tracer,
-            self.tracing_mode,
-            pre_dispatch=self.pre_dispatch,
-            _allow_fake_constant=self._allow_fake_constant,
-            _error_on_data_dependent_ops=self._error_on_data_dependent_ops
-        )
-        self.torch_fn_metadata_mode = TorchFunctionMetadataMode(self.fx_tracer)
-
     def trace(self, f, *args) -> torch.fx.GraphModule:
         self._init_modes_from_inputs(f, args)
         return self._trace_inner(f, *args)
 
     def trace_subgraph(self, f, *args):
         # Create a new tracer based on parent's config
-        sub_tracer = _MakefxTracer.from_config(
+        sub_tracer = _MakefxTracer(
             self.decomposition_table,
             self.tracing_mode,
             self._allow_non_fake_inputs,
@@ -1412,7 +1376,7 @@ def make_fx(
     assert tracing_mode in ["real", "fake", "symbolic"]
 
 
-    make_fx_tracer = _MakefxTracer.from_config(
+    make_fx_tracer = _MakefxTracer(
         decomposition_table,
         tracing_mode,
         _allow_non_fake_inputs,
@@ -1427,7 +1391,6 @@ def make_fx(
         return make_fx_tracer.trace(f, *args)
 
     return wrapped
-
 
 def get_torch_dispatch_modes():
     return torch.utils._python_dispatch._get_current_dispatch_mode_stack()
