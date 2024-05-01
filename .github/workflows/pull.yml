@@ -184,14 +184,14 @@ jobs:
       docker-image-name: pytorch-linux-focal-py3.11-clang10
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 3, runner: "linux.2xlarge" },
-          { config: "default", shard: 2, num_shards: 3, runner: "linux.2xlarge" },
-          { config: "default", shard: 3, num_shards: 3, runner: "linux.2xlarge" },
-          { config: "crossref", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
-          { config: "crossref", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
-          { config: "dynamo", shard: 1, num_shards: 3, runner: "linux.2xlarge" },
-          { config: "dynamo", shard: 2, num_shards: 3, runner: "linux.2xlarge" },
-          { config: "dynamo", shard: 3, num_shards: 3, runner: "linux.2xlarge" },
+          { config: "default", shard: 1, num_shards: 3, runner: "linux.4xlarge" },
+          { config: "default", shard: 2, num_shards: 3, runner: "linux.4xlarge" },
+          { config: "default", shard: 3, num_shards: 3, runner: "linux.4xlarge" },
+          { config: "crossref", shard: 1, num_shards: 2, runner: "linux.4xlarge" },
+          { config: "crossref", shard: 2, num_shards: 2, runner: "linux.4xlarge" },
+          { config: "dynamo", shard: 1, num_shards: 3, runner: "linux.12xlarge" },
+          { config: "dynamo", shard: 2, num_shards: 3, runner: "linux.12xlarge" },
+          { config: "dynamo", shard: 3, num_shards: 3, runner: "linux.12xlarge" },
         ]}
 
 
