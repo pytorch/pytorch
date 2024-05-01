@@ -41,6 +41,39 @@ inline std::string BlasOpToString(BlasOp op) {
   return "N";
 }
 
+namespace detail {
+
+static bool NumericalCheck(ScalarType dtype, void* c, void* other_c, int64_t size) {
+  auto options = at::TensorOptions().dtype(dtype).device(at::kCUDA);
+  // comparison done as 1D tensor
+  at::Tensor ref = at::from_blob(c,       {size}, options);
+  at::Tensor oth = at::from_blob(other_c, {size}, options);
+  at::Tensor ref_float = ref.to(at::kFloat);
+  at::Tensor oth_float = oth.to(at::kFloat);
+  std::vector<double> atols{1e-1, 1e-2, 1e-3, 1e-4, 1e-5};
+  std::vector<double> rtols{1e-1, 1e-2, 1e-3, 1e-4, 1e-5};
+  double last_succeed_atol = 1;
+  double last_succeed_rtol = 1;
+  for (auto& atol : atols) {
+    for (auto& rtol : rtols) {
+      if (at::allclose(ref_float, oth_float, rtol, atol)) {
+        last_succeed_atol = atol;
+        last_succeed_rtol = rtol;
+      }
+    }
+  }
+  if (last_succeed_atol == 1) {
+    return false;
+  }
+  else {
+    TUNABLE_LOG("├──verify numerics: atol=", last_succeed_atol, ", rtol=", last_succeed_rtol);
+  }
+
+  return true;
+}
+
+}
+
 template <typename T>
 struct GemmParams : OpParams {
   std::string Signature() const override {
@@ -65,32 +98,8 @@ struct GemmParams : OpParams {
   }
 
   TuningStatus NumericalCheck(GemmParams<T> *other) {
-    auto options = at::TensorOptions().dtype(c10::CppTypeToScalarType<T>::value).device(at::kCUDA);
-    // comparison done as 1D tensor
-    at::Tensor ref = at::from_blob(c,        {m*n}, options);
-    at::Tensor oth = at::from_blob(other->c, {m*n}, options);
-    at::Tensor ref_float = ref.to(at::kFloat);
-    at::Tensor oth_float = oth.to(at::kFloat);
-    std::vector<double> atols{1e-1, 1e-2, 1e-3, 1e-4, 1e-5};
-    std::vector<double> rtols{1e-1, 1e-2, 1e-3, 1e-4, 1e-5};
-    double last_succeed_atol = 1;
-    double last_succeed_rtol = 1;
-    for (auto& atol : atols) {
-      for (auto& rtol : rtols) {
-        if (at::allclose(ref_float, oth_float, rtol, atol)) {
-          last_succeed_atol = atol;
-          last_succeed_rtol = rtol;
-        }
-      }
-    }
-    if (last_succeed_atol == 1) {
-      return FAIL;
-    }
-    else {
-      TUNABLE_LOG("├──verify numerics: atol=", last_succeed_atol, ", rtol=", last_succeed_rtol);
-    }
-
-    return OK;
+    auto c_dtype = c10::CppTypeToScalarType<T>::value;
+    return detail::NumericalCheck(c_dtype, c, other->c, m*n) ? OK : FAIL;
   }
 
   char transa;
@@ -132,32 +141,8 @@ struct GemmStridedBatchedParams : OpParams {
   }
 
   TuningStatus NumericalCheck(GemmStridedBatchedParams<T> *other) {
-    auto options = at::TensorOptions().dtype(c10::CppTypeToScalarType<T>::value).device(at::kCUDA);
-    // comparison done as 1D tensor
-    at::Tensor ref = at::from_blob(c,        {batch*stride_c}, options);
-    at::Tensor oth = at::from_blob(other->c, {batch*stride_c}, options);
-    at::Tensor ref_float = ref.to(at::kFloat);
-    at::Tensor oth_float = oth.to(at::kFloat);
-    std::vector<double> atols{1e-1, 1e-2, 1e-3, 1e-4, 1e-5};
-    std::vector<double> rtols{1e-1, 1e-2, 1e-3, 1e-4, 1e-5};
-    double last_succeed_atol = 1;
-    double last_succeed_rtol = 1;
-    for (auto& atol : atols) {
-      for (auto& rtol : rtols) {
-        if (at::allclose(ref_float, oth_float, rtol, atol)) {
-          last_succeed_atol = atol;
-          last_succeed_rtol = rtol;
-        }
-      }
-    }
-    if (last_succeed_atol == 1) {
-      return FAIL;
-    }
-    else {
-      TUNABLE_LOG("├──verify numerics: atol=", last_succeed_atol, ", rtol=", last_succeed_rtol);
-    }
-
-    return OK;
+    auto c_dtype = c10::CppTypeToScalarType<T>::value;
+    return detail::NumericalCheck(c_dtype, c, other->c, batch*stride_c) ? OK : FAIL;
   }
 
   char transa;
@@ -203,32 +188,7 @@ struct ScaledGemmParams : OpParams {
   }
 
   TuningStatus NumericalCheck(ScaledGemmParams<T> *other) {
-    auto options = at::TensorOptions().dtype(c_dtype).device(at::kCUDA);
-    // comparison done as 1D tensor
-    at::Tensor ref = at::from_blob(c,        {m*n}, options);
-    at::Tensor oth = at::from_blob(other->c, {m*n}, options);
-    at::Tensor ref_float = ref.to(at::kFloat);
-    at::Tensor oth_float = oth.to(at::kFloat);
-    std::vector<double> atols{1e-1, 1e-2, 1e-3, 1e-4, 1e-5};
-    std::vector<double> rtols{1e-1, 1e-2, 1e-3, 1e-4, 1e-5};
-    double last_succeed_atol = 1;
-    double last_succeed_rtol = 1;
-    for (auto& atol : atols) {
-      for (auto& rtol : rtols) {
-        if (at::allclose(ref_float, oth_float, rtol, atol)) {
-          last_succeed_atol = atol;
-          last_succeed_rtol = rtol;
-        }
-      }
-    }
-    if (last_succeed_atol == 1) {
-      return FAIL;
-    }
-    else {
-      TUNABLE_LOG("├──verify numerics: atol=", last_succeed_atol, ", rtol=", last_succeed_rtol);
-    }
-
-    return OK;
+    return detail::NumericalCheck(c_dtype, c, other->c, m*n) ? OK : FAIL;
   }
 
   char transa;

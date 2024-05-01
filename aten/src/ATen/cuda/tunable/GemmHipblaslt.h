@@ -123,8 +123,8 @@ constexpr hipblasDatatype_t HipBlasDataTypeFor<c10::Float8_e5m2fnuz>() {
 
 #endif
 
-template <typename T, typename ParamsT>
-int GetBatchFromParams(const ParamsT* params) {
+template <typename T>
+int GetBatchFromParams(const GemmParams<T>* params) {
   return 1;
 }
 
@@ -133,8 +133,13 @@ int GetBatchFromParams(const GemmStridedBatchedParams<T>* params) {
   return params->batch;
 }
 
-template <typename T, typename ParamsT>
-int GetStrideAFromParams(const ParamsT* params) {
+template <typename T>
+int GetBatchFromParams(const ScaledGemmParams<T>* params) {
+  return 1;
+}
+
+template <typename T>
+int GetStrideAFromParams(const GemmParams<T>* params) {
   return 1;
 }
 
@@ -143,8 +148,13 @@ int GetStrideAFromParams(const GemmStridedBatchedParams<T>* params) {
   return params->stride_a;
 }
 
-template <typename T, typename ParamsT>
-int GetStrideBFromParams(const ParamsT* params) {
+template <typename T>
+int GetStrideAFromParams(const ScaledGemmParams<T>* params) {
+  return 1;
+}
+
+template <typename T>
+int GetStrideBFromParams(const GemmParams<T>* params) {
   return 1;
 }
 
@@ -153,8 +163,13 @@ int GetStrideBFromParams(const GemmStridedBatchedParams<T>* params) {
   return params->stride_b;
 }
 
-template <typename T, typename ParamsT>
-int GetStrideCFromParams(const ParamsT* params) {
+template <typename T>
+int GetStrideBFromParams(const ScaledGemmParams<T>* params) {
+  return 1;
+}
+
+template <typename T>
+int GetStrideCFromParams(const GemmParams<T>* params) {
   return 1;
 }
 
@@ -163,8 +178,18 @@ int GetStrideCFromParams(const GemmStridedBatchedParams<T>* params) {
   return params->stride_c;
 }
 
-template <typename T, typename ParamsT>
-float GetAlphaFromParams(const ParamsT* params) {
+template <typename T>
+int GetStrideCFromParams(const ScaledGemmParams<T>* params) {
+  return 1;
+}
+
+template <typename T>
+float GetAlphaFromParams(const GemmParams<T>* params) {
+  return params->alpha;
+}
+
+template <typename T>
+float GetAlphaFromParams(const GemmStridedBatchedParams<T>* params) {
   return params->alpha;
 }
 
@@ -173,8 +198,13 @@ float GetAlphaFromParams(const ScaledGemmParams<T>* params) {
   return 1.0;
 }
 
-template <typename T, typename ParamsT>
-float GetBetaFromParams(const ParamsT* params) {
+template <typename T>
+float GetBetaFromParams(const GemmParams<T>* params) {
+  return params->beta;
+}
+
+template <typename T>
+float GetBetaFromParams(const GemmStridedBatchedParams<T>* params) {
   return params->beta;
 }
 
@@ -183,18 +213,13 @@ float GetBetaFromParams(const ScaledGemmParams<T>* params) {
   return 0.0;
 }
 
-template <typename T, typename ParamsT>
-bool GetFastAccuModeFromParams(const ParamsT* params) {
-  return false;
+template <typename T>
+const void* GetAScalePointerFromParams(const GemmParams<T>* params) {
+  return nullptr;
 }
 
 template <typename T>
-bool GetFastAccuModeFromParams(const ScaledGemmParams<T>* params) {
-  return params->use_fast_accum;
-}
-
-template <typename T, typename ParamsT>
-const void* GetAScalePointerFromParams(const ParamsT* params) {
+const void* GetAScalePointerFromParams(const GemmStridedBatchedParams<T>* params) {
   return nullptr;
 }
 
@@ -203,8 +228,13 @@ const void* GetAScalePointerFromParams(const ScaledGemmParams<T>* params) {
   return params->a_scale_ptr;
 }
 
-template <typename T, typename ParamsT>
-const void* GetBScalePointerFromParams(const ParamsT* params) {
+template <typename T>
+const void* GetBScalePointerFromParams(const GemmParams<T>* params) {
+  return nullptr;
+}
+
+template <typename T>
+const void* GetBScalePointerFromParams(const GemmStridedBatchedParams<T>* params) {
   return nullptr;
 }
 
@@ -213,8 +243,13 @@ const void* GetBScalePointerFromParams(const ScaledGemmParams<T>* params) {
   return params->b_scale_ptr;
 }
 
-template <typename T, typename ParamsT>
-const void* GetDScalePointerFromParams(const ParamsT* params) {
+template <typename T>
+const void* GetDScalePointerFromParams(const GemmParams<T>* params) {
+  return nullptr;
+}
+
+template <typename T>
+const void* GetDScalePointerFromParams(const GemmStridedBatchedParams<T>* params) {
   return nullptr;
 }
 
@@ -223,8 +258,13 @@ const void* GetDScalePointerFromParams(const ScaledGemmParams<T>* params) {
   return params->c_scale_ptr;
 }
 
-template <typename T, typename ParamsT>
-const void* GetBiasPointerFromParams(const ParamsT* params) {
+template <typename T>
+const void* GetBiasPointerFromParams(const GemmParams<T>* params) {
+  return nullptr;
+}
+
+template <typename T>
+const void* GetBiasPointerFromParams(const GemmStridedBatchedParams<T>* params) {
   return nullptr;
 }
 
@@ -233,8 +273,13 @@ const void* GetBiasPointerFromParams(const ScaledGemmParams<T>* params) {
   return params->bias_ptr;
 }
 
-template <typename T, typename ParamsT>
-hipDataType GetBiasTypeFromParams(const ParamsT* params) {
+template <typename T>
+hipDataType GetBiasTypeFromParams(const GemmParams<T>* params) {
+  return HIP_R_32F;
+}
+
+template <typename T>
+hipDataType GetBiasTypeFromParams(const GemmStridedBatchedParams<T>* params) {
   return HIP_R_32F;
 }
 
@@ -358,7 +403,6 @@ class HipblasltGemmOp : public Callable<ParamsT> {
 
       float alpha = GetAlphaFromParams<CT>(params);
       float beta = GetBetaFromParams<CT>(params);
-      //bool use_fast_accum = GetFastAccuModeFromParams<CT>(params);
 
       hipblasLtMatrixLayout_t mat_a, mat_b, mat_c;
       if (opa == HIPBLAS_OP_N) {
