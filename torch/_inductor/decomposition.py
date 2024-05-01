@@ -103,7 +103,7 @@ def register_decomposition(ops):
 
 
 # TODO: for now, inductor doesn't handle asserts
-# because the condition is symbool -> tensor in the graph.
+# because the condition is symbol -> tensor in the graph.
 @register_decomposition([aten._assert_async.msg])
 def assert_async_msg_decomp(tensor, msg):
     return
@@ -728,7 +728,7 @@ def index_reduce(
         return out / counts if true_division else out // counts
 
     if use_scatter_fallback(
-        "aten.scatter_reduce_",
+        aten.scatter_reduce_.two,
         reduction_type,
         self.dtype,
         src.dtype,

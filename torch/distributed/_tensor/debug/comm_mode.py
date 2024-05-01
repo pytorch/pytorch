@@ -8,6 +8,7 @@ from torch.utils._python_dispatch import TorchDispatchMode
 
 funcol_native = torch.ops._c10d_functional
 funcol_py = torch.ops.c10d_functional
+funcol_autograd = torch.ops._c10d_functional_autograd
 
 NATIVE_TO_PY_MAPPING = {
     funcol_native.all_gather_into_tensor: funcol_py.all_gather_into_tensor,
@@ -17,6 +18,8 @@ NATIVE_TO_PY_MAPPING = {
     funcol_native.broadcast: funcol_py.broadcast,
     funcol_native.reduce_scatter_tensor: funcol_py.reduce_scatter_tensor,
     funcol_native.reduce_scatter_tensor_coalesced: funcol_py.reduce_scatter_tensor_coalesced,
+    # functional ops
+    funcol_autograd.all_to_all_single: funcol_py.all_to_all_single,
 }
 
 
@@ -46,6 +49,8 @@ class CommDebugMode(TorchDispatchMode):
         for native_op, py_op in NATIVE_TO_PY_MAPPING.items():
             self.comm_registry.add(native_op)
             self.comm_registry.add(py_op)
+
+        self.comm_registry.add(torch.ops._dtensor.shard_dim_alltoall)
 
     def get_total_counts(self) -> int:
         return sum(self.comm_counts.values())

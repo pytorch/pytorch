@@ -239,7 +239,12 @@ struct alignas(1) Float8_e4m3fn {
   inline C10_HOST_DEVICE bool isnan() const;
 };
 
-C10_API std::ostream& operator<<(std::ostream& out, const Float8_e4m3fn& value);
+C10_API inline std::ostream& operator<<(
+    std::ostream& out,
+    const Float8_e4m3fn& value) {
+  out << (float)value;
+  return out;
+}
 
 } // namespace c10
 

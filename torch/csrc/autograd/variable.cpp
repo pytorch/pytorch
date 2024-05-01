@@ -364,16 +364,6 @@ void bump_version(const Variable& self) {
   self.unsafeGetTensorImpl()->bump_version();
 }
 
-void forbid_in_autograd(const Variable& self) {
-  TORCH_CHECK(
-      self.defined(), "cannot call forbid_in_autograd() on undefined tensor");
-  auto new_grad_fn = std::shared_ptr<torch::autograd::Error>(
-      new torch::autograd::Error(
-          "Cannot backprop through Error node, file a bug in PyTorch"),
-      torch::autograd::deleteNode);
-  torch::autograd::set_history(self, new_grad_fn);
-}
-
 const c10::VariableVersion& version_counter(const Variable& self) {
   TORCH_CHECK(
       self.defined(), "cannot call version_counter() on undefined tensor");

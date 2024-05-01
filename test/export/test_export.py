@@ -10,6 +10,7 @@ import warnings
 from contextlib import contextmanager
 from dataclasses import dataclass
 from re import escape
+from typing import Dict, List
 
 import torch
 import torch._dynamo as torchdynamo
@@ -124,11 +125,23 @@ def foo_functional(x):
     return a.cos()
 
 
+@dataclass
+class Inp:
+    x: Tensor
+    y: List[Tensor]
+    z: Dict[str, Tensor]
+
+
 NON_STRICT_SUFFIX = "_non_strict"
+RETRACEABILITY_SUFFIX = "_retraceability"
 
 
 def is_non_strict_test(test_name):
     return test_name.endswith(NON_STRICT_SUFFIX)
+
+
+def is_retracebility_test(test_name):
+    return test_name.endswith(RETRACEABILITY_SUFFIX)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
@@ -1051,7 +1064,6 @@ class TestExport(TestCase):
         ):
             _ = export(foo, inputs, dynamic_shapes=((dx, 9), (dy, 4), (3, 3)))
 
-    @testing.expectedFailurePreDispatchRunDecomp  # T183703911
     def test_dim_1_2(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -1069,7 +1081,6 @@ class TestExport(TestCase):
         self.assertEqual(vr.lower, 1)
         self.assertEqual(vr.upper, 2)
 
-    @testing.expectedFailurePreDispatchRunDecomp  # T183703911
     def test_derived_dim_1_2(self):
         class Bar(torch.nn.Module):
             def forward(self, x, y):
@@ -1086,6 +1097,86 @@ class TestExport(TestCase):
         range_upper_bounds = sorted(vr.upper for vr in ep.range_constraints.values())
         self.assertEqual(range_lower_bounds, [1, 2])
         self.assertEqual(range_upper_bounds, [2, 3])
+
+    def test_dynamic_shapes_builder_basic(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y, z):
+                return x + y[0] + z["k"]
+
+        m = M()
+
+        x = torch.randn(4)
+        y = [torch.randn(4)]
+        z = {"k": torch.randn(4)}
+        args = (x, y, z)
+
+        shapes_collection = torch.export.ShapesCollection()
+        dim = torch.export.Dim("dim", max=10)
+        shapes_collection[x] = (dim,)
+        shapes_collection[y[0]] = (dim,)
+        shapes_collection[z["k"]] = (dim,)
+
+        ep = export(m, args, dynamic_shapes=shapes_collection)
+        sym = next(iter(ep.range_constraints.keys()))
+        for node in ep.graph.nodes:
+            if node.op == "placeholder":
+                self.assertEqual(str(tuple(node.meta["val"].shape)), f"({sym},)")
+
+    def test_dynamic_shapes_builder_kwargs(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y, z):
+                return x + y[0] + z["k"]
+
+        m = M()
+
+        x = torch.randn(4)
+        y = [torch.randn(4)]
+        z = {"k": torch.randn(4)}
+        args = (x,)
+        kwargs = {"z": z, "y": y}
+
+        shapes_collection = torch.export.ShapesCollection()
+        dim = torch.export.Dim("dim", max=10)
+        shapes_collection[x] = (dim,)
+        shapes_collection[y[0]] = (dim,)
+        shapes_collection[z["k"]] = (dim,)
+
+        ep = export(m, args, kwargs=kwargs, dynamic_shapes=shapes_collection)
+        sym = next(iter(ep.range_constraints.keys()))
+        for node in ep.graph.nodes:
+            if node.op == "placeholder":
+                self.assertEqual(str(tuple(node.meta["val"].shape)), f"({sym},)")
+
+    # retracing doesn't seem to like dataclass registration,
+    # raising a dynamo error in fx_pytree.tree_flatten_spec
+    @testing.expectedFailureRetraceability
+    def test_dynamic_shapes_builder_pytree(self):
+        torch.export.register_dataclass(
+            Inp,
+            serialized_type_name="test_dynamic_shapes_builder_pytree.Inp",
+        )
+
+        class M(torch.nn.Module):
+            def forward(self, inp: Inp):
+                return inp.x + inp.y[0] + inp.z["k"]
+
+        m = M()
+        x = torch.randn(4)
+        y = [torch.randn(4)]
+        z = {"k": torch.randn(4)}
+        args = (Inp(x, y, z),)
+
+        shapes_collection = torch.export.ShapesCollection()
+        dim = torch.export.Dim("dim", max=10)
+        shapes_collection[x] = (dim,)
+        shapes_collection[y[0]] = (dim,)
+        shapes_collection[z["k"]] = (dim,)
+
+        ep = export(m, args, dynamic_shapes=shapes_collection.dynamic_shapes(m, args))
+        sym = next(iter(ep.range_constraints.keys()))
+        for node in ep.graph.nodes:
+            if node.op == "placeholder":
+                self.assertEqual(str(tuple(node.meta["val"].shape)), f"({sym},)")
 
     def test_raise_user_error_when_guard_on_data_dependent_operation(self):
         class M(torch.nn.Module):
@@ -1534,7 +1625,7 @@ class TestExport(TestCase):
                 return torch.matmul(inputs[0], inputs[1])
 
         foo = Foo()
-        inputs = ((torch.randn(10, 2, 3), torch.randn(10, 3, 4)),)
+        inputs = ([torch.randn(10, 2, 3), torch.randn(10, 3, 4)],)
         batch = Dim("batch")
         efoo = export(
             foo, inputs, dynamic_shapes={"inputs": [{0: batch} for _ in range(2)]}
@@ -1550,6 +1641,11 @@ class TestExport(TestCase):
         self.assertEqual(efoo.module()(*inputs).shape, foo(*inputs).shape)
 
         # pass dynamic shapes of inputs [dataclass]
+
+        # TODO(avik): This part of the test should have failed both serde and retracing
+        # but these failures are hidden because of the local import of `export` in this test.
+        # The serde failure is benign, and easily avoided by moving the dataclass definition
+        # to the top-level. OTOH the retracing failure needs further investigation.
         @dataclass
         class DataClass:
             a: Tensor
@@ -1899,6 +1995,50 @@ class TestExport(TestCase):
             ):
                 _ = export(mod, inp, strict=True)
 
+    def test_device_to_static(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return x.to("cpu")
+
+        ep = export(Module(), (torch.tensor(1, device="cpu"),))
+        ops = []
+        for node in ep.graph.nodes:
+            if node.op == "call_function":
+                ops.append(node.target)
+        self.assertGreater(len(ops), 0)
+        for op in ops:
+            self.assertIn(op, (torch.ops.aten._to_copy.default,))
+
+    def test_device_to_dynamic(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return x.to("cpu")
+
+        ep = export(
+            Module(),
+            (torch.tensor([1, 2], device="cpu"),),
+            dynamic_shapes={"x": {0: Dim("i")}},
+        )
+        ops = []
+        for node in ep.graph.nodes:
+            if node.op == "call_function":
+                ops.append(node.target)
+        self.assertGreater(len(ops), 0)
+        for op in ops:
+            self.assertIn(op, (torch.ops.aten._to_copy.default,))
+
+    def test_device_to_mutation(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                y = x.to("cpu")
+                y.add_(1)
+                return y, x
+
+        with self.assertRaisesRegex(
+            RuntimeError, "cannot mutate tensors with frozen storage"
+        ):
+            export(Module(), (torch.tensor(1, device="cpu"),))
+
     def test_module(self):
         class MyLinear(torch.nn.Module):
             def __init__(self):
@@ -2047,8 +2187,8 @@ class TestExport(TestCase):
         self.assertExpectedInline(
             str(gm.code).strip(),
             """\
-def forward(self, arg_0):
-    x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+def forward(self, x):
+    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     conv_weight = self.conv.weight
     conv_bias = self.conv.bias
     bn_weight = self.bn.weight
@@ -2066,8 +2206,8 @@ def forward(self, arg_0):
         self.assertExpectedInline(
             str(gm_train.code).strip(),
             """\
-def forward(self, arg_0):
-    x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+def forward(self, x):
+    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     conv_weight = self.conv.weight
     conv_bias = self.conv.bias
     bn_weight = self.bn.weight
@@ -2250,7 +2390,6 @@ def forward(self, arg_0):
             )
         )
 
-    @testing.expectedFailureNonStrict  # non-strict does not add deferred runtime assertions
     @testing.expectedFailureSerDerPreDispatch  # .item call becomes aten.item in predispatch IR
     @testing.expectedFailurePreDispatchRunDecomp  # assert name is still referring to item
     def test_automatic_constrain_size(self):
@@ -2261,10 +2400,13 @@ def forward(self, arg_0):
 
         ep = export(M(), (torch.tensor(1), torch.ones(4, 5)))
 
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"_local_scalar_dense is outside of inline constraint \[0, 9223372036854775806\]",
-        ):
+        if is_non_strict_test(self._testMethodName):
+            error_msg = r"Runtime assertion failed for _local_scalar_dense >= 0"
+        elif is_retracebility_test(self._testMethodName):
+            error_msg = r"Runtime assertion failed for _local_scalar_dense_default >= 0"
+        else:
+            error_msg = "_local_scalar_dense is outside of inline constraint \[0, 9223372036854775806\]."
+        with self.assertRaisesRegex(RuntimeError, error_msg):
             _ = ep.module()(torch.tensor(-1), torch.randn(4, 5))
 
         self.assertTrue(
@@ -2618,6 +2760,17 @@ def forward(self, arg_0):
         self.assertTrue(
             torch.allclose(ep.module()(torch.ones(6, 4)), Foo()(torch.ones(6, 4)))
         )
+
+    def test_aten_lift_fresh_copy(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aten.lift_fresh_copy(x)
+
+        ep = export(M(), (torch.ones(6, 4),))
+        found = False
+
+        op = "torch.ops.aten.clone.default"
+        FileCheck().check_count(op, 1, exactly=True).run(ep.graph_module.code)
 
     def test_cond_buffers(self):
         class M(torch.nn.Module):
@@ -3972,6 +4125,32 @@ def forward(self, b_t, x, y):
         ][0]
         self.assertEqual(op_node.target._name, "aten::add.Tensor")
 
+    @testing.expectedFailureRetraceability
+    def test_layer_sharing(self):
+        N, C, H, W = 1, 2, 2, 3
+
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                layer = torch.nn.LayerNorm([C, H, W])
+                self.norms = torch.nn.ModuleList(
+                    [
+                        layer,
+                        layer,
+                    ]
+                )
+
+            def forward(self, x):
+                for norm in self.norms:
+                    x = norm(x)
+                return x
+
+        m = Module()
+        copied_m = copy.deepcopy(m)
+        ep = export(copied_m, (torch.randn(N, C, H, W),))
+        self.assertEqual(copied_m.state_dict(), m.state_dict())
+        self.assertEqual(ep.state_dict, m.state_dict())
+
     def test_non_persistent_buffer(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -4379,9 +4558,6 @@ def forward(self, x):
         ]
         self.assertEqual(expected_getattr_names, real_getattr_names)
 
-    # original input names aren't retraceable:
-    # compilation will succeed, but names won't match forward() signature.
-    @testing.expectedFailureRetraceability
     def test_constant_input_naming(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y, div="floor"):
