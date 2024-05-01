@@ -318,6 +318,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
                         else:
                             arg.items.append(SourcelessBuilder.create(tx, val))
 
+
     def create_finalizer(self, tx):
         names_to_delete = self.static_tensor_names
         value = self.value
