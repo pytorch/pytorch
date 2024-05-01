@@ -249,6 +249,38 @@ def create_setup_with(target) -> Instruction:
     return create_instruction(opname, target=target)
 
 
+def create_swap(n) -> List[Instruction]:
+    if sys.version_info >= (3, 11):
+        return [create_instruction("SWAP", arg=n)]
+    # in Python < 3.11, SWAP is a macro that expands to multiple instructions
+    if n == 1:
+        return []
+    """
+    e.g. swap "a" and "b" in this stack:
+    0 a 1 2 3 b
+    0 a [1 2 3 b]
+    0 a [1 2 3 b] n-1
+    0 a [1 2 3 b] b
+    0 b a [1 2 3 b]
+    0 b a [1 2 3 b] n-1
+    0 b a [1 2 3 a]
+    0 b [1 2 3 a] a
+    0 b [1 2 3 a]
+    0 b 1 2 3 a
+    """
+    return [
+        create_instruction("BUILD_LIST", arg=n - 1),
+        create_instruction("LOAD_CONST", argval=n - 1),
+        create_instruction("BINARY_SUBSCR"),
+        create_instruction("ROT_THREE"),
+        create_instruction("LOAD_CONST", argval=n - 1),
+        create_instruction("STORE_SUBSCR"),
+        create_instruction("ROT_TWO"),
+        create_instruction("POP_TOP"),
+        create_instruction("UNPACK_SEQUENCE"),
+    ]
+
+
 def lnotab_writer(
     lineno: int, byteno: int = 0
 ) -> Tuple[List[int], Callable[[int, int], None]]:

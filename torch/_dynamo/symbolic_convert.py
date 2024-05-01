@@ -37,6 +37,7 @@ from .bytecode_transformation import (
     create_call_function,
     create_instruction,
     create_jump_absolute,
+    create_swap,
     get_code_keys,
     Instruction,
     is_generator,
@@ -2294,7 +2295,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                 stack_ctx_vars.append((i, tuple(ctx.target_values)))
                 # Replace the current stack var with the context class
                 ctx.reconstruct_type(cg)
-                cg.append_output(create_instruction("SWAP", arg=len(self.stack) - i))
+                cg.extend_output(create_swap(len(self.stack) - i + 1))
                 cg.append_output(create_instruction("POP_TOP"))
 
         argnames_ctx_vars = []
