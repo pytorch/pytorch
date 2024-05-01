@@ -832,6 +832,7 @@ def make_propagate_real_tensors_cls(cls):
         "_propagate_real_tensors",
         (torch._functorch.config, "fake_tensor_propagate_real_tensors", True),
         xfail_prop="_expected_failure_propagate_real_tensors",
+        decorator=skipIfTorchDynamo("propagate_real_tensors affects Dynamo"),
     )
     cls.__file__ = __file__
     cls.__module__ = __name__
@@ -1351,8 +1352,7 @@ class FakeTensorPropTest(TestCase):
                 self.assertTrue(failed)
 
 
-    # Propagate real tensors doesn't work with fake-on-fake
-    @expectedFailurePropagateRealTensors
+    @expectedFailurePropagateRealTensors  # Propagate real tensors doesn't work with fake-on-fake
     def test_fake_tensor_prop_on_nn_module_with_optional_args(self):
         class OptionalArgumentInBetween(torch.nn.Module):
             def __init__(self):
