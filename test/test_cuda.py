@@ -17,7 +17,6 @@ from copy import deepcopy
 from itertools import product
 from random import randint
 
-import json
 import torch
 import torch.cuda
 
