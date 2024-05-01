@@ -56,7 +56,7 @@ endif()
 
 # This define is needed to preserve behavior given anticpated changes to cccl/thrust
 # https://nvidia.github.io/libcudacxx/standard_api/numerics_library/complex.html
-string(APPEND CMAKE_CUDA_FLAGS "-DLIBCUDACXX_ENABLE_SIMPLIFIED_COMPLEX_OPERATIONS")
+string(APPEND CMAKE_CUDA_FLAGS " -DLIBCUDACXX_ENABLE_SIMPLIFIED_COMPLEX_OPERATIONS")
 
 if(LINUX)
   include(cmake/CheckAbi.cmake)
