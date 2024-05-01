@@ -8,6 +8,7 @@ from typing import (
     Callable,
     cast,
     Dict,
+    Generator,
     Iterable,
     List,
     no_type_check,
@@ -201,7 +202,7 @@ class _EXTRA_STATE:
 def _iterate_valid_model_state(model):
     visited_modules: Set[nn.Module] = set()
 
-    def recurse(module: nn.Module, curr_fqn: str) -> Tuple[str, Any]:
+    def recurse(module: nn.Module, curr_fqn: str) -> Generator:
         visited_modules.add(module)
 
         curr_fqn = f"{curr_fqn}." if curr_fqn else ""
