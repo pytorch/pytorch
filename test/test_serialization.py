@@ -27,9 +27,14 @@ from torch.serialization import check_module_version_greater_or_equal, get_defau
 from torch.testing._internal.common_utils import (
     IS_FILESYSTEM_UTF8_ENCODING, TemporaryDirectoryName,
     TestCase, IS_WINDOWS, TEST_DILL, run_tests, download_file, BytesIOContext, TemporaryFileName,
-    parametrize, instantiate_parametrized_tests, AlwaysWarnTypedStorageRemoval)
+    parametrize, instantiate_parametrized_tests, AlwaysWarnTypedStorageRemoval, serialTest)
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_dtype import all_types_and_complex_and
+
+if not IS_WINDOWS:
+    from mmap import MAP_SHARED, MAP_PRIVATE
+else:
+    MAP_SHARED, MAP_PRIVATE = None, None
 
 # These tests were all copied from `test/test_torch.py` at some point, so see
 # the actual blame, see this revision
@@ -924,7 +929,7 @@ class TestSerialization(TestCase, SerializationMixin):
             test(fname)
 
         if IS_FILESYSTEM_UTF8_ENCODING:
-            with TemporaryDirectoryName(suffix='非ASCIIパス') as dname:
+            with TemporaryDirectoryName(suffix='\u975eASCII\u30d1\u30b9') as dname:
                 with TemporaryFileName(dir=dname) as fname:
                     test(fname)
 
@@ -937,6 +942,7 @@ class TestSerialization(TestCase, SerializationMixin):
             torch.load(f)
 
     # Ensure large zip64 serialization works properly
+    @serialTest()
     def test_serialization_2gb_file(self):
         # Run GC to clear up as much memory as possible before running this test
         gc.collect()
@@ -981,10 +987,14 @@ class TestSerialization(TestCase, SerializationMixin):
             lr_scheduler_state = torch.load(f)
 
         self.assertEqual(lr_scheduler_state['base_lrs'], lr_scheduler.base_lrs)
-        self.assertFalse(hasattr(lr_scheduler_state['anneal_func'], '__self__'))  # check method is not bound
+        if 'anneal_func' in lr_scheduler_state:
+            self.assertFalse(hasattr(lr_scheduler_state['anneal_func'], '__self__'))  # check method is not bound
+        else:
+            self.assertTrue('_anneal_func_type' in lr_scheduler_state)
         self.assertTrue(size < 1024 * 1024)  # Must be less than 1MB
 
-    def test_serialization_python_attr(self):
+    @parametrize('weights_only', (True, False))
+    def test_serialization_python_attr(self, weights_only):
         def _test_save_load_attr(t):
             t.foo = 'foo'
             t.pi = 3.14
@@ -992,7 +1002,7 @@ class TestSerialization(TestCase, SerializationMixin):
             with BytesIOContext() as f:
                 torch.save(t, f)
                 f.seek(0)
-                loaded_t = torch.load(f)
+                loaded_t = torch.load(f, weights_only=weights_only)
 
             self.assertEqual(t, loaded_t)
             self.assertEqual(t.foo, loaded_t.foo)
@@ -3949,6 +3959,32 @@ class TestSerialization(TestCase, SerializationMixin):
             for v in result.values():
                 self.assertTrue(v.is_cuda)
 
+    def test_serialization_mmap_loading_options(self):
+        if IS_WINDOWS:
+            with self.assertRaisesRegex(RuntimeError, "Changing the default mmap options is currently not supported"):
+                torch.serialization.set_default_mmap_options(2)
+            return
+        m = torch.nn.Linear(3, 5)
+        sd = m.state_dict()
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(sd, f)
+            # with MmapVisibility.MAP_PRIVATE, should not be able to modify file
+            sd_loaded = torch.load(f.name, mmap=True)
+            sd_loaded['weight'][0][0] = 0
+            sd_loaded2 = torch.load(f.name, mmap=True)
+            self.assertEqual(sd_loaded2['weight'], sd['weight'])
+            # with MmapVisibility.MAP_SHARED, should be able to modify file
+            torch.serialization.set_default_mmap_options(MAP_SHARED)
+            try:
+                sd_loaded = torch.load(f.name, mmap=True)
+                sd_loaded['weight'][0][0] = 0
+                sd_loaded2 = torch.load(f.name, mmap=True)
+                self.assertNotEqual(sd_loaded2['weight'], sd['weight'])
+                self.assertEqual(sd_loaded2['weight'][0][0].item(), 0)
+                self.assertEqual(sd_loaded2['weight'], sd_loaded['weight'])
+            finally:
+                torch.serialization.set_default_mmap_options(MAP_PRIVATE)
+
     @parametrize('dtype', (torch.float8_e5m2, torch.float8_e4m3fn, torch.complex32))
     @parametrize('weights_only', (True, False))
     def test_serialization_dtype(self, dtype, weights_only):
@@ -3963,7 +3999,6 @@ class TestSerialization(TestCase, SerializationMixin):
             y['odd'][0] = torch.tensor(0.25, dtype=dtype)
             y['even'][0] = torch.tensor(-0.25, dtype=dtype)
             self.assertEqual(y['x'][:2].to(dtype=torch.float32), torch.tensor([-0.25, 0.25]))
-
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):

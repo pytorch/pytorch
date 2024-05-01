@@ -28,6 +28,16 @@ except ImportError:
     import test_functions
 
 
+_variable = 0
+_variable1 = 0
+
+
+def update_global():
+    global _variable, _variable1
+    _variable += 1
+    _variable1 += 1
+
+
 class BasicModule(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -2214,6 +2224,33 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertTrue(grad_sizes.keys() == backward_hook_handles.keys())
         self.assertTrue(pre_grad_sizes.keys() == pre_backward_hook_handles.keys())
 
+    def test_udo_instance_method_as_hook(self):
+        class CustomClass:
+            def __init__(self, module):
+                self.module = module
+                self.handle = self.module.register_forward_pre_hook(
+                    self.func1, prepend=True, with_kwargs=True
+                )
+
+            def func1(self, module, args, kwargs):
+                return (args[0] + 1,), kwargs
+
+            def __call__(self, x):
+                return self.module(x)
+
+        class ToyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x * x
+
+        model = ToyModel()
+        x = torch.zeros((3, 4))
+        obj = CustomClass(model)
+        out = torch.compile(obj, fullgraph=True)(x)
+        self.assertEqual(out, (x + 1) * (x + 1))
+
     def test_module_dict_iter_name(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -2407,6 +2444,22 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         compiled_model(input)
 
         self.assertEqual(model.x, compiled_model.x)
+
+    def test_globals_change_in_other_file(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            update_global()
+            a = test_functions.update_global(x)
+            # Ensure that the updated global values are read
+            return x * a * (_variable + _variable1 + test_functions._variable)
+
+        res = fn(torch.ones(10))
+        self.assertEqual(_variable, 1)
+        self.assertEqual(_variable1, 1)
+        # Ensure that the reconstructed bytecode updates the global value in the
+        # other file.
+        self.assertEqual(test_functions._variable, 1)
+        self.assertEqual(res, 3 * torch.ones(10))
 
 
 if __name__ == "__main__":

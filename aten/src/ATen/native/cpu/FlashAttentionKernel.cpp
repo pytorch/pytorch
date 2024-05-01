@@ -493,15 +493,15 @@ void cpu_flash_attention_backward(
   scalar_t* grad_q_data = grad_q.data_ptr<scalar_t>();
   scalar_t* grad_k_data = grad_k.data_ptr<scalar_t>();
   scalar_t* grad_v_data = grad_v.data_ptr<scalar_t>();
-  scalar_t* grad_out_data = grad_out.data_ptr<scalar_t>();
-  scalar_t* q_data = query.data_ptr<scalar_t>();
-  scalar_t* k_data = key.data_ptr<scalar_t>();
-  scalar_t* v_data = value.data_ptr<scalar_t>();
-  accum_t* mask_data = has_attn_mask
-      ? attn_mask.value().data_ptr<accum_t>()
+  const scalar_t* grad_out_data = grad_out.const_data_ptr<scalar_t>();
+  const scalar_t* q_data = query.const_data_ptr<scalar_t>();
+  const scalar_t* k_data = key.const_data_ptr<scalar_t>();
+  const scalar_t* v_data = value.const_data_ptr<scalar_t>();
+  const accum_t* mask_data = has_attn_mask
+      ? attn_mask.value().const_data_ptr<accum_t>()
       : nullptr;
-  scalar_t* out_data = out.data_ptr<scalar_t>();
-  accum_t* lse_data = logsumexp.data_ptr<accum_t>();
+  const scalar_t* out_data = out.const_data_ptr<scalar_t>();
+  const accum_t* lse_data = logsumexp.const_data_ptr<accum_t>();
   accum_t* buf_data = buf.data_ptr<accum_t>();
   scalar_t* buf_reduced_data = is_reduced_type ? buf_reduced.data_ptr<scalar_t>() : nullptr;
 

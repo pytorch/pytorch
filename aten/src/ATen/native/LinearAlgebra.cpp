@@ -2839,10 +2839,16 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
   }
 
   if (is_reduce_over_1D_vector) {
-    if (ord != 0.0) {
-      keepdim ? at::abs_outf(self, const_cast<Tensor&>(result)) : at::abs_outf(self.squeeze(reduce_dim), const_cast<Tensor&>(result));
+    Tensor self_;
+    if (opt_dtype.has_value()) {
+      self_ = self.to(*opt_dtype);
     } else {
-      keepdim ? at::ne_outf(self, 0, const_cast<Tensor&>(result)) : at::ne_outf(self.squeeze(reduce_dim), 0, const_cast<Tensor&>(result));
+      self_ = self;
+    }
+    if (ord != 0.0) {
+      keepdim ? at::abs_outf(self_, const_cast<Tensor&>(result)) : at::abs_outf(self_.squeeze(reduce_dim), const_cast<Tensor&>(result));
+    } else {
+      keepdim ? at::ne_outf(self_, 0, const_cast<Tensor&>(result)) : at::ne_outf(self_.squeeze(reduce_dim), 0, const_cast<Tensor&>(result));
     }
     return;
   }
@@ -3479,8 +3485,8 @@ Tensor _weight_int4pack_mm_cpu(
   auto N = B.size(0) * kNTileSize;
   auto K = A.size(1);
 
-  TORCH_CHECK(A.dtype() == kBFloat16,
-      __func__, " : expect A to be bfloat16 tensor.");
+  TORCH_CHECK(A.dtype() == kBFloat16 || A.dtype() == kHalf || A.dtype() == kFloat,
+      __func__, " : expect A to be either 32-bit or 16-bit float tensor.");
   TORCH_CHECK(A.is_contiguous(),
       __func__, " : expect A to be contiguous.");
   TORCH_CHECK(A.dim() == 2,
@@ -3516,8 +3522,8 @@ Tensor _weight_int8pack_mm_cpu(
   auto N = B.size(0);
   auto K = A.size(1);
 
-  TORCH_CHECK(A.dtype() == kBFloat16,
-      __func__, " : expect A to be bfloat16 tensor.");
+  TORCH_CHECK(A.dtype() == kBFloat16 || A.dtype() == kHalf || A.dtype() == kFloat,
+      __func__, " : expect A to be either 32-bit or 16-bit float tensor.");
   TORCH_CHECK(A.is_contiguous(),
       __func__, " : expect A to be contiguous.");
   TORCH_CHECK(A.dim() == 2,

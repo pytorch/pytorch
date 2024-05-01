@@ -28,7 +28,7 @@ import torch
 import torch._logging
 from torch._guards import compile_context, CompileContext, CompileId, tracing
 from torch._logging import structured
-from torch._utils_internal import compiletime_sl_profile_meta, signpost_event
+from torch._utils_internal import compile_time_strobelight_meta, signpost_event
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     GuardOnDataDependentSymNode,
@@ -452,7 +452,7 @@ def register_bytecode_hook(hook: BytecodeHook) -> RemovableHandle:
     return handle
 
 
-@compiletime_sl_profile_meta(phase_name="_compile")
+@compile_time_strobelight_meta(phase_name="_compile")
 @_use_lazy_graph_module(config.use_lazy_graph_module)
 @maybe_cprofile
 def _compile(
@@ -547,6 +547,21 @@ def _compile(
         nonlocal dynamo_time_before_restart
         nonlocal restart_reasons
         last_attempt_start_time = start_time = time.time()
+
+        def log_bytecode(prefix, name, filename, line_no, code):
+            if bytecode_log.isEnabledFor(logging.DEBUG):
+                bytecode_log.debug(
+                    format_bytecode(prefix, name, filename, line_no, code)
+                )
+
+        log_bytecode(
+            "ORIGINAL BYTECODE",
+            code.co_name,
+            code.co_filename,
+            code.co_firstlineno,
+            code,
+        )
+
         for attempt in itertools.count():
             CompileContext.get().attempt = attempt
             try:
@@ -576,19 +591,6 @@ def _compile(
                     log.debug("No graph captured with one_graph=True")
                 return None
 
-        def log_bytecode(prefix, name, filename, line_no, code):
-            if bytecode_log.isEnabledFor(logging.DEBUG):
-                bytecode_log.debug(
-                    format_bytecode(prefix, name, filename, line_no, code)
-                )
-
-        log_bytecode(
-            "ORIGINAL BYTECODE",
-            code.co_name,
-            code.co_filename,
-            code.co_firstlineno,
-            code,
-        )
         log_bytecode(
             "MODIFIED BYTECODE",
             code.co_name,
@@ -694,6 +696,7 @@ def _compile(
         fail_reason: Optional[str] = None
         fail_user_frame_filename: Optional[str] = None
         fail_user_frame_lineno: Optional[int] = None
+        guarded_code = None
         try:
             guarded_code = compile_inner(code, one_graph, hooks, transform)
             return guarded_code
@@ -799,6 +802,7 @@ def _compile(
                 compliant_custom_ops,
                 restart_reasons,
                 dynamo_time_before_restart,
+                guarded_code is not None,
             )
             record_compilation_metrics(metrics)
             torch._dynamo.callback_handler.run_end_callbacks()
@@ -848,14 +852,17 @@ def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
                 # Log this message in the graph break. Also use the string
                 # "skip: " to tell that the whole frame is falling back to
                 # eager.
-                with compile_context(CompileContext(e.compile_id)):  # type: ignore[attr-defined]
-                    user_stack = e.real_stack
-                    user_stack_formatted = "".join(traceback.format_list(user_stack))
-                    graph_break_log.debug(
-                        "Graph break: skip: from user code at:\n%s",
-                        user_stack_formatted,
-                        exc_info=True,
-                    )
+                if hasattr(e, "compile_id"):
+                    with compile_context(CompileContext(e.compile_id)):  # type: ignore[attr-defined]
+                        user_stack = e.real_stack
+                        user_stack_formatted = "".join(
+                            traceback.format_list(user_stack)
+                        )
+                        graph_break_log.debug(
+                            "Graph break: skip: from user code at:\n%s",
+                            user_stack_formatted,
+                            exc_info=True,
+                        )
 
             if not config.suppress_errors and not soft_fail:
                 raise
@@ -939,13 +946,12 @@ def catch_errors_wrapper(callback, hooks: Hooks):
                         else "dynamo tracing is disabled"
                     )
                 )
-                if not is_skipfile or config.verbose:
-                    log.debug(
-                        "skipping: %s (reason: %s, file: %s)",
-                        frame.f_code.co_name,
-                        skip_reason,
-                        frame.f_code.co_filename,
-                    )
+                log.debug(
+                    "skipping: %s (reason: %s, file: %s)",
+                    frame.f_code.co_name,
+                    skip_reason,
+                    frame.f_code.co_filename,
+                )
             return None
         if frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__":
             # nametuple constructor

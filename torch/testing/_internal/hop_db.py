@@ -11,7 +11,7 @@ from torch.testing._internal.opinfo.core import (
 )
 from torch.testing._internal.common_dtype import all_types_and, custom_types
 from torch.testing._internal.opinfo.core import DecorateInfo
-from torch.nn.attention._templated_attention import _templated_attention
+from torch.nn.attention._flex_attention import _flex_attention
 
 def sample_inputs_map(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = functools.partial(
@@ -58,7 +58,6 @@ hop_that_doesnt_have_opinfo_test_allowlist = [
     "with_effects",
     "strict_mode",
     "_export_tracepoint",
-    "while_loop",
 ]
 
 torch.library.define(
@@ -109,9 +108,9 @@ def simple_auto_functionalize(x, z):
     return torch.ops.testlib.mutating_custom_op(x, z)
 
 
-def sample_inputs_templated_attention(opinfo, device, dtype, reuires_grad, **kwargs):
+def sample_inputs_flex_attention(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = functools.partial(
-        make_tensor, device=device, dtype=dtype, requires_grad=reuires_grad
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
     )
 
     def score_mod(score, b, h, m, n):
@@ -123,6 +122,24 @@ def sample_inputs_templated_attention(opinfo, device, dtype, reuires_grad, **kwa
         make_arg(2, 2, 64, 8, low=0.1, high=2),
         score_mod,
     )
+
+def sample_inputs_while_loop(opinfo, device, dtype, requires_grad, **kwargs):
+    make_arg = functools.partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=False
+    )
+    yield SampleInput(
+        torch.tensor(3),
+        make_arg(2, 3, 4, low=0.1, high=2),
+    )
+
+def simple_while_loop(iter_t, x):
+    def cond_fn(iter_t, x):
+        return iter_t > 0
+
+    def body_fn(iter_t, x):
+        return iter_t - 1, x.cos()
+
+    return torch._higher_order_ops.while_loop(cond_fn, body_fn, (iter_t, x))
 
 
 hop_db = [
@@ -176,6 +193,19 @@ hop_db = [
         supports_autograd=False,
     ),
     OpInfo(
+        name="while_loop",
+        variant_test_name="simple",
+        op=simple_while_loop,
+        sample_inputs_func=sample_inputs_while_loop,
+        dtypes=all_types_and(torch.bool, torch.half),
+        supports_out=False,
+        check_batched_grad=False,
+        check_batched_gradgrad=False,
+        check_batched_forward_grad=False,
+        check_inplace_batched_forward_grad=False,
+        supports_autograd=False,
+    ),
+    OpInfo(
         name="auto_functionalize",
         variant_test_name="simple",
         op=simple_auto_functionalize,
@@ -189,10 +219,10 @@ hop_db = [
         supports_autograd=False,
     ),
     OpInfo(
-        name="templated_attention",
+        name="flex_attention",
         variant_test_name="simple",
-        op=_templated_attention,
-        sample_inputs_func=sample_inputs_templated_attention,
+        op=_flex_attention,
+        sample_inputs_func=sample_inputs_flex_attention,
         dtypes=custom_types(torch.float16, torch.float32),
         supports_out=False,
         check_batched_grad=False,
@@ -206,4 +236,22 @@ hop_db = [
             DecorateInfo(unittest.expectedFailure, "TestHOP", "test_retrace_export"),
         )
     ),
+    OpInfo(
+        name="flex_attention_backward",
+        variant_test_name="simple",
+        op=_flex_attention,
+        sample_inputs_func=sample_inputs_flex_attention,
+        dtypes=custom_types(torch.float16, torch.float32),
+        supports_out=False,
+        check_batched_grad=False,
+        check_batched_gradgrad=False,
+        check_batched_forward_grad=False,
+        check_inplace_batched_forward_grad=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_aot_export"),
+            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_pre_dispatch_export"),
+            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_serialize_export"),
+            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_retrace_export"),
+        )
+    )
 ]
