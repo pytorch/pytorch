@@ -841,6 +841,15 @@ class IndentedBuffer:
         return res
 
 
+@contextlib.contextmanager
+def restore_stdout_stderr(initial_stdout, initial_stderr):
+    try:
+        yield
+    finally:
+        sys.stdout = initial_stdout
+        sys.stderr = initial_stderr
+
+
 class DeferredLineBase:
     """A line that can be 'unwritten' at a later time"""
 

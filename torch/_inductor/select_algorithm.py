@@ -8,7 +8,6 @@ import sys
 import textwrap
 import time
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
 from io import StringIO
 
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
@@ -41,6 +40,7 @@ from .runtime.runtime_utils import do_bench
 from .utils import (
     get_dtype_size,
     Placeholder,
+    restore_stdout_stderr,
     sympy_dot,
     sympy_index_symbol,
     sympy_product,
@@ -1013,21 +1013,11 @@ class AlgorithmSelectorCache(PersistentCache):
             # different than the original values. we explicitly restore the state
             # here to avoid this issue.
 
-            original_stdout = sys.stdout
-            original_stderr = sys.stderr
-
-            @contextmanager
-            def restore_stdout_stderr():
-                try:
-                    yield
-                finally:
-                    a = sys.stdout
-                    sys.stdout = original_stdout
-                    sys.stderr = original_stderr
-                    print(a)
+            initial_stdout = sys.stdout
+            initial_stderr = sys.stderr
 
             def precompile_with_captured_stdout(choice):
-                with restore_stdout_stderr():
+                with restore_stdout_stderr(initial_stdout, initial_stderr):
                     return choice.precompile()
 
             executor = ThreadPoolExecutor(max_workers=num_workers)
@@ -1039,7 +1029,7 @@ class AlgorithmSelectorCache(PersistentCache):
             from triton.runtime.autotuner import OutOfResources
 
             @functools.lru_cache(None)
-            @restore_stdout_stderr()
+            @restore_stdout_stderr(initial_stdout, initial_stderr)
             def wait_on_futures():
                 counters["inductor"]["select_algorithm_precompile"] += 1
                 try:
