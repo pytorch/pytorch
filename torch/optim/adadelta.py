@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 import torch
 from torch import Tensor
@@ -74,9 +74,16 @@ class Adadelta(Optimizer):
                     )
 
     def _init_group(
-        self, group, params_with_grad, grads, square_avgs, acc_deltas, state_steps
+        self,
+        group: Dict[str, Any],
+        params_with_grad: List[Tensor],
+        grads: List[Tensor],
+        square_avgs: List[Tensor],
+        acc_deltas: List[Tensor],
+        state_steps: List[Tensor],
     ):
         has_complex = False
+        p: Tensor
         for p in group["params"]:
             if p.grad is None:
                 continue
