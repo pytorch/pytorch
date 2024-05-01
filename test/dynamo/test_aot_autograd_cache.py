@@ -1,15 +1,77 @@
 # Owner(s): ["module: dynamo"]
 
+import pickle
+from functools import partial
+
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
 
 import torch._functorch._aot_autograd
+from functorch.compile import (
+    aot_module_simplified,
+    default_decompositions,
+    min_cut_rematerialization_partition,
+)
 from torch._functorch._aot_autograd.autograd_cache import (
     autograd_cache_hash,
     BypassAOTAutogradCache,
+    deserialize_graph_module,
+    serialize_graph_module,
 )
 from torch._functorch._aot_autograd.schemas import AOTConfig
+from torch._subclasses import FakeTensorMode
+
+
+def _get_dynamo_output(fn, inputs):
+    # Reset dynamo between runs
+    torch._dynamo.reset()
+    fx_graph = None
+
+    def compiler(gm, inputs):
+        nonlocal fx_graph
+        fx_graph = gm
+        return gm
+
+    g = torch.compile(fn, backend=compiler, fullgraph=True)
+    result = g(*inputs)
+    return (result, fx_graph)
+
+
+def get_post_autograd_graphs(fn, inps):
+    def extract_graph(fx_g, _, graph_cell):
+        graph_cell[0] = fx_g
+        return fx_g
+
+    (_, post_dynamo) = _get_dynamo_output(fn, inps)
+    fw_graph_cell = [None]
+    bw_graph_cell = [None]
+    aot_module_simplified(
+        post_dynamo,
+        inps,
+        fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
+        bw_compiler=partial(extract_graph, graph_cell=bw_graph_cell),
+        partition_fn=min_cut_rematerialization_partition,
+        decompositions=default_decompositions,
+    )
+    return fw_graph_cell[0], bw_graph_cell[0]
+
+
+class AOTAutogradSerializationTests(torch._dynamo.test_case.TestCase):
+    def test_basic_serialize(self, device="cpu"):
+        def fn(x, y):
+            return x.sin().cos() + y
+
+        fw, _ = get_post_autograd_graphs(fn, [torch.randn(3), torch.randn(3)])
+        fw_serialized = pickle.dumps(serialize_graph_module(fw))
+        # Use a empty FakeTensormode for testing for now
+        with FakeTensorMode():
+            new_fw = deserialize_graph_module(pickle.loads(fw_serialized))
+        self.assertEqual(len(fw.graph.nodes), len(new_fw.graph.nodes))
+        for n1, n2 in zip(fw.graph.nodes, new_fw.graph.nodes):
+            self.assertEqual(n1.op, n2.op)
+            self.assertEqual(str(n1.target), str(n2.target))
+            self.assertEqual(len(n1.args), len(n2.args))
 
 
 class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
@@ -30,24 +92,10 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             enable_log=False,
         )
 
-    def _get_dynamo_output(self, fn, *args, **kwargs):
-        # Reset dynamo between runs
-        torch._dynamo.reset()
-        fx_graph = None
-
-        def compiler(gm, inputs, **kwargs):
-            nonlocal fx_graph
-            fx_graph = gm
-            return gm
-
-        g = torch.compile(fn, backend=compiler, fullgraph=True)
-        result = g(*args, **kwargs)
-        return (result, fx_graph)
-
     def gen_cache_key(self, f, config, inputs=None):
         if inputs is None:
             inputs = [torch.randn(3)]
-        _, fx_g = self._get_dynamo_output(f, *inputs)
+        _, fx_g = _get_dynamo_output(f, inputs)
         return autograd_cache_hash(fx_g, config)
 
     def test_basic_hash_key(self):

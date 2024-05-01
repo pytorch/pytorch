@@ -3,27 +3,35 @@ Utils for caching the outputs of AOTAutograd
 """
 from __future__ import annotations
 
+import dataclasses
+
 import functools
 import logging
 import os
-import dataclasses
-from copy import copy
-from torch._guards import detect_fake_mode
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
-import torch
 import pickle
+import tempfile
+from copy import copy
+from typing import Any, cast, List, Optional
+
+import torch
+from torch._guards import detect_fake_mode
 from torch._inductor.codecache import (
     _ident,
     FxGraphCachePickler,
     get_code_hash,
     get_inductor_root,
-    write_atomic
+    write_atomic,
 )
-import tempfile
+from torch._subclasses.fake_tensor import (
+    extract_tensor_metadata,
+    FakeTensor,
+    TensorMetadata,
+    FakeTensorMode,
+)
 from torch.fx.node import Node
 
 from .schemas import AOTConfig  # noqa: F401
-from typing import cast
+
 
 def fake_tensor_from_meta(tensor_meta):
     fake_mode = detect_fake_mode()
@@ -39,7 +47,6 @@ def fake_tensor_from_meta(tensor_meta):
             ),
         )
 
-
 log = logging.getLogger(__name__)
 
 
@@ -48,9 +55,11 @@ class BypassAOTAutogradCache(Exception):
 
 cache = tempfile.mkdtemp()
 
+
 def cache_dir():
     """Returns the directory where we store AOTAutograd cache entries."""
     return cache
+
 
 def check_node_safe(node: Node):
     """
@@ -165,13 +174,133 @@ def autograd_cache_hash(
     log.debug("FX graph cache hash details for key %s:\n%s", key, details.debug_str())
     return key
 
+
+@dataclasses.dataclass
+class SerializedAOTGraphModule:
+    module: torch.fx.GraphModule
+    node_metas: Dict[Str, Any]
+
+
 @dataclasses.dataclass
 class AOTAutogradCacheEntry:
     """
     A cache entry for a compiled FX graph.
     """
-    fw_module: torch.fx.GraphModule
-    bw_module: Optional[torch.fx.GraphModule] = None
+
+    fw_module: SerializedAOTGraphModule
+    bw_module: Optional[SerializedAOTGraphModule] = None
+
+
+class NodeMetaSerializer:
+    """
+    Convert a node's meta field into a pickleable dictionary
+    """
+
+    SERIALIZABLE_FIELDS = ["tensor_meta", "stack_trace", "seq_nr"]
+
+    @staticmethod
+    def serialize(node_meta):
+        new_meta = {}
+        for key in node_meta:
+            try:
+                if key in NodeMetaSerializer.SERIALIZABLE_FIELDS:
+                    new_meta[key] = node_meta[key]
+                else:
+                    new_meta[key] = getattr(NodeMetaSerializer, f"serialize_{key}")(
+                        node_meta[key]
+                    )
+            except AttributeError as e:
+                raise BypassAOTAutogradCache(
+                    f"No serialization implemented for meta field {key} with value {node_meta[key]}. Implement serialize_{key} and deserialize_{key}"
+                ) from e
+            except Exception as e:
+                raise BypassAOTAutogradCache(
+                    f"Failed serializing meta field {key}"
+                ) from e
+        return new_meta
+
+    @staticmethod
+    def serialize_val(val):
+        # TODO: handle other possible values
+        if not isinstance(val, torch.Tensor):
+            return val
+        return extract_tensor_metadata(val)
+
+    """ TODO: implement serialization for these fields """
+    @staticmethod
+    def serialize_source_fn_stack(val):
+        return None
+
+    @staticmethod
+    def deserialize_source_fn_stack(val):
+        return None
+
+    @staticmethod
+    def serialize_original_aten(val):
+        return None
+
+    @staticmethod
+    def deserialize_original_aten(val):
+        return None
+
+    @staticmethod
+    def serialize_from_node(val):
+        return None
+
+    @staticmethod
+    def deserialize_from_node(val):
+        return None
+
+    @staticmethod
+    def deserialize_val(val):
+        # TODO: handle other possible values
+        if not isinstance(val, TensorMetadata):
+            return val
+        return fake_tensor_from_meta(val)
+
+    @staticmethod
+    def deserialize(serialized_meta):
+        new_meta = {}
+        for key in serialized_meta:
+            try:
+                if key in NodeMetaSerializer.SERIALIZABLE_FIELDS:
+                    new_meta[key] = serialized_meta[key]
+                else:
+                    new_meta[key] = getattr(NodeMetaSerializer, f"deserialize_{key}")(
+                        serialized_meta[key]
+                    )
+            except AttributeError as e:
+                raise BypassAOTAutogradCache(
+                    f"No deserialization implemented for meta field {key}. Implement serialize_{key} and deserialize_{key}"
+                ) from e
+            except Exception as e:
+                raise BypassAOTAutogradCache(
+                    f"Failed deserializing meta field {key}"
+                ) from e
+        return new_meta
+
+
+def serialize_graph_module(module: torch.fx.GraphModule) -> SerializedAOTGraphModule:
+    if module is None:
+        return None
+    module = copy(module)
+    module.recompile()
+    node_metas = {}
+    for node in module.graph.nodes:
+        node_metas[str(node.target)] = NodeMetaSerializer.serialize(node.meta)
+    assert len(module.graph.nodes) == len(node_metas)
+    return SerializedAOTGraphModule(module, node_metas)
+
+
+def deserialize_graph_module(module: SerializedAOTGraphModule) -> torch.fx.GraphModule:
+    if module is None:
+        return None
+    new_module = module.module
+    node_metas = module.node_metas
+    for node in new_module.graph.nodes:
+        node.meta = NodeMetaSerializer.deserialize(node_metas[str(node.target)])
+    new_module.recompile()
+    return new_module
 
 
 class AOTAutogradCache:
@@ -180,6 +309,7 @@ class AOTAutogradCache:
     Cache entries are stored at
         <temp_dir>/<hash-key>/
     """
+
     @staticmethod
     def _get_tmp_dir() -> str:
         """
@@ -193,36 +323,30 @@ class AOTAutogradCache:
         subdir = os.path.join(AOTAutogradCache._get_tmp_dir(), key)
         if not os.path.exists(subdir):
             return None
-        path = os.path.join(subdir, "fw_module")
+        path = os.path.join(subdir, "entry")
         try:
-            (fw_module, node_metas) = pickle.load(open(path, "rb"))
-            for node, meta in zip(fw_module.graph.nodes, node_metas):
-                node.meta = meta
-                if "tensor_meta" in node.meta:
-                    node.meta["val"] = fake_tensor_from_meta(node.meta["tensor_meta"])
-            return fw_module
+            entry: AOTAutogradCacheEntry = pickle.load(open(path, "rb"))
+            fw_module = deserialize_graph_module(entry.fw_module)
+            bw_module = deserialize_graph_module(entry.bw_module)
+            return (fw_module, bw_module)
         except Exception as e:
             print("AOTAutograd cache unable to load compiled graph:", e)
             raise e
 
     @staticmethod
-    def _save(key: str, fw_module, bw_module = None):
+    def _save(key: str, fw_module, bw_module=None):
         """Save forward and backward modules to the cache."""
-        fw_module = copy(fw_module)
-        node_metas = []
-        for node in fw_module.graph.nodes:
-            meta = {}
-            if "tensor_meta" in node.meta:
-                meta["tensor_meta"] = node.meta["tensor_meta"]
-            node_metas.append(meta)
+        serialized_fw = serialize_graph_module(fw_module)
+        serialized_bw = serialize_graph_module(bw_module)
+        entry = AOTAutogradCacheEntry(serialized_fw, serialized_bw)
         try:
-            content = pickle.dumps((fw_module, node_metas))
+            content = pickle.dumps(entry)
         except Exception as e:
             print("AOTAutograd cache unable to serialize compiled graph: %s", e)
-            return
+            raise e
         subdir = os.path.join(AOTAutogradCache._get_tmp_dir(), key)
         if not os.path.exists(subdir):
             os.makedirs(subdir, exist_ok=True)
-        path = os.path.join(subdir, "fw_module")
+        path = os.path.join(subdir, "entry")
         log.warning("Writing AOTAutograd cache entry to %s", path)
         write_atomic(path, content)

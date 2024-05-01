@@ -20,22 +20,6 @@ import torch._dynamo as torchdynamo
 import torch.nn as nn
 import torch.utils._pytree as pytree
 from common_utils import decorate, decorateForModules, skip, skipOps, xfail
-from functorch import grad, jacrev, make_fx, vjp, vmap
-from functorch.compile import (
-    aot_function,
-    aot_module,
-    compiled_function,
-    compiled_module,
-    default_decompositions,
-    default_partition,
-    get_aot_compilation_context,
-    make_boxed_compiler,
-    memory_efficient_fusion,
-    min_cut_rematerialization_partition,
-    nnc_jit,
-    nop,
-)
-from functorch.experimental import control_flow
 from torch._decomp import decomposition_table
 from torch._functorch.aot_autograd import (
     aot_export_joint_simple,
@@ -75,6 +59,23 @@ from torch.testing._internal.optests import (
     aot_autograd_check,
 )
 from torch.testing._internal.two_tensor import TwoTensor, TwoTensorMode
+
+from functorch import grad, jacrev, make_fx, vjp, vmap
+from functorch.compile import (
+    aot_function,
+    aot_module,
+    compiled_function,
+    compiled_module,
+    default_decompositions,
+    default_partition,
+    get_aot_compilation_context,
+    make_boxed_compiler,
+    memory_efficient_fusion,
+    min_cut_rematerialization_partition,
+    nnc_jit,
+    nop,
+)
+from functorch.experimental import control_flow
 
 USE_TORCHVISION = False
 try:
@@ -285,10 +286,7 @@ def is_in_base(t, maybe_tensors):
     return False
 
 
-class TestAOTAutograd(AOTTestCase):
-    # test_mutation will:
-    # - Ensure that inputs are non-leaves, so our graphs can mutate them
-    # - try to mutate outputs of the graph (to ensure that autograd meta is set properly on outputs)
+class AOTAutogradTestCase(AOTTestCase):
     @patch("functorch.compile.config.debug_assert", True)
     def verify_aot_autograd(
         self,
@@ -400,6 +398,12 @@ class TestAOTAutograd(AOTTestCase):
                     self.assertEqual(ref_i.requires_grad, test_i.requires_grad)
                 self.assertEqual(ref_i, test_i)
         return fw_graph_cell[0]
+
+
+class TestAOTAutograd(AOTAutogradTestCase):
+    # test_mutation will:
+    # - Ensure that inputs are non-leaves, so our graphs can mutate them
+    # - try to mutate outputs of the graph (to ensure that autograd meta is set properly on outputs)
 
     def test_non_tensor_and_none_inputs(self):
         # int, None, Tensor
