@@ -3,7 +3,7 @@ import logging
 from typing import Any, List
 
 import torch
-from .. import config, utils
+from .. import config
 from ..lowering import empty_strided, lowerings, register_lowering
 from ..select_algorithm import autotune_select_algorithm, TritonTemplate
 
