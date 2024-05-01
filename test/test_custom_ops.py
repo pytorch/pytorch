@@ -598,6 +598,18 @@ class TestCustomOp(CustomOpTestCaseBase):
 
         self.assertExpectedInline(infer_schema(a), """(Tensor x) -> Tensor""")
 
+        def kwonly1(x: Tensor, *, y: int, z: float) -> Tensor:
+            return torch.empty([])
+
+        self.assertExpectedInline(
+            infer_schema(kwonly1), """(Tensor x, *, SymInt y, float z) -> Tensor"""
+        )
+
+        def kwonly2(*, y: Tensor) -> Tensor:
+            return torch.empty([])
+
+        self.assertExpectedInline(infer_schema(kwonly2), """(*, Tensor y) -> Tensor""")
+
         def b(
             x: Tensor,
             y: int,
@@ -1454,12 +1466,13 @@ class TestCustomOp(CustomOpTestCaseBase):
         @torch.library.impl_abstract(f"{TestCustomOp.test_ns}::foo", lib=self.lib())
         def foo_meta(x):
             ctx = torch.library.get_ctx()
-            ctx.new_dynamic_size(min=1)
+            r = ctx.new_dynamic_size(min=1)
             with self.assertRaisesRegex(ValueError, "greater than or equal to 0"):
                 ctx.new_dynamic_size(min=-1)
             with self.assertRaisesRegex(ValueError, "SymInt"):
                 ctx.new_dynamic_size(max=x.numel())
-            return torch.clone(x)
+            # NB: You must return dynamic sizes!
+            return x.new_empty(r)
 
         x = torch.randn(2, 3, device="cpu")
         op = self.get_op(f"{self.test_ns}::foo")
@@ -2159,6 +2172,96 @@ class TestCustomOpAPI(TestCase):
         self.assertEqual(x, expected)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_kwarg_only_tensors(self):
+        with self.assertRaisesRegex(NotImplementedError, "kwarg-only Tensor args"):
+
+            @torch.library.custom_op("_torch_testing::foo", mutates_args=())
+            def foo(x: Tensor, *, y: int, z: Tensor) -> Tensor:
+                pass
+
+        with self.assertRaisesRegex(NotImplementedError, "kwarg-only Tensor args"):
+
+            @torch.library.custom_op("_torch_testing::foo", mutates_args=())
+            def foo2(x: Tensor, *, y: int, z: Optional[Tensor]) -> Tensor:
+                pass
+
+        with self.assertRaisesRegex(NotImplementedError, "kwarg-only Tensor args"):
+
+            @torch.library.custom_op("_torch_testing::foo", mutates_args=())
+            def foo3(x: Tensor, *, y: int, z: List[Tensor]) -> Tensor:
+                pass
+
+        with torch.library._scoped_library("_torch_testing", "FRAGMENT") as lib:
+            lib.define("foo(Tensor x, *, Tensor y) -> Tensor")
+            with self.assertRaisesRegex(NotImplementedError, "kwarg-only Tensor args"):
+                torch.library.register_autograd(
+                    "_torch_testing::foo",
+                    lambda grad: grad,
+                    setup_context=lambda ctx, inputs, keyword_only_inputs, output: None,
+                )
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_register_autograd_kwargonly_low_level(self):
+        with torch.library._scoped_library("_torch_testing", "FRAGMENT") as lib:
+            lib.define("foo(Tensor x, *, float y) -> Tensor")
+            called = False
+
+            def foo_impl(x, *, y):
+                return x * y
+
+            lib.impl("foo", foo_impl, "CPU")
+
+            def backward(ctx, grad):
+                nonlocal called
+                called = True
+                return grad * ctx.y
+
+            def setup_context(ctx, inputs, keyword_only_inputs, output):
+                assert tuple(keyword_only_inputs.keys()) == ("y",)
+                ctx.y = keyword_only_inputs["y"]
+
+            torch.library.register_autograd(
+                "_torch_testing::foo", backward, setup_context=setup_context, lib=lib
+            )
+
+            x = torch.randn(3, requires_grad=True)
+            torch.ops._torch_testing.foo(x, y=3.14).sum().backward()
+            self.assertTrue(called)
+            self.assertEqual(x.grad, torch.tensor([3.14, 3.14, 3.14]))
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_register_autograd_defaults(self):
+        with torch.library._scoped_library("_torch_testing", "FRAGMENT") as lib:
+            lib.define("foo(Tensor w, int x = 2, *, int y = 3, int z) -> Tensor")
+
+            def foo_impl(w, x=2, *, y=3, z):
+                return w * x * y * z
+
+            lib.impl("foo", foo_impl, "CPU")
+
+            called = False
+
+            def backward(ctx, grad):
+                nonlocal called
+                called = True
+                return grad * ctx.c
+
+            def setup_context(ctx, inputs, keyword_only_inputs, output):
+                assert len(inputs) == 2
+                assert inputs[1] == 2
+                assert keyword_only_inputs == {"y": 3, "z": 42}
+                ctx.c = keyword_only_inputs["y"] * keyword_only_inputs["z"] * inputs[1]
+
+            torch.library.register_autograd(
+                "_torch_testing::foo", backward, setup_context=setup_context, lib=lib
+            )
+
+            w = torch.randn(3, requires_grad=True)
+            torch.ops._torch_testing.foo(w, z=42).sum().backward()
+            self.assertTrue(called)
+            self.assertEqual(w.grad, torch.full_like(w, 2 * 3 * 42))
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_manual_schema_error(self):
         with self.assertRaisesRegex(ValueError, "the op mutates {'x'}"):
 
@@ -2320,6 +2423,16 @@ class TestCustomOpAPI(TestCase):
             self.assertGreater(after, prev)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    @parametrize("idx", [0, 1, 2, 3, 4, 5])
+    def test_library_register_fake_source(self, idx):
+        opname = f"source{idx}"
+        op = getattr(torch.ops._torch_testing, opname).default
+        entry = torch._library.simple_registry.singleton.find(op._name)
+        source = entry.abstract_impl.kernel.source
+        assert source is not None
+        self.assertTrue("custom_op_db.py" in source)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_library_register_fake(self):
         for mode in ["function", "qualname", "opoverload"]:
 
@@ -2333,10 +2446,15 @@ class TestCustomOpAPI(TestCase):
 
             if mode == "function":
                 dec = torch.library.register_fake(add)
+                self.assertIsNotNone(dec)
             elif mode == "qualname":
                 dec = torch.library.register_fake("_torch_testing::add")
+                self.assertIsNotNone(dec)
             elif mode == "opoverload":
                 dec = torch.library.register_fake(torch.ops._torch_testing.add.default)
+                self.assertIsNotNone(dec)
+            else:
+                raise AssertionError("should not get here")
 
             @dec
             def _(x, y):

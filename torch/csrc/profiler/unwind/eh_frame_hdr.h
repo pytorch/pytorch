@@ -7,7 +7,6 @@
 
 // Overview of the format described in
 // https://refspecs.linuxfoundation.org/LSB_1.3.0/gLSB/gLSB/ehframehdr.html
-namespace torch::unwind {
 
 struct EHFrameHdr {
   EHFrameHdr(void* base) : base_(base) {
@@ -94,5 +93,3 @@ struct EHFrameHdr {
   int64_t fde_count_;
   uint32_t table_size_;
 };
-
-} // namespace torch::unwind

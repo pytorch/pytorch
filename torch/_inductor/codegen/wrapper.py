@@ -28,7 +28,12 @@ import torch._ops
 from torch._dynamo.utils import counters, dynamo_timed
 
 from torch._inductor.codegen.multi_kernel import MultiKernelState
-from torch.fx.experimental.symbolic_shapes import SymTypes
+from torch.fx.experimental.symbolic_shapes import (
+    ConvertIntKey,
+    DivideByKey,
+    free_unbacked_symbols,
+    SymTypes,
+)
 from torch.fx.node import _get_qualified_name
 from torch.utils._sympy.singleton_int import SingletonInt
 
@@ -869,18 +874,23 @@ class WrapperCodeGen(CodeGen):
             filter(lambda x: not is_expr(x), graph_inputs.items())
         )
 
+        def is_unbacked_symbol(s):
+            return isinstance(s, sympy.Symbol) and free_unbacked_symbols(s)
+
         for name, shape in graph_inputs_expr:
             shape = V.graph.sizevars.simplify(shape)  # type: ignore[arg-type]
-            if shape in needed:
-                needed.remove(shape)  # type: ignore[arg-type]
+            if (b := shape in needed) or is_unbacked_symbol(shape):
+                if b:
+                    needed.remove(shape)  # type: ignore[arg-type]
                 code.writeline(f"{self.declare}{shape} = {name}{self.ending}")
 
         for name, value in graph_inputs_tensors:
             shapes = value.get_size()
             for dim, shape in enumerate(shapes):
                 shape = V.graph.sizevars.simplify(shape)  # type: ignore[arg-type]
-                if shape in needed:
-                    needed.remove(shape)  # type: ignore[arg-type]
+                if (b := shape in needed) or is_unbacked_symbol(shape):
+                    if b:
+                        needed.remove(shape)  # type: ignore[arg-type]
                     code.writeline(
                         f"{self.declare}{shape} = {sizeof(name)}[{dim}]{self.ending}"
                     )
@@ -889,8 +899,9 @@ class WrapperCodeGen(CodeGen):
             shapes = value.get_stride()
             for dim, shape in enumerate(shapes):
                 shape = V.graph.sizevars.simplify(shape)  # type: ignore[arg-type]
-                if shape in needed:
-                    needed.remove(shape)  # type: ignore[arg-type]
+                if (b := shape in needed) or is_unbacked_symbol(shape):
+                    if b:
+                        needed.remove(shape)  # type: ignore[arg-type]
                     code.writeline(
                         f"{self.declare}{shape} = {strideof(name)}[{dim}]{self.ending}"
                     )
@@ -908,8 +919,11 @@ class WrapperCodeGen(CodeGen):
     def finalize_prefix(self):
         pass
 
-    def codegen_python_sizevar(self, x: Expr) -> str:
-        return pexpr(V.graph.sizevars.simplify(x))
+    def codegen_python_sizevar(self, x: Expr, *, simplify: bool = True) -> str:
+        if simplify:
+            return pexpr(V.graph.sizevars.simplify(x))
+        else:
+            return pexpr(x)
 
     def codegen_sizevar(self, x: Expr) -> str:
         return self.codegen_python_sizevar(x)
@@ -955,10 +969,21 @@ class WrapperCodeGen(CodeGen):
 
     def codegen_dynamic_scalar(self, node):
         (data,) = (t.codegen_reference() for t in node.inputs)
-        if node.is_bool:
-            self.writeline(f"{node.sym} = 1 if {data}.item() else 0")
-        else:
+        if len(node.keypath) == 0:
             self.writeline(f"{node.sym} = {data}.item()")
+        elif len(node.keypath) == 1 and isinstance(node.keypath[0], ConvertIntKey):
+            self.writeline(f"{node.sym} = 1 if {data}.item() else 0")
+        elif len(node.keypath) == 1 and isinstance(node.keypath[0], DivideByKey):
+            self.writeline(f"{node.sym}_undivided = {data}.item()")
+            self.writeline(
+                f"assert {node.sym}_undivided % {node.keypath[0].divisor} == 0, "
+                f"f'{{{node.sym}_undivided}} not divisible by {node.keypath[0].divisor}'"
+            )
+            self.writeline(
+                f"{node.sym} = {node.sym}_undivided // {node.keypath[0].divisor}"
+            )
+        else:
+            raise AssertionError(f"unrecognized keypath {node.keypath}")
         # No one should ever use this buffer, but for uniformity
         # define the variable and assign it None
         self.writeline(f"{node.get_name()} = None")
@@ -1004,10 +1029,20 @@ class WrapperCodeGen(CodeGen):
                     # the subclass.
                     continue
                 if isinstance(value, sympy.Expr):  # Don't need to add symbolic
-                    add_expr_input(name, V.graph.sizevars.size_hint(value))
+                    # TODO: this fallback and those below actually will generate possibly
+                    # invalid benchmark code, because it's not guaranteed 42
+                    # is actually a valid value for the kernel in question.
+                    # See https://github.com/pytorch/pytorch/issues/124686
+                    add_expr_input(name, V.graph.sizevars.size_hint(value, fallback=42))
                 else:
-                    shape = [V.graph.sizevars.size_hint(x) for x in value.get_size()]
-                    stride = [V.graph.sizevars.size_hint(x) for x in value.get_stride()]
+                    shape = [
+                        V.graph.sizevars.size_hint(x, fallback=42)
+                        for x in value.get_size()
+                    ]
+                    stride = [
+                        V.graph.sizevars.size_hint(x, fallback=42)
+                        for x in value.get_stride()
+                    ]
                     add_fake_input(
                         name, shape, stride, value.get_device(), value.get_dtype()
                     )
@@ -1106,7 +1141,7 @@ class WrapperCodeGen(CodeGen):
             # https://github.com/openai/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
             "constants": {
                 **constants,
-                **{idx: 1 for idx in equal_to_1_arg_idx},
+                **dict.fromkeys(equal_to_1_arg_idx, 1),
             },
             "configs": [
                 config_of(

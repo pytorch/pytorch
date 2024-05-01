@@ -4,10 +4,12 @@ import functools
 from collections import namedtuple
 from typing import Callable
 
-from unittest import skip, skipUnless
+from unittest import expectedFailure, skip, skipUnless
 from unittest.mock import patch
 
 import torch
+
+from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
 from torch._higher_order_ops.templated_attention import (
     templated_attention as templated_attention_hop,
 )
@@ -56,6 +58,9 @@ test_dtypes_fast = [torch.float16]
 if common_utils.TEST_WITH_ROCM:
     test_dtypes = [torch.float32]
 
+
+# --------- Useful score mod functions for testing ---------
+
 test_score_mods = [
     _identity,
     _causal,
@@ -65,9 +70,56 @@ test_score_mods = [
 ]
 
 
-def _causal_mod(score, b, h, token_q, token_kv):
-    return torch.where(token_q >= token_kv, score, float("-inf"))
+def _times_two(score, b, h, m, n):
+    """Joint graph needed for correctness"""
+    return score * 2
 
+
+def _squared(score, b, h, m, n):
+    """Joint graph needed for correctness"""
+    return score * score
+
+
+def _head_offset(dtype: torch.dtype):
+    """Captured Buffer
+    Note: this builds a score_mod with index of a type
+    """
+    head_offset = torch.rand(H, device="cuda", dtype=dtype)
+
+    def score_mod(score, b, h, m, n):
+        return score * index(head_offset, [h])
+
+    return score_mod
+
+
+def _trig(score, b, h, m, n):
+    """Joint graph needed for correctness"""
+    return torch.sin(torch.cos(score)) + torch.tan(b)
+
+
+def _trig2(score, b, h, m, n):
+    """Branching joint graph"""
+    cos_score = torch.cos(score)
+    sin_score = torch.sin(score)
+    z = cos_score * sin_score + torch.tan(b)
+    return z
+
+
+def _buffer_reduced(dtype: torch.dtype):
+    """Reduction in captured buffer"""
+    batch_offsets = torch.rand(B, 8, device="cuda", dtype=dtype)
+
+    def score_mod(score, b, h, m, n):
+        batch_vals = index(batch_offsets, [b])
+        return score + batch_vals.sum()
+
+    return score_mod
+
+
+captured_buffers_map = {
+    "_head_offset": _head_offset,
+    "_buffer_reduced": _buffer_reduced,
+}
 
 B = 4
 H = 8
@@ -108,6 +160,14 @@ class TestTemplatedSDPA(InductorTestCase):
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
+    def test_skip_odd_keys(self, dtype: torch.dtype):
+        def score_mod(score, b, h, q, kv):
+            return torch.where(kv % 2 == 0, score, float("-inf"))
+
+        self.run_test(score_mod, dtype)
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes)
     def test_function_composition(self, dtype: torch.dtype):
         def score_mod_1(score, b, h, m, n):
             return score + (m - n)
@@ -125,7 +185,7 @@ class TestTemplatedSDPA(InductorTestCase):
         head_offset = torch.rand(H, device="cuda", dtype=dtype)
 
         def score_mod(score, b, h, m, n):
-            return score + index(head_offset, [h])
+            return score + head_offset[h]
 
         self.run_test(score_mod, dtype)
 
@@ -136,9 +196,7 @@ class TestTemplatedSDPA(InductorTestCase):
         seq_idx[S // 2 :] = 1
 
         def seq_mask_mod(score, b, h, q, kv):
-            return torch.where(
-                index(seq_idx, [q]) == index(seq_idx, [kv]), score, float("-inf")
-            )
+            return torch.where(seq_idx[q] == seq_idx[kv], score, float("-inf"))
 
         self.run_test(seq_mask_mod, dtype)
 
@@ -148,7 +206,7 @@ class TestTemplatedSDPA(InductorTestCase):
         bias = torch.randn(S, S, device="cuda", dtype=dtype)
 
         def bias_mod(score, b, h, q, kv):
-            return score + index(bias, [q, kv])
+            return score + bias[q, kv]
 
         self.run_test(bias_mod, dtype)
 
@@ -158,7 +216,7 @@ class TestTemplatedSDPA(InductorTestCase):
         bias = torch.randn(B, S, S, device="cuda", dtype=dtype)
 
         def bias_mod(score, b, h, q, kv):
-            return score + index(bias, [b, q, kv])
+            return score + bias[b, q, kv]
 
         self.run_test(bias_mod, dtype)
 
@@ -168,7 +226,7 @@ class TestTemplatedSDPA(InductorTestCase):
         bias = torch.randn(B, H, S, S, device="cuda", dtype=dtype)
 
         def bias_mod(score, b, h, q, kv):
-            return score + index(bias, [b, h, q, kv])
+            return score + bias[b, h, q, kv]
 
         self.run_test(bias_mod, dtype)
 
@@ -178,7 +236,7 @@ class TestTemplatedSDPA(InductorTestCase):
         rel_bias = torch.randn(2 * S, device="cuda", dtype=dtype)
 
         def bias_mod(score, b, h, q, kv):
-            return score + index(rel_bias, [(q - kv) + S])
+            return score + rel_bias[(q - kv) + S]
 
         self.run_test(bias_mod, dtype)
 
@@ -189,7 +247,7 @@ class TestTemplatedSDPA(InductorTestCase):
 
         def bias_mod(score, b, h, q, kv):
             causal_attention = q >= kv
-            cur_num_bidirectional = index(num_bidirectional, (b,))
+            cur_num_bidirectional = num_bidirectional[b]
             bidirectional_attention_on_video = (q <= cur_num_bidirectional) & (
                 kv <= cur_num_bidirectional
             )
@@ -200,6 +258,38 @@ class TestTemplatedSDPA(InductorTestCase):
             )
 
         self.run_test(bias_mod, dtype)
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    def test_natten_2d(self, dtype):
+        H = 32
+        W = S // H
+        WINDOW = 3
+        assert W * H == S
+
+        def get_x_y(idx):
+            # This should be a floor divide, but we don't support that properly
+            return idx / W, idx % W
+
+        def natten_mask(score, b, h, q, kv):
+            q_x, q_y = get_x_y(q)
+            kv_x, kv_y = get_x_y(kv)
+            return torch.where(
+                ((q_x - kv_x).abs() <= WINDOW) | ((q_y - kv_y).abs() <= WINDOW),
+                score,
+                float("-inf"),
+            )
+
+        self.run_test(natten_mask, dtype)
+
+    @supported_platform
+    @expectedFailure
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    def test_silu_on_score(self, dtype):
+        def silu_score(score, b, h, q, kv):
+            return torch.nn.functional.silu(score)
+
+        self.run_test(silu_score, dtype)
 
     @supported_platform
     @skip("Triton bug ")  # https://github.com/pytorch/pytorch/issues/124571
@@ -214,13 +304,13 @@ class TestTemplatedSDPA(InductorTestCase):
 
         def create_njt_wrapper(orig_score_mod, offsets, seq_idx):
             def njt_score_mod(qk, b, h, q, kv):
-                q_nested = q - index(offsets, [index(seq_idx, [q])])
-                kv_nested = kv - index(offsets, [index(seq_idx, [kv])])
+                q_nested = q - offsets[seq_idx[q]]
+                kv_nested = kv - offsets[seq_idx[kv]]
                 return orig_score_mod(qk, b, h, q_nested, kv_nested)
 
             return njt_score_mod
 
-        causal_njt = create_njt_wrapper(_causal_mod, offsets, seq_idx)
+        causal_njt = create_njt_wrapper(_causal, offsets, seq_idx)
 
         self.run_test(causal_njt, dtype)
 
@@ -234,10 +324,11 @@ class TestTemplatedSDPA(InductorTestCase):
             requires_grad=True,
         )
         q, k, v = make_tensor(), make_tensor(), make_tensor()
-        out = _templated_attention(q, k, v, _identity)
+        func = torch.compile(_templated_attention, backend="inductor", fullgraph=True)
         with self.assertRaisesRegex(
-            RuntimeError, "Autograd not implemented for templated_attention"
+            AssertionError, "templated_attention_backward is not an OpOverload"
         ):
+            out = func(q, k, v, _identity)
             out.backward(torch.ones_like(out))
 
     @supported_platform
@@ -274,9 +365,9 @@ class TestTemplatedSDPA(InductorTestCase):
         tok_scale = torch.randn(S, device="cuda")
 
         def bias_mod(score, batch, head, token_q, token_kv):
-            score = score + index(tok_scale, [token_q])
-            score = score + index(batch_scale, [batch])
-            score = score + index(head_scale, [head])
+            score = score + tok_scale[token_q]
+            score = score + batch_scale[batch]
+            score = score + head_scale[head]
             return score
 
         self.run_test(bias_mod)
@@ -289,6 +380,14 @@ class TestTemplatedSDPA(InductorTestCase):
         def sdpa_hop(q, k, v, score_mod):
             return templated_attention_hop(q, k, v, score_mod)
 
+        @torch.compile(backend="aot_eager")
+        def eager_sdpa_hop(q, k, v, score_mod):
+            """The main entrypoint for FlexAttention doesnt return LSE.
+            Besides dropping LSE it also ensures that the hop is compiled with aot-eager
+            backend. We need to replicate this.
+            """
+            return templated_attention_hop(q, k, v, score_mod)
+
         make_tensor = functools.partial(
             torch.randn,
             (B, H, S, D),
@@ -298,7 +397,7 @@ class TestTemplatedSDPA(InductorTestCase):
         )
         q, k, v = make_tensor(), make_tensor(), make_tensor()
 
-        ref_out, ref_lse = templated_attention_hop(
+        ref_out, ref_lse = eager_sdpa_hop(
             q.to(torch.float64), k.to(torch.float64), v.to(torch.float64), score_mod
         )
         compiled_out, compiled_lse = sdpa_hop(q, k, v, score_mod)
@@ -308,10 +407,10 @@ class TestTemplatedSDPA(InductorTestCase):
         # this means that the base for the LSE computed by ref is e while for the compiled
         # version it is 2. To compare we use the change of base formula
         # log_2(x_compiled) = log_e(x_ref) * log_2(e) where
-        # x_ref      = ∑_i e^(scores[i])
-        # x_compiled = ∑_i 2^(log2(e) * scores[i])
+        # x_ref      = sum(_i e^(scores[i]))
+        # x_compiled = sum(_i 2^(log2(e) * scores[i]))
 
-        self.assertTrue(ref_lse.dtype == torch.float32)
+        self.assertTrue(ref_lse.dtype == torch.float64)
         self.assertTrue(compiled_lse.dtype == torch.float32)
         ref_lse = ref_lse * torch.log2(torch.tensor(torch.e))
 
@@ -370,6 +469,145 @@ class TestTemplatedSDPA(InductorTestCase):
         _, code = run_and_get_code(func, q, k, v, _identity)
         # Ensure that two kernels are generated
         FileCheck().check_count(".run(", 2, True).run(code[0])
+
+    @supported_platform
+    @common_utils.parametrize(
+        "score_mod", [_identity, _causal, _times_two, _squared, _trig, _trig2]
+    )
+    def test_aot_eager_gradcheck(self, score_mod):
+        make_tensor = functools.partial(
+            torch.randn,
+            (2, 2, 8, 4),
+            device="cuda",
+            dtype=torch.float64,
+            requires_grad=True,
+        )
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+
+        func = torch.compile(_templated_attention, backend="aot_eager", fullgraph=True)
+
+        self.assertTrue(
+            torch.autograd.gradcheck(
+                func, (query, key, value, score_mod), raise_exception=True
+            )
+        )
+
+    @supported_platform
+    @common_utils.parametrize("score_mod_name", ["_head_offset", "_buffer_reduced"])
+    @common_utils.parametrize("mode", ["eager", "aot_eager"])
+    def test_captured_score_mod_aot_eager_gradcheck(
+        self, score_mod_name: str, mode: str
+    ):
+        make_tensor = functools.partial(
+            torch.randn,
+            (2, 2, 8, 4),
+            device="cuda",
+            dtype=torch.float64,
+            requires_grad=True,
+        )
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+
+        func = torch.compile(_templated_attention, backend=mode, fullgraph=True)
+        score_mod = captured_buffers_map[score_mod_name](torch.float64)
+
+        self.assertTrue(
+            torch.autograd.gradcheck(
+                func, (query, key, value, score_mod), raise_exception=True
+            )
+        )
+
+    @supported_platform
+    def test_fw_bw_graph_correctness(self):
+        cnt = CompileCounterWithBackend("aot_eager")
+        make_tensor = functools.partial(
+            torch.randn,
+            (2, 2, 8, 4),
+            device="cuda",
+            dtype=torch.float64,
+            requires_grad=True,
+        )
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+
+        func = torch.compile(_templated_attention, backend=cnt, fullgraph=True)
+        out = func(query, key, value, _squared)
+        out.sum().backward()
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(len(cnt.graphs), 1)
+        graph = cnt.graphs[0]
+        norm_graph = normalize_gm(graph.print_readable(print_output=False))
+        self.assertExpectedInline(
+            norm_graph,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_args_0_ : torch.Tensor, L_args_1_ : torch.Tensor, L_args_2_ : torch.Tensor):
+        l_args_0_ = L_args_0_
+        l_args_1_ = L_args_1_
+        l_args_2_ = L_args_2_
+
+        new_empty = l_args_0_.new_empty([], requires_grad = True)
+        new_empty_1 = l_args_0_.new_empty([], dtype = torch.int32)
+        new_empty_2 = l_args_0_.new_empty([], dtype = torch.int32)
+        new_empty_3 = l_args_0_.new_empty([], dtype = torch.int32)
+        new_empty_4 = l_args_0_.new_empty([], dtype = torch.int32)
+        templated_attention_0 = self.templated_attention_0
+        templated_attention = torch.ops.higher_order.templated_attention(l_args_0_, """
+            + """l_args_1_, l_args_2_, templated_attention_0);  l_args_0_ = l_args_1_ = l_args_2_ = templated_attention_0 = None
+        out = templated_attention[0];  templated_attention = None
+        return (out,)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, new_empty, new_empty_1, new_empty_2, new_empty_3, new_empty_4):
+            mul = new_empty * new_empty;  new_empty = None
+            return mul
+""",
+        )
+        # Save the AOT graphs
+        aot_graphs = []
+        from torch._inductor import compile_fx
+
+        def debug_compile_fx_inner(graph, example_inputs, *args, **kwargs):
+            aot_graphs.append(graph)
+            return graph
+
+        backend = functools.partial(
+            compile_fx.compile_fx, inner_compile=debug_compile_fx_inner
+        )
+        func = torch.compile(func, backend=backend, fullgraph=True)
+        out = func(query, key, value, _squared)
+        out.sum().backward()
+
+        joint_graph = normalize_gm(aot_graphs[1].print_readable(print_output=False))
+
+        self.assertExpectedInline(
+            joint_graph,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f64[2, 2, 8, 4]", primals_2: "f64[2, 2, 8, 4]", primals_3: "f64[2, 2, 8, 4]", """
+            + """alias_5: "f64[2, 2, 8, 4]", alias_7: "f32[2, 2, 8]", tangents_1: "f64[2, 2, 8, 4]"):
+        fw_graph = self.fw_graph
+        joint_graph = self.joint_graph
+        templated_attention_backward = torch.ops.higher_order.templated_attention_backward(primals_1, primals_2, """
+            + """primals_3, alias_5, alias_7, tangents_1, fw_graph, joint_graph);  primals_1 = primals_2 = primals_3 = alias_5 """
+            + """= alias_7 = tangents_1 = fw_graph = joint_graph = None
+        getitem_2: "f64[2, 2, 8, 4]" = templated_attention_backward[0]
+        getitem_3: "f64[2, 2, 8, 4]" = templated_attention_backward[1]
+        getitem_4: "f64[2, 2, 8, 4]" = templated_attention_backward[2];  templated_attention_backward = None
+        return [getitem_2, getitem_3, getitem_4]
+
+    class <lambda>(torch.nn.Module):
+        def forward(self, arg0_1: "f64[]", arg1_1: "i32[]", arg2_1: "i32[]", arg3_1: "i32[]", arg4_1: "i32[]"):
+            mul: "f64[]" = torch.ops.aten.mul.Tensor(arg0_1, arg0_1);  arg0_1 = None
+            return mul
+
+    class <lambda>(torch.nn.Module):
+        def forward(self, arg0_1: "f64[]", arg1_1: "i32[]", arg2_1: "i32[]", arg3_1: "i32[]", arg4_1: "i32[]", arg5_1: "f64[]"):
+            mul: "f64[]" = torch.ops.aten.mul.Tensor(arg0_1, arg0_1)
+            mul_1: "f64[]" = torch.ops.aten.mul.Tensor(arg5_1, arg0_1)
+            mul_2: "f64[]" = torch.ops.aten.mul.Tensor(arg5_1, arg0_1);  arg5_1 = arg0_1 = None
+            add: "f64[]" = torch.ops.aten.add.Tensor(mul_2, mul_1);  mul_2 = mul_1 = None
+            return [add, None, None, None, None]
+""",
+        )
 
 
 common_utils.instantiate_parametrized_tests(TestTemplatedSDPA)

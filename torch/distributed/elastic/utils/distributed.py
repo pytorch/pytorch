@@ -13,6 +13,7 @@ from typing import Optional
 
 import torch.distributed as dist
 from torch.distributed.elastic.utils.logging import get_logger
+from torch.distributed.elastic.utils.store import barrier
 
 
 logger = get_logger(__name__)
@@ -20,8 +21,7 @@ logger = get_logger(__name__)
 _ADDRESS_IN_USE = "Address already in use"
 _SOCKET_TIMEOUT = "Socket Timeout"
 
-_MEMBER_CHECKIN = "_tcp_store/num_members"
-_LAST_MEMBER_CHECKIN = "_tcp_store/last_member"
+_TCP_STORE_INIT = "_tcp_store/num_members"
 
 
 def create_c10d_store(
@@ -54,8 +54,9 @@ def create_c10d_store(
             "Creating c10d store on %s:%s\n"
             "  world_size  : %s\n"
             "  is_server   : %s\n"
-            "  timeout(sec): %s\n",
-            server_addr, port, world_size, is_server, timeout
+            "  timeout(sec): %s\n"
+            "  use_libuv   : %s\n",
+            server_addr, port, world_size, is_server, timeout, use_libuv,
         )
 
         try:
@@ -75,7 +76,7 @@ def create_c10d_store(
                 store = store_builder(use_libuv=use_libuv)
             # skips full rank check when we don't have to wait for all workers
             if wait_for_workers:
-                _check_full_rank(store, world_size)
+                _check_full_rank(store, world_size, timeout=timeout)
             logger.info("Successfully created c10d store")
             return store
         except RuntimeError as e:
@@ -98,13 +99,9 @@ def create_c10d_store(
                 raise
 
 
-def _check_full_rank(store, world_size):
-    idx = store.add(_MEMBER_CHECKIN, 1)
-    if idx == world_size:
-        store.set(_LAST_MEMBER_CHECKIN, "<val_ignored>")
-
+def _check_full_rank(store, world_size, timeout):
     try:
-        store.get(_LAST_MEMBER_CHECKIN)
+        barrier(store, world_size, key_prefix=_TCP_STORE_INIT, barrier_timeout=timeout)
     except RuntimeError as e:
         if str(e) == _SOCKET_TIMEOUT:
             raise TimeoutError(
