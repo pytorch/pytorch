@@ -29,10 +29,19 @@ from torch._dynamo.utils import (
 from torch._functorch import config as functorch_config
 from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
 from torch._inductor.codecache import code_hash, CompiledFxGraph, FxGraphCache
-from torch._inductor.cudagraph_utils import BoxedDeviceIndex, get_placeholders
+from torch._inductor.cudagraph_utils import (
+    BoxedDeviceIndex,
+    get_placeholders,
+    log_cudagraph_skip_and_bump_counter,
+)
 
 from torch._inductor.debug import save_args_for_compile_fx_inner
-from torch._inductor.utils import BoxedBool, count_tangents
+from torch._inductor.utils import (
+    BoxedBool,
+    count_tangents,
+    should_assume_input_aligned,
+    tensor_is_aligned,
+)
 from torch._logging import trace_structured
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
@@ -53,8 +62,8 @@ from .graph import GraphLowering
 from .ir import ExternKernelNode
 from .utils import (
     get_cloned_parameter_buffer_name,
-    get_dtype_size,
     has_incompatible_cudagraph_ops,
+    maybe_get_suppress_shape_guards_ctx,
     output_node,
 )
 from .virtualized import V
@@ -63,7 +72,7 @@ if config.is_fbcode():
     from torch._inductor.fb.utils import log_optimus_to_scuba, time_and_log
 else:
     # no-op decorator
-    def time_and_log(attr: str, extra_loggings: Optional[Dict[str, str]] = None):
+    def time_and_log(attr: str):
         return dynamo_utils.identity
 
 
@@ -389,10 +398,7 @@ def get_patched_config_dict(config_patches=None) -> Dict[str, Any]:
 
 @DebugContext.wrap
 @torch.utils._python_dispatch._disable_current_modes()
-@time_and_log(
-    attr="compilation time (in seconds)",
-    extra_loggings={"config_dict": str(get_patched_config_dict())},
-)
+@time_and_log(attr="compilation time (in seconds)")
 # Need this decorator for compile_fx_inner even if we already have one for
 # compile_fx. The reason is the compilation for backward graph may happen after
 # compile_fx return and we may want to use the _LazyGraphModule for compiling
@@ -483,9 +489,8 @@ def compile_fx_inner(
     # check cudagraph disabling reasons from inductor lowering
     if cudagraphs and compiled_graph.disabled_cudagraphs_reason:
         if "cuda" in compiled_graph.device_types:
-            perf_hint_log.warning(
-                "skipping cudagraphs due to %s",
-                compiled_graph.disabled_cudagraphs_reason,
+            log_cudagraph_skip_and_bump_counter(
+                f"skipping cudagraphs due to {compiled_graph.disabled_cudagraphs_reason}"
             )
         BoxedBool.disable(cudagraphs)
 
@@ -596,10 +601,12 @@ def compile_fx_inner(
                 # prefer better disable_cudagraphs_reason bc stack trace
                 # TODO: migrate all disable reasons to stack trace, refactor
                 if compiled_graph.disabled_cudagraphs_reason:
-                    perf_hint_log.warning(compiled_graph.disabled_cudagraphs_reason)
+                    log_cudagraph_skip_and_bump_counter(
+                        compiled_graph.disabled_cudagraphs_reason
+                    )
                 else:
-                    perf_hint_log.warning(
-                        "skipping cudagraphs due to %s", cudagraph_fail_reasons
+                    log_cudagraph_skip_and_bump_counter(
+                        f"skipping cudagraphs due to {cudagraph_fail_reasons}"
                     )
 
     # cudagraphs does its own aligning of inputs
@@ -698,7 +705,9 @@ def fx_codegen_and_compile(
             payload_fn=lambda: gm.print_readable(print_output=False),
         )
         if config.is_fbcode():
-            log_optimus_to_scuba()
+            log_optimus_to_scuba(
+                extra_logging={"pt2_configs": str(get_patched_config_dict())}
+            )
 
     with V.set_fake_mode(fake_mode), maybe_disable_comprehensive_padding(
         example_inputs
@@ -837,20 +846,34 @@ def get_input_idxs_to_check(
     inputs: Union[List[torch.Tensor], Sequence[int]],
     static_input_idxs: Sequence[int],
 ) -> Sequence[int]:
-    def is_aligned(storage_offset, dtype):
-        return (storage_offset * get_dtype_size(dtype)) % ALIGNMENT == 0
-
+    """
+    This function runs at compile time, and generates a list of indices for which we
+    might need to do a copy to preserve alignment requirements.
+    """
     ids_to_check = []
+
     for i, input in enumerate(inputs):
-        if (
-            isinstance(input, torch.Tensor)
-            and (
-                i not in static_input_idxs
-                or not is_aligned(input.storage_offset(), input.dtype)
-            )
-            and input.device.type == "cuda"
-        ):
-            ids_to_check.append(i)
+        if not isinstance(input, torch.Tensor):
+            # non-tensors don't need alignment
+            continue
+        if input.device.type != "cuda":
+            # right now we only care for cuda tensors
+            continue
+        with maybe_get_suppress_shape_guards_ctx():
+            # suppress guards so that tensor_is_aligned and should_assume_input_aligned
+            # do not add guards on input's storage offset
+            if i in static_input_idxs and tensor_is_aligned(input):
+                continue
+            if not should_assume_input_aligned(input):
+                continue
+
+        # if we get here, then
+        # (a) our triton code assumes that the input is aligned
+        # (b) we can't be sure ahead of time that the input will actually be aligned.
+        # therefore, at runtime, we'll need to check that the input is aligned
+        # (and if not, clone it to make it aligned.)
+        ids_to_check.append(i)
+
     return ids_to_check
 
 
@@ -872,10 +895,7 @@ def align_inputs(
     inputs: List[torch.Tensor],
     static_input_idxs: Sequence[int] = (),
 ):
-    if config.assume_aligned_inputs:
-        inputs_to_check = get_input_idxs_to_check(inputs, static_input_idxs)
-    else:
-        inputs_to_check = []
+    inputs_to_check = get_input_idxs_to_check(inputs, static_input_idxs)
     return align_inputs_from_check_idxs(model, inputs_to_check)
 
 
