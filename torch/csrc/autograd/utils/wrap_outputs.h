@@ -38,10 +38,6 @@ inline PyObject* wrap(int64_t value) {
   return THPUtils_packInt64(value);
 }
 
-inline PyObject* wrap(c10::SymInt value) {
-  return py::cast(value).release().ptr();
-}
-
 inline PyObject* wrap(double value) {
   return PyFloat_FromDouble(value);
 }
