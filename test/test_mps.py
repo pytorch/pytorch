@@ -4273,6 +4273,13 @@ class TestMPS(TestCaseMPS):
             self.assertEqual(e_string, "MPS does not support cumsum_out_mps op with int64 input." +
                              " Support has been added in macOS 13.3")
 
+    def test_cumsum_bool(self):
+        a = torch.ones(2**16, dtype=torch.bool)
+        t_cpu = a.cumsum(0)
+        t_mps = a.to("mps").cumsum(0)
+
+        self.assertEqual(t_cpu, t_mps)
+
     def test_cumsum_minus_one_axis(self):
         def helper(dtype):
             # Test with axis -1
