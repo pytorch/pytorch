@@ -3715,7 +3715,10 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
 
     # Squeezes tail
     while idx < a_.ndim:
-        assert a_.shape[idx] == 1
+        torch._check(
+            a_.shape[idx] == 1,
+            lambda: f"a.size({idx}) expected to be 1 but got {a_.shape[idx]}",
+        )
         a_ = squeeze(a_, idx)
 
     return a_
@@ -6150,6 +6153,19 @@ def vdot(self, other):
     _dot_check(self, other)
     # The decomposition fails if you do self.conj()... not sure why
     return (self.conj_physical() * other).sum()
+
+
+@register_decomposition(aten.select_scatter)
+@out_wrapper()
+def select_scatter(x: TensorLikeType, src: TensorLikeType, dim: int, index: int):
+    dim = utils.canonicalize_dim(x.ndim, dim)
+    mask_shape = [1] * x.ndim
+    mask_shape[dim] = -1
+    if index < 0:
+        index = index + x.shape[dim]
+    mask = torch.arange(x.shape[dim], device=x.device).view(mask_shape) == index
+    src = torch.unsqueeze(src, dim).expand(x.shape)
+    return torch.where(mask, src, x)
 
 
 # inplace

@@ -5,7 +5,6 @@ from typing import Any, cast, Dict, List, NamedTuple, Optional, Set, Tuple, Unio
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.autograd.graph import Node
 from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicates
 from torch.utils._pytree import tree_flatten, tree_unflatten
 from torch.utils.hooks import RemovableHandle
@@ -123,11 +122,6 @@ class FSDPParamGroup:
         self.comm_ctx = FSDPCommContext()
         # Group's indices in the shared post-forward order
         self._post_forward_indices: List[int] = []
-        # Used to avoid mistargeted backward prefetches when the module is used
-        # in forward but not in backward: for each forward, we record a tuple
-        # of the output's grad fns and later query the autograd engine whether
-        # any grad fn will execute in the current backward to know to prefetch.
-        self.all_forward_output_grad_fns: Set[Tuple[Node, ...]] = set()
         # Whether to reduce gradients at all (whether for FSDP or HSDP)
         self.reduce_grads: bool = True
         # Whether to all-reduce gradients for HSDP; only used if
@@ -305,13 +299,11 @@ class FSDPParamGroup:
         self.comm_ctx.post_forward_order.append(self)
         self._post_forward_indices.append(post_forward_index)
 
-    def pre_backward(self, forward_grad_fns: Tuple[Any, ...], *unused: Any):
+    def pre_backward(self, *unused: Any):
         with torch.profiler.record_function("FSDP::pre_backward"):
             self._training_state = TrainingState.PRE_BACKWARD
             self.unshard()  # no-op if prefetched
             self.wait_for_unshard()
-            # Can be already removed if running multiple `backward`s
-            self.all_forward_output_grad_fns.discard(forward_grad_fns)
             self._prefetch_unshard()
 
     def post_backward(self, *unused: Any):
@@ -370,7 +362,6 @@ class FSDPParamGroup:
                 fsdp_param.grad_offload_event.synchronize()
                 fsdp_param.grad_offload_event = None
         self._post_forward_indices.clear()
-        self.all_forward_output_grad_fns.clear()
 
     def _prefetch_unshard(self):
         if self._training_state == TrainingState.PRE_BACKWARD:
@@ -380,18 +371,14 @@ class FSDPParamGroup:
             curr_index = self._post_forward_indices.pop()
             if (target_index := curr_index - 1) < 0:
                 return
+            # Prefetch naively using the reverse post-forward order, which may
+            # have mistargeted prefetches if not all modules used in forward
+            # are used in this backward
             target_fsdp_param_group = self.comm_ctx.post_forward_order[target_index]
-            if any(
-                torch._C._will_engine_execute_node(grad_fn)  # type: ignore[attr-defined]
-                for grad_fns in target_fsdp_param_group.all_forward_output_grad_fns
-                for grad_fn in grad_fns
-            ):
-                with torch.profiler.record_function(
-                    "FSDP::backward_prefetch"
-                ), target_fsdp_param_group.use_training_state(
-                    TrainingState.PRE_BACKWARD
-                ):
-                    target_fsdp_param_group.unshard()
+            with torch.profiler.record_function(
+                "FSDP::backward_prefetch"
+            ), target_fsdp_param_group.use_training_state(TrainingState.PRE_BACKWARD):
+                target_fsdp_param_group.unshard()
 
     # Utilities #
     def _to_sharded(self):
