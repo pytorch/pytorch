@@ -444,7 +444,7 @@ def _export_to_torch_ir(
         except GuardOnDataDependentSymNode as e:
             raise UserError(  # noqa: TRY200
                 UserErrorType.ANTI_PATTERN,
-                f"Consider annotating your code using torch._constrain_as_*(). {str(e)}",
+                f"Consider annotating your code using torch._check*(). {str(e)}",
                 case_name="constrain_as_size_example",
             )
 
