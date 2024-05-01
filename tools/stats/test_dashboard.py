@@ -203,8 +203,8 @@ def get_invoking_file_summary(grouped):
     for build_name, build in grouped.items():
         for test_config, test_config_data in build.items():
             for invoking_file, invoking_file_data in test_config_data.items():
-                for class_name, class_data in invoking_file_data.items():
-                    for test_name, test_data in class_data.items():
+                for _, class_data in invoking_file_data.items():
+                    for _, test_data in class_data.items():
                         invoking_file_summary[build_name][test_config][invoking_file][
                             "count"
                         ] += 1
