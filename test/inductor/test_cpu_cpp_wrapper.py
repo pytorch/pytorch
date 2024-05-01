@@ -88,7 +88,6 @@ if config.abi_compatible:
         "test_qlinear_cpu",
         "test_qlinear_dequant_promotion_cpu",
         "test_qlinear_relu_cpu",
-        "test_tensor2_cpu",
     ]
     for test_name in xfail_list:
         test_failures_cpp_wrapper[test_name] = test_torchinductor.TestFailure(
