@@ -322,7 +322,6 @@ class OptimizerVariable(UserDefinedObjectVariable):
         names_to_delete = self.static_tensor_names
         value = self.value
         tc = tx.output.tracing_context
-
         def init_finalizer(gm):
             def clear_static_tensor_refs():
                 for name in names_to_delete:
