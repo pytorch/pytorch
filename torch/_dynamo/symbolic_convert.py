@@ -2282,6 +2282,23 @@ class InstructionTranslator(InstructionTranslatorBase):
         if sys.version_info < (3, 12):
             assert len(argnames_null) == 0, "variables should not be NULL in < 3.12"
 
+        # Handle inactive context variables - inactive context variables
+        # are reconstructed to be the class, NOT the object.
+        # So the resume function needs to construct the context object
+        # from the class and the context object's target values.
+        # e.g. torch.set_grad_enabled(True) will be reconstructed as
+        # torch.set_grad_enabled
+        stack_ctx_vars = []
+        for i, var in enumerate(self.stack):
+            if type.__instancecheck__(ContextWrappingVariable, var):
+                stack_ctx_vars.append((i, tuple(var.target_values)))  # type: ignore[attr-defined]
+        argnames_ctx_vars = []
+        for name in argnames:
+            if type.__instancecheck__(
+                ContextWrappingVariable, var := self.symbolic_locals[name]
+            ):
+                argnames_ctx_vars.append((name, tuple(var.target_values)))  # type: ignore[attr-defined]
+
         cg = PyCodegen(self)
 
         # Python does not allow null to be an arg to a function, so
@@ -2293,12 +2310,12 @@ class InstructionTranslator(InstructionTranslatorBase):
         if sys.version_info >= (3, 11):
             # find indices of NullVariables
             for i, var in enumerate(self.stack):
-                if isinstance(var, NullVariable):
+                if type.__instancecheck__(NullVariable, var):
                     null_idxes.append(i)
             # generate bytecode to pop the nulls
             null_cnt = 0
             for i, var in enumerate(reversed(self.stack)):
-                if isinstance(var, NullVariable):
+                if type.__instancecheck__(NullVariable, var):
                     for j in range(2, i + 2 - null_cnt):
                         cg.append_output(create_instruction("SWAP", arg=j))
                     cg.extend_output(cg.pop_null())
@@ -2320,6 +2337,8 @@ class InstructionTranslator(InstructionTranslatorBase):
             argnames,
             argnames_null,
             tuple(b.resume_fn() for b in self.block_stack),
+            tuple(stack_ctx_vars),
+            tuple(argnames_ctx_vars),
             tuple(null_idxes),
         )
 
