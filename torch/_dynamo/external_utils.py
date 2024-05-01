@@ -1,6 +1,7 @@
 # This module contains functions that *will be allowed* by dynamo
 
 import functools
+import types
 
 import threading
 
@@ -45,14 +46,17 @@ def wrap_inline(fn):
     cached_wrappers = _TLS.cached_wrappers
 
     if isinstance(fn, torch.nn.Module):
-        key = fn.forward.__code__
-    elif hasattr(fn, "__code__"):
-        key = fn.__code__
+        key = hash(fn.forward.__func__)
+    elif isinstance(fn, types.MethodType):
+        key = hash(fn.__func__)
+    elif isinstance(fn, types.FunctionType):
+        key = hash(fn)
     else:
-        key = fn
+        key = None
 
-    if cached_wrapper := cached_wrappers.get(key):
-        return cached_wrapper
+    if key:
+        if cached_wrapper := cached_wrappers.get(key):
+            return cached_wrapper
 
     from .bytecode_transformation import create_new_fn
 
