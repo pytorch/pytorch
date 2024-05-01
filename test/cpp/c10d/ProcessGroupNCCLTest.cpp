@@ -417,7 +417,7 @@ void testAllreduce(const std::string& path, int rank, int size) {
   const auto expected = (totalNumGPUs * (totalNumGPUs - 1)) / 2;
   const auto tensors = test.getTensors();
   for (const auto& tensor : tensors) {
-    const auto* const data = tensor.data_ptr<float>();
+    const auto* const data = tensor.const_data_ptr<float>();
     for (const auto k : c10::irange(tensor.numel())) {
       EXPECT_EQ(data[k], expected)
           << "Allreduce outputs do not match expected outputs";
@@ -463,7 +463,7 @@ void testSparseAllreduce(const std::string& path, int rank, int size) {
     }
 
     // validate all tensor values are expected value
-    const auto* const data = values.data_ptr<float>();
+    const auto* const data = values.const_data_ptr<float>();
     for (const auto k : c10::irange(values.numel())) {
       EXPECT_EQ(data[k], expected)
           << "Allreduce outputs do not match expected outputs";
@@ -514,7 +514,7 @@ void testSparseAllreduceLarge(const std::string& path, int rank, int size) {
     }
 
     // validate all tensor values are expected value
-    const auto* const data = values.data_ptr<float>();
+    const auto* const data = values.const_data_ptr<float>();
     for (const auto k : c10::irange(values.numel())) {
       EXPECT_EQ(data[k], expected)
           << "Allreduce outputs do not match expected outputs";
@@ -544,7 +544,7 @@ void testBroadcast(const std::string& path, int rank, int size) {
       const auto expected = (rootRank * numDevices + rootTensor);
       const auto tensors = test.getTensors();
       for (const auto& tensor : tensors) {
-        const auto* const data = tensor.data_ptr<float>();
+        const auto* const data = tensor.const_data_ptr<float>();
         for (const auto k : c10::irange(tensor.numel())) {
           EXPECT_EQ(data[k], expected)
               << "Broadcast outputs do not match expected outputs";
@@ -703,7 +703,7 @@ void testSplittingCommunicator(const std::string& path, int rank, int size) {
         const auto expected = (rootRank * numDevices + rootTensor);
         const auto tensors = test->getTensors();
         for (const auto& tensor : tensors) {
-          const auto* const data = tensor.data_ptr<float>();
+          const auto* const data = tensor.const_data_ptr<float>();
           for (const auto k : c10::irange(tensor.numel())) {
             EXPECT_EQ(data[k], expected)
                 << "Broadcast outputs do not match expected outputs";

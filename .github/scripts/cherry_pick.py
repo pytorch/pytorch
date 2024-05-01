@@ -29,7 +29,7 @@ def parse_args() -> Any:
         "--onto-branch", type=str, required=True, help="the target release branch"
     )
     parser.add_argument(
-        "--github-actor", type=str, required=True, help="all the world’s a stage"
+        "--github-actor", type=str, required=True, help="all the world's a stage"
     )
     parser.add_argument(
         "--classification",
