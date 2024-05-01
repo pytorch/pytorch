@@ -564,9 +564,10 @@ def _export_non_strict(
             index += 1
 
     is_joint = graph_signature.backward_signature is not None
+    gm.print_readable()
 
     def make_argument_spec(i, node) -> ArgumentSpec:
-        if isinstance(node, (int, bool, float, type(None))):
+        if isinstance(node, (int, bool, float, type(None), str)):
             # For const outputs we just directly return this
             return ConstantArgument(name="", value=node)
 

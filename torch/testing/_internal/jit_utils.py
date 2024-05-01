@@ -496,9 +496,22 @@ class JitTestCase(JitCommonTestCase):
                     python_fn = script
 
                 if inputs_requires_grad:
-                    recording_inputs = do_input_map(lambda t: t.detach().requires_grad_(), inputs)
+                    recording_inputs = tuple(do_input_map(lambda t: t.detach().requires_grad_(), inputs))
                 else:
-                    recording_inputs = inputs
+                    recording_inputs = tuple(inputs)
+
+                print(scripted_fn.graph)
+
+                class WrapperModule(torch.nn.Module):
+                    def __init__(self):
+                        super().__init__()
+                        self.scripted_fn = scripted_fn
+
+                    def forward(self, *args):
+                        return self.scripted_fn(*args)
+
+                scripted_fn = torch.export.export(WrapperModule(), recording_inputs, strict=False).module()
+                print(scripted_fn)
 
                 if capture_output:
                     with self.capture_stdout() as script_stdout:
@@ -522,6 +535,7 @@ class JitTestCase(JitCommonTestCase):
                     python_outputs = python_fn(*inputs)
                 self.assertEqual(python_outputs, script_outputs, atol=atol, rtol=rtol)
                 self.assertEqual(script_outputs, opt_script_outputs, atol=atol, rtol=rtol)
+                raise RuntimeError("TORCH EXPORT SUCCEEDED")
                 return scripted_fn
 
     def checkTrace(self, func, reference_tensors, input_tensors=None,

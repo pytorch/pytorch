@@ -5884,6 +5884,11 @@ a")
     def _make_scalar_vars(self, arr, dtype):
         return [torch.tensor(val, dtype=dtype) for val in arr]
 
+    def test_simple_add(self):
+        def func(a):
+            return a * a
+
+        self.checkScript(func, (torch.ones(2, 2),))
 
     def test_string_print(self):
         def func(a):
