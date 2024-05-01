@@ -1858,10 +1858,11 @@ class CheckFunctionManager:
         self.check_fn.id_matched_objs = builder.id_matched_objs
 
         if config.enable_cpp_guard_manager:
-            if guards_log.isEnabledFor(logging.DEBUG):
-                guards_log.debug("%s", self.guard_manager)
-                # print(self.guard_manager)
-            # breakpoint()
+            # TODO: don't do the string rep, do something more structured here
+            torch._logging.trace_structured(
+                "dynamo_cpp_guards_str", payload_fn=lambda: str(self.guard_manager)
+            )
+            guards_log.debug("%s", self.guard_manager)
             assert self.guard_manager  # to make mypy happy
             self.guard_manager.id_matched_objs = builder.id_matched_objs
             self.check_fn = self.guard_manager
