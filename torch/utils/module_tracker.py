@@ -1,14 +1,15 @@
+import weakref
+
 import torch
-from torch import nn
-from torch.nn.modules.module import register_module_forward_hook, register_module_forward_pre_hook
 from torch.autograd.graph import register_multi_grad_hook
+from torch.nn.modules.module import (
+    register_module_forward_hook,
+    register_module_forward_pre_hook,
+)
 from torch.utils._pytree import tree_flatten
 
-import weakref
-import gc
-from collections import OrderedDict
 
-class ModuleTracker():
+class ModuleTracker:
     """
     ``ModuleTracker`` is a context manager that tracks the nn.Module hierarchy during execution
     so that other system which Module is currently being executed (or its backward is being
@@ -42,7 +43,7 @@ class ModuleTracker():
         self.parents = {"Global"}
         # This is used to reset parents at the end of the backward
         self.is_bw = False
-        self._known_modules = weakref.WeakKeyDictionary()
+        self._known_modules: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
         self._seen_modules = set()
 
     def _get_mod_name(self, mod):
@@ -65,6 +66,7 @@ class ModuleTracker():
                     "Please file a bug to PyTorch`)"
                 )
             self.parents.add(name)
+
         return fn
 
     def _get_pop_fn(self, name, is_bw):
@@ -74,7 +76,10 @@ class ModuleTracker():
             elif not is_bw:
                 # Due to some input/output not requiring gradients, we cannot enforce
                 # proper nesting in backward
-                raise RuntimeError("The Module hierarchy tracking is wrong. Report a bug to PyTorch")
+                raise RuntimeError(
+                    "The Module hierarchy tracking is wrong. Report a bug to PyTorch"
+                )
+
         return fn
 
     def _fw_pre_hook(self, mod, input):
@@ -82,7 +87,7 @@ class ModuleTracker():
         self._get_append_fn(name, False)()
 
         args, _ = tree_flatten(input)
-        tensors = list(a for a in args if isinstance(a, torch.Tensor) and a.requires_grad)
+        tensors = [a for a in args if isinstance(a, torch.Tensor) and a.requires_grad]
         if tensors:
             register_multi_grad_hook(tensors, self._get_pop_fn(name, True))
 
@@ -91,7 +96,7 @@ class ModuleTracker():
         self._get_pop_fn(name, False)()
 
         args, _ = tree_flatten(output)
-        tensors = list(a for a in args if isinstance(a, torch.Tensor) and a.requires_grad)
+        tensors = [a for a in args if isinstance(a, torch.Tensor) and a.requires_grad]
         if tensors:
             register_multi_grad_hook(tensors, self._get_append_fn(name, True))
 
@@ -103,4 +108,3 @@ class ModuleTracker():
     def __exit__(self, *args):
         self._fw_pre_handle.remove()
         self._fw_post_handle.remove()
-
