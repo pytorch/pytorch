@@ -987,6 +987,8 @@ class AlgorithmSelectorCache(PersistentCache):
                 benchmark=None,
             )
 
+
+
             if timings:
                 return no_op
 
