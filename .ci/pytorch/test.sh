@@ -1158,8 +1158,8 @@ test_executorch() {
 }
 
 test_linux_aarch64(){
-  # TODO: extend unit tests list
-  python test/run_test.py --include test_modules test_mkldnn test_mkldnn_fusion test_openmp --verbose
+  python test/run_test.py --include test_modules test_mkldnn test_mkldnn_fusion test_openmp test_torch test_dynamic_shapes \
+       test_transformers test_multiprocessing test_numpy_interop --verbose
 }
 
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
