@@ -10,11 +10,8 @@ log = logging.getLogger(__name__)
 
 
 class FakeScriptObject:
-    def __init__(self, wrapped_obj: Any, script_class_name: str):
+    def __init__(self, wrapped_obj):
         self.wrapped_obj = wrapped_obj
-
-        # The fully qualified name of the class of original script object
-        self.script_class_name = script_class_name
 
 
 class HasStaticMethodFromReal(Protocol):
@@ -74,13 +71,12 @@ def to_fake_obj(fake_mode, x: torch.ScriptObject) -> FakeScriptObject:
 
         return wrapped
 
-    fake_x_wrapped = FakeScriptObject(fake_x, x._type().qualified_name())  # type: ignore[attr-defined]
+    fake_x_wrapped = FakeScriptObject(fake_x)
     for name in x._method_names():  # type: ignore[attr-defined]
         attr = getattr(fake_x, name, None)
         if attr:
             if not callable(attr):
                 raise RuntimeError(f"Expect {name} to be a callable but got {attr}.")
-
             setattr(
                 fake_x_wrapped,
                 name,
