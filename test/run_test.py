@@ -490,6 +490,7 @@ def run_test(
         and not is_cpp_test
         and "-n" not in command
     )
+
     is_slow = "slow" in os.environ.get("TEST_CONFIG", "") or "slow" in os.environ.get(
         "BUILD_ENVRIONMENT", ""
     )
