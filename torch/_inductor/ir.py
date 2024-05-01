@@ -3587,7 +3587,7 @@ class TritonTemplateBuffer(TemplateBuffer):
         self.mutated_inputs = mutated_inputs
         if mutated_inputs is not None:
             # Ensure that the mutated inputs are only allowed for certain nodes
-            allowed_set = {"templated_attention"}
+            allowed_set = {"flex_attention"}
             current_node = str(V.graph.current_node)
             assert (
                 current_node in allowed_set
