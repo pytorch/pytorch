@@ -14,7 +14,8 @@ def count_label(label):
 def count(fn):
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
-        simple_call_counter.setdefault(fn.__qualname__, 0)
-        simple_call_counter[fn.__qualname__] += 1
+        if fn.__qualname__ not in simple_call_counter:
+            simple_call_counter[fn.__qualname__] = 0
+        simple_call_counter[fn.__qualname__] = simple_call_counter[fn.__qualname__] + 1
         return fn(*args, **kwargs)
     return wrapper
