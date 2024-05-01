@@ -1,6 +1,7 @@
 import gzip
 import json
 import os
+import shutil
 import tempfile
 from abc import ABC, abstractmethod
 from enum import Enum
@@ -71,8 +72,10 @@ class _KinetoProfile:
 
     Args:
         activities (iterable): list of activity groups (CPU, CUDA) to use in profiling, supported values:
-            ``torch.profiler.ProfilerActivity.CPU``, ``torch.profiler.ProfilerActivity.CUDA``.
-            Default value: ProfilerActivity.CPU and (when available) ProfilerActivity.CUDA.
+            ``torch.profiler.ProfilerActivity.CPU``, ``torch.profiler.ProfilerActivity.CUDA``,
+            ``torch.profiler.ProfilerActivity.XPU``.
+            Default value: ProfilerActivity.CPU and (when available) ProfilerActivity.CUDA
+            or (when available) ProfilerActivity.XPU.
         record_shapes (bool): save information about operator's input shapes.
         profile_memory (bool): track tensor memory allocation/deallocation (see ``export_memory_timeline``
             for more details).
@@ -125,9 +128,13 @@ class _KinetoProfile:
         self.profiler: Optional[prof.profile] = None
         self.mem_tl: Optional[MemoryProfileTimeline] = None
         self.use_device = None
-        privateuse1_backend = _get_privateuse1_backend_name()
-        if privateuse1_backend != "privateuseone":
-            self.use_device = privateuse1_backend
+        if ProfilerActivity.CUDA in self.activities:
+            self.use_device = "cuda"
+        elif ProfilerActivity.XPU in self.activities:
+            self.use_device = "xpu"
+        elif ProfilerActivity.PrivateUse1 in self.activities:
+            self.use_device = _get_privateuse1_backend_name()
+
         # user-defined metadata to be amended to the trace
         self.preset_metadata: Dict[str, str] = dict()
 
@@ -143,7 +150,7 @@ class _KinetoProfile:
             use_cuda=(ProfilerActivity.CUDA in self.activities),
             use_cpu=(ProfilerActivity.CPU in self.activities),
             use_mtia=(ProfilerActivity.MTIA in self.activities),
-            use_device=None,
+            use_device=self.use_device,
             record_shapes=self.record_shapes,
             with_flops=self.with_flops,
             profile_memory=self.profile_memory,
@@ -216,18 +223,11 @@ class _KinetoProfile:
             return self.profiler.export_chrome_trace(path)
 
     def export_stacks(self, path: str, metric: str = "self_cpu_time_total"):
-        """Save stack traces in a file in a format suitable for visualization.
+        """Save stack traces to a file
 
         Args:
             path (str): save stacks file to this location;
             metric (str): metric to use: "self_cpu_time_total" or "self_cuda_time_total"
-
-        .. note::
-            Example of using FlameGraph tool:
-
-            - git clone https://github.com/brendangregg/FlameGraph
-            - cd FlameGraph
-            - ./flamegraph.pl --title "CPU time" --countname "us." profiler.stacks > perf_viz.svg
         """
         assert self.profiler
         return self.profiler.export_stacks(path, metric)
@@ -450,8 +450,10 @@ class profile(_KinetoProfile):
 
     Args:
         activities (iterable): list of activity groups (CPU, CUDA) to use in profiling, supported values:
-            ``torch.profiler.ProfilerActivity.CPU``, ``torch.profiler.ProfilerActivity.CUDA``.
-            Default value: ProfilerActivity.CPU and (when available) ProfilerActivity.CUDA.
+            ``torch.profiler.ProfilerActivity.CPU``, ``torch.profiler.ProfilerActivity.CUDA``,
+            ``torch.profiler.ProfilerActivity.XPU``.
+            Default value: ProfilerActivity.CPU and (when available) ProfilerActivity.CUDA
+            or (when available) ProfilerActivity.XPU.
         schedule (Callable): callable that takes step (int) as a single parameter and returns
             ``ProfilerAction`` value that specifies the profiler action to perform at each step.
         on_trace_ready (Callable): callable that is called at each step when ``schedule``
@@ -743,6 +745,11 @@ class profile(_KinetoProfile):
             for action in action_list:
                 action()
 
+    def _stats(self) -> Optional[prof._ProfilerStats]:
+        if self.profiler is None:
+            return None
+        return self.profiler._stats
+
 
 class ExecutionTraceObserver(_ITraceObserver):
     """Execution Trace Observer
@@ -786,8 +793,36 @@ class ExecutionTraceObserver(_ITraceObserver):
         """
         Removes ET observer from record function callbacks.
         """
+
+        def _save_triton_kernels():
+            # Save the kernel paths for the generated kernels
+            from torch._inductor.codecache import PyCodeCache as PyCodeCache
+
+            kernel_files = [
+                v.__file__
+                for v in PyCodeCache.cache.values()
+                if getattr(v, "__file__", None) is not None
+            ]
+            work_dir, file_name = os.path.split(self._output_file_path)
+            resource_dir = os.path.join(
+                work_dir, os.path.splitext(file_name)[0] + "_resources"
+            )
+            if not os.path.exists(resource_dir):
+                os.mkdir(resource_dir)
+
+            for kernel_file in kernel_files:
+                if kernel_file is None:
+                    continue
+                path, name = os.path.split(kernel_file)
+                dst = os.path.join(resource_dir, name)
+                shutil.copyfile(kernel_file, dst)
+
         if self._registered:
             self.stop()
+            try:
+                _save_triton_kernels()
+            except Exception as e:
+                warn(f"Execution trace failed to save kernels: {e}")
             _remove_execution_trace_observer()
             self._registered = False
 

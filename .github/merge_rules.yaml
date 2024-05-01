@@ -28,7 +28,6 @@
   - caffe2/python/onnx/**
   approved_by:
   - BowenBao
-  - abock
   - justinchuby
   - shubhambhokare1
   - thiagocrepaldi
@@ -240,6 +239,9 @@
   patterns:
   - aten/src/ATen/xpu/**
   - c10/xpu/**
+  - torch/csrc/xpu/**
+  - torch/xpu/**
+  - test/xpu/**
   - third_party/xpu.txt
   approved_by:
   - EikanWang
@@ -371,12 +373,14 @@
 
 - name: CPU inductor
   patterns:
+  - torch/_inductor/mkldnn_lowerings.py
   - torch/_inductor/fx_passes/mkldnn_fusion.py
   - torch/_inductor/fx_passes/quantization.py
   - torch/_inductor/codegen/cpp.py
   - test/inductor/test_mkldnn_pattern_matcher.py
   - test/inductor/test_cpu_repo.py
   - test/inductor/test_cpu_cpp_wrapper.py
+  - aten/src/ATen/cpu/**
   - aten/src/ATen/native/quantized/cpu/**
   - test/quantization/core/test_quantized_op.py
   - torch/ao/quantization/quantizer/x86_inductor_quantizer.py
