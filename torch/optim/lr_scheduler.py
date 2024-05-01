@@ -159,7 +159,7 @@ class LRScheduler:
                 )
 
             # Just check if there were two first lr_scheduler.step() calls before optimizer.step()
-            elif getattr(self.optimizer, "_step_called", False):
+            elif not getattr(self.optimizer, "_opt_called", False):
                 warnings.warn(
                     "Detected call of `lr_scheduler.step()` before `optimizer.step()`. "
                     "In PyTorch 1.1.0 and later, you should call them in the opposite order: "
