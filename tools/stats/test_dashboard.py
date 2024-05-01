@@ -143,22 +143,22 @@ def get_reruns(grouped: Dict[str, Any]) -> Dict[str, Any]:
     return reruns
 
 
-def get_invoking_file_summary(grouped):
-    invoking_file_summary = defaultdict(
+def get_invoking_file_summary(grouped: Dict[str, Any]) -> Dict[str, Any]:
+    invoking_file_summary: Dict[str, Any] = defaultdict(
         lambda: defaultdict(lambda: defaultdict(lambda: {"count": 0, "time": 0.0}))
     )
     for build_name, build in grouped.items():
         for test_config, test_config_data in build.items():
             for invoking_file, invoking_file_data in test_config_data.items():
-                for _, class_data in invoking_file_data.items():
-                    for _, test_data in class_data.items():
+                for class_data in invoking_file_data.values():
+                    for test_data in class_data.values():
                         invoking_file_summary[build_name][test_config][invoking_file][
                             "count"
                         ] += 1
                         for i in test_data:
-                            invoking_file_summary[build_name][test_config][invoking_file][
-                                "time"
-                            ] += i["time"]
+                            invoking_file_summary[build_name][test_config][
+                                invoking_file
+                            ]["time"] += i["time"]
 
     return invoking_file_summary
 
