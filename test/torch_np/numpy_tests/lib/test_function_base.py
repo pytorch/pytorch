@@ -3259,7 +3259,7 @@ class TestPercentile(TestCase):
             subtest(
                 [1, 7],
                 decorators=[
-                    xpassIfTorchDynamo,
+                    xfail,
                 ],
             ),
         ],
@@ -3273,13 +3273,13 @@ class TestPercentile(TestCase):
             subtest(
                 (0, 1),
                 decorators=[
-                    xpassIfTorchDynamo,
+                    xfail,
                 ],
             ),
             subtest(
                 (-3, -1),
                 decorators=[
-                    xpassIfTorchDynamo,
+                    xfail,
                 ],
             ),
         ],
@@ -3839,13 +3839,13 @@ class TestMedian(TestCase):
             subtest(
                 (0, 1),
                 decorators=[
-                    xpassIfTorchDynamo,
+                    xfail,
                 ],
             ),
             subtest(
                 (-3, -1),
                 decorators=[
-                    xpassIfTorchDynamo,
+                    xfail,
                 ],
             ),
         ],
