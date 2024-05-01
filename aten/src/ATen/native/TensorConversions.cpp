@@ -294,6 +294,10 @@ Tensor _to_copy(
         " only supports memory format Preserve, but got ", memory_format,
         " instead.");
 
+    if (options.device().is_meta()) {
+      return zeros_like(self, options);
+    }
+
     auto [compressed_indices, plain_indices] = at::sparse_csr::getCompressedPlainIndices(self);
 
     const auto new_values = at::native::to(
