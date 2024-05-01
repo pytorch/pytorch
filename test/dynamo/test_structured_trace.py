@@ -16,10 +16,11 @@ import torch._dynamo.testing
 import torch._logging.structured
 import torch.distributed as dist
 
+from torch._inductor.test_case import TestCase
+
 from torch._logging._internal import TorchLogsFormatter
 from torch.nn.parallel import DistributedDataParallel as DDP
-
-from torch.testing._internal.common_utils import find_free_port, TestCase
+from torch.testing._internal.common_utils import find_free_port
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
