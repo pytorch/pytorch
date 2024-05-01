@@ -262,7 +262,7 @@ class ShardedTensor(ShardedTensorBase):
 
         self._metadata.tensor_properties.memory_format = memory_format
 
-        current_rank = dist.get_rank(self._process_group)
+        current_rank = dist.get_rank()  # global rank
 
         for shard_metadata in self._metadata.shards_metadata:
             rank, device = _parse_and_validate_remote_device(self._process_group, shard_metadata.placement)
@@ -281,12 +281,7 @@ class ShardedTensor(ShardedTensorBase):
         self._init_rrefs = init_rrefs
         self._sharded_tensor_id = None
 
-        self._process_group = (
-            process_group
-            if process_group is not None
-            else distributed_c10d._get_default_group()
-        )
-
+        self._process_group = self._normalize_pg(process_group)
         self._remote_shards: Dict[int, List[rpc.RRef[Shard]]] = {}
 
     def _post_init(self):
@@ -674,6 +669,11 @@ class ShardedTensor(ShardedTensorBase):
         )
         return st_to
 
+    @classmethod
+    def _normalize_pg(cls, process_group: Optional[dist.ProcessGroup]) -> dist.ProcessGroup:
+        if process_group is not None:
+            return process_group
+        return distributed_c10d._get_default_group()
 
     @classmethod
     def _init_from_local_shards(
@@ -684,12 +684,8 @@ class ShardedTensor(ShardedTensorBase):
         init_rrefs=False,
     ):
         # STEP 1: Validate the Shardmetadatas locally
-        process_group = (
-            process_group
-            if process_group is not None
-            else distributed_c10d._get_default_group()
-        )
-        current_rank = dist.get_rank(process_group)
+        process_group = cls._normalize_pg(process_group)
+        current_rank = dist.get_rank()  # intentional to get global rank
         world_size = dist.get_world_size(process_group)
 
         local_sharded_tensor_metadata: Optional[ShardedTensorMetadata] = None
@@ -819,12 +815,8 @@ class ShardedTensor(ShardedTensorBase):
             tensor_properties
         )
 
-        process_group = (
-            process_group
-            if process_group is not None
-            else distributed_c10d._get_default_group()
-        )
-        current_rank = dist.get_rank(process_group)
+        process_group = cls._normalize_pg(process_group)
+        current_rank = dist.get_rank()  # intentional to get global rank
 
         local_shards: List[Shard] = []
         for shard_metadata in sharded_tensor_metadata.shards_metadata:
@@ -859,12 +851,8 @@ class ShardedTensor(ShardedTensorBase):
                  not do cross rank validations, and fully rely on the user
                  for the correctness of sharded_tensor_metadata on each rank
         """
-        process_group = (
-            process_group
-            if process_group is not None
-            else distributed_c10d._get_default_group()
-        )
-        current_rank = dist.get_rank(process_group)
+        process_group = cls._normalize_pg(process_group)
+        current_rank = dist.get_rank()  # intentional to get global rank
 
         shards_metadata = sharded_tensor_metadata.shards_metadata
 

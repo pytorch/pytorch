@@ -26,7 +26,7 @@ from typing import (
 import sympy
 
 import torch
-from torch._dynamo.utils import dynamo_timed
+from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.utils._triton import has_triton
 
@@ -35,18 +35,19 @@ from .codegen.common import get_scheduling_for_device, Kernel
 from .comm_analysis import estimate_nccl_collective_runtime
 from .dependencies import Dep, MemoryDep, StarDep, WeakDep
 from .ir import ComputedBuffer, MultiOutput, MultiOutputLayout
+from .runtime.runtime_utils import green_text, red_text
 from .sizevars import SimplifyIndexing
 from .utils import (
     cache_on_self,
     cmp,
+    device_need_guard,
     free_symbol_has,
     get_device_tflops,
     get_dtype_size,
     get_gpu_dram_gbps,
-    green_text,
     is_collective,
+    is_gpu,
     is_wait,
-    red_text,
     sympy_product,
 )
 from .virtualized import V
@@ -353,7 +354,11 @@ class BaseSchedulerNode:
                 input_node: Optional[
                     BaseSchedulerNode
                 ] = self.scheduler.name_to_node.get(read.name)
-                if input_node and V.graph.wrapper_code.can_reuse(input_node, self):
+                if (
+                    input_node
+                    and V.graph.wrapper_code.can_reuse(input_node, self)
+                    and not isinstance(input_node, NopKernelSchedulerNode)
+                ):
                     assert input_node.users is not None
                     remaining_uses = [
                         x
@@ -536,7 +541,7 @@ class BaseSchedulerNode:
         node_bytes = 0
 
         for buf_name in reads | writes:
-            buf_accessed_elems = sum([node_numel for dep in buf_accesses[buf_name]])
+            buf_accessed_elems = sum(node_numel for dep in buf_accesses[buf_name])
             buf: Union[ir.Buffer, ir.TensorBox]
             if buf_name in V.graph.name_to_buffer:
                 buf = V.graph.name_to_buffer[buf_name]
@@ -581,7 +586,7 @@ class BaseSchedulerNode:
             layout = self.node.get_layout()
             dtype = self.node.get_dtype()
 
-        if "cuda" != layout.device.type:
+        if not is_gpu(layout.device.type):
             # default to no reordering based on runtime
             return 0
 
@@ -612,9 +617,15 @@ class BaseSchedulerNode:
                 from torch._subclasses.fake_tensor import FakeTensorMode
                 from torch.utils.flop_counter import FlopCounterMode
 
-                with FakeTensorMode(), FlopCounterMode(
+                assert self.node.fx_node is not None
+                with FakeTensorMode() as fake_mode, FlopCounterMode(
                     display=False
-                ) as flop_counter_mode:
+                ) as flop_counter_mode, V.set_current_node(
+                    self.node.fx_node
+                ), V.set_fake_mode(
+                    fake_mode
+                ):
+                    assert V.current_node is not None
                     from .ir import ir_node_to_tensor
 
                     fake_inputs = [
@@ -866,8 +877,8 @@ class FusedSchedulerNode(BaseSchedulerNode):
             for dep in set.union(*[x.unmet_dependencies for x in snodes])
             if dep.name not in self.get_names()
         } - self.read_writes.writes
-        self.min_order = min([x.min_order for x in self.snodes])
-        self.max_order = max([x.max_order for x in self.snodes])
+        self.min_order = min(x.min_order for x in self.snodes)
+        self.max_order = max(x.max_order for x in self.snodes)
 
     @cache_on_self
     def get_name(self) -> str:
@@ -1478,6 +1489,13 @@ class Scheduler:
 
         unbacked_symbol_to_origin_node = {}
 
+        # NB: None means that the dependency is on an input.  Don't actually
+        # generate a dependency because if we do, Inductor will start trying
+        # to free the unbacked int but that's pointless
+        for name, val in V.graph.graph_inputs.items():
+            if isinstance(val, sympy.Symbol):
+                unbacked_symbol_to_origin_node[val] = None
+
         for node in self.nodes:
             log.debug("scheduling %s", node.node)
 
@@ -1492,7 +1510,7 @@ class Scheduler:
                 # because if a MultiOutputLayout buffer propagates an unbacked
                 # symint to multiple outputs, they will all claim to def it.
                 if s not in unbacked_symbol_to_origin_node:
-                    unbacked_symbol_to_origin_node[s] = node
+                    unbacked_symbol_to_origin_node[s] = node.get_name()
 
             unbacked_symbol_uses = sorted(
                 node.node.get_unbacked_symbol_uses(), key=lambda x: x.name
@@ -1502,7 +1520,8 @@ class Scheduler:
                 assert (
                     s in unbacked_symbol_to_origin_node
                 ), f"{s} not in {unbacked_symbol_to_origin_node}"
-                node.add_fake_dep(StarDep(unbacked_symbol_to_origin_node[s].get_name()))
+                if (r := unbacked_symbol_to_origin_node[s]) is not None:
+                    node.add_fake_dep(StarDep(r))
 
             # a node will mutate either 0 or 1 buffers
             assert len(node.get_mutations()) <= 1
@@ -1547,9 +1566,11 @@ class Scheduler:
                 assert (
                     s in unbacked_symbol_to_origin_node
                 ), f"{s} not in {unbacked_symbol_to_origin_node.keys()}"
-                node_name = unbacked_symbol_to_origin_node[s].node.name
-                log.debug("scheduling output %s for unbacked symint %s", node_name, s)
-                add_user(node_name, OutputNode(StarDep(node_name)))
+                if (node_name := unbacked_symbol_to_origin_node[s]) is not None:
+                    log.debug(
+                        "scheduling output %s for unbacked symint %s", node_name, s
+                    )
+                    add_user(node_name, OutputNode(StarDep(node_name)))
 
         # make sure input mutation isn't dead-code-eliminated
         for name in self.mutation_renames:
@@ -1686,7 +1707,9 @@ class Scheduler:
         for i in range(10):
             old_len = len(self.nodes)
             fusion_log.debug(
-                "===== attempting fusion (%d/10): %d nodes =====", i + 1, old_len
+                "===== attempting fusion (%d/10): %d nodes =====",
+                i + 1,
+                old_len,
             )
             self.fuse_nodes_once()
             new_len = len(self.nodes)
@@ -1765,7 +1788,11 @@ class Scheduler:
         If config.benchmark_fusion is False, always return True.
         Otherwise, return True if fusion can brings speedup.
         """
-        if not config.benchmark_fusion:
+
+        is_multi_template = node1.is_template() and isinstance(
+            node1.get_template_node(), ir.MultiTemplateBuffer
+        )
+        if not config.benchmark_fusion and not is_multi_template:
             return True
 
         if (
@@ -1831,12 +1858,18 @@ class Scheduler:
             min_ms_fused = float("inf")
             ms_fused_choice = None
 
+            triton_choices = 0
+
             for choice, unfused_time in choice_timings.items():
                 if not isinstance(choice, torch._inductor.ir.TritonTemplateCallerBase):
                     continue
 
                 if unfused_time >= ms1 + ms2:
                     continue
+
+                triton_choices += 1
+                if triton_choices > config.max_epilogue_benchmarked_choices:
+                    break
 
                 # TODO - parallel compile triton templates
                 # TODO - should prune/skip choices that are not within certain % of best choice
@@ -1974,6 +2007,9 @@ class Scheduler:
             for node_grouping in group_grouping.values():
                 check_all_pairs(node_grouping)
 
+        possible_fusions = self.get_possible_fusions_with_highest_priority(
+            possible_fusions
+        )
         possible_fusions.sort(key=self.score_fusion_key, reverse=True)
         fusion_log.debug("found %d possible fusions", len(possible_fusions))
         return possible_fusions
@@ -2229,6 +2265,36 @@ class Scheduler:
         }
         return sum(dep.numbytes_hint() for dep in common_memory_deps)
 
+    def get_possible_fusions_with_highest_priority(self, possible_fusions):
+        # Group the possible fusions based on their priority from the backend.
+        # Only return the group of possible fusions with highest priority.
+        if len(possible_fusions) == 0:
+            return possible_fusions
+        possible_fusions_group_by_priority: Dict[
+            int, List[Tuple["BaseSchedulerNode", "BaseSchedulerNode"]]
+        ] = {}
+
+        for node1, node2 in possible_fusions:
+            assert node1.get_device() == node2.get_device()
+            device = node1.get_device()
+            fusion_pair_priority = int(
+                self.get_backend(device).get_fusion_pair_priority(node1, node2)
+            )
+            if fusion_pair_priority not in possible_fusions_group_by_priority:
+                possible_fusions_group_by_priority[fusion_pair_priority] = [
+                    (node1, node2),
+                ]
+            else:
+                possible_fusions_group_by_priority[fusion_pair_priority].append(
+                    (node1, node2)
+                )
+        # return the possible fusions with highest priority
+        possible_fusions_with_highest_priority = min(
+            possible_fusions_group_by_priority.items(), key=operator.itemgetter(0)
+        )[1]
+        assert len(possible_fusions_with_highest_priority) > 0
+        return possible_fusions_with_highest_priority
+
     def score_fusion_key(self, nodes):
         """
         Shim for list.sort(key=...)
@@ -2241,9 +2307,7 @@ class Scheduler:
         Populate node.last_usage recursively (also for the nodes within a FusedSchedulerNode)
         """
 
-        future_used_buffers = set()
-        for node_name in V.graph.get_output_names():
-            future_used_buffers.add(node_name)
+        future_used_buffers = set(V.graph.get_output_names())
 
         for node in reversed(self.nodes):
             node.set_last_usage(future_used_buffers, self.mutation_real_name)
@@ -2333,6 +2397,7 @@ class Scheduler:
         # the current kernel from where 'allocate' retrieve those decisions.
         # We have to make sure there is a non-NULL kernel handler to store
         # those inplace update decisions.
+        counters["inductor"]["extern_calls"] += 1
         with V.set_kernel_handler(Kernel(increase_kernel_count=False)):
             scheduler_node.decide_inplace_update()
             scheduler_node.allocate()
@@ -2343,7 +2408,7 @@ class Scheduler:
 
     def create_backend(self, device: torch.device):
         assert (
-            device.type != "cuda" or device.index is not None
+            not is_gpu(device.type) or device.index is not None
         ), f"{device} should have been normalized in lowering"
         V.graph.add_device_info(device)
 
@@ -2351,13 +2416,15 @@ class Scheduler:
         if device_scheduling is None:
             raise RuntimeError(f"Unsupported device type: {device.type}")
 
-        if device.type == "cuda" and not has_triton():
-            device_props = torch.cuda.get_device_properties(device)
-            if device_props.major < 7:
+        if not has_triton():
+            if (
+                device.type == "cuda"
+                and (device_props := torch.cuda.get_device_properties(device)).major < 7
+            ):
                 raise RuntimeError(
                     f"Found {device_props.name} which is too old to be supported by the triton GPU compiler, which is used as the backend. Triton only supports devices of CUDA Capability >= 7.0, but your device is of CUDA capability {device_props.major}.{device_props.minor}"  # noqa: B950
                 )
-            else:
+            elif is_gpu(device.type):
                 raise RuntimeError(
                     "Cannot find a working triton installation. More information on installing Triton can be found at https://github.com/openai/triton"  # noqa: B950
                 )
@@ -2401,8 +2468,9 @@ class Scheduler:
 
             self.enter_context(node)
 
-            if not isinstance(node, NopKernelSchedulerNode):
-                device = node.get_device()
+            if not isinstance(node, NopKernelSchedulerNode) and (
+                device := node.get_device()
+            ):
                 if (
                     device != self.current_device
                     or node.is_extern()
@@ -2410,13 +2478,14 @@ class Scheduler:
                 ):
                     self.flush()
                 if device != self.current_device:
-                    if device.type == "cuda":
-                        if self.current_device and self.current_device.type == "cuda":
-                            V.graph.wrapper_code.codegen_device_guard_exit()
+                    if self.current_device and device_need_guard(
+                        self.current_device.type
+                    ):
+                        V.graph.wrapper_code.codegen_device_guard_exit()
+                    if device_need_guard(device.type):
                         assert device.index is not None, "device should have an index"
                         V.graph.wrapper_code.codegen_device_guard_enter(device.index)
-                    elif self.current_device and self.current_device.type == "cuda":
-                        V.graph.wrapper_code.codegen_device_guard_exit()
+
                     self.current_device = device
 
             self.buffer_names_to_free.update(node.last_usage)
@@ -2429,7 +2498,7 @@ class Scheduler:
             elif node.is_foreach():
                 self.get_backend(device).codegen_foreach(node)  # type: ignore[possibly-undefined]
             elif isinstance(node, (FusedSchedulerNode, SchedulerNode)):
-                self.get_backend(device).codegen_nodes(node.get_nodes())  # type: ignore[possibly-undefined]
+                self.get_backend(device).codegen_node(node)  # type: ignore[possibly-undefined]
             else:
                 assert isinstance(node, NopKernelSchedulerNode)
                 node.allocate()
@@ -2444,10 +2513,10 @@ class Scheduler:
 
             if not isinstance(node, NopKernelSchedulerNode):
                 device = node.get_device()
-                if self.get_backend(device).ready_to_flush():
+                if device is not None and self.get_backend(device).ready_to_flush():
                     self.flush()
 
-        if self.current_device and self.current_device.type == "cuda":
+        if self.current_device and device_need_guard(self.current_device.type):
             # exit the outermost CUDA device guard. this is
             # important for nested indentation codegen-ing.
             V.graph.wrapper_code.codegen_device_guard_exit()
@@ -2464,13 +2533,13 @@ class BaseScheduling:
         """
         Check whether node1 and node2 can be vertically fused or not.
         """
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def can_fuse_horizontal(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode):
         """
         Check whether node1 and node2 can be horizontally fused or not.
         """
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def fuse(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode):
         """
@@ -2485,7 +2554,7 @@ class BaseScheduling:
         """
         Process the iteration sizes in case a transformation needs to be applied.
         """
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def codegen_template(
         self, template_node: SchedulerNode, epilogue_nodes: List[SchedulerNode]
@@ -2496,19 +2565,19 @@ class BaseScheduling:
         This function is only available for triton now. If the third-party backend behaves as a sub-class
         of TritonScheduling, it can override it or reuse it.
         """
-        raise NotImplementedError()
+        raise NotImplementedError
 
-    def codegen_nodes(self, nodes: List[SchedulerNode]):
+    def codegen_node(self, node: Union[FusedSchedulerNode, SchedulerNode]):
         """
         Generate a kernel given a list of pre-fused nodes.
         """
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def codegen_sync(self):
         """
         Generate synchronization code for the kernel. This method depends on the hardware characteristics.
         """
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def ready_to_flush(self) -> bool:
         """
@@ -2521,11 +2590,18 @@ class BaseScheduling:
         """
         Flush the generated kernel and python wrapper code to the source code file.
         """
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def benchmark_fused_nodes(self, nodes):
         """
         Benchmark fused list of nodes and return the execution time
         in milliseconds on randomly generated inputs.
         """
-        raise NotImplementedError()
+        raise NotImplementedError
+
+    def get_fusion_pair_priority(self, node1, node2) -> int:
+        """
+        Return an unsigned integer which represents the priority of this fusion pair.
+        The smaller is with higher priority.
+        """
+        return 0

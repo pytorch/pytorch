@@ -181,7 +181,14 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
         # We can't do isinstance(value, type) check because some ctx managers
         # are implemented as a function decorated by contextlib.contextmanager,
         # E.g., torch._functorch.vmap.vmap_increment_nesting.
-        return hashable(value) and value in supported_ctx_manager_classes
+        return (
+            # Context manager type or function with @contextmanager is callable
+            callable(value)
+            and (
+                hashable(value)  # accesses value.__hash__()
+                and value in supported_ctx_manager_classes
+            )
+        )
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -552,6 +559,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         if DistributedVariable.is_available():
             from torch.distributed._tensor import DTensor
             from torch.distributed.distributed_c10d import (
+                _get_group_rank_by_name,
                 _get_group_size_by_name,
                 _get_group_tag,
                 _rank_not_in_group,
@@ -560,6 +568,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             )
 
             @register(
+                _get_group_rank_by_name,
                 _get_group_size_by_name,
                 _get_group_tag,
                 _rank_not_in_group,
@@ -647,6 +656,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         expr.sym_num
                     )
                 )
+            elif isinstance(expr, ConstantVariable):
+                return expr
 
         @register(torch._C._autograd._unsafe_set_version_counter)
         def handle_unsafe_set_version_counter(self, tx, *args, **kwargs):
