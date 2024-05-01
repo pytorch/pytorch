@@ -548,7 +548,7 @@ def _convert_element_type(x: TensorBox, dtype: torch.dtype):
     if dtype.is_complex or x.get_dtype().is_complex:
         if x.get_size():
             # Decompose since aa aten fallback is more friendly for c++ codegen.
-            # This decompostion doesn't work for empty tensor, which needs more investigation.
+            # This decomposition doesn't work for empty tensor, which needs more investigation.
             dst = empty_like(x, dtype=dtype)
             ir.InplaceCopyFallback.create(dst, x)
             return dst
@@ -1856,8 +1856,9 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             return arg
 
         meta_val = fx_arg.meta["val"]
+        meta_stride = meta_val.stride()
 
-        stride_order = ir.get_stride_order(meta_val.stride())
+        stride_order = ir.get_stride_order(meta_stride)
         if stride_order and stride_order[-1] != 0:
             # contiguous stride order
             stride_order = list(reversed(range(len(arg.get_size()))))
@@ -1885,7 +1886,9 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         try:
             arg.get_stride()
             if is_aligned_realized_tensor(arg):
-                return arg
+                return V.graph.try_match_insignificant_strides(
+                    ir.ExternKernel.realize_input(arg), meta_stride
+                )
         except AttributeError:
             pass
 
@@ -1895,7 +1898,9 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         if isinstance(arg.data, ir.BaseView):
             if not is_aligned(arg):
                 if is_aligned(arg.unwrap_view()):
-                    return arg
+                    return V.graph.try_match_insignificant_strides(
+                        ir.ExternKernel.realize_input(arg), meta_stride
+                    )
 
         return ir.ExternKernel.require_stride_order(arg, stride_order)
 
@@ -2345,6 +2350,8 @@ def long_tensor(data):
 
 @register_lowering(aten._local_scalar_dense)
 def _local_scalar_dense(data):
+    from torch.fx.experimental.symbolic_shapes import resolve_unbacked_bindings
+
     # This is interesting!  Most lowerings return tensors, so you can just
     # return the buffer you allocated and it will get used (or not used, if
     # it's dead.)  But _local_scalar_dense (aka item) returns an int,
@@ -2355,18 +2362,44 @@ def _local_scalar_dense(data):
     # solely responsible for generating this .item().  The buffer is
     # not used for anything (notice we discard it); at codegen time,
     # the "buffer" just gets assigned None.
-    sym = V.graph.current_node.meta["val"].node.expr
-    buffer = ir.DynamicScalar(sym, data)
+    unbacked_bindings = resolve_unbacked_bindings(
+        V.graph.sizevars.shape_env, V.graph.current_node.meta["unbacked_bindings"]
+    )
+    assert len(unbacked_bindings) == 1, unbacked_bindings
+    # NB: Have to be very careful here.  V.graph.current_node.meta["val"]
+    # seemingly also contains a symbol which you want to do binding for,
+    # but it actually isn't.  In particular, if we have later performed
+    # a deferred runtime assert saying that u0 == s0, you will actually
+    # see s0 from expr!  This is bad because we need to actually generate
+    # the assert that says u0 == s0, so we need to know where to get u0
+    # from (this call).  In particular, we must use unbacked_bindings, which
+    # is guaranteed to have the original, unreplaced symbol in question.
+    #
+    # NB2: Another thing we have to be very careful about are symbol bindings
+    # that require nontrivial refinement, e.g., when you have a binding site
+    # x: Sym(u0 * 4) = y.item().  Here, the code generation must do a division
+    # in order to appropriately bind u0.  This is communicated via the keypath
+    # in unbacked_bindings, and we need to hold onto it in order to generate
+    # code appropriately for this case.
+    binding_sym, keypath = next(iter(unbacked_bindings.items()))
+    buffer = ir.DynamicScalar(binding_sym, keypath, data)
     buffer.name = V.graph.register_buffer(buffer)
-    return sym
+    # NB: the replaced expr is OK to use directly downstream, we want
+    # simplifications in this case!
+    val = V.graph.current_node.meta["val"]
+    if isinstance(val, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+        return val.node.expr
+    else:
+        return sympy.sympify(val)
 
 
 @register_lowering(aten._assert_scalar)
 def _assert_scalar(data, msg):
-    buffer = ir.AssertScalar(data, msg)
-    # This buffer isn't used by anyone (it returns None), so we must explicitly register it
-    buffer.name = V.graph.register_buffer(buffer)
-    return buffer
+    # NB: These will be handled at codegen time
+    # Not sure if we are guaranteed to be able to serve out truth from the
+    # deferred_runtime_asserts, TODO: try this assert out
+    # assert bool(data.scalar), data
+    return None
 
 
 def _full(fill_value, device, dtype, size):
@@ -5628,123 +5661,6 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
     return list(map(TensorBox.create, result))
 
 
-@register_lowering(torch.ops.higher_order.templated_attention)
-def templated_attention(*args, **kwargs):
-    from torch._prims_common import make_contiguous_strides_for
-    from .ir import (
-        ComputedBuffer,
-        FixedLayout,
-        FlexibleLayout,
-        InputBuffer,
-        StorageBox,
-        TensorBox,
-    )
-
-    query, key, value, subgraph = args
-
-    def create_placeholder(name: str, dtype: torch.dtype) -> InputBuffer:
-        return TensorBox.create(
-            InputBuffer(
-                name,
-                FixedLayout(
-                    query.get_device(),
-                    dtype,
-                    [
-                        1,
-                    ],
-                    [
-                        1,
-                    ],
-                ),
-            )
-        )
-
-    scalar_inps = ["score", "b", "h", "m", "n"]
-    env = {}
-    cnt = 0
-    placeholder_inps = [
-        create_placeholder(name, dtype)
-        for name, dtype in [
-            ("score", query.get_dtype()),
-            ("b", torch.int64),
-            ("h", torch.int64),
-            ("m", torch.int64),
-            ("n", torch.int64),
-        ]
-    ]
-    for node in subgraph.graph_module.graph.nodes:
-        # There are two classes of placeholder inpts that we need
-        # to handle differently. For the first n_scalar_inps inputs
-        # we expect that these placeholders were generated by the make_fx call
-        # in the templated Attention HOP. So we need to create a new placeholder
-        # TensorBox for each of these inputs. For the rest of the inputs we
-        # expect that these are lifted inputs that fill up the '*other_buffers'
-        # tuple and already have corresponding TensorBoxes passed in as args.
-        if node.op == "placeholder":
-            is_lifted_input = cnt >= len(scalar_inps)
-            env[node] = args[cnt - 1] if is_lifted_input else placeholder_inps[cnt]
-            cnt += 1
-        elif node.op == "call_function":
-            # For call_function we use the defulat lowerings and pass in the
-            # already created TensorBoxes as args
-            from torch.utils._pytree import tree_map
-
-            env[node] = lowerings[node.target](
-                *tree_map(lambda x: env[x] if x in env else x, node.args)
-            )
-        elif node.op == "output":
-            # For the output node we need to create a ComputedBuffer
-            # which represents the actual score modification
-
-            output_buffer = env[node.args[0]]
-            assert isinstance(output_buffer.data, StorageBox), (
-                "The output node for the templated attention subgraph must be a StorageBox, but got: ",
-                type(output_buffer),
-            )
-            # Create the ComputedBuffere directly that will be inlined into the modfication block
-            subgraph_buffer = ComputedBuffer(
-                name=None,
-                layout=FlexibleLayout(
-                    device=output_buffer.data.get_device(),
-                    dtype=output_buffer.data.get_dtype(),
-                    size=output_buffer.data.get_size(),
-                ),
-                data=output_buffer.data.data,  # type: ignore[arg-type]
-            )
-            from .kernel.templated_attention import sdpa_template
-
-            layout = FixedLayout(
-                output_buffer.get_device(),
-                query.get_dtype(),
-                query.get_size(),
-                make_contiguous_strides_for(query.get_size()),
-            )
-            choices: List[Any] = []
-            from .select_algorithm import autotune_select_algorithm
-
-            for BLOCK_M, BLOCK_N, num_warps, num_stages in [
-                (128, 64, 4, 3),
-                (128, 128, 4, 3),
-                (128, 128, 8, 2),
-                (64, 128, 4, 3),
-            ]:
-                sdpa_template.maybe_append_choice(
-                    choices=choices,
-                    input_nodes=(query, key, value),
-                    layout=layout,
-                    subgraphs=subgraph_buffer,
-                    num_stages=num_stages,
-                    num_warps=num_warps,
-                    BLOCK_M=BLOCK_M,
-                    BLOCK_N=BLOCK_N,
-                    BLOCK_DMODEL=query.get_size()[-1],
-                )
-            return autotune_select_algorithm(
-                "sdpa", choices, [query, key, value], layout
-            )
-    raise ValueError("TemplatedAttention was passed a subgraph with no output node!")
-
-
 @register_lowering(associative_scan_op, type_promotion_kind=None)
 def associative_scan(combine_fn: ir.Subgraph, input, dim: int):
     from .subgraph_lowering import InputDescriptor, lower_pointwise_subgraph
@@ -5968,6 +5884,18 @@ try:
     def _wait_tensor(inp):
         ir._WaitKernel.create_wait(_c10d_functional.wait_tensor.default, inp)
         return inp
+
+    @register_lowering(torch.ops._dtensor.shard_dim_alltoall)
+    def _shard_dim_alltoall(inp, gather_dim, shard_dim, group_name):
+        return ir.TensorBox.create(
+            ir._CollectiveKernel.create_out_of_place(
+                torch.ops._dtensor.shard_dim_alltoall.default,
+                inp,
+                gather_dim,
+                shard_dim,
+                group_name,
+            )
+        )
 
 except ImportError:
     log.info(

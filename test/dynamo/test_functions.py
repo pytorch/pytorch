@@ -54,6 +54,16 @@ def constant3(a, b):
     return a - b + (1.0 + 2)
 
 
+_variable = 0
+
+
+def update_global(x):
+    global _variable
+    _variable += 1
+    # Check that updated global variable value is picked up
+    return x * _variable
+
+
 def func_with_default(a, b, some_default_arg=True):
     if some_default_arg:
         return a - b
@@ -677,6 +687,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     @make_test
     def test_is_complex(x):
         if torch.is_complex(x):
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
+    def test_tensor_is_complex(x):
+        if x.is_complex():
             return x + 1
         else:
             return x - 1
