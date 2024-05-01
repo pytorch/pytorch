@@ -3379,6 +3379,7 @@ class TestAttnBias(NNTestCase):
         forw_tolerances: Optional[Tolerances] = None,
         grad_tolerances: Optional[Tolerances] = None,
         backend=None,
+        causal_variant=None,
     ):
         if backend is not None:
             torch._dynamo.reset()
@@ -3446,6 +3447,7 @@ class TestAttnBias(NNTestCase):
         if causal_variant == CausalVariant.UPPER_LEFT:
             attn_bias = causal_upper_left(seq_len_q, seq_len_kv)
         else:
+            print(seq_len_q, seq_len_kv)
             attn_bias = causal_lower_right(seq_len_q, seq_len_kv)
 
         self.run_test(device, make_q_tensor, make_kv_tensor, attn_bias, forw_tol, grad_tol, backend=None)
