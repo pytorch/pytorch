@@ -8,7 +8,6 @@ ciflow_push_tags:
 - ciflow/binaries_wheel
 - ciflow/inductor
 - ciflow/inductor-perf-compare
-- ciflow/linux-aarch64
 - ciflow/mps
 - ciflow/nightly
 - ciflow/periodic

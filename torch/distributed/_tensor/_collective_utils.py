@@ -6,14 +6,14 @@ from functools import lru_cache
 from typing import List, Optional
 
 import torch
-import torch.distributed._functional_collectives as funcol
 import torch.distributed._tensor.placement_types as placement_types
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed.distributed_c10d import (
-    _get_group_size_by_name,
+    all_to_all,
     broadcast,
     get_global_rank,
     get_rank,
+    get_world_size,
     GroupMember,
     ProcessGroup,
     scatter,
@@ -23,33 +23,7 @@ from torch.distributed.distributed_c10d import (
 logger = logging.getLogger(__name__)
 
 
-@torch.library.register_fake("_dtensor::shard_dim_alltoall")
-def _shard_dim_alltoall_meta(input, gather_dim, shard_dim, group_name):
-    group_size = _get_group_size_by_name(group_name)
-    stacked_list = [torch.empty_like(input) for _ in range(group_size)]
-    return torch.cat(stacked_list, dim=gather_dim).chunk(group_size, dim=shard_dim)
-
-
-def shard_dim_alltoall(input, gather_dim, shard_dim, mesh, mesh_dim):
-    if mesh.device_type == "cpu":
-        # Gloo does not support alltoall, so falling back to allgather + chunk
-        logger.warning(
-            "CPU process group does not support alltoall yet, falling back with allgather + chunk!"
-        )
-        out = funcol.all_gather_tensor(input, gather_dim, (mesh, mesh_dim))
-        if isinstance(out, funcol.AsyncCollectiveTensor):
-            # stick to the same behavior for the alltoall case, remove this once we enable alltoall async
-            out = out.wait()
-        out = torch.chunk(out, mesh.size(mesh_dim), dim=shard_dim)[
-            mesh.get_local_rank(mesh_dim)
-        ]
-        return out.contiguous() if not out.is_contiguous() else out
-
-    group_name = funcol._resolve_group_name((mesh, mesh_dim))
-    # TODO: enable async op for shard_dim_alltoall
-    return torch.ops._dtensor.shard_dim_alltoall(
-        input, gather_dim, shard_dim, group_name
-    )
+# TODO: we need to migrate these APIs to be functional collectives
 
 
 def mesh_scatter(
@@ -146,6 +120,48 @@ def mesh_broadcast(
         src_for_dim = get_global_rank(dim_group, 0)
 
     return broadcast(tensor, src=src_for_dim, group=dim_group, async_op=async_op)
+
+
+# TODO: test uneven split on GLOO and NCCL
+def mesh_all_to_all(
+    output_tensor_list: List[torch.Tensor],
+    input_tensor_list: List[torch.Tensor],
+    mesh: DeviceMesh,
+    mesh_dim: int = 0,
+    async_op: bool = False,
+) -> Optional[Work]:
+    dim_group = mesh.get_group(mesh_dim)
+    assert isinstance(dim_group, ProcessGroup)
+
+    work = None
+    # no direct dist.all_to_all support on 'gloo' so we manually do scatters
+    if mesh.device_type == "cpu":
+        logger.warning(
+            "ProcessGroupGloo does not support all_to_all, falling back with scatters!"
+        )
+        # TODO: pull the handle of uneven case in #492
+        dim_group_size = get_world_size(dim_group)
+        for i in range(dim_group_size):
+            # src need to be global rank
+            src_for_dim = i
+            if dim_group is not GroupMember.WORLD:
+                src_for_dim = get_global_rank(dim_group, i)
+
+            work = scatter(
+                output_tensor_list[i],
+                input_tensor_list if mesh.get_rank() == src_for_dim else [],
+                group=dim_group,
+                src=src_for_dim,
+                async_op=async_op,
+            )
+    else:
+        work = all_to_all(
+            output_tensor_list,
+            input_tensor_list,
+            dim_group,
+            async_op=async_op,
+        )
+    return work
 
 
 def pad_tensor(tensor: torch.Tensor, pad_dim: int, pad_size: int) -> torch.Tensor:
