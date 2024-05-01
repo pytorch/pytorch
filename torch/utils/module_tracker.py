@@ -15,13 +15,14 @@ class ModuleTracker:
     so that other system which Module is currently being executed (or its backward is being
     executed).
 
-    You can access the ``parents`` attribute on this context manager to get the set of all the current
+    You can access the ``parents`` attribute on this context manager to get the set of all the
     Modules currently being executed via their fqn.
     You can access the ``is_bw`` attribute to know if you are currently running in backward or not.
 
     Note that the ``parents`` is never empty and always contains the "Global" key. The ``is_bw`` flag
     will remain ``True`` after the forward until another Module is executed. If you need it to be
-    more accurate, please submit an issue.
+    more accurate, please submit an issue requesting this. Adding a map from fqn to the module instance
+    is possible but not done yet, please submit and issue requesting this if you need it.
 
     Example usage
 
