@@ -900,10 +900,11 @@ class MetaConverter:
                     if t.requires_grad:
                         r.requires_grad = True
                     if t.requires_grad and not is_leaf:
-                        r = torch._C._functions.DelayedError(
-                            "Internal error: Tried to backward() through example input",
-                            1,
-                        )(r)
+                        # This should probably use DelayedError,
+                        # but clone is fine for now for sparse tensors.
+                        # (DelayedError does not work for sparse because it causes
+                        # the Fake sparse tensor to "lose" its fakeness)
+                        r = r.clone()
                         with torch.enable_grad():
                             r._coalesced_(t.is_coalesced)
                 elif is_sparse_compressed_layout(t.layout):
@@ -1022,8 +1023,8 @@ class MetaConverter:
                                     "Internal error: Tried to backward() through example input",
                                     1,
                                 )(
-                                    r
-                                )  # type: ignore[arg-type]
+                                    r  # type: ignore[arg-type]
+                                )
                         elif t.is_functional:
                             assert t.unwrapped is not None
                             assert t.current_level is not None
