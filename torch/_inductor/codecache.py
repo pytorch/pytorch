@@ -1453,11 +1453,12 @@ def _get_python_include_dirs():
     # non-existing /Library/Python/... include path, in which case
     # one should use Headers folder from the framework
     if not include_dir.exists() and platform.system() == "Darwin":
-         std_lib = Path(sysconfig.get_path("stdlib"))
-         include_dir = (std_lib.parent.parent / "Headers").absolute()
+        std_lib = Path(sysconfig.get_path("stdlib"))
+        include_dir = (std_lib.parent.parent / "Headers").absolute()
     if not (include_dir / "Python.h").exists():
         warnings.warn(f"Can't find Python.h in {str(include_dir)}")
     return [str(include_dir)]
+
 
 def get_include_and_linking_paths(
     include_pytorch: bool = False,
