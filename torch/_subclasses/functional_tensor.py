@@ -218,6 +218,13 @@ class FunctionalTensor(torch.Tensor):
         else:
             return [elem.tolist() for elem in self.elem]
 
+    def to(self, *args, **kwargs):
+        if _detect_functional_mode().export:
+            # If copy is specified as pos arg, it's always the second one.
+            if len([arg for arg in args if isinstance(arg, bool)]) <= 1:
+                return super().to(*args, **{**kwargs, "copy": True})
+        return super().to(*args, **kwargs)
+
 
 class FunctionalTensorMode(TorchDispatchMode):
     def __init__(self, pre_dispatch=False, export=False, _allow_token_discovery=False):
@@ -423,9 +430,13 @@ class FunctionalTensorMode(TorchDispatchMode):
                         *args_unwrapped,
                         **kwargs_unwrapped,
                     )
-                    # We don't allow any mutation on result of dropout
-                    if self.export and func == torch.ops.aten.dropout.default:
-                        torch._freeze_functional_tensor(outs_unwrapped)  # type: ignore[attr-defined]
+                    # We don't allow any mutation on result of dropout or _to_copy
+                    if self.export:
+                        if func in (
+                            torch.ops.aten.dropout.default,
+                            torch.ops.aten._to_copy.default,
+                        ):
+                            torch._freeze_functional_tensor(outs_unwrapped)  # type: ignore[attr-defined]
                     outs_wrapped = pytree.tree_map_only(
                         torch.Tensor, wrap, outs_unwrapped
                     )
@@ -513,7 +524,7 @@ class BaseFunctionalizeAPI(ABC):
     @abstractmethod
     def unwrap_tensors(
         self, args: Union[torch.Tensor, Tuple[torch.Tensor, ...]]
-    ) -> Tuple[Any]:
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, ...]]:
         pass
 
     @abstractmethod
@@ -557,7 +568,7 @@ class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
 
     def unwrap_tensors(
         self, args: Union[torch.Tensor, Tuple[torch.Tensor, ...]]
-    ) -> Tuple[Any]:
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, ...]]:
         return torch.utils._pytree.tree_map_only(
             FunctionalTensor, FunctionalTensor.from_functional, args
         )
@@ -599,7 +610,7 @@ class CppFunctionalizeAPI(BaseFunctionalizeAPI):
 
     def unwrap_tensors(
         self, args: Union[torch.Tensor, Tuple[torch.Tensor, ...]]
-    ) -> Tuple[Any]:
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, ...]]:
         from torch._functorch.eager_transforms import (
             _unwrap_all_tensors_from_functional,
         )
@@ -638,7 +649,7 @@ class FunctorchFunctionalizeAPI(BaseFunctionalizeAPI):
 
     def unwrap_tensors(
         self, args: Union[torch.Tensor, Tuple[torch.Tensor, ...]]
-    ) -> Tuple[Any]:
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, ...]]:
         from torch._functorch.eager_transforms import (
             _unwrap_all_tensors_from_functional,
         )

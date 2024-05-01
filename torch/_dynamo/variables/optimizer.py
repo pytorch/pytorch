@@ -6,10 +6,14 @@ from typing import Dict, List
 import torch
 from torch.utils._pytree import tree_map_only
 
-from ..exc import unimplemented, Unsupported
-
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, ConstDictKeySource, GetItemSource, GlobalWeakRefSource
+from ..source import (
+    AttrSource,
+    ConstDictKeySource,
+    GetItemSource,
+    GlobalWeakRefSource,
+    GradSource,
+)
 from ..utils import GLOBAL_KEY_PREFIX
 
 from .base import VariableTracker
@@ -36,23 +40,6 @@ class OptimizerVariable(UserDefinedObjectVariable):
         *UserDefinedObjectVariable._nonvar_fields,
     }
 
-    @classmethod
-    def throw_if_unsupported_step(cls, symbolic_locals, f_name):
-        """
-        We don't support calling the step with closure argument, so graph break if
-        if that's the case.
-        """
-        if (
-            "closure" in symbolic_locals
-            and not isinstance(symbolic_locals["closure"], ConstantVariable)
-            and "self" in symbolic_locals
-            and isinstance(symbolic_locals["self"], OptimizerVariable)
-            and f_name == "step"
-        ):
-            unimplemented(
-                "Optimizer step with closure not supported by torch.compile()"
-            )
-
     def __init__(
         self,
         value,
@@ -61,17 +48,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         tensor_to_source=None,
         **kwargs,
     ):
-        from ..decorators import mark_static_address
-
         super().__init__(value, **kwargs)
-
-        for group in self.value.param_groups:
-            if "capturable" in group:
-                group["capturable"] = True
-
-            for p in group["params"]:
-                mark_static_address(p, guard=False)
-
         self.grad_to_source = grad_to_source or {}
         self.tensor_to_source = tensor_to_source or {}
         self.static_tensor_names = static_tensor_names or set()
@@ -86,6 +63,8 @@ class OptimizerVariable(UserDefinedObjectVariable):
         """This is an optimization to avoid tracing the very slow initialization of the optimizer"""
         if name == "_init_group":
             try:
+                self.graph_break_if_pending_mutation(tx)
+                self.move_step_if_cpu()
                 py_args, py_kwargs = self.get_python_args(*args, **kwargs)
                 ret_val = self.value._init_group(*py_args, **py_kwargs)
                 self.map_sources_and_install_guards(tx)
@@ -105,17 +84,6 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 # trace normally if we can't map args or install guards correctly
                 pass
 
-        if name == "step":
-            if (
-                "closure" in kwargs
-                and not isinstance(kwargs["closure"], ConstantVariable)
-                or len(args) == 1
-                and not isinstance(args[0], ConstantVariable)
-            ):
-                raise Unsupported(
-                    "Optimizer step with closure not supported by torch.compile()"
-                )
-
         return super().call_method(tx, name, args, kwargs)
 
     def var_getattr(self, tx, name):
@@ -125,7 +93,52 @@ class OptimizerVariable(UserDefinedObjectVariable):
         if name in ("_init_group", "step"):
             return GetAttrVariable(self, name, source=AttrSource(self.source, name))
 
+        if name == "param_groups":
+            from ..decorators import mark_static_address
+
+            for group in self.value.param_groups:
+                for p in group["params"]:
+                    mark_static_address(p)
+
+            self._set_capturable(tx)
+
         return super().var_getattr(tx, name)
+
+    def graph_break_if_pending_mutation(self, tx):
+        # If there are pending mutations on a parameter (due to using closure)
+        # then we need to graph break to allow the python version of the parameter
+        # to update, so that running _init_group will initialize the states with
+        # the correct values
+        for g in self.value.param_groups:
+            for p in g["params"]:
+                side_effects = tx.output.side_effects
+                if side_effects.has_pending_mutation(
+                    side_effects.id_to_variable.get(id(p), None)
+                ):
+                    from ..exc import Unsupported
+
+                    raise Unsupported("Pending mutation on parameter")
+
+    def _set_capturable(self, tx):
+        from . import LazyVariableTracker
+        from .builder import VariableBuilder
+
+        # Set capturable to True
+        for group in self.value.param_groups:
+            if "capturable" in group:
+                group["capturable"] = True
+
+        param_groups_vt = LazyVariableTracker.realize_all(
+            VariableBuilder(tx, AttrSource(self.source, "param_groups"))(
+                self.value.param_groups
+            )
+        )
+        for param_group_vt in param_groups_vt.items:
+            key = ConstDictVariable._HashableTracker(
+                ConstantVariable.create("capturable")
+            )
+            if key in param_group_vt.items:
+                param_group_vt.items[key] = ConstantVariable.create(True)
 
     def get_python_args(self, *args, **kwargs):
         """Get python values equivalent to the variable tracker args"""
@@ -143,12 +156,22 @@ class OptimizerVariable(UserDefinedObjectVariable):
             ):
                 return self.value.param_groups[arg.source.index]
 
-            raise ArgMappingException()
+            raise ArgMappingException
 
         new_args = [map_arg(arg) for arg in args]
         new_kwargs = {k: map_arg(v) for k, v in kwargs.items()}
 
         return new_args, new_kwargs
+
+    # If users load an old state dictionary,
+    # it's possible that step could be on the cpu
+    # if this is the case, move it to the GPU
+    # corresponding to the parameter
+    # in most cases this is a no-op because the state is empty
+    def move_step_if_cpu(self):
+        for p, state in self.value.state.items():
+            if "step" in state and state["step"].is_cpu:
+                state["step"] = state["step"].to(p.device)
 
     def map_sources_and_install_guards(self, tx):
         from ..decorators import mark_static_address
@@ -167,34 +190,54 @@ class OptimizerVariable(UserDefinedObjectVariable):
         # to be done first because the variable builder relies on the static
         # address annotation.
         def mark_static(x):
-            mark_static_address(x, guard=False)
+            mark_static_address(x)
 
         tree_map_only(torch.Tensor, mark_static, self.value.state)
 
         # Recursively realize the variable trackers for optim.state and
         # optim.param_groups, which recursively install the necessary guards.
-
-        # NB: Its necessary to install the guards for optim.state first.
-        # optim.state is a dict with parameters as keys. Therefore, we just put
-        # ID_MATCH on parameters, instead of TENSOR_MATCH. When we install the
-        # guards for param_groups later, VariableTrackerCache just ensures that
-        # we directly return the cached tensor variable tracker without
-        # inserting the TENSOR_MATCH guard.
-        state_vt = LazyVariableTracker.realize_all(
-            VariableBuilder(tx, AttrSource(self.source, "state"))(self.value.state)
-        )
-
         param_groups_vt = LazyVariableTracker.realize_all(
             VariableBuilder(tx, AttrSource(self.source, "param_groups"))(
                 self.value.param_groups
             )
         )
 
+        state_vt = VariableBuilder(tx, AttrSource(self.source, "state"))(
+            self.value.state
+        )
+
+        # We need to realize the top level state dict to populate
+        # the guard locals
+        state_vt.realize()
+
         # Populate self.grad_to_source and self.tensor_to_source so that we can
         # manually update_list_args
         for g_ind, (group, group_vt) in enumerate(
             zip(self.value.param_groups, param_groups_vt.items)
         ):
+            # we assume here that all params within a param group
+            # are initialized similarly
+            if len(group["params"]) > 0:
+                for param in group["params"]:
+                    if param.grad is not None:
+                        key_index = None
+                        for i, k in enumerate(self.value.state.keys()):
+                            if k is param:
+                                key_index = i
+                                break
+                        if key_index:
+                            state_source = AttrSource(self.source, "state")
+                            LazyVariableTracker.realize_all(
+                                VariableBuilder(
+                                    tx,
+                                    GetItemSource(
+                                        state_source,
+                                        ConstDictKeySource(state_source, key_index),
+                                    ),
+                                )(self.value.state[param])
+                            )
+                            break
+
             group_source = group_vt.source
             params_vt = group_vt.getitem_const(ConstantVariable.create("params"))
             for p_ind, (p, p_vt) in enumerate(
@@ -202,10 +245,11 @@ class OptimizerVariable(UserDefinedObjectVariable):
             ):
                 param_source = p_vt.source
                 self.tensor_to_source[p] = param_source
-                grad_source = AttrSource(
+                grad_source = GradSource(
                     param_source,
                     "grad",
                 )
+
                 if p.grad is not None:
                     self.grad_to_source[p.grad] = grad_source
                 else:
@@ -238,14 +282,14 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
         if tensor_value in self.tensor_to_source:
             # mark these tensors as static for cudagraphs
-            mark_static_address(tensor_value, guard=False)
+            mark_static_address(tensor_value)
             builder = VariableBuilder(tx, self.tensor_to_source[tensor_value])
             self.static_tensor_names.add(tx.output.module_key_name(builder.name))
         elif tensor_value in self.grad_to_source:
             builder = VariableBuilder(tx, self.grad_to_source[tensor_value])
         else:
             # mark these tensors as static for cudagraphs
-            mark_static_address(tensor_value, guard=False)
+            mark_static_address(tensor_value)
 
             global_name = tx.store_global_weakref_by_id(GLOBAL_KEY_PREFIX, tensor_value)
             builder = VariableBuilder(tx, GlobalWeakRefSource(global_name))

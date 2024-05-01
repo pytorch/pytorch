@@ -764,10 +764,24 @@ class MetaConverter:
                 return base.as_strided(sizes, strides, storage_offset)
 
             from torch._dynamo.source import EphemeralSource
-            from torch.fx.experimental.symbolic_shapes import sym_eq
+            from torch.fx.experimental.symbolic_shapes import (
+                StatelessSymbolicContext,
+                sym_eq,
+            )
 
             def symint_visitor_fn(s):
-                if shape_env is None:
+                nonlocal symbolic_context
+                from torch.fx.experimental.symbolic_shapes import DimDynamic
+
+                all_static_sizes = (
+                    symbolic_context is not None
+                    and isinstance(symbolic_context, StatelessSymbolicContext)
+                    and all(
+                        x is DimDynamic.STATIC for x in symbolic_context.dynamic_sizes
+                    )
+                )
+                # Can't just rely on shape env being None - dynamo always initializes it
+                if all_static_sizes or shape_env is None:
                     return s
 
                 # if it's already symbolic, just return it
@@ -1255,7 +1269,7 @@ class MetaConverter:
                         mb_fake_mode = maybe_get_fake_mode(r)
                         if mb_fake_mode is not None:
                             maybe_fake_mgr = in_kernel_invocation_manager(mb_fake_mode)
-                        with maybe_fake_mgr, torch.no_grad():
+                        with maybe_fake_mgr, torch.no_grad(), maybe_suppress():
                             r.set_(r_s, storage_offset, sizes, strides)
 
                 if t.grad is not None:

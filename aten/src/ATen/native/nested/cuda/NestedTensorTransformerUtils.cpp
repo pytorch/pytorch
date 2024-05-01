@@ -133,8 +133,8 @@ int64_t get_nnz(Tensor nestedtensor) {
     }
 
     // Check the offsets are a constant multiple from the previous numels
-    const int64_t* tensor_size_ptr = tensor_sizes.data_ptr<int64_t>();
-    const int64_t* tensor_stride_ptr = tensor_strides.data_ptr<int64_t>();
+    const int64_t* tensor_size_ptr = tensor_sizes.const_data_ptr<int64_t>();
+    const int64_t* tensor_stride_ptr = tensor_strides.const_data_ptr<int64_t>();
 
     int64_t numel_0 = (tensor_size_ptr[0] * tensor_stride_ptr[0]);
     TORCH_INTERNAL_ASSERT(numel_0 > 0, "numels must be positive!");

@@ -706,7 +706,7 @@ void GraphTask::mark_as_completed_and_run_post_processing() {
     // when the callbacks are called.
     lock.unlock();
     future_result_->markCompleted(vars);
-  } catch (std::exception& e) {
+  } catch (std::exception&) {
     future_result_->setErrorIfNeeded(std::current_exception());
   }
 }

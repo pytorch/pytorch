@@ -59,7 +59,7 @@ def _wrap_jagged_dims(ndim, dims, op_name):
 
 def check_schema(schema_str: str, func, *args, **kwargs) -> None:
     named_arg_types = schema_str.split(", ")
-    num_optional_args = sum([x.endswith("?") for x in named_arg_types])
+    num_optional_args = [x.endswith("?") for x in named_arg_types].count(True)
     min_args = len(named_arg_types) - num_optional_args
 
     # special case: ellipses allows for any number of unchecked args at the end
@@ -201,7 +201,7 @@ def lookup_jagged(func, *args, **kwargs) -> Optional[Callable]:
     # Handle pointwise fallbacks
     if torch.Tag.pointwise in func.tags:
         # Assume there aren't additional tensors that aren't the "unary/binary" args
-        num_tensor_args = sum([isinstance(x, torch.Tensor) for x in args])
+        num_tensor_args = sum(isinstance(x, torch.Tensor) for x in args)
         if num_tensor_args == 1:
             check_schema("self: jt_all, ...", func, *args, **kwargs)
             return functools.partial(jagged_unary_pointwise, func)

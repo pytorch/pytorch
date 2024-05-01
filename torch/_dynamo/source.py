@@ -144,7 +144,6 @@ class GlobalWeakRefSource(Source):
 @dataclasses.dataclass(frozen=True)
 class AttrSource(ChainedSource):
     member: str
-    get_static: bool = False
 
     def __post_init__(self):
         assert self.base, "Can't construct an AttrSource without a valid base source"
@@ -163,10 +162,27 @@ class AttrSource(ChainedSource):
         return self.base.guard_source()
 
     def name(self):
-        if self.get_static:
-            return f"inspect.getattr_static({self.base.name()}, {self.member!r})"
-        elif not self.member.isidentifier():
+        if not self.member.isidentifier():
             return f"getattr({self.base.name()}, {self.member!r})"
+        return f"{self.base.name()}.{self.member}"
+
+
+# Represents tensor.grad source. It could be represented by AttrSource as well.
+# But, we could access grad field on tensor directly in C++ without going
+# through the Python bytecodes. Therefore, we use a separate source for grad
+# field.
+@dataclasses.dataclass(frozen=True)
+class GradSource(ChainedSource):
+    member: str = "grad"
+
+    def reconstruct(self, codegen):
+        self.base.reconstruct(codegen)
+        codegen.extend_output(codegen.create_load_attrs(self.member))
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
         return f"{self.base.name()}.{self.member}"
 
 
@@ -196,7 +212,7 @@ class EphemeralSource(Source):
         return f"<ephemeral{': ' + self.desc if self.desc is not None else ''}>"
 
     def make_guard(self):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def is_ephemeral(self):
         return True
@@ -258,7 +274,7 @@ class NegateSource(ChainedSource):
         assert self.base is not None
 
     def reconstruct(self, codegen):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def guard_source(self):
         return self.base.guard_source()
@@ -497,7 +513,7 @@ class ConstantSource(Source):
         return self.source_name
 
     def make_guard(self, fn):
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 @dataclasses.dataclass(frozen=True)
