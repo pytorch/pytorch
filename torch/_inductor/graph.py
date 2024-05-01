@@ -78,7 +78,7 @@ from .utils import (
     maybe_get_suppress_shape_guards_ctx,
     should_assume_input_aligned,
 )
-from .virtualized import V
+from .virtualized import NullHandler, V
 
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
@@ -1514,7 +1514,8 @@ class GraphLowering(torch.fx.Interpreter):
         if "cuda" in self.device_types:
             # first pass
             self.cpp_wrapper = False
-            compiled = self.compile_to_module().call
+            with config.patch({"triton.store_cubin": True}):
+                compiled = self.compile_to_module().call
 
             def materialize(x):
                 if isinstance(x, (torch.SymInt, torch.SymFloat)):
@@ -1528,6 +1529,14 @@ class GraphLowering(torch.fx.Interpreter):
                     ), "Unknown type when creating real inputs" + str(type(x))
                     return x
 
+            # In the backward pass, V.real_inputs is not set.
+            # Generating random inputs based on self.example_inputs sometimes can be problematic,
+            # e.g. illegal memory access. A comprehensive fix is to autotune in a separate process.
+            real_inputs = (
+                self.example_inputs
+                if isinstance(V.real_inputs, NullHandler)
+                else V.real_inputs
+            )
             if tracing_context := torch._guards.TracingContext.try_get():
                 if tracing_context.output_strides:
                     tracing_context.output_strides.clear()
@@ -1538,10 +1547,10 @@ class GraphLowering(torch.fx.Interpreter):
                     if param is not None
                 ]
                 real_inputs = [
-                    materialize(x) for x in itertools.chain(params_flat, V.real_inputs)
+                    materialize(x) for x in itertools.chain(params_flat, real_inputs)
                 ]
             else:
-                real_inputs = [materialize(x) for x in V.real_inputs]
+                real_inputs = [materialize(x) for x in real_inputs]
 
             if self.mutated_inputs:
                 from .compile_fx import clone_preserve_strides
@@ -1563,7 +1572,6 @@ class GraphLowering(torch.fx.Interpreter):
                     real_inputs[idx] = clone_preserve_strides(real_inputs[idx])
 
             with torch.utils._python_dispatch._disable_current_modes():
-                assert self.example_inputs is not None
                 compiled(real_inputs)
             del real_inputs
 
