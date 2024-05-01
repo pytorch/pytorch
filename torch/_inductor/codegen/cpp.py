@@ -3109,13 +3109,6 @@ class CppKernelDispatcher(CppKernel):
         self.need_arr_acc_var = False
         self.loops = loops
 
-        if len(loops) == 1:
-            loop = loops[0]
-            step_expr = loop.steps
-            size_expr = loop.size
-            if step_expr > size_expr:
-                loop.steps = 1
-                split = False
         self.split = split
         if split:
             for loop in loops:
@@ -3131,11 +3124,15 @@ class CppKernelDispatcher(CppKernel):
     def gen_tiling_conditions(self):
         if len(self.tiling_ranges) == 1:
             # generate 1-d tiling condition
-            self.vec_condition.writeline(
-                f"if ({self.itervars[0]} < {cexpr_index(self.tiling_ranges[0])})"
-            )
-            self.scalar_condition.writeline(
-                f"if ({self.itervars[0]} >= {cexpr_index(self.tiling_ranges[0])})"
+            if self.tiling_ranges[0] != 0:
+                self.vec_condition.writeline(
+                    f"if ({self.itervars[0]} < {cexpr_index(self.tiling_ranges[0])})"
+                )
+            else:
+                self.loops[0].steps = 1
+            if self.tiling_ranges[0] != 0 and self.tiling_ranges[0] != self.sizes[0]:
+                self.scalar_condition.writeline(
+                    f"if ({self.itervars[0]} >= {cexpr_index(self.tiling_ranges[0])})"
             )
         elif len(self.tiling_ranges) == 2:
             # generate 2-d tiling condition
@@ -3224,22 +3221,25 @@ class CppKernelDispatcher(CppKernel):
 
     def codegen_scalar_kernel(self, code):
         if self.scalar_kernel:
-            code.splice(self.scalar_condition)
-            with contextlib.ExitStack() as stack:
-                stack.enter_context(code.indent())
-                code.splice(self.scalar_loop)
-                stack.enter_context(code.indent())
-                if len(self.tiling_ranges) == 1:
-                    self.replace_vars(self.scalar_kernel, [0])
-                elif len(self.tiling_ranges) == 2:
-                    self.replace_vars(self.scalar_kernel, [0, 1])
-                if len(self.reduction_var_dict):
-                    for k, v in self.reduction_var_dict.items():
-                        self.replace_loop_vars(self.scalar_kernel.stores._lines, k, v["new_var"])
+            if len(self.scalar_condition._lines) > 0:
+                code.splice(self.scalar_condition)
+                with contextlib.ExitStack() as stack:
+                    stack.enter_context(code.indent())
+                    code.splice(self.scalar_loop)
+                    stack.enter_context(code.indent())
+                    if len(self.tiling_ranges) == 1:
+                        self.replace_vars(self.scalar_kernel, [0])
+                    elif len(self.tiling_ranges) == 2:
+                        self.replace_vars(self.scalar_kernel, [0, 1])
+                    if len(self.reduction_var_dict):
+                        for k, v in self.reduction_var_dict.items():
+                            self.replace_loop_vars(self.scalar_kernel.stores._lines, k, v["new_var"])
+                    self.gen_kernel(self.scalar_kernel, code)
+            else:
                 self.gen_kernel(self.scalar_kernel, code)
 
     def codegen_vec_kernel(self, code):
-        if self.vec_kernel:
+        if self.vec_kernel and len(self.vec_condition._lines) > 0:
             code.splice(self.vec_condition)
             with contextlib.ExitStack() as stack:
                 stack.enter_context(code.indent())
