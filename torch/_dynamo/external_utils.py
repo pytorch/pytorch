@@ -26,22 +26,16 @@ def is_compiling() -> bool:
     return torch.compiler.is_compiling()
 
 
-# Skip tracing this frame. To avoid circular imports, apply the skip lazily.
-@torch._disable_dynamo(recursive=False)
 def wrap_inline(fn):
     """
     Create an extra frame around fn that is not in skipfiles
     """
-    from .bytecode_transformation import create_new_fn
 
+    @functools.wraps(fn)
     def inner(*args, **kwargs):
         return fn(*args, **kwargs)
 
-    # Create a new function dynamically to avoid Dynamo cache collisions on the
-    # same fn.__code__ object.
-    # functools.wraps is really important to ensure that __dict__ of the old
-    # function is propagated to the new function.
-    return functools.wraps(fn)(create_new_fn(inner))
+    return inner
 
 
 def call_hook(hook, *args):
