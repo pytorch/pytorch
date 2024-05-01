@@ -201,6 +201,18 @@ def scaled_dot_product_attention_strategy(
         ]
         single_mesh_dim_strategies.append(num_heads_dim_sharding)
 
+        # Context Parallelism: shards on the sequence dim
+        single_mesh_dim_strategies.append(
+            [
+                Shard(2),  # output
+                Shard(2),  # logsumexp
+                Shard(2),  # debugattn
+                Shard(2),  # q
+                Shard(2),  # k
+                Shard(2),  # v
+            ]
+        )
+
         all_mesh_dim_strategies.append(single_mesh_dim_strategies)
 
     strategy_combs = itertools.product(*all_mesh_dim_strategies)
@@ -292,6 +304,24 @@ def scaled_dot_product_attention_backward_strategy(
         num_heads_dim_sharding.extend([Replicate()] * (num_tensor_inputs - 6))
         single_mesh_dim_strategies.append(num_heads_dim_sharding)
 
+        # Context Parallelism: shards on the sequence dim
+        seq_dim_sharding: List[Placement] = [
+            Shard(2),  # grad_q
+            Shard(2),  # grad_k
+            Shard(2),  # grad_v
+            Shard(2),  # grad_output
+            Shard(2),  # q
+            Shard(2),  # k
+            Shard(2),  # v
+            Shard(2),  # output
+            Shard(2),  # logsumexp
+        ]
+        # accept replicate on the rest tensor inputs, potentially
+        # cum_seq_q, cum_seq_k, philox_seed, philox_offset
+        # at indices 6, 7, 12, 13, respectively
+        seq_dim_sharding.extend([Replicate()] * (num_tensor_inputs - 6))
+        single_mesh_dim_strategies.append(seq_dim_sharding)
+
         all_mesh_dim_strategies.append(single_mesh_dim_strategies)
 
     strategy_combs = itertools.product(*all_mesh_dim_strategies)
@@ -327,3 +357,20 @@ def scaled_dot_product_attention_backward_strategy(
             all_strategies.append(strat)
 
     return OpStrategy(all_strategies)
+
+
+@register_op_strategy(aten.constant_pad_nd.default)
+def constant_pad_nd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
+    # TODO(d4l3k); implement a more correct strategy for constant_pad_nd
+    return OpStrategy(
+        [
+            PlacementStrategy(
+                output_specs=DTensorSpec(mesh, (Replicate(),)),
+                input_specs=(
+                    DTensorSpec(mesh, (Replicate(),)),
+                    DTensorSpec(mesh, (Replicate(),)),
+                ),
+                redistribute_cost=[[1]],
+            )
+        ]
+    )

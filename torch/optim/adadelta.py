@@ -1,9 +1,19 @@
+from typing import List, Optional
+
 import torch
 from torch import Tensor
 
-from .optimizer import (Optimizer, _use_grad_for_differentiable, _default_to_fused_or_foreach,
-                        _differentiable_doc, _foreach_doc, _maximize_doc, _capturable_doc, _view_as_real, _get_scalar_dtype)
-from typing import List, Optional
+from .optimizer import (
+    _capturable_doc,
+    _default_to_fused_or_foreach,
+    _differentiable_doc,
+    _foreach_doc,
+    _get_scalar_dtype,
+    _maximize_doc,
+    _use_grad_for_differentiable,
+    _view_as_real,
+    Optimizer,
+)
 
 __all__ = ["Adadelta", "adadelta"]
 
@@ -52,13 +62,19 @@ class Adadelta(Optimizer):
             group.setdefault("capturable", False)
             for p in group["params"]:
                 p_state = self.state.get(p, [])
-                if len(p_state) != 0 and not torch.is_tensor(p_state['step']):
+                if len(p_state) != 0 and not torch.is_tensor(p_state["step"]):
                     step_val = float(p_state["step"])
-                    p_state["step"] = (torch.tensor(step_val, dtype=_get_scalar_dtype(), device=p.device)
-                                       if group['capturable']
-                                       else torch.tensor(step_val, dtype=_get_scalar_dtype()))
+                    p_state["step"] = (
+                        torch.tensor(
+                            step_val, dtype=_get_scalar_dtype(), device=p.device
+                        )
+                        if group["capturable"]
+                        else torch.tensor(step_val, dtype=_get_scalar_dtype())
+                    )
 
-    def _init_group(self, group, params_with_grad, grads, square_avgs, acc_deltas, state_steps):
+    def _init_group(
+        self, group, params_with_grad, grads, square_avgs, acc_deltas, state_steps
+    ):
         has_complex = False
         for p in group["params"]:
             if p.grad is None:
@@ -73,8 +89,11 @@ class Adadelta(Optimizer):
 
             # Lazy state initialization
             if len(state) == 0:
-                state["step"] = (torch.zeros((), dtype=_get_scalar_dtype(), device=p.device)
-                                 if group["capturable"] else torch.zeros((), dtype=_get_scalar_dtype()))
+                state["step"] = (
+                    torch.zeros((), dtype=_get_scalar_dtype(), device=p.device)
+                    if group["capturable"]
+                    else torch.zeros((), dtype=_get_scalar_dtype())
+                )
 
                 state["square_avg"] = torch.zeros_like(
                     p, memory_format=torch.preserve_format
@@ -110,7 +129,16 @@ class Adadelta(Optimizer):
             square_avgs = []
             acc_deltas = []
             state_steps = []
-            lr, rho, eps, weight_decay, foreach, maximize, differentiable, capturable = (
+            (
+                lr,
+                rho,
+                eps,
+                weight_decay,
+                foreach,
+                maximize,
+                differentiable,
+                capturable,
+            ) = (
                 group["lr"],
                 group["rho"],
                 group["eps"],
@@ -118,10 +146,12 @@ class Adadelta(Optimizer):
                 group["foreach"],
                 group["maximize"],
                 group["differentiable"],
-                group["capturable"]
+                group["capturable"],
             )
 
-            has_complex = self._init_group(group, params_with_grad, grads, square_avgs, acc_deltas, state_steps)
+            has_complex = self._init_group(
+                group, params_with_grad, grads, square_avgs, acc_deltas, state_steps
+            )
 
             adadelta(
                 params_with_grad,
@@ -143,7 +173,8 @@ class Adadelta(Optimizer):
         return loss
 
 
-Adadelta.__doc__ = r"""Implements Adadelta algorithm.
+Adadelta.__doc__ = (
+    r"""Implements Adadelta algorithm.
 
     .. math::
        \begin{aligned}
@@ -170,7 +201,8 @@ Adadelta.__doc__ = r"""Implements Adadelta algorithm.
        \end{aligned}
 
     For further details regarding the algorithm we refer to `ADADELTA: An Adaptive Learning Rate Method`_.
-    """ + fr"""
+    """
+    + rf"""
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
@@ -192,6 +224,7 @@ Adadelta.__doc__ = r"""Implements Adadelta algorithm.
         https://arxiv.org/abs/1212.5701
 
     """
+)
 
 
 def adadelta(
@@ -220,12 +253,18 @@ def adadelta(
 
     # this check is slow during compilation, so we skip it
     # if it's strictly needed we can add this check back in dynamo
-    if not torch._utils.is_compiling() and not all(isinstance(t, torch.Tensor) for t in state_steps):
-        raise RuntimeError("API has changed, `state_steps` argument must contain a list of singleton tensors")
+    if not torch._utils.is_compiling() and not all(
+        isinstance(t, torch.Tensor) for t in state_steps
+    ):
+        raise RuntimeError(
+            "API has changed, `state_steps` argument must contain a list of singleton tensors"
+        )
 
     # We still respect when the user inputs False for foreach.
     if foreach is None:
-        _, foreach = _default_to_fused_or_foreach(params, differentiable, use_fused=False)
+        _, foreach = _default_to_fused_or_foreach(
+            params, differentiable, use_fused=False
+        )
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with foreach optimizers")
@@ -270,10 +309,11 @@ def _single_tensor_adadelta(
 ):
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
     if not torch._utils.is_compiling() and capturable:
-        assert all(p.is_cuda and step.is_cuda for p, step in zip(params, state_steps)), \
-            "If capturable=True, params and state_steps must be CUDA tensors."
+        assert all(
+            p.is_cuda and step.is_cuda for p, step in zip(params, state_steps)
+        ), "If capturable=True, params and state_steps must be CUDA tensors."
 
-    for (param, grad, square_avg, acc_delta, step) in zip(
+    for param, grad, square_avg, acc_delta, step in zip(
         params, grads, square_avgs, acc_deltas, state_steps
     ):
         step += 1
@@ -316,28 +356,40 @@ def _multi_tensor_adadelta(
     capturable: bool,
     has_complex: bool,
 ):
-
     assert not differentiable, "_foreach ops don't support autograd"
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
     if not torch._utils.is_compiling() and capturable:
-        assert all(p.is_cuda and step.is_cuda for p, step in zip(params, state_steps)), \
-            "If capturable=True, params and state_steps must be CUDA tensors."
+        assert all(
+            p.is_cuda and step.is_cuda for p, step in zip(params, state_steps)
+        ), "If capturable=True, params and state_steps must be CUDA tensors."
 
     if len(params) == 0:
         return
 
-    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, square_avgs, acc_deltas, state_steps])
-    for ((device_params, device_grads, device_square_avgs, device_acc_deltas, device_state_steps), _) in grouped_tensors.values():
+    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
+        [params, grads, square_avgs, acc_deltas, state_steps]
+    )
+    for (
+        device_params,
+        device_grads,
+        device_square_avgs,
+        device_acc_deltas,
+        device_state_steps,
+    ), _ in grouped_tensors.values():
         if has_complex:
-            _view_as_real(device_params, device_grads, device_square_avgs, device_acc_deltas)
+            _view_as_real(
+                device_params, device_grads, device_square_avgs, device_acc_deltas
+            )
 
         # Update steps
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
         # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
         # wrapped it once now. The alpha is required to assure we go to the right overload.
         if device_state_steps[0].is_cpu:
-            torch._foreach_add_(device_state_steps, torch.tensor(1.0, device='cpu'), alpha=1.0)
+            torch._foreach_add_(
+                device_state_steps, torch.tensor(1.0, device="cpu"), alpha=1.0
+            )
         else:
             torch._foreach_add_(device_state_steps, 1)
 
@@ -349,10 +401,14 @@ def _multi_tensor_adadelta(
             if maximize:
                 torch._foreach_add_(device_grads, device_params, alpha=weight_decay)
             else:
-                device_grads = torch._foreach_add(device_grads, device_params, alpha=weight_decay)
+                device_grads = torch._foreach_add(
+                    device_grads, device_params, alpha=weight_decay
+                )
 
         torch._foreach_mul_(device_square_avgs, rho)
-        torch._foreach_addcmul_(device_square_avgs, device_grads, device_grads, value=1 - rho)
+        torch._foreach_addcmul_(
+            device_square_avgs, device_grads, device_grads, value=1 - rho
+        )
 
         std = torch._foreach_add(device_square_avgs, eps)
         torch._foreach_sqrt_(std)
