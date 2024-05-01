@@ -19,6 +19,9 @@ namespace c10 {
 [[noreturn]] C10_API void throwNullDataPtrError();
 C10_API void warnDeprecatedDataPtr();
 
+// Used in StorageImpl to store extra metadata.
+// Currently used only for storing a custom error message
+// used when throwing an exception when data_ptr is accessed.
 struct C10_API StorageExtraMeta {
   c10::optional<std::string> custom_data_ptr_error_msg_ = c10::nullopt;
   StorageExtraMeta() = default;
