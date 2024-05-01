@@ -9,19 +9,23 @@ set -ex
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-# Workaround for dind-rootless userid mapping (https://github.com/pytorch/ci-infra/issues/96)
-WORKSPACE_ORIGINAL_OWNER_ID=$(stat -c '%u' "/var/lib/jenkins/workspace")
-cleanup_workspace() {
-  echo "sudo may print the following warning message that can be ignored. The chown command will still run."
-  echo "    sudo: setrlimit(RLIMIT_STACK): Operation not permitted"
-  echo "For more details refer to https://github.com/sudo-project/sudo/issues/42"
-  sudo chown -R "$WORKSPACE_ORIGINAL_OWNER_ID" /var/lib/jenkins/workspace
-}
-# Disable shellcheck SC2064 as we want to parse the original owner immediately.
-# shellcheck disable=SC2064
-trap_add cleanup_workspace EXIT
-sudo chown -R jenkins /var/lib/jenkins/workspace
-git config --global --add safe.directory /var/lib/jenkins/workspace
+# Do not change workspace permissions for ROCm CI jobs
+# as it can leave workspace with bad permissions for cancelled jobs
+if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
+  # Workaround for dind-rootless userid mapping (https://github.com/pytorch/ci-infra/issues/96)
+  WORKSPACE_ORIGINAL_OWNER_ID=$(stat -c '%u' "/var/lib/jenkins/workspace")
+  cleanup_workspace() {
+    echo "sudo may print the following warning message that can be ignored. The chown command will still run."
+    echo "    sudo: setrlimit(RLIMIT_STACK): Operation not permitted"
+    echo "For more details refer to https://github.com/sudo-project/sudo/issues/42"
+    sudo chown -R "$WORKSPACE_ORIGINAL_OWNER_ID" /var/lib/jenkins/workspace
+  }
+  # Disable shellcheck SC2064 as we want to parse the original owner immediately.
+  # shellcheck disable=SC2064
+  trap_add cleanup_workspace EXIT
+  sudo chown -R jenkins /var/lib/jenkins/workspace
+  git config --global --add safe.directory /var/lib/jenkins/workspace
+fi
 
 echo "Environment variables:"
 env
@@ -175,6 +179,11 @@ if [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
   # ninja is installed in $HOME/.local/bin, e.g., /var/lib/jenkins/.local/bin for CI user jenkins
   # but this script should be runnable by any user, including root
   export PATH="$HOME/.local/bin:$PATH"
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *aarch64* ]]; then
+  # TODO: revisit this once the CI is stabilized on aarch64 linux
+  export VALGRIND=OFF
 fi
 
 install_tlparse
@@ -1148,11 +1157,18 @@ test_executorch() {
   assert_git_not_dirty
 }
 
+test_linux_aarch64(){
+  # TODO: extend unit tests list
+  python test/run_test.py --include test_modules test_mkldnn test_mkldnn_fusion test_openmp --verbose
+}
+
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 fi
-if [[ "${TEST_CONFIG}" == *backward* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *aarch64* ]]; then
+  test_linux_aarch64
+elif [[ "${TEST_CONFIG}" == *backward* ]]; then
   test_forward_backward_compatibility
   # Do NOT add tests after bc check tests, see its comment.
 elif [[ "${TEST_CONFIG}" == *xla* ]]; then

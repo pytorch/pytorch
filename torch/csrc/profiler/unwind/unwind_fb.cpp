@@ -5,7 +5,6 @@
 #include <llvm/DebugInfo/Symbolize/Symbolize.h>
 #include <torch/csrc/profiler/unwind/unwind.h>
 
-namespace torch {
 namespace torch::unwind {
 
 std::vector<Frame> symbolize(const std::vector<void*>& frames, Mode mode) {
@@ -39,6 +38,5 @@ std::vector<Frame> symbolize(const std::vector<void*>& frames, Mode mode) {
 }
 
 } // namespace torch::unwind
-} // namespace torch
 
 #endif
