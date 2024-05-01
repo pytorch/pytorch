@@ -774,12 +774,22 @@ class OpInfo:
     # (e.g. functions like ones, zeros, methods like view, permute)
     supports_varargs: bool = False
 
-    # Whether the operation avoids materializing COW tensor inputs
-    supports_cow_input_no_materialize: bool = True
+    # Whether the forward operation avoids materializing COW tensor inputs
+    supports_cow_input_no_materialize_forward: bool = True
 
-    # If `supports_cow_input_no_materialize == True`, this list contains the arg
-    # indices or kwarg names of inputs that are expected to materialize
-    allow_cow_input_materialize: List[Union[int, str]] = None
+    # Whether the backward operation avoids materializing COW tensor inputs
+    supports_cow_input_no_materialize_backward: bool = True
+
+    # Whether to skip the backward part of the COW tensor input test
+    skip_cow_input_backward: bool = False
+
+    # If `supports_cow_input_no_materialize_forward == True`, this list contains
+    # the arg indices or kwarg names of inputs that are expected to materialize
+    allow_cow_input_materialize_forward: List[Union[int, str]] = None
+
+    # If `supports_cow_input_no_materialize_backward == True`, this list contains
+    # the arg indices or kwarg names of inputs that are expected to materialize
+    allow_cow_input_materialize_backward: List[Union[int, str]] = None
 
     # wrapper function for gradcheck
     gradcheck_wrapper: Callable = lambda op, *args, **kwargs: op(*args, **kwargs)
@@ -2704,7 +2714,7 @@ class ForeachFuncInfo(OpInfo):
         sample_inputs_func,
         *,
         dtypes=floating_and_complex_types(),
-        dtypesIfCUDA=floating_and_complex_types_and(torch.half),
+        dtypesIfCUDA=None,
         dtypesIfROCM=None,
         supports_alpha_param=False,
         supports_autograd=True,

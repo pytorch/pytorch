@@ -10,6 +10,7 @@ from . import utils
 
 from .bytecode_transformation import (
     create_call_function,
+    create_call_method,
     create_dup_top,
     create_instruction,
     create_load_attr,
@@ -265,6 +266,12 @@ class PyCodegen:
         self.tx.output.update_co_names(name)
         return create_load_method(name)
 
+    def load_method(self, name):
+        self.append_output(self.create_load_method(name))
+
+    def call_method(self, nargs):
+        self.extend_output(create_call_method(nargs))
+
     def create_load_attr(self, name) -> Instruction:
         if name not in self.code_options["co_names"]:
             self.code_options["co_names"] += (name,)
@@ -321,6 +328,9 @@ class PyCodegen:
             *create_call_function(0, False),
             create_instruction("POP_TOP"),
         ]
+
+    def pop_top(self):
+        self.append_output(create_instruction("POP_TOP"))
 
     def call_function(self, nargs: int, push_null: bool):
         self.extend_output(create_call_function(nargs, push_null=push_null))

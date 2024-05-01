@@ -132,7 +132,7 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
     @classmethod
     def register_datapipe_as_function(cls, function_name, cls_to_register, enable_df_api_tracing=False):
         if function_name in cls.functions:
-            raise Exception(f"Unable to add DataPipe function name {function_name} as it is already taken")
+            raise Exception(f"Unable to add DataPipe function name {function_name} as it is already taken")  # noqa: TRY002
 
         def class_function(cls, enable_df_api_tracing, source_dp, *args, **kwargs):
             result_pipe = cls(source_dp, *args, **kwargs)
@@ -174,13 +174,13 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
     @classmethod
     def set_getstate_hook(cls, hook_fn):
         if IterDataPipe.getstate_hook is not None and hook_fn is not None:
-            raise Exception("Attempt to override existing getstate_hook")
+            raise Exception("Attempt to override existing getstate_hook")  # noqa: TRY002
         IterDataPipe.getstate_hook = hook_fn
 
     @classmethod
     def set_reduce_ex_hook(cls, hook_fn):
         if IterDataPipe.reduce_ex_hook is not None and hook_fn is not None:
-            raise Exception("Attempt to override existing reduce_ex_hook")
+            raise Exception("Attempt to override existing reduce_ex_hook")  # noqa: TRY002
         IterDataPipe.reduce_ex_hook = hook_fn
 
     def __repr__(self):
@@ -275,7 +275,7 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
     @classmethod
     def register_datapipe_as_function(cls, function_name, cls_to_register):
         if function_name in cls.functions:
-            raise Exception(f"Unable to add DataPipe function name {function_name} as it is already taken")
+            raise Exception(f"Unable to add DataPipe function name {function_name} as it is already taken")  # noqa: TRY002
 
         def class_function(cls, source_dp, *args, **kwargs):
             result_pipe = cls(source_dp, *args, **kwargs)
@@ -310,13 +310,13 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
     @classmethod
     def set_getstate_hook(cls, hook_fn):
         if MapDataPipe.getstate_hook is not None and hook_fn is not None:
-            raise Exception("Attempt to override existing getstate_hook")
+            raise Exception("Attempt to override existing getstate_hook")  # noqa: TRY002
         MapDataPipe.getstate_hook = hook_fn
 
     @classmethod
     def set_reduce_ex_hook(cls, hook_fn):
         if MapDataPipe.reduce_ex_hook is not None and hook_fn is not None:
-            raise Exception("Attempt to override existing reduce_ex_hook")
+            raise Exception("Attempt to override existing reduce_ex_hook")  # noqa: TRY002
         MapDataPipe.reduce_ex_hook = hook_fn
 
     def __repr__(self):

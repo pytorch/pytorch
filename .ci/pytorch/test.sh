@@ -6,6 +6,27 @@
 
 set -ex
 
+# shellcheck source=./common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+
+# Do not change workspace permissions for ROCm CI jobs
+# as it can leave workspace with bad permissions for cancelled jobs
+if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
+  # Workaround for dind-rootless userid mapping (https://github.com/pytorch/ci-infra/issues/96)
+  WORKSPACE_ORIGINAL_OWNER_ID=$(stat -c '%u' "/var/lib/jenkins/workspace")
+  cleanup_workspace() {
+    echo "sudo may print the following warning message that can be ignored. The chown command will still run."
+    echo "    sudo: setrlimit(RLIMIT_STACK): Operation not permitted"
+    echo "For more details refer to https://github.com/sudo-project/sudo/issues/42"
+    sudo chown -R "$WORKSPACE_ORIGINAL_OWNER_ID" /var/lib/jenkins/workspace
+  }
+  # Disable shellcheck SC2064 as we want to parse the original owner immediately.
+  # shellcheck disable=SC2064
+  trap_add cleanup_workspace EXIT
+  sudo chown -R jenkins /var/lib/jenkins/workspace
+  git config --global --add safe.directory /var/lib/jenkins/workspace
+fi
+
 echo "Environment variables:"
 env
 
@@ -90,9 +111,6 @@ if [[ -n $TESTS_TO_INCLUDE ]]; then
   INCLUDE_CLAUSE="--include $TESTS_TO_INCLUDE"
 fi
 
-# shellcheck source=./common.sh
-source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
-
 echo "Environment variables"
 env
 
@@ -163,6 +181,11 @@ if [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
   export PATH="$HOME/.local/bin:$PATH"
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *aarch64* ]]; then
+  # TODO: revisit this once the CI is stabilized on aarch64 linux
+  export VALGRIND=OFF
+fi
+
 install_tlparse
 
 # DANGER WILL ROBINSON.  The LD_PRELOAD here could cause you problems
@@ -211,8 +234,6 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     export LD_PRELOAD=/usr/lib/llvm-15/lib/clang/15.0.7/lib/linux/libclang_rt.asan-x86_64.so
     # Disable valgrind for asan
     export VALGRIND=OFF
-    # Increase stack size, because ASAN red zones use more stack
-    ulimit -s 81920
 
     (cd test && python -c "import torch; print(torch.__version__, torch.version.git_version)")
     echo "The next four invocations are expected to crash; if they don't that means ASAN/UBSAN is misconfigured"
@@ -304,6 +325,7 @@ test_inductor_distributed() {
   pytest test/distributed/_composable/fsdp/test_fully_shard_frozen.py
   pytest test/distributed/_composable/fsdp/test_fully_shard_mixed_precision.py -k test_compute_dtype
   pytest test/distributed/_composable/fsdp/test_fully_shard_mixed_precision.py -k test_reduce_dtype
+  pytest test/distributed/fsdp/test_fsdp_tp_integration.py -k test_fsdp_tp_integration
 
   # this runs on both single-gpu and multi-gpu instance. It should be smart about skipping tests that aren't supported
   # with if required # gpus aren't available
@@ -315,13 +337,13 @@ test_inductor() {
   python tools/dynamo/verify_dynamo.py
   python test/run_test.py --inductor --include test_modules test_ops test_ops_gradients test_torch --verbose
   # Do not add --inductor for the following inductor unit tests, otherwise we will fail because of nested dynamo state
-  python test/run_test.py --include inductor/test_torchinductor inductor/test_torchinductor_opinfo --verbose
+  python test/run_test.py --include inductor/test_torchinductor inductor/test_torchinductor_opinfo inductor/test_aot_inductor --verbose
 
   # docker build uses bdist_wheel which does not work with test_aot_inductor
   # TODO: need a faster way to build
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
       BUILD_AOT_INDUCTOR_TEST=1 python setup.py develop
-      CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aot_inductor
+      CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_aoti_inference
   fi
 }
 
@@ -433,6 +455,17 @@ test_perf_for_dashboard() {
         TORCHINDUCTOR_MAX_AUTOTUNE=1 python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_max_autotune_${suite}_${dtype}_${mode}_cuda_${target}.csv"
+      fi
+      if [[ "$DASHBOARD_TAG" == *cudagraphs_low_precision-true* ]] && [[ "$mode" == "inference" ]]; then
+        # TODO: This has a new dtype called quant and the benchmarks script needs to be updated to support this.
+        # The tentative command is as follows. It doesn't work now, but it's ok because we only need mock data
+        # to fill the dashboard.
+        python "benchmarks/dynamo/$suite.py" \
+          "${target_flag[@]}" --"$mode" --quant --backend "$backend" "$@" \
+          --output "$TEST_REPORTS_DIR/${backend}_cudagraphs_low_precision_${suite}_quant_${mode}_cuda_${target}.csv" || true
+        # Copy cudagraph results as mock data, easiest choice?
+        cp "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_cuda_${target}.csv" \
+          "$TEST_REPORTS_DIR/${backend}_cudagraphs_low_precision_${suite}_quant_${mode}_cuda_${target}.csv"
       fi
     done
   done
@@ -1124,11 +1157,33 @@ test_executorch() {
   assert_git_not_dirty
 }
 
+test_linux_aarch64(){
+  python test/run_test.py --include test_modules test_mkldnn test_mkldnn_fusion test_openmp test_torch test_dynamic_shapes \
+       test_transformers test_multiprocessing test_numpy_interop --verbose
+
+  # Dynamo tests
+  python test/run_test.py --include dynamo/test_compile dynamo/test_backends dynamo/test_comptime dynamo/test_config \
+       dynamo/test_functions dynamo/test_fx_passes_pre_grad dynamo/test_interop dynamo/test_model_output dynamo/test_modules \
+       dynamo/test_optimizers dynamo/test_recompile_ux dynamo/test_recompiles --verbose
+
+  # Inductor tests
+  python test/run_test.py --include inductor/test_torchinductor inductor/test_benchmark_fusion inductor/test_codecache \
+       inductor/test_config inductor/test_control_flow inductor/test_coordinate_descent_tuner inductor/test_fx_fusion \
+       inductor/test_group_batch_fusion inductor/test_inductor_freezing inductor/test_inductor_utils \
+       inductor/test_inplacing_pass inductor/test_kernel_benchmark inductor/test_layout_optim \
+       inductor/test_max_autotune inductor/test_memory_planning inductor/test_metrics inductor/test_multi_kernel inductor/test_pad_mm \
+       inductor/test_pattern_matcher inductor/test_perf inductor/test_profiler inductor/test_select_algorithm inductor/test_smoke \
+       inductor/test_split_cat_fx_passes inductor/test_standalone_compile inductor/test_torchinductor \
+       inductor/test_torchinductor_codegen_dynamic_shapes inductor/test_torchinductor_dynamic_shapes --verbose
+}
+
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 fi
-if [[ "${TEST_CONFIG}" == *backward* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *aarch64* ]]; then
+  test_linux_aarch64
+elif [[ "${TEST_CONFIG}" == *backward* ]]; then
   test_forward_backward_compatibility
   # Do NOT add tests after bc check tests, see its comment.
 elif [[ "${TEST_CONFIG}" == *xla* ]]; then

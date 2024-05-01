@@ -295,10 +295,8 @@ Node* CloneNodeToGraph(
     std::shared_ptr<Graph> n_graph,
     const ParamMap& params_dict,
     int opset_version) {
-  auto vals_to_params_map =
-      buildValueToParamsMap(n->owningGraph()->block(), params_dict);
   auto clone_node = n_graph->createClone(
-      n, [&n_graph, &vals_to_params_map, opset_version](Value* v) {
+      n, [&n_graph, &params_dict, opset_version](Value* v) {
         auto v_n = v->node();
         switch (v_n->kind()) {
           case ::c10::prim::Constant:
@@ -328,9 +326,10 @@ Node* CloneNodeToGraph(
             // If the input value is unknown, set it to graph input in the new
             // graph, and copy over metadata, such as datatype and shape.
             ::c10::optional<at::Tensor> val = ::c10::nullopt;
-            if (vals_to_params_map.find(v) != vals_to_params_map.end()) {
-              val = vals_to_params_map.find(v)->second.second.toTensor();
-            } else if (ConstantValueMap::HasValue(v->debugName())) {
+            auto v0 = params_dict.find(v->debugName());
+            if (v0 != params_dict.end()) {
+              val = v0->second.toTensor();
+            } else {
               val = ConstantValueMap::GetValue(v->debugName());
             }
 
@@ -2055,11 +2054,16 @@ void ONNXShapeTypeInference(
           clone_node->output(i)->debugName();
     }
     // Make inferred_shape_data use name from temporal ONNX graph
-    // instead of original PyTorch graph
-    for (const auto& gs_data : original_shape_data) {
-      const auto onnx_output_name = torch_to_onnx_input.find(gs_data.first);
-      if (onnx_output_name != torch_to_onnx_input.end()) {
-        inferred_shape_data[onnx_output_name->second] = gs_data.second;
+    // instead of original PyTorch graph. Only copy what we need,
+    // which are the inputs of n.
+    for (auto input : n->inputs()) {
+      const auto maybe_shape = original_shape_data.find(input->debugName());
+      if (maybe_shape != original_shape_data.end()) {
+        const auto onnx_output_name =
+            torch_to_onnx_input.find(input->debugName());
+        if (onnx_output_name != torch_to_onnx_input.end()) {
+          inferred_shape_data[onnx_output_name->second] = maybe_shape->second;
+        }
       }
     }
     // Use scalar_type_analysis without low precision cast

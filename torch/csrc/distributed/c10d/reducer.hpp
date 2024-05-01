@@ -51,7 +51,7 @@ class TORCH_API Reducer {
   explicit Reducer(
       std::vector<at::Tensor> params,
       std::vector<std::vector<size_t>> bucket_indices,
-      std::vector<size_t> per_bucket_size_limits,
+      const std::vector<size_t>& per_bucket_size_limits,
       c10::intrusive_ptr<c10d::ProcessGroup> process_group,
       std::vector<bool> expect_sparse_gradients,
       int64_t bucket_bytes_cap,
@@ -303,11 +303,9 @@ class TORCH_API Reducer {
   using GradCallback = std::function<bool(at::Tensor&)>;
 #ifndef _WIN32
   static_assert(
-      std::is_same<
+      std::is_same_v<
           GradCallback,
-          torch::distributed::autograd::DistAutogradContext::GradCallback>::
-          value,
-      "");
+          torch::distributed::autograd::DistAutogradContext::GradCallback>);
 #endif
   void runGradCallbackForVariable(at::Tensor& variable, GradCallback&& cb);
 
@@ -540,7 +538,7 @@ class TORCH_API Reducer {
   std::unordered_map<size_t, std::string> param_names_;
   // Variable indices stored sequentially in order of when the gradient is ready
   // for the current backwards pass.
-  std::vector<int> grad_ready_order_indices_;
+  std::vector<int64_t> grad_ready_order_indices_;
   // Bytes capacity of first bucket, can be configured by user
   int64_t first_bucket_bytes_cap_;
   // Per iteration set of parameter indices that have been marked ready.

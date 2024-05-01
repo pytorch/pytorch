@@ -485,7 +485,7 @@ def _make_alias(fn, name):
     """
     This function defines an alias of another function and sets its __name__ argument.
     It also sets its __module__ argument to the module of the caller.
-    Note that when naïvely doing `alias = fn`, we have that `alias.__name__ == "fn"`, and
+    Note that when naively doing `alias = fn`, we have that `alias.__name__ == "fn"`, and
     `alias.__module__ == fn.__module__`.
     """
 
@@ -1146,9 +1146,7 @@ def copysign(
     if isinstance(b, Number) and isinstance(a, Tensor):
         b = scalar_tensor(b, dtype=a.dtype, device=a.device)
     elif isinstance(a, Tensor) and isinstance(b, Tensor) and a.device != b.device:
-        msg = "Expected divisor (b) to be on the same device ({}) as dividend (a), but it is found on {}!".format(
-            a.device, b.device
-        )
+        msg = f"Expected divisor (b) to be on the same device ({a.device}) as dividend (a), but it is found on {b.device}!"
         raise RuntimeError(msg)
     return where(signbit(b), neg(abs(a)), abs(a))
 
@@ -1288,9 +1286,7 @@ def floor_divide(
         a = scalar_tensor(a, dtype=b.dtype, device=b.device)
     elif isinstance(a, Tensor) and isinstance(b, Tensor) and a.device != b.device:
         if a.device == torch.device("cpu"):
-            msg = "Expected divisor (b) to be on the same device ({}) as dividend (a), but it is found on {}!".format(
-                a.device, b.device
-            )
+            msg = f"Expected divisor (b) to be on the same device ({a.device}) as dividend (a), but it is found on {b.device}!"
             raise RuntimeError(msg)
         else:
             b = prims.device_put(b, device=a.device)
@@ -1936,9 +1932,7 @@ def clone(
 
 def copy_to(a: Tensor, b: Tensor, *, allow_cross_device=True):
     if not allow_cross_device and a.device != b.device:
-        msg = "Attempting to copy from device {} to device {}, but cross-device copies are not allowed!".format(
-            b.device, a.device
-        )
+        msg = f"Attempting to copy from device {b.device} to device {a.device}, but cross-device copies are not allowed!"
         raise RuntimeError(msg)
 
     return prims.copy_to(a, b)
@@ -3603,7 +3597,7 @@ def repeat(a: Tensor, *repeat_shape) -> Tensor:
 
     # derive permute order by sorting urtensor strides
     enumerated_stride = list(enumerate(urtensor_stride))
-    enumerated_stride.sort(key=lambda item: item[1], reverse=True)
+    enumerated_stride.sort(key=operator.itemgetter(1), reverse=True)
     permute_order, sorted_stride = zip(*enumerated_stride)
 
     # add new and expand dimensions according to urtensor
@@ -3708,9 +3702,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
                 if allow_copy:
                     return prims.reshape(a, shape)
 
-                msg = "Cannot view a tensor with shape {} and strides {} as a tensor with shape {}!".format(
-                    a.shape, a.stride(), shape
-                )
+                msg = f"Cannot view a tensor with shape {a.shape} and strides {a.stride()} as a tensor with shape {shape}!"
                 raise ValueError(msg)
 
             a_ = flatten(a_, idx, end)
@@ -3723,7 +3715,10 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
 
     # Squeezes tail
     while idx < a_.ndim:
-        assert a_.shape[idx] == 1
+        torch._check(
+            a_.shape[idx] == 1,
+            lambda: f"a.size({idx}) expected to be 1 but got {a_.shape[idx]}",
+        )
         a_ = squeeze(a_, idx)
 
     return a_
@@ -3898,12 +3893,14 @@ def unflatten(a: TensorLikeType, dim: int, sizes: ShapeType) -> TensorLikeType:
 
 @register_decomposition(aten.unbind)
 def unbind(t: TensorLikeType, dim: int = 0) -> TensorSequenceType:
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     dim = utils.canonicalize_dim(t.ndim, dim)
     torch._check_index(
         len(t.shape) > 0,
         lambda: "Dimension specified as 0 but tensor has no dimensions",
     )
-    if t.shape[dim] == 0:
+    if guard_size_oblivious(t.shape[dim] == 0):
         return tuple()
     else:
         return tuple(
@@ -4070,8 +4067,9 @@ def tensor_split(
     # If indices_or_sections is a tensor, it must be a CPU Long tensor
     if isinstance(indices_or_sections, TensorLike):
         if not indices_or_sections.device.type == "cpu":
-            msg = "tensor_split: if indices_or_sections is a tensor it must be on the CPU, but received one on {}".format(
-                indices_or_sections.device
+            msg = (
+                f"tensor_split: if indices_or_sections is a tensor it must be on the CPU, "
+                f"but received one on {indices_or_sections.device}"
             )
             raise ValueError(msg)
         if indices_or_sections.dtype != torch.long:
@@ -4932,9 +4930,10 @@ def arange(
         lambda: f"step must be finite but got {step}",
     )
 
+    args = (start, end, step)
+    integer_args = builtins.all(isinstance(arg, IntLike) for arg in args)
+
     if dtype is None:
-        args = (start, end, step)
-        integer_args = builtins.all(isinstance(arg, IntLike) for arg in args)
         dtype = torch.int64 if integer_args else torch.get_default_dtype()
 
     is_integer = utils.is_integer_dtype(dtype)
@@ -4962,7 +4961,6 @@ def arange(
             requires_grad=requires_grad,
         )
 
-    computation_dtype = utils.get_acc_type(dtype, device)
     index = prims.iota(
         length,
         start=0,
@@ -4970,6 +4968,10 @@ def arange(
         dtype=torch.int64,
         device=device,
         requires_grad=False,
+    )
+
+    computation_dtype = (
+        torch.long if integer_args else utils.get_acc_type(dtype, device)
     )
     index = _maybe_convert_to_dtype(index, computation_dtype)
     result = start + step * index
@@ -5555,7 +5557,10 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
             lambda: f"only supports a 0-dimensional value tensor, but got tensor with {value_ndim} dimension",
         )
         # `masked_fill` allows cpu scalar to be moved to cuda and xpu but not otherwise.
-        is_cpu_scalar = a.device.type in ["cuda", "xpu"] and value.device.type == "cpu"
+        is_cpu_scalar = (
+            a.device.type in ["cuda", "xpu", torch._C._get_privateuse1_backend_name()]
+            and value.device.type == "cpu"
+        )
         torch._check(
             is_cpu_scalar or value.device == a.device,
             lambda: "Expected `value` to be on same device as `a`",
@@ -6151,6 +6156,19 @@ def vdot(self, other):
     _dot_check(self, other)
     # The decomposition fails if you do self.conj()... not sure why
     return (self.conj_physical() * other).sum()
+
+
+@register_decomposition(aten.select_scatter)
+@out_wrapper()
+def select_scatter(x: TensorLikeType, src: TensorLikeType, dim: int, index: int):
+    dim = utils.canonicalize_dim(x.ndim, dim)
+    mask_shape = [1] * x.ndim
+    mask_shape[dim] = -1
+    if index < 0:
+        index = index + x.shape[dim]
+    mask = torch.arange(x.shape[dim], device=x.device).view(mask_shape) == index
+    src = torch.unsqueeze(src, dim).expand(x.shape)
+    return torch.where(mask, src, x)
 
 
 # inplace
