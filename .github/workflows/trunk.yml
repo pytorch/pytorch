@@ -33,6 +33,22 @@ jobs:
     permissions:
       id-token: write
       contents: read
+
+
+  win-vs2019-cpu-py3-build:
+    name: win-vs2019-cpu-py3
+    uses: ./.github/workflows/_win-build.yml
+    with:
+      build-environment: win-vs2019-cpu-py3
+      cuda-version: cpu
+      sync-tag: win-cpu-build
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 3, runner: "windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 2, num_shards: 3, runner: "windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 3, num_shards: 3, runner: "windows.4xlarge.nonephemeral" },
+        ]}
+
   win-vs2019-cuda11_8-py3-build:
     name: win-vs2019-cuda11.8-py3
     uses: ./.github/workflows/_win-build.yml
