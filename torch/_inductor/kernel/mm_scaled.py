@@ -1,17 +1,13 @@
-import functools
 import logging
-from typing import Any, Dict, List, Optional
 
 import torch
-from torch._inductor.virtualized import V
-
-from .. import config as inductor_config
-from ..codegen.cuda.gemm_template import CUTLASSGemmTemplate
-from ..lowering import register_lowering
+from ..ir import FlexibleLayout
+from ..lowering import register_lowering, constrain_to_fx_strides, add_layout_constraint, empty
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
     TritonTemplate,
+    realize_inputs,
 )
 from ..utils import (
     use_aten_gemm_kernels,
@@ -20,13 +16,12 @@ from ..utils import (
     use_triton_template,
 )
 from .mm_common import (
-    addmm_epilogue,
-    int8_mm_configs,
     mm_args,
     mm_configs,
     mm_grid,
     mm_options,
 )
+from .mm import _is_static_problem  # TODO(yangsiyu) move to mm_common
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -35,7 +30,7 @@ scaled_mm_template = TritonTemplate(
     name="scaled_mm",
     grid=mm_grid,
     source=r"""
-{{def_kernel("A", "B")}}
+{{def_kernel("A", "B", "output_amax")}}
     M = {{size("A", 0)}}
     N = {{size("B", 1)}}
     K = {{size("A", 1)}}
@@ -90,11 +85,19 @@ scaled_mm_template = TritonTemplate(
 
     # inductor generates a suffix
     {{store_output(("idx_m", "idx_n"), "acc", "mask")}}
+
+    # TODO compute and update output_amax
 """,
 )
 
 
-aten__scaled_mm = ExternKernelChoice(torch._scaled_mm, "at::_scaled_mm")
+aten__scaled_mm = ExternKernelChoice(
+    torch._scaled_mm,
+    "at::_scaled_mm",
+    op_overload=aten._scaled_mm.default,
+    use_fallback_kernel=True,  # only FallbackKernel can handle multi-output now
+)
+# also changed select_algorithm to use_fallback_kernel if True without checking other conditions
 
 
 @register_lowering(aten._scaled_mm.default, type_promotion_kind=None)
@@ -102,45 +105,52 @@ def tuned_scaled_mm(
     mat1,
     mat2,
     *,
-    bias,
-    out_dtype,
-    scale_a,
-    scale_b,
-    scale_result,
-    use_fast_accum,
+    bias=None,
+    out_dtype=None,
+    # scale_a,
+    # scale_b,
+    scale_result=None,
+    use_fast_accum=True,
     layout=None
 ):
-    m, n, k, layout, mat1, mat2, scale_a, scale_b = mm_args(
-        mat1, mat2, scale_a, scale_b, layout=layout
-    )
+    add_layout_constraint(aten._scaled_mm.default, constrain_to_fx_strides)
+    m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout, out_dtype=out_dtype)
 
-    choices = (
-        [
-            aten__scaled_mm.bind(
-                (
-                    mat1,
-                    mat2,
-                    bias,
-                    out_dtype,
-                    scale_a,
-                    scale_b,
-                    scale_result,
-                    use_fast_accum,
-                ),
-                layout,
-            )
-        ]
-        if use_aten_gemm_kernels()
-        else []
-    )
+    # Question: what should layout here be if the kernel outputs tuple(Tensor, Tensor)?
+    # FallbackKernel handles it okay now in tensor_to_layout()
 
-    if use_triton_template(layout):
+    # choices = (
+    #     [aten__scaled_mm.bind((mat1, mat2), layout)] if use_aten_gemm_kernels() else []
+    # )
+
+    # D56408683 only auto-tuned Triton choices, so the second output can be returned
+    # in addition to the output of autotune_select_algorithm
+    # Here we need to auto-tune between ExternKernel and Triton kernels, so we need
+    # the output of autotune_select_algorithm to be a tuple already.
+    # output_amax need to be a keyword arg because the ATen kernel expects only 2 positional args.
+
+    choices = []  # trying out Triton kernels now
+
+    static_shape, is_nonzero = _is_static_problem([mat1, mat2], layout)
+    if is_nonzero and use_triton_template(layout, enable_float8=True):
+
+        # see NOTE:[TritonTemplates with multiple outputs]
+        output_amax = empty((), dtype=torch.float32, device=mat1.get_device())
+
         for config in mm_configs(m, n, k):
+            # Siyu DEBUG maybe_append_choice possibly appends a TritonTemplateCaller to choices
             scaled_mm_template.maybe_append_choice(
                 choices,
-                input_nodes=(mat1, mat2, scale_a, scale_b),
+                input_nodes=(mat1, mat2, output_amax),
                 layout=layout,
+                mutated_inputs=[
+                    output_amax,
+                ],
                 **mm_options(config, m, n, k, layout),
             )
+        # TODO _scaled_mm() returns two tensors, use mutated inputs
 
-    return autotune_select_algorithm("scaled_mm", choices, [mat1, mat2], layout)
+    log.info(f"Siyu DEBUG, scaled_mm len choices: {len(choices)}")
+
+    # return autotune_select_algorithm("scaled_mm", choices, [mat1, mat2], layout)  # 2 positional inputs
+    return (autotune_select_algorithm("scaled_mm", choices, [mat1, mat2, output_amax], layout), output_amax)

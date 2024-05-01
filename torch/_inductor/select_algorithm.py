@@ -16,6 +16,7 @@ from unittest.mock import patch
 import sympy
 
 import torch
+import torch.utils._pytree as pytree
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters, identity, preserve_rng_state
 
@@ -863,15 +864,18 @@ class ExternKernelCaller(ChoiceCaller):
         )
 
     def output_node(self):
-        if config.abi_compatible and self.choice.use_fallback_kernel:
+        # if config.abi_compatible and self.choice.use_fallback_kernel:
+        if self.choice.use_fallback_kernel:
             assert (
                 self.choice.op_overload is not None
             ), "Please provide an op_overload to use ir.FallbackKernel"
             inner = ir.FallbackKernel.create(
                 self.choice.op_overload, *self.input_nodes, **self.kwargs
             )
+            log.warning(f"Siyu DEBUG, inner is FallbackKernel")
         else:
             cls = ir.ExternKernelOut if self.has_out_variant else ir.ExternKernelAlloc
+            log.warning(f"Siyu DEBUG, inner is {cls=}. {self.layout}, {self.choice.call_name()=}, {self.choice.cpp_kernel_name=}, {self.choice.op_overload=}")
             inner = cls(
                 layout=self.layout,
                 inputs=self.input_nodes,
@@ -882,7 +886,8 @@ class ExternKernelCaller(ChoiceCaller):
                 kwargs=self.kwargs,
             )
 
-        return ir.TensorBox.create(inner)
+        # return ir.TensorBox.create(inner)
+        return pytree.tree_map(ir.TensorBox.create, inner)
 
     def info_dict(self) -> Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]:
         """Information returned here is logged to the autotune log file when that is enabled."""
