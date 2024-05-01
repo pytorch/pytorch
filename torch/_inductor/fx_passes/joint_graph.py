@@ -109,6 +109,28 @@ def remove_no_ops(
         if len(node.args) == 2 and node.args[1] in ones:
             replace_no_op(node, 0)
 
+    # meta tensors returned from the graph have no data and can be replaced with empty_strided
+    for output_node in graph.find_nodes(op="output"):
+        had_meta_return = False
+
+        def visit(n):
+            nonlocal had_meta_return
+            val = n.meta.get("val")
+            if isinstance(val, torch.Tensor) and val.device.type == "meta":
+                with graph.inserting_before(output_node):
+                    n.replace_all_uses_with(
+                        graph.call_function(
+                            torch.ops.aten.empty_strided.default,
+                            args=(val.size(), val.stride()),
+                            kwargs={"dtype": val.dtype, "device": val.device},
+                        )
+                    )
+                had_meta_return = True
+
+        torch.fx.map_arg(output_node.args, visit)
+        if had_meta_return:
+            graph.eliminate_dead_code()
+
 
 @torch.utils._python_dispatch._disable_current_modes()
 def remove_redundant_views(gm: torch.fx.GraphModule):
@@ -247,7 +269,7 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
             ):
                 torch._check(runtime_size == compile_time_size)
 
-            # zeros, and ones just get traced into full, so we insert those
+            # zeros and ones just get traced into full, so we insert those
             new_node = graph.call_function(
                 aten.full.default,
                 args=(node_replacements_shapes[node], value),
@@ -278,6 +300,9 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
     """
     lazy_init()
     count = 0
+    if config.joint_custom_pre_pass is not None:
+        config.joint_custom_pre_pass(graph.graph)
+        count += 1
 
     if config.joint_graph_constant_folding:
         constant_fold_uniform_value(graph)
@@ -287,6 +312,10 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
 
     if not config.fallback_random:
         count += replace_random_passes(graph)
+
+    if config.joint_custom_post_pass is not None:
+        config.joint_custom_post_pass(graph.graph)
+        count += 1
 
     if count:
         stable_topological_sort(graph.graph)

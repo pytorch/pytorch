@@ -217,7 +217,7 @@ def _split_helper_int(tensor, indices_or_sections, axis, strict=False):
     l, n = tensor.shape[axis], indices_or_sections
 
     if n <= 0:
-        raise ValueError()
+        raise ValueError
 
     if l % n == 0:
         num, sz = n, l // n
@@ -2008,7 +2008,7 @@ def min_scalar_type(a: ArrayLike, /):
     from ._dtypes import DType
 
     if a.numel() > 1:
-        # numpy docs: "For non-scalar array a, returns the vector’s dtype unmodified."
+        # numpy docs: "For non-scalar array a, returns the vector's dtype unmodified."
         return DType(a.dtype)
 
     if a.dtype == torch.bool:

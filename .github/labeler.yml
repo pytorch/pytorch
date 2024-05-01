@@ -36,7 +36,8 @@
 - torch/distributed/_tensor/**
 - torch/distributed/fsdp/**
 - torch/csrc/inductor/**
-- test/cpp/aot_inductor/**
+- test/cpp/aoti_abi_check/**
+- test/cpp/aoti_inference/**
 
 "module: cpu":
 - aten/src/ATen/cpu/**

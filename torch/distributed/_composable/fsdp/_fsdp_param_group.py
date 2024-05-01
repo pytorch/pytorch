@@ -5,12 +5,10 @@ from typing import Any, cast, Dict, List, NamedTuple, Optional, Set, Tuple, Unio
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-
-from torch.autograd.graph import Node
 from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicates
 from torch.utils._pytree import tree_flatten, tree_unflatten
 from torch.utils.hooks import RemovableHandle
-from ._fsdp_api import MixedPrecisionPolicy
+from ._fsdp_api import MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_collectives import (
     AllGatherResult,
     foreach_all_gather,
@@ -91,12 +89,19 @@ class FSDPParamGroup:
         post_forward_mesh_info: Optional[FSDPMeshInfo],
         device: torch.device,
         mp_policy: MixedPrecisionPolicy,
+        offload_policy: OffloadPolicy,
     ):
         self.module = module  # permit ref cycle because 1:1 lifetime
         param_module_infos = _get_param_module_infos(params, module)
         self.fsdp_params = [
             FSDPParam(
-                param, module_info, mesh_info, post_forward_mesh_info, device, mp_policy
+                param,
+                module_info,
+                mesh_info,
+                post_forward_mesh_info,
+                device,
+                mp_policy,
+                offload_policy,
             )
             for param, module_info in zip(params, param_module_infos)
         ]
@@ -117,17 +122,15 @@ class FSDPParamGroup:
         self.comm_ctx = FSDPCommContext()
         # Group's indices in the shared post-forward order
         self._post_forward_indices: List[int] = []
-        # Used to avoid mistargeted backward prefetches when the module is used
-        # in forward but not in backward: for each forward, we record a tuple
-        # of the output's grad fns and later query the autograd engine whether
-        # any grad fn will execute in the current backward to know to prefetch.
-        self.all_forward_output_grad_fns: Set[Tuple[Node, ...]] = set()
         # Whether to reduce gradients at all (whether for FSDP or HSDP)
         self.reduce_grads: bool = True
         # Whether to all-reduce gradients for HSDP; only used if
         # `self.reduce_grads` is true, in which case setting this to false
         # means reduce-scatter but no all-reduce
         self.all_reduce_grads: bool = True
+        # Whether to reshard parameters after backward (only useful for
+        # gradient accumulation)
+        self.reshard_after_backward: bool = True
 
         # - CUDA events for stream synchronization
         # Holds the all-gather output buffer, sync objects, and metadata
@@ -188,6 +191,7 @@ class FSDPParamGroup:
         self._grad_divide_factors = (factor, data_parallel_world_size / factor)
 
     def lazy_init(self):
+        # Lazy init should be idempotent
         param_names_on_meta = [
             fsdp_param._param_fqn
             for fsdp_param in self.fsdp_params
@@ -244,7 +248,7 @@ class FSDPParamGroup:
             self._all_gather_result, self.fsdp_params, self._all_gather_process_group
         )
         for fsdp_param in self.fsdp_params:
-            fsdp_param.init_unsharded_param()  # no-op after 1st call
+            fsdp_param.init_unsharded_param()
         self._to_unsharded()
         all_gather_copy_out_event = torch.cuda.Event()
         all_gather_copy_out_event.record()
@@ -295,31 +299,42 @@ class FSDPParamGroup:
         self.comm_ctx.post_forward_order.append(self)
         self._post_forward_indices.append(post_forward_index)
 
-    def pre_backward(self, forward_grad_fns: Tuple[Any, ...], *unused: Any):
+    def pre_backward(self, *unused: Any):
         with torch.profiler.record_function("FSDP::pre_backward"):
             self._training_state = TrainingState.PRE_BACKWARD
             self.unshard()  # no-op if prefetched
             self.wait_for_unshard()
-            # Can be already removed if running multiple `backward`s
-            self.all_forward_output_grad_fns.discard(forward_grad_fns)
             self._prefetch_unshard()
 
     def post_backward(self, *unused: Any):
         self._training_state = TrainingState.POST_BACKWARD
+        with torch.profiler.record_function("FSDP::post_backward_accumulate"):
+            for fsdp_param in self.fsdp_params:
+                fsdp_param.accumulate_unsharded_grad_if_needed()
         with torch.profiler.record_function("FSDP::post_backward_reshard"):
             if not self.reduce_grads:
-                self.reshard()
+                if self.reshard_after_backward:
+                    self.reshard()
+                for fsdp_param in self.fsdp_params:
+                    fsdp_param.to_accumulated_grad_if_needed()
                 return
             # Save the autograd-computed gradients before resharding to only
             # access the unsharded parameters when their data is present
             fsdp_params_with_grad: List[FSDPParam] = []
             unsharded_grads: List[torch.Tensor] = []
             for fsdp_param in self.fsdp_params:
-                if fsdp_param.unsharded_param.grad is not None:
+                # May have an accumulated gradient of the reduce dtype if the
+                # previous backward did not reduce-scatter
+                if fsdp_param.unsharded_accumulated_grad is not None:
+                    fsdp_params_with_grad.append(fsdp_param)
+                    unsharded_grads.append(fsdp_param.unsharded_accumulated_grad_data)
+                    fsdp_param.unsharded_accumulated_grad = None
+                elif fsdp_param.unsharded_param.grad is not None:
                     fsdp_params_with_grad.append(fsdp_param)
                     unsharded_grads.append(fsdp_param.unsharded_grad_data)
                     fsdp_param.unsharded_param.grad = None
-            self.reshard()
+            if self.reshard_after_backward:
+                self.reshard()
         if len(fsdp_params_with_grad) == 0:
             return
         with torch.profiler.record_function("FSDP::post_backward_reduce"):
@@ -342,9 +357,11 @@ class FSDPParamGroup:
         if self._post_reduce_view_out_event is not None:
             torch.cuda.current_stream().wait_event(self._post_reduce_view_out_event)
             self._post_reduce_view_out_event = None
-        self._training_state = TrainingState.IDLE
+        for fsdp_param in self.fsdp_params:
+            if fsdp_param.grad_offload_event is not None:
+                fsdp_param.grad_offload_event.synchronize()
+                fsdp_param.grad_offload_event = None
         self._post_forward_indices.clear()
-        self.all_forward_output_grad_fns.clear()
 
     def _prefetch_unshard(self):
         if self._training_state == TrainingState.PRE_BACKWARD:
@@ -354,18 +371,14 @@ class FSDPParamGroup:
             curr_index = self._post_forward_indices.pop()
             if (target_index := curr_index - 1) < 0:
                 return
+            # Prefetch naively using the reverse post-forward order, which may
+            # have mistargeted prefetches if not all modules used in forward
+            # are used in this backward
             target_fsdp_param_group = self.comm_ctx.post_forward_order[target_index]
-            if any(
-                torch._C._will_engine_execute_node(grad_fn)  # type: ignore[attr-defined]
-                for grad_fns in target_fsdp_param_group.all_forward_output_grad_fns
-                for grad_fn in grad_fns
-            ):
-                with torch.profiler.record_function(
-                    "FSDP::backward_prefetch"
-                ), target_fsdp_param_group.use_training_state(
-                    TrainingState.PRE_BACKWARD
-                ):
-                    target_fsdp_param_group.unshard()
+            with torch.profiler.record_function(
+                "FSDP::backward_prefetch"
+            ), target_fsdp_param_group.use_training_state(TrainingState.PRE_BACKWARD):
+                target_fsdp_param_group.unshard()
 
     # Utilities #
     def _to_sharded(self):
@@ -434,8 +447,13 @@ class FSDPParamGroup:
         return args, kwargs
 
     def _register_state_dict_hooks(self) -> None:
-        assert len(self._module_to_pre_save_state_dict_hook_handle) == 0
-        assert len(self._module_to_pre_load_state_dict_hook_handle) == 0
+        num_pre_save_hooks = len(self._module_to_pre_save_state_dict_hook_handle)
+        num_pre_load_hooks = len(self._module_to_pre_load_state_dict_hook_handle)
+        assert (
+            num_pre_save_hooks == num_pre_load_hooks
+        ), f"Pre-save: {num_pre_save_hooks} pre-load: {num_pre_load_hooks}"
+        if num_pre_save_hooks > 0:
+            return  # already registered
         modules_with_fsdp_params: Set[nn.Module] = {
             fsdp_param._module_info.module for fsdp_param in self.fsdp_params
         }

@@ -9,7 +9,7 @@
 namespace c10d::intra_node_comm {
 
 constexpr size_t kMaxDevices = 8;
-constexpr size_t kDefaultBufferSize = 10 * 1024 * 1024;
+constexpr size_t kDefaultBufferSize = 10ull * 1024 * 1024;
 
 using NvlMesh = std::array<std::array<size_t, kMaxDevices>, kMaxDevices>;
 using HybridCubeMesh = std::array<std::array<int, 4>, kMaxDevices>;

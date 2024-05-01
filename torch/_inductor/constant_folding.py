@@ -95,7 +95,8 @@ class ConstantFolder(torch.fx.Interpreter):
                 seen_uses.add(inp)
                 last_non_output_use[node].append(inp)
 
-            pytree.tree_map_only(torch.fx.Node, add_use, (node.args, node.kwargs))
+            # In-place is fine since we don't mutate
+            pytree.tree_map_only_(torch.fx.Node, add_use, (node.args, node.kwargs))
 
             # if this node is only used in output, we want to gc it right away
             if len(node.users) == 1 and output_node in node.users:
@@ -110,7 +111,8 @@ class ConstantFolder(torch.fx.Interpreter):
             def set_env(arg):
                 self.env[arg] = self.unknown_value
 
-            pytree.tree_map_only(torch.fx.Node, set_env, node.args)
+            # In-place is fine since we don't mutate
+            pytree.tree_map_only_(torch.fx.Node, set_env, node.args)
             return super().run_node(node)
 
         args, kwargs = self.fetch_args_kwargs_from_env(node)
@@ -153,6 +155,9 @@ class ConstantFolder(torch.fx.Interpreter):
         out = super().run_node(node)
 
         if node.op != "get_attr" and isinstance(out, torch.Tensor):
+            if out.device.type == "meta":
+                return out
+
             if not self.insertable_tensor_check(out):
                 return out
 

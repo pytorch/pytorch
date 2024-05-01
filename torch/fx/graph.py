@@ -4,8 +4,9 @@ import torch.utils._pytree as pytree
 from . import _pytree as fx_pytree
 from ._compatibility import compatibility
 
+import os
 import contextlib
-from typing import TYPE_CHECKING, Callable, Any, List, Dict, NamedTuple, Optional, Tuple, Set, FrozenSet, Type
+from typing import TYPE_CHECKING, Callable, Any, List, Dict, NamedTuple, Optional, Tuple, Set, FrozenSet, Type, Iterable
 from dataclasses import dataclass
 from contextlib import contextmanager
 import copy
@@ -305,6 +306,9 @@ class _ParsedStackTrace:
     name: str
     code: str
 
+    def get_summary_str(self):
+        return f'File: {self.file}:{self.lineno} in {self.name}, code: {self.code}'
+
 # get File:lineno code from stack_trace
 def _parse_stack_trace(stack_trace: str):
     if stack_trace is None:
@@ -378,7 +382,8 @@ class CodeGen:
         return []
 
     def _gen_python_code(
-        self, nodes, root_module: str, namespace: _Namespace, *, verbose: bool = False,
+        self, nodes, root_module: str, namespace: _Namespace, *,
+        verbose: bool = False, include_stride: bool = False, include_device: bool = False
     ) -> PythonCode:
         free_vars: List[str] = []
         body: List[str] = []
@@ -387,6 +392,8 @@ class CodeGen:
 
         # Wrap string in list to pass by reference
         maybe_return_annotation : List[str] = ['']
+        include_stride = include_stride or (os.environ.get("FX_GRAPH_SHOW_STRIDE", "0") == "1")
+        include_device = include_device or (os.environ.get("FX_GRAPH_SHOW_DEVICE", "0") == "1")
 
         def add_global(name_hint: str, obj: Any):
             """Add an obj to be tracked as a global.
@@ -517,20 +524,15 @@ class CodeGen:
                         prev_stacktrace = node.stack_trace
                         summary_str = ""
 
-                        parsed_stack_trace = _parse_stack_trace(node.stack_trace)
-
-                        if parsed_stack_trace is not None:
-                            lineno = parsed_stack_trace.lineno
-                            code = parsed_stack_trace.code
-                            name = parsed_stack_trace.name
-                            summary_str = f'File: {parsed_stack_trace.file}:{lineno} in {name}, code: {code}'
+                        if parsed_stack_trace := _parse_stack_trace(node.stack_trace):
+                            summary_str = parsed_stack_trace.get_summary_str()
 
                         body.append(f'\n# {summary_str}\n')
                 elif prev_stacktrace != "":
                     prev_stacktrace = ""
                     body.append('\n# No stacktrace found for following nodes\n')
 
-        def stringify_shape(shape : torch.Size) -> str:
+        def stringify_shape(shape : Iterable) -> str:
             return f"[{', '.join(str(x) for x in shape)}]"
 
         def emit_node(node : Node):
@@ -543,10 +545,13 @@ class CodeGen:
                 from torch.fx.passes.shape_prop import TensorMetadata
 
                 meta_val = node.meta.get('val', node.meta.get('tensor_meta', None))
-
                 # use string as annotation, to make it valid python code
                 if isinstance(meta_val, FakeTensor):
-                    maybe_type_annotation = f': "{dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}"'
+                    stride_annotation = f"{stringify_shape(meta_val.stride())}" if include_stride else ""
+                    device_annotation = f"{meta_val.device}" if include_device else ""
+                    maybe_type_annotation = \
+                        f': "{dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}' \
+                        f'{stride_annotation}{device_annotation}"'
                 elif isinstance(meta_val, py_sym_types):
                     maybe_type_annotation = f': "Sym({meta_val})"'
                 elif isinstance(meta_val, TensorMetadata):
@@ -1346,7 +1351,10 @@ class Graph:
         return op
 
     @compatibility(is_backward_compatible=True)
-    def python_code(self, root_module: str, *, verbose: bool = False) -> PythonCode:
+    def python_code(
+        self, root_module: str, *,
+        verbose: bool = False, include_stride: bool = False, include_device: bool = False
+    ) -> PythonCode:
         """
         Turn this ``Graph`` into valid Python code.
 
@@ -1405,10 +1413,19 @@ class Graph:
                     node._repr_fn = orig_repr_fns[node]
 
         with override_node_repr(self):
-            return self._python_code(root_module, namespace, verbose=verbose)
+            return self._python_code(
+                root_module, namespace,
+                verbose=verbose, include_stride=include_stride, include_device=include_device
+            )
 
-    def _python_code(self, root_module: str, namespace: _Namespace, *, verbose: bool = False) -> PythonCode:
-        return self._codegen._gen_python_code(self.nodes, root_module, namespace, verbose=verbose)
+    def _python_code(
+        self, root_module: str, namespace: _Namespace, *,
+        verbose: bool = False, include_stride: bool = False, include_device: bool = False
+    ) -> PythonCode:
+        return self._codegen._gen_python_code(
+            self.nodes, root_module, namespace,
+            verbose=verbose, include_stride=include_stride, include_device=include_device
+        )
 
 
     def __str__(self) -> str:

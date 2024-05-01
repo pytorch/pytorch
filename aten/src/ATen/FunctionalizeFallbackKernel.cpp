@@ -210,7 +210,13 @@ static at::Tensor lift_fresh_functionalize_copy(const at::Tensor & self) {
   // but that isn't really a use case today.
   // Needed for https://github.com/pytorch/pytorch/issues/105327
   if (at::functionalization::impl::isFunctionalTensor(self)) {
-    return self.clone();
+    // Note [Composite Functionalization under PreDispatch mode]
+    // When we are tracing under PreDispatch, PreDispatch key will be
+    // in the local include TLS. As a result, when we redispatch here,
+    // we will end up hitting PreDispatch stack first. So, we should
+    // directly redispatch to the functionalize key manually.
+    static auto op = c10::Dispatcher::singleton().findSchemaOrThrow("aten::clone", "").typed<at::Tensor(const at::Tensor &, c10::optional<at::MemoryFormat>)>();
+    return op.redispatch(c10::DispatchKeySet({c10::DispatchKey::Functionalize}), self, c10::nullopt);
   }
 
   at::AutoDispatchSkipFunctionalize guard;
@@ -316,14 +322,14 @@ static at::Tensor& set__functionalize(at::Tensor& self, const at::Tensor& src) {
   TORCH_CHECK(at::functionalization::impl::isFunctionalTensor(self) || !at::functionalization::impl::isFunctionalTensor(src),
     "set__functionalize: Tried to mutate a non-functional tensor with a functional tensor, which is not allowed");
 
-  TORCH_CHECK(at::functionalization::impl::isFunctionalTensor(src),
-    "set__functionalize: We do not currently support x.set_(y) where y is not a FunctionalTensor. Please file an issue");
-
   // nop case
   if (!at::functionalization::impl::isFunctionalTensor(self) && !at::functionalization::impl::isFunctionalTensor(src)) {
     at::AutoDispatchSkipFunctionalize guard;
     return self.set_(src);
   }
+
+  TORCH_CHECK(at::functionalization::impl::isFunctionalTensor(src),
+    "set__functionalize: We do not currently support x.set_(y) where y is not a FunctionalTensor. Please file an issue");
 
   TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(self));
   TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(src));
