@@ -1066,8 +1066,7 @@ class VariableBuilder:
             )
 
     def wrap_literal(self, value):
-        unspec = not config.specialize_int
-        if unspec and type(value) is int:
+        if not config.specialize_int and type(value) is int:
             # unspecializing int by default, but still
             # specialize for the following conditions
             if not TracingContext.get().force_unspec_int_unbacked_size_like and (
@@ -1084,6 +1083,8 @@ class VariableBuilder:
                 return ConstantVariable.create(value=value, source=self.source)
             else:
                 return self.wrap_unspecialized_primitive(value)
+        elif not config.specialize_float and type(value) is float:
+            return self.wrap_unspecialized_primitive(value)
         else:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value)
@@ -1317,16 +1318,17 @@ class VariableBuilder:
                     TrackedFake(wrapped_value, self.source, None)
                 )
 
-            # NB: We do not do float.  For motivation, see
-            # https://docs.google.com/document/d/1INSCdYu1PxXcr43HrD82OudeEuS-qxQe1yZmLg2wy6A/edit
-            # but the general idea is that we generate kernels that can
-            # take unspecialized floats and use them in sizevar computation
+            # TODO: bools?
             elif (
-                isinstance(value, int)
+                type(value) in (int, float)
                 and not is_constant_source(self.get_source())
+                # TODO: How come RandomValueSource special cased?
                 and not isinstance(self.get_source(), RandomValueSource)
             ):
-                if torch._dynamo.config.specialize_int:
+                if (
+                    (torch._dynamo.config.specialize_int and isinstance(value, int)) or
+                    (torch._dynamo.config.specialize_float and isinstance(value, float))
+                ):
                     # If specialize_int is False, also return
                     # a constant (but this should have been handled
                     # in the caller, TBH)
@@ -1344,7 +1346,8 @@ class VariableBuilder:
                     frame_state_entry = self.tx.output.frame_state[name]
                     if frame_state_entry.scalar != value:
                         log.debug(
-                            "automatic dynamic int %s val %s != %s",
+                            "automatic dynamic %s %s val %s != %s",
+                            type(value).__name__,
                             name,
                             value,
                             frame_state_entry.scalar,
@@ -1366,11 +1369,24 @@ class VariableBuilder:
                     self.install_guards(GuardBuilder.CONSTANT_MATCH)
                     return ConstantVariable.create(value=value)
 
-                wrapped_value = shape_env.create_unspecified_symint_and_symbol(
-                    value,
-                    source=self.source,
-                    dynamic_dim=dynamic_dim,
-                )
+                if type(value) is int:
+                    wrapped_value = shape_env.create_unspecified_symint_and_symbol(
+                        value,
+                        source=self.source,
+                        dynamic_dim=dynamic_dim,
+                    )
+                elif type(value) is float:
+                    wrapped_value = shape_env.create_symfloatnode(
+                        shape_env.create_unspecified_symbol(
+                            value,
+                            source=self.source,
+                            dynamic_dim=dynamic_dim,
+                        ),
+                        hint=value,
+                        source=self.source,
+                    )
+                else:
+                    raise AssertionError(f"unrecognized {type(value)}")
                 self.tx.output.bound_symbols.add(wrapped_value.node.expr)
 
                 self.tx.output.tracked_fakes.append(

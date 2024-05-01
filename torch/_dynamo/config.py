@@ -49,6 +49,8 @@ accumulated_cache_size_limit = 256
 # to be dynamic, but accesses to ints should NOT get promoted into inputs.
 specialize_int = False
 
+specialize_float = False  # TODO: set to True for safety
+
 # legacy config, does nothing now!
 dynamic_shapes = True
 
