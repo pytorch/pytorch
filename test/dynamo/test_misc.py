@@ -26,9 +26,9 @@ from unittest.mock import patch
 
 import numpy as np
 import torch
-
-import torch._dynamo.test_case
 import torch._dynamo.testing
+
+import torch._inductor.test_case
 import torch.onnx.operators
 
 import torch.utils._pytree as pytree
@@ -151,7 +151,7 @@ class UserDefineSetAttr:
         return self.__dict__[f"pfx_{key}"]
 
 
-class MiscTests(torch._dynamo.test_case.TestCase):
+class MiscTests(torch._inductor.test_case.TestCase):
     def test_get_cache_entry(self):
         def f(x):
             return x + 1
@@ -5748,6 +5748,7 @@ def fn():
         m = Mod()
         graph, _ = torch._dynamo.export(m)(torch.randn(3, 3))
 
+    @torch._dynamo.config.patch(guard_nn_modules=True)
     def test_nn_sequential_invocation(self):
         with freeze_rng_state():
 
@@ -5772,6 +5773,7 @@ def fn():
             dynamo_result = graph(x)
             self.assertTrue(same(real, dynamo_result))
 
+    @torch._dynamo.config.patch(guard_nn_modules=True)
     def test_nn_sequential_invocation_reposition_indices(self):
         with freeze_rng_state():
 
@@ -8489,7 +8491,9 @@ def ___make_guard_fn():
         def f(lengths, values):
             sizes = lengths.tolist()
             for s in sizes:
-                torch._constrain_as_size(s, min=2, max=100)
+                torch._check_is_size(s)
+                torch._check(s >= 2)
+                torch._check(s <= 100)
             return torch.split(values, sizes)
 
         f(torch.tensor([2, 3, 4]), torch.randn(9))
