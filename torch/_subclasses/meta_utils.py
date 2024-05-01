@@ -198,13 +198,13 @@ class MetaTensorDescriber:
         is_functional = torch._is_functional_tensor(t)
 
         uf = torch.nested._internal.union_find.get_union_find()
-        union_find_id, mb_cached_max, mb_cached_min = None, None, None
+        union_find_id, cached_max, cached_min = None, None, None
         if uf.is_registered(t):
             union_find_id = uf._tensor_int_map.get_int(uf.find(t))
             # TODO: rename the field to make it generically "max"
             cached_metadata = uf.get_metadata(t)
-            mb_cached_max = cached_metadata.get("_max_seqlen", None)
-            mb_cached_min = cached_metadata.get("_min_seqlen", None)
+            cached_max = cached_metadata.get("_max_seqlen", None)
+            cached_min = cached_metadata.get("_min_seqlen", None)
 
         storage = None
         # NB: For compatibility, I default this to zero, as sometimes people
@@ -425,6 +425,10 @@ class MetaTensorDesc:
     creation_meta: Optional[CreationMeta] = None
     grad: Optional[MetaTensorDesc] = None
 
+    union_find_id: Optional[int] = None
+    cached_max: Optional[int] = None
+    cached_min: Optional[int] = None
+
     # Everything below is NOT serializable, need some more work
     ctx: Optional[object] = None  # is_traceable_wrapper_subclass
     type: Optional[Type] = None  # is_traceable_wrapper_subclass
@@ -445,10 +449,6 @@ class MetaTensorDesc:
     current_level: Optional[int] = None
     functorch_stack: Optional[List[CInterpreter]] = None
     autograd_meta_from: Optional[torch.Tensor] = None
-
-    union_find_id: Optional[int] = None
-    mb_cached_max: Optional[int] = None
-    mb_cached_min: Optional[int] = None
 
     # Faithfully serializing functorch tensors will not be too difficult.
     # We only need to consider grad/vmap interpreters, and their internal
@@ -617,16 +617,18 @@ class MetaConverter:
             else:
                 # Just use the global union_find is okay?
                 uf = torch.nested._internal.union_find.get_union_find()
-                uf.merge(weak_prev(), t_fake)
+                if weak_prev() is not None:
+                    # TODO: when is this None?
+                    uf.merge(weak_prev(), t_fake)
 
             # Replicate the metadata
             uf = torch.nested._internal.union_find.get_union_find()
             cached_metadata = uf.get_metadata(t_fake)
             # TODO: we could instead use the hint to make this a real symint
             # but should not be necessary for NestedTensors
-            if t_descr.mb_cached_max is not None:
+            if t_descr.cached_max is not None:
                 cached_metadata["_max_seqlen"] = shape_env.create_unbacked_symint()
-            if t_descr.mb_cached_max is not None:
+            if t_descr.cached_max is not None:
                 cached_metadata["_min_seqlen"] = shape_env.create_unbacked_symint()
 
         def empty_create(
