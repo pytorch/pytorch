@@ -10,6 +10,9 @@ C10_API std::optional<DeviceType> getAccelerator(bool checked) {
 #define CHECK_NO_PU1 \
   TORCH_CHECK(!is_privateuse1_backend_registered(), "Cannot have both CUDA and PrivateUse1");
 
+#define CHECK_NO_MTIA \
+  TORCH_CHECK(!at::hasMTIA(), "Cannot have MTIA with other devices");
+
     if (is_privateuse1_backend_registered()) {
         // We explicitly allow PrivateUse1 and another device at the same time
         // as we use this for testing.
@@ -17,7 +20,12 @@ C10_API std::optional<DeviceType> getAccelerator(bool checked) {
         return kPrivateUse1;
     } else if (at::hasCUDA()) {
         CHECK_NO_PU1
+        CHECK_NO_MTIA
         return kCUDA;
+    } else if (at::hasMTIA()) {
+        CHECK_NO_CUDA
+        CHECK_NO_PU1
+        return kMTIA;
     } else {
         TORCH_CHECK(!checked, "Cannot access accelerator device when none is available.")
         return std::nullopt;
