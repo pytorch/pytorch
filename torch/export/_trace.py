@@ -103,13 +103,15 @@ DEFAULT_EXPORT_DYNAMO_CONFIG.reorderable_logging_functions = {
 
 
 @contextmanager
-def _ignore_backend_decomps():
-    orig_mkldnn_flag = torch.backends.mkldnn.set_flags(False)
+def _ignore_backend_decomps(_enable_mkldnn=False):
+    if not _enable_mkldnn:
+        orig_mkldnn_flag = torch.backends.mkldnn.set_flags(False)
     orig_nnpack_flag = torch.backends.nnpack.set_flags(False)
     try:
         yield
     finally:
-        torch.backends.mkldnn.set_flags(*orig_mkldnn_flag)
+        if not _enable_mkldnn:
+            torch.backends.mkldnn.set_flags(*orig_mkldnn_flag)
         torch.backends.nnpack.set_flags(*orig_nnpack_flag)
 
 
@@ -405,6 +407,7 @@ def _export_to_torch_ir(
     disable_constraint_solver: bool = False,
     restore_fqn: bool = True,
     _log_export_usage: bool = True,
+    _enable_mkldnn: bool = False,
 ) -> torch.fx.GraphModule:
     """
     Traces either an nn.Module's forward function or just a callable with PyTorch
@@ -427,7 +430,7 @@ def _export_to_torch_ir(
             module_call_specs: Dict[str, Dict[str, pytree.TreeSpec]] = {}
             with _wrap_submodules(
                 f, preserve_module_call_signature, module_call_specs
-            ), _ignore_backend_decomps():
+            ), _ignore_backend_decomps(_enable_mkldnn):
                 gm_torch_level, _ = torch._dynamo.export(
                     f,
                     dynamic_shapes=dynamic_shapes,  # type: ignore[arg-type]
@@ -465,6 +468,7 @@ def _export_non_strict(
     *,
     transform=lambda x: x,  # TODO(zhxchen17) Revisit if this is needed later.
     pre_dispatch=False,
+    _enable_mkldnn=False,
 ):
     assert not any(
         isinstance(obj, torch.ScriptObject) for obj in constant_attrs
@@ -495,7 +499,7 @@ def _export_non_strict(
         tie_weights=True,
         strict=True,
         stack_weights=True,
-    ), grad_safe_guard, _ignore_backend_decomps(), _compiling_state_context():  # type: ignore[attr-defined]
+    ), grad_safe_guard, _ignore_backend_decomps(_enable_mkldnn), _compiling_state_context():  # type: ignore[attr-defined]
         gm, graph_signature = transform(aot_export_module)(
             mod,
             fake_args,
@@ -875,6 +879,7 @@ def _export(
     strict: bool = True,
     preserve_module_call_signature: Tuple[str, ...] = (),
     pre_dispatch: bool = False,
+    _enable_mkldnn: bool = False,
 ) -> ExportedProgram:
     """
     Traces either an nn.Module's forward function or just a callable with PyTorch
@@ -904,6 +909,8 @@ def _export(
 
         preserve_module_call_signature: A list of submodule paths for which the original
             calling conventions are preserved as metadata.
+
+        _enable_mkldnn: will enable MKLDNN ops during tracing, avoiding some op decompositions.
 
     Returns:
         An ExportedProgram containing the traced method.
@@ -1030,6 +1037,7 @@ def _export(
                     new_fake_constant_attrs,
                     pre_dispatch=pre_dispatch,
                     transform=_tuplify_outputs,
+                    _enable_mkldnn=_enable_mkldnn,
                 )
                 # ep_non_strict.constants contains only fake script objects, we need to map them back
                 ep_non_strict.constants = {
@@ -1133,6 +1141,7 @@ def _export(
         preserve_module_call_signature=preserve_module_call_signature,
         restore_fqn=False,  # don't need to restore because we will do it later
         _log_export_usage=False,
+        _enable_mkldnn=_enable_mkldnn,
     )
 
     # We detect the fake_mode by looking at gm_torch_level's placeholders, this is the fake_mode created in dynamo.
