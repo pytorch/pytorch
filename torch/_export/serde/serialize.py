@@ -315,7 +315,7 @@ def deserialize_torch_artifact(serialized: Union[Dict[str, Any], Tuple[Any, ...]
     return artifact
 
 
-def _sympy_int_to_int(val: sympy.Expr):
+def _sympy_int_to_int(val: sympy.Expr, adjust: str):
     # Convert simple sympy Integers into concrete int
     if val == sympy.oo:
         return math.inf
@@ -323,7 +323,20 @@ def _sympy_int_to_int(val: sympy.Expr):
         return -math.inf
     if isinstance(val, sympy.Integer):
         return int(val)
-    raise RuntimeError("Export constraints cannot be non-integer expressions")
+
+    # TODO: Remove this adjustment when Ed gets rid of fractional ranges
+    log.warning(
+        "Export constraints cannot be non-integer expressions. Found "
+        "type %s, and value %s. We will attempt to %s "
+        "this value.", type(val), val, adjust
+    )
+
+    if adjust == "floor":
+        return math.floor(val)
+    elif adjust == "ceil":
+        return math.ceil(val)
+    else:
+        raise RuntimeError(f"Got invalid adjustment {adjust}")
 
 
 def _int_to_sympy_int(val) -> sympy.Expr:
@@ -340,8 +353,8 @@ def serialize_range_constraints(
 ) -> Dict[str, RangeConstraint]:
     return {
         str(k): RangeConstraint(
-            _sympy_int_to_int(v.lower),  # type: ignore[arg-type]
-            _sympy_int_to_int(v.upper),  # type: ignore[arg-type]
+            _sympy_int_to_int(v.lower, "ceil"),  # type: ignore[arg-type]
+            _sympy_int_to_int(v.upper, "floor"),  # type: ignore[arg-type]
         )
         for k, v in range_constraints.items()
     }
@@ -587,14 +600,14 @@ class GraphModuleSerializer(metaclass=Final):
                 serialized_args.append(
                     NamedArgument(
                         name=schema_arg.name,
-                        arg=self.serialize_input(kwargs[schema_arg.name]),
+                        arg=self.serialize_input(kwargs[schema_arg.name], schema_arg.type),
                     )
                 )
             elif not schema_arg.kwarg_only and i < len(args):
                 serialized_args.append(
                     NamedArgument(
                         name=schema_arg.name,
-                        arg=self.serialize_input(args[i]),
+                        arg=self.serialize_input(args[i], schema_arg.type),
                     )
                 )
             else:
@@ -635,7 +648,9 @@ class GraphModuleSerializer(metaclass=Final):
             and arg.name in self.graph_state.sym_bool_values
         )
 
-    def serialize_input(self, arg) -> Argument:
+    def serialize_input(
+        self, arg, arg_type: Optional[torch._C.Argument] = None
+    ) -> Argument:
         import torch._inductor.ir as inductor_ir
 
         inductor_tensor_buffers = (
@@ -703,6 +718,39 @@ class GraphModuleSerializer(metaclass=Final):
         elif arg is None:
             return Argument.create(as_none=())
         elif isinstance(arg, (list, tuple)):
+            if len(arg) == 0:
+                if arg_type is not None:
+                    if isinstance(arg_type, torch.OptionalType):
+                        arg_type = arg_type.getElementType()  # type: ignore[assignment]
+                    assert isinstance(arg_type, torch.ListType)
+                    elem_type = arg_type.getElementType()
+                    if isinstance(elem_type, torch.OptionalType):
+                        elem_type = elem_type.getElementType()
+
+                    if isinstance(elem_type, torch.BoolType):
+                        return Argument.create(as_bools=[])
+                    elif isinstance(elem_type, torch.IntType):
+                        return Argument.create(as_ints=[])
+                    elif isinstance(elem_type, torch.FloatType):
+                        return Argument.create(as_floats=[])
+                    elif isinstance(elem_type, torch.StringType):
+                        return Argument.create(as_strings=[])
+                    elif isinstance(elem_type, torch.TensorType):
+                        return Argument.create(as_tensors=[])
+                    else:
+                        # I believe empty symint lists default to ints, but
+                        # please file an issue if this is not the case
+                        raise SerializeError(f"Empty list with type {elem_type} nyi.")
+                else:
+                    # We could serialize this by default to a tensor list. This
+                    # is needed in the HOO case
+                    log.warning(
+                        "Unsure how to serialize the given empty list, "
+                        "as we don't know what is the type of this argument. "
+                        "Serializing it as a tensor list by default."
+                    )
+                    return Argument.create(as_tensors=[])
+
             # Must check bool first, as bool is also treated as int
             if all(isinstance(a, bool) for a in arg):
                 return Argument.create(as_bools=list(arg))
@@ -1084,7 +1132,7 @@ class GraphModuleSerializer(metaclass=Final):
                 # undefined Tensor which will be implicitly converted to None in Python.
                 output_arguments.append(Argument.create(as_none=()))
             elif isinstance(meta, FakeTensor):
-                assert isinstance(return_schema.real_type, torch.TensorType)
+                assert isinstance(return_schema.real_type, (torch.OptionalType, torch.TensorType))
                 user_node = _output_node_at_index(node, idx)
                 name = (
                     user_node.name
@@ -1408,8 +1456,7 @@ class GraphModuleDeserializer(metaclass=Final):
                         self.shape_env.add_var_to_val(sym, hint)
 
                     if vr := self.symbol_name_to_range.get(val.expr_str):
-                        symbolic_shapes._constrain_symbol_range(
-                            self.shape_env,
+                        self.shape_env.constrain_symbol_range(
                             sym,
                             compiler_min=vr.lower,  # type: ignore[arg-type]
                             compiler_max=vr.upper,  # type: ignore[arg-type]
@@ -1424,8 +1471,7 @@ class GraphModuleDeserializer(metaclass=Final):
                         if s.name not in self.symbol_name_to_symbol:
                             self.symbol_name_to_symbol[s.name] = s
                         if vr := self.symbol_name_to_range.get(s.name):
-                            symbolic_shapes._constrain_symbol_range(
-                                self.shape_env,
+                            self.shape_env.constrain_symbol_range(
                                 s,
                                 compiler_min=vr.lower,  # type: ignore[arg-type]
                                 compiler_max=vr.upper,  # type: ignore[arg-type]
@@ -1755,7 +1801,7 @@ class GraphModuleDeserializer(metaclass=Final):
             if symbol_name_to_range:
                 for k, vr in symbol_name_to_range.items():
                     lower = int(vr.lower)
-                    if vr.upper >= 2:  # no specialization on 0/1
+                    if vr.upper >= 2:  # max is >= 2, not sym bool range
                         lower = max(2, lower)
                     self.symbol_name_to_range[k] = symbolic_shapes.ValueRanges(_int_to_sympy_int(lower), vr.upper)
 
@@ -2219,13 +2265,11 @@ class ExportedProgramDeserializer(metaclass=Final):
             key for key in model_opset_version if key in self.expected_opset_version
         }
         for namespace in common_namespaces:
-            assert isinstance(
-                model_version := model_opset_version[namespace], int
-            ), f"model_opset_version value should be int, got {model_opset_version[namespace]}"
+            model_version = model_opset_version[namespace]
+            assert isinstance(model_version, int), f"model_opset_version value should be int, got {model_version}"
 
-            assert isinstance(
-                compiler_version := self.expected_opset_version[namespace], int
-            ), f"expected_opset_version value should be int, got {self.expected_opset_version[namespace]}"
+            compiler_version = self.expected_opset_version[namespace]
+            assert isinstance(compiler_version, int), f"expected_opset_version value should be int, got {compiler_version}"
 
             # TODO(larryliu0820): Add support for upgrader & downgrader
             if model_version != compiler_version:
@@ -2582,12 +2626,12 @@ def _canonicalize_graph(
         n.metadata.clear()
 
     # Stage 4: Aggregate values.
-    sorted_tensor_values = dict(sorted(graph.tensor_values.items(), key=lambda x: x[0]))
+    sorted_tensor_values = dict(sorted(graph.tensor_values.items(), key=operator.itemgetter(0)))
     sorted_sym_int_values = dict(
-        sorted(graph.sym_int_values.items(), key=lambda x: x[0])
+        sorted(graph.sym_int_values.items(), key=operator.itemgetter(0))
     )
     sorted_sym_bool_values = dict(
-        sorted(graph.sym_bool_values.items(), key=lambda x: x[0])
+        sorted(graph.sym_bool_values.items(), key=operator.itemgetter(0))
     )
 
     # Stage 5: Recurse in subgraphs.
@@ -2635,8 +2679,8 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
     """
     ep = copy.deepcopy(ep)
 
-    opset_version = dict(sorted(ep.opset_version.items(), key=lambda x: x[0]))
-    range_constraints = dict(sorted(ep.range_constraints.items(), key=lambda x: x[0]))
+    opset_version = dict(sorted(ep.opset_version.items(), key=operator.itemgetter(0)))
+    range_constraints = dict(sorted(ep.range_constraints.items(), key=operator.itemgetter(0)))
     module_call_graph = sorted(ep.graph_module.module_call_graph, key=lambda x: x.fqn)
     signature = ep.graph_module.signature
     graph = ep.graph_module.graph
