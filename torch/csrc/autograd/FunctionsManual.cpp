@@ -73,13 +73,8 @@ Tensor toNonOptFwGrad(const c10::optional<Tensor>& t) {
 }
 
 Tensor toNonOptPrimal(const c10::optional<Tensor>& t) {
-  if (t.has_value() && t->defined()) {
-    if (t->unsafeGetTensorImpl()->is_wrapped_number()) {
-      return *t;
-    }
-    return t->_fw_primal(/* level */ 0);
-  }
-  return Tensor();
+  return (t.has_value() && t->defined()) ? t->_fw_primal(/*level */ 0)
+                                         : Tensor();
 }
 
 void copy_range(variable_list& out, IndexRange range, const Tensor& t) {
