@@ -89,7 +89,7 @@ def coerce_tangent(x):
     # but has noncontiguous inner tensors.
     # Force these to be conntiguous too
     if is_traceable_wrapper_subclass(out):
-        for attr in out.__tensor_flatten__()[0]:
+        for attr in out.__tensor_flatten__()[0]:  # type: ignore[attr-defined]
             elem = getattr(out, attr)
             if not elem.is_contiguous():
                 elem_contig = elem.contiguous()

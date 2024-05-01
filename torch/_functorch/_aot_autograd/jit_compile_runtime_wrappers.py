@@ -81,7 +81,7 @@ def _force_contiguous(x):
     x = x.contiguous()
     if not is_traceable_wrapper_subclass(x):
         return x
-    for attr in x.__tensor_flatten__()[0]:
+    for attr in x.__tensor_flatten__()[0]:  # type: ignore[attr-defined]
         elem = getattr(x, attr)
         if not elem.is_contiguous():
             setattr(x, attr, elem.contiguous())
