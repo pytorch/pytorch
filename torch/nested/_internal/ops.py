@@ -1065,7 +1065,7 @@ def values_default(func, *args, **kwargs):
 
 @register_jagged_func(
     torch.ops.aten._nested_view_from_jagged.default,
-    "values: t, offsets: t, dummy: jt_all, lengths: t?, ragged_idx: any?, min_seqlen: any?, max_seqlen: any?",
+    "values: t, offsets: t, dummy: jt_all, lengths: t?, ragged_idx: any?, min_seqlen: t?, max_seqlen: t?",
 )
 def _nested_view_from_jagged_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(
@@ -1081,9 +1081,9 @@ def _nested_view_from_jagged_default(func, *args, **kwargs):
     min_seqlen = new_kwargs["min_seqlen"]
     max_seqlen = new_kwargs["max_seqlen"]
     metadata_cache = {}
-    if min_seqlen > -1:
+    if min_seqlen is not None:
         metadata_cache["min_seqlen"] = min_seqlen
-    if max_seqlen > -1:
+    if max_seqlen is not None:
         metadata_cache["max_seqlen"] = max_seqlen
 
     return NestedTensor(
@@ -1132,7 +1132,7 @@ def _nested_get_min_seqlen(func, *args, **kwargs):
     )
 
     inp = new_kwargs.pop("input")
-    return inp._metadata_cache.get("min_seqlen", -1)
+    return inp._metadata_cache.get("min_seqlen", None)
 
 
 @register_jagged_func(torch.ops.aten._nested_get_max_seqlen.default, "self: jt_all")
@@ -1142,7 +1142,7 @@ def _nested_get_max_seqlen(func, *args, **kwargs):
     )
 
     inp = new_kwargs.pop("input")
-    return inp._metadata_cache.get("max_seqlen", -1)
+    return inp._metadata_cache.get("max_seqlen", None)
 
 
 # Make the dummy available on the C++ side.
