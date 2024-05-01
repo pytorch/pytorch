@@ -2626,6 +2626,18 @@ class TestMPS(TestCaseMPS):
         # Regression test for https://github.com/pytorch/pytorch/issues/96113
         torch.nn.LayerNorm((16,), elementwise_affine=True).to("mps")(torch.randn(1, 2, 16).to("mps", dtype=torch.float16))
 
+    def test_ifft(self):
+        # See: https://github.com/pytorch/pytorch/issues/124096
+        device = torch.device("mps")
+
+        N = 64
+        signal = torch.rand(N, device=device)
+        fft_result = torch.fft.rfft(signal)
+        ifft_result = torch.fft.irfft(fft_result, n=signal.shape[0])
+
+        #Expecting the inverted to yield the original signal
+        self.assertEqual(ifft_result, signal)
+
     def test_instance_norm(self):
         def helper(shape, eps=1, momentum=0.1, wts=False, channels_last=False, track_running_stats=True, test_module=False):
 
