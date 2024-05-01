@@ -3433,8 +3433,7 @@ static void linalg_lstsq_out_info(
     if (input.numel() == 0) {
         auto output_shape = input.sizes().vec();
         output_shape.back() = other.size(-1);
-        rank.fill_(0);
-        solution = at::zeros(output_shape, input.options());
+        solution.zero_();
     } else {
         auto [U, S, Vh] = at::_linalg_svd(input, false, true, "gesvd");
         rank = at::zeros({1}, at::kLong);
@@ -3459,7 +3458,7 @@ static void linalg_lstsq_out_info(
     bool compute_residuals = true;
     if (driver == "gelss" || driver == "gelsd") {
       if (input.dim() == 2) {
-        compute_residuals = (rank.item().toInt() == n);
+        compute_residuals = (rank.item().toDouble() == n);
       } else {
         // it is not clear what to do if some matrices have rank < n in case of batched input
         // For now let's compute the residuals only if all matrices have rank equal to n
@@ -3468,9 +3467,8 @@ static void linalg_lstsq_out_info(
         compute_residuals = at::all(rank == n).item().toBool();
       }
     }
-  if (compute_residuals) {
-    // LAPACK stores residuals data for postprocessing in rows n:(m-n)
-    if (solution.size(-2) >= n + (m - n)) {
+    if (compute_residuals) {
+      // LAPACK stores residuals data for postprocessing in rows n:(m-n)
       auto raw_residuals = solution.narrow(/*dim=*/-2, /*start=*/n, /*length*/m - n);
       if (raw_residuals.is_complex()) {
         raw_residuals.mul_(raw_residuals.conj());
@@ -3480,7 +3478,6 @@ static void linalg_lstsq_out_info(
       }
       at::sum_out(residuals, raw_residuals, /*dim=*/-2, /*keepdim=*/false, /*dtype*/real_dtype);
     }
-  }
   }
   if (solution.size(-2) >= n) {
     auto solution_view = solution.narrow(/*dim=*/-2, /*start=*/0, /*length*/n);
@@ -3494,6 +3491,7 @@ static void linalg_lstsq_out_info(
   if (m == 0) {
     solution.zero_();
   }
+
   // for 1-dimensional 'other', we need to squeeze the solution after "apply_lstsq"
   if (vector_case) {
     solution.squeeze_(-1);
