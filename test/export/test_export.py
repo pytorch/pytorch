@@ -4570,6 +4570,36 @@ def forward(self, x):
         self.assertEqual(div_spec.arg.name, "div")
         self.assertEqual(div_spec.arg.value, "floor")
 
+    def test_lstm_mkldnn(self):
+        class LSTM(torch.nn.Module):
+            def __init__(self, input_size, hidden_size, num_layers):
+                super(LSTM, self).__init__()
+                self.hidden_size = hidden_size
+                self.num_layers = num_layers
+                self.lstm = torch.nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
+
+            def forward(self, text_tokens):
+                # input: (seq_len, batch, input_size)
+                lstm_out, (new_hidden_state, new_cell_state) = self.lstm(input=text_tokens, hx=None)
+                return lstm_out
+
+
+        lstm = LSTM(input_size=200, hidden_size=203, num_layers=2)
+        inps = (torch.randn(2, 5, 200), )
+        batch_dim = Dim('batch_size',min=1, max=100)
+        text_length_dim = Dim('max_length',min=1, max=100)
+        dynamic_shapes ={
+            "text_tokens": {0:batch_dim, 1: text_length_dim},
+        }
+        ep = export(
+            lstm,
+            inps,
+            dynamic_shapes=dynamic_shapes,
+            strict=False,
+            _enable_mkldnn=True,
+        )
+        self.assertTrue(torch.allclose(ep.module()(*inps), lstm(*inps)))
+
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):
