@@ -112,12 +112,9 @@ class _MinimizerBase:
         settings: _MinimizerSettingBase,
         module_exporter: Optional[
             Callable[
-                [Tensors, torch.fx.GraphModule, str],
+                [List[torch.Tensor], torch.fx.GraphModule, str],
                 None
             ]
-        ] = None,
-        exclusion_fn: Optional[
-            Callable[[NodeList, int, int], None]
         ] = None,
     ):
         assert isinstance(module, torch.fx.GraphModule)
@@ -127,7 +124,6 @@ class _MinimizerBase:
         self.compare_fn = compare_fn
         self.module_exporter = module_exporter
         self.settings = settings
-        self.exclusion_fn = exclusion_fn
 
         # Stores outputs of run_a function
         self.a_outputs: Dict[str, Any] = {}
@@ -386,10 +382,10 @@ class _MinimizerBase:
             report.append(f"Result mismatch for {result_key}")
             if self.module_exporter:
                 self.module_exporter(
-                    a_input, submodule, str(result_key[0]) + "_cpu",
+                    List[torch.Tensor](a_input), submodule, str(result_key[0]) + "_cpu",
                 )
                 self.module_exporter(
-                    b_input, submodule, str(result_key[0]) + "_acc",
+                    List[torch.Tensor](b_input), submodule, str(result_key[0]) + "_acc",
                 )
             raise FxNetMinimizerResultMismatchError(f"Result mismatch for {result_key}")
 
@@ -399,32 +395,26 @@ class _MinimizerBase:
         """
         Recursive binary search implementation.
         """
-        culprits: NodeSet = set()
         nodes: NodeList = all_nodes[start_idx:end_idx]
 
         report: List[str] = []
-        if self.exclusion_fn is not None:
-            self.exclusion_fn(nodes, start_idx, end_idx)
-            if len(nodes) == 0:
-                report = ["All nodes are excluded by user"]
-                self.reports.append(report)
-                return culprits
-
-        first_node_name = nodes[0].name
-        output_node_name = nodes[-1].name
-        self.iteration += 1
         self.reports.append(report)
-        report.append(f"Binary search iteration {self.iteration}")
+        self.iteration += 1
+        report.append(f"Binary search iteration {self.iteration}.")
         report.append(
-            f"From node index {start_idx}:{first_node_name} to {end_idx-1}:{output_node_name}. "
+            f"From node index {start_idx} to {end_idx-1}. "
             f"Size of the interested node list is {len(nodes)}"
         )
+
         cur_nodes: NodeSet = set(nodes)
+
+        for node in nodes:
+            if node in self.fusions:
+                cur_nodes.update(self.fusions[node])
 
         try:
             split_module, submod_name = self._build_submodule(cur_nodes)
-            self._run_and_compare(split_module, submod_name, [output_node_name])
-
+            self._run_and_compare(split_module, submod_name, [])
         except (FxNetMinimizerRunFuncError, FxNetMinimizerResultMismatchError):
 
             if len(nodes) == 1:
@@ -482,14 +472,6 @@ class _MinimizerBase:
             report.append(f"Visit node: {node.name}")
 
             _LOGGER.info("Visit node: %s", node.name)
-            node_list: NodeList = [node]
-            if self.exclusion_fn is not None:
-                self.exclusion_fn(node_list, -1, -1)
-                if len(node_list) == 0:
-                    report.append(f"User exclusion : {node.name}")
-                    self.print_report(report)
-                    return culprits
-
             cur_nodes: NodeSet = {node}
 
             if node in self.fusions:
@@ -519,12 +501,6 @@ class _MinimizerBase:
         run user defined `nodes` and determine if it is a culprit.
         """
         culprits: NodeSet = set()
-        if self.exclusion_fn is not None:
-            self.exclusion_fn(nodes, -1, -1)
-        if len(nodes) == 0:
-            report = ["All nodes are excluded by user"]
-            self.reports.append(report)
-            return culprits
 
         first_node_name = nodes[0].name
         output_node_name = nodes[-1].name
@@ -586,14 +562,7 @@ class _MinimizerBase:
         """
         culprits: NodeSet = set()
         nodes: NodeList = all_nodes[start_idx:end_idx]
-        cur_nodes: NodeSet = set(nodes)
-        if self.exclusion_fn is not None:
-            self.exclusion_fn(nodes, start_idx, end_idx)
-            cur_nodes = set(nodes)
-        else:
-            for node in nodes:
-                if node in self.fusions:
-                    cur_nodes.update(self.fusions[node])
+
         report: List[str] = []
         self.reports.append(report)
         self.iteration += 1
@@ -602,6 +571,12 @@ class _MinimizerBase:
             f"From node index {start_idx} to {end_idx-1}. "
             f"Size of the interested node list is {len(nodes)}"
         )
+
+        cur_nodes: NodeSet = set(nodes)
+
+        for node in nodes:
+            if node in self.fusions:
+                cur_nodes.update(self.fusions[node])
 
         try:
             split_module, submod_name = self._build_submodule(cur_nodes)
@@ -613,7 +588,7 @@ class _MinimizerBase:
             return culprits
         except (FxNetMinimizerRunFuncError):
             culprits.update(cur_nodes)
-            report.append(f"Found culprit from run error: {cur_nodes}")
+            report.append(f"Found culprit from run error: {node}")
             self.print_report(report)
             return culprits
         else:
