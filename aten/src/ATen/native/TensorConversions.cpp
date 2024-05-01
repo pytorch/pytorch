@@ -259,6 +259,9 @@ Tensor _to_copy(
         memory_format == MemoryFormat::Preserve,
         "to(options): COO only supports memory format Preserve, but got ", memory_format,
         " instead.");
+    if (options.device().is_meta()) {
+        return zeros_like(self, options);
+    }
     auto indices = self._indices();
     const auto new_indices = at::native::to(
         indices,
