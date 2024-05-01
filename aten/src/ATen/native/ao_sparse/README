@@ -1,0 +1,23 @@
+For C++ implementation, there are no plans to migrate quantization kernels.  For sparsity, we plan to follow the structure below:
+
+./torch/aten/src/ATen
+├── (...)
+├── native
+│   ├── ao_sparse  # New folder containing ops with sparse packed weights
+│   │   ├── cpu
+│   │   ├── cuda
+│   │   └── quantized  # New folder with fused sparse and quantized packed weights
+│   │       ├── cpu
+│   │       └── cuda
+│   ├── quantized  # Existing quantized kernels
+│   │   ├── cpu
+│   │   │   ├── kernels
+│   │   │   └── qnnpack  # Existing mobile quantized and sparse kernels
+│   │   ├── cuda
+│   │   ├── QTensor.cpp
+│   │   ├── library.cpp
+│   │   └── (*.cpp, *.h)
+│   └── sparse  # Existing folder containing torch.sparse methods
+└── quantized  # Quantized Tensor definition and methods
+    ├── QTensorImpl.{cpp,h}
+    └── Quantizer.{cpp,h}
