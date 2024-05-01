@@ -29,10 +29,10 @@ thread_local bool handle_initialized = false;
 
 // Look-up table for HIPSPARSELT data types
 #ifdef USE_ROCM
-constexpr static std::unordered_map<std::string, hipsparseLtDatatype_t> sparseLtDataTypes = {
-    {"HIP_R_8I", HIPSPARSELT_R_8I},
-    {"HIP_R_16F", HIPSPARSELT_R_16F},
-    {"HIP_R_16BF", HIPSPARSELT_R_16BF},
+const static std::unordered_map<hipDataType, hipsparseLtDatatype_t> sparseLtDataTypes = {
+    {HIP_R_8I, HIPSPARSELT_R_8I},
+    {HIP_R_16F, HIPSPARSELT_R_16F},
+    {HIP_R_16BF, HIPSPARSELT_R_16BF},
 };
 
 static bool isHipSparseLtSupported(int idx) {
@@ -40,9 +40,9 @@ static bool isHipSparseLtSupported(int idx) {
     if (cache.find(idx) != cache.end()) {
         return cache[idx];
     }
-    hipDeviceProp_t prop = at::cuda::getCurrentDeviceProperties(idx);
-    std::string_view arch = prop.gcnArchName;
-    constexpr std::set<std::string> supported_archs = {"gfx940", "gfx941", "gfx942", "gfx1200", "gfx1201"};
+    hipDeviceProp_t* prop = at::cuda::getDeviceProperties(idx);
+    std::string_view arch{prop->gcnArchName};
+    const static std::set<std::string> supported_archs = {"gfx940", "gfx941", "gfx942", "gfx1200", "gfx1201"};
     bool result = (supported_archs.find(arch) != supported_archs.end()) && (ROCM_VERSION >= 61000);
     cache[idx] = result;
     if (!result) {
@@ -50,14 +50,6 @@ static bool isHipSparseLtSupported(int idx) {
     }
     return result;
 }
-
-#else
-constexpr static std::unordered_map<std::string, cudaDataType> sparseLtDataTypes = {
-    {"CUDA_R_8I", CUDA_R_8I},
-    {"CUDA_R_16F", CUDA_R_16F},
-    {"CUDA_R_16BF", CUDA_R_16BF},
-    {"CUDA_R_32F", CUDA_R_32F},
-};
 #endif
 
 
@@ -77,18 +69,18 @@ at::Tensor _cslt_compress(const Tensor& sparse_input)
     )
     {
         case at::ScalarType::Char:
-            type = sparseLtDataTypes.at("CUDA_R_8I");
+            type = CUDA_R_8I;
             compression_factor = 10;
             break;
         case at::ScalarType::Half:
-            type = sparseLtDataTypes.at("CUDA_R_16F");
+            type = CUDA_R_16F;
             break;
         case at::ScalarType::BFloat16:
-            type = sparseLtDataTypes.at("CUDA_R_16BF");
+            type = CUDA_R_16BF;
             break;
 #ifndef USE_ROCM
     case at::ScalarType::Float:
-            type = sparseLtDataTypes.at("CUDA_R_32F");
+            type = CUDA_R_32F;
             break;
 #endif
         default:
@@ -106,7 +98,11 @@ at::Tensor _cslt_compress(const Tensor& sparse_input)
         sparse_input.size(1),
         sparse_input.size(1),
         16,
+    #ifdef USE_ROCM
+        sparseLtDataTypes.at(type),
+    #else
         type,
+    #endif
         CUSPARSE_ORDER_ROW,
         CUSPARSELT_SPARSITY_50_PERCENT));
 
@@ -163,34 +159,33 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
   cudaDataType output_type;
   cusparseComputeType compute_type;
   auto compression_factor = 9;
-
-#ifdef USE_ROCM
-    auto isHipSparseLtSupported = isHipSparseLtSupported(at::cuda::getCurrentDevice());
-#endif
+  auto ishipSparseLt = (USE_ROCM)?isHipSparseLtSupported(compressed_A.device().index()):false;
+  
   switch(compressed_A.scalar_type())
   {
+
     case at::ScalarType::Char:
-        input_type = sparseLtDataTypes.at("CUDA_R_8I");
-        output_type = sparseLtDataTypes.at("CUDA_R_8I");
+        input_type = CUDA_R_8I;
+        output_type = CUDA_R_8I;
         compute_type = CUSPARSE_COMPUTE_32I;
         compression_factor = 10;
         break;
 
 // cuSPARSELt v0.5.2 onwards changes CUSPARSE_COMPUTE_TF32, CUSPARSE_COMPUT_16F to CUSPARSE_COMPUTE_32F
-#if ((defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 502) || isHipSparseLtSupported)
+#if ((defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 502) || ishipSparseLt)
     case at::ScalarType::Half:
-        input_type = sparseLtDataTypes.at("CUDA_R_16F");
-        output_type = sparseLtDataTypes.at("CUDA_R_16F");
+        input_type = CUDA_R_16F;
+        output_type = CUDA_R_16F;
         compute_type = CUSPARSE_COMPUTE_32F;
         break;
     case at::ScalarType::BFloat16:
-        input_type = sparseLtDataTypes.at("CUDA_R_16BF");
-        output_type = sparseLtDataTypes.at("CUDA_R_16BF");
+        input_type = CUDA_R_16BF;
+        output_type = CUDA_R_16BF;
         compute_type = CUSPARSE_COMPUTE_32F;
         break;
     case at::ScalarType::Float:
-        input_type = sparseLtDataTypes.at("CUDA_R_32F");
-        output_type = sparseLtDataTypes.at("CUDA_R_32F");
+        input_type = CUDA_R_32F;
+        output_type = CUDA_R_32F;
         compute_type = CUSPARSE_COMPUTE_32F;
         #ifdef USE_ROCM
         TORCH_CHECK(false, "HIPSPARSELT does not support R_32F data type.");
@@ -200,18 +195,18 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
 // cuSPARSELt <= v0.5.2 uses CUSPARSE_COMPUTE_TF32, CUSPARSE_COMPUTE_16F
 #else
     case at::ScalarType::Half:
-        input_type = sparseLtDataTypes.at("CUDA_R_16F");
-        output_type = sparseLtDataTypes.at("CUDA_R_16F");
+        input_type = CUDA_R_16F;
+        output_type = CUDA_R_16F;
         compute_type = CUSPARSE_COMPUTE_16F;
         break;
     case at::ScalarType::BFloat16:
-        input_type = sparseLtDataTypes.at("CUDA_R_16BF");
-        output_type = sparseLtDataTypes.at("CUDA_R_16BF");
+        input_type = CUDA_R_16BF;
+        output_type = CUDA_R_16BF;
         compute_type = CUSPARSE_COMPUTE_16F;
         break;
     case at::ScalarType::Float:
-        input_type = sparseLtDataTypes.at("CUDA_R_32F");
-        output_type = sparseLtDataTypes.at("CUDA_R_32F");
+        input_type = CUDA_R_32F;
+        output_type = CUDA_R_32F;
         compute_type = CUSPARSE_COMPUTE_TF32;
         break;
 #endif
@@ -228,13 +223,13 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
     switch (out_dtype)
     {
         case at::ScalarType::Half:
-            output_type = sparseLtDataTypes.at("CUDA_R_16F");
+            output_type = CUDA_R_16F;
             break;
         case at::ScalarType::BFloat16:
-            output_type = sparseLtDataTypes.at("CUDA_R_16BF");
+            output_type = CUDA_R_16BF;
             break;
         case at::ScalarType::Int:
-            output_type = sparseLtDataTypes.at("CUDA_R_32I");
+            output_type = CUDA_R_32I;
             break;
         default:
             TORCH_CHECK(false, "Unsupported out_dtype passed, must be one of {fp16, bf16, int32}");
@@ -255,7 +250,11 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
       k,
       k,
       16,
+#ifdef USE_ROCM
+      sparseLtDataTypes.at(input_type),
+#else
       input_type,
+#endif
       CUSPARSE_ORDER_ROW,
       CUSPARSELT_SPARSITY_50_PERCENT));
 
@@ -268,7 +267,11 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
       (dense_B.is_contiguous()) ? n : k,
       (dense_B.is_contiguous()) ? n : k,
       16,
+#ifdef USE_ROCM
+      sparseLtDataTypes.at(input_type),
+#else
       input_type,
+#endif
       CUSPARSE_ORDER_ROW));
 
   // create result tensor
@@ -284,7 +287,11 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
       n,
       (transpose_result) ? m: n,
       16,
+#ifdef USE_ROCM
+      sparseLtDataTypes.at(output_type),
+#else
       output_type,
+#endif
       (transpose_result) ? CUSPARSE_ORDER_COL : CUSPARSE_ORDER_ROW));
 
   // initialize matmul

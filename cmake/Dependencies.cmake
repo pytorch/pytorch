@@ -1086,7 +1086,7 @@ if(USE_ROCM)
     list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS ${hipblaslt_LIBRARIES})
 
     list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
-      roc::hipblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsolver)
+      roc::hipblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsparselt roc::hipsolver)
 
     # ---[ Kernel asserts
     # Kernel asserts is disabled for ROCm by default.
