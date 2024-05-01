@@ -4,6 +4,7 @@
 #include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/ir/irparser.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/operator_upgraders/upgraders.h>
 #include <torch/csrc/jit/operator_upgraders/utils.h>
 #include <torch/csrc/jit/operator_upgraders/version_map.h>
@@ -13,7 +14,6 @@
 #include <unordered_map>
 #include <utility>
 #include <iostream>
-#include "jit/ir/ir.h"
 
 namespace torch {
 namespace jit {
