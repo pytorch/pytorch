@@ -309,10 +309,12 @@ def transform_subclass(t, callback, outer_size=None, outer_stride=None):
 
     attrs, ctx = t.__tensor_flatten__()
     transformed_tensors_dict = {}
+    original_tensors_dict = {}
     for attr in attrs:
+        original_tensors_dict[attr] = getattr(t, attr)
         transformed_tensors_dict[attr] = callback(attr, getattr(t, attr))
     sub = type(t).__tensor_unflatten__(
-        transformed_tensors_dict, ctx, outer_size, outer_stride
+        transformed_tensors_dict, ctx, outer_size, outer_stride, original_tensors=original_tensors_dict
     )
 
     # NB: Purposefully guard here to simplify the inner / outer symbols.

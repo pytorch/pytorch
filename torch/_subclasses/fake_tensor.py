@@ -292,8 +292,9 @@ class FakeTensorConverter:
             raise UnsupportedFakeTensorException("quantized nyi in meta tensors")
         if type(t) is torch.nn.Parameter:
             assert not make_constant
+        maybe_constant_t = t if make_constant else None
 
-        def mk_fake_tensor(make_meta_t):
+        def mk_fake_tensor(make_meta_t, *, t_descr=None):
             # NB: don't use in_kernel_invocation_manager. to
             # ensure FakeTensor can internally do constant computation
             # as necessary.  Invocation manager is "more correct" as
@@ -301,12 +302,16 @@ class FakeTensorConverter:
             # invariant is that make_meta_t only calls factories
             # for which it is not strictly necessary to use the
             # invocation manager (I think!)
+            if t_descr is not None:
+                maybe_memo = self.tensor_memo.get(t_descr.id)
+                if maybe_memo is not None:
+                    return maybe_memo
             with no_dispatch():
                 return FakeTensor(
                     fake_mode,
                     make_meta_t(),
                     existing_device,
-                    constant=t if make_constant else None,
+                    constant=maybe_constant_t,
                 )
 
         out = self.meta_converter(
@@ -432,6 +437,10 @@ class FakeTensor(torch.Tensor):
     _unique_memo: Optional[torch.SymInt]
     _unique_memo_vc: Optional[int]
 
+     # TODO: write something here
+    _nested_int_memo: Optional[torch.SymInt]
+    _nested_int_memo_vc: Optional[int]
+
     @property
     def unique_memo(self):
         if self._unique_memo is None:
@@ -524,6 +533,8 @@ class FakeTensor(torch.Tensor):
         self._nonzero_memo_vc = None  # type: ignore[attr-defined]
         self._unique_memo = None  # type: ignore[attr-defined]
         self._unique_memo_vc = None  # type: ignore[attr-defined]
+        self._nested_int_memo = None  # type: ignore[attr-defined]
+        self._nested_int_memo_vc = None  # type: ignore[attr-defined]
 
         if FakeTensorConfig.debug:
             self._debug_trace = CapturedTraceback.extract()  # type: ignore[attr-defined]
@@ -706,6 +717,22 @@ class FakeTensor(torch.Tensor):
             torch._constrain_as_size(s, min=2)
             out.append(s)
         return out
+
+    def get_nested_int(self):
+        if self._nested_int_memo_vc != self._version:
+            self._nested_int_memo = None
+
+        if not self._nested_int_memo:
+            # We only reach here for intermediate offsets?
+            # we never look up nested int with coeff.
+            self._nested_int_memo = self.fake_mode.shape_env.create_unbacked_symint()
+            self._nested_int_memo_vc = self._version
+
+        return self._nested_int_memo
+
+    def set_nested_int(self, val):
+        self._nested_int_memo = val
+        self._nested_int_memo_vc = self._version
 
 
 @dataclass(frozen=True)

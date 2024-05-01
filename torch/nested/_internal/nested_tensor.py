@@ -4,6 +4,8 @@ import torch
 from torch._C import DispatchKey, DispatchKeySet
 from torch._prims_common import is_expandable_to
 from torch.fx.experimental.symbolic_shapes import has_free_symbols
+from torch.fx.experimental.sym_node import SymNode, NestedIntNode
+from torch.nested._internal import union_find
 from torch.utils.weak import WeakTensorKeyDictionary
 from typing import *  # noqa: F403
 
@@ -11,14 +13,15 @@ _tensor_id_counter = 0
 _tensor_symint_registry = WeakTensorKeyDictionary()
 
 
-def get_tensor_symint(tensor, *, coeff=1):
-    global _tensor_id_counter
-    tensor_symint = _tensor_symint_registry.get(tensor)
-    if tensor_symint is None:
-        tensor_symint = torch._C._get_nested_int(_tensor_id_counter, coeff)
-        _tensor_id_counter += 1
-        _tensor_symint_registry[tensor] = tensor_symint
-    return tensor_symint
+def get_nested_symint(tensor, coeff=1, for_hint=False):
+    if isinstance(tensor, torch._subclasses.functional_tensor.FunctionalTensor):
+        tensor = torch._from_functional_tensor(tensor.elem)
+        return get_nested_symint(tensor, coeff=coeff)
+    if (isinstance(tensor, torch._subclasses.fake_tensor.FakeTensor)) and not for_hint:
+        return tensor.get_nested_int()
+    uf = union_find.get_union_find()
+    t_id = uf._tensor_int_map.get_int(tensor)
+    return torch.SymInt(NestedIntNode(t_id, tensor, coeff))
 
 
 # SDPA metadata; max / min seqlens are needed for e.g. flash
@@ -90,7 +93,7 @@ class NestedTensor(torch.Tensor):
         # Query cache for the symint associated with offsets or lengths
         # (create a new one if needed).
         ragged_source = offsets if lengths is None else lengths
-        ragged_size = get_tensor_symint(ragged_source, coeff=1)
+        ragged_size = get_nested_symint(ragged_source, coeff=1)
         self._ragged_idx = kwargs.get("_ragged_idx", 1)
         B = offsets.shape[0] - 1
         if lengths is not None:
@@ -178,23 +181,33 @@ class NestedTensor(torch.Tensor):
         return inner_tensors, ctx
 
     @staticmethod
-    def __tensor_unflatten__(inner_tensors: Dict, meta, outer_size, outer_stride):
+    def __tensor_unflatten__(inner_tensors: Dict, meta, outer_size, outer_stride, original_tensors=None):
         # inner tensors: _values, _offsets, [_lengths]
         assert len(inner_tensors) >= 2 and len(inner_tensors) <= 3
         values = inner_tensors["_values"]
         offsets = inner_tensors["_offsets"]
         lengths = inner_tensors.get("_lengths", None)
         ragged_idx = meta["ragged_idx"]
-
-        # Note that we cannot simply check if is_fake(values) because
-        # during aot autograd, FunctionalTensors are not fake but hold
-        # symbolic sizes.
         ragged_source = offsets if lengths is None else lengths
-        if has_free_symbols(ragged_source) or has_free_symbols(values):
-            # Associate offsets or lengths (possibly fake, possibly functionalized)
-            # with the ragged_size.
-            ragged_size = outer_size[ragged_idx]
-            _tensor_symint_registry[ragged_source] = ragged_size
+        # for the functional to fake wrapping, don't need to do anything (since we rely on unwrapping)
+        # for the initial fakification? (different, and we've already saved it on the fake tensor)
+        # for the grad_output thing (same, and so we need to do this)
+        # for the runtime wrapper (different, and we just create a fresh one because we're in eager)
+        # the thing is... this is not enough?
+        if original_tensors:
+            orig_offsets = original_tensors.get("_offsets", None)
+            orig_lengths = original_tensors.get("_lengths", None)
+            orig_ragged_source = orig_offsets if orig_lengths is None else orig_lengths
+            if type(orig_ragged_source) is type(ragged_source):
+                from torch.nested._internal import union_find
+                assert orig_ragged_source is not None
+                uf = union_find.get_union_find()
+                uf.merge(ragged_source, orig_ragged_source)
+                # Two FakeTensor now share the same NestedInt?!
+                # Previously this was not the case. We also don't need to do
+                # the union find thing above?
+                ragged_source._nested_int_memo = orig_ragged_source._nested_int_memo
+                ragged_source._nested_int_memo_vc = ragged_source._version
 
         return NestedTensor(
             values,

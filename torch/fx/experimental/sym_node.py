@@ -448,6 +448,125 @@ class SymNode:
         return False
 
 
+def _tid_eq(a, b):
+    from torch.nested._internal import union_find
+    uf = union_find.get_union_find()
+    a_canonical = uf._union_find_int.find(a)
+    b_canonical = uf._union_find_int.find(b)
+    return a_canonical == b_canonical
+
+
+def _eq(lhs, rhs) -> bool:
+    return (
+        isinstance(lhs, NestedIntNode)
+        and isinstance(rhs, NestedIntNode)
+        and _tid_eq(lhs.t_id, rhs.t_id)
+        and lhs.coeff == rhs.coeff
+    )
+
+
+def _ge(lhs, rhs) -> bool:
+    if isinstance(rhs, NestedIntNode) and isinstance(lhs, NestedIntNode):
+        if _tid_eq(lhs.t_id, rhs.t_id):
+            return lhs.coeff >= rhs.coeff
+        raise ValueError("ge: relation is indeterminate")
+    elif isinstance(lhs, NestedIntNode):
+        if rhs.is_constant() and rhs.constant_int() <= 2:
+            return True
+        raise ValueError("ge: relation is indeterminate")
+    elif isinstance(rhs, NestedIntNode):
+        if lhs.is_constant() and lhs.constant_int() < 2:
+            return False
+        raise ValueError("ge: relation is indeterminate")
+    else:
+        raise ValueError(f"inputs unsupported")
+
+
+class NestedIntNode:
+    def __init__(self, t_id, tensor, coeff):
+        self.t_id = t_id  # useful for keeping track of the version
+        self.tensor = tensor
+        self.coeff = coeff
+
+    def get_tensor(self):
+        return self.tensor
+
+    def nested_int_coeff(self):
+        return self.coeff
+
+    def maybe_as_int(self):
+        return None
+
+    def is_int(self):
+        # ???
+        return True
+
+    def is_float(self):
+        return False
+
+    def is_bool(self):
+        return False
+
+    def is_nested_int(self):
+        # Do we still need this?c
+        return True
+
+    def clone(self):
+        return self
+
+    def str(self):
+        if self.coeff == 1:
+            return f"j{self.t_id}"
+        return f"{self.coeff}*j{self.t_id}"
+
+    def __str__(self):
+        return self.str()
+
+    def __repr__(self):
+        return self.str()
+
+    def mul(self, other) -> "SymNode":
+        if other.is_constant():
+            other = other.constant_int()
+        else:
+            raise ValueError(f"unsupported: {type(other)}")
+        return NestedIntNode(self.t_id, self.tensor, self.coeff * other)
+
+    def eq(self, other) -> "SymNode":
+        return torch._C._get_constant_bool_symnode(_eq(self, other))
+
+    def ne(self, other) -> "SymNode":
+        return torch._C._get_constant_bool_symnode(not _eq(self, other))
+
+    def gt(self, other) -> "SymNode":
+        return torch._C._get_constant_bool_symnode(not _ge(other, self))
+
+    def lt(self, other) -> "SymNode":
+        return torch._C._get_constant_bool_symnode(not _ge(self, other))
+
+    def le(self, other) -> "SymNode":
+        return torch._C._get_constant_bool_symnode(_ge(other, self))
+
+    def ge(self, other) -> "SymNode":
+        return torch._C._get_constant_bool_symnode(_ge(self, other))
+
+    def neg(self) -> "SymNode":
+        return self._neg()  # type: ignore[attr-defined]
+
+    def is_symbolic(self):
+        return False
+
+    def nested_int(self):
+        return self.t_id
+
+    def is_constant(self):
+        return False
+
+    def wrap_int(self, num):
+        assert type(num) is int
+        return torch._C._get_constant_int_symnode(num)
+
+
 # TODO: this probably needs the sizes-strides eval functions
 METHOD_TO_OPERATOR = {
     "pos": operator.pos,
@@ -1290,7 +1409,13 @@ def _make_user_magic(method, user_type):
         other_node = to_node(self.node, other)
         if other_node is NotImplemented:
             return NotImplemented
-        ret = wrap_node(getattr(other_node, method_attr)(self.node))
+        try:
+            ret = wrap_node(getattr(other_node, method_attr)(self.node))
+        except:
+            if method_attr == "mul":
+                ret = wrap_node(getattr(self.node, method_attr)(other_node))
+
+
         return get_constant(ret) if is_constant(ret) else ret
 
     if method in unary_magic_methods:

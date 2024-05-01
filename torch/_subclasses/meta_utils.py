@@ -173,8 +173,25 @@ class MetaTensorDescriber:
             self.next_storage_id += 1
         return self.lookup_storage[s]
 
-    # NB: the describe functions NOT maintain a cache and will happily regen the
+    # NB: the describe functions do NOT maintain a cache and will happily regen the
     # description
+
+    def describe_custom_size_strides(self, t: torch.Tensor):
+        def process(x):
+            from torch.fx.experimental.sym_node import NestedIntNode
+
+            if isinstance(x, torch.SymInt):
+                assert isinstance(x.node, NestedIntNode)
+                return MetaNestedIntDesc(
+                    tensor=self.describe_tensor(x.node.get_tensor()),
+                    # Maybe we should not hardcode this
+                    attr="offsets",
+                )
+            return None
+        return MetaCustomSizeStridesDesc(
+            size=tuple(process(x) for x in t.size()),
+            stride=tuple(process(x) for x in t.stride()),
+        )
 
     def describe_storage(self, s: torch.UntypedStorage):
         return MetaStorageDesc(
@@ -281,6 +298,8 @@ class MetaTensorDescriber:
             attrs = {attr: self.describe_tensor(getattr(t, attr)) for attr in raw_attrs}
             type_v = type(t)
 
+        custom_size_strides = self.describe_custom_size_strides(t)
+
         # TODO: Is it important to enable torch.inference_mode before querying
         # these values?
         return MetaTensorDesc(
@@ -364,9 +383,23 @@ class MetaTensorDescriber:
             autograd_meta_from=autograd_meta_from,
             current_level=current_level,
             union_find_id=union_find_id,
-            mb_cached_max=mb_cached_max,
-            mb_cached_min=mb_cached_min,
+            cached_max=cached_max,
+            cached_min=cached_min,
+            custom_size_strides=custom_size_strides,
         )
+
+
+@dataclass(frozen=True)
+class MetaNestedIntDesc:
+    tensor: MetaTensorDesc
+    attr: str
+
+
+@dataclass(frozen=True)
+class MetaCustomSizeStridesDesc:
+    size: Tuple[Optional[MetaNestedIntDesc], ...]
+    stride: Tuple[Optional[MetaNestedIntDesc], ...]
+    # storage_offset can never be NestedInt
 
 
 @dataclass(frozen=True)
@@ -428,6 +461,7 @@ class MetaTensorDesc:
     union_find_id: Optional[int] = None
     cached_max: Optional[int] = None
     cached_min: Optional[int] = None
+    custom_size_strides: MetaCustomSizeStridesDesc = None
 
     # Everything below is NOT serializable, need some more work
     ctx: Optional[object] = None  # is_traceable_wrapper_subclass
@@ -576,6 +610,28 @@ class MetaConverter:
             assert t.stride is not None
             if shape_env is not None:
                 fake_mode = t.fake_mode
+
+                def metafy_fn(t: MetaTensorDesc, src) -> torch.Tensor:
+                    # Note [Recursive fakification]
+                    #
+                    # Symints can sometimes hold tensors, and during the
+                    # syminfication process, we need to fakify these tensors.
+                    # In order to find the symbolic context for the tensor on
+                    # the symint, we require that that tensor be associated with
+                    # a inner tensor on the tensor wrapper subclass.
+                    # Today, this path is only used for NestedTensor.
+                    return self.meta_tensor(
+                        t,
+                        shape_env,
+                        callback,
+                        source=src,
+                        symbolic_context=(
+                            None
+                            if symbolic_context is None
+                            # Would be cool not to hard code this!
+                            else symbolic_context.inner_contexts["_offsets"]
+                        )
+                    )
                 if fake_mode is not None and fake_mode.shape_env is shape_env:
                     # Don't reallocate the sizes; the shape envs are the same,
                     # so reuse the old sizes/strides/etc
@@ -600,6 +656,8 @@ class MetaConverter:
                         [d in t.dynamo_dynamic_indices for d in range(t.ndim)],
                         src,
                         symbolic_context=symbolic_context,
+                        custom_size_strides=t.custom_size_strides,
+                        metafy_fn=metafy_fn,
                     )
             else:
                 return (t.size, t.stride, t.storage_offset)
@@ -691,7 +749,8 @@ class MetaConverter:
                             if symbolic_context is None
                             else symbolic_context.inner_contexts[attr]
                         ),
-                    )
+                    ),
+                    t_descr=inner_t
                 )
                 for attr, inner_t in t.attrs.items()
             }

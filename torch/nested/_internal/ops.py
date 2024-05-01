@@ -447,7 +447,9 @@ def to_copy_default(func, *args, **kwargs):
 
     new_values = func(inp._values, **new_kwargs)
     new_offsets = inp._offsets.to(device=new_values.device)
-    _tensor_symint_registry[new_offsets] = _tensor_symint_registry[inp._offsets]
+    from torch.nested._internal import union_find
+    uf = union_find.get_union_find()
+    uf.merge(new_offsets, inp._offsets)
     inp_kwargs = extract_kwargs(inp)
     inp_kwargs["offsets"] = new_offsets
 

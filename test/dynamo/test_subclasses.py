@@ -1363,9 +1363,9 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
 
     # TODO: cannot parametrize this test class with device for some reason
     def _test_autograd(self, backend):
-        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64)
-        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64)
-        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64)
+        a = torch.randn(2, 5, requires_grad=True, dtype=torch.float64)
+        b = torch.randn(3, 5, requires_grad=True, dtype=torch.float64)
+        c = torch.randn(4, 5, requires_grad=True, dtype=torch.float64)
         nt = torch.nested.as_nested_tensor([a, b, c], layout=torch.jagged)
         # TODO: Switch to public API when it exists
         nt2, _ = jagged_from_list([a, b, c], nt.offsets())
@@ -1494,11 +1494,11 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
                 isinstance(nt_view._base, NestedTensor)
                 or nt_view_name == "subclass_dense"
             ):
-                self.assertExpectedInline(guard_str, """Eq(s3 - 1, s0)""")
+                self.assertExpectedInline(guard_str, """Eq(s2 - 1, s0)""")
             elif nt_view_name.startswith("base_is_nt_False_"):
                 # TODO: this is a "do I need to resize storage" guard,
                 # probably don't actually want to see this
-                self.assertExpectedInline(guard_str, """8*s1*s3 <= 8*s0*s1""")
+                self.assertExpectedInline(guard_str, """8*s1*s4 <= 8*s0*s1""")
             else:
                 self.assertExpectedInline(guard_str, """""")
             return gm
