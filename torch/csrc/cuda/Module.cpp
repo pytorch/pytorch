@@ -909,11 +909,17 @@ PyObject* THCPModule_cudaGetSyncDebugMode(PyObject* self, PyObject* noargs) {
 static void registerCudaDeviceProperties(PyObject* module) {
   // Add _cudaDevicePropertires class to torch._C
   auto m = py::handle(module).cast<py::module>();
+  // CUuuid is defined in either cuda.h or driver_types.h
+  // hipified to hipUUID which is defined in hip_runtime_api.h
   py::class_<CUuuid>(m, "_CUuuid")
       .def_property_readonly(
           "bytes", [](const CUuuid& uuid) { return py::bytes(uuid.bytes); })
       .def("__repr__", [](const CUuuid& uuid) {
-        constexpr size_t size = 36 + 1;
+        // UUIDs are a 128-bit label. CUDA and HIP store this as char[16].
+        // For string representation, the code here expands this to
+        // 8-4-4-4-12 hex format, so each byte becomes 2 hex characters.
+        // Size is 16x2 hex characters + 4 hyphens + 1 null byte.
+        constexpr size_t size = sizeof(CUuuid) * 2 + 4 + 1;
         char device_path_str[size] = {0};
         snprintf(
             device_path_str,
