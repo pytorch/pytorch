@@ -1104,7 +1104,6 @@ def configure_extension_build():
             "default = torch.distributed.elastic.multiprocessing:DefaultLogsSpecs",
         ],
     }
-
     return extensions, cmdclass, packages, entry_points, extra_install_requires
 
 
@@ -1128,6 +1127,32 @@ def print_box(msg):
     for l in lines:
         print("|{}{}|".format(l, " " * (size - len(l))))
     print("-" * (size + 2))
+
+
+def rename_torch_packages(package_list):
+    """
+    Create a dictionary from a list of package names, renaming packages where
+    the top-level package is 'torch' to 'libtorch'.
+
+    Args:
+        package_list (list of str): The list of package names.
+
+    Returns:
+        dict: A dictionary where keys are the package names with 'torch' replaced by 'libtorch',
+              and values are the original package names, only including those where the
+              top-level name is 'torch'.
+    """
+    result = {}
+    for package in package_list:
+        # Split the package name by dots to handle subpackages or modules
+        parts = package.split(".")
+        # Check if the top-level package is 'torch'
+        if parts[0] == "torch":
+            # Replace 'torch' with 'libtorch' in the top-level package name
+            new_key = "libtorch" + package[len("torch") :]
+            result[new_key] = package
+
+    return result
 
 
 def main():
@@ -1417,12 +1442,32 @@ def main():
         "packaged/**/*.h",
         "packaged/**/*.yaml",
     ]
-    torch_package_dir_name = "libtorch" if BUILD_LIBTORCH_WHL else "wrong_torch"
 
-
+    if BUILD_LIBTORCH_WHL:
+        modified_packages = []
+        for package in packages:
+            parts = package.split(".")
+            if len(parts) < 2:
+                continue
+            if parts[0] == "torch":
+                modified_packages.append("libtorch" + package[len("torch") :])
+        packages = modified_packages
+        torch_package_dir_name = "libtorch"
+        package_dir = {"libtorch": "torch"}
+        package_data = {"libtorch": torch_package_data}
+    else:
+        torch_package_dir_name = "torch"
+        package_dir = {}
+        package_data = {
+            "torch": torch_package_data,
+            "torchgen": torchgen_package_data,
+            "caffe2": [
+                "python/serialized_test/data/operator_test/*.zip",
+            ],
+        }
 
     setup(
-        name=package_name,
+        name="libtorch",
         version=version,
         description=(
             "Tensors and Dynamic neural networks in "
@@ -1432,18 +1477,13 @@ def main():
         long_description_content_type="text/markdown",
         ext_modules=extensions,
         cmdclass=cmdclass,
-        packages=packages,
+        packages=[],
         entry_points=entry_points,
         install_requires=install_requires,
         extras_require=extras_require,
-        package_dir={torch_package_dir_name: "torch"},
-        package_data={
-            torch_package_dir_name: torch_package_data,
-            # "torchgen": torchgen_package_data,
-            # "caffe2": [
-            #     "python/serialized_test/data/operator_test/*.zip",
-            # ],
-        },
+        package_dir=package_dir,
+        package_data=package_data,
+        include_package_data=True,
         url="https://pytorch.org/",
         download_url="https://github.com/pytorch/pytorch/tags",
         author="PyTorch Team",
