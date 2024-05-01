@@ -16,9 +16,12 @@ except ImportError:
 import collections
 import gc
 import json
+import mmap
 import os
 import pickle
+import random
 import re
+import struct
 import subprocess
 import sys
 import threading
@@ -2267,9 +2270,6 @@ aten::mm""",
 
     @unittest.skipIf(IS_ARM64 or not IS_LINUX, "x86 linux only cpp unwinding")
     def test_fuzz_symbolize(self):
-        import mmap
-        import random
-        import struct
         # generate some random addresses in the text section and make sure the
         # symbolizers do not throw exceptions/crash
         def get_text_sections():
