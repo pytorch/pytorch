@@ -741,6 +741,30 @@ class TestBypassFailures(TestCase):
         self.assertTrue(len(failed) == 0)
         self.assertTrue(len(ignorable["UNSTABLE"]) == 1)
 
+        # Add another test case where there is no unstable keyword in the job name, but
+        # the job has already been marked as unstable
+        pr = GitHubPR("pytorch", "executorch", 3318)
+        checks = pr.get_checkrun_conclusions()
+        checks = get_classifications(
+            pr.pr_num,
+            pr.project,
+            checks,
+            [],
+        )
+        print(checks)
+        workflow_name = "test-llama-app"
+        job_name = "mobile-job (android)"
+        self.assertTrue(
+            checks[f"Android / {workflow_name} / {job_name}"].classification
+            == "UNSTABLE"
+        )
+        pending, failed, ignorable = categorize_checks(
+            checks, list(checks.keys()), ok_failed_checks_threshold=1
+        )
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 0)
+        self.assertTrue(len(ignorable["UNSTABLE"]) == 1)
+
     def test_get_classifications_broken_trunk(self, *args: Any) -> None:
         # The mock merge base is the actual value returned by gh_fetch_merge_base
         test_cases = [
