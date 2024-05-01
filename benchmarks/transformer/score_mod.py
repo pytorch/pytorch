@@ -8,7 +8,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from tabulate import tabulate
-from torch.nn.attention._templated_attention import _templated_attention
+from torch.nn.attention._flex_attention import _flex_attention
 from tqdm import tqdm
 
 torch._dynamo.config.automatic_dynamic_shapes = False
@@ -113,7 +113,7 @@ def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:
     def eager_sdpa(query, key, value, _):
         return F.scaled_dot_product_attention(query, key, value)
 
-    compiled_sdpa = torch.compile(_templated_attention)
+    compiled_sdpa = torch.compile(_flex_attention)
 
     score_mod = config.score_mod
 
@@ -211,7 +211,7 @@ def generate_experiment_configs() -> List[ExperimentConfig]:
     batch_sizes = [1, 8, 16]
     num_heads = [16]
     q_kv_seq_lens = [(512, 512), (1024, 1024), (4096, 4096)]
-    head_dims = [64]
+    head_dims = [64, 128]
     dtypes = [
         torch.bfloat16,
     ]

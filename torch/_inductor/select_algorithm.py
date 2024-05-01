@@ -990,6 +990,11 @@ class AlgorithmSelectorCache(PersistentCache):
             if timings:
                 return no_op
 
+            if config.search_autotune_cache and not (
+                config.max_autotune or config.max_autotune_gemm
+            ):
+                return no_op
+
             precompile_key = (
                 f"{name}: {inputs_key} : {torch.get_float32_matmul_precision()}"
             )
@@ -1008,6 +1013,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 [c for c in choices if hasattr(c, "precompile")],
                 timeout=precompilation_timeout_seconds,
             )
+            from triton.runtime.autotuner import OutOfResources
 
             @functools.lru_cache(None)
             def wait_on_futures():
@@ -1026,6 +1032,9 @@ class AlgorithmSelectorCache(PersistentCache):
                         f"Precompilation timed out after {precompilation_timeout_seconds} seconds."  # noqa: G004
                     )
                 except StopIteration:
+                    pass
+                except OutOfResources:
+                    # This config is invalid due to requiring too many resources
                     pass
 
                 executor.shutdown(wait=True)

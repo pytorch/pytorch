@@ -1064,14 +1064,14 @@ def gen_pyi(
             "new_tensor": [
                 f"def new_tensor(self, data: Any, {FACTORY_PARAMS}) -> Tensor: ..."
             ],
-            "__new__": ["def __new__(self, *args, **kwargs) -> Tensor: ..."],
+            "__new__": ["def __new__(cls, *args, **kwargs) -> Self: ..."],
             # new and __init__ have the same signatures differ only in return type
             # Adapted from legacy_tensor_ctor and legacy_tensor_new
             "new": [
-                f"def new(self, *args: Any, {DEVICE_PARAM}) -> Tensor: ...",
-                "def new(self, storage: Storage) -> Tensor: ...",
-                "def new(self, other: Tensor) -> Tensor: ...",
-                f"def new(self, size: _size, *, {DEVICE_PARAM}) -> Tensor: ...",
+                f"def new(cls, *args: Any, {DEVICE_PARAM}) -> Self: ...",
+                "def new(cls, storage: Storage) -> Self: ...",
+                "def new(cls, other: Tensor) -> Self: ...",
+                f"def new(cls, size: _size, *, {DEVICE_PARAM}) -> Self: ...",
             ],
             "__init__": [
                 f"def __init__(self, *args: Any, {DEVICE_PARAM}) -> None: ...",
