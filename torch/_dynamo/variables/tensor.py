@@ -6,6 +6,7 @@ import logging
 import operator
 import textwrap
 import types
+import unittest
 from typing import Dict, List
 
 import sympy
@@ -645,11 +646,15 @@ class TensorVariable(VariableTracker):
 
         def tolist(tensor, sub_proxy):
             def wrap(i, sub_proxy):
-                return SymNodeVariable.create(
-                    tx,
-                    sub_proxy.item(),
-                    sym_num=tx.output.shape_env.create_unbacked_symint(),
-                )
+                # Sigh, we forgot to gate this, so this data dependent is on
+                # by default and is load bearing in CI
+                with unittest.mock.patch.object(
+                    tx.fake_mode, "allow_scalar_outputs", True
+                ):
+                    return SymNodeVariable.create(
+                        tx,
+                        sub_proxy.item(),
+                    )
 
             if tensor.dtype not in [
                 torch.int8,
@@ -963,11 +968,11 @@ class SymNodeVariable(VariableTracker):
     }
 
     @classmethod
-    def create(cls, tx, proxy, sym_num, **options):
-        if "example_value" in proxy.node.meta:
-            assert proxy.node.meta["example_value"] == sym_num
+    def create(cls, tx, proxy, sym_num=None, **options):
         if sym_num is None:
             sym_num = get_fake_value(proxy.node, tx)
+        if "example_value" in proxy.node.meta:
+            assert proxy.node.meta["example_value"] == sym_num
         set_example_value(proxy.node, sym_num)
 
         if isinstance(sym_num, (sympy.Integer, int, bool)):
