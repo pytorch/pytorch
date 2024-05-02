@@ -1147,9 +1147,7 @@ class TestFullyShardCustomForwardMethod(FSDPTestMultiThread):
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_register_fsdp_forward_method(self):
-        """
-        Based on https://github.com/pytorch/pytorch/issues/109385
-        """
+        """Based on https://github.com/pytorch/pytorch/issues/109385"""
 
         class VisionTransformer(nn.Module):
             def __init__(self):
