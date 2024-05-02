@@ -3743,9 +3743,7 @@ class CUDATemplateBuffer(TemplateBuffer):
         self._tuned_for_epilogue: List[Any] = []
 
     def get_workspace_size(self):
-        if callable(self.workspace_size):
-            return self.workspace_size()
-        return self.workspace_size if self.workspace_size is not None else 0
+        return self.workspace_size
 
     def get_read_writes(self):
         with patch.object(FlexibleLayout, "allow_indexing", True):

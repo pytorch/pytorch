@@ -1170,17 +1170,17 @@ class AlgorithmSelectorCache(PersistentCache):
                 for input_node in input_nodes
             ]
 
-        out = cls.benchmark_example_value(layout)
-        out_extern = torch.as_strided(
-            out, out.size(), out.stride(), V.graph.sizevars.size_hint(layout.offset)
-        )
-        expected = None
-        if VERIFY:
-            for i in range(len(choices)):
-                if isinstance(choices[i], ExternKernelCaller):
-                    choices[i].benchmark(*example_inputs_extern, out=out_extern)
-                    expected = out_extern.clone()
-                    break
+            out = cls.benchmark_example_value(layout)
+            out_extern = torch.as_strided(
+                out, out.size(), out.stride(), V.graph.sizevars.size_hint(layout.offset)
+            )
+            expected = None
+            if VERIFY:
+                for i in range(len(choices)):
+                    if isinstance(choices[i], ExternKernelCaller):
+                        choices[i].benchmark(*example_inputs_extern, out=out_extern)
+                        expected = out_extern.clone()
+                        break
 
             return example_inputs, example_inputs_extern, out, out_extern, expected
 

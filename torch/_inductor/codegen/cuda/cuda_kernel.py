@@ -169,9 +169,11 @@ class CUDATemplateKernel(CUDAKernel):
         # workspace_size should have already been retrieved prior to this call.
         call_args.append("None")
 
-        workspace_node = V.graph.get_workspace_buffer_for(node)
-        if workspace_node is not None:
-            call_args.append(f"c_void_p({workspace_node.get_name()}.data_ptr())")
+        if node.get_workspace_size() > 0:
+            wrapper.generate_workspace_allocation(
+                node.get_workspace_size(), V.graph.scheduler.current_device, False
+            )
+            call_args.append("c_void_p(workspace.data_ptr())")
         else:
             call_args.append("None")
 
@@ -182,6 +184,8 @@ class CUDATemplateKernel(CUDAKernel):
             cuda=True,
             triton=False,
         )
+        if node.get_workspace_size() > 0:
+            wrapper.writeline(wrapper.make_free_by_names(["workspace"]))
 
     def dtype(self, node: IRNode) -> Optional[str]:
         """
