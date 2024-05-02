@@ -40,6 +40,7 @@ from .runtime.runtime_utils import do_bench
 from .utils import (
     get_dtype_size,
     Placeholder,
+    restore_stdout_stderr,
     sympy_dot,
     sympy_index_symbol,
     sympy_product,
@@ -1007,15 +1008,28 @@ class AlgorithmSelectorCache(PersistentCache):
                 num_workers,
             )
 
+            # In rare circumstances, because python threads inherit global state,
+            # thread pool executor can race and leave stdout/stderr in a state
+            # different than the original values. we explicitly restore the state
+            # here to avoid this issue.
+
+            initial_stdout = sys.stdout
+            initial_stderr = sys.stderr
+
+            def precompile_with_captured_stdout(choice):
+                with restore_stdout_stderr(initial_stdout, initial_stderr):
+                    return choice.precompile()
+
             executor = ThreadPoolExecutor(max_workers=num_workers)
             futures = executor.map(
-                lambda c: c.precompile(),
+                lambda c: precompile_with_captured_stdout(c),
                 [c for c in choices if hasattr(c, "precompile")],
                 timeout=precompilation_timeout_seconds,
             )
             from triton.runtime.autotuner import OutOfResources
 
             @functools.lru_cache(None)
+            @restore_stdout_stderr(initial_stdout, initial_stderr)
             def wait_on_futures():
                 counters["inductor"]["select_algorithm_precompile"] += 1
                 try:
