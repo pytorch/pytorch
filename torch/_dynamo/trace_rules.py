@@ -189,6 +189,7 @@ manual_torch_name_rule_map = {
     "torch._C.autocast_decrement_nesting": SkipFunctionVariable,
     "torch._C.autocast_increment_nesting": SkipFunctionVariable,
     "torch.autograd.grad": SkipFunctionVariable,
+    "torch.autograd.backward": SkipFunctionVariable,
     "torch._C.clear_autocast_cache": SkipFunctionVariable,
     "torch.distributions.constraints.is_dependent": SkipFunctionVariable,
     "torch.jit.isinstance": SkipFunctionVariable,
@@ -262,6 +263,8 @@ manual_torch_name_rule_map = {
     "torch.autograd.forward_ad.exit_dual_level": UserFunctionVariable,
     "torch.autograd.forward_ad.make_dual": UserFunctionVariable,
     "torch.autograd.forward_ad.unpack_dual": UserFunctionVariable,
+    # functorch/linearize
+    "torch._functorch.eager_transforms.linearize": FunctorchHigherOrderVariable,
     # functorch/jacfwd
     "torch._functorch.eager_transforms.jacfwd": FunctorchHigherOrderVariable,
     "torch._functorch.eager_transforms._construct_standard_basis_for": UserFunctionVariable,
@@ -2240,6 +2243,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._functorch.eager_transforms._vjp_treespec_compare",
         "torch._functorch.eager_transforms._set_tensor_requires_grad",
         "torch._functorch.eager_transforms._jvp_treespec_compare",
+        "torch._functorch.eager_transforms._linearize_treespec_compare",
         "torch._functorch.eager_transforms._is_differentiable",
         "torch._functorch.eager_transforms._maybe_unwrap_functional_tensor",
         "torch._functorch.eager_transforms._maybe_wrap_functional_tensor",
@@ -2248,7 +2252,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._functorch.eager_transforms.assert_flat_tuple_of_tensors",
         "torch._functorch.eager_transforms.functionalize",
         "torch._functorch.eager_transforms.lazy_dynamo_disable",
-        "torch._functorch.eager_transforms.linearize",
         "torch._functorch.eager_transforms.noop",
         "torch._functorch.functional_call.construct_stacked_leaf",
         "torch._functorch.functional_call.functional_call",
@@ -2335,7 +2338,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.autograd._make_grads",
         "torch.autograd._register_py_tensor_class_for_device",
         "torch.autograd._tensor_or_tensors_to_tuple",
-        "torch.autograd.backward",
         "torch.autograd.forward_ad._maybe_load_decompositions",
         "torch.autograd.function._iter_filter",
         "torch.autograd.function._iter_jit_values",
@@ -2587,6 +2589,8 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.functional.unravel_index",
         "torch.futures.collect_all",
         "torch.futures.wait_all",
+        "torch.fx.experimental.const_fold.split_const_subgraphs",
+        "torch.fx.experimental.proxy_tensor.make_fx",
         "torch.get_deterministic_debug_mode",
         "torch.get_float32_matmul_precision",
         "torch.is_deterministic_algorithms_warn_only_enabled",
@@ -3201,6 +3205,7 @@ MOD_INLINELIST = {
     "torch._dynamo.comptime",
     "torch._dynamo.polyfill",
     "torch._functorch.vmap",
+    "torch._functorch.autograd_function",
     "torch._library.custom_ops",
     "torch._functorch.eager_transforms",
     "torch._inductor.test_operators",
@@ -3225,6 +3230,7 @@ MOD_INLINELIST = {
     "torch._tensor",
     "torch._higher_order_ops.strict_mode",
     "torch._higher_order_ops.while_loop",
+    "torch._higher_order_ops.associative_scan",
 }
 
 

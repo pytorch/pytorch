@@ -36,7 +36,7 @@ class AsyncStager(Protocol):
         the serialization thread starts and before returning from dcp.async_save. If this is set to False,
         the assumption is the user has defined a custom synchronization point for the the purpose of further
         optimizing save latency in the training loop (for example, by overlapping staging with the
-        forward/backward pass), and it is respondsibility is on the user to call `AsyncStager.synchronize_staging`
+        forward/backward pass), and it is the respondsibility of the user to call `AsyncStager.synchronize_staging`
         at the appropriate time.
 
     """
@@ -79,6 +79,9 @@ class BlockingAsyncStager(AsyncStager):
 
     """
 
+    # default to True since the common case is to stage synchronously
+    _synchronize_after_execute: bool = False
+
     def __init__(
         self,
         cache_staged_state_dict: bool = False,
@@ -109,3 +112,9 @@ class BlockingAsyncStager(AsyncStager):
         if self.state_dict_cache is None:
             self.state_dict_cache = _create_cpu_state_dict(state_dict, pin_memory=True)
         return _copy_state_dict(state_dict, self.state_dict_cache)
+
+    def synchronize_staging(self) -> None:
+        """
+        No-op function, since staging is blocking.
+        """
+        pass
