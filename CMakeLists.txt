@@ -56,7 +56,7 @@ endif()
 
 # This define is needed to preserve behavior given anticpated changes to cccl/thrust
 # https://nvidia.github.io/libcudacxx/standard_api/numerics_library/complex.html
-string(APPEND CMAKE_CUDA_FLAGS "-DLIBCUDACXX_ENABLE_SIMPLIFIED_COMPLEX_OPERATIONS")
+string(APPEND CMAKE_CUDA_FLAGS " -DLIBCUDACXX_ENABLE_SIMPLIFIED_COMPLEX_OPERATIONS")
 
 if(LINUX)
   include(cmake/CheckAbi.cmake)
@@ -228,7 +228,6 @@ option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
 option(USE_KINETO "Use Kineto profiling library" ON)
 option(USE_CUPTI_SO "Use CUPTI as a shared library" ON)
 option(USE_FAKELOWP "Use FakeLowp operators" OFF)
-option(USE_FFMPEG "Use ffmpeg" OFF)
 option(USE_GFLAGS "Use GFLAGS" OFF)
 option(USE_GLOG "Use GLOG" OFF)
 option(USE_LEVELDB "Use LEVELDB" OFF)
@@ -264,7 +263,6 @@ cmake_dependent_option(
 option(USE_NUMPY "Use NumPy" ON)
 option(USE_OBSERVERS "Use observers module." OFF)
 option(USE_OPENCL "Use OpenCL" OFF)
-option(USE_OPENCV "Use OpenCV" OFF)
 option(USE_OPENMP "Use OpenMP for parallel code" ON)
 option(USE_PRECOMPILED_HEADERS "Use pre-compiled headers to accelerate build." OFF)
 
