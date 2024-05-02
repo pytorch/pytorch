@@ -3556,6 +3556,12 @@ class ShapeEnv:
                         inner_t,
                         inner_context.constraint_sizes
                     ))
+                    uf = torch.nested._internal.union_find.get_union_find()
+                    if uf.get_metadata(inner_t).get("_max_seqlen") is not None:
+                        track_symint(
+                            torch._dynamo.source.UnionFindMetadataSource(AttrSource(source, attr), "_max_seqlen"),
+                            uf.get_metadata(inner_t)["_max_seqlen"]
+                        )
             else:
                 sources_tensors_constraints = [(source, t, context.constraint_sizes)]
 

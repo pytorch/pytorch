@@ -685,9 +685,25 @@ class MetaConverter:
             # TODO: we could instead use the hint to make this a real symint
             # but should not be necessary for NestedTensors
             if t_descr.cached_max is not None:
-                cached_metadata["_max_seqlen"] = shape_env.create_unbacked_symint()
-            if t_descr.cached_max is not None:
-                cached_metadata["_min_seqlen"] = shape_env.create_unbacked_symint()
+                import sympy
+                src = torch._dynamo.source.UnionFindMetadataSource(source, "_max_seqlen")
+                ret = shape_env.create_symintnode(
+                    sym=shape_env.create_symbol(
+                        val=t_descr.cached_max,
+                        source=src,
+                    ),
+                    hint=t_descr.cached_max,
+                    source=src,
+                )
+                cached_metadata["_max_seqlen"] = ret
+            if t_descr.cached_min is not None:
+                # TODO:
+                import sympy
+                cached_metadata["_min_seqlen"] = shape_env.create_symintnode(
+                    sym=sympy.Integer(t_descr.cached_min),
+                    hint=t_descr.cached_min,
+                    source=torch._dynamo.source.UnionFindMetadataSource(source, "_min_seqlen"),
+                )
 
         def empty_create(
             inner_t: MetaTensorDesc, inner_src, symbolic_context=symbolic_context

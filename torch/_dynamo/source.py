@@ -292,6 +292,26 @@ class SymNodePropertySource(ChainedSource):
 
 
 @dataclasses.dataclass(frozen=True)
+class UnionFindMetadataSource(ChainedSource):
+    prop: str
+
+    def __post_init__(self):
+        assert self.base is not None
+
+    def reconstruct(self, codegen):
+        return [
+            *self.base.reconstruct(codegen),
+            codegen.create_load_attr(self.prop),
+        ]
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return f"torch.nested._internal.union_find.get_union_find().get_metadata({self.base.name()})['{self.prop}']"
+
+
+@dataclasses.dataclass(frozen=True)
 class NegateSource(ChainedSource):
     def __post_init__(self):
         assert self.base is not None

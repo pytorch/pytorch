@@ -26,6 +26,8 @@ from torch.nested._internal.nested_tensor import (
     nested_view_from_values_offsets,
     NestedTensor,
 )
+from torch.nested._internal import union_find
+from torch.nested._internal.union_find import get_max_seqlen
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -1360,6 +1362,45 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         nt2, _ = self._get_jagged_tensor(((2, 3, 4), 5), offsets)
         nt3, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
         self._check_recompiles(binary, (nt1, nt2), (nt1, nt3), True)
+
+    # TODO: also implement min_seqlen
+    def test_max_seqlen(self):
+        a = torch.randn(2, 5, requires_grad=True, dtype=torch.float64)
+        b = torch.randn(3, 5, requires_grad=True, dtype=torch.float64)
+        c = torch.randn(4, 5, requires_grad=True, dtype=torch.float64)
+        nt = torch.nested.as_nested_tensor([a, b, c], layout=torch.jagged)
+        nt.requires_grad_(True)
+
+        def fn(nt):
+            if get_max_seqlen(nt.offsets()) <= 7:
+                return nt * get_max_seqlen(nt.offsets())
+            else:
+                return nt / 2
+
+        compile_count = [0]
+
+        def counter(gm, example_inputs):
+            compile_count[0] += 1
+            return gm
+
+        # Manual checks for guards that are produced?
+        compiled_fn = torch.compile(fn, fullgraph=True, backend=counter)
+        uf = union_find.get_union_find()
+        metadata = uf.get_metadata(nt.offsets())
+        metadata["_max_seqlen"] = 14
+        out1 = compiled_fn(nt)
+        self.assertEqual(compile_count[0], 1)
+
+        metadata["_max_seqlen"] = 2
+        out2 = compiled_fn(nt)
+        self.assertEqual(compile_count[0], 2)
+
+        metadata["_max_seqlen"] = 100
+        out3 = compiled_fn(nt)
+        self.assertEqual(compile_count[0], 2)
+
+        self.assertEqual(out1, out3)
+        self.assertEqual(out1 * 4, out2)
 
     # TODO: cannot parametrize this test class with device for some reason
     def _test_autograd(self, backend):

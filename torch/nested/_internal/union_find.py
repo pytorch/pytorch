@@ -124,6 +124,23 @@ def find(a):
     uf = get_union_find()
     return uf.find(a)
 
+lib = torch.library.Library("nested", "FRAGMENT")
+lib.define("get_max_seqlen(Tensor x) -> SymInt")
+
+def foo_impl(x):
+    uf = get_union_find()
+    cached_metadata = uf.get_metadata(x)
+    if not cached_metadata.get("_max_seqlen"):
+        cached_metadata["_max_seqlen"] = torch.max(x).item()
+    return cached_metadata["_max_seqlen"]
+
+lib.impl("get_max_seqlen", foo_impl, "CPU")
+lib.impl("get_max_seqlen", foo_impl, "CUDA")
+lib.impl("get_max_seqlen", foo_impl, "Meta")
+
+def get_max_seqlen(x):
+    return torch.ops.nested.get_max_seqlen(x)
+
 class TensorUnionFind:
     # Union-find over tensors with some extra functionality
     def __init__(self, tensor_int_map=None):
