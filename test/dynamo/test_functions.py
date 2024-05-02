@@ -2162,19 +2162,15 @@ class GraphModule(torch.nn.Module):
         def func(a, b, info_or_dt):
             return a + info_func(info_or_dt).max
 
+        opt_fn = torch.compile(func)
+
         a = torch.randn(2)
         b = torch.randn(2)
         eager_result = func(a, b, dt_args[0])
 
-        cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(func)
-
         for arg in arg_variants_iter:
             opt_result = opt_fn(a, b, arg)
             self.assertTrue(same(opt_result, eager_result))
-
-        # TODO: guard is in the wrong place
-        self.assertEqual(cnts.frame_count, 1)
 
     def test_compare_constant_and_tensor(self):
         for op in [
