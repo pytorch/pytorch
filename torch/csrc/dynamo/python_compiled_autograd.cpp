@@ -228,8 +228,8 @@ struct CacheNode {
   std::vector<CacheKeyBuffer> key_storage;
   std::vector<SizeInput> expected_sizes;
 
+  THPObjectPtr runtime_wrapper;
   THPObjectPtr compiled_fn;
-  std::function<void(std::vector<at::Tensor>&)> inputs_runtime_wrapper = [](std::vector<at::Tensor>&) {};
 };
 
 struct InputBuffers : public std::unordered_map<Node*, InputBuffer> {
@@ -354,6 +354,7 @@ CacheNode* _compiled_autograd_impl(
   calls.reserve(
       check_exec_info ? graph_task.exec_info_.size() : dependencies.size() + 1);
 
+  bool already_logged_node_miss = false;
   while (!worklist.empty()) {
     std::shared_ptr<Node> fn = std::move(worklist.back());
     worklist.pop_back();
@@ -368,14 +369,13 @@ CacheNode* _compiled_autograd_impl(
         node_args.collect(call.node->next_edges());
       }
       CacheKey key = node_args.key();
-      if (is_verbose_logging_enabled &&
+      if (is_verbose_logging_enabled && !already_logged_node_miss &&
           cache->lookup(key, /*create=*/false) == nullptr) {
-        vcout() << "cache miss for " << fn->name()
-                << ", with key of size " << key.key_size << std::endl;
+        vcout() << "cache miss: mismatch starting " << fn->name()
+                << " (NodeCall " << calls.size() - 1 << "), with key of size "
+                << key.key_size << std::endl;
+        already_logged_node_miss = true;
       }
-      //  else {
-      //   std::cout << "cache hit for " << fn->name() << std::endl;
-      // }
       cache = cache->lookup(key);
     }
 
@@ -509,22 +509,18 @@ CacheNode* _compiled_autograd_impl(
     }
 
     PyObject* res = check(call_end_capture(py_compiler, state.outputs));
-    cache->compiled_fn = PyTuple_GetItem(res, 0);
-    PyObject* inputs_on_cpu = PyTuple_GetItem(res, 1);
-    TORCH_CHECK(PyList_Check(inputs_on_cpu));
-    std::vector<Py_ssize_t> _inputs_on_cpu;
-    for (Py_ssize_t i = 0; i < PyList_Size(inputs_on_cpu); i++) {
-      PyObject* idx = PyList_GetItem(inputs_on_cpu, i);
-      TORCH_CHECK(PyLong_Check(idx));
-      _inputs_on_cpu.emplace_back(PyLong_AsSsize_t(idx));
-    }
-    cache->inputs_runtime_wrapper =
-      [_inputs_on_cpu = std::move(_inputs_on_cpu)](std::vector<at::Tensor>& inputs) {
-        for (auto i : _inputs_on_cpu) {
-          std::cout << "moving inputs " << i << " to cuda" << std::endl;
-          inputs[i] = inputs[i].to(at::kCUDA);
-        }
-      };
+    TORCH_CHECK(PyTuple_Check(res), "Expected end_capture to return tuple");
+    TORCH_CHECK(
+        PyTuple_Size(res) == 2,
+        "Expected end_capture to return tuple of size 2");
+    cache->runtime_wrapper = PyTuple_GetItem(res, 0);
+    TORCH_CHECK(
+        PyCallable_Check(cache->runtime_wrapper),
+        "Expected end_capture to return runtime_wrapper");
+    cache->compiled_fn = PyTuple_GetItem(res, 1);
+    TORCH_CHECK(
+        PyCallable_Check(cache->compiled_fn),
+        "Expected end_capture to return compiled_fn");
     state.debug_asserts();
   } // End cache miss region
 
@@ -535,7 +531,6 @@ CacheNode* _compiled_autograd_impl(
     }
   }
 
-  cache->inputs_runtime_wrapper(compiler_call.tensor_args.inputs);
   *graph_arg_inputs = THPVariable_WrapList(compiler_call.tensor_args.inputs);
   *graph_arg_sizes = wrap_int_list(compiler_call.dyn_size_inputs);
   *graph_arg_hooks = convert_hook_list(compiler_call.hooks);
@@ -571,7 +566,12 @@ variable_list compiled_autograd(
       &hooks);
 
   THPObjectPtr pyresult(check(PyObject_CallFunctionObjArgs(
-      cache->compiled_fn.get(), inputs.get(), sizes.get(), hooks.get(), NULL)));
+      cache->runtime_wrapper.get(),
+      cache->compiled_fn.get(),
+      inputs.get(),
+      sizes.get(),
+      hooks.get(),
+      NULL)));
   variable_list outputs = THPVariable_UnpackList(pyresult);
   TORCH_INTERNAL_ASSERT(outputs.size() == output_edges.size());
   return outputs;

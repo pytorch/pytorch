@@ -2616,7 +2616,9 @@ def maybe_enable_compiled_autograd(should_enable, fullgraph=False, dynamic=False
             torch._dynamo.utils.counters["compiled_autograd"]["compiles"] += 1
             return torch._inductor.compile(gm_, example_inputs_)
 
-        return torch.compile(gm, backend=inner_compiler, fullgraph=fullgraph, dynamic=dynamic)
+        return torch.compile(
+            gm, backend=inner_compiler, fullgraph=fullgraph, dynamic=dynamic
+        )
 
     if should_enable:
         with torch._dynamo.compiled_autograd.enable(compiler_fn) as ctx:
