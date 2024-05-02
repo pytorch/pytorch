@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
@@ -15,6 +15,7 @@ from .optimizer import (
     _use_grad_for_differentiable,
     _view_as_real,
     Optimizer,
+    ParamsT,
 )
 
 __all__ = ["ASGD", "asgd"]
@@ -30,7 +31,7 @@ def _to_tensor(x, device=None):
 class ASGD(Optimizer):
     def __init__(
         self,
-        params,
+        params: ParamsT,
         lr=1e-2,
         lambd=1e-4,
         alpha=0.75,
@@ -135,12 +136,12 @@ class ASGD(Optimizer):
                 loss = closure()
 
         for group in self.param_groups:
-            params_with_grad = []
-            grads = []
-            mus = []
-            axs = []
-            etas = []
-            state_steps = []
+            params_with_grad: List[Tensor] = []
+            grads: List[Tensor] = []
+            mus: List[Tensor] = []
+            axs: List[Tensor] = []
+            etas: List[Tensor] = []
+            state_steps: List[Tensor] = []
 
             has_complex = self._init_group(
                 group, params_with_grad, grads, mus, axs, etas, state_steps
@@ -223,7 +224,7 @@ def _single_tensor_asgd(
             assert (
                 param.is_cuda and mu.is_cuda and eta.is_cuda and step_t.is_cuda
             ) or (
-                param.is_xla and mu.is_xla and eta.is_xla and step_t.is_xla
+                param.is_xla and mu.is_xla and eta.is_xla and step_t.is_xla  # type: ignore[attr-defined]
             ), "If capturable=True, params, mus, etas, and state_steps must be CUDA or XLA tensors."
 
         if torch.is_complex(param):
@@ -310,7 +311,7 @@ def _multi_tensor_asgd(
             _view_as_real(grouped_params, grouped_grads, grouped_axs)
 
         if maximize:
-            grouped_grads = torch._foreach_neg(grouped_grads)
+            grouped_grads = torch._foreach_neg(grouped_grads)  # type: ignore[assignment]
 
         # Update steps
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
@@ -324,6 +325,7 @@ def _multi_tensor_asgd(
             torch._foreach_add_(grouped_state_steps, 1)
 
         # intermediate = grad + param * lambd
+        intermediate: Union[Tuple[Tensor, ...], List[Tensor]]
         if weight_decay != 0:
             if maximize:
                 torch._foreach_add_(grouped_grads, grouped_params, alpha=weight_decay)
@@ -358,6 +360,8 @@ def _multi_tensor_asgd(
         torch._foreach_addcmul_(grouped_axs, intermediate, grouped_mus)
         del intermediate
 
+        new_etas: Union[Tuple[Tensor, ...], List[Tensor]]
+        new_mus: Union[Tuple[Tensor, ...], List[Tensor]]
         if capturable:
             # update grouped_mus
             new_mus = torch._foreach_sub(grouped_state_steps, t0)
