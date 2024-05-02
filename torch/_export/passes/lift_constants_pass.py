@@ -4,8 +4,6 @@ from typing import Any, Dict, Union
 import torch
 from torch._export.verifier import SpecViolationError
 from torch._guards import detect_fake_mode
-
-from torch._library.fake_class_registry import FakeScriptObject
 from torch.export.exported_program import (
     ArgumentSpec,
     CustomObjArgument,
@@ -17,35 +15,33 @@ from torch.export.exported_program import (
 
 
 class ConstantAttrMap(collections.abc.MutableMapping):
-    """A mapping class that understands how to use module constants (tensors,
-    ScriptObjects, FakeScriptObjects) as keys. We store tensors and FakeScriptObjects normally,
-    but ScriptObjects are stored by hash, because different torch.ScriptObjects can point to
-    the same underlying value (but we guarantee that they will `hash()` to the same value
+    """A mapping class that understands how to use module constants (tensors and
+    ScriptObjects) as keys. We store tensors normally, but ScriptObjects are
+    stored by hash, because different torch.ScriptObjects can point to the same
+    underlying value (but we guarantee that they will `hash()` to the same value
     if that's the case).
     """
 
     def __init__(self):
         # Underlying dict that we use to implement this mapping.
-        self._constant_attrs: Dict[Union[int, torch.Tensor, FakeScriptObject], Any] = {}
+        self._constant_attrs: Dict[Union[int, torch.Tensor], Any] = {}
         # Map from the hash(ScriptObject) to the ScriptObject itself. Used for
         # APIs like `__iter__` that should look like they're returning the
         # original ScriptObjects.
         self._script_object_map: Dict[int, torch.ScriptObject] = {}
 
-    def __getitem__(
-        self, key: Union[torch.Tensor, torch.ScriptObject, FakeScriptObject]
-    ) -> Any:
+    def __getitem__(self, key: Union[torch.Tensor, torch.ScriptObject]) -> Any:
         real_key = hash(key) if isinstance(key, torch.ScriptObject) else key
-        assert isinstance(real_key, (int, torch.Tensor, FakeScriptObject))
+        assert isinstance(real_key, (int, torch.Tensor))
         return self._constant_attrs[real_key]
 
     def __setitem__(
-        self, key: Union[torch.Tensor, torch.ScriptObject, FakeScriptObject], value: Any
+        self, key: Union[torch.Tensor, torch.ScriptObject], value: Any
     ) -> None:
         if isinstance(key, torch.ScriptObject):
             self._constant_attrs[hash(key)] = value
             self._script_object_map[hash(key)] = key
-        elif isinstance(key, (torch.Tensor, FakeScriptObject)):
+        elif isinstance(key, torch.Tensor):
             self._constant_attrs[key] = value
         else:
             raise TypeError(
@@ -87,7 +83,7 @@ def lift_constants_pass(
     gm: torch.fx.GraphModule,
     graph_signature: ExportGraphSignature,
     constant_attrs: ConstantAttrMap,
-) -> Dict[str, Union[torch.Tensor, torch.ScriptObject, FakeScriptObject]]:
+) -> Dict[str, Union[torch.Tensor, torch._C.ScriptObject]]:
     """
     Takes a graph module, graph signature, and modifies them implace to lift any
     constants (tensors or custom classes) as inputs to the graph. Returns a
@@ -105,9 +101,7 @@ def lift_constants_pass(
     Returns:
         A dictionary of fqn => constant value.
     """
-    all_constants: Dict[
-        str, Union[torch.Tensor, torch.ScriptObject, FakeScriptObject]
-    ] = {}
+    all_constants: Dict[str, Union[torch.Tensor, torch._C.ScriptObject]] = {}
 
     inputs = graph_signature.input_specs
     num_custom_obj = sum(
@@ -141,7 +135,7 @@ def lift_constants_pass(
                 gm.graph.erase_node(node)
                 continue
 
-            # For ScriptObject, Tensor and FakeScriptObject constants:
+            # For ScriptObject and Tensor constants:
             # First check if the constant was an attribute on some module by
             # consulting `constant_attrs` map. If it is, use the fqn that keeps
             # its location consistent with the eager module.
@@ -150,7 +144,7 @@ def lift_constants_pass(
             # constant (e.g. x + torch.tensor(0)), and thus did not have a
             # specific location in the eager module. In that case, just generate
             # some name and attach it to the module in which it was used.
-            if isinstance(constant_val, (torch.ScriptObject, FakeScriptObject)):
+            if isinstance(constant_val, torch.ScriptObject):
                 constant_kind = InputKind.CUSTOM_OBJ
                 constant_fqn = constant_attrs.get(constant_val)
                 if constant_fqn is not None:
@@ -209,14 +203,6 @@ def lift_constants_pass(
                     input_spec_arg = CustomObjArgument(
                         name=const_placeholder_node.name, class_fqn=class_fqn
                     )
-                elif isinstance(constant_val, FakeScriptObject):
-                    class_fqn = constant_val.script_class_name
-                    const_placeholder_node.meta["val"] = CustomObjArgument(
-                        constant_fqn, class_fqn
-                    )
-                    input_spec_arg = CustomObjArgument(
-                        name=const_placeholder_node.name, class_fqn=class_fqn
-                    )
                 else:
                     raise SpecViolationError(
                         f"tried to lift unsupported type {type(constant_val)} from node {node.format_node()}"
@@ -243,35 +229,24 @@ def lift_constants_pass(
 
 def rewrite_script_object_meta(
     gm: torch.fx.GraphModule,
-) -> Dict[str, Union[torch.Tensor, FakeScriptObject],]:
-    """When tracing, we produce a graph with FakeScriptObject in the
-    meta["val"].
+) -> Dict[str, Union[torch.Tensor, torch.ScriptObject]]:
+    """When tracing, we produce a graph with an actual ScriptObject in the
+    meta["val"]. Eventually we want to change this behavior, when FakeMode infra
+    for ScriptObjects lands.
 
     For now, we rewrie meta["val"] to be a placeholder CustomObjArgument
     """
-    constants: Dict[
-        str,
-        Union[
-            torch.Tensor,
-            FakeScriptObject,
-        ],
-    ] = {}
+    constants: Dict[str, Union[torch.Tensor, torch._C.ScriptObject]] = {}
     for node in gm.graph.nodes:
-        if "val" not in node.meta:
+        if "val" not in node.meta or not isinstance(
+            node.meta["val"], torch.ScriptObject
+        ):
             continue
 
-        assert not isinstance(
-            node.meta["val"], torch.ScriptObject
-        ), "ScriptObject should already be fakified in to FakeScriptObject."
-
-        if isinstance(
-            node.meta["val"],
-            FakeScriptObject,
-        ):
-            old_meta = node.meta["val"]
-            class_fqn = old_meta.script_class_name  # type: ignore[attr-defined]
-            new_meta = CustomObjArgument(node.name, class_fqn)
-            constants[node.name] = old_meta
-            node.meta["val"] = new_meta
+        old_meta = node.meta["val"]
+        class_fqn = old_meta._type().qualified_name()  # type: ignore[attr-defined]
+        new_meta = CustomObjArgument(node.name, class_fqn)
+        constants[node.name] = old_meta
+        node.meta["val"] = new_meta
 
     return constants

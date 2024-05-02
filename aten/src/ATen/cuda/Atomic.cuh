@@ -36,6 +36,26 @@ struct AtomicFPOp<at::Half> {
 };
 
 template <>
+struct AtomicFPOp<c10::complex<float>> {
+  template <typename func_t>
+  inline __device__ c10::complex<float> operator() (c10::complex<float> *address, c10::complex<float> val, const func_t& func) {
+    unsigned long long int* addr_as_ull = (unsigned long long int*)address;
+    unsigned long long int old = *addr_as_ull;
+    unsigned long long int assumed, new_val;
+
+    c10::complex<float> csum;
+    do {
+        assumed = old;
+        csum = func(csum, val);
+        new_val = *reinterpret_cast<unsigned long long*>(&csum);
+        old = atomicCAS(addr_as_ull, assumed, new_val);
+    } while (assumed != old);
+
+    return *reinterpret_cast<c10::complex<float>*>(&addr_as_ull);
+  }
+};
+
+template <>
 struct AtomicFPOp<at::BFloat16> {
   template <typename func_t>
   inline __device__ at::BFloat16 operator() (at::BFloat16 *address, at::BFloat16 val, const func_t& func) {
@@ -348,6 +368,14 @@ GPU_ATOMIC_INTEGER(Mul, a * b, int16_t)
 GPU_ATOMIC_INTEGER(Mul, a * b, int32_t)
 GPU_ATOMIC_INTEGER(Mul, a * b, int64_t)
 
+inline __device__ c10::complex<float> gpuAtomicMul(c10::complex<float> *address, c10::complex<float> val){
+  return AtomicFPOp<c10::complex<float>>()(address, val,
+                                [](c10::complex<float> bsum, c10::complex<float> val) {
+                                  bsum*=(val);
+                                  return bsum;
+                                });
+}
+
 inline __device__ at::Half gpuAtomicMul(at::Half * address, at::Half val) {
   return AtomicFPOp<at::Half>()(address, val,
                                 [](at::Half bsum, at::Half val) {
@@ -369,7 +397,7 @@ inline __device__ double gpuAtomicMul(double * address, double val) {
                               });
 }
 
-// Dont use a templated function for this since the addition function defaults to the CUDA built-in.
+// Don't use a templated function for this since the addition function defaults to the CUDA built-in.
 inline __device__ float gpuAtomicMul (float * address, float val) {
   unsigned int* address_as_ull = (unsigned int*)address;
   unsigned int old = *address_as_ull;
@@ -402,6 +430,29 @@ __host__ __device__ T safe_max(T a, T b) {
   return max;
 }
 
+__inline__ __device__ c10::complex<float> complex_max(c10::complex<float> a, c10::complex<float> b) {
+  if(at::_isnan(b)) {
+    return b;
+  } else {
+    // Compute the magnitude of the complex numbers and compare each to see which one is greater.
+    float a_magnitude = __fsqrt_rn(
+      (
+        __fmul_rn(a.real(), a.real()) +
+        __fmul_rn(a.imag(),a.imag())
+      )
+    );
+    float b_magnitude = __fsqrt_rn(
+      (
+        __fmul_rn(b.real(), b.real()) +
+        __fmul_rn(b.imag(),b.imag())
+      )
+    );
+    return std::max<float>(a_magnitude, b_magnitude);
+  }
+
+}
+
+
 ATOMIC_INTEGER_IMPL(Max)
 GPU_ATOMIC_INTEGER(Max, safe_max(a, b), uint8_t)
 GPU_ATOMIC_INTEGER(Max, safe_max(a, b), int8_t)
@@ -413,6 +464,13 @@ inline __device__ at::Half gpuAtomicMax(at::Half * address, at::Half val) {
   return AtomicFPOp<at::Half>()(address, val,
                                 [](at::Half bsum, at::Half val) {
                                   return safe_max(bsum, val);
+                                });
+}
+
+inline __device__ c10::complex<float> gpuAtomicMax(c10::complex<float> * address, c10::complex<float> val) {
+  return AtomicFPOp<c10::complex<float>>()(address, val,
+                                [](c10::complex<float> bsum, c10::complex<float> val) {
+                                  return complex_max(bsum, val);
                                 });
 }
 
@@ -462,6 +520,27 @@ __host__ __device__ T safe_min(T a, T b) {
   return min;
 }
 
+__inline__ __device__ c10::complex<float> complex_min(c10::complex<float> a, c10::complex<float> b) {
+   if(at::_isnan(b)) {
+    return b;
+  } else {
+    // Compute the magnitude of the complex numbers and compare each to see which one is smaller.
+    float a_magnitude = __fsqrt_rn(
+      (
+        __fmul_rn(a.real(), a.real()) +
+        __fmul_rn(a.imag(),a.imag())
+      )
+    );
+    float b_magnitude = __fsqrt_rn(
+      (
+        __fmul_rn(b.real(), b.real()) +
+        __fmul_rn(b.imag(),b.imag())
+      )
+    );
+    return std::min<float>(a_magnitude, b_magnitude);
+  }
+}
+
 ATOMIC_INTEGER_IMPL(Min)
 GPU_ATOMIC_INTEGER(Min, safe_min(a, b), uint8_t)
 GPU_ATOMIC_INTEGER(Min, safe_min(a, b), int8_t)
@@ -473,6 +552,13 @@ inline __device__ at::Half gpuAtomicMin(at::Half * address, at::Half val) {
   return AtomicFPOp<at::Half>()(address, val,
                                 [](at::Half bsum, at::Half val) {
                                   return safe_min(bsum, val);
+                                });
+}
+
+inline __device__ c10::complex<float> gpuAtomicMin(c10::complex<float> * address, c10::complex<float> val) {
+  return AtomicFPOp<c10::complex<float>>()(address, val,
+                                [](c10::complex<float> bsum, c10::complex<float> val) {
+                                  return complex_min(bsum, val);
                                 });
 }
 
