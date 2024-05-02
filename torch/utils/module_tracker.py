@@ -30,6 +30,7 @@ class ModuleTracker:
     Example usage
 
     .. code-block:: python
+
         mod = torch.nn.Linear(2, 2)
 
         with ModuleTracker() as tracker:
