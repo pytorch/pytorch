@@ -3707,7 +3707,7 @@ class CUDATemplateBuffer(TemplateBuffer):
         self.template = template
 
     def get_workspace_size(self):
-        return self.workspace_size if self.workspace_size is not None else 0
+        return self.workspace_size
 
 
 @dataclasses.dataclass
