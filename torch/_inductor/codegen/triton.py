@@ -37,6 +37,7 @@ from torch._inductor.metrics import is_metric_table_enabled, log_kernel_metadata
 from torch._inductor.runtime.hints import AutotuneHint
 from torch._prims_common import is_integer_dtype
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
+from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import ValueRanges
 from torch.utils._triton import has_triton_package
 
@@ -1671,7 +1672,9 @@ class TritonKernel(Kernel):
                 # indirect indexing
                 cse_var = self.cse.varname_map[var.name]
                 mask_vars.update(cse_var.mask_vars)
-            elif var.name.startswith(("s", "ps", "i", "u")):
+            elif var.name.startswith(("ps", "i")) or symbol_is_type(
+                var, (SymT.UNBACKED_INT, SymT.SIZE)
+            ):
                 pass
             else:
                 # var is one of xN, yN or rN
