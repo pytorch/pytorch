@@ -8491,7 +8491,9 @@ def ___make_guard_fn():
         def f(lengths, values):
             sizes = lengths.tolist()
             for s in sizes:
-                torch._constrain_as_size(s, min=2, max=100)
+                torch._check_is_size(s)
+                torch._check(s >= 2)
+                torch._check(s <= 100)
             return torch.split(values, sizes)
 
         f(torch.tensor([2, 3, 4]), torch.randn(9))
