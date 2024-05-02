@@ -1162,8 +1162,11 @@ class AlgorithmSelectorCache(PersistentCache):
             )
             expected = None
             if VERIFY:
-                choices[0].benchmark(*example_inputs_extern, out=out_extern)
-                expected = out_extern.clone()
+                for i in range(len(choices)):
+                    if isinstance(choices[i], ExternKernelCaller):
+                        choices[i].benchmark(*example_inputs_extern, out=out_extern)
+                        expected = out_extern.clone()
+                        break
 
             return example_inputs, example_inputs_extern, out, out_extern, expected
 
