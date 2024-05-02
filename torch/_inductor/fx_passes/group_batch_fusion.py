@@ -22,6 +22,7 @@ from torch._utils_internal import upload_graph
 from .. import config
 from ..pattern_matcher import (
     CallFunctionVarArgs,
+    CallMethodVarArgs,
     get_arg_value,
     stable_topological_sort,
 )
@@ -152,7 +153,7 @@ class BatchFusion(GroupBatchFusionBase):
     pass
 
 
-class BatchPointwiseOpsFusionFactory(BatchFusion):
+class BatchOpsFusionFactory(BatchFusion):
     def __init__(self, op, **kwargs):
         super().__init__(**kwargs)
         self.op = op
@@ -319,7 +320,7 @@ class GroupLinearFusion(GroupFusion):
         counters["inductor"]["group_linear"] += 1
 
 
-class BatchPointwiseOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
+class BatchPointwiseOpsPostGradFusion(BatchOpsFusionFactory):
     """
     Batch pointwise operator (e.g., add, mul) in post grad pass.
     """
@@ -748,7 +749,7 @@ class BatchLayernormFusion(BatchFusion):
         counters["inductor"]["batch_layernorm"] += 1
 
 
-class BatchPointwiseOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
+class BatchPointwiseOpsPreGradFusion(BatchOpsFusionFactory):
     """
     Batch pointwise ops (e.g., sigmoid, relu, tanh) fusion in pre grad pass.
     We fuse it in random place, and the introduced stack node may be merged in split cat.
@@ -810,6 +811,106 @@ class BatchPointwiseOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
         counters["inductor"]["batch_" + self.op.__name__.lower().split(".")[0]] += 1
 
 
+class BatchMathMethodPreGradFusion(BatchOpsFusionFactory):
+    """
+    Batch simple match related ops such as detach in pre grad pass.
+    We fuse it in random place, and the introduced stack node may be merged in split cat.
+    """
+
+    def __init__(self, op, **kwargs):
+        super().__init__(op, **kwargs)
+        self.op = op
+
+    def match(self, node: torch.fx.Node):
+        input = get_arg_value(node, 0, "input")
+        if CallMethodVarArgs(self.op).match(node) and is_node_meta_valid(node):
+            group_key = str(input.meta["example_value"].shape)
+        else:
+            group_key = None
+        return group_key
+
+    def fuse(self, graph: torch.fx.GraphModule, subset: List[torch.fx.Node]):
+        batch_nodes = []
+        batch_inputs = []
+        batch_inputs_metadata = []
+
+        for node in subset:
+            batch_nodes.append(node)
+            input = get_arg_value(node, 0, "input")
+            batch_inputs.append(input)
+            batch_inputs_metadata.append(input.meta["example_value"])
+
+        with graph.inserting_before(subset[0]):
+            stack_inputs = graph.call_function(
+                torch.stack, args=(batch_inputs,), kwargs={"dim": 0}
+            )
+            update_stack_example_value(stack_inputs, batch_inputs_metadata)
+            batch_op = graph.call_method(
+                self.op,
+                args=(stack_inputs,),
+            )
+            unbind_op = graph.call_function(
+                torch.unbind, args=(batch_op,), kwargs={"dim": 0}
+            )
+            for i, node in enumerate(batch_nodes):
+                with graph.inserting_after(unbind_op):
+                    getitem = graph.call_function(operator.getitem, args=(unbind_op, i))
+                node.replace_all_uses_with(getitem)
+                getitem.meta.update(node.meta)
+                graph.erase_node(node)
+        counters["inductor"]["batch_" + self.op.lower()] += 1
+
+
+class BatchMathFunctionPreGradFusion(BatchOpsFusionFactory):
+    """
+    Batch simple match related ops such as nan_to_num in pre grad pass.
+    We fuse it in random place, and the introduced stack node may be merged in split cat.
+    """
+
+    def __init__(self, op, **kwargs):
+        super().__init__(op, **kwargs)
+        self.op = op
+
+    def match(self, node: torch.fx.Node):
+        input = get_arg_value(node, 0, "input")
+        if CallFunctionVarArgs(self.op).match(node) and is_node_meta_valid(node):
+            group_key = str(input.meta["example_value"].shape)
+        else:
+            group_key = None
+        return group_key
+
+    def fuse(self, graph: torch.fx.GraphModule, subset: List[torch.fx.Node]):
+        batch_nodes = []
+        batch_inputs = []
+        batch_inputs_metadata = []
+
+        for node in subset:
+            batch_nodes.append(node)
+            input = get_arg_value(node, 0, "input")
+            batch_inputs.append(input)
+            batch_inputs_metadata.append(input.meta["example_value"])
+
+        with graph.inserting_before(subset[0]):
+            stack_inputs = graph.call_function(
+                torch.stack, args=(batch_inputs,), kwargs={"dim": 0}
+            )
+            update_stack_example_value(stack_inputs, batch_inputs_metadata)
+            batch_op = graph.call_function(
+                self.op,
+                args=(stack_inputs,),
+            )
+            unbind_op = graph.call_function(
+                torch.unbind, args=(batch_op,), kwargs={"dim": 0}
+            )
+            for i, node in enumerate(batch_nodes):
+                with graph.inserting_after(unbind_op):
+                    getitem = graph.call_function(operator.getitem, args=(unbind_op, i))
+                node.replace_all_uses_with(getitem)
+                getitem.meta.update(node.meta)
+                graph.erase_node(node)
+        counters["inductor"]["batch_" + self.op.__name__.lower().split(".")[0]] += 1
+
+
 @register_fusion("batch_tanh")
 class BatchTanhPreGradFusion(BatchPointwiseOpsPreGradFusion):
     def __init__(self, **kwargs):
@@ -826,6 +927,18 @@ class BatchSigmoidPreGradFusion(BatchPointwiseOpsPreGradFusion):
 class BatchReLuPreGradFusion(BatchPointwiseOpsPreGradFusion):
     def __init__(self, **kwargs):
         super().__init__(torch.nn.functional.relu, **kwargs)
+
+
+@register_fusion("batch_detach")
+class BatchDetachPreGradFusion(BatchMathMethodPreGradFusion):
+    def __init__(self, **kwargs):
+        super().__init__("detach", **kwargs)
+
+
+@register_fusion("batch_nan_to_num")
+class BatchNanToNumPreGradFusion(BatchMathFunctionPreGradFusion):
+    def __init__(self, **kwargs):
+        super().__init__(torch.nan_to_num, **kwargs)
 
 
 @register_fusion("batch_aten_add", pre_grad=False)

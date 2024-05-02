@@ -199,7 +199,7 @@ class MyModule5(torch.nn.Module):
 
 
 class TestPoitwiseOps(torch.nn.Module):
-    def __init__(self, device, has_bias=True):
+    def __init__(self, device):
         super().__init__()
         self.device = device
 
@@ -219,6 +219,17 @@ class TestPoitwiseOps(torch.nn.Module):
         div = [torch.div(sub[i], sub[i]) for i in range(len(sub))]
         return torch.cat(div, dim=1)
 
+class TestMathOps(torch.nn.Module):
+    def __init__(self, device):
+        super().__init__()
+        self.device = device
+
+    def forward(self, x):
+        inputs = [x.to(self.device) for i in range(10)]
+        nan_to_num = [torch.nan_to_num(x) for x in inputs]
+        detach = [x.detach() for x in nan_to_num]
+        return torch.stack(detach, dim=0)
+
 
 @requires_cuda
 @torch._inductor.config.patch(
@@ -229,6 +240,8 @@ class TestPoitwiseOps(torch.nn.Module):
         "batch_tanh": {},
         "batch_relu": {},
         "batch_sigmoid": {},
+        "batch_detach": {},
+        "batch_nan_to_num": {},
     },
     post_grad_fusion_options={
         "batch_aten_add": {},
@@ -397,6 +410,23 @@ class TestGroupBatchFusion(TestCase):
         res.sum().backward()
         self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
         self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
+        counters.clear()
+
+    def test_math_op_fusion(self):
+        counters.clear()
+        module = TestMathOps("cuda")
+        input = [
+            torch.tensor(
+                [float('nan'), float('inf'), -float('inf'), 3.14], device="cuda"
+            )
+        ]
+        traced = torch.compile(module)
+        ref = module(*input)
+        res = traced(*input)
+        self.compare_pred(module, traced, input)
+        self.assertEqual(counters["inductor"]["batch_detach"], 1)
+        self.assertEqual(counters["inductor"]["batch_nan_to_num"], 1)
+        self.assertTrue(torch.allclose(ref, res))
         counters.clear()
 
 
