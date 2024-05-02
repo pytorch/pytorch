@@ -36,6 +36,7 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.fx.node import _get_qualified_name
 from torch.utils._sympy.singleton_int import SingletonInt
+from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import codecache, config, ir
 from ..ir import ReinterpretView
@@ -906,7 +907,7 @@ class WrapperCodeGen(CodeGen):
                     )
 
     def ensure_size_computed(self, sym: sympy.Symbol):
-        if isinstance(sym, sympy.Symbol) and sym.name.startswith("ps"):
+        if isinstance(sym, sympy.Symbol) and symbol_is_type(sym, SymT.PRECOMPUTED_SIZE):
             if sym in self.computed_sizes:
                 return
             self.computed_sizes.add(sym)

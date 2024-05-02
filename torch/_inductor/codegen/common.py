@@ -26,18 +26,11 @@ import torch
 import torch.fx
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch.utils import _pytree as pytree
-from torch.utils._sympy.symbol import symbol_is_type, SymT
+from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from .. import config, metrics
-from ..utils import (
-    DeferredLineBase,
-    free_symbol_startswith,
-    IndentedBuffer,
-    sympy_dot,
-    sympy_subs,
-    unique,
-)
+from ..utils import DeferredLineBase, IndentedBuffer, sympy_dot, sympy_subs, unique
 from ..virtualized import ops, OpsHandler, OpsValue, ReductionType, StoreMode, V
 
 
@@ -1567,7 +1560,7 @@ class Kernel(CodeGen):
                     # A load from an invalidated store requires us to
                     # keep the actual buffer around
                     V.kernel.must_keep_buffers.add(name)
-                if free_symbol_startswith(index, "tmp"):
+                if free_symbol_is_type(index, SymT.TMP):
                     return self.indirect_load(name, index)
                 store_cache = self.cse.store_cache
                 if name in store_cache:
@@ -1683,9 +1676,7 @@ class Kernel(CodeGen):
         replacements = {
             x: self.args.size(x)
             for x in sorted_symbols
-            if symbol_is_type(x, (SymT.UNBACKED_INT, SymT.SIZE))
-            or x.name.startswith("ps")
-            or (x.name.startswith("i") and not x.name.startswith("idx"))
+            if symbol_is_type(x, (SymT.UNBACKED_INT, SymT.SIZE, SymT.PRECOMPUTED_SIZE))
         }
         return sympy_subs(index, replacements)
 
