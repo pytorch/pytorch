@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, TypeAlias, Union
 
 import torch
 from torch import Tensor
@@ -28,10 +28,10 @@ class Adam(Optimizer):
     def __init__(
         self,
         params: ParamsT,
-        lr: Union[float, Tensor] = 1e-3,
+        lr=1e-3,
         betas: Tuple[float, float] = (0.9, 0.999),
-        eps: float = 1e-8,
-        weight_decay: float = 0,
+        eps=1e-8,
+        weight_decay=0,
         amsgrad: bool = False,
         *,
         foreach: Optional[bool] = None,
@@ -202,12 +202,12 @@ class Adam(Optimizer):
                 loss = closure()
 
         for group in self.param_groups:
-            params_with_grad = []
-            grads = []
-            exp_avgs = []
-            exp_avg_sqs = []
-            max_exp_avg_sqs = []
-            state_steps = []
+            params_with_grad: List[Tensor] = []
+            grads: List[Tensor] = []
+            exp_avgs: List[Tensor] = []
+            exp_avg_sqs: List[Tensor] = []
+            max_exp_avg_sqs: List[Tensor] = []
+            state_steps: List[Tensor] = []
             beta1, beta2 = group["betas"]
 
             has_complex = self._init_group(
@@ -353,7 +353,7 @@ def _single_tensor_adam(
         # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
         if not torch._utils.is_compiling() and capturable:
             assert (param.is_cuda and step_t.is_cuda) or (
-                param.is_xla and step_t.is_xla
+                param.is_xla and step_t.is_xla  # type: ignore[attr-defined]
             ), "If capturable=True, params and state_steps must be CUDA or XLA tensors."
 
         # update step
@@ -498,7 +498,7 @@ def _multi_tensor_adam(
                 )
 
         if maximize:
-            device_grads = torch._foreach_neg(device_grads)
+            device_grads = torch._foreach_neg(device_grads)  # type: ignore[assignment]
 
         # Update steps
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
@@ -516,7 +516,7 @@ def _multi_tensor_adam(
             if maximize:
                 torch._foreach_add_(device_grads, device_params, alpha=weight_decay)
             else:
-                device_grads = torch._foreach_add(
+                device_grads = torch._foreach_add(  # type: ignore[assignment]
                     device_grads, device_params, alpha=weight_decay
                 )
 
@@ -531,6 +531,9 @@ def _multi_tensor_adam(
         # Delete the local intermediate since it won't be used anymore to save on peak memory
         del device_grads
 
+        bias_correction1: Union[Tuple[Tensor, ...], List[Tensor]]
+        bias_correction2: Union[Tuple[Tensor, ...], List[Tensor]]
+        bias_correction2_sqrt: Union[Tuple[Tensor, ...], List[Tensor]]
         if capturable:
             bias_correction1 = torch._foreach_pow(beta1, device_state_steps)
             bias_correction2 = torch._foreach_pow(beta2, device_state_steps)
@@ -591,8 +594,11 @@ def _multi_tensor_adam(
             torch._foreach_div_(exp_avg_sq_sqrt, bias_correction2_sqrt)
             torch._foreach_add_(exp_avg_sq_sqrt, eps)
             torch._foreach_addcdiv_(
-                device_params, device_exp_avgs, exp_avg_sq_sqrt, step_size
+                device_params, device_exp_avgs, exp_avg_sq_sqrt, step_size  # type: ignore[arg-type]
             )
+
+
+DeviceDict: TypeAlias = Dict[Optional[torch.device], Tensor]
 
 
 def _fused_adam(
@@ -621,16 +627,17 @@ def _fused_adam(
     if differentiable:
         raise RuntimeError("Adam with fused=True does not support differentiable=True")
 
-    grad_scale_dict = (
-        {grad_scale.device: grad_scale} if grad_scale is not None else None
+    grad_scale_dict: DeviceDict = (
+        {grad_scale.device: grad_scale} if grad_scale is not None else {}
     )
-    found_inf_dict = {found_inf.device: found_inf} if found_inf is not None else None
+    found_inf_dict: DeviceDict = (
+        {found_inf.device: found_inf} if found_inf is not None else {}
+    )
 
     # We only shuffle around the lr when it is a Tensor and on CUDA, otherwise, we prefer
     # treating it as a scalar.
-    lr_dict = (
-        {lr.device: lr} if isinstance(lr, Tensor) and str(lr.device) != "cpu" else None
-    )
+    lr = torch.tensor(lr)
+    lr_dict: DeviceDict = {lr.device: lr} if str(lr.device) != "cpu" else {}
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps]
@@ -655,7 +662,7 @@ def _fused_adam(
             if found_inf not in found_inf_dict:
                 found_inf_dict[device] = found_inf.to(device, non_blocking=True)
             device_found_inf = found_inf_dict[device]
-        if lr_dict is not None and device not in lr_dict:
+        if device not in lr_dict:
             lr_dict[device] = lr.to(device=device, non_blocking=True)
             lr = lr_dict[device]
         torch._foreach_add_(device_state_steps, 1)

@@ -110,7 +110,7 @@ def _stack_if_compiling(x):
 
 
 def _dispatch_sqrt(
-    x: float,
+    x: Union[float, torch.Tensor],
 ):  # float annotation is needed because of torchscript type inference
     if not torch.jit.is_scripting() and isinstance(x, torch.Tensor):
         return x.sqrt()
