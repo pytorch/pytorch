@@ -293,6 +293,10 @@ class Compare:
         return "\n".join(self._render())
 
     def extend_results(self, results):
+        """Append results to already stored ones.
+        
+        All added results must be instances of ``Measurement``.
+        """
         for r in results:
             if not isinstance(r, common.Measurement):
                 raise ValueError(
