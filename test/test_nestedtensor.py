@@ -4339,6 +4339,28 @@ class TestNestedTensorSubclass(TestCase):
         self.assertTrue(torch.allclose(attn_output_eager, attn_output))
         self.assertTrue(torch.allclose(value_grad, value.grad))
 
+    @dtypes(torch.float32)
+    def test_apply_(self, device, dtype):
+        nt = random_nt_from_dims(
+            [5, None, 10], device=device, dtype=dtype, layout=torch.jagged, requires_grad=True)
+
+        def f(x):
+            return x * 2
+
+        if device != "cpu":
+            with self.assertRaisesRegex(TypeError, "apply_ is only implemented on CPU tensors"):
+                nt.apply_(f)
+            return
+
+        before = nt._values.clone().detach()
+
+        nt.apply_(f)
+        expected = f(before)
+        self.assertEqual(expected, nt._values)
+        # apply_ should swap values in-place without appending to autograd graph
+        self.assertIsNone(nt.grad)
+        self.assertIsNone(nt._values.grad)
+
 
 instantiate_parametrized_tests(TestNestedTensor)
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
