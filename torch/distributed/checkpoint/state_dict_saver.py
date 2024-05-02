@@ -247,7 +247,7 @@ def async_save(
         isinstance(storage_writer, AsyncStager)
         and storage_writer.should_synchronize_after_execute
     ):
-        storage_writer.synchronize_staging()  # expectation is that we wait for stage, in the case
+        storage_writer.synchronize_staging()
 
     return f
 

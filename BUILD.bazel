@@ -446,29 +446,12 @@ cu_library(
 # caffe2
 CAFFE2_COPTS = COMMON_COPTS + [
     "-Dcaffe2_EXPORTS",
-    "-DCAFFE2_USE_GLOO",
     "-DCAFFE2_USE_CUDNN",
     "-DCAFFE2_BUILD_MAIN_LIB",
     "-fvisibility-inlines-hidden",
     "-fno-math-errno",
     "-fno-trapping-math",
 ]
-
-filegroup(
-    name = "caffe2_contrib_srcs",
-    srcs = [
-        "caffe2/contrib/aten/aten_op.cc",
-        "caffe2/contrib/gloo/allgather_ops.cc",
-        "caffe2/contrib/gloo/allreduce_ops.cc",
-        "caffe2/contrib/gloo/barrier_ops.cc",
-        "caffe2/contrib/gloo/broadcast_ops.cc",
-        "caffe2/contrib/gloo/common.cc",
-        "caffe2/contrib/gloo/common_world_ops.cc",
-        "caffe2/contrib/gloo/context.cc",
-        "caffe2/contrib/gloo/reduce_scatter_ops.cc",
-        "caffe2/contrib/gloo/store_handler.cc",
-    ],
-)
 
 filegroup(
     name = "caffe2_core_srcs",
@@ -1024,10 +1007,6 @@ filegroup(
 filegroup(
     name = "caffe2_cuda_cpp_srcs",
     srcs = [
-        "caffe2/contrib/aten/aten_op_gpu.cc",
-        "caffe2/contrib/gloo/allreduce_ops_gpu.cc",
-        "caffe2/contrib/gloo/broadcast_ops_gpu.cc",
-        "caffe2/contrib/gloo/common_world_ops_gpu.cc",
         "caffe2/core/blob_serialization_gpu.cc",
         "caffe2/core/common_cudnn.cc",
         "caffe2/core/common_gpu.cc",
@@ -1271,35 +1250,10 @@ cc_library(
     ],
 )
 
-py_binary(
-    name = "gen_op",
-    srcs = ["caffe2/contrib/aten/gen_op.py"],
-    deps = ["//torchgen"],
-)
-
-genrule(
-    name = "generated_caffe2_aten_op_headers",
-    srcs = [
-        "caffe2/contrib/aten/aten_op_template.h",
-        "aten/src/ATen/Declarations.yaml",
-    ],
-    outs = ["caffe2/caffe2/contrib/aten/gen_aten_op.h"],
-    cmd = """
-    $(location :gen_op) \
-        --output_prefix gen_ \
-        --install_dir $(@D) \
-        --aten_root `dirname $(location aten/src/ATen/Declarations.yaml)`/../.. \
-        --template_dir `dirname $(location caffe2/contrib/aten/aten_op_template.h)` \
-        --yaml_dir `dirname $(location aten/src/ATen/Declarations.yaml)`""",
-    tools = [":gen_op"],
-)
-
 cc_library(
     name = "caffe2_headers",
     hdrs = glob(
         [
-            "caffe2/contrib/aten/*.h",
-            "caffe2/contrib/gloo/*.h",
             "caffe2/core/*.h",
             "caffe2/core/nomnigraph/include/nomnigraph/Converters/*.h",
             "caffe2/core/nomnigraph/include/nomnigraph/Generated/*.h",
@@ -1338,10 +1292,9 @@ cc_library(
     ) + if_cuda(glob([
         "caffe2/**/*.cuh",
         "caffe2/image/*.h",
-    ])) + [":generated_caffe2_aten_op_headers"],
+    ])),
     copts = CAFFE2_COPTS,
     includes = [
-        "caffe2/contrib/aten",
         "caffe2/core/nomnigraph/include",
     ],
     visibility = ["//visibility:public"],
@@ -1385,7 +1338,6 @@ cc_library(
         "caffe2/db/create_db_op.cc",
         "caffe2/db/protodb.cc",
         "caffe2/share/contrib/depthwise/depthwise3x3_conv_op.cc",
-        ":caffe2_contrib_srcs",
         ":caffe2_core_srcs",
         ":caffe2_distributed_srcs",
         ":caffe2_ideep_srcs",
@@ -1419,7 +1371,6 @@ cc_library(
         "@fbgemm//:fbgemm_src_headers",
         "@fmt",
         "@foxi",
-        "@gloo",
         "@onnx",
     ] + if_cuda(
         [
@@ -1467,7 +1418,6 @@ cu_library(
         "@cuda//:curand",
         "@cudnn",
         "@eigen",
-        "@gloo",
         "@tensorpipe//:tensorpipe_cuda",
     ],
     alwayslink = True,
