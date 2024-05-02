@@ -10,19 +10,17 @@ from unittest.mock import patch
 import torch
 
 from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
-from torch._higher_order_ops.templated_attention import (
-    templated_attention as templated_attention_hop,
-)
+from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
-from torch.nn.attention._templated_attention import (
+from torch.nn.attention._flex_attention import (
     _causal,
     _compose,
+    _flex_attention,
     _generate_alibi_bias,
     _identity,
     _rel_bias,
     _rel_causal,
-    _templated_attention,
 )
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
@@ -42,7 +40,7 @@ index = torch.ops.aten.index
 
 
 def create_attention(score_mod):
-    return functools.partial(_templated_attention, score_mod=score_mod)
+    return functools.partial(_flex_attention, score_mod=score_mod)
 
 
 test_dtypes = (
@@ -324,9 +322,9 @@ class TestTemplatedSDPA(InductorTestCase):
             requires_grad=True,
         )
         q, k, v = make_tensor(), make_tensor(), make_tensor()
-        func = torch.compile(_templated_attention, backend="inductor", fullgraph=True)
+        func = torch.compile(_flex_attention, backend="inductor", fullgraph=True)
         with self.assertRaisesRegex(
-            AssertionError, "templated_attention_backward is not an OpOverload"
+            AssertionError, "flex_attention_backward is not an OpOverload"
         ):
             out = func(q, k, v, _identity)
             out.backward(torch.ones_like(out))
@@ -339,7 +337,7 @@ class TestTemplatedSDPA(InductorTestCase):
         with self.assertRaisesRegex(
             ValueError, "Expected query, key, and value to have the same dtype"
         ):
-            _templated_attention(query, key, value, _identity)
+            _flex_attention(query, key, value, _identity)
 
     @supported_platform
     def test_different_sequence_length_fails(self):
@@ -347,7 +345,7 @@ class TestTemplatedSDPA(InductorTestCase):
         key = torch.randn((1, 1, 1024, 64), dtype=torch.float32, device="cuda")
         value = torch.randn((1, 1, 1024, 64), dtype=torch.float32, device="cuda")
         with self.assertRaisesRegex(ValueError, "NYI: The target sequence length"):
-            _templated_attention(query, key, value, _identity)
+            _flex_attention(query, key, value, _identity)
 
     @supported_platform
     @patch.object(torch._inductor.config, "max_autotune", True)
@@ -378,7 +376,7 @@ class TestTemplatedSDPA(InductorTestCase):
     def test_logsumexp_correctness(self, dtype, score_mod):
         @torch.compile
         def sdpa_hop(q, k, v, score_mod):
-            return templated_attention_hop(q, k, v, score_mod)
+            return flex_attention_hop(q, k, v, score_mod)
 
         @torch.compile(backend="aot_eager")
         def eager_sdpa_hop(q, k, v, score_mod):
@@ -386,7 +384,7 @@ class TestTemplatedSDPA(InductorTestCase):
             Besides dropping LSE it also ensures that the hop is compiled with aot-eager
             backend. We need to replicate this.
             """
-            return templated_attention_hop(q, k, v, score_mod)
+            return flex_attention_hop(q, k, v, score_mod)
 
         make_tensor = functools.partial(
             torch.randn,
@@ -441,7 +439,7 @@ class TestTemplatedSDPA(InductorTestCase):
 
         @torch.compile
         def func(q, k, v, score_mod):
-            _, lse = templated_attention_hop(q, k, v, score_mod)
+            _, lse = flex_attention_hop(q, k, v, score_mod)
             lse_2 = lse * 2
             return lse_2
 
@@ -462,7 +460,7 @@ class TestTemplatedSDPA(InductorTestCase):
 
         @torch.compile
         def func(q, k, v, score_mod):
-            out, lse = templated_attention_hop(q, k, v, score_mod)
+            out, lse = flex_attention_hop(q, k, v, score_mod)
             lse_2 = lse * 2
             return out, lse_2
 
@@ -484,7 +482,7 @@ class TestTemplatedSDPA(InductorTestCase):
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
 
-        func = torch.compile(_templated_attention, backend="aot_eager", fullgraph=True)
+        func = torch.compile(_flex_attention, backend="aot_eager", fullgraph=True)
 
         self.assertTrue(
             torch.autograd.gradcheck(
@@ -507,7 +505,7 @@ class TestTemplatedSDPA(InductorTestCase):
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
 
-        func = torch.compile(_templated_attention, backend=mode, fullgraph=True)
+        func = torch.compile(_flex_attention, backend=mode, fullgraph=True)
         score_mod = captured_buffers_map[score_mod_name](torch.float64)
 
         self.assertTrue(
@@ -528,7 +526,7 @@ class TestTemplatedSDPA(InductorTestCase):
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
 
-        func = torch.compile(_templated_attention, backend=cnt, fullgraph=True)
+        func = torch.compile(_flex_attention, backend=cnt, fullgraph=True)
         out = func(query, key, value, _squared)
         out.sum().backward()
         self.assertEqual(cnt.frame_count, 1)
@@ -549,10 +547,10 @@ class GraphModule(torch.nn.Module):
         new_empty_2 = l_args_0_.new_empty([], dtype = torch.int32)
         new_empty_3 = l_args_0_.new_empty([], dtype = torch.int32)
         new_empty_4 = l_args_0_.new_empty([], dtype = torch.int32)
-        templated_attention_0 = self.templated_attention_0
-        templated_attention = torch.ops.higher_order.templated_attention(l_args_0_, """
-            + """l_args_1_, l_args_2_, templated_attention_0);  l_args_0_ = l_args_1_ = l_args_2_ = templated_attention_0 = None
-        out = templated_attention[0];  templated_attention = None
+        flex_attention_0 = self.flex_attention_0
+        flex_attention = torch.ops.higher_order.flex_attention(l_args_0_, """
+            + """l_args_1_, l_args_2_, flex_attention_0);  l_args_0_ = l_args_1_ = l_args_2_ = flex_attention_0 = None
+        out = flex_attention[0];  flex_attention = None
         return (out,)
 
     class GraphModule(torch.nn.Module):
@@ -586,12 +584,12 @@ class GraphModule(torch.nn.Module):
             + """alias_5: "f64[2, 2, 8, 4]", alias_7: "f32[2, 2, 8]", tangents_1: "f64[2, 2, 8, 4]"):
         fw_graph = self.fw_graph
         joint_graph = self.joint_graph
-        templated_attention_backward = torch.ops.higher_order.templated_attention_backward(primals_1, primals_2, """
+        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, """
             + """primals_3, alias_5, alias_7, tangents_1, fw_graph, joint_graph);  primals_1 = primals_2 = primals_3 = alias_5 """
             + """= alias_7 = tangents_1 = fw_graph = joint_graph = None
-        getitem_2: "f64[2, 2, 8, 4]" = templated_attention_backward[0]
-        getitem_3: "f64[2, 2, 8, 4]" = templated_attention_backward[1]
-        getitem_4: "f64[2, 2, 8, 4]" = templated_attention_backward[2];  templated_attention_backward = None
+        getitem_2: "f64[2, 2, 8, 4]" = flex_attention_backward[0]
+        getitem_3: "f64[2, 2, 8, 4]" = flex_attention_backward[1]
+        getitem_4: "f64[2, 2, 8, 4]" = flex_attention_backward[2];  flex_attention_backward = None
         return [getitem_2, getitem_3, getitem_4]
 
     class <lambda>(torch.nn.Module):
