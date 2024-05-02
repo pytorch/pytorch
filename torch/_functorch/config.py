@@ -106,6 +106,36 @@ fake_tensor_allow_unsafe_data_ptr_access = True
 # tokens.
 unlift_effect_tokens = False
 
+# This mode specifies that we should also keep track of the real
+# tensor along with the fake tensor, and do real compute.  While
+# seemingly this eliminates the whole point of fake tensors, there are
+# two obvious use cases for it:
+#
+#   1. When users call item()/other data dependent operations,
+#      if we propagate_real_tensors we are able to determine what
+#      the true value is and keep going.
+#
+#   2. It can be useful for testing, when you want to see if the fake
+#      and real tensors agree with each other.  (Note that there are
+#      currently known inaccuracies in how we clone real tensors, that
+#      would have to be tightened up for this to be useful in this
+#      case.)
+#
+# Note that fake tensors are typically understood to be cheap to store
+# indefinitely, so we tend to hold on to them longer than we would
+# hold onto the real tensors.  So we also support you explicitly
+# deallocating the real tensor associated with a fake tensor, at which
+# point we will stop propagating real tensors.
+#
+# One more thing: when you provide a real tensor to fakeify, we will
+# clone it, so that we can safely perform mutations on it if necessary.
+# This will increase live memory usage.  This could potentially be
+# optimized by using COW.  We also currently do not faithfully
+# maintain autograd metadata on the real tensor; this is fine because
+# AOTAutograd will only use the fake tensor to determine leafness/etc
+# of tensors in question.
+fake_tensor_propagate_real_tensors = False
+
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 
