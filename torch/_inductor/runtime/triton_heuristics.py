@@ -795,10 +795,7 @@ class CachingAutotuner(KernelInterface):
         if autograd_profiler._is_profiler_enabled:
             # grid can be a tuple of ints or a string.
             if isinstance(grid, tuple):
-                grid_info = "("
-                for e in grid:
-                    grid_info = grid_info + f"{e},"
-                grid_info = grid_info + ")"
+                grid_info = str(grid)
             else:
                 grid_info = getattr(grid, "grid_fn_str", "")
             with torch._C._profiler._RecordFunctionFast(
