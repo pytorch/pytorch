@@ -291,7 +291,7 @@ class Unpickler:
                         f"Trying to call reduce for unrecognized function {func}"
                     )
                 # Prevent tensor subclass type that is pushed onto stack in GLOBAL from
-                # being passed as arg anywhere except the first arg of _rebuild_from_type_v2
+                # being passed as arg anywhere except the second arg of _rebuild_from_type_v2
                 arg_is_subclass_type = [
                     i
                     for i, arg in enumerate(args)
