@@ -396,7 +396,9 @@ def _fakify_script_objects(
     fake_constant_attrs = ConstantAttrMap()
     fake_to_real = {}
 
-    def _fakify_obj(obj):
+    def _maybe_fakify_obj(obj):
+        if not torch._library.fake_class_registry.has_fake_class(obj._type().qualified_name()):  # type: ignore[attr-defined]
+            return obj
         fake_obj = torch._library.fake_class_registry.to_fake_obj(fake_mode, obj)
         fake_to_real[fake_obj] = obj
         return fake_obj
@@ -415,7 +417,7 @@ def _fakify_script_objects(
             if isinstance(obj, torch.ScriptObject):
                 cur_mod, attr = _leaf_mod_and_attr(mod, fqn)
                 assert obj is getattr(cur_mod, attr)
-                fake_script_obj = _fakify_obj(obj)
+                fake_script_obj = _maybe_fakify_obj(obj)
                 setattr(cur_mod, attr, fake_script_obj)
                 fake_constant_attrs[fake_script_obj] = fqn
                 patched_attr[fqn] = obj
@@ -423,14 +425,8 @@ def _fakify_script_objects(
                 fake_constant_attrs[obj] = fqn
 
         fake_args, fake_kwargs = pytree.tree_map_only(
-            torch.ScriptObject, _fakify_obj, (args, kwargs)
+            torch.ScriptObject, _maybe_fakify_obj, (args, kwargs)
         )
-        assert not any(
-            isinstance(obj, torch.ScriptObject) for obj in fake_constant_attrs.values()
-        ), "Patched mod shouldn't contain any torch.ScriptObject."
-        assert not pytree.tree_any(
-            lambda obj: isinstance(obj, torch.ScriptObject), (fake_args, fake_kwargs)
-        ), "Fakfied args and kwargs shouldn't contain any torch.ScriptObject."
         yield (mod, fake_args, fake_kwargs, fake_constant_attrs, fake_to_real)
     finally:
         for fqn, orig_obj in patched_attr.items():

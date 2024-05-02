@@ -466,9 +466,6 @@ def _export_non_strict(
     transform=lambda x: x,  # TODO(zhxchen17) Revisit if this is needed later.
     pre_dispatch=False,
 ):
-    assert not any(
-        isinstance(obj, torch.ScriptObject) for obj in constant_attrs
-    ), "We expect all script objects have been replaced by FakeScriptObjects."
     # [NOTE] If the user is exporting under training mode, we want to detect if there is any
     # state change in the autograd global state and error. If the user is exporting under inference
     # mode, we don't care. At predispatch level, we don't care about the state change.
@@ -600,13 +597,6 @@ def _export_non_strict(
 
     constants = rewrite_script_object_meta(gm)
     attr_constants = lift_constants_pass(gm, export_graph_signature, constant_attrs)
-    assert not any(
-        isinstance(obj, torch.ScriptObject) for obj in attr_constants.values()
-    ), "We expect all script objects have been replaced by FakeScriptObjects."
-    constants.update(attr_constants)  # type: ignore[arg-type]
-    assert not any(
-        isinstance(obj, torch.ScriptObject) for obj in constants.values()
-    ), "We expect all script objects have been replaced by FakeScriptObjects."
 
     # prettify names for placeholder nodes
     placeholder_naming_pass(
@@ -628,6 +618,7 @@ def _export_non_strict(
             Union[
                 torch.Tensor,
                 FakeScriptObject,
+                torch.ScriptObject,
             ],
         ]
 
