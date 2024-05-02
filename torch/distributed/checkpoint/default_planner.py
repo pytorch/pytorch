@@ -147,8 +147,7 @@ class DefaultLoadPlanner(LoadPlanner):
 
     flatten_state_dict: Handle state_dict with nested dicts
     flatten_sharded_tensors: For FSDP in 2D parallel mode
-    allow_partial_load: If False, will raise a runtime error if a key is present in state_dict, but not in
-        the checkpoint.
+    allow_partial_load: If False, will raise a runtime error if a key is present in state_dict, but not in the checkpoint.
     """
 
     original_state_dict: STATE_DICT_TYPE
