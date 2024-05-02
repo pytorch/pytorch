@@ -71,6 +71,7 @@ test_failures_cpp_wrapper = {
 
 if config.abi_compatible:
     xfail_list = [
+        "test_add_complex_cpu",
         "test_bernoulli1_cpu",  # cpp fallback op naming issue
         "test_conv2d_binary_inplace_fusion_failed_cpu",
         "test_conv2d_binary_inplace_fusion_pass_cpu",
@@ -173,6 +174,7 @@ if RUN_CPU:
         code_string_count: dict = {}
 
     for item in [
+        BaseTest("test_add_complex"),
         BaseTest("test_add_complex4"),
         BaseTest("test_as_strided"),  # buffer reuse
         BaseTest("test_bernoulli1"),
