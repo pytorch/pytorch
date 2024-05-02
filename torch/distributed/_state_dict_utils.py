@@ -544,6 +544,10 @@ def _broadcast_state_dict(
             ret[key] = full_state_dict[key]
 
         keys.append(key)
+        # Broadcast every 10 tensors, just hardcode the number for now
+        if len(keys) >= 10:
+            _broadcast_tensors(ret, local_state_dict, keys, device, pg)
+            keys.clear()
 
     if keys:
         _broadcast_tensors(ret, local_state_dict, keys, device, pg)
