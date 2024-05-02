@@ -7,6 +7,7 @@ from warnings import warn
 import torch
 
 import torch.cuda
+from torch._C import _get_privateuse1_backend_name
 from torch._C._profiler import _ExperimentalConfig
 
 from torch.autograd import (
@@ -240,7 +241,9 @@ class profile:
                 use_kineto
             ), "Device-only events supported only with Kineto (use_kineto=True)"
 
-        VALID_DEVICE_OPTIONS = ["cuda", "xpu", "privateuseone"]
+        VALID_DEVICE_OPTIONS = ["cuda", "xpu"]
+        if _get_privateuse1_backend_name() != "privateuseone":
+            VALID_DEVICE_OPTIONS.append(_get_privateuse1_backend_name())
         if self.use_device not in VALID_DEVICE_OPTIONS:
             warn(f"The {self.use_device} is not a valid device option.")
             self.use_device = None
@@ -283,7 +286,6 @@ class profile:
                 self.profiler_kind = ProfilerState.KINETO_PRIVATEUSE1_FALLBACK
             else:
                 self.kineto_activities.add(ProfilerActivity.PrivateUse1)
-                self.profiler_kind = ProfilerState.KINETO_PRIVATEUSE1
 
         assert (
             len(self.kineto_activities) > 0
@@ -328,10 +330,10 @@ class profile:
     def __exit__(self, exc_type, exc_val, exc_tb):
         if not self.enabled:
             return
-        if self.use_device == "cuda":
-            torch.cuda.synchronize()
-        elif self.use_device == "xpu":
-            torch.xpu.synchronize()
+        if self.use_device and hasattr(torch, self.use_device):
+            device_module = getattr(torch, self.use_device)
+            if hasattr(device_module, "synchronize"):
+                device_module.synchronize()
 
         t0 = perf_counter_ns()
         self.kineto_results = _disable_profiler()
@@ -467,8 +469,13 @@ class profile:
                 else 0
             )
 
-        # Create and return FunctionEvent list
-        function_events = []
+        # Create and return FunctionEvent list, which contains all function events
+        # Here 2 function events are created:
+        # all_function_events contains all events associated with each kineto event from result
+        all_function_events = []
+        # frontend_function_events contains the events in aten or torch frontend level,
+        # whose correlation id is 0
+        frontend_function_events = []
         device_corr_map: Dict[int, List[FunctionEvent]] = {}
         max_evt_id = 0
         for kineto_event in result.events():
@@ -532,22 +539,31 @@ class profile:
                     if cuda_time > 0:
                         fe.append_kernel(fe.name, fe.device_index, cuda_time)
                         fe.is_legacy = True
-            function_events.append(fe)
+            all_function_events.append(fe)
             corr_id = kineto_event.linked_correlation_id()
             if corr_id > 0:
                 if corr_id not in device_corr_map:
                     device_corr_map[corr_id] = []
                 device_corr_map[corr_id].append(fe)
+            elif corr_id == 0:
+                frontend_function_events.append(fe)
+            else:
+                raise RuntimeError(
+                    f"Got negative correlation id {corr_id} in profiler post processing"
+                )
 
         # associate device kernels and device runtime (CPU) with CPU events
-        for fe in function_events:
+        for fe in frontend_function_events:
             if (
                 fe.device_type == DeviceType.CPU
                 and not fe.is_async
                 and fe.id in device_corr_map
             ):
                 for f_evt in device_corr_map[fe.id]:
-                    if f_evt.device_type == DeviceType.CUDA:
+                    if (
+                        f_evt.device_type == DeviceType.CUDA
+                        or f_evt.device_type == DeviceType.PrivateUse1
+                    ):
                         fe.append_kernel(
                             f_evt.name,
                             f_evt.device_index,
@@ -587,17 +603,17 @@ class profile:
             if not mem_record[1]:
                 max_evt_id += 1
                 fe = createFunctionEventForMemoryEvents(mem_record[0])
-                function_events.append(fe)
+                all_function_events.append(fe)
 
         for oom_record in oom_records:
             max_evt_id += 1
             fe = createFunctionEventForMemoryEvents(oom_record)
-            function_events.append(fe)
+            all_function_events.append(fe)
 
-        function_events.sort(
+        all_function_events.sort(
             key=lambda evt: [evt.time_range.start, -evt.time_range.end]
         )
-        return function_events
+        return all_function_events
 
 
 class record_function(_ContextDecorator):

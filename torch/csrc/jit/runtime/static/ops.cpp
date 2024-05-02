@@ -2122,7 +2122,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::layer_norm, aten_layer_norm, [](Node* n) -> SROp
           p_node->Output(0).toTensor(), X->sizes(), c10::nullopt);
     }
     at::Tensor& output = p_node->Output(0).toTensor();
-    at::native::layer_norm_cpu_out(output, input, *gamma, *beta, eps, M, N);
+    at::native::layer_norm_cpu_out(output, *X, *gamma, *beta, eps, M, N);
   };
 });
 
