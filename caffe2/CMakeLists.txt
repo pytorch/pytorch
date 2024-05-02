@@ -846,18 +846,19 @@ set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS_NON_AVX} ${Caffe2_CPU_SRCS_AVX2} ${Caffe2_
 # ==========================================================
 # END formerly-libtorch sources
 # ==========================================================
-
-add_library(torch_cpu ${Caffe2_CPU_SRCS})
-if(HAVE_SOVERSION)
-  set_target_properties(torch_cpu PROPERTIES
-      VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
-endif()
-torch_compile_options(torch_cpu)  # see cmake/public/utils.cmake
-if(BUILD_CAFFE2 AND NOT MSVC)
-  # Caffe2 has too many signed-unsigned violation, but the framework is dead
-  # So no point in fixing those
-  target_compile_options(torch_cpu PRIVATE "-Wno-sign-compare")
-endif()
+find_library(TARGET_LIB torch_cpu PATHS /home/sahanp/.conda/envs/pytorch-3.10/lib/python3.10/site-packages/libtorch/lib/libtorch_cpu.so NO_DEFAULT_PATH)
+if(NOT TARGET_LIB)
+  add_library(torch_cpu ${Caffe2_CPU_SRCS})
+  if(HAVE_SOVERSION)
+    set_target_properties(torch_cpu PROPERTIES
+        VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
+  endif()
+  torch_compile_options(torch_cpu)  # see cmake/public/utils.cmake
+  if(BUILD_CAFFE2 AND NOT MSVC)
+    # Caffe2 has too many signed-unsigned violation, but the framework is dead
+    # So no point in fixing those
+    target_compile_options(torch_cpu PRIVATE "-Wno-sign-compare")
+  endif()
 
 # Ignore Wdeprecated-XXX errors from third-party libraries
 if(NOT MSVC)
@@ -865,25 +866,26 @@ if(NOT MSVC)
   set_source_files_properties(${PROJECT_SOURCE_DIR}/torch/csrc/distributed/c10d/socket.cpp PROPERTIES COMPILE_OPTIONS "-Wno-error=deprecated")
 endif()
 
-if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND NOT USE_VULKAN AND NOT USE_IOS AND NOT USE_PYTORCH_METAL AND NOT USE_COREML_DELEGATE)
-  target_compile_options_if_supported(torch_cpu "-Wmissing-prototypes")
-  target_compile_options_if_supported(torch_cpu "-Werror=missing-prototypes")
-  get_target_property(TORCH_CPU_SOURCES torch_cpu SOURCES)
-  foreach(generated_file IN LISTS GENERATED_CXX_TORCH)
-    set_source_files_properties(${generated_file} PROPERTIES COMPILE_OPTIONS "-Wno-missing-prototypes;-Wno-error=missing-prototypes")
-  endforeach()
-  foreach(source_file IN LISTS TORCH_CPU_SOURCES)
-    get_filename_component(source_file "${source_file}" REALPATH)
-    string(FIND "${source_file}" "${CMAKE_BINARY_DIR}" res)
-    if(res GREATER -1)
-      set_source_files_properties(${source_file} PROPERTIES COMPILE_OPTIONS "-Wno-missing-prototypes;-Wno-error=missing-prototypes")
-      continue()
-    endif()
-    string(FIND "${source_file}" "caffe2" res)
-    if(res GREATER -1)
-      set_source_files_properties(${source_file} PROPERTIES COMPILE_OPTIONS "-Wno-missing-prototypes;-Wno-error=missing-prototypes")
-    endif()
-  endforeach()
+  if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND NOT USE_VULKAN AND NOT USE_IOS AND NOT USE_PYTORCH_METAL AND NOT USE_COREML_DELEGATE)
+    target_compile_options_if_supported(torch_cpu "-Wmissing-prototypes")
+    target_compile_options_if_supported(torch_cpu "-Werror=missing-prototypes")
+    get_target_property(TORCH_CPU_SOURCES torch_cpu SOURCES)
+    foreach(generated_file IN LISTS GENERATED_CXX_TORCH)
+      set_source_files_properties(${generated_file} PROPERTIES COMPILE_OPTIONS "-Wno-missing-prototypes;-Wno-error=missing-prototypes")
+    endforeach()
+    foreach(source_file IN LISTS TORCH_CPU_SOURCES)
+      get_filename_component(source_file "${source_file}" REALPATH)
+      string(FIND "${source_file}" "${CMAKE_BINARY_DIR}" res)
+      if(res GREATER -1)
+        set_source_files_properties(${source_file} PROPERTIES COMPILE_OPTIONS "-Wno-missing-prototypes;-Wno-error=missing-prototypes")
+        continue()
+      endif()
+      string(FIND "${source_file}" "caffe2" res)
+      if(res GREATER -1)
+        set_source_files_properties(${source_file} PROPERTIES COMPILE_OPTIONS "-Wno-missing-prototypes;-Wno-error=missing-prototypes")
+      endif()
+    endforeach()
+  endif()
 endif()
 
 option(TORCH_USE_IWYU "Use include-what-you-use to clean up header inclusion" OFF)
@@ -972,12 +974,14 @@ file(WRITE ${DUMMY_EMPTY_FILE} ${DUMMY_FILE_CONTENT})
 
 # Wrapper library for people who link against torch and expect both CPU and CUDA support
 # Contains "torch_cpu" and "torch_cuda"
-add_library(torch ${DUMMY_EMPTY_FILE})
-if(HAVE_SOVERSION)
-  set_target_properties(torch PROPERTIES
-      VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
+find_library(TARGET_LIB torch PATHS /home/sahanp/.conda/envs/pytorch-3.10/lib/python3.10/site-packages/libtorch/lib/libtorch.so NO_DEFAULT_PATH)
+if(NOT TARGET_LIB)
+  add_library(torch ${DUMMY_EMPTY_FILE})
+  if(HAVE_SOVERSION)
+    set_target_properties(torch PROPERTIES
+        VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
+  endif()
 endif()
-
 if(USE_ROCM)
   filter_list(__caffe2_hip_srcs_cpp Caffe2_HIP_SRCS "\\.(cu|hip)$")
   set_source_files_properties(${__caffe2_hip_srcs_cpp} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
@@ -987,47 +991,52 @@ endif()
 if(USE_ROCM)
   set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
   list(APPEND Caffe2_HIP_SRCS ${GENERATED_CXX_TORCH_CUDA})
-  hip_add_library(torch_hip ${Caffe2_HIP_SRCS})
-  if(USE_FLASH_ATTENTION)
-    target_link_libraries(torch_hip PRIVATE __caffe2_aotriton)
-    add_dependencies(torch_hip aotriton_external)
-  endif()
-  set(CUDA_LINK_LIBRARIES_KEYWORD)
-  torch_compile_options(torch_hip)  # see cmake/public/utils.cmake
-  # TODO: Not totally sure if this is live or not
-  if(USE_NCCL)
-    target_link_libraries(torch_hip PRIVATE __caffe2_nccl)
-    target_compile_definitions(torch_hip PRIVATE USE_NCCL)
-  endif()
+  find_library(TARGET_LIB torch_hip PATHS /home/sahanp/.conda/envs/pytorch-3.10/lib/python3.10/site-packages/libtorch/lib/libtorch_hip.so NO_DEFAULT_PATH)
+  if(NOT TARGET_LIB)
+    hip_add_library(torch_hip ${Caffe2_HIP_SRCS})
+    if(USE_FLASH_ATTENTION)
+      target_link_libraries(torch_hip PRIVATE __caffe2_aotriton)
+      add_dependencies(torch_hip aotriton_external)
+    endif()
+    set(CUDA_LINK_LIBRARIES_KEYWORD)
+    torch_compile_options(torch_hip)  # see cmake/public/utils.cmake
+    # TODO: Not totally sure if this is live or not
+    if(USE_NCCL)
+      target_link_libraries(torch_hip PRIVATE __caffe2_nccl)
+      target_compile_definitions(torch_hip PRIVATE USE_NCCL)
+    endif()
 
-  if(USE_PRECOMPILED_HEADERS)
-    target_precompile_headers(torch_hip PRIVATE
-        "$<$<COMPILE_LANGUAGE:CXX>:ATen/core/ATen_pch.h>")
+    if(USE_PRECOMPILED_HEADERS)
+      target_precompile_headers(torch_hip PRIVATE
+          "$<$<COMPILE_LANGUAGE:CXX>:ATen/core/ATen_pch.h>")
+    endif()
   endif()
 elseif(USE_CUDA)
-  set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
-  list(APPEND Caffe2_GPU_SRCS ${GENERATED_CXX_TORCH_CUDA})
-  if(CUDA_SEPARABLE_COMPILATION)
+  find_library(TARGET_LIB torch_cpu PATHS /home/sahanp/.conda/envs/pytorch-3.10/lib/python3.10/site-packages/libtorch/lib/libtorch.so NO_DEFAULT_PATH)
+  if(NOT TARGET_LIB)
+    set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
+    list(APPEND Caffe2_GPU_SRCS ${GENERATED_CXX_TORCH_CUDA})
+    if(CUDA_SEPARABLE_COMPILATION)
     # Separate compilation fails when kernels using `thrust::sort_by_key`
     # are linked with the rest of CUDA code. Workaround by linking them separately.
-    add_library(torch_cuda ${Caffe2_GPU_SRCS} ${Caffe2_GPU_CU_SRCS})
-    set_property(TARGET torch_cuda PROPERTY CUDA_SEPARABLE_COMPILATION ON)
+      add_library(torch_cuda ${Caffe2_GPU_SRCS} ${Caffe2_GPU_CU_SRCS})
+      set_property(TARGET torch_cuda PROPERTY CUDA_SEPARABLE_COMPILATION ON)
 
-    add_library(torch_cuda_w_sort_by_key OBJECT
-        ${Caffe2_GPU_SRCS_W_SORT_BY_KEY}
-        ${Caffe2_GPU_CU_SRCS_W_SORT_BY_KEY})
-    set_property(TARGET torch_cuda_w_sort_by_key PROPERTY CUDA_SEPARABLE_COMPILATION OFF)
-    target_link_libraries(torch_cuda PRIVATE torch_cuda_w_sort_by_key)
-  else()
-    add_library(torch_cuda
-        ${Caffe2_GPU_SRCS} ${Caffe2_GPU_SRCS_W_SORT_BY_KEY}
-        ${Caffe2_GPU_CU_SRCS} ${Caffe2_GPU_CU_SRCS_W_SORT_BY_KEY})
+      add_library(torch_cuda_w_sort_by_key OBJECT
+          ${Caffe2_GPU_SRCS_W_SORT_BY_KEY}
+          ${Caffe2_GPU_CU_SRCS_W_SORT_BY_KEY})
+      set_property(TARGET torch_cuda_w_sort_by_key PROPERTY CUDA_SEPARABLE_COMPILATION OFF)
+      target_link_libraries(torch_cuda PRIVATE torch_cuda_w_sort_by_key)
+    else()
+      add_library(torch_cuda
+          ${Caffe2_GPU_SRCS} ${Caffe2_GPU_SRCS_W_SORT_BY_KEY}
+          ${Caffe2_GPU_CU_SRCS} ${Caffe2_GPU_CU_SRCS_W_SORT_BY_KEY})
+    endif()
+    set(CUDA_LINK_LIBRARIES_KEYWORD)
+    torch_compile_options(torch_cuda)  # see cmake/public/utils.cmake
+    target_compile_options_if_supported(torch_cuda "-Wno-deprecated-copy")  # see cmake/public/utils.cmake
+    target_compile_definitions(torch_cuda PRIVATE USE_CUDA)
   endif()
-  set(CUDA_LINK_LIBRARIES_KEYWORD)
-  torch_compile_options(torch_cuda)  # see cmake/public/utils.cmake
-  target_compile_options_if_supported(torch_cuda "-Wno-deprecated-copy")  # see cmake/public/utils.cmake
-  target_compile_definitions(torch_cuda PRIVATE USE_CUDA)
-
   if(USE_CUSPARSELT)
       target_link_libraries(torch_cuda PRIVATE torch::cusparselt)
       target_compile_definitions(torch_cuda PRIVATE USE_CUSPARSELT)
@@ -1722,7 +1731,10 @@ target_link_libraries(torch_cpu PRIVATE flatbuffers)
 # That usually leads to missing symbol errors at run-time, so to avoid a situation like
 # this we have to preload those libs in a global namespace.
 if(BUILD_SHARED_LIBS)
-  add_library(torch_global_deps SHARED ${TORCH_SRC_DIR}/csrc/empty.c)
+  find_library(TARGET_LIB torch_global_deps PATHS /home/sahanp/.conda/envs/pytorch-3.10/lib/python3.10/site-packages/libtorch/lib/libtorch_global_deps.so NO_DEFAULT_PATH)
+  if(NOT TARGET_LIB)
+    add_library(torch_global_deps SHARED ${TORCH_SRC_DIR}/csrc/empty.c)
+  endif()
   if(HAVE_SOVERSION)
     set_target_properties(torch_global_deps PROPERTIES
         VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})

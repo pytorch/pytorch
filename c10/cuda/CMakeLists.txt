@@ -47,13 +47,16 @@ set(C10_CUDA_HEADERS
     impl/CUDATest.h
 )
 set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
-torch_cuda_based_add_library(c10_cuda ${C10_CUDA_SRCS} ${C10_CUDA_HEADERS})
-set(CUDA_LINK_LIBRARIES_KEYWORD)
-# If building shared library, set dllimport/dllexport proper.
-target_compile_options(c10_cuda PRIVATE "-DC10_CUDA_BUILD_MAIN_LIB")
-# Enable hidden visibility if compiler supports it.
-if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
-  target_compile_options(c10_cuda PRIVATE "-fvisibility=hidden")
+find_library(TARGET_LIB c10_cuda PATHS /home/sahanp/.conda/envs/pytorch-3.10/lib/python3.10/site-packages/libtorch/lib/libc10_cuda.so NO_DEFAULT_PATH)
+if(NOT TARGET_LIB)
+  torch_cuda_based_add_library(c10_cuda ${C10_CUDA_SRCS} ${C10_CUDA_HEADERS})
+  set(CUDA_LINK_LIBRARIES_KEYWORD)
+  # If building shared library, set dllimport/dllexport proper.
+  target_compile_options(c10_cuda PRIVATE "-DC10_CUDA_BUILD_MAIN_LIB")
+  # Enable hidden visibility if compiler supports it.
+  if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
+    target_compile_options(c10_cuda PRIVATE "-fvisibility=hidden")
+  endif()
 endif()
 
 # ---[ Dependency of c10_cuda

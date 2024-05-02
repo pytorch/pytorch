@@ -1244,13 +1244,10 @@ def main():
         "nn/parallel/*.pyi",
         "utils/data/*.pyi",
         "utils/data/datapipes/*.pyi",
-        "lib/*.so*",
-        "lib/*.dylib*",
-        "lib/*.dll",
-        "lib/*.lib",
         "lib/*.pdb",
         "lib/torch_shm_manager",
         "lib/*.h",
+        "lib/libtorch_python*",
         "include/*.h",
         "include/ATen/*.h",
         "include/ATen/cpu/*.h",
@@ -1411,6 +1408,15 @@ def main():
         "utils/model_dump/code.js",
         "utils/model_dump/*.mjs",
     ]
+    if not BUILD_LIBTORCH_WHL:
+        torch_package_data.extend(
+            [
+                "lib/*.so*",
+                "lib/*.dylib*",
+                "lib/*.dll",
+                "lib/*.lib",
+            ]
+        )
 
     if get_cmake_cache_vars()["BUILD_CAFFE2"]:
         torch_package_data.extend(
