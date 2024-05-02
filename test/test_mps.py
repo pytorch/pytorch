@@ -643,7 +643,6 @@ def mps_ops_modifier(ops):
         'log_sigmoid_forward': None,
         'linalg.eig': None,
         'linalg.eigvals': None,
-        'fft.hfft2': None,
         'fft.hfftn': None,
         'put': None,
         'nn.functional.conv_transpose3d': None,
