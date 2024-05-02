@@ -402,7 +402,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             if name in self._tolerance["higher_bf16"]:
                 return 1e-2, cosine
 
-        if is_training and current_device == "cuda":
+        if is_training and (current_device == "cuda" or current_device == "xpu"):
             tolerance = 1e-3
             if name in self._tolerance["cosine"]:
                 cosine = True
