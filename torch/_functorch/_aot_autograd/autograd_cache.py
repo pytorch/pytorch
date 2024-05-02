@@ -34,6 +34,10 @@ from .schemas import AOTConfig  # noqa: F401
 log = logging.getLogger(__name__)
 
 
+class BypassAOTAutogradCache(Exception):
+    pass
+
+
 def fake_tensor_from_meta(tensor_meta):
     fake_mode = detect_fake_mode()
     with fake_mode:
@@ -46,18 +50,6 @@ def fake_tensor_from_meta(tensor_meta):
                 requires_grad=tensor_meta.requires_grad,
             ),
         )
-
-
-class BypassAOTAutogradCache(Exception):
-    pass
-
-
-cache = tempfile.mkdtemp()
-
-
-def cache_dir():
-    """Returns the directory where we store AOTAutograd cache entries."""
-    return cache
 
 
 def check_node_safe(node: Node):
@@ -343,6 +335,15 @@ def deserialize_graph_module(module: SerializedAOTGraphModule) -> torch.fx.Graph
         node.meta = NodeMetaSerializer.deserialize(node_metas[str(node.name)])
     new_module.recompile()
     return new_module
+
+
+cache = tempfile.mkdtemp()
+
+
+def cache_dir():
+    """Returns the directory where we store AOTAutograd cache entries."""
+    return cache
+
 
 @dataclasses.dataclass
 class AOTAutogradCacheEntry:
