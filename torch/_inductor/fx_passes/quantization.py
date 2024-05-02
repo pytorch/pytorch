@@ -106,7 +106,7 @@ dequantize activation:
     x = x * scale
 """
 dequantize_per_tensor_activation_pattern = CallFunction(
-    aten.mul.Tensor,
+    aten.mul.Scalar,
     CallFunction(
         aten.sub.Tensor,
         CallFunction(
@@ -200,7 +200,7 @@ def get_qlinear_pt2e_pattern(x_scale_zp_are_tensors, users=1):
 
 
 dequantize_accum_pattern = CallFunction(
-    aten.mul.Tensor,
+    aten.mul.Scalar,
     CallFunction(
         aten.sub.Tensor,
         CallFunction(
@@ -263,7 +263,7 @@ def generate_pattern_with_output_quant(
                     CallFunction(
                         aten.round.default,
                         CallFunction(
-                            aten.mul.Tensor,
+                            aten.mul.Scalar,
                             _may_generate_pattern_with_dtype_convert(
                                 computation_call,
                                 KeywordArg("autocast_output_quant_dtype"),
@@ -485,7 +485,7 @@ def _is_valid_quantized_conv_binary_optimization_pattern(output_dtype):
             assert extra_input_of_binary_node is not None
             # Extra input of binary node comes from dequant pattern
             if (not isinstance(extra_input_of_binary_node, torch.fx.Node)) or (
-                extra_input_of_binary_node.target != aten.mul.Tensor
+                extra_input_of_binary_node.target != aten.mul.Scalar
             ):
                 return False
 
@@ -1025,7 +1025,7 @@ def _is_input_output_same_scale_zp(check_node):
             return False
 
         # Step 2: Check inputs/output scale
-        mul_nodes = filter_nodes(match.nodes, aten.mul.Tensor)
+        mul_nodes = filter_nodes(match.nodes, aten.mul.Scalar)
         # We need to find mul node at output since the scale value is reciprocal to input scale.
         # Mul node at output should connect to cat node directly.
         scales = [
@@ -1061,7 +1061,7 @@ def _register_quantized_cat_lowering(
 
 
 _raw_dequantize_per_tensor_activation_pattern = CallFunction(
-    aten.mul.Tensor,
+    aten.mul.Scalar,
     CallFunction(
         aten.sub.Tensor,
         CallFunction(
@@ -1167,7 +1167,7 @@ def _register_woq_mm_int8_pattern1():
     # F.linear(x, weight.to(dtype=x.dtype)) * scales
     # case of dispatching to mm, with x reshape
     _woq_pattern = CallFunction(
-        aten.mul.Tensor,
+        aten.mul.Scalar,
         CallFunction(
             aten.reshape.default,
             CallFunction(
@@ -1192,7 +1192,7 @@ def _register_woq_mm_int8_pattern2():
     # F.linear(x, weight.to(dtype=x.dtype)) * scales
     # case of dispatching to mm, w/o x reshape
     _woq_pattern = CallFunction(
-        aten.mul.Tensor,
+        aten.mul.Scalar,
         CallFunction(
             aten.reshape.default,
             CallFunction(
@@ -1217,7 +1217,7 @@ def _register_woq_mm_int8_pattern3():
     # F.linear(x, weight.to(dtype=x.dtype)) * scales
     # case of dispatching to bmm
     _woq_pattern = CallFunction(
-        aten.mul.Tensor,
+        aten.mul.Scalar,
         CallFunction(
             aten.bmm.default,
             CallFunction(aten.expand.default, KeywordArg("x"), Arg()),
@@ -1257,7 +1257,7 @@ def _is_valid_dequant_promotion_pattern(dtype=torch.float32):
         assert dtype in [torch.float32, torch.bfloat16]
         dequant_pattern_end_node = match.output_node()
         if dequant_pattern_end_node.target not in [
-            aten.mul.Tensor,
+            aten.mul.Scalar,
             prims.convert_element_type.default,
             aten.reshape.default,
         ]:
@@ -1283,7 +1283,7 @@ def _is_valid_dequant_promotion_pattern(dtype=torch.float32):
         sub_node = mul_node.args[0]
         to_fp32_node = sub_node.args[0]
         if (
-            mul_node.target is aten.mul.Tensor
+            mul_node.target is aten.mul.Scalar
             and sub_node.target is aten.sub.Tensor
             and to_fp32_node.target is prims.convert_element_type.default
             and len(list(dequant_pattern_end_node.users)) > 1
@@ -1349,7 +1349,7 @@ def _register_dequant_promotion_pass(pattern, pass_number, dtype=torch.float32):
         # * Start node should be the node of dtype convert to float32
         dequant_pattern_end_node = match.output_node()
         assert dequant_pattern_end_node.target in [
-            aten.mul.Tensor,
+            aten.mul.Scalar,
             prims.convert_element_type.default,
             aten.reshape.default,
         ]
@@ -1422,7 +1422,7 @@ def _is_valid_dequant_conv2d_pattern(dtype):
 
         assert to_fp32_node.target is prims.convert_element_type.default
         assert sub_node.target is aten.sub.Tensor
-        assert mul_node.target is aten.mul.Tensor
+        assert mul_node.target is aten.mul.Scalar
         if (
             len(list(to_fp32_node.users)) != 1
             or len(list(sub_node.users)) != 1
@@ -1713,7 +1713,7 @@ def _is_valid_dequant_linear_pattern(dtype, input_dim_exceeds_two, input_contigu
 
         assert to_fp32_node.target is prims.convert_element_type.default
         assert sub_node.target is aten.sub.Tensor
-        assert mul_node.target is aten.mul.Tensor
+        assert mul_node.target is aten.mul.Scalar
         if (
             len(list(to_fp32_node.users)) != 1
             or len(list(sub_node.users)) != 1

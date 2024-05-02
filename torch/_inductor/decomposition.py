@@ -756,10 +756,16 @@ def index_reduce(
         include_self=include_self,
     )
 
-
 @register_decomposition(aten.mul.Tensor)
 def mul_tensor(x, y):
     if isinstance(y, Number):
         # cpp wrapper codegen needs to use a more type-accurate overload
         return aten.mul.Scalar(x, y)
+    return NotImplemented
+
+@register_decomposition(aten.div.Tensor)
+def div_tensor(x, y):
+    if isinstance(y, Number):
+        # cpp wrapper codegen needs to use a more type-accurate overload
+        return aten.div.Scalar(x, y)
     return NotImplemented
