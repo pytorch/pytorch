@@ -181,17 +181,19 @@ class NodeMetaSerializer:
     Convert a node's meta field into a pickleable dictionary and back
     """
 
+    # Fields that are already serializable and therefore don't need a special implementation
     SERIALIZABLE_FIELDS = ["tensor_meta", "stack_trace", "seq_nr"]
 
+    # Serialize or deserialize implementation
     @staticmethod
-    def serialize(node_meta):
+    def _convert(node_meta, action):
         new_meta = {}
         for key in node_meta:
             try:
                 if key in NodeMetaSerializer.SERIALIZABLE_FIELDS:
                     new_meta[key] = node_meta[key]
                 else:
-                    new_meta[key] = getattr(NodeMetaSerializer, f"serialize_{key}")(
+                    new_meta[key] = getattr(NodeMetaSerializer, f"{action}_{key}")(
                         node_meta[key]
                     )
             except AttributeError as e:
@@ -204,6 +206,14 @@ class NodeMetaSerializer:
                     f"Failed serializing meta field {key}"
                 ) from e
         return new_meta
+
+    @staticmethod
+    def serialize(node_meta):
+        return NodeMetaSerializer._convert(node_meta, "serialize")
+
+    @staticmethod
+    def deserialize(serialized_meta):
+        return NodeMetaSerializer._convert(serialized_meta, "deserialize")
 
     @staticmethod
     def serialize_val(val):
@@ -283,27 +293,6 @@ class NodeMetaSerializer:
         if not isinstance(val, TensorMetadata):
             return val
         return fake_tensor_from_meta(val)
-
-    @staticmethod
-    def deserialize(serialized_meta):
-        new_meta = {}
-        for key in serialized_meta:
-            try:
-                if key in NodeMetaSerializer.SERIALIZABLE_FIELDS:
-                    new_meta[key] = serialized_meta[key]
-                else:
-                    new_meta[key] = getattr(NodeMetaSerializer, f"deserialize_{key}")(
-                        serialized_meta[key]
-                    )
-            except AttributeError as e:
-                raise BypassAOTAutogradCache(
-                    f"No deserialization implemented for meta field {key}. Implement serialize_{key} and deserialize_{key}"
-                ) from e
-            except Exception as e:
-                raise BypassAOTAutogradCache(
-                    f"Failed deserializing meta field {key}"
-                ) from e
-        return new_meta
 
 
 def serialize_graph_module(module: torch.fx.GraphModule) -> SerializedAOTGraphModule:
