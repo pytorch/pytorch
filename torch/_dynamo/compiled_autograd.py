@@ -222,8 +222,8 @@ class AutogradCompilerInstance:
         )
 
         def runtime_wrapper(compiled_fn, inputs, sizes, hooks):
-            breakpoint()
-            # insert inspecting code here
+            # insert debug code here
+            verbose_log.debug(f"lifted hooks={hooks}")
             return compiled_fn(inputs, sizes, hooks)
 
         return runtime_wrapper, self.compiler_fn(graph)
