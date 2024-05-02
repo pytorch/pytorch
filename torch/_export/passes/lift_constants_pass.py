@@ -253,16 +253,13 @@ def rewrite_script_object_meta(
         str,
         Union[
             torch.Tensor,
+            torch.ScriptObject,
             FakeScriptObject,
         ],
     ] = {}
     for node in gm.graph.nodes:
         if "val" not in node.meta:
             continue
-
-        assert not isinstance(
-            node.meta["val"], torch.ScriptObject
-        ), "ScriptObject should already be fakified in to FakeScriptObject."
 
         if isinstance(
             node.meta["val"],
