@@ -442,7 +442,8 @@ class TestPasses(TestCase):
 
             def forward(self, x):
                 b = x.item()
-                torch._constrain_as_value(b, min=2, max=5)
+                torch._check(b >= 2)
+                torch._check(b <= 5)
                 return b
 
         x = torch.tensor([2])
@@ -465,7 +466,8 @@ class TestPasses(TestCase):
 
             def forward(self, x):
                 b = x.nonzero()
-                torch._constrain_as_value(b.shape[0], min=3, max=5)
+                torch._check(b.shape[0] >= 3)
+                torch._check(b.shape[0] <= 5)
                 return b
 
         x = torch.tensor([2, 1, 2, 3, 5, 0])
@@ -506,12 +508,14 @@ class TestPasses(TestCase):
             def forward(self, pred, x, y):
                 def true_fn(x, y):
                     b = x.item()
-                    torch._constrain_as_value(b, min=2, max=5)
+                    torch._check(b >= 2)
+                    torch._check(b <= 5)
                     return x - b
 
                 def false_fn(x, y):
                     c = y.item()
-                    torch._constrain_as_value(c, min=2, max=5)
+                    torch._check(c >= 2)
+                    torch._check(c <= 5)
                     return y - c
 
                 ret = cond(pred, true_fn, false_fn, [x, y])
@@ -531,7 +535,8 @@ class TestPasses(TestCase):
         class Foo(torch.nn.Module):
             def forward(self, x):
                 a = x.item()
-                torch._constrain_as_value(a, 4, 7)
+                torch._check(a >= 4)
+                torch._check(a <= 7)
                 return torch.empty((a, 4))
 
         f = Foo()
@@ -539,8 +544,8 @@ class TestPasses(TestCase):
         ep = torch.export.export(f, (torch.tensor([7]),))
         gm = ep.graph_module
         FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range.default",
-            1,
+            "torch.ops.aten._assert_async.msg",
+            2,
             exactly=True,
         ).run(gm.code)
 
@@ -558,10 +563,10 @@ class TestPasses(TestCase):
         self.assertEqual(dep_token.shape, torch.Size([]))
 
         FileCheck().check_count(
-            "torch.ops.aten._functional_sym_constrain_range", 1, exactly=True
+            "torch.ops.aten._functional_assert_async.msg", 2, exactly=True
         ).run(gm.code)
         FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range.default", 0, exactly=True
+            "torch.ops.aten._assert_async.msg", 0, exactly=True
         ).run(gm.code)
 
     def test_math_ops(self):
@@ -582,8 +587,8 @@ class TestPasses(TestCase):
         self.assertExpectedInline(
             mod.code.strip("\n"),
             """\
-def forward(self, arg_0):
-    x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+def forward(self, x):
+    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     sin = torch.ops.aten.sin.default(add);  add = None
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
@@ -597,8 +602,8 @@ def forward(self, arg_0):
         self.assertExpectedInline(
             mod.code.strip("\n"),
             """\
-def forward(self, arg_0):
-    x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+def forward(self, x):
+    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     sin = torch.ops.aten.sin.default(add);  add = None
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
@@ -613,8 +618,8 @@ def forward(self, arg_0):
         self.assertExpectedInline(
             mod.code.strip("\n"),
             """\
-def forward(self, arg_0):
-    x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+def forward(self, x):
+    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     sin = torch.ops.aten.sin.default(add);  add = None
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
@@ -628,8 +633,8 @@ def forward(self, arg_0):
         self.assertExpectedInline(
             mod.code.strip("\n"),
             """\
-def forward(self, arg_0):
-    x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+def forward(self, x):
+    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     submod_5 = self.submod_1
     sum_1 = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(True, submod_5, add);  submod_5 = add = None
@@ -643,8 +648,8 @@ def forward(self, arg_0):
         self.assertExpectedInline(
             mod.code.strip("\n"),
             """\
-def forward(self, arg_0):
-    x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+def forward(self, x):
+    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     sin = torch.ops.aten.sin.default(add)
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
@@ -663,8 +668,8 @@ def forward(self, arg_0):
         self.assertExpectedInline(
             mod.code.strip("\n"),
             """\
-def forward(self, arg_0):
-    x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+def forward(self, x):
+    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     submod_5 = self.submod_1
     wrap_with_set_grad_enabled = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(True, submod_5, add);  submod_5 = add = None
@@ -698,8 +703,8 @@ def forward(self, arg_0):
         self.assertExpectedInline(
             new_gm.code.strip("\n"),
             """\
-def forward(self, arg_0, arg_1):
-    x1, x2, = fx_pytree.tree_flatten_spec(([arg_0, arg_1], {}), self._in_spec)
+def forward(self, x1, x2):
+    x1, x2, = fx_pytree.tree_flatten_spec(([x1, x2], {}), self._in_spec)
     submod_1 = self.submod_1(x1, x2);  x1 = x2 = None
     getitem = submod_1[0]
     getitem_1 = submod_1[1];  submod_1 = None

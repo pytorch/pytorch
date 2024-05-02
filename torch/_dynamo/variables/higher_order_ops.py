@@ -530,7 +530,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return OutDtypeHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "wrap":
             return WrapHigherOrderVariable(value, source, **kwargs)
-        elif value.__name__ == "templated_attention":
+        elif value.__name__ == "flex_attention":
             return TemplatedAttentionHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ in (
             "wrap_activation_checkpoint",
@@ -1475,7 +1475,7 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         self, tx, query: "VariableTracker", score_function: "VariableTracker"
     ):
         from torch._dynamo.symbolic_convert import InstructionTranslator
-        from torch._higher_order_ops.templated_attention import TransformGetItemToIndex
+        from torch._higher_order_ops.flex_attention import TransformGetItemToIndex
         from .builder import SourcelessBuilder
 
         tx: InstructionTranslator = tx
@@ -1511,14 +1511,14 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 score_function,
                 new_args,
                 {},  # expect only args no kwargs for now
-                description="templated_attention",
+                description="flex_attention",
                 source_target=self.value,
                 set_subgraph_inputs="flatten_manual",
             )
 
         body_name = add_subgraph(
             tx,
-            "templated_attention",
+            "flex_attention",
             torch.fx.GraphModule(tx.output.nn_modules, body_graph),
         )
 
@@ -1532,7 +1532,7 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         proxy_args = (body_node,) + lifted_args
 
-        return proxy_args, {}
+        return proxy_args
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -1541,7 +1541,7 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         query, key, value, score_mod = self.normalize_to_args(args, kwargs)
 
-        p_args, p_kwargs = self.create_wrapped_node(tx, query, score_mod)
+        p_args = self.create_wrapped_node(tx, query, score_mod)
         proxied_args = [query, key, value]
 
         # Store the invocation as a call
@@ -1549,21 +1549,22 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # Proxying user defined functions is not supported.
         inp_args, _ = proxy_args_kwargs(proxied_args, {})
 
-        # Why is this here? Unlike other HOPs, the subgrpah's output for this hop is unrelated
-        # to what the overall HOP returns, we create the correct output proxy by calling the
-        # hop (self.value) with the example values.
+        query_meta = query.as_proxy().node.meta["example_value"]
+        logsumexp_shape = query_meta.size()[:-1]  # [B, H, M]
         with torch._guards.TracingContext.try_get().fake_mode:
-            example_args = pytree.tree_map_only(
-                torch.fx.Proxy, lambda a: a.node.meta["example_value"], inp_args
+            out_meta = torch.empty_like(
+                query_meta, memory_format=torch.contiguous_format
             )
-            example_value = self.value(*example_args, score_mod)
+            lse_meta = query_meta.new_empty(logsumexp_shape, dtype=torch.float32)
+        example_value = (out_meta, lse_meta)
+
         return wrap_fx_proxy(
             tx=tx,
             proxy=tx.output.create_proxy(
                 "call_function",
                 self.value,
                 args=inp_args + p_args,
-                kwargs=p_kwargs,
+                kwargs={},
             ),
             example_value=example_value,
         )
