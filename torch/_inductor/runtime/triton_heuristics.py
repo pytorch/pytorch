@@ -794,14 +794,15 @@ class CachingAutotuner(KernelInterface):
         # manager is a nullcontext.
         if autograd_profiler._is_profiler_enabled:
             # grid can be a tuple of ints or a string.
-            grid_info = (
-                grid if isinstance(grid, tuple) else getattr(grid, "grid_fn_str", None)
-            )
+            if isinstance(grid, tuple):
+                grid_info = str(grid)
+            else:
+                grid_info = getattr(grid, "grid_fn_str", "")
             with torch._C._profiler._RecordFunctionFast(
                 self.inductor_meta.get("kernel_name", "triton kernel"),
                 args,
                 {
-                    "kernel_file": self.filename,
+                    "kernel_file": "" if self.filename is None else self.filename,
                     "kernel_backend": "triton",
                     "grid": grid_info,
                     "stream": stream,
