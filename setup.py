@@ -227,8 +227,8 @@
 #   USE_PRIORITIZED_TEXT_FOR_LD
 #      Uses prioritized text form cmake/prioritized_text.txt for LD
 #
-#   BUILD_LIBTORCH
-#      Builds libtorch.so and its dependencies
+#   BUILD_LIBTORCH_WHL
+#      Builds libtorch.so and its dependencies as a wheel
 
 import os
 import sys
@@ -1447,14 +1447,13 @@ def main():
         modified_packages = []
         for package in packages:
             parts = package.split(".")
-            if len(parts) < 2:
-                continue
             if parts[0] == "torch":
                 modified_packages.append("libtorch" + package[len("torch") :])
         packages = modified_packages
-        torch_package_dir_name = "libtorch"
         package_dir = {"libtorch": "torch"}
+        torch_package_dir_name = "libtorch"
         package_data = {"libtorch": torch_package_data}
+        extensions = []
     else:
         torch_package_dir_name = "torch"
         package_dir = {}
@@ -1477,7 +1476,7 @@ def main():
         long_description_content_type="text/markdown",
         ext_modules=extensions,
         cmdclass=cmdclass,
-        packages=[],
+        packages=packages,
         entry_points=entry_points,
         install_requires=install_requires,
         extras_require=extras_require,

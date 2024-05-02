@@ -1,6 +1,5 @@
 # This file used to build libtorch.so.
 # Now it only builds the Torch python bindings.
-return()
 if(BUILD_PYTHONLESS)
   return()
 endif()
