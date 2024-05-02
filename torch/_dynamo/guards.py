@@ -75,6 +75,7 @@ from .source import (
     NumpyTensorSource,
     ODictGetItemSource,
     OptimizerSource,
+    ScriptObjectQualifiedNameSource,
     ShapeEnvSource,
     TupleIteratorGetItemSource,
     TypeSource,
@@ -756,6 +757,14 @@ class GuardBuilder(GuardBuilderBase):
             assert base_guard_manager  # to make mypy happy
             return base_guard_manager.lambda_manager(
                 python_lambda=lambda x: x.__obj_flatten__(),
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, ScriptObjectQualifiedNameSource):
+            assert base_guard_manager  # to make mypy happy
+            return base_guard_manager.lambda_manager(
+                python_lambda=lambda x: x._type().qualified_name(),
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,

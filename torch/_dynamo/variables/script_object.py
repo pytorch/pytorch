@@ -69,10 +69,12 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
             method_name=name,
         )
 
+    # We only support method calls on script objects. Interpreting the bytecodes
+    # should go through var_getattr then call_function instead of call_method.
+    #
+    # However, it's possible for call_method to be used directly e.g. for __setattr__.
     @_raise_hard_error_if_graph_break(
         "Dynamo cannot safely trace script object due to graph break."
     )
     def call_method(self, tx, name, args, kwargs):
-        if name == "__setattr__":
-            unimplemented("Setattr on script object is not safe.")
-        return super().call_method(tx, name, args, kwargs)
+        unimplemented("Setattr on script object is not safe.")

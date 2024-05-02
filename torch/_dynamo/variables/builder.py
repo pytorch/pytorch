@@ -891,17 +891,24 @@ class VariableBuilder:
                 ),
             )
         elif TorchScriptObjectVariable.is_matching_cls(type(value)):
-            from ..source import FlattenScriptObjectSource
+            from ..source import (
+                FlattenScriptObjectSource,
+                ScriptObjectQualifiedNameSource,
+            )
 
             # This exists to allow a smoother transition.
             # The script objects won't be tracked as proxies.
             # Methods on these objects won't show up in the graph.
             # The original script object might be mutated.
-            # TODO(yidi): gradually adding support for more script objects.
             if not hasattr(value, "__obj_flatten__"):
                 return self.wrap_user_defined(value)
 
-            # TODO:(yidi) also guard on the type of the script object
+            # Install the guards on the fully qualified name of the script object
+            LazyVariableTracker.realize_all(
+                VariableBuilder(self.tx, ScriptObjectQualifiedNameSource(self.source))(
+                    value._type().qualified_name()  # type: ignore[attr-defined]
+                )
+            )
             # Install the guards on the content of the script object by setting the source
             # to be FlattenScriptObjectSource, which calls __obj_flatten__() to get the contents.
             LazyVariableTracker.realize_all(
