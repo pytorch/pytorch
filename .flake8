@@ -54,6 +54,7 @@ per-file-ignores =
     torch/ao/quantization/fx/_decomposed.py: TOR901
     torch/distributed/_functional_collectives.py: TOR901
     torch/distributed/_spmd/data_parallel.py: TOR901
+    torch/distributed/_tensor/_collective_utils.py: TOR901
 optional-ascii-coding = True
 exclude =
     ./.git,
