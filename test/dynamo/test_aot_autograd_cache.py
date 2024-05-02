@@ -60,18 +60,19 @@ def get_post_autograd_graphs(fn, inps):
 class AOTAutogradSerializationTests(torch._dynamo.test_case.TestCase):
     def test_basic_serialize(self, device="cpu"):
         def fn(x, y):
-            return x.sin().cos() + y
+            return x.sin().sin() + y
 
         fw, _ = get_post_autograd_graphs(fn, [torch.randn(3), torch.randn(3)])
         fw_serialized = pickle.dumps(serialize_graph_module(fw))
-        # Use a empty FakeTensormode for testing for now
+        # Use a empty FakeTensormode for testing
+        # The fake tensor mode used is the same one in autograd in all runs
         with FakeTensorMode():
             new_fw = deserialize_graph_module(pickle.loads(fw_serialized))
         self.assertEqual(len(fw.graph.nodes), len(new_fw.graph.nodes))
-        for n1, n2 in zip(fw.graph.nodes, new_fw.graph.nodes):
-            self.assertEqual(n1.op, n2.op)
-            self.assertEqual(str(n1.target), str(n2.target))
-            self.assertEqual(len(n1.args), len(n2.args))
+        self.assertEqual(
+            fw.print_readable(print_output=False),
+            new_fw.print_readable(print_output=False),
+        )
 
 
 class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):

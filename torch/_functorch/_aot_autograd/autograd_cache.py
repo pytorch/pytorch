@@ -7,11 +7,11 @@ import dataclasses
 
 import functools
 import logging
+import operator
 import os
 import pickle
 import tempfile
-from copy import copy
-from typing import Any, cast, Dict, Optional, Str
+from typing import Any, cast, Dict, List, Optional
 
 import torch
 from torch._guards import detect_fake_mode
@@ -27,7 +27,7 @@ from torch._subclasses.fake_tensor import (
     FakeTensor,
     TensorMetadata,
 )
-from torch.fx.node import Node
+from torch.fx.node import _get_qualified_name, Node
 
 from .schemas import AOTConfig  # noqa: F401
 
@@ -42,7 +42,6 @@ def fake_tensor_from_meta(tensor_meta):
             torch.empty_strided(
                 tensor_meta.shape,
                 tensor_meta.stride,
-                device="meta",
                 dtype=tensor_meta.dtype,
                 requires_grad=tensor_meta.requires_grad,
             ),
@@ -178,7 +177,9 @@ def autograd_cache_hash(
 @dataclasses.dataclass
 class SerializedAOTGraphModule:
     module: torch.fx.GraphModule
-    node_metas: Dict[Str, Any]
+    node_metas: Dict[str, Any]
+    # A list of node names
+    node_names: List[str]
 
 
 @dataclasses.dataclass
@@ -193,7 +194,7 @@ class AOTAutogradCacheEntry:
 
 class NodeMetaSerializer:
     """
-    Convert a node's meta field into a pickleable dictionary
+    Convert a node's meta field into a pickleable dictionary and back
     """
 
     SERIALIZABLE_FIELDS = ["tensor_meta", "stack_trace", "seq_nr"]
@@ -227,31 +228,70 @@ class NodeMetaSerializer:
             return val
         return extract_tensor_metadata(val)
 
+    @staticmethod
+    def serialize_operator(op):
+        if isinstance(op, str):
+            return op
+        elif hasattr(op, "__module__"):
+            return _get_qualified_name(op)
+        else:
+            # TODO: handle other possible cases
+            raise BypassAOTAutogradCache(f"Don't know how to serialize operator {op}")
+
+    @staticmethod
+    def deserialize_operator(serialized_target: str):
+        # Weird case from _export/serde/serialize.py
+        if serialized_target.startswith("_operator"):
+            module = operator
+            serialized_target_names = serialized_target.split(".")[1:]
+        elif serialized_target.startswith("torch.nn"):
+            module = torch.nn
+            serialized_target_names = serialized_target.split(".")[2:]
+        elif serialized_target.startswith("torch"):
+            module = torch  # type: ignore[misc]
+            serialized_target_names = serialized_target.split(".")[1:]
+        else:
+            return serialized_target
+
+        target = module
+        for name in serialized_target_names:
+            if not hasattr(target, name):
+                return serialized_target
+            else:
+                target = getattr(target, name)
+        return target
+
+    @staticmethod
+    def serialize_source_fn_stack(source_fn_stack):
+        return [
+            (name, f"{NodeMetaSerializer.serialize_operator(target)}")
+            for (name, target) in source_fn_stack
+        ]
+
+    @staticmethod
+    def deserialize_source_fn_stack(source_fn_stack):
+        return [
+            (name, NodeMetaSerializer.deserialize_operator(target))
+            for (name, target) in source_fn_stack
+        ]
+
     """ TODO: implement serialization for these fields """
 
     @staticmethod
-    def serialize_source_fn_stack(val):
-        return None
+    def serialize_original_aten(original_aten):
+        return NodeMetaSerializer.serialize_operator(original_aten)
 
     @staticmethod
-    def deserialize_source_fn_stack(val):
-        return None
-
-    @staticmethod
-    def serialize_original_aten(val):
-        return None
-
-    @staticmethod
-    def deserialize_original_aten(val):
-        return None
+    def deserialize_original_aten(original_aten):
+        return NodeMetaSerializer.deserialize_operator(original_aten)
 
     @staticmethod
     def serialize_from_node(val):
-        return None
+        return NodeMetaSerializer.serialize_source_fn_stack(val)
 
     @staticmethod
     def deserialize_from_node(val):
-        return None
+        return NodeMetaSerializer.deserialize_source_fn_stack(val)
 
     @staticmethod
     def deserialize_val(val):
@@ -283,20 +323,30 @@ class NodeMetaSerializer:
 
 
 def serialize_graph_module(module: torch.fx.GraphModule) -> SerializedAOTGraphModule:
-    module = copy(module)
-    module.recompile()
+    """Converts a graph module to a pickeable format while preserving meta fields.
+    When copying a graph module, node names and meta fields aren't necessarily preserved,
+    but we want to make sure they're equivalent in our serialization, so we copy the results.
+    To do so, we need to preserve the node names and serialized meta fields in the serialized object.
+    Similarly, the class name is reset on any module copy, so we save the original class name on the module.
+    """
     node_metas = {}
+    node_names = []
     for node in module.graph.nodes:
-        node_metas[str(node.target)] = NodeMetaSerializer.serialize(node.meta)
-    assert len(module.graph.nodes) == len(node_metas)
-    return SerializedAOTGraphModule(module, node_metas)
+        node_names.append(str(node.name))
+        node_metas[str(node.name)] = NodeMetaSerializer.serialize(node.meta)
+    module._graphmodule_cls_name = module.__class__.__name__
+    return SerializedAOTGraphModule(module, node_metas, node_names)
 
 
 def deserialize_graph_module(module: SerializedAOTGraphModule) -> torch.fx.GraphModule:
+    """Deserialize a graph module, going through each node and updating old names and meta fields
+    TODO: this relies on the fact that the node list order is the same across serialization. How to improve?
+    """
     new_module = module.module
     node_metas = module.node_metas
-    for node in new_module.graph.nodes:
-        node.meta = NodeMetaSerializer.deserialize(node_metas[str(node.target)])
+    for old_name, node in zip(module.node_names, new_module.graph.nodes):
+        node._rename(old_name)
+        node.meta = NodeMetaSerializer.deserialize(node_metas[str(node.name)])
     new_module.recompile()
     return new_module
 
