@@ -9,6 +9,7 @@
 #endif
 
 #include <ATen/ATen.h>
+#include <ATen/BlasBackend.h>
 #include <ATen/DLConvertor.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/LegacyVmapMode.h>
@@ -1047,9 +1048,7 @@ PyObject* THPModule_setFlushDenormal(PyObject* _unused, PyObject* arg) {
 PyObject* THPModule_getDefaultDtype(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   auto scalar_type = torch::tensors::get_default_scalar_type();
-  auto dtype = (PyObject*)torch::getTHPDtype(scalar_type);
-  Py_INCREF(dtype);
-  return dtype;
+  return Py_NewRef(torch::getTHPDtype(scalar_type));
   END_HANDLE_TH_ERRORS
 }
 
@@ -1940,6 +1939,45 @@ Call this whenever a new thread is created in order to propagate values from
     return at::globalContext().linalgPreferredBackend();
   });
 
+  py::enum_<at::BlasBackend>(py_module, "_BlasBackend")
+      .value("Cublas", at::BlasBackend::Cublas)
+      .value("Cublaslt", at::BlasBackend::Cublaslt);
+
+  py_module.def("_set_blas_preferred_backend", [](at::BlasBackend b) {
+    at::globalContext().setBlasPreferredBackend(b);
+  });
+  py_module.def("_get_blas_preferred_backend", []() {
+    return at::globalContext().blasPreferredBackend();
+  });
+
+  py_module.def(
+      "_construct_storage_from_data_pointer",
+      [](int64_t data_ptr, c10::Device device, size_t size_bytes) {
+        return c10::Storage(
+            c10::Storage::use_byte_size_t(),
+            size_bytes,
+            // NOLINTNEXTLINE(performance-no-int-to-ptr)
+            at::DataPtr(reinterpret_cast<void*>(data_ptr), device));
+      });
+
+  py_module.def(
+      "_stash_obj_in_tls", [](const std::string& key, py::handle arg) {
+        at::impl::ThreadLocalPythonObjects::get_state().set(
+            key,
+            std::make_shared<c10::SafePyObject>(arg.ptr(), getPyInterpreter()));
+      });
+
+  py_module.def("_get_obj_in_tls", [](const std::string& key) -> py::handle {
+    auto safe_pyobject =
+        at::impl::ThreadLocalPythonObjects::get_state().get(key);
+    auto obj = safe_pyobject->ptr(getPyInterpreter());
+    return py::handle(obj);
+  });
+
+  py_module.def("_is_key_in_tls", [](const std::string& key) -> bool {
+    return at::impl::ThreadLocalPythonObjects::get_state().contains(key);
+  });
+
   py_module.def("_accelerator_hooks_device_count", []() {
     auto device_type = at::getAccelerator();
     if (device_type.has_value()) {
@@ -2003,34 +2041,6 @@ Call this whenever a new thread is created in order to propagate values from
             -1);
       },
       py::arg("check") = nullptr);
-
-  py_module.def(
-      "_construct_storage_from_data_pointer",
-      [](int64_t data_ptr, c10::Device device, size_t size_bytes) {
-        return c10::Storage(
-            c10::Storage::use_byte_size_t(),
-            size_bytes,
-            // NOLINTNEXTLINE(performance-no-int-to-ptr)
-            at::DataPtr(reinterpret_cast<void*>(data_ptr), device));
-      });
-
-  py_module.def(
-      "_stash_obj_in_tls", [](const std::string& key, py::handle arg) {
-        at::impl::ThreadLocalPythonObjects::get_state().set(
-            key,
-            std::make_shared<c10::SafePyObject>(arg.ptr(), getPyInterpreter()));
-      });
-
-  py_module.def("_get_obj_in_tls", [](const std::string& key) -> py::handle {
-    auto safe_pyobject =
-        at::impl::ThreadLocalPythonObjects::get_state().get(key);
-    auto obj = safe_pyobject->ptr(getPyInterpreter());
-    return py::handle(obj);
-  });
-
-  py_module.def("_is_key_in_tls", [](const std::string& key) -> bool {
-    return at::impl::ThreadLocalPythonObjects::get_state().contains(key);
-  });
 
 #ifdef USE_CUDA
   PyObject* has_cuda = Py_True;

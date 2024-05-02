@@ -1304,6 +1304,22 @@ class GraphModule(torch.nn.Module):
             self.assertEqual(fn(x), opt_fn(x))
             self.assertEqual(fn(x).requires_grad, opt_fn(x).requires_grad)
 
+    def test_inactive_context_graph_break(self):
+        def fn(x):
+            x = x + 1
+            ctx = torch.set_grad_enabled(True)
+            torch._dynamo.graph_break()
+            with ctx:
+                x = x + 1
+            return x
+
+        x = torch.zeros(10, requires_grad=False)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(fn(x).requires_grad, opt_fn(x).requires_grad)
+        self.assertEqual(cnts.frame_count, 2)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

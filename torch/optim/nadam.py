@@ -6,6 +6,7 @@ from .optimizer import (
     _capturable_doc,
     _default_to_fused_or_foreach,
     _differentiable_doc,
+    _disable_dynamo_if_unsupported,
     _dispatch_sqrt,
     _foreach_doc,
     _get_scalar_dtype,
@@ -258,6 +259,7 @@ NAdam.__doc__ = (
 )
 
 
+@_disable_dynamo_if_unsupported
 def nadam(
     params: List[Tensor],
     grads: List[Tensor],
@@ -576,13 +578,18 @@ def _multi_tensor_nadam(
         else:
             step_size_grads = _stack_if_compiling(
                 [
-                    (lr * (1.0 - mu) / (1.0 - _get_value(mu_product))) * -1
+                    (_get_value(lr) * (1.0 - mu) / (1.0 - _get_value(mu_product))) * -1
                     for mu_product, mu in zip(grouped_mu_products, mus)
                 ]
             )
             step_size_expavg = _stack_if_compiling(
                 [
-                    (lr * mu_next / (1.0 - _get_value(mu_product) * mu_next)) * -1
+                    (
+                        _get_value(lr)
+                        * mu_next
+                        / (1.0 - _get_value(mu_product) * mu_next)
+                    )
+                    * -1
                     for mu_product, mu_next in zip(grouped_mu_products, mu_nexts)
                 ]
             )
