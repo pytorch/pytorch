@@ -413,6 +413,9 @@ class FakeTensor(torch.Tensor):
     # Indicates to our torch_dispatch dispatching infra that
     # this is an "infra" mode with lower dispatching precedence.
     _mode_key = torch._C._TorchDispatchModeKey.FAKE
+    # Have a non-none source, set during fakification indicates that the
+    # faketensor is an input to the graph.
+    source = None
 
     @property
     def nonzero_memo(self):
@@ -719,16 +722,33 @@ class FakeTensor(torch.Tensor):
         return out
 
     def get_nested_int(self):
+        # Coeff is always 1 during lookup
         if self._nested_int_memo_vc != self._version:
             self._nested_int_memo = None
 
         if not self._nested_int_memo:
-            # We only reach here for intermediate offsets?
-            # we never look up nested int with coeff.
-            self._nested_int_memo = self.fake_mode.shape_env.create_unbacked_symint()
-            self._nested_int_memo_vc = self._version
-
+            if self.source is None:
+                # We only reach here for intermediate offsets?
+                self._nested_int_memo = self.fake_mode.shape_env.create_unbacked_symint()
+                self._nested_int_memo_vc = self._version
+            else:
+                hint = torch.nested._internal.nested_tensor.get_nested_symint(self, coeff=1, for_hint=True)
+                shape_env = self.fake_mode.shape_env
+                src = torch._dynamo.source.NestedIntSource(self.source)
+                self._nested_int_memo = shape_env.create_symintnode(
+                    sym=shape_env.create_symbol(
+                        val=hint,
+                        source=src,
+                    ),
+                    hint=hint,
+                    source=src,
+                    fake_tensor=self,
+                )
+                self._nested_int_memo_vc = self._version
         return self._nested_int_memo
+
+    def has_nested_int(self):
+        return self._nested_int_memo is not None and self._nested_int_memo_vc == self._version
 
     def set_nested_int(self, val):
         self._nested_int_memo = val

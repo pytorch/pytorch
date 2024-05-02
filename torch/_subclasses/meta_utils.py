@@ -1411,6 +1411,7 @@ class MetaConverter:
             self.set_tensor_memo(t, r)
 
             handle_union_find(t, r)
+            r.source = source
 
         return self.get_tensor_memo(t)
 

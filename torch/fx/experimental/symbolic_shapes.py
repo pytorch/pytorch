@@ -2896,6 +2896,7 @@ class ShapeEnv:
             source: Optional[Source] = None,
             metafy_fn: Optional[Callable] = None,
             nested_int: Optional[MetaNestedIntDesc] = None,
+            fake_tensor: Optional[torch.Tensor] = None,
     ):
         """Create a SymInt value from a symbolic expression
 
@@ -2925,10 +2926,14 @@ class ShapeEnv:
             out = int(sym)
         elif is_nested_int(hint):
             # See Note [Recursive fakification]
-            fake_vec = metafy_fn(
-                nested_int.tensor,
-                torch._dynamo.source.SymNodePropertySource(source, "get_tensor"),
-            )
+            if metafy_fn is not None:
+                fake_vec = metafy_fn(
+                    nested_int.tensor,
+                    torch._dynamo.source.SymNodePropertySource(source, "get_tensor"),
+                )
+            else:
+                assert fake_tensor is not None
+                fake_vec = fake_tensor
             coeff = hint.node.nested_int_coeff()
             nested_int = SymInt(
                 SymNode(
@@ -3564,6 +3569,9 @@ class ShapeEnv:
                         )
             else:
                 sources_tensors_constraints = [(source, t, context.constraint_sizes)]
+                # Assume t is Fake?
+                if t.has_nested_int():
+                    track_symint(torch._dynamo.source.NestedIntSource(source), t.get_nested_int())
 
             for src, curr_t, constraint in sources_tensors_constraints:
                 if is_sparse_any(curr_t):

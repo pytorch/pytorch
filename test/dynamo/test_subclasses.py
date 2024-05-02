@@ -1402,6 +1402,70 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         self.assertEqual(out1, out3)
         self.assertEqual(out1 * 4, out2)
 
+
+    def test_construct_from_jagged_with_offsets_from_inputs(self):
+        # Basic case
+        nt, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
+        nt2, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
+
+        def fn(values, offsets):
+            return torch.nested.nested_tensor_from_jagged(values * 2, offsets) * 2
+
+        values = nt.values().requires_grad_(True)
+        out = torch.compile(fn, fullgraph=True, backend="aot_eager")(values, nt.offsets())
+        ref_out = fn(values, nt.offsets())
+        grad, = torch.autograd.grad(out, inputs=(values,), grad_outputs=(torch.ones_like(out),))
+        ref_grad, = torch.autograd.grad(ref_out, inputs=(values,), grad_outputs=(torch.ones_like(ref_out),))
+        self.assertEqual(out, ref_out)
+        self.assertEqual(grad, ref_grad)
+
+        # Binary op
+        def fn(values, offsets, offsets2):
+            nt1 = torch.nested.nested_tensor_from_jagged(values * 2, offsets)
+            nt2 = torch.nested.nested_tensor_from_jagged(values * 3, offsets2)
+            return nt1 * nt2
+
+        out = torch.compile(fn, fullgraph=True, backend="aot_eager")(values, nt.offsets(), nt.offsets())
+        ref_out = fn(values, nt.offsets(), nt.offsets())
+        grad, = torch.autograd.grad(out, inputs=(values,), grad_outputs=(torch.ones_like(out),))
+        ref_grad, = torch.autograd.grad(ref_out, inputs=(values,), grad_outputs=(torch.ones_like(ref_out),))
+        self.assertEqual(out, ref_out)
+        self.assertEqual(grad, ref_grad)
+
+        # Not only do we recompile, we also error out on the recompile with
+        # an error message mentioning data-dependent-ness.
+        # with self.assertRaisesRegex(RuntimeError, "data-dependent"):
+        #     out = torch.compile(fn, fullgraph=True, backend="aot_eager")(values, nt.offsets(), nt2.offsets())
+
+        # values = values.detach()
+        # # Offsets which is an intermediate works without autograd
+        # def fn(values, offsets):
+        #     return torch.nested.nested_tensor_from_jagged(values * 2, offsets.clone()) * 2
+
+        # out = torch.compile(fn, fullgraph=True, backend="aot_eager")(values, nt.offsets())
+
+        # Mixed
+        values = nt.values().requires_grad_(True)
+        torch._dynamo.mark_dynamic(values, 0)
+
+        def fn(nt, values, offsets):
+            nt2 = torch.nested.nested_tensor_from_jagged(values, offsets)
+            return nt * nt2
+
+        out = torch.compile(fn, fullgraph=True, backend="aot_eager")(nt, values, nt.offsets())
+
+        # Mixed case with a merge outside region
+        union_find.merge(nt.offsets(), nt2.offsets())
+
+        def fn(nt, values, offsets):
+            nt2 = torch.nested.nested_tensor_from_jagged(values, offsets)
+            return nt * nt2
+
+        out = torch.compile(fn, fullgraph=True, backend="aot_eager")(nt2, values, nt.offsets())
+
+        # Issue, merges inside the region are traced away by aot autograd!
+
+
     # TODO: cannot parametrize this test class with device for some reason
     def _test_autograd(self, backend):
         a = torch.randn(2, 5, requires_grad=True, dtype=torch.float64)
