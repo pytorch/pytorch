@@ -6335,7 +6335,7 @@ def _infer_scalar_type(obj):
 # xref: recursive_store in torch/csrc/utils/tensor_new.cpp
 def _recursive_build(scalarType: torch.dtype, obj: TensorOrNumberLikeType):
     if isinstance(obj, Tensor) and obj.ndim <= 1:
-        return obj.to(dtype=scalarType, device='cpu', copy=True)
+        return obj.to(dtype=scalarType, device="cpu", copy=True)
     elif isinstance(obj, Number):
         return torch.scalar_tensor(obj, dtype=scalarType)
 
