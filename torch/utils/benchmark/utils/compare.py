@@ -305,6 +305,10 @@ class Compare:
         self._trim_significant_figures = True
 
     def colorize(self, rowwise=False):
+        """Colorize formatted table.
+        
+        Colorize columnwise by default.
+        """
         self._colorize = Colorize.ROWWISE if rowwise else Colorize.COLUMNWISE
 
     def highlight_warnings(self):
