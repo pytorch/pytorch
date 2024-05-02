@@ -479,6 +479,15 @@ class GuardBuilder(GuardBuilderBase):
         self.tensor_check_guard_managers: List[GuardManager] = []
 
         self.check_fn_manager: CheckFunctionManager = check_fn_manager
+
+        # Collect the ids of dicts which need key order guarding. source_name is
+        # not sufficient because for nn modules, we can have different sources
+        # to access the same object - self._module["param"] is same as
+        # self.param.
+        self.key_order_guarded_dict_ids = set()
+        for source_name in self.check_fn_manager.output_graph.guard_on_key_order:
+            self.key_order_guarded_dict_ids.add(id(self.get(source_name)))
+
         # Keep track of weak references of objects with ID_MATCH guard. This
         # info is stored alongside optimized_code and check_fn and is used to
         # limit the number of cache entries with same ID_MATCH'd object.
@@ -489,7 +498,7 @@ class GuardBuilder(GuardBuilderBase):
         if isinstance(dict_mgr, DictGuardManager):
             raise NotImplementedError(
                 "Not expecting a DictGuardManager. Seems like Dynamo incorrectly "
-                "added the dict to tx.output.guard_on_key_order"
+                f"added the dict to tx.output.guard_on_key_order for {guard.name}"
             )
 
         # Iterate over the dicts and install a dict_getitem_manager.
@@ -514,7 +523,7 @@ class GuardBuilder(GuardBuilderBase):
         if not isinstance(dict_mgr, DictGuardManager):
             raise NotImplementedError(
                 "Expecting a DictGuardManager. Seems like Dynamo forgot "
-                "to add the dict in tx.output.guard_on_key_order"
+                f"to set the right guard manager enum for {guard.name}"
             )
         assert isinstance(dict_mgr, DictGuardManager)
 
@@ -690,9 +699,16 @@ class GuardBuilder(GuardBuilderBase):
                 )
             return l1_mgr
 
+    def requires_key_order_guarding(self, source):
+        source_name = source.name()
+        if source_name == "":
+            return False
+        obj_id = id(self.get(source_name))
+        return obj_id in self.key_order_guarded_dict_ids
+
     def get_guard_manager_type(self, source, example_value):
         guard_manager_enum = GuardManagerType.GUARD_MANAGER
-        if source.name() in self.check_fn_manager.output_graph.guard_on_key_order:
+        if self.requires_key_order_guarding(source):
             assert isinstance(example_value, dict)
             # If keys method is not overriden, we can use PyDict_Next to get key
             # orderings. Read more in guards.cpp
@@ -1495,8 +1511,7 @@ class GuardBuilder(GuardBuilderBase):
 
         self._set_guard_export_info(guard, code)
         if config.enable_cpp_guard_manager:
-            dict_info = self.check_fn_manager.output_graph.guard_on_key_order
-            if guard.originating_source.name() in dict_info:
+            if self.requires_key_order_guarding(guard.originating_source):
                 self.guard_on_dict_keys_and_order(value, guard)
             else:
                 self.guard_on_dict_keys_and_ignore_order(value, guard)
@@ -1553,8 +1568,7 @@ class GuardBuilder(GuardBuilderBase):
         self._set_guard_export_info(guard, code)
 
         if config.enable_cpp_guard_manager:
-            dict_info = self.check_fn_manager.output_graph.guard_on_key_order
-            if guard.originating_source.name() in dict_info:
+            if self.requires_key_order_guarding(guard.originating_source):
                 self.guard_on_dict_keys_and_order(value, guard)
             else:
                 self.guard_on_dict_keys_and_ignore_order(value, guard)
@@ -1666,7 +1680,9 @@ class GuardBuilder(GuardBuilderBase):
                 self._produce_guard_code(guard, [shape_guard], shape_env=True)
 
     def TENSOR_MATCH(self, guard: Guard, value=None):
-        if guard.is_nn_module() or match_on_id_for_tensor(guard):
+        if (
+            not torch._dynamo.config.guard_nn_modules and guard.is_nn_module()
+        ) or match_on_id_for_tensor(guard):
             self.ID_MATCH(guard)
         else:
             if isinstance(value, TensorWeakRef):
