@@ -1,10 +1,16 @@
-from typing import runtime_checkable
+from typing import Optional, runtime_checkable
 
 from typing_extensions import Protocol
 
+from torch.distributed._state_dict_utils import (
+    _copy_state_dict,
+    _create_cpu_state_dict,
+    _offload_state_dict_to_cpu,
+)
+
 from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
 
-__all__ = ["AsyncStager"]
+__all__ = ["AsyncStager", "BlockingAsyncStager"]
 
 
 @runtime_checkable
@@ -59,5 +65,56 @@ class AsyncStager(Protocol):
         """
         In the case `stage` is async in some way, this method should be called to ensure staging
         is complete and it is safe to begin modifying the original `state_dict`
+        """
+        pass
+
+
+class BlockingAsyncStager(AsyncStager):
+    """
+    An implementation of AsyncStager which stages the state_dict on CPU RAM and blocks until the copy is complete.
+    This implementation also provides an option to optimize stage latency using pinned memory.
+
+    N.B. synchronize_staging is a no-op in this case.
+
+
+    """
+
+    # default to True since the common case is to stage synchronously
+    _synchronize_after_execute: bool = False
+
+    def __init__(
+        self,
+        cache_staged_state_dict: bool = False,
+        type_check: bool = False,
+    ):
+        """
+        Initializes the BlockingAsyncStager.
+
+        Args:
+            cache_staged_state_dict: Whether to cache the staged state_dict. This option decreases staging latency
+                at the cost of increases memory usage. Additionally, if this parameter is set to True, it's the expectation
+                that the stager is maintained and re-used for multiple dcp.async_save calls. Default to False.
+            type_check: Whether to perform a type check during cpu_offload. Defaults to False.
+
+        """
+        self.cache_staged_state_dict = cache_staged_state_dict
+        self.type_check = type_check
+        self.state_dict_cache: Optional[STATE_DICT_TYPE] = None
+
+    def stage(self, state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
+        """
+        Returns a copy of `state_dict` on the CPU.
+        """
+
+        if not self.cache_staged_state_dict:
+            return _offload_state_dict_to_cpu(state_dict, type_check=self.type_check)
+
+        if self.state_dict_cache is None:
+            self.state_dict_cache = _create_cpu_state_dict(state_dict, pin_memory=True)
+        return _copy_state_dict(state_dict, self.state_dict_cache)
+
+    def synchronize_staging(self) -> None:
+        """
+        No-op function, since staging is blocking.
         """
         pass
