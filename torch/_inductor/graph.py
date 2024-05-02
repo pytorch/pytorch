@@ -1580,7 +1580,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         log_module_code(mod.__file__)
         log.debug("Output code written to: %s", mod.__file__)
-        output_code_log.debug("Output code: \n%s", code)
+        # output_code_log.debug("Output code: \n%s", code)
         trace_structured(
             "inductor_output_code",
             lambda: {"filename": mod.__file__},

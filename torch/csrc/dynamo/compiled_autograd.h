@@ -11,6 +11,8 @@
 #include <torch/csrc/utils/torch_dispatch_mode.h>
 #include <typeindex>
 #include <vector>
+#include "c10/core/DeviceType.h"
+#include <iostream>
 
 // see [Note: Compiled Autograd]
 
@@ -140,6 +142,9 @@ struct TensorArgs {
   }
 
   TensorArg& add(const at::Tensor& tensor) {
+    if (tensor.defined() && tensor.device() == c10::kCPU) {
+      std::cout << "lifted cpu tensor, emplacing at idx=" << inputs.size() << std::endl;
+    }
     return lookup(tensor, true);
   }
 

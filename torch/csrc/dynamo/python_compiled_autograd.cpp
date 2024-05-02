@@ -229,6 +229,7 @@ struct CacheNode {
   std::vector<SizeInput> expected_sizes;
 
   THPObjectPtr compiled_fn;
+  std::function<void(std::vector<at::Tensor>&)> inputs_runtime_wrapper = [](std::vector<at::Tensor>&) {};
 };
 
 struct InputBuffers : public std::unordered_map<Node*, InputBuffer> {
@@ -369,9 +370,12 @@ CacheNode* _compiled_autograd_impl(
       CacheKey key = node_args.key();
       if (is_verbose_logging_enabled &&
           cache->lookup(key, /*create=*/false) == nullptr) {
-        vcout() << "Creating cache entry for " << fn->name()
+        vcout() << "cache miss for " << fn->name()
                 << ", with key of size " << key.key_size << std::endl;
       }
+      //  else {
+      //   std::cout << "cache hit for " << fn->name() << std::endl;
+      // }
       cache = cache->lookup(key);
     }
 
@@ -504,12 +508,26 @@ CacheNode* _compiled_autograd_impl(
       }
     }
 
-    cache->compiled_fn = check(call_end_capture(py_compiler, state.outputs));
+    PyObject* res = check(call_end_capture(py_compiler, state.outputs));
+    cache->compiled_fn = PyTuple_GetItem(res, 0);
+    PyObject* inputs_on_cpu = PyTuple_GetItem(res, 1);
+    TORCH_CHECK(PyList_Check(inputs_on_cpu));
+    std::vector<Py_ssize_t> _inputs_on_cpu;
+    for (Py_ssize_t i = 0; i < PyList_Size(inputs_on_cpu); i++) {
+      PyObject* idx = PyList_GetItem(inputs_on_cpu, i);
+      TORCH_CHECK(PyLong_Check(idx));
+      _inputs_on_cpu.emplace_back(PyLong_AsSsize_t(idx));
+    }
+    cache->inputs_runtime_wrapper =
+      [_inputs_on_cpu = std::move(_inputs_on_cpu)](std::vector<at::Tensor>& inputs) {
+        for (auto i : _inputs_on_cpu) {
+          std::cout << "moving inputs " << i << " to cuda" << std::endl;
+          inputs[i] = inputs[i].to(at::kCUDA);
+        }
+      };
     state.debug_asserts();
   } // End cache miss region
 
-  // TODO(jansel): we should release all the variables and then use a
-  //               boxed calling convention so activation memory can be freed
   // TODO(jansel): clear grads we will overwrite below
   if (!graph_task.keep_graph_) {
     for (auto& call : calls) {
@@ -517,6 +535,7 @@ CacheNode* _compiled_autograd_impl(
     }
   }
 
+  cache->inputs_runtime_wrapper(compiler_call.tensor_args.inputs);
   *graph_arg_inputs = THPVariable_WrapList(compiler_call.tensor_args.inputs);
   *graph_arg_sizes = wrap_int_list(compiler_call.dyn_size_inputs);
   *graph_arg_hooks = convert_hook_list(compiler_call.hooks);

@@ -2610,13 +2610,13 @@ def get_first_attr(obj, *attrs):
 
 
 @contextlib.contextmanager
-def maybe_enable_compiled_autograd(should_enable):
+def maybe_enable_compiled_autograd(should_enable, fullgraph=False, dynamic=False):
     def compiler_fn(gm):
         def inner_compiler(gm_, example_inputs_):
             torch._dynamo.utils.counters["compiled_autograd"]["compiles"] += 1
             return torch._inductor.compile(gm_, example_inputs_)
 
-        return torch.compile(gm, backend=inner_compiler, fullgraph=True, dynamic=True)
+        return torch.compile(gm, backend=inner_compiler, fullgraph=fullgraph, dynamic=dynamic)
 
     if should_enable:
         with torch._dynamo.compiled_autograd.enable(compiler_fn) as ctx:

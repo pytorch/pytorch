@@ -773,6 +773,7 @@ class CUDAGraphNode:
         ]
         self.tensor_weakrefs: OutputList[Optional[TensorWeakRef]] = []
 
+        # need to manage these
         # tensors which are outputs of previous graphs in the tree
         self.cudagraph_managed_idxs: List[int] = [
             idx
@@ -780,9 +781,11 @@ class CUDAGraphNode:
             if isinstance(t, torch.Tensor) and self._is_cuda_graph_recorded_tensor(t)
         ]
 
+        # relies on wrapped_function.static_input_idxs
         self.static_input_idxs: List[int] = list(
             set(wrapped_function.static_input_idxs) | set(self.cudagraph_managed_idxs)
         )
+        log.info(f"cudagraph_managed_idxs={len(self.cudagraph_managed_idxs)}, static_input_idxs={len(self.static_input_idxs)}")
 
         self.non_static_input_idx: LevelList[int] = [
             i for i in range(len(inputs)) if i not in self.static_input_idxs
@@ -925,8 +928,12 @@ class CUDAGraphNode:
         self.graph.replay()
 
     def _copy_inputs_and_remove_from_src(self, dsts, srcs):
+        log.info(f"_copy_inputs_and_remove_from_src srcs={len(srcs)}, dsts={len(dsts)}")
+        print(f"_copy_inputs_and_remove_from_src srcs={len(srcs)}, dsts={len(dsts)}")
         dst_tensors = []
         src_tensors = []
+        log.info(f"non_static_input_idx={self.non_static_input_idx}")
+        print(f"non_static_input_idx={self.non_static_input_idx}")
         for idx in self.non_static_input_idx:
             if not isinstance(srcs[idx], torch.Tensor):
                 continue
@@ -934,8 +941,11 @@ class CUDAGraphNode:
             dst_tensors.append(index_expanded_dims(dsts[idx], expanded_dims))
             src_tensors.append(index_expanded_dims(srcs[idx], expanded_dims))
             srcs[idx] = None
+        log.info(f"dst_tensors={len(dst_tensors)}, src_tensors={len(src_tensors)}")
+        print(f"dst_tensors={len(dst_tensors)}, src_tensors={len(src_tensors)}")
         # Fails on empty lists
-        if dst_tensors:
+        if dst_tensors:# and not torch._dynamo.compiled_autograd.compiled_autograd_enabled:
+            print("foreach copy :(")
             torch._foreach_copy_(dst_tensors, src_tensors)
 
     def check_static_inputs_are_stable(self, new_inputs):
@@ -1070,6 +1080,7 @@ class CUDAGraphNode:
         return output_storages
 
     def run_graph(self):
+        print("Cudagraph tree being replayed")
         assert self.graph is not None
         self.graph.replay()
 
@@ -1785,6 +1796,7 @@ class CUDAGraphTreeManager:
         self.running_forwards_with_pending_backwards = False
 
     def run(self, new_inputs: List[Tensor], function_id: FunctionID):
+        print(f"cudagraph tree manager running function {function_id}")
         assert self.graph is not None, "Running CUDAGraph after shutdown"
         out = self._run(new_inputs, function_id)
 

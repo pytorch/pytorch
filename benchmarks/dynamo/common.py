@@ -655,7 +655,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     tolerance = args.xla_tolerance if args.trace_on_xla else 1e-4
     torch._dynamo.config.repro_tolerance = tolerance
 
-    with maybe_profile(args.export_profiler_trace) as p:
+    with maybe_profile(args.export_profiler_trace, with_stack=args.profile_debug, record_shapes=args.profile_debug) as p:
         if args.export_aot_inductor:
             frozen_model_iter_fn = export_aot_inductor(
                 model, example_inputs, args.devices[0]
@@ -688,6 +688,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             # call mark_step between the 2 calls to make the comparison fair.
             maybe_mark_step(args)
 
+            print(f"running rep {rep}")
             with maybe_mark_profile(p=p, mark="actual"), maybe_enable_compiled_autograd(
                 args.compiled_autograd
             ):
@@ -2085,6 +2086,8 @@ class BenchmarkRunner:
                 self.autocast_arg["dtype"] = amp_dtype
 
     def init_optimizer(self, name, device, params):
+        self.optimizer = None
+        return
         if device == "cuda" and self.args.training and name not in CI_SKIP_OPTIMIZER:
             if (name in CI_USE_SGD and self.args.ci) or name in BENCHMARK_USE_SGD:
                 self.optimizer = torch.optim.SGD(params, lr=0.01, foreach=True)
@@ -2706,7 +2709,11 @@ class BenchmarkRunner:
                     torch.cuda.reset_peak_memory_stats()
                     torch.cuda.empty_cache()
                 t0 = time.perf_counter()
-                for _ in range(niters):
+                for i in range(niters):
+                    if mode == "dynamo":
+                        print(f"warm up iteration {i}")
+                        # if i == 2:
+                        #     breakpoint()
                     fn(model, example_inputs)
                 t1 = time.perf_counter()
                 latency = t1 - t0
@@ -3209,6 +3216,11 @@ def parse_args(args=None):
         "--export-profiler-trace",
         action="store_true",
         help="exports trace of kineto profiler",
+    )
+    parser.add_argument(
+        "--profile-debug",
+        action="store_true",
+        help="args.profile_debug",
     )
     parser.add_argument(
         "--profiler-trace-name",
