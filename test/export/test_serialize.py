@@ -51,16 +51,6 @@ def get_filtered_export_db_tests():
     ]
 
 
-def cleanup_op(opname):
-    ns, name = opname.split("::")
-    if not hasattr(torch.ops, ns):
-        return
-    actual_ns = getattr(torch.ops, ns)
-    if not hasattr(actual_ns, name):
-        return
-    delattr(actual_ns, name)
-
-
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSerialize(TestCase):
     def test_predispatch_export_with_autograd_op(self):
@@ -141,7 +131,7 @@ class TestSerialize(TestCase):
         inp = (torch.ones(10),)
         # Module will only be able to roundtrip if metadata
         # can be correctly parsed.
-        ep = export(MyModule(), inp).run_decompositions()
+        ep = export(MyModule(), inp)
         buffer = io.BytesIO()
         save(ep, buffer)
         loaded_ep = load(buffer)
@@ -194,7 +184,7 @@ class TestSerialize(TestCase):
                 torch.ones([512]),
                 torch.ones([512]),
             ),
-        ).run_decompositions()
+        )
 
         serialized = ExportedProgramSerializer().serialize(exported_module)
         node = serialized.exported_program.graph_module.graph.nodes[-1]
@@ -340,6 +330,17 @@ class TestSerialize(TestCase):
             g.nodes[0].inputs[0].arg.as_tensor.name,
             g.nodes[1].inputs[0].arg.as_tensor.name,
         )
+
+    def test_int_list(self) -> None:
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aten.sum.dim_IntList(x, [])
+
+        ep = torch.export.export(M(), (torch.randn(3, 2),))
+        serialized = ExportedProgramSerializer().serialize(ep)
+        for node in serialized.exported_program.graph_module.graph.nodes:
+            if "aten.sum.dim_IntList" in node.target:
+                self.assertEqual(node.inputs[1].arg.type, "as_ints")
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
@@ -493,9 +494,31 @@ class TestDeserialize(TestCase):
         else:
             _check_graph(pre_dispatch=False)
 
+    def test_optional_tuple(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor a, Tensor b, Tensor? c) -> (Tensor, Tensor?)",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            @torch.library.impl_abstract("mylib::foo")
+            def foo_impl(a, b, c):
+                res2 = None
+                if c is not None:
+                    res2 = c + a + b
+                return a + b, res2
+
+            class M(torch.nn.Module):
+                def forward(self, a, b, c):
+                    return torch.ops.mylib.foo(a, b, c)
+
+            self.check_graph(M(), (torch.randn(3), torch.randn(3), torch.randn(3)))
+
     def test_auto_functionalize(self):
-        try:
-            lib = torch.library.Library("mylib", "FRAGMENT")  # noqa: TOR901
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
                 "mylib::foo1",
                 "(Tensor(a!) x, Tensor[] y, Tensor(b!) z, SymInt w, Tensor n) -> Tensor",
@@ -550,10 +573,6 @@ class TestDeserialize(TestCase):
 
             # TODO Auto_functionalize is not supported on pre_dispatch IR
             self.check_graph(M(), orig_args, use_pre_dispatch=False)
-
-        finally:
-            cleanup_op("mylib::foo")
-            del lib
 
     def test_multi_return(self) -> None:
         """
@@ -697,10 +716,7 @@ class TestDeserialize(TestCase):
         self.check_graph(g, inputs, _check_meta=False)
 
     def test_tensor_tensor_list(self):
-        try:
-            from torch.library import Library
-
-            lib = Library("_export", "FRAGMENT")  # noqa: TOR901
+        with torch.library._scoped_library("_export", "FRAGMENT") as lib:
             lib.define(
                 "_test_tensor_tensor_list_output(Tensor x, Tensor y) -> (Tensor, Tensor[])",
                 tags=torch.Tag.pt2_compliant_tag,
@@ -728,10 +744,6 @@ class TestDeserialize(TestCase):
                     return a + b[0]
 
             self.check_graph(M(), (torch.rand(3, 2), torch.rand(3, 2)))
-
-        finally:
-            cleanup_op("_export::_test_tensor_tensor_list_output")
-            del lib
 
     def test_list_of_optional_tensors(self) -> None:
         class MyModule(torch.nn.Module):
@@ -771,7 +783,7 @@ class TestDeserialize(TestCase):
         class Module(torch.nn.Module):
             def forward(self, x, y):
                 n = x.item()
-                torch._constrain_as_size(n, min=2)
+                torch._check_is_size(n)
                 return y.sum() + torch.ones(n, 5).sum()
 
         f = Module()
