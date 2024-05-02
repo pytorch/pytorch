@@ -147,7 +147,7 @@ class DefaultLoadPlanner(LoadPlanner):
 
     flatten_state_dict: Handle state_dict with nested dicts
     flatten_sharded_tensors: For FSDP in 2D parallel mode
-    strict: If True, will raise a runtime error if a key is present in state_dict, but not in
+    allow_partial_load: If False, will raise a runtime error if a key is present in state_dict, but not in
         the checkpoint.
     """
 
@@ -158,13 +158,13 @@ class DefaultLoadPlanner(LoadPlanner):
         self,
         flatten_state_dict: bool = True,
         flatten_sharded_tensors: bool = True,
-        strict: bool = False,
+        allow_partial_load: bool = False,
     ) -> None:
         self.flatten_state_dict = flatten_state_dict
         self.flatten_sharded_tensors = flatten_sharded_tensors
         self.original_state_dict = {}
         self.mappings = {}
-        self.strict = strict
+        self.allow_partial_load = allow_partial_load
 
     def set_up_planner(
         self,
@@ -187,7 +187,7 @@ class DefaultLoadPlanner(LoadPlanner):
 
     def create_local_plan(self) -> LoadPlan:
         return create_default_local_load_plan(
-            self.state_dict, self.metadata, self.strict
+            self.state_dict, self.metadata, not self.allow_partial_load
         )
 
     def create_global_plan(self, global_plan: List[LoadPlan]) -> List[LoadPlan]:

@@ -350,14 +350,14 @@ class TestLoadPlanner(TestCase):
         dcp.load(
             state_dict={"module": new_module},
             checkpoint_id=self.temp_dir,
-            planner=DefaultLoadPlanner(strict=False),
+            planner=DefaultLoadPlanner(allow_partial_load=True),
         )
 
         with self.assertRaisesRegex(CheckpointException, "Missing key in checkpoint"):
             dcp.load(
                 state_dict={"module": new_module},
                 checkpoint_id=self.temp_dir,
-                planner=DefaultLoadPlanner(strict=True),
+                planner=DefaultLoadPlanner(allow_partial_load=False),
             )
 
 
