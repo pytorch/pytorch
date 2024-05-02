@@ -214,14 +214,14 @@ class Transformer(nn.Module):
         # Parallelize the root submodules.
         if use_seq_parallel:
             root_plan = {
-                "tok_embeddings": ColwiseParallel(output_layouts=Shard(1)),
-                "pos_embeddings": ColwiseParallel(output_layouts=Shard(0)),
+                "tok_embeddings": RowwiseParallel(input_layouts=Replicate(), output_layouts=Shard(1)),
+                "pos_embeddings": RowwiseParallel(input_layouts=Replicate(), output_layouts=Shard(0)),
                 "norm": SequenceParallel(),
             }
         else:
             root_plan = {
-                "tok_embeddings": ColwiseParallel(output_layouts=Replicate()),
-                "pos_embeddings": ColwiseParallel(output_layouts=Replicate()),
+                "tok_embeddings": RowwiseParallel(input_layouts=Replicate(), output_layouts=Replicate()),
+                "pos_embeddings": RowwiseParallel(input_layouts=Replicate(), output_layouts=Replicate()),
             }
 
         module_tp = parallelize_module(module, device_mesh, root_plan)
@@ -261,25 +261,14 @@ class Transformer(nn.Module):
         # Parallelize the output submodule. If weight tying is enabled, we need to
         # make sure output.weight is sharded consistently as tok_embeddings.weight,
         # at the cost of the all_reduce operation using RowwiseParallel.
-        output_parallelize_plan = None
-        if not module_tp.model_args.weight_tying:
-            output_parallelize_plan = (
-                ColwiseParallel(
-                    input_layouts=Shard(1),
-                    output_layouts=Replicate(),
-                )
-                if use_seq_parallel
-                else ColwiseParallel(output_layouts=Replicate())
+        output_parallelize_plan = (
+            ColwiseParallel(
+                input_layouts=Shard(1),
+                output_layouts=Replicate(),
             )
-        else:
-            output_parallelize_plan = (
-                RowwiseParallel(
-                    input_layouts=Shard(1),
-                    output_layouts=Replicate(),
-                )
-                if use_seq_parallel
-                else RowwiseParallel(input_layouts=Replicate())
-            )
+            if use_seq_parallel
+            else ColwiseParallel(output_layouts=Replicate())
+        )
         parallelize_module(module_tp.output, device_mesh, output_parallelize_plan)
 
         # Do manual setup on features that DTensor does not support yet.
