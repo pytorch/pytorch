@@ -345,7 +345,6 @@ def mps_ops_modifier(ops):
         'any',
         'addcdiv',
         'addcmul',
-        'argwhere',
         'asin',
         'atan',
         'atanh',
