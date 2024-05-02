@@ -125,7 +125,11 @@ inline __host__ __device__ uint32_t getAlignmentRoundUp(const void* p) {
   return diff == 0 ? 0 : uint32_t(Align) - diff;
 }
 
+#if defined(USE_ROCM)
+constexpr int32_t kWarpSize = __AMDGCN_WAVEFRONT_SIZE;
+#else
 constexpr int32_t kWarpSize = 32;
+#endif
 
 #if (defined(CUDA_VERSION) && CUDA_VERSION >= 12000) && (!defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800))
 // f16 vector types

@@ -122,8 +122,12 @@ struct AttentionKernel {
   static_assert(kKeysPerBlock % 32 == 0, "");
   static constexpr int kNumWarpsPerBlock =
       kQueriesPerBlock * kKeysPerBlock / (32 * 32);
+  
+#if defined(USE_ROCM)
+  static constexpr int kWarpSize = __AMDGCN_WAVEFRONT_SIZE;
+#else
   static constexpr int kWarpSize = 32;
-
+#endif
   // Launch bounds
   static constexpr int kNumThreads = kWarpSize * kNumWarpsPerBlock;
   static constexpr int kMinBlocksPerSm =

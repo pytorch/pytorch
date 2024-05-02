@@ -10,7 +10,11 @@ namespace intra_node_comm {
 static constexpr size_t kBytesPerThread = 16;
 static constexpr size_t kMaxAllReduceBlocks = 24;
 static constexpr size_t kThreadsPerBlock = 1024;
+#if defined(USE_ROCM)
+static constexpr size_t kWarpSize = __AMDGCN_WAVEFRONT_SIZE;
+#else
 static constexpr size_t kWarpSize = 32;
+#endif
 
 static constexpr size_t kHcmThreshBytes = 256 * 1024;
 static constexpr size_t kOneShotThreshBytes = 256 * 1024;

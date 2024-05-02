@@ -242,8 +242,11 @@ struct AttentionBackwardKernel {
   static constexpr bool kKeysQueriesAlignedToBlockSize =
       kKeysQueriesAlignedToBlockSize_;
 
+#if defined(USE_ROCM) 
+  static constexpr int64_t kWarpSize = __AMDGCN_WAVEFRONT_SIZE;
+#else
   static constexpr int64_t kWarpSize = 32;
-
+#endif
   // If this is true, we store and accumulate dK/dV in RF
   // rather than going back to gmem everytime
   static constexpr bool kIsHalf = cutlass::sizeof_bits<scalar_t>::value <= 16;
