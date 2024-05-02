@@ -945,8 +945,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     // position of the first key token for batch $b
     const c10::optional<at::Tensor>& seqstart_k,
     // (Mode 1MHK only) Maximum sequence length across batches
-    const c10::optional<int64_t> max_seqlen_q_,
-    const c10::optional<int64_t> max_seqlen_k_,
+    const c10::optional<c10::SymInt> max_seqlen_q_,
+    const c10::optional<c10::SymInt> max_seqlen_k_,
     double dropout_p, // attention matrix dropout probability
     int64_t custom_mask_type,
     bool compute_logsumexp,
