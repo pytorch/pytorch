@@ -3013,7 +3013,7 @@ if (
     # TODO(jansel): do we need a version of warm_pool for threads?
     or config.worker_start_method == "thread"
     # TODO(jansel): warm pool is broken, need to fix it
-    or config.worker_start_method == "subproc"
+    or config.worker_start_method == "subprocess"
 ):
     pass
 elif sys.version_info >= (3, 12):
