@@ -1316,7 +1316,6 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
   }
 
  private:
-  long unsigned int _num_tensors;
   py::list _tensor_names;
   ska::flat_hash_map<PyObject*, std::nullptr_t> _unique_tensors;
   long unsigned int _counter = 0;
