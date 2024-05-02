@@ -67,7 +67,8 @@ extern_kernels = KernelNamespace()
 @functools.lru_cache(None)
 def warn_ast_parse_3_11():
     log.warning(
-        "Skipping parallel precompilation of triton max-autotune templates due to https://github.com/python/cpython/issues/106905. Update python 3.11 version past 3.11.8 to reenable."
+        "Skipping parallel precompilation of triton max-autotune templates due to https://github.com/python/cpython/issues/106905. "
+        "Update python 3.11 version past 3.11.8 to reenable."
     )
 
 
