@@ -3,7 +3,6 @@
 import contextlib
 import functools
 import logging
-import opcode
 import sys
 import types
 
@@ -28,7 +27,11 @@ from torch._ops import HigherOrderOperator
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.utils import _pytree as pytree
 from .. import variables
-from ..bytecode_transformation import Instruction, transform_code_object
+from ..bytecode_transformation import (
+    create_instruction,
+    Instruction,
+    transform_code_object,
+)
 
 from ..exc import UncapturedHigherOrderOpError, unimplemented, Unsupported
 from ..source import AttrSource
@@ -1175,6 +1178,7 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         "RAISE_VARARGS",
         "SETUP_FINALLY",
         "POP_EXCEPT",
+        "PUSH_EXC_INFO",
         # TODO: Nested loops are not supported for now.
         # We can support them by recursively calling this translation every time
         # for each nested loop, from the innermost loop to the outermost.
@@ -1191,6 +1195,7 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # right RETURN_VALUEs (see code below for how to do that).
         "JUMP_BACKWARD",
         "JUMP_ABSOLUTE",
+        "JUMP_FORWARD",
         # list, set, dictionary comprehensions
         "LIST_APPEND",
         "SET_ADD",
@@ -1235,6 +1240,8 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
             raise CannotConvertRangeToHigherOrder(
                 "Control flow too complex for loop higher order op."
             )
+        if any(op.exn_tab_entry for op in loop_body_instructions):
+            raise CannotConvertRangeToHigherOrder("Contains exception handling code.")
         varnames = host_code_object.co_varnames
         args = [
             symbolic_locals.get(k)
@@ -1246,7 +1253,7 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         assert loop_body_instructions[0].opname == "STORE_FAST"
         co_code: List[Instruction] = []
         if sys.version_info >= (3, 11):
-            co_code.append(Instruction(opcode.opmap["RESUME"], "RESUME", 0, None))
+            co_code.append(create_instruction("RESUME", arg=0))
             # Note: generators and async need a preceding RETURN_GENERATOR
             # too, but we already blocked that by blocking YIELD_VALUE, so this
             # is in essence a "pure" function.
@@ -1259,18 +1266,11 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # We need to replace the last `JUMP_BACKWARD` with a RETURN_VALUE of all
         # the locals.
         for i in range(host_code_object.co_nlocals):
-            co_code.append(
-                Instruction(opcode.opmap["LOAD_FAST"], "LOAD_FAST", i, varnames[i])
-            )
+            co_code.append(create_instruction("LOAD_FAST", arg=i))
         co_code.extend(
             (
-                Instruction(
-                    opcode.opmap["BUILD_TUPLE"],
-                    "BUILD_TUPLE",
-                    host_code_object.co_nlocals,
-                    None,
-                ),
-                Instruction(opcode.opmap["RETURN_VALUE"], "RETURN_VALUE", 0, None),
+                create_instruction("BUILD_TUPLE", arg=host_code_object.co_nlocals),
+                create_instruction("RETURN_VALUE", arg=0),
             )
         )
 

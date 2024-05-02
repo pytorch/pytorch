@@ -6387,6 +6387,45 @@ class GraphModule(torch.nn.Module):
         # Just not crashing is good enough.
         self.assertEqual(result, f(x))
 
+    def test_loop_to_higher_order_reject_exceptions(self):
+        counters.clear()
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+
+        def f(x):
+            try:
+                for _ in range(10):
+                    x += x
+                return x
+            except Exception:
+                pass
+
+        x = torch.tensor(1)
+        f = torch._dynamo.optimize(cnt)(f)
+        result = f(x)
+        self.assertEqual(result, f(x))
+        # Note: no converted loop body!
+        self.assertExpectedInline(
+            normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        l_x_ = L_x_
+
+        l_x_ += l_x_;  x = l_x_;  l_x_ = None
+        x += x;  x_1 = x;  x = None
+        x_1 += x_1;  x_2 = x_1;  x_1 = None
+        x_2 += x_2;  x_3 = x_2;  x_2 = None
+        x_3 += x_3;  x_4 = x_3;  x_3 = None
+        x_4 += x_4;  x_5 = x_4;  x_4 = None
+        x_5 += x_5;  x_6 = x_5;  x_5 = None
+        x_6 += x_6;  x_7 = x_6;  x_6 = None
+        x_7 += x_7;  x_8 = x_7;  x_7 = None
+        x_8 += x_8;  x_9 = x_8;  x_8 = None
+        return (x_9,)
+""",
+        )
+
     @torch._dynamo.config.patch(
         convert_for_loops_to_functions=True, for_loop_medium_size_boundary=10
     )
