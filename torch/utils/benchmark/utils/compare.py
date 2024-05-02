@@ -301,7 +301,7 @@ class Compare:
         self._results.extend(results)
 
     def trim_significant_figures(self):
-        """Enable trimming of significant figures when building the formatted table"""
+        """Enables trimming of significant figures when building the formatted table."""
         self._trim_significant_figures = True
 
     def colorize(self, rowwise=False):
@@ -312,6 +312,7 @@ class Compare:
         self._colorize = Colorize.ROWWISE if rowwise else Colorize.COLUMNWISE
 
     def highlight_warnings(self):
+        """Enables warning highlighting when building formatted table."""
         self._highlight_warnings = True
 
     def print(self):
