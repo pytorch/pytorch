@@ -1,5 +1,7 @@
 import weakref
 
+from typing import Set
+
 import torch
 from torch.autograd.graph import register_multi_grad_hook
 from torch.nn.modules.module import (
@@ -8,7 +10,6 @@ from torch.nn.modules.module import (
 )
 from torch.utils._pytree import tree_flatten
 
-from typing import Set
 
 class ModuleTracker:
     """
