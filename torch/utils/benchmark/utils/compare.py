@@ -294,7 +294,7 @@ class Compare:
 
     def extend_results(self, results):
         """Append results to already stored ones.
-        
+
         All added results must be instances of ``Measurement``.
         """
         for r in results:
@@ -310,7 +310,7 @@ class Compare:
 
     def colorize(self, rowwise=False):
         """Colorize formatted table.
-        
+
         Colorize columnwise by default.
         """
         self._colorize = Colorize.ROWWISE if rowwise else Colorize.COLUMNWISE
