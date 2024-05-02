@@ -124,7 +124,7 @@ def _check_for_seq_len_0_and_consistent_head_dim_nested_helper(
         return False
 
     # This is being called inside sdp with shape [batch, heads, {seq_len}, dim]
-    if param._min_seqlen == 0:
+    if param.min_seqlen() == 0:
         if debug:
             log.warning(
                 "Fused kernels do not support seq_len == 0, %s has a seq len of 0.",
@@ -314,7 +314,7 @@ def _cumulative_and_max_seq_len_nnz(qkv: torch.Tensor) -> Tuple[torch.Tensor, in
     if qkv.lengths() is None:
         # TODO: Explore performance impact of copying
         cumulative_seqlen = qkv.offsets().to(dtype=torch.int32, device=qkv.device)
-        max_seqlen = qkv._max_seqlen
+        max_seqlen = qkv.max_seqlen()
         n_elem = qkv.values().shape[0]
     else:
         # TODO: Explore performance impact of copying
@@ -322,7 +322,7 @@ def _cumulative_and_max_seq_len_nnz(qkv: torch.Tensor) -> Tuple[torch.Tensor, in
             qkv.lengths().cumsum(0).to(dtype=torch.int32, device=qkv.device)
         )
         batch_size = qkv.size(0)
-        max_seqlen = qkv._max_seqlen
+        max_seqlen = qkv.max_seqlen()
         # TODO: Explore performance impact when compiling
         n_elem = int(cumulative_seqlen[-1].item())
     return cumulative_seqlen, max_seqlen, n_elem
@@ -566,8 +566,8 @@ def _sdpa_nested_preprocessing(query, key, value):
 
     output_nt_info = {
         "offsets": q_t.offsets(),
-        "_max_seqlen": q_t._max_seqlen,
-        "_min_seqlen": q_t._min_seqlen,
+        "_max_seqlen": q_t.max_seqlen(),
+        "_min_seqlen": q_t.min_seqlen(),
     }
 
     return (
@@ -753,8 +753,10 @@ def jagged_scaled_dot_product_attention(
         d1 = query._size[1]
         d2 = value._size[-1]
 
-        min_seqlen = query._metadata_cache.get("min_seqlen", -1)  # type: ignore[attr-defined]
-        max_seqlen = query._metadata_cache.get("max_seqlen", -1)  # type: ignore[attr-defined]
+        min_seqlen_tensor = query._metadata_cache.get(
+            "min_seqlen", None)  # type: ignore[attr-defined]
+        max_seqlen_tensor = query._metadata_cache.get(
+            "max_seqlen", None)  # type: ignore[attr-defined]
 
         # convert jagged layout Nested Tensor to strided layout Nested Tensor
         # which support the math implementation of SDPA
@@ -774,14 +776,16 @@ def jagged_scaled_dot_product_attention(
             query, key, value, attn_mask, dropout_p, is_causal, scale=scale
         )[0]
 
+        from torch.nested._internal.nested_tensor import nested_view_from_values_offsets
+
         # convert strided layout Nested Tensor back to jagged layout Nested Tensor
         attn_out = attn_out.transpose(1, 2).contiguous().values()
         attn_out = attn_out.view(-1, d1, d2)
         attn_out = nested_view_from_values_offsets(
             attn_out,
             offsets,
-            min_seqlen=min_seqlen,
-            max_seqlen=max_seqlen,
+            min_seqlen=(None if min_seqlen_tensor is None else min_seqlen_tensor.shape[0]),
+            max_seqlen=(None if max_seqlen_tensor is None else max_seqlen_tensor.shape[0]),
         ).transpose(1, 2)
 
         return attn_out
