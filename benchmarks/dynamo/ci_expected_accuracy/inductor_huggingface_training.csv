@@ -110,7 +110,7 @@ MBartForConditionalGeneration,pass,24
 
 
 
-MT5ForConditionalGeneration,pass,6
+MT5ForConditionalGeneration,pass,5
 
 
 
@@ -122,11 +122,11 @@ MegatronBertForQuestionAnswering,pass,5
 
 
 
-MobileBertForMaskedLM,pass,4
+MobileBertForMaskedLM,pass,3
 
 
 
-MobileBertForQuestionAnswering,pass,4
+MobileBertForQuestionAnswering,pass,3
 
 
 
@@ -162,11 +162,11 @@ Speech2Text2ForCausalLM,pass,12
 
 
 
-T5ForConditionalGeneration,pass,6
+T5ForConditionalGeneration,pass,5
 
 
 
-T5Small,pass,6
+T5Small,pass,5
 
 
 
@@ -178,8 +178,8 @@ XGLMForCausalLM,pass,12
 
 
 
-XLNetLMHeadModel,pass,6
+XLNetLMHeadModel,pass,5
 
 
 
-YituTechConvBert,pass,6
+YituTechConvBert,pass,5
