@@ -1272,14 +1272,10 @@ class TENSOR_ALIASING : public RelationalGuard {
  */
 class NO_TENSOR_ALIASING : public RelationalGuard {
  public:
-  NO_TENSOR_ALIASING(
-      long unsigned int num_tensors,
-      py::object tensor_names,
-      py::object verbose_code_parts)
+  NO_TENSOR_ALIASING(py::list tensor_names, py::object verbose_code_parts)
       : RelationalGuard(std::move(verbose_code_parts)),
-        _num_tensors(num_tensors),
-        _tensor_names(std::move(tensor_names)) {
-    _unique_tensors.reserve(num_tensors);
+        _tensor_names(tensor_names) {
+    _unique_tensors.reserve(tensor_names.size());
   }
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
@@ -1305,9 +1301,6 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
     if (!result) {
       std::stringstream fail_reason;
       fail_reason << "Duplicate tensor found where not expected! ";
-      fail_reason << py::cast<std::string>(_tensor_names[_counter])
-                  << " should not alias to anything, but is aliased."
-                  << " Total number of tensors are " << _num_tensors;
       return GuardDebugInfo(false, fail_reason.str(), 0);
     }
     _counter += 1;
@@ -3238,9 +3231,7 @@ void install_no_tensor_aliasing_guard(
   // relational guard. There is one guard object that is shared between multiple
   // guard managers.
   std::shared_ptr<RelationalGuard> guard = std::make_shared<NO_TENSOR_ALIASING>(
-      guard_managers.size(),
-      std::move(tensor_names),
-      std::move(verbose_code_parts));
+      std::move(tensor_names), std::move(verbose_code_parts));
 
   // Register the resetter on the toor gaurd mananger, so that it can reset
   // the newly added relational guard when the guard eval fails.
