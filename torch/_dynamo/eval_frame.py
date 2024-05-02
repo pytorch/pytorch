@@ -357,11 +357,6 @@ class _TorchDynamoContext:
             filename = inspect.getsourcefile(fn)
         except TypeError:
             filename = None
-        was_created_in_exec_eval = (
-            hasattr(fn, "__code__")
-            and fn.__code__.co_filename == "<string>"
-            and fn.__code__.f_globals.get("__compile_source__") is not None
-        )
         if (
             (filename is None or trace_rules.check(fn))
             and (
@@ -369,7 +364,7 @@ class _TorchDynamoContext:
                 not in ["_call_impl", "_wrapped_call_impl", "_lazy_forward"]
             )
             and filename not in DONT_WRAP_FILES
-            and not was_created_in_exec_eval
+            and not (hasattr(fn, "__code__") and fn.__code__.co_filename == "<string>")
         ):
             # call to a builtin without a frame for us to capture
             fn = external_utils.wrap_inline(fn)
