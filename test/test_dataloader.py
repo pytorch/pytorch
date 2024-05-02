@@ -1375,21 +1375,19 @@ except RuntimeError as e:
     def test_no_shuffle_preserves_RNG_state(self):
         seed_reset = torch.seed()
 
-        try:
-            torch.manual_seed(seed_reset)
-            before = torch.randint(0, 200, (1, )).item()
+        # Test the global seed
+        torch.manual_seed(seed_reset)
+        before = torch.randint(0, 200, (1,)).item()
 
-            torch.manual_seed(seed_reset)
-            data = torch.arange(100)
-            dl = DataLoader(data, batch_size=4, shuffle=False)
-            iter(dl)
-            after = torch.randint(0, 200, (1, )).item()
+        torch.manual_seed(seed_reset)
+        data = torch.arange(100)
+        dl = DataLoader(data, batch_size=4, shuffle=False)
+        iter(dl)
+        after = torch.randint(0, 200, (1,)).item()
 
-            self.assertEqual(before, after)
+        self.assertEqual(before, after)
 
-        finally:
-            torch.manual_seed(seed_reset)
-
+        # Test with a generator
         generator = torch.Generator()
         generator.manual_seed(seed_reset)
         data = torch.arange(100)
