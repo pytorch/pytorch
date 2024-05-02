@@ -31,7 +31,9 @@ PackedTensorAccessor32<scalar_t, ndim, PtrTraits> dummy_packed_accessor32() {
 
 template <typename scalar_t, typename index_t>
 __global__ void
-__launch_bounds__(at::cuda::detail::CUDA_NUM_THREADS, 2)
+#if !defined(USE_ROCM)
+C10_LAUNCH_BOUNDS_1(at::cuda::detail::CUDA_NUM_THREADS)
+#endif
 conv_depthwise2d_forward_kernel_generic(
     const PackedTensorAccessor32<const scalar_t, 4, DefaultPtrTraits> input,
     PackedTensorAccessor32<scalar_t, 4, DefaultPtrTraits> output,
@@ -138,7 +140,9 @@ conv_depthwise2d_forward_kernel_generic(
 
 template <int kSize, typename scalar_t, typename index_t>
 __global__ void
-__launch_bounds__(at::cuda::detail::CUDA_NUM_THREADS, 2)
+#if !defined(USE_ROCM)
+C10_LAUNCH_BOUNDS_1(at::cuda::detail::CUDA_NUM_THREADS)
+#endif
 conv_depthwise2d_forward_kernel(
     const PackedTensorAccessor32<const scalar_t, 4, DefaultPtrTraits> input,
     PackedTensorAccessor32<scalar_t, 4, DefaultPtrTraits> output,
