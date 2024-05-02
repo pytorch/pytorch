@@ -5522,6 +5522,15 @@ class FallbackKernel(ExternKernelAlloc):
         if kernel.namespace == "aten":  # type: ignore[union-attr]
             # Aten Fallback Ops
             assert isinstance(kernel, torch._ops.OpOverload)
+
+            if (
+                kernel == aten.mul.Tensor
+                and len(self.inputs) == 1
+                and len(self.constant_args) == 1
+            ):
+                # When aten.mul.Tensor's second arg is constant, cpp wrapper expects to call mul_Scalar
+                kernel = aten.mul.Scalar
+
             if V.graph.cpp_wrapper:
                 if (
                     config.is_fbcode()
