@@ -205,8 +205,8 @@ class SavePlanner(abc.ABC):
     def set_up_planner(
         self,
         state_dict: STATE_DICT_TYPE,
-        storage_meta: Optional[StorageMeta],
-        is_coordinator: bool,
+        storage_meta: Optional[StorageMeta] = None,
+        is_coordinator: bool = False,
     ) -> None:
         """
         Initialize this planner to save ``state_dict``.
@@ -349,8 +349,8 @@ class LoadPlanner:
     def set_up_planner(
         self,
         state_dict: STATE_DICT_TYPE,
-        metadata: Metadata,
-        is_coordinator: bool,
+        metadata: Optional[Metadata] = None,
+        is_coordinator: bool = False,
     ) -> None:
         """
         Initialize this instance to load data into ``state_dict``.

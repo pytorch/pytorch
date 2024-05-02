@@ -82,8 +82,8 @@ class DefaultSavePlanner(SavePlanner):
     def set_up_planner(
         self,
         state_dict: STATE_DICT_TYPE,
-        storage_meta: Optional[StorageMeta],
-        is_coordinator: bool,
+        storage_meta: Optional[StorageMeta] = None,
+        is_coordinator: bool = False,
     ) -> None:
         if self.flatten_state_dict:
             state_dict, self.mappings = flatten_state_dict(state_dict)
@@ -171,8 +171,8 @@ class DefaultLoadPlanner(LoadPlanner):
     def set_up_planner(
         self,
         state_dict: STATE_DICT_TYPE,
-        metadata: Metadata,
-        is_coordinator: bool,
+        metadata: Optional[Metadata] = None,
+        is_coordinator: bool = False,
     ) -> None:
         _init_state_dict(state_dict)
         self.original_state_dict = state_dict
