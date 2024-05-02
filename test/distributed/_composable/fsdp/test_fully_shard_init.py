@@ -725,5 +725,69 @@ class TestFullyShardProcessGroupInit(FSDPTestMultiThread):
             self.assertEqual(param.grad, ref_param.grad)
 
 
+class TestFullyShardHSDPBroadcast(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 4
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_hsdp_broadcast_across_replicas(self):
+        shard_size, replicate_size = 2, 2
+        mesh = init_device_mesh(
+            "cuda", (replicate_size, shard_size), mesh_dim_names=("replicate", "shard")
+        )
+        model_args = ModelArgs()
+        model = Transformer(model_args)
+        for module in model.modules():
+            if isinstance(module, TransformerBlock):
+                fully_shard(module, mesh=mesh)
+        fully_shard(model, mesh=mesh)
+
+        # Only preserve the model parameters on the replicate mesh's rank 0
+        if mesh.get_local_rank("replicate") > 0:
+            print(f"[Rank {self.rank}] filling with 1337")
+            for param in model.parameters():
+                param.detach().fill_(1337)
+
+        # Check that replicas are different
+        for param_name, param in model.named_parameters():
+            local_param = param.to_local()
+            local_param_list = [
+                torch.empty_like(local_param) for _ in range(mesh["replicate"].size())
+            ]
+            dist.all_gather(
+                local_param_list, local_param, group=mesh.get_group("replicate")
+            )
+            for other_local_param in local_param_list[1:]:
+                self.assertEqual(other_local_param.shape, local_param_list[0].shape)
+                self.assertNotEqual(other_local_param, local_param_list[0])
+
+        # Broadcast from replicate mesh's rank 0
+        replicate_group = mesh.get_group("replicate")
+        for param in model.parameters():
+            # E.g. for mesh [[0, 1, 2, 3], [4, 5, 6, 7]] sharding on dim-1 and
+            # replicating on dim-0, broadcast with sources 0, 1, 2, 3
+            src_rank = dist.get_process_group_ranks(replicate_group)[0]
+            torch.distributed.broadcast(
+                param.to_local(), src=src_rank, group=replicate_group
+            )
+
+        # Check that replicas are the same
+        for param_name, param in model.named_parameters():
+            local_param = param.to_local()
+            local_param_list = [
+                torch.empty_like(local_param) for _ in range(mesh["replicate"].size())
+            ]
+            dist.all_gather(
+                local_param_list, local_param, group=mesh.get_group("replicate")
+            )
+            for other_local_param in local_param_list[1:]:
+                self.assertEqual(other_local_param, local_param_list[0])
+
+        # Check that we can run an iteration without erroring
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device="cuda")
+        model(inp).sum().backward()
+
+
 if __name__ == "__main__":
     run_tests()
