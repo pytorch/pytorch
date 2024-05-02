@@ -38,7 +38,8 @@ bool operands_support_triton_mm_kernel(const Tensor& compressed, const Tensor& s
        const auto blocksize = at::sparse_csr::getBlockSize(compressed);
        // Dtype and blocksize checks for potential Triton usage.
        return ((strided.scalar_type() == ScalarType::Half
-                || strided.scalar_type() == ScalarType::BFloat16)
+                || strided.scalar_type() == ScalarType::BFloat16
+                || strided.scalar_type() == ScalarType::Float)
                && compressed.scalar_type() == strided.scalar_type()
                && is_power_of_2(blocksize[0]) && is_power_of_2(blocksize[1])
                && (blocksize[0] >= 16) && (blocksize[1] >= 16)
@@ -173,10 +174,9 @@ Tensor& _compressed_row_strided_mm_out(const Tensor& compressed, const Tensor& s
     values.unsqueeze_(-1).unsqueeze_(-1);
   }
 
-  Tensor compressed_indices, plain_indices;
-  std::tie(compressed_indices, plain_indices) = at::sparse_csr::getCompressedPlainIndices(compressed);
+  auto [compressed_indices, plain_indices] = at::sparse_csr::getCompressedPlainIndices(compressed);
 
-  // Select block rows of the strided input that intersect with the block colums of the sparse input.
+  // Select block rows of the strided input that intersect with the block columns of the sparse input.
   auto strided_tiled_selected_rows = strided_tiled.index_select(-4, plain_indices);
 
   // Promote to float if output is half or bfloat16 for better precision
@@ -199,7 +199,7 @@ Tensor& _compressed_row_strided_mm_out(const Tensor& compressed, const Tensor& s
       compressed_indices.scalar_type() == kInt).select(0, 0);
 
   // Reduction step.
-  // If result is neither half nor bfloat16, do everyting in-place.
+  // If result is neither half nor bfloat16, do everything in-place.
   if (result.scalar_type() == mm_dtype) {
     // Zero out and sum over the blocks that share the same row indices.
     result_tiled.zero_();

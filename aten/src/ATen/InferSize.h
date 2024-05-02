@@ -37,7 +37,8 @@ inline void infer_size_impl(
     }
   }
 
-  if (numel == newsize || (infer_dim && newsize > 0 && numel % newsize == 0)) {
+  if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_eq(numel, newsize)) ||
+      (infer_dim && newsize > 0 && numel % newsize == 0)) {
     if (infer_dim) {
       // We have a degree of freedom here to select the dimension size; follow
       // NumPy semantics and just bail.  However, a nice error message is needed

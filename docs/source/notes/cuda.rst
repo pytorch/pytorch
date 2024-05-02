@@ -1,7 +1,12 @@
+.. meta::
+   :description: A guide to torch.cuda, a PyTorch module to run CUDA operations
+   :keywords: memory management, PYTORCH_CUDA_ALLOC_CONF, optimize PyTorch, CUDA
+
 .. _cuda-semantics:
 
 CUDA semantics
 ==============
+
 
 :mod:`torch.cuda` is used to set up and run CUDA operations. It keeps track of
 the currently selected GPU, and all CUDA tensors you allocate will by default be
@@ -415,8 +420,8 @@ underlying allocation patterns produced by your code.
 
 .. _cuda-memory-envvars:
 
-Environment variables
-^^^^^^^^^^^^^^^^^^^^^
+Optimizing memory usage  with ``PYTORCH_CUDA_ALLOC_CONF``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Use of a caching allocator can interfere with memory checking tools such as
 ``cuda-memcheck``.  To debug memory errors using ``cuda-memcheck``, set
@@ -971,9 +976,12 @@ Violating any of these will likely cause a runtime error:
   :class:`~torch.cuda.graph` and
   :func:`~torch.cuda.make_graphed_callables` set a side stream for you.)
 * Ops that synchronize the CPU with the GPU (e.g., ``.item()`` calls) are prohibited.
-* CUDA RNG ops are allowed, but must use default generators. For example, explicitly constructing a
-  new :class:`torch.Generator` instance and passing it as the ``generator`` argument to an RNG function
-  is prohibited.
+* CUDA RNG operations are permitted, and when using multiple :class:`torch.Generator` instances within a graph,
+  they must be registered using :meth:`CUDAGraph.register_generator_state<torch.cuda.CUDAGraph.register_generator_state>` before graph capture.
+  Avoid using :meth:`Generator.get_state<torch.get_state>` and :meth:`Generator.set_state<torch.set_state>` during capture;
+  instead, utilize :meth:`Generator.graphsafe_set_state<torch.Generator.graphsafe_set_state>` and :meth:`Generator.graphsafe_get_state<torch.Generator.graphsafe_get_state>`
+  for managing generator states safely within the graph context. This ensures proper RNG operation and generator management within CUDA graphs.
+
 
 Violating any of these will likely cause silent numerical errors or undefined behavior:
 

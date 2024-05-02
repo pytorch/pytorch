@@ -1,17 +1,26 @@
 #pragma once
 
+#include <c10/core/Allocator.h>
+#include <c10/core/Device.h>
+#include <c10/core/DeviceType.h>
+#include <c10/core/DispatchKey.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/core/InferenceMode.h>
+#include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
+#include <c10/core/ScalarType.h>
 #include <c10/core/ScalarTypeToTypeMeta.h>
 #include <c10/core/Storage.h>
 #include <c10/core/SymBool.h>
+#include <c10/core/SymInt.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/core/SymbolicShapeMeta.h>
 #include <c10/core/WrapDimMinimal.h>
 #include <c10/core/impl/PyObjectSlot.h>
 #include <c10/core/impl/SizesAndStrides.h>
+#include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/ArrayRef.h>
 #include <c10/util/DimVector.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Flags.h>
@@ -24,10 +33,14 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <memory>
+#include <string>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 // A global boolean variable to control whether we free memory when a Tensor
 // is shrunk to a smaller size. As a result, a Tensor is always going to
@@ -43,11 +56,6 @@ C10_DECLARE_bool(caffe2_keep_on_shrink);
 // is larger than this flag in bytes.  This only applies to functions which
 // respect caffe2_keep_on_shrink.
 C10_DECLARE_int64(caffe2_max_keep_on_shrink_memory);
-
-C10_CLANG_DIAGNOSTIC_PUSH()
-#if C10_CLANG_HAS_WARNING("-Wimplicit-int-float-conversion")
-C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-float-conversion")
-#endif
 
 namespace at {
 class Tensor;
@@ -713,14 +721,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomSizes))) {
       return dim_custom();
     }
-    return sizes_and_strides_.size();
+    return static_cast<int64_t>(sizes_and_strides_.size());
   }
 
   int64_t dim_default() const {
     if (has_symbolic_sizes_strides_) {
-      return symbolic_shape_meta().sizes_.size();
+      return static_cast<int64_t>(symbolic_shape_meta().sizes_.size());
     } else {
-      return sizes_and_strides_.size();
+      return static_cast<int64_t>(sizes_and_strides_.size());
     }
   }
 
@@ -1058,6 +1066,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return layout() == kSparseCsr;
   }
 
+  // Whether a tensor is sparse CSR/CSC/BSR/BSC or not.
+  bool is_sparse_compressed() const {
+    return key_set_.has_all(c10::sparse_csr_ks);
+  }
+
   bool is_quantized() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
@@ -1191,11 +1204,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return device_opt_.has_value() && device_opt_->type() == kMPS;
   }
 
-  bool is_ort() const {
+  bool is_maia() const {
     if (C10_UNLIKELY(device_policy_)) {
-      return device_custom().is_ort();
+      return device_custom().is_maia();
     }
-    return device_opt_.has_value() && device_opt_->type() == kORT;
+    return device_opt_.has_value() && device_opt_->type() == kMAIA;
   }
 
   bool is_nested() const {
@@ -1223,7 +1236,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return no_ADInplaceOrView && no_Autograd;
   }
 
-  int64_t get_device() const {
+  DeviceIndex get_device() const {
     if (C10_UNLIKELY(device_policy_)) {
       return device_custom().index();
     }
@@ -1261,7 +1274,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       return kStrided;
     } else if (is_sparse()) {
       return kSparse;
-    } else if (key_set_.has_any(c10::sparse_csr_ks)) {
+    } else if (is_sparse_compressed()) {
       // Typically, the tensor dispatch keys define the tensor layout
       // uniquely. This allows using non-virtual layout method for
       // better performance. However, when tensor's layout depends,
@@ -1563,8 +1576,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     }
     TORCH_CHECK(
         storage_initialized(),
-        "The tensor has a non-zero number of elements, but its data is not allocated yet. "
-        "Caffe2 uses a lazy allocation, so you will need to call "
+        "The tensor has a non-zero number of elements, but its data is not allocated yet.\n"
+        "If you're using torch.compile/export/fx, it is likely that we are erroneously "
+        "tracing into a custom kernel. To fix this, please wrap the custom kernel into "
+        "an opaque custom op. Please see the following for details: "
+        "https://docs.google.com/document/d/1W--T6wz8IY8fOI0Vm8BF44PdBgs283QvpelJZWieQWQ\n"
+        "If you're using Caffe2, Caffe2 uses a lazy allocation, so you will need to call "
         "mutable_data() or raw_mutable_data() to actually allocate memory.");
     // Caller does the type check.
     // Note: storage_offset_ can be non-null even for zero-elements tensors
@@ -1674,7 +1691,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     storage_ = {};
     set_storage_access_should_throw();
     get_extra_meta().custom_data_ptr_error_msg_ = s;
-    get_extra_meta().custom_storage_error_msg_ = s;
+    get_extra_meta().custom_storage_error_msg_ = std::move(s);
   }
 
  protected:
@@ -2027,8 +2044,15 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       constexpr auto sparse_k = DispatchKeySet(DispatchKey::Sparse);
       return ts.has_any(sparse_k) && ts.has_any(sparse_backends);
     };
+    auto is_sparse_compressed = [](DispatchKeySet ts) {
+      constexpr auto sparse_compressed_k =
+          DispatchKeySet(DispatchKey::SparseCsr);
+      return ts.has_any(sparse_compressed_k);
+    };
     return (key_set_ == from) || (is_dense(key_set_) && is_dense(from)) ||
-        (is_sparse(key_set_) && is_sparse(from));
+        (is_sparse(key_set_) && is_sparse(from)) ||
+        (is_sparse_compressed(key_set_) && is_sparse_compressed(from));
+    ;
   }
 
  private:
@@ -2242,7 +2266,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
             storage_offset_ == 0); // because we just reallocated
         return storage_.mutable_data();
       }
-      const Allocator* allocator = storage_.allocator();
+      Allocator* allocator = storage_.allocator();
       // Storage might have nullptr allocator in rare cases, for example, if
       // an external memory segment has been wrapped with Tensor and we don't
       // know how to reallocate it. However, in order to preserve legacy C2
@@ -2415,8 +2439,22 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return is_non_overlapping_and_dense_default();
   }
 
+  // if this returns true, then it is guaranteed that this tensor has symbolic
+  // sizes/strides
   bool has_symbolic_sizes_strides() const {
     return has_symbolic_sizes_strides_;
+  }
+
+  // if this returns true, then it is guaranteed that this tensor does NOT have
+  // symbolic sizes/strides. This is different from the above, because it's
+  // possible that has_symbolic_sizes_strides() returns false, but we do
+  // not have symbolic sizes/strides. This exists for the case of
+  // Nested Tensor python subclass, where the sizes are implemented in python
+  // (TODO: clean this up and just implement sizes in nested tensor without a
+  // python implementation)
+  bool does_not_have_symbolic_sizes_strides() const {
+    return !has_symbolic_sizes_strides() &&
+        !matches_policy(SizesStridesPolicy::CustomStrides);
   }
 
  private:
@@ -2433,7 +2471,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   template <
       typename T,
-      typename = typename std::enable_if<std::is_integral<T>::value>::type>
+      typename = typename std::enable_if_t<std::is_integral_v<T>>>
   bool SetDimsTemplate(ArrayRef<T> src) {
     TORCH_CHECK(
         !has_symbolic_sizes_strides_,
@@ -3227,5 +3265,3 @@ static_assert(
 #undef C10_GCC_VERSION_MINOR
 
 } // namespace c10
-
-C10_CLANG_DIAGNOSTIC_POP()

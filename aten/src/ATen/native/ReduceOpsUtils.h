@@ -104,6 +104,7 @@ static inline void check_scalar_type_device_layout_equal(const Tensor& out, cons
 
 static inline Tensor integer_upcast(const Tensor& self, c10::optional<ScalarType> dtype) {
   ScalarType scalarType = self.scalar_type();
+  TORCH_CHECK(!isBarebonesUnsignedType(scalarType), "integer upcasting for uint16, uint32 and uint64 is not currently implemented");
   ScalarType upcast_scalarType = dtype.value_or(at::isIntegralType(scalarType, /*includeBool=*/true) ? ScalarType::Long : scalarType);
   return self.toType(upcast_scalarType);
 }
@@ -367,7 +368,13 @@ static void resize_reduction(
   DimVector dims_ = at::native::make_dim_vector(opt_dims, self.dim());
   maybe_wrap_dims(dims_, self.dim());
   auto shape = get_reduction_shape(self, dims_, keepdim, allow_empty_dims);
-  meta.set_output_raw_strided(0, shape, {}, self.options().dtype(out_dtype));
+  if (self.layout() == kStrided) {
+    meta.set_output_raw_strided(0, shape, {}, self.options().dtype(out_dtype));
+  } else if (shape.size() == 0) {
+    meta.set_output_raw_strided(0, shape, {}, self.options().dtype(out_dtype).layout(kStrided));
+  } else {
+    TORCH_CHECK(false, "resize_reduction: support for output with ", self.layout(), " layout is not implemented yet");
+  }
   namedinference::propagate_names_for_reduction(
       meta.maybe_get_output(), self, dims_, keepdim);
 }

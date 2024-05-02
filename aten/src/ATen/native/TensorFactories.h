@@ -4,6 +4,7 @@
 #include <ATen/EmptyTensor.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/native/DispatchStub.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -107,10 +108,10 @@ inline Tensor& fill_empty_deterministic_(Tensor& tensor) {
         tensor.fill_(std::numeric_limits<scalar_t>::quiet_NaN());
     });
   } else {
-    AT_DISPATCH_INTEGRAL_TYPES_AND(
-      kBool, tensor.scalar_type(), "fill_empty_deterministic_", [&]() {
+    AT_DISPATCH_V2(
+      tensor.scalar_type(), "fill_empty_deterministic_", AT_WRAP([&]() {
         tensor.fill_(std::numeric_limits<scalar_t>::max());
-    });
+    }), kBool, AT_EXPAND(AT_INTEGRAL_TYPES_V2));
   }
   return tensor;
 }
@@ -123,12 +124,13 @@ struct ZeroTensorAllocator final : public at::Allocator {
   static void deleter(void* const pointer) {
     TORCH_INTERNAL_ASSERT(!pointer);
   }
-  DataPtr allocate(const size_t /*nbytes*/) const override {
+  DataPtr allocate(const size_t /*nbytes*/) override {
     return {nullptr, nullptr, &deleter, device_};
   }
   DeleterFnPtr raw_deleter() const override {
     return deleter;
   }
+  void copy_data(void* dest, const void* src, std::size_t count) const final {}
   at::Device device_;
 };
 

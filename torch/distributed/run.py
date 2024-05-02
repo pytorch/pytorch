@@ -68,6 +68,27 @@ to ``torchrun`` follow these steps:
     |                                                       |                                                    |
     +-------------------------------------------------------+----------------------------------------------------+
 
+.. versionchanged:: 2.0.0
+
+    The launcher will pass the ``--local-rank=<rank>`` argument to your script.
+    From PyTorch 2.0.0 onwards, the dashed ``--local-rank`` is preferred over the
+    previously used underscored ``--local_rank``.
+
+    For backward compatibility, it may be necessary for users to handle both
+    cases in their argument parsing code. This means including both ``"--local-rank"``
+    and ``"--local_rank"`` in the argument parser. If only ``"--local_rank"`` is
+    provided, the launcher will trigger an error: "error: unrecognized arguments:
+    --local-rank=<rank>". For training code that only supports PyTorch 2.0.0+,
+    including ``"--local-rank"`` should be sufficient.
+
+    ::
+
+        >>> # xdoctest: +SKIP
+        >>> import argparse
+        >>> parser = argparse.ArgumentParser()
+        >>> parser.add_argument("--local-rank", "--local_rank", type=int)
+        >>> args = parser.parse_args()
+
 The aformentioned changes suffice to migrate from ``torch.distributed.launch`` to ``torchrun``.
 To take advantage of new features such as elasticity, fault-tolerance, and error reporting of ``torchrun``
 please refer to:
@@ -375,12 +396,13 @@ import logging
 import os
 import sys
 import uuid
+import importlib.metadata as metadata
 from argparse import REMAINDER, ArgumentParser
-from typing import Callable, List, Tuple, Union
+from typing import Callable, List, Tuple, Type, Union, Optional, Set
 
 import torch
 from torch.distributed.argparse_util import check_env, env
-from torch.distributed.elastic.multiprocessing import Std
+from torch.distributed.elastic.multiprocessing import DefaultLogsSpecs, LogsSpecs, Std
 from torch.distributed.elastic.multiprocessing.errors import record
 from torch.distributed.elastic.rendezvous.utils import _parse_rendezvous_config
 from torch.distributed.elastic.utils import macros
@@ -388,7 +410,7 @@ from torch.distributed.elastic.utils.logging import get_logger
 from torch.distributed.launcher.api import LaunchConfig, elastic_launch
 from torch.utils.backend_registration import _get_custom_mod_func
 
-log = get_logger(__name__)
+logger = get_logger(__name__)
 
 
 def get_args_parser() -> ArgumentParser:
@@ -477,7 +499,7 @@ def get_args_parser() -> ArgumentParser:
         "--monitor_interval",
         action=env,
         type=float,
-        default=5,
+        default=0.1,
         help="Interval, in seconds, to monitor the state of workers.",
     )
     parser.add_argument(
@@ -548,6 +570,17 @@ def get_args_parser() -> ArgumentParser:
         help="Tee std streams into a log file and also to console (see --redirects for format).",
     )
 
+    parser.add_argument(
+        "--local-ranks-filter",
+        "--local_ranks_filter",
+        action=env,
+        type=str,
+        default="",
+        help="Only show logs from specified ranks in console (e.g. [--local_ranks_filter=0,1,2] will "
+        "only show logs from rank 0, 1 and 2). This will only apply to stdout and stderr, not to"
+        "log files saved via --redirect or --tee",
+    )
+
     #
     # Backwards compatible parameters with caffe2.distributed.launch.
     #
@@ -591,6 +624,15 @@ def get_args_parser() -> ArgumentParser:
         "machine's FQDN.",
     )
 
+    parser.add_argument(
+        "--logs-specs",
+        "--logs_specs",
+        default=None,
+        type=str,
+        help="torchrun.logs_specs group entrypoint name, value must be type of LogsSpecs. "
+        "Can be used to override custom logging behavior.",
+    )
+
     #
     # Positional arguments.
     #
@@ -622,7 +664,7 @@ def parse_min_max_nnodes(nnodes: str):
         min_nodes = int(arr[0])
         max_nodes = int(arr[1])
     else:
-        raise RuntimeError(f'nnodes={nnodes} is not in "MIN:MAX" format')
+        raise RuntimeError(f'nnodes={nnodes} is not in "MIN:MAX" format')  # noqa: E231
 
     return min_nodes, max_nodes
 
@@ -659,7 +701,7 @@ def determine_local_world_size(nproc_per_node: str):
         else:
             raise ValueError(f"Unsupported nproc_per_node value: {nproc_per_node}") from e
 
-        log.info(
+        logger.info(
             "Using nproc_per_node=%s,"
             " setting to %s since the instance "
             "has %s %s",
@@ -670,7 +712,7 @@ def determine_local_world_size(nproc_per_node: str):
 
 def get_rdzv_endpoint(args):
     if args.rdzv_backend == "static" and not args.rdzv_endpoint:
-        return f"{args.master_addr}:{args.master_port}"
+        return f"{args.master_addr}:{args.master_port}"  # noqa: E231
     return args.rdzv_endpoint
 
 
@@ -688,6 +730,36 @@ def get_use_env(args) -> bool:
     return args.use_env
 
 
+def _get_logs_specs_class(logs_specs_name: Optional[str]) -> Type[LogsSpecs]:
+    """
+    Attemps to load `torchrun.logs_spec` entrypoint with key of `logs_specs_name` param.
+    Provides plugin mechanism to provide custom implementation of LogsSpecs.
+
+    Returns `DefaultLogsSpecs` when logs_spec_name is None.
+    Raises ValueError when entrypoint for `logs_spec_name` can't be found in entrypoints.
+    """
+    logs_specs_cls = None
+    if logs_specs_name is not None:
+        eps = metadata.entry_points()
+        if hasattr(eps, "select"):  # >= 3.10
+            group = eps.select(group="torchrun.logs_specs")
+            if group.select(name=logs_specs_name):
+                logs_specs_cls = group[logs_specs_name].load()
+
+        elif specs := eps.get("torchrun.logs_specs"):  # < 3.10
+            if entrypoint_list := [ep for ep in specs if ep.name == logs_specs_name]:
+                logs_specs_cls = entrypoint_list[0].load()
+
+        if logs_specs_cls is None:
+            raise ValueError(f"Could not find entrypoint under 'torchrun.logs_specs[{logs_specs_name}]' key")
+
+        logging.info("Using logs_spec '%s' mapped to %s", logs_specs_name, str(logs_specs_cls))
+    else:
+        logs_specs_cls = DefaultLogsSpecs
+
+    return logs_specs_cls
+
+
 def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str]]:
     # If ``args`` not passed, defaults to ``sys.argv[:1]``
     min_nodes, max_nodes = parse_min_max_nnodes(args.nnodes)
@@ -695,7 +767,7 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
     assert args.max_restarts >= 0
 
     if hasattr(args, "master_addr") and args.rdzv_backend != "static" and not args.rdzv_endpoint:
-        log.warning(
+        logger.warning(
             "master_addr is only used for static rdzv_backend and when rdzv_endpoint "
             "is not specified."
         )
@@ -703,7 +775,7 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
     nproc_per_node = determine_local_world_size(args.nproc_per_node)
     if "OMP_NUM_THREADS" not in os.environ and nproc_per_node > 1:
         omp_num_threads = 1
-        log.warning(
+        logger.warning(
             "\n*****************************************\n"
             "Setting OMP_NUM_THREADS environment variable for each process to be "
             "%s in default, to avoid your system being overloaded, "
@@ -724,6 +796,24 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
 
     rdzv_endpoint = get_rdzv_endpoint(args)
 
+    ranks: Optional[Set[int]] = None
+    if args.local_ranks_filter:
+        try:
+            ranks = set(map(int, args.local_ranks_filter.split(",")))
+            assert ranks
+        except Exception as e:
+            raise Exception(  # noqa: TRY002
+                "--local_ranks_filter must be a comma-separated list of integers e.g. --local_ranks_filter=0,1,2"
+            ) from e
+
+    logs_specs_cls: Type[LogsSpecs] = _get_logs_specs_class(args.logs_specs)
+    logs_specs = logs_specs_cls(
+        log_dir=args.log_dir,
+        redirects=Std.from_str(args.redirects),
+        tee=Std.from_str(args.tee),
+        local_ranks_filter=ranks,
+    )
+
     config = LaunchConfig(
         min_nodes=min_nodes,
         max_nodes=max_nodes,
@@ -736,11 +826,9 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
         max_restarts=args.max_restarts,
         monitor_interval=args.monitor_interval,
         start_method=args.start_method,
-        redirects=Std.from_str(args.redirects),
-        tee=Std.from_str(args.tee),
-        log_dir=args.log_dir,
         log_line_prefix_template=log_line_prefix_template,
         local_addr=args.local_addr,
+        logs_specs=logs_specs,
     )
 
     with_python = not args.no_python
@@ -789,7 +877,7 @@ def run(args):
         args.rdzv_backend = "c10d"
         args.rdzv_endpoint = "localhost:0"
         args.rdzv_id = str(uuid.uuid4())
-        log.info(
+        logger.info(
             "\n**************************************\n"
             "Rendezvous info:\n"
             "--rdzv-backend=%s "

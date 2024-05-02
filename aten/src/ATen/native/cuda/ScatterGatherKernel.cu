@@ -4,7 +4,6 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/MemoryOverlap.h>
-
 #include <ATen/native/ScatterGatherChecks.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/TensorIterator.h>
@@ -82,7 +81,7 @@ static TensorAssign tensor_assign;
 // of the same size.
 template <int N> struct alignas(N) OpaqueType { char data[N]; };
 
-// essentialy rewritten related to legacy::launch_kernel parts
+// essentially rewritten related to legacy::launch_kernel parts
 template <int nt, int vt, typename func_t>
 C10_LAUNCH_BOUNDS_2(nt, vt)
 __global__ void _scatter_gather_elementwise_kernel(int N, func_t f) {
@@ -188,8 +187,8 @@ struct cuda_scatter_gather_base_kernel {
       .check_all_same_dtype(false)
       .resize_outputs(false)
       .add_output(self_restrided)
-      .add_input(src_restrided)
-      .add_input(index)
+      .add_const_input(src_restrided)
+      .add_const_input(index)
       .build();
 
     auto self_dim_stride = ensure_nonempty_stride(self, dim);
@@ -200,7 +199,6 @@ struct cuda_scatter_gather_base_kernel {
 
     auto index_size = is_scatter_like ? self_dim_size : src_dim_size;
     auto index_stride = is_scatter_like ? self_dim_stride : src_dim_stride;
-
 
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
@@ -246,8 +244,8 @@ struct cuda_scatter_gather_base_kernel {
       .check_all_same_dtype(false)
       .resize_outputs(false)
       .add_output(self_restrided)
-      .add_input(src_restrided)
-      .add_input(index)
+      .add_const_input(src_restrided)
+      .add_const_input(index)
       .build();
 
     auto self_dim_stride = ensure_nonempty_stride(self, dim);
@@ -258,7 +256,6 @@ struct cuda_scatter_gather_base_kernel {
 
     auto index_size = is_scatter_like ? self_dim_size : src_dim_size;
     auto index_stride = is_scatter_like ? self_dim_stride : src_dim_stride;
-
 
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
@@ -305,8 +302,8 @@ struct cuda_scatter_gather_base_kernel {
       .check_all_same_dtype(false)
       .resize_outputs(false)
       .add_output(self_restrided)
-      .add_input(src_restrided)
-      .add_input(index)
+      .add_const_input(src_restrided)
+      .add_const_input(index)
       .build();
 
     auto self_dim_stride = ensure_nonempty_stride(self, dim);
@@ -318,9 +315,9 @@ struct cuda_scatter_gather_base_kernel {
     auto index_size = is_scatter_like ? self_dim_size : src_dim_size;
     auto index_stride = is_scatter_like ? self_dim_stride : src_dim_stride;
 
-
-    AT_DISPATCH_ALL_TYPES_AND2(
+    AT_DISPATCH_ALL_TYPES_AND3(
       at::ScalarType::Half, at::ScalarType::BFloat16,
+      at::ScalarType::ComplexFloat,
       iter.dtype(),
       "cuda_scatter_gather_base_kernel_func", [&] {
         using dtype = typename std::conditional<cast_to_opaque,
@@ -401,7 +398,7 @@ struct cuda_scatter_fill_base_kernel {
       .check_all_same_dtype(false)
       .resize_outputs(false)
       .add_output(self_restrided)
-      .add_input(index)
+      .add_const_input(index)
       .build();
 
     auto index_size = ensure_nonempty_size(self, dim);
@@ -444,14 +441,15 @@ struct cuda_scatter_fill_base_kernel {
       .check_all_same_dtype(false)
       .resize_outputs(false)
       .add_output(self_restrided)
-      .add_input(index)
+      .add_const_input(index)
       .build();
 
     auto index_size = ensure_nonempty_size(self, dim);
     auto index_stride = ensure_nonempty_stride(self, dim);
 
-    AT_DISPATCH_ALL_TYPES_AND2(
+    AT_DISPATCH_ALL_TYPES_AND3(
       at::ScalarType::Half, at::ScalarType::BFloat16,
+      at::ScalarType::ComplexFloat,
       iter.dtype(),
       "cuda_scatter_fill_base_kernel_reduce_multiply", [&] {
         using dtype = typename std::conditional<cast_to_opaque,

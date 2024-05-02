@@ -526,8 +526,7 @@ std::tuple<Tensor, Tensor> RNNImpl::forward(const Tensor& input, Tensor hx) {
   auto sorted_indices = torch::Tensor();
   auto unsorted_indices = torch::Tensor();
 
-  Tensor output, hidden;
-  std::tie(output, hidden) = this->forward_helper(
+  auto [output, hidden] = this->forward_helper(
       input, batch_sizes, sorted_indices, max_batch_size, std::move(hx));
 
   return std::make_tuple(
@@ -543,8 +542,7 @@ std::tuple<PackedSequence, Tensor> RNNImpl::forward_with_packed_input(
   const auto& unsorted_indices = packed_input.unsorted_indices();
   auto max_batch_size = batch_sizes[0].item<int64_t>();
 
-  Tensor output, hidden;
-  std::tie(output, hidden) = this->forward_helper(
+  auto [output, hidden] = this->forward_helper(
       input, batch_sizes, sorted_indices, max_batch_size, std::move(hx));
 
   auto output_packed =
@@ -678,9 +676,7 @@ std::tuple<Tensor, std::tuple<Tensor, Tensor>> LSTMImpl::forward(
   auto sorted_indices = torch::Tensor();
   auto unsorted_indices = torch::Tensor();
 
-  Tensor output;
-  std::tuple<Tensor, Tensor> hidden;
-  std::tie(output, hidden) = this->forward_helper(
+  auto [output, hidden] = this->forward_helper(
       input, batch_sizes, sorted_indices, max_batch_size, std::move(hx_opt));
 
   return std::make_tuple(
@@ -697,9 +693,7 @@ std::tuple<PackedSequence, std::tuple<Tensor, Tensor>> LSTMImpl::
   const auto& unsorted_indices = packed_input.unsorted_indices();
   auto max_batch_size = batch_sizes[0].item<int64_t>();
 
-  Tensor output;
-  std::tuple<Tensor, Tensor> hidden;
-  std::tie(output, hidden) = this->forward_helper(
+  auto [output, hidden] = this->forward_helper(
       input, batch_sizes, sorted_indices, max_batch_size, std::move(hx_opt));
 
   auto output_packed =
@@ -779,8 +773,7 @@ std::tuple<Tensor, Tensor> GRUImpl::forward(const Tensor& input, Tensor hx) {
   auto sorted_indices = torch::Tensor();
   auto unsorted_indices = torch::Tensor();
 
-  Tensor output, hidden;
-  std::tie(output, hidden) = this->forward_helper(
+  auto [output, hidden] = this->forward_helper(
       input, batch_sizes, sorted_indices, max_batch_size, std::move(hx));
 
   return std::make_tuple(
@@ -796,8 +789,7 @@ std::tuple<PackedSequence, Tensor> GRUImpl::forward_with_packed_input(
   const auto& unsorted_indices = packed_input.unsorted_indices();
   auto max_batch_size = batch_sizes[0].item<int64_t>();
 
-  Tensor output, hidden;
-  std::tie(output, hidden) = this->forward_helper(
+  auto [output, hidden] = this->forward_helper(
       input, batch_sizes, sorted_indices, max_batch_size, std::move(hx));
 
   auto output_packed =

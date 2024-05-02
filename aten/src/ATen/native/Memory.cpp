@@ -12,8 +12,7 @@
 #include <ATen/ops/pin_memory_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 // Exposes at::has_internal_overlap as an operator for testing purposes
 int64_t _debug_has_internal_overlap(const Tensor& self) {
@@ -37,5 +36,4 @@ Tensor pin_memory(const Tensor& self, c10::optional<Device> device) {
   return at::_pin_memory(self, device);
 }
 
-}
-}
+} // namespace at::native

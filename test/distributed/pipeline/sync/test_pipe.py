@@ -6,27 +6,28 @@
 #
 # This source code is licensed under the BSD license found in the
 # LICENSE file in the root directory of this source tree.
+import random
+import time
 from collections import OrderedDict
 from copy import deepcopy
-import time
 
 import pytest
-import random
 import torch
-from torch import nn
-from torch import Tensor
+from torch import nn, Tensor
 
-from torch.distributed.pipeline.sync import Pipe, NoChunk, WithDevice
+from torch.distributed.pipeline.sync import NoChunk, Pipe, WithDevice
 from torch.distributed.pipeline.sync.pipe import PipeSequential
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_cuda import TEST_MULTIGPU
+from torch.testing._internal.common_utils import run_tests, TEST_CUDA
 
-skip_if_no_cuda = pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda required")
+skip_if_no_cuda = pytest.mark.skipif(not TEST_CUDA, reason="cuda required")
 
 
 def test_pipe_without_rpc():
     model = nn.Sequential(nn.Linear(1, 1))
-    with pytest.raises(RuntimeError, match='Please initialize RPC framework'):
+    with pytest.raises(RuntimeError, match="Please initialize RPC framework"):
         pipe = Pipe(model, chunks=1)
+
 
 def test_parameters(setup_rpc):
     model = nn.Sequential(nn.Linear(1, 1))
@@ -70,6 +71,7 @@ def test_sequential_like(setup_rpc):
     assert model[-1] is b
     assert model[-2] is a
 
+
 def test_chunks_less_than_1(setup_rpc):
     model = nn.Sequential(nn.Linear(1, 1))
 
@@ -78,6 +80,7 @@ def test_chunks_less_than_1(setup_rpc):
 
     with pytest.raises(ValueError):
         Pipe(model, chunks=-1)
+
 
 def test_batch_size_indivisible(setup_rpc):
     model = nn.Sequential(nn.Linear(1, 1))
@@ -131,14 +134,19 @@ def test_checkpoint_mode(setup_rpc):
     never_output = never(input)
 
     assert count_grad_fn(always_output.local_value().grad_fn, "CheckpointBackward") == 2
-    assert count_grad_fn(except_last_output.local_value().grad_fn, "CheckpointBackward") == 1
+    assert (
+        count_grad_fn(except_last_output.local_value().grad_fn, "CheckpointBackward")
+        == 1
+    )
     assert count_grad_fn(never_output.local_value().grad_fn, "CheckpointBackward") == 0
 
 
 def test_checkpoint_mode_invalid(setup_rpc):
     model = nn.Sequential(nn.Linear(1, 1))
 
-    with pytest.raises(ValueError, match="checkpoint is not one of 'always', 'except_last', or 'never'"):
+    with pytest.raises(
+        ValueError, match="checkpoint is not one of 'always', 'except_last', or 'never'"
+    ):
         Pipe(model, chunks=2, checkpoint="INVALID_CHECKPOINT")
 
 
@@ -223,7 +231,7 @@ def test_exception(setup_rpc):
 
     class Raise(nn.Module):
         def forward(self, *_):
-            raise ExpectedException()
+            raise ExpectedException
 
     model = nn.Sequential(Raise())
     model = Pipe(model, chunks=1)
@@ -257,7 +265,7 @@ def test_exception_early_stop_asap(setup_rpc):
 
     class Raise(nn.Module):
         def forward(self, x):
-            raise ExpectedException()
+            raise ExpectedException
 
     model = nn.Sequential(Pass(), Pass(), Counter(), Raise())
     model = Pipe(model, chunks=3)
@@ -317,6 +325,7 @@ def test_input_pair(setup_rpc):
     assert a.grad is not None
     assert b.grad is not None
 
+
 def test_multi_sequence_input(setup_rpc):
     class MultiSeq(nn.Module):
         def forward(self, tup1, tup2):
@@ -324,10 +333,8 @@ def test_multi_sequence_input(setup_rpc):
 
     model = Pipe(nn.Sequential(MultiSeq()))
     with pytest.raises(TypeError):
-        model(
-            [torch.rand(10), torch.rand(10)],
-            [torch.rand(10), torch.rand(10)]
-        )
+        model([torch.rand(10), torch.rand(10)], [torch.rand(10), torch.rand(10)])
+
 
 def test_input_singleton(setup_rpc):
     class One(nn.Module):
@@ -421,7 +428,9 @@ def test_valid_non_tensor(checkpoint, setup_rpc):
             res += d
             return c, res, a, d + f if f is not None else d, b, e, f
 
-    model = Pipe(nn.Sequential(NonTensor1(), NonTensor2()), chunks=5, checkpoint=checkpoint)
+    model = Pipe(
+        nn.Sequential(NonTensor1(), NonTensor2()), chunks=5, checkpoint=checkpoint
+    )
     a = random.randint(0, 10)
     b = torch.rand(10, 10)
     c = random.randint(0, 1) == 0
@@ -458,6 +467,7 @@ def test_valid_non_tensor(checkpoint, setup_rpc):
     # Need atleast one tensor.
     with pytest.raises(TypeError):
         model(a, None, c, None)
+
 
 @pytest.mark.parametrize("checkpoint", ["never", "always", "except_last"])
 def test_no_tensor_output(checkpoint, setup_rpc):
@@ -500,8 +510,9 @@ def test_uneven_batch_size(checkpoint, setup_rpc):
     b = random.randint(0, 10)
     c = torch.rand(4, 10)
 
-    with pytest.raises(RuntimeError, match='Found different number of chunks'):
+    with pytest.raises(RuntimeError, match="Found different number of chunks"):
         model(a, b, c)
+
 
 @pytest.mark.parametrize("checkpoint", ["never", "always", "except_last"])
 def test_no_chunk(checkpoint, setup_rpc):
@@ -521,7 +532,7 @@ def test_no_chunk(checkpoint, setup_rpc):
     assert torch.allclose(torch.cat((c, c, c, c, c)), res[2])
 
     # Test invalid type for NoChunk
-    with pytest.raises(TypeError, match='NoChunk only supported for tensors'):
+    with pytest.raises(TypeError, match="NoChunk only supported for tensors"):
         NoChunk(b)
 
 
@@ -530,7 +541,10 @@ def test_deferred_batch_norm(checkpoint, setup_rpc):
     bn = nn.BatchNorm2d(3)
     pipe_bn = deepcopy(bn)
     pipe = Pipe(
-        nn.Sequential(pipe_bn), chunks=2, checkpoint=checkpoint, deferred_batch_norm=True
+        nn.Sequential(pipe_bn),
+        chunks=2,
+        checkpoint=checkpoint,
+        deferred_batch_norm=True,
     )
 
     x = torch.rand(4, 3, 10, 10)
@@ -546,7 +560,10 @@ def test_deferred_batch_norm_params(checkpoint, setup_rpc):
     bn = nn.BatchNorm2d(3)
     pipe_bn = deepcopy(bn)
     pipe = Pipe(
-        nn.Sequential(pipe_bn), chunks=1, checkpoint=checkpoint, deferred_batch_norm=True
+        nn.Sequential(pipe_bn),
+        chunks=1,
+        checkpoint=checkpoint,
+        deferred_batch_norm=True,
     )
 
     x = torch.rand(4, 3, 10, 10)
@@ -588,7 +605,7 @@ def test_partitions(setup_rpc):
     assert "partitions.0.0.weight" in model.state_dict()
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda required")
+@skip_if_no_cuda
 def test_merged_partitions(setup_rpc):
     a = nn.Linear(1, 1).to(0)
     b = nn.Sequential(nn.Linear(1, 1), nn.Linear(1, 2)).to(0)
@@ -674,7 +691,9 @@ def test_named_children(setup_rpc):
 
 
 def test_verify_module_non_sequential(setup_rpc):
-    with pytest.raises(TypeError, match="module must be nn.Sequential to be partitioned"):
+    with pytest.raises(
+        TypeError, match="module must be nn.Sequential to be partitioned"
+    ):
         Pipe(nn.Module())
 
 
@@ -682,7 +701,9 @@ def test_verify_module_duplicate_children(setup_rpc):
     conv = nn.Conv2d(3, 3, 1)
     model = nn.Sequential(conv, conv)
 
-    with pytest.raises(ValueError, match="module with duplicate children is not supported"):
+    with pytest.raises(
+        ValueError, match="module with duplicate children is not supported"
+    ):
         Pipe(model)
 
 
@@ -700,28 +721,24 @@ def test_verify_module_params_on_same_device(setup_rpc):
 
     with pytest.raises(
         ValueError,
-        match=r'should have all parameters on a single device, please use .to\(\)'
-            ' to place the module on a single device'):
+        match=r"should have all parameters on a single device, please use .to\(\)"
+        " to place the module on a single device",
+    ):
         Pipe(model)
 
-@skip_if_no_cuda
-@pytest.mark.skipif(torch.cuda.device_count() < 2, reason="Need atleast two GPUs")
+
+@pytest.mark.skipif(not TEST_MULTIGPU, reason="Need atleast two GPUs")
 def test_verify_nested_modules(setup_rpc):
     model = nn.Sequential(
-        nn.Sequential(
-            nn.Linear(32, 16).cuda(0),
-            nn.Linear(16, 8).cuda(0)
-        ),
-        nn.Sequential(
-            nn.Linear(8, 4).cuda(1),
-            nn.Linear(4, 2).cuda(1)
-        ),
+        nn.Sequential(nn.Linear(32, 16).cuda(0), nn.Linear(16, 8).cuda(0)),
+        nn.Sequential(nn.Linear(8, 4).cuda(1), nn.Linear(4, 2).cuda(1)),
     )
 
     pipe = Pipe(model)
     out = pipe(torch.rand(10, 32).cuda(0))
     assert out.local_value().device == torch.device("cuda:1")
     assert out.local_value().size() == torch.Size([10, 2])
+
 
 def test_verify_module_duplicate_parameters_on_same_device(setup_rpc):
     class Surrogate(nn.Module):
@@ -764,6 +781,7 @@ def test_forward_lockstep(setup_rpc):
     #
     assert timeline == [(0, 0), (1, 0), (0, 1), (2, 0), (1, 1), (2, 1)]
 
+
 @pytest.mark.parametrize("checkpoint", ["never", "always", "except_last"])
 @skip_if_no_cuda
 def test_multiple_inputs(checkpoint, setup_rpc):
@@ -775,13 +793,17 @@ def test_multiple_inputs(checkpoint, setup_rpc):
         def forward(self, a, b):
             return a + b
 
-    model = Pipe(nn.Sequential(Module1().cuda(0), Module2().cuda(0)), chunks=2, checkpoint=checkpoint)
+    model = Pipe(
+        nn.Sequential(Module1().cuda(0), Module2().cuda(0)),
+        chunks=2,
+        checkpoint=checkpoint,
+    )
     t = torch.rand(10)
     res = model(t, t, t).local_value()
     assert torch.equal(res, (t + t + t) + (t * t * t))
 
-@skip_if_no_cuda
-@pytest.mark.skipif(torch.cuda.device_count() < 2, reason="Need atleast two GPUs")
+
+@pytest.mark.skipif(not TEST_MULTIGPU, reason="Need atleast two GPUs")
 def test_inputs_wrong_device(setup_rpc):
     class Module1(nn.Module):
         def __init__(self):
@@ -795,31 +817,40 @@ def test_inputs_wrong_device(setup_rpc):
     a = torch.rand(10).cuda(1)
     b = torch.rand(10).cuda(1)
     model = Pipe(nn.Sequential(Module1().cuda(0), Module1().cuda(1)), chunks=2)
-    with pytest.raises(ValueError, match='All inputs should be on the same device as the first partition'):
+    with pytest.raises(
+        ValueError,
+        match="All inputs should be on the same device as the first partition",
+    ):
         model(a, b)
 
-@skip_if_no_cuda
-@pytest.mark.skipif(torch.cuda.device_count() < 2, reason="Need atleast two GPUs")
+
+@pytest.mark.skipif(not TEST_MULTIGPU, reason="Need atleast two GPUs")
 def test_with_device_wrapper(setup_rpc):
     fc1 = nn.Linear(16, 8).cuda(0)
     fc2 = nn.Linear(8, 4).cuda(1)
     dropout = nn.Dropout()
 
-    model = nn.Sequential(fc1, fc2, WithDevice(dropout, 'cuda:1'))
+    model = nn.Sequential(fc1, fc2, WithDevice(dropout, "cuda:1"))
     model = Pipe(model, chunks=8)
-    assert torch.device('cuda:1') == model(torch.rand(16, 16).cuda(0)).local_value().device
-    assert [torch.device('cuda:0'), torch.device('cuda:1')] == model.devices
+    assert (
+        torch.device("cuda:1") == model(torch.rand(16, 16).cuda(0)).local_value().device
+    )
+    assert [torch.device("cuda:0"), torch.device("cuda:1")] == model.devices
 
-    model = nn.Sequential(fc1, WithDevice(dropout, 'cuda:1'))
+    model = nn.Sequential(fc1, WithDevice(dropout, "cuda:1"))
     model = Pipe(model, chunks=8)
-    assert torch.device('cuda:1') == model(torch.rand(16, 16).cuda(0)).local_value().device
-    assert [torch.device('cuda:0'), torch.device('cuda:1')] == model.devices
+    assert (
+        torch.device("cuda:1") == model(torch.rand(16, 16).cuda(0)).local_value().device
+    )
+    assert [torch.device("cuda:0"), torch.device("cuda:1")] == model.devices
 
-    model = nn.Sequential(fc1, WithDevice(fc2, 'cuda:0'))
+    model = nn.Sequential(fc1, WithDevice(fc2, "cuda:0"))
     model = Pipe(model, chunks=8)
-    assert torch.device('cuda:0') == model(torch.rand(16, 16).cuda(0)).local_value().device
-    assert [torch.device('cuda:0')] == model.devices
-    assert torch.device('cuda:0') == fc2.weight.device
+    assert (
+        torch.device("cuda:0") == model(torch.rand(16, 16).cuda(0)).local_value().device
+    )
+    assert [torch.device("cuda:0")] == model.devices
+    assert torch.device("cuda:0") == fc2.weight.device
 
 
 if __name__ == "__main__":

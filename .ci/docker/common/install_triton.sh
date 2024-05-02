@@ -13,8 +13,11 @@ conda_reinstall() {
 }
 
 if [ -n "${ROCM_VERSION}" ]; then
-  TRITON_REPO="https://github.com/ROCmSoftwarePlatform/triton"
+  TRITON_REPO="https://github.com/openai/triton"
   TRITON_TEXT_FILE="triton-rocm"
+elif [ -n "${BASEKIT_VERSION}" ]; then
+  TRITON_REPO="https://github.com/intel/intel-xpu-backend-for-triton"
+  TRITON_TEXT_FILE="triton-xpu"
 else
   TRITON_REPO="https://github.com/openai/triton"
   TRITON_TEXT_FILE="triton"
@@ -64,5 +67,6 @@ if [ -n "${CONDA_CMAKE}" ]; then
   # latest numpy version, which fails ASAN tests with the following import error: Numba
   # needs NumPy 1.20 or less.
   conda_reinstall cmake="${CMAKE_VERSION}"
-  conda_reinstall numpy="${NUMPY_VERSION}"
+  # Note that we install numpy with pip as conda might not have the version we want
+  pip_install --force-reinstall numpy=="${NUMPY_VERSION}"
 fi

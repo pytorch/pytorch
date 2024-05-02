@@ -33,7 +33,7 @@ c10::AliasAnalysisKind aliasAnalysisConservative() {
 
 void checkListInputType(const c10::TypePtr& elem_type, bool empty_list) {
   if (!elem_type->isSubtypeOf(*NumberType::get()) &&
-      elem_type != BoolType::get()) {
+      !elem_type->isSubtypeOf(*BoolType::get())) {
     std::stringstream error;
     error << "Input must be of ints, floats, or bools, "
           << "got " << elem_type->repr_str();
@@ -292,19 +292,22 @@ RegisterOperators reg({
           aliasAnalysisFromSchema()),
 
     DEFINE_TORCH_TENSOR_OP(
-        float,
-        double,
-        at::native::scalar_tensor(
-            scalar_val,
-            typeMetaToScalarType(c10::get_default_dtype()),
-            c10::nullopt /* layout */,
-            at::kCPU,
-            c10::nullopt /* pin_memory*/))
-        DEFINE_TORCH_TENSOR_OP(int, int64_t, at::scalar_to_tensor(scalar_val))
+        bool,
+        bool,
+        at::empty({}, at::CPU(at::kBool).options()).fill_(scalar_val))
+        DEFINE_TORCH_TENSOR_OP(
+            float,
+            double,
+            at::native::scalar_tensor(
+                scalar_val,
+                typeMetaToScalarType(c10::get_default_dtype()),
+                c10::nullopt /* layout */,
+                at::kCPU,
+                c10::nullopt /* pin_memory*/))
             DEFINE_TORCH_TENSOR_OP(
-                bool,
-                bool,
-                at::empty({}, at::CPU(at::kBool).options()).fill_(scalar_val))
+                int,
+                int64_t,
+                at::scalar_to_tensor(scalar_val))
                 DEFINE_TORCH_TENSOR_OP(
                     complex,
                     c10::complex<double>,

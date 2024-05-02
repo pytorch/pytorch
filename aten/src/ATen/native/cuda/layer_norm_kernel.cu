@@ -297,7 +297,7 @@ __device__ __inline__ void vectorized_layer_norm_kernel_impl(
 
 //to avoid windows SFINAE errors
 template <typename T, typename T_ACC>
-__global__ __inline__ void vectorized_layer_norm_kernel(
+__global__ void vectorized_layer_norm_kernel(
   const int N,
   T_ACC eps,
   const  T* __restrict__ X,
@@ -334,17 +334,17 @@ __device__ __inline__ void compute_gI(
     for (; l+unroll - 1 < N; l += blockDim.x * unroll){
       #pragma unroll
       for (int k=0; k< unroll; k++){
-          T_ACC gamma_val = (gamma != nullptr) ? static_cast<T_ACC>(gamma[l+k]) : T_ACC(1);
-          const T_ACC c_h = static_cast<T_ACC>(X_i[l+k]);
-          const T_ACC c_loss = static_cast<T_ACC>(dY_i[l+k]);
+          const auto gamma_val = (gamma != nullptr) ? static_cast<T_ACC>(gamma[l+k]) : T_ACC(1);
+          const auto c_h = static_cast<T_ACC>(X_i[l+k]);
+          const auto c_loss = static_cast<T_ACC>(dY_i[l+k]);
           stats_x1 += c_loss * gamma_val;
           stats_x2 += c_loss * gamma_val * (c_h - mean_val) * rstd_val;
       }
     }
     for (;  l < N; l ++) {
-          T_ACC gamma_val = (gamma != nullptr) ? static_cast<T_ACC>(gamma[l]) : T_ACC(1);
-          const T_ACC c_h = static_cast<T_ACC>(X_i[l]);
-          const T_ACC c_loss = static_cast<T_ACC>(dY_i[l]);
+          const auto gamma_val = (gamma != nullptr) ? static_cast<T_ACC>(gamma[l]) : T_ACC(1);
+          const auto c_h = static_cast<T_ACC>(X_i[l]);
+          const auto c_loss = static_cast<T_ACC>(dY_i[l]);
           stats_x1 += c_loss * gamma_val;
           stats_x2 += c_loss * gamma_val * (c_h - mean_val) * rstd_val;
     }
@@ -362,9 +362,10 @@ __device__ __inline__ void compute_gI(
     T_ACC term1 = (T_ACC(1) / fH) * rstd_val;
 
     for (int l = threadIdx.x; l < N; l += blockDim.x){
-        const T_ACC x = X_i[l];
-        const T_ACC dy = dY_i[l];
-        T_ACC gamma_val = (gamma != nullptr) ? static_cast<T_ACC>(gamma[l]) : T_ACC(1);
+        const auto x = X_i[l];
+        const auto dy = dY_i[l];
+        const auto gamma_val = (gamma != nullptr) ? static_cast<T_ACC>(gamma[l]) : T_ACC(1);
+
         T_ACC f_grad_input = fH * gamma_val * dy;
         f_grad_input -= (x - mean_val) * rstd_val * stats_x2;
         f_grad_input -= stats_x1;
@@ -392,7 +393,7 @@ __global__ void layer_norm_grad_input_kernel(
 
 // This implementation gets called when input buffers (dY, X, gamma and dX) are aligned
 // to vec_size * sizeof(T). Compared to the unvectorized implementation, it is about 10%
-// faster measuread at PT operator level, with cases seeing a 2X speedup (where N >> M).
+// faster measured at PT operator level, with cases seeing a 2X speedup (where N >> M).
 // There are no noticeable regressions on the rest of the sizes.
 
 template<typename T, typename T_ACC>
@@ -415,10 +416,10 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
   T* dX_i = dX + bIdx * N;
 
   using vec_t = aligned_vector<T, vec_size>;
-  const vec_t* X_i_vec_ptr = reinterpret_cast<const vec_t*>(X_i);
-  const vec_t* dY_i_vec_ptr = reinterpret_cast<const vec_t*>(dY_i);
-  const vec_t* gamma_vec_ptr = (gamma != nullptr) ? reinterpret_cast<const vec_t*>(gamma) : nullptr;
-  vec_t* dX_i_vec = reinterpret_cast<vec_t*>(dX_i);
+  const vec_t* const X_i_vec_ptr = reinterpret_cast<const vec_t*>(X_i);
+  const vec_t* const dY_i_vec_ptr = reinterpret_cast<const vec_t*>(dY_i);
+  const vec_t* const gamma_vec_ptr = (gamma != nullptr) ? reinterpret_cast<const vec_t*>(gamma) : nullptr;
+  vec_t* const dX_i_vec = reinterpret_cast<vec_t*>(dX_i);
 
   vec_t X_i_vec_reg, dY_i_vec_reg, gamma_vec_reg, dX_i_vec_reg;
   for (int k = 0; k < vec_size; ++k) {
@@ -437,9 +438,9 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
     dY_i_vec_reg = dY_i_vec_ptr[vec_idx];
 
     for (int k = 0; k < vec_size; ++k) {
-      const T_ACC gamma_val = static_cast<T_ACC>(gamma_vec_reg.val[k]);
-      const T_ACC c_h = static_cast<T_ACC>(X_i_vec_reg.val[k]);
-      const T_ACC c_loss = static_cast<T_ACC>(dY_i_vec_reg.val[k]);
+      const auto gamma_val = static_cast<T_ACC>(gamma_vec_reg.val[k]);
+      const auto c_h = static_cast<T_ACC>(X_i_vec_reg.val[k]);
+      const auto c_loss = static_cast<T_ACC>(dY_i_vec_reg.val[k]);
       stats_x1 += c_loss * gamma_val;
       stats_x2 += c_loss * gamma_val * (c_h - mean_val) * rstd_val;
     }
@@ -447,9 +448,9 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
 
   // Tail Loop
   for (; l < N; l++) {
-    T_ACC gamma_val = (gamma != nullptr) ? static_cast<T_ACC>(gamma[l]) : T_ACC(1);
-    const T_ACC c_h = static_cast<T_ACC>(X_i[l]);
-    const T_ACC c_loss = static_cast<T_ACC>(dY_i[l]);
+    const auto gamma_val = (gamma != nullptr) ? static_cast<T_ACC>(gamma[l]) : T_ACC(1);
+    const auto c_h = static_cast<T_ACC>(X_i[l]);
+    const auto c_loss = static_cast<T_ACC>(dY_i[l]);
     stats_x1 += c_loss * gamma_val;
     stats_x2 += c_loss * gamma_val * (c_h - mean_val) * rstd_val;
   }
@@ -479,9 +480,9 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
     dY_i_vec_reg = dY_i_vec_ptr[vec_idx];
 
     for (int k = 0; k < vec_size; ++k) {
-      const T_ACC gamma_val = static_cast<T_ACC>(gamma_vec_reg.val[k]);
-      const T_ACC x = static_cast<T_ACC>(X_i_vec_reg.val[k]);
-      const T_ACC dy = static_cast<T_ACC>(dY_i_vec_reg.val[k]);
+      const auto gamma_val = static_cast<T_ACC>(gamma_vec_reg.val[k]);
+      const auto x = static_cast<T_ACC>(X_i_vec_reg.val[k]);
+      const auto dy = static_cast<T_ACC>(dY_i_vec_reg.val[k]);
 
       T_ACC f_grad_input = fH * gamma_val * dy;
       f_grad_input -= (x - mean_val) * rstd_val * stats_x2;
@@ -495,9 +496,10 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
 
   // Tail Loop
   for (; l < N; l += blockDim.x) {
-    const T_ACC x = X_i[l];
-    const T_ACC dy = dY_i[l];
-    T_ACC gamma_val = (gamma != nullptr) ? static_cast<T_ACC>(gamma[l]) : T_ACC(1);
+    const auto x = X_i[l];
+    const auto dy = dY_i[l];
+    const auto gamma_val = (gamma != nullptr) ? static_cast<T_ACC>(gamma[l]) : T_ACC(1);
+
     T_ACC f_grad_input = fH * gamma_val * dy;
     f_grad_input -= (x - mean_val) * rstd_val * stats_x2;
     f_grad_input -= stats_x1;
@@ -538,6 +540,10 @@ __global__ void GammaBetaBackwardSimpleCUDAKernel(
   }
 }
 
+// This implementation gets called if M and N divide with 32. This case should
+// be the most common. We can then make better use of warp level intrinsics
+// to improve performance.
+
 template <typename T, typename T_ACC>
 __global__ void GammaBetaBackwardCUDAKernel_32x32(
     int64_t M,
@@ -577,10 +583,7 @@ __global__ void GammaBetaBackwardCUDAKernel_32x32(
         mean_reg_tmp = mean[offset + laneId];
         rstd_reg_tmp = rstd[offset + laneId];
       }
-#if !defined(USE_ROCM)
-      // Volta and newer architectures allow lane divergence within a warp.
-      __syncwarp();
-#endif
+      WARP_SYNC();
 
       #pragma unroll
       for (int ii = 0; ii < unroll_factor; ++ii) {
@@ -1146,12 +1149,12 @@ void LayerNormBackwardKernelImplInternal(
   file a support request to support bigger batches");
   TORCH_CHECK(N <= std::numeric_limits<int>::max(), "Normalized shape should have less than INT_MAX elements, \
   file a support request to support bigger normalized shapes");
-  const T* dY_data = dY.template data_ptr<T>();
-  const T* X_data = X.template data_ptr<T>();
-  const T_ACC* mean_data = mean.template data_ptr<T_ACC>();
-  const T_ACC* rstd_data = rstd.template data_ptr<T_ACC>();
+  const T* dY_data = dY.template const_data_ptr<T>();
+  const T* X_data = X.template const_data_ptr<T>();
+  const T_ACC* mean_data = mean.template const_data_ptr<T_ACC>();
+  const T_ACC* rstd_data = rstd.template const_data_ptr<T_ACC>();
   const T* gamma_data =
-      gamma.defined() ? gamma.template data_ptr<T>() : nullptr;
+      gamma.defined() ? gamma.template const_data_ptr<T>() : nullptr;
   T* dX_data = dX->defined() ? dX->template data_ptr<T>() : nullptr;
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
   const int warp_size = at::cuda::warp_size();

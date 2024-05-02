@@ -20,3 +20,5 @@ For a quick overview of ``torch.compiler``, see :ref:`torch.compiler_overview`.
      list_backends
      disable
      cudagraph_mark_step_begin
+     is_compiling
+     is_dynamo_compiling

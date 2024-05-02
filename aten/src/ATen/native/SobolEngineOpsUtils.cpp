@@ -3,7 +3,7 @@
 #include <ATen/native/SobolEngineOpsUtils.h>
 
 /*
-The direction nubmers in this file  were generated using the
+The direction numbers in this file  were generated using the
 python script below (thius this assumes that the file
 https://web.maths.unsw.edu.au/~fkuo/sobol/new-joe-kuo-6.21201
 is present in the working directory). For additional details see [1].
@@ -42,9 +42,7 @@ is present in the working directory). For additional details see [1].
     poly = np.concatenate([[1], df["poly"].values])
 */
 
-namespace at {
-namespace native {
-namespace sobol_utils {
+namespace at::native::sobol_utils {
 
 /// All definitions below this point are data. These are constant, and should
 /// not be modified without notice
@@ -42458,6 +42456,4 @@ const int64_t initsobolstate[21201][18] = {
     {1, 1, 7, 11, 15, 7, 37, 239, 337, 245, 1557, 3681, 7357, 9639, 27367, 26869, 114603, 86317}
     };
 
-} // namespace sobol_utils
-} // namespace native
-} // namespace at
+} // namespace at::native::sobol_utils

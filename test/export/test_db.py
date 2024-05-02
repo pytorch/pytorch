@@ -1,4 +1,4 @@
-# Owner(s): ["module: dynamo"]
+# Owner(s): ["oncall: export"]
 
 import copy
 import unittest
@@ -12,12 +12,14 @@ from torch._export.db.examples import (
 from torch.export import export
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_WINDOWS,
     parametrize,
     run_tests,
     TestCase,
 )
 
 
+@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class ExampleTests(TestCase):
     # TODO Maybe we should make this tests actually show up in a file?
@@ -40,14 +42,14 @@ class ExampleTests(TestCase):
         exported_program.graph_module.print_readable()
 
         self.assertEqual(
-            exported_program(*inputs_export.args, **inputs_export.kwargs),
+            exported_program.module()(*inputs_export.args, **inputs_export.kwargs),
             model(*inputs_model.args, **inputs_model.kwargs),
         )
 
         if case.extra_inputs is not None:
             inputs = normalize_inputs(case.extra_inputs)
             self.assertEqual(
-                exported_program(*inputs.args, **inputs.kwargs),
+                exported_program.module()(*inputs.args, **inputs.kwargs),
                 model(*inputs.args, **inputs.kwargs),
             )
 
@@ -59,7 +61,9 @@ class ExampleTests(TestCase):
     def test_exportdb_not_supported(self, name: str, case: ExportCase) -> None:
         model = case.model
         # pyre-ignore
-        with self.assertRaises((torchdynamo.exc.Unsupported, AssertionError, RuntimeError)):
+        with self.assertRaises(
+            (torchdynamo.exc.Unsupported, AssertionError, RuntimeError)
+        ):
             inputs = normalize_inputs(case.example_inputs)
             exported_model = export(
                 model,
@@ -76,6 +80,7 @@ class ExampleTests(TestCase):
         for rewrite_case in get_rewrite_cases(case)
     ]
     if exportdb_not_supported_rewrite_cases:
+
         @parametrize(
             "name,rewrite_case",
             exportdb_not_supported_rewrite_cases,

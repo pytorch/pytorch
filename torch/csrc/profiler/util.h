@@ -27,7 +27,7 @@
       if (torch::profiler::impl::softAssertRaises()) { \
         TORCH_INTERNAL_ASSERT(cond, __VA_ARGS__);      \
       } else {                                         \
-        TORCH_WARN(__VA_ARGS__);                       \
+        TORCH_WARN_ONCE(__VA_ARGS__);                  \
       }                                                \
       return false;                                    \
     }                                                  \
@@ -159,12 +159,4 @@ struct HashCombine {
 
 } // namespace impl
 } // namespace profiler
-} // namespace torch
-
-namespace torch {
-namespace autograd {
-namespace profiler {
-using torch::profiler::impl::computeFlops;
-} // namespace profiler
-} // namespace autograd
 } // namespace torch

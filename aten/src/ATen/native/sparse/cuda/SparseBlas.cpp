@@ -24,8 +24,7 @@
 
 #include <c10/util/MaybeOwned.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 /*
   Computes `result` <- α*(A @ B) * spy(C) + β*C, where spy(C) is the sparsity pattern matrix of C.
@@ -285,5 +284,4 @@ std::tuple<Tensor&, Tensor&> triangular_solve_out_sparse_csr_cuda(
   return std::tuple<Tensor&, Tensor&>(X, clone_A);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

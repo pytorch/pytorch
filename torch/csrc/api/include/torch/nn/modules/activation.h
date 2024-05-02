@@ -14,7 +14,7 @@ namespace nn {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ELU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies elu over a given input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.ELU to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.ELU to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::ELUOptions` class to learn what
@@ -49,7 +49,7 @@ TORCH_MODULE(ELU);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ SELU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the selu function element-wise.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.SELU to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.SELU to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::SELUOptions` class to learn what
@@ -84,7 +84,7 @@ TORCH_MODULE(SELU);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Hardshrink ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the hard shrinkage function element-wise.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.Hardshrink to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.Hardshrink to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::HardshrinkOptions` class to learn what
@@ -119,7 +119,7 @@ TORCH_MODULE(Hardshrink);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Hardtanh ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the HardTanh function element-wise.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.Hardtanh to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.Hardtanh to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::HardtanhOptions` class to learn what
@@ -155,7 +155,7 @@ TORCH_MODULE(Hardtanh);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ LeakyReLU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the LeakyReLU function element-wise.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.LeakyReLU to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.LeakyReLU to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::LeakyReLUOptions` class to learn what
@@ -190,7 +190,7 @@ TORCH_MODULE(LeakyReLU);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ LogSigmoid ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the LogSigmoid function element-wise.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.LogSigmoid to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.LogSigmoid to learn
 /// about the exact behavior of this module.
 class TORCH_API LogSigmoidImpl : public torch::nn::Cloneable<LogSigmoidImpl> {
  public:
@@ -211,7 +211,7 @@ TORCH_MODULE(LogSigmoid);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Softmax ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the Softmax function.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.Softmax to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.Softmax to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::SoftmaxOptions` class to learn what
@@ -246,7 +246,7 @@ TORCH_MODULE(Softmax);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Softmin ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the Softmin function element-wise.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.Softmin to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.Softmin to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::SoftminOptions` class to learn what
@@ -281,7 +281,7 @@ TORCH_MODULE(Softmin);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ LogSoftmax ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the LogSoftmax function element-wise.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.LogSoftmax to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.LogSoftmax to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::LogSoftmaxOptions` class to learn what
@@ -317,7 +317,7 @@ TORCH_MODULE(LogSoftmax);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Softmax2d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the Softmax2d function element-wise.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.Softmax2d to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.Softmax2d to learn
 /// about the exact behavior of this module.
 class TORCH_API Softmax2dImpl : public torch::nn::Cloneable<Softmax2dImpl> {
  public:
@@ -338,7 +338,7 @@ TORCH_MODULE(Softmax2d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ PReLU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the PReLU function element-wise.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.PReLU to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.PReLU to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::PReLUOptions` class to learn what
@@ -376,7 +376,7 @@ TORCH_MODULE(PReLU);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ReLU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the ReLU function element-wise.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.ReLU to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.ReLU to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::ReLUOptions` class to learn what
@@ -411,7 +411,7 @@ TORCH_MODULE(ReLU);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ReLU6 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the ReLU6 function element-wise.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.ReLU6 to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.ReLU6 to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::ReLU6Options` class to learn what
@@ -446,7 +446,7 @@ TORCH_MODULE(ReLU6);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ RReLU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the RReLU function element-wise.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.RReLU to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.RReLU to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::RReLUOptions` class to learn what
@@ -481,7 +481,7 @@ TORCH_MODULE(RReLU);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CELU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies celu over a given input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.CELU to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.CELU to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::CELUOptions` class to learn what
@@ -516,7 +516,7 @@ TORCH_MODULE(CELU);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GLU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies glu over a given input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.GLU to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.GLU to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::GLUOptions` class to learn what
@@ -551,7 +551,7 @@ TORCH_MODULE(GLU);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GELU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies gelu over a given input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.GELU to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.GELU to learn
 /// about the exact behavior of this module.
 class TORCH_API GELUImpl : public torch::nn::Cloneable<GELUImpl> {
  public:
@@ -577,7 +577,7 @@ TORCH_MODULE(GELU);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ SiLU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies silu over a given input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.SiLU to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.SiLU to learn
 /// about the exact behavior of this module.
 class TORCH_API SiLUImpl : public torch::nn::Cloneable<SiLUImpl> {
  public:
@@ -598,7 +598,7 @@ TORCH_MODULE(SiLU);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Mish ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies mish over a given input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.Mish to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.Mish to learn
 /// about the exact behavior of this module.
 class TORCH_API MishImpl : public torch::nn::Cloneable<MishImpl> {
  public:
@@ -619,7 +619,7 @@ TORCH_MODULE(Mish);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Sigmoid ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies sigmoid over a given input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.Sigmoid to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.Sigmoid to learn
 /// about the exact behavior of this module.
 class TORCH_API SigmoidImpl : public torch::nn::Cloneable<SigmoidImpl> {
  public:
@@ -640,7 +640,7 @@ TORCH_MODULE(Sigmoid);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Softplus ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies softplus over a given input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.Softplus to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.Softplus to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::SoftplusOptions` class to learn what
@@ -675,7 +675,7 @@ TORCH_MODULE(Softplus);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Softshrink ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the soft shrinkage function element-wise.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.Softshrink to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.Softshrink to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::SoftshrinkOptions` class to learn what
@@ -710,7 +710,7 @@ TORCH_MODULE(Softshrink);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Softsign ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies Softsign over a given input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.Softsign to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.Softsign to learn
 /// about the exact behavior of this module.
 class TORCH_API SoftsignImpl : public torch::nn::Cloneable<SoftsignImpl> {
  public:
@@ -731,7 +731,7 @@ TORCH_MODULE(Softsign);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Tanh ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies Tanh over a given input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.Tanh to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.Tanh to learn
 /// about the exact behavior of this module.
 class TORCH_API TanhImpl : public torch::nn::Cloneable<TanhImpl> {
  public:
@@ -752,7 +752,7 @@ TORCH_MODULE(Tanh);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Tanhshrink ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies Tanhshrink over a given input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.Tanhshrink to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.Tanhshrink to learn
 /// about the exact behavior of this module.
 class TORCH_API TanhshrinkImpl : public torch::nn::Cloneable<TanhshrinkImpl> {
  public:
@@ -773,7 +773,7 @@ TORCH_MODULE(Tanhshrink);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Threshold ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the Threshold function element-wise.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.Threshold to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.Threshold to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::ThresholdOptions` class to learn what
@@ -810,7 +810,7 @@ TORCH_MODULE(Threshold);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ MultiheadAttention ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the MultiheadAttention function element-wise.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.MultiheadAttention
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.MultiheadAttention
 /// to learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::MultiheadAttentionOptions` class to

@@ -7,8 +7,7 @@
 #include <functional>
 #include <utility>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 struct BuiltinOpFunction : public Function {
   BuiltinOpFunction(
@@ -62,12 +61,16 @@ struct BuiltinOpFunction : public Function {
     return *this;
   }
 
-  bool call(Stack& stack, c10::optional<size_t>, c10::function_ref<void(const Code&)>) override {
+  bool call(
+      Stack& stack,
+      c10::optional<size_t>,
+      c10::function_ref<void(const Code&)>) override {
     run(stack);
     return false;
   }
 
-  bool call(Stack& stack, c10::function_ref<void(const mobile::Code&)>) override {
+  bool call(Stack& stack, c10::function_ref<void(const mobile::Code&)>)
+      override {
     run(stack);
     return false;
   }
@@ -84,5 +87,4 @@ struct BuiltinOpFunction : public Function {
   std::string doc_string_;
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -15,7 +15,6 @@
 /// and inspired by Half implementation from pytorch/c10/util/Half.h
 
 #include <c10/macros/Macros.h>
-#include <c10/util/C++17.h>
 #include <c10/util/TypeSafeSignMath.h>
 #include <c10/util/floating_point_utils.h>
 #include <type_traits>
@@ -96,7 +95,7 @@ inline C10_HOST_DEVICE float fp8e4m3fn_to_fp32_value(uint8_t input) {
    * mantissa will shift into exponent, turning the biased exponent into 1, and
    * making mantissa normalized (i.e. without leading 1).
    */
-#if defined(__CUDA_ARCH__)
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
   uint32_t renorm_shift = __clz(nonsign);
 #elif defined(__SYCL_DEVICE_ONLY__)
   // Note: zero is not a supported input into `__builtin_clz`
@@ -240,7 +239,12 @@ struct alignas(1) Float8_e4m3fn {
   inline C10_HOST_DEVICE bool isnan() const;
 };
 
-C10_API std::ostream& operator<<(std::ostream& out, const Float8_e4m3fn& value);
+C10_API inline std::ostream& operator<<(
+    std::ostream& out,
+    const Float8_e4m3fn& value) {
+  out << (float)value;
+  return out;
+}
 
 } // namespace c10
 

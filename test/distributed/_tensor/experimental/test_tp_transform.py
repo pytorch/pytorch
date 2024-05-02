@@ -11,6 +11,7 @@ from torch.distributed.tensor.parallel.style import (
     ParallelStyle,
     RowwiseParallel,
 )
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
@@ -71,10 +72,9 @@ class TensorParallelTest(DTensorTestBase):
         inputs = (torch.randn(7, 3, requires_grad=False).to(device=self.device_type),)
         with torch.no_grad():
             res = model(*inputs)
-        exported_program = torch._export.export(
+        exported_program = torch.export.export(
             model,
             inputs,
-            constraints=None,
         )
         tp_exported_program = tensor_parallel_transformation(
             exported_program,
@@ -91,8 +91,8 @@ class TensorParallelTest(DTensorTestBase):
         self.assert_has_c10d_ops(
             tp_exported_program.graph_module,
             {
-                "c10d_functional.all_gather_into_tensor.default": 1,
-                "c10d_functional.wait_tensor.default": 1,
+                "_c10d_functional.all_gather_into_tensor.default": 1,
+                "_c10d_functional.wait_tensor.default": 1,
             },
         )
 
@@ -110,10 +110,9 @@ class TensorParallelTest(DTensorTestBase):
 
         with torch.inference_mode():
             res = model(*inputs)
-        exported_program = torch._export.export(
+        exported_program = torch.export.export(
             model,
             inputs,
-            constraints=None,
         )
         tp_exported_program = tensor_parallel_transformation(
             exported_program,
@@ -130,8 +129,8 @@ class TensorParallelTest(DTensorTestBase):
         self.assert_has_c10d_ops(
             tp_exported_program.graph_module,
             {
-                "c10d_functional.all_reduce.default": 2,
-                "c10d_functional.wait_tensor.default": 2,
+                "_c10d_functional.all_reduce.default": 2,
+                "_c10d_functional.wait_tensor.default": 2,
             },
         )
 
@@ -147,10 +146,9 @@ class TensorParallelTest(DTensorTestBase):
 
         with torch.inference_mode():
             res = model(*inputs)
-        exported_program = torch._export.export(
+        exported_program = torch.export.export(
             model,
             inputs,
-            constraints=None,
         )
         tp_exported_program = tensor_parallel_transformation(
             exported_program,
@@ -166,7 +164,11 @@ class TensorParallelTest(DTensorTestBase):
         self.assert_has_c10d_ops(
             tp_exported_program.graph_module,
             {
-                "c10d_functional.all_reduce.default": 1,
-                "c10d_functional.wait_tensor.default": 1,
+                "_c10d_functional.all_reduce.default": 1,
+                "_c10d_functional.wait_tensor.default": 1,
             },
         )
+
+
+if __name__ == "__main__":
+    run_tests()

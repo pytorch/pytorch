@@ -8,10 +8,11 @@
 # LICENSE file in the root directory of this source tree.
 import pytest
 import torch
-from torch import nn
 import torch.nn.functional as F
+from torch import nn
 
 from torch.distributed.pipeline.sync import Pipe
+from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import run_tests
 
 
@@ -62,7 +63,7 @@ def test_exception_no_hang(setup_rpc):
 
     class Raise(nn.Module):
         def forward(self, x):
-            raise ExpectedException()
+            raise ExpectedException
 
     model = nn.Sequential(Pass(), Pass(), Raise())
     model = Pipe(model, chunks=3)
@@ -71,7 +72,7 @@ def test_exception_no_hang(setup_rpc):
         model(torch.rand(3))
 
 
-@pytest.mark.skipif(torch.cuda.device_count() < 2, reason="2 cuda devices required")
+@pytest.mark.skipif(not TEST_MULTIGPU, reason="2 cuda devices required")
 def test_tuple_wait(cuda_sleep, setup_rpc):
     # In v0.0.3, Wait is applied to only the first tensor on a micro-batch.
     # Under this behavior, if checkpointing was disabled, there's a possibility

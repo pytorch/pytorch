@@ -445,20 +445,27 @@ def _str_intern(inp, *, tensor_contents=None):
         suffixes.append("size=" + str(tuple(self.shape)))
         from torch._subclasses.fake_tensor import FakeTensor
 
-        if not self.is_meta and not isinstance(self, FakeTensor):
+        is_meta = self.is_meta or isinstance(self, FakeTensor)
+        if not is_meta:
             suffixes.append("nnz=" + str(self._nnz()))
         if not has_default_dtype:
             suffixes.append("dtype=" + str(self.dtype))
         if not custom_contents_provided:
             indices_prefix = "indices=tensor("
             indices = self._indices().detach()
-            indices_str = _tensor_str(indices, indent + len(indices_prefix))
-            if indices.numel() == 0:
+            if is_meta:
+                indices_str = "..."
+            else:
+                indices_str = _tensor_str(indices, indent + len(indices_prefix))
+            if indices.numel() == 0 or is_meta:
                 indices_str += ", size=" + str(tuple(indices.shape))
             values_prefix = "values=tensor("
             values = self._values().detach()
-            values_str = _tensor_str(values, indent + len(values_prefix))
-            if values.numel() == 0:
+            if is_meta:
+                values_str = "..."
+            else:
+                values_str = _tensor_str(values, indent + len(values_prefix))
+            if values.numel() == 0 or is_meta:
                 values_str += ", size=" + str(tuple(values.shape))
             tensor_str = (
                 indices_prefix
@@ -475,8 +482,12 @@ def _str_intern(inp, *, tensor_contents=None):
         torch.sparse_bsr,
         torch.sparse_bsc,
     }:
+        from torch._subclasses.fake_tensor import FakeTensor
+
         suffixes.append("size=" + str(tuple(self.shape)))
-        suffixes.append("nnz=" + str(self._nnz()))
+        is_meta = self.is_meta or isinstance(self, FakeTensor)
+        if not is_meta:
+            suffixes.append("nnz=" + str(self._nnz()))
         if not has_default_dtype:
             suffixes.append("dtype=" + str(self.dtype))
         if not custom_contents_provided:
@@ -492,24 +503,33 @@ def _str_intern(inp, *, tensor_contents=None):
                 cdimname, pdimname = "column", "row"
             compressed_indices_prefix = f"c{cdimname[:3]}_indices=tensor("
             compressed_indices = compressed_indices_method(self).detach()
-            compressed_indices_str = _tensor_str(
-                compressed_indices, indent + len(compressed_indices_prefix)
-            )
-            if compressed_indices.numel() == 0:
+            if is_meta:
+                compressed_indices_str = "..."
+            else:
+                compressed_indices_str = _tensor_str(
+                    compressed_indices, indent + len(compressed_indices_prefix)
+                )
+            if compressed_indices.numel() == 0 or is_meta:
                 compressed_indices_str += ", size=" + str(
                     tuple(compressed_indices.shape)
                 )
             plain_indices_prefix = f"{pdimname[:3]}_indices=tensor("
             plain_indices = plain_indices_method(self).detach()
-            plain_indices_str = _tensor_str(
-                plain_indices, indent + len(plain_indices_prefix)
-            )
-            if plain_indices.numel() == 0:
+            if is_meta:
+                plain_indices_str = "..."
+            else:
+                plain_indices_str = _tensor_str(
+                    plain_indices, indent + len(plain_indices_prefix)
+                )
+            if plain_indices.numel() == 0 or is_meta:
                 plain_indices_str += ", size=" + str(tuple(plain_indices.shape))
             values_prefix = "values=tensor("
             values = self.values().detach()
-            values_str = _tensor_str(values, indent + len(values_prefix))
-            if values.numel() == 0:
+            if is_meta:
+                values_str = "..."
+            else:
+                values_str = _tensor_str(values, indent + len(values_prefix))
+            if values.numel() == 0 or is_meta:
                 values_str += ", size=" + str(tuple(values.shape))
             tensor_str = (
                 compressed_indices_prefix
@@ -610,7 +630,7 @@ def _str_intern(inp, *, tensor_contents=None):
         # no-grad mode. See: https://github.com/pytorch/pytorch/issues/99968
         grad_fn_name = "Invalid"
 
-    if grad_fn_name is None and grad_fn is not None:
+    if grad_fn_name is None and grad_fn is not None:  # type: ignore[possibly-undefined]
         grad_fn_name = type(grad_fn).__name__
         if grad_fn_name == "CppFunction":
             grad_fn_name = grad_fn.name().rsplit("::", 1)[-1]
@@ -627,7 +647,7 @@ def _str_intern(inp, *, tensor_contents=None):
         suffixes.append(f"tangent={tangent}")
 
     string_repr = _add_suffixes(
-        prefix + tensor_str, suffixes, indent, force_newline=self.is_sparse
+        prefix + tensor_str, suffixes, indent, force_newline=self.is_sparse  # type: ignore[possibly-undefined]
     )
 
     # Check if this instance is flagged as a parameter and change the repr accordingly.

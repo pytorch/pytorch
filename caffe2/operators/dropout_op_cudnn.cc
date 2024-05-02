@@ -5,10 +5,6 @@
 
 namespace caffe2 {
 
-// cudnnRestoreDropoutDescriptor is needed for correctness and
-// doesn't exist prior to cuDNN v7
-#if CUDNN_VERSION_MIN(7,0,0)
-
 class CuDNNDropoutOp final : public Operator<CUDAContext> {
  public:
   USE_OPERATOR_FUNCTIONS(CUDAContext);
@@ -292,7 +288,5 @@ namespace {
 REGISTER_CUDNN_OPERATOR(Dropout, CuDNNDropoutOp);
 REGISTER_CUDNN_OPERATOR(DropoutGrad, CuDNNDropoutGradientOp);
 }
-
-#endif
 
 }; // namespace caffe2

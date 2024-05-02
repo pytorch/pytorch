@@ -43,8 +43,7 @@ constexpr auto kTensorSubclassLike =
          // no matter the backend component
          DispatchKey::Batched,
          DispatchKey::Sparse,
-         DispatchKey::SparseCsrCPU,
-         DispatchKey::SparseCsrCUDA,
+         DispatchKey::SparseCsr,
          DispatchKey::Python}) |
     DispatchKeySet(BackendComponent::MetaBit);
 

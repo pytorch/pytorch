@@ -200,7 +200,7 @@ auto InputOutputEncoder::getIValueGenerator(const IOType& io_type) {
     std::vector<op_input_t> out;
     auto push_value = [&out, io_type](const Tag& tag, op_input_t input) {
       if (io_type == tagToIOType(tag)) {
-        out.push_back(std::move(input));
+        out.emplace_back(std::move(input));
       } else {
         out.emplace_back(c10::nullopt);
       }
@@ -311,6 +311,7 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
           fn.forwardThreadId(),
           fn.scope(),
           fn.isAsync(),
+          fn.handle(),
           fn.debugHandle(),
           fn.name()});
   if (config_.report_input_shapes) {
@@ -591,7 +592,7 @@ int64_t Result::endTimeNS() const {
           Vulkan, start_time_ns_ + (e.in_tree_building_ ? 0 : e.duration_ns_)),
       ATTRIBUTE(Allocation, start_time_ns_),
       ATTRIBUTE(OutOfMemory, start_time_ns_),
-      ATTRIBUTE(Kineto, start_time_ns_ + e.duration_us_ * 1000),
+      ATTRIBUTE(Kineto, start_time_ns_ + e.duration_ns_),
       [&](const auto& e) -> int64_t { return e.end_time_ns_; }));
 
   // In rare cases we're willing to tolerate ops which are missing an end time
@@ -745,58 +746,56 @@ void generateForwardBackwardLink(
 
 void generateForwardBackwardLinks(
     std::unique_ptr<torch::profiler::impl::kineto::trace_t>& cpu_trace,
-    const std::vector<std::shared_ptr<Result>>& results) {
+    const std::vector<std::shared_ptr<Result>>& results){
 #ifndef USE_KINETO
 }
 #else // USE_KINETO
-  TORCH_INTERNAL_ASSERT(cpu_trace->activities.size() == results.size());
+    TORCH_INTERNAL_ASSERT(cpu_trace->activities.size() == results.size());
 
-  // startThreadId_seqNum to pointer of activity.
-  // Low-16bits of startThreadId and low-48bits seqNum are concatenated into
-  // one uint64_t variable as key.
+// startThreadId_seqNum to pointer of activity.
+// Low-16bits of startThreadId and low-48bits seqNum are concatenated into
+// one uint64_t variable as key.
 
-  std::unordered_map<uint64_t, libkineto::GenericTraceActivity*>
-      tidSeq2activity;
-  uint64_t fwd_bwd_link_id = 1;
+std::unordered_map<uint64_t, libkineto::GenericTraceActivity*> tidSeq2activity;
+uint64_t fwd_bwd_link_id = 1;
 
-  using result_activity_t =
-      std::pair<Result*, libkineto::GenericTraceActivity*>;
-  std::vector<result_activity_t> torch_events;
+using result_activity_t = std::pair<Result*, libkineto::GenericTraceActivity*>;
+std::vector<result_activity_t> torch_events;
 
-  for (const auto idx : c10::irange(cpu_trace->activities.size())) {
-    auto& profiler_result = results[idx];
-    auto& activity = cpu_trace->activities[idx];
+for (const auto idx : c10::irange(cpu_trace->activities.size())) {
+  auto& profiler_result = results[idx];
+  auto& activity = cpu_trace->activities[idx];
 
-    // add information about an associated forward op, if a sequence number
-    // is available (e.g. during training)
+  // add information about an associated forward op, if a sequence number
+  // is available (e.g. during training)
 
-    profiler_result->visit_if_base<ExtraFields<EventType::TorchOp>>(
-        [&](const auto& e) {
-          if (e.sequence_number_ >= 0) {
-            torch_events.emplace_back(profiler_result.get(), activity.get());
-          }
-        });
-  }
-
-  // We need to visit the events in chronological order.
-  // So we sort them by end_time_ns_ before processing.
-  std::sort(
-      torch_events.begin(),
-      torch_events.end(),
-      [](const result_activity_t& left, const result_activity_t& right) {
-        auto left_end_time =
-            std::get<ExtraFields<EventType::TorchOp>>(left.first->extra_fields_)
-                .end_time_ns_;
-        auto right_end_time = std::get<ExtraFields<EventType::TorchOp>>(
-                                  right.first->extra_fields_)
-                                  .end_time_ns_;
-        return left_end_time < right_end_time;
+  profiler_result->visit_if_base<ExtraFields<EventType::TorchOp>>(
+      [&](const auto& e) {
+        if (e.sequence_number_ >= 0) {
+          torch_events.emplace_back(profiler_result.get(), activity.get());
+        }
       });
+}
 
-  for (auto& [profiler_result, activity] : torch_events) {
-    generateForwardBackwardLink(
-        *profiler_result, fwd_bwd_link_id, *activity, tidSeq2activity);
-  }
+// We need to visit the events in chronological order.
+// So we sort them by end_time_ns_ before processing.
+std::sort(
+    torch_events.begin(),
+    torch_events.end(),
+    [](const result_activity_t& left, const result_activity_t& right) {
+      auto left_end_time =
+          std::get<ExtraFields<EventType::TorchOp>>(left.first->extra_fields_)
+              .end_time_ns_;
+      auto right_end_time =
+          std::get<ExtraFields<EventType::TorchOp>>(right.first->extra_fields_)
+              .end_time_ns_;
+      return left_end_time < right_end_time;
+    });
+
+for (auto& [profiler_result, activity] : torch_events) {
+  generateForwardBackwardLink(
+      *profiler_result, fwd_bwd_link_id, *activity, tidSeq2activity);
+}
 }
 #endif // USE_KINETO
 
@@ -804,23 +803,28 @@ static constexpr const char* indexKey = "Ev Idx";
 
 void passEventsToKineto(
     const std::vector<std::shared_ptr<Result>>& results,
-    uint64_t start_time_us,
-    uint64_t end_time_us,
+    uint64_t start_time_ns,
+    uint64_t end_time_ns,
     const ProfilerConfig& config) {
   using namespace torch::profiler::impl::kineto;
   TraceWrapper cpu_trace(
-      static_cast<int64_t>(start_time_us), "PyTorch Profiler");
+      static_cast<int64_t>(start_time_ns), "PyTorch Profiler");
 
   // Generate Kineto events for each event recorded by the PyTorch profiler.
   for (const auto i : c10::irange(results.size())) {
     const auto& e = results[i];
+    // (TODO): This is a temporary fix for async traces to make sure that we do
+    // not use int64 MIN as end time in Kineto. If we use that value, the
+    // duration will overflow and become a very large positive number. For a
+    // long term solution, add guards in kineto for each activity type
+    int64_t act_end_time = std::max(e->endTimeNS(), e->start_time_ns_);
     auto* activity = cpu_trace.addCPUActivity(
         e->name(),
         e->kinetoType(),
         e->kineto_info_,
         e->correlationID(),
-        e->start_time_ns_ / 1000,
-        e->endTimeNS() / 1000);
+        e->start_time_ns_,
+        act_end_time);
 
     TORCH_INTERNAL_ASSERT(activity || !kKinetoAvailable);
     if (activity) {
@@ -843,7 +847,7 @@ void passEventsToKineto(
   }
 
   // Kineto adds the events that it collected.
-  cpu_trace.transferCpuTrace(static_cast<int64_t>(end_time_us));
+  cpu_trace.transferCpuTrace(static_cast<int64_t>(end_time_ns));
 }
 
 #ifdef USE_KINETO
@@ -952,7 +956,7 @@ class TransferEvents {
         static_cast<int32_t>(activity->resourceId())};
 
     auto event = Result::create(
-        activity->timestamp() * 1000,
+        activity->timestamp(),
         noTID, // Placeholder
         device_and_resource,
         ExtraFields<EventType::Kineto>{
@@ -1099,11 +1103,11 @@ class TransferEvents {
 
 trace_ptr_t addKinetoEvents(
     std::vector<std::shared_ptr<Result>>& results,
-    uint64_t start_time_us,
-    uint64_t end_time_us,
+    uint64_t start_time_ns,
+    uint64_t end_time_ns,
     const ProfilerConfig& config) {
   using namespace torch::profiler::impl::kineto;
-  passEventsToKineto(results, start_time_us, end_time_us, config);
+  passEventsToKineto(results, start_time_ns, end_time_ns, config);
 
   // In on demand mode kineto is directly controlled by other machinery.
   if (config.global()) {
@@ -1354,8 +1358,8 @@ std::pair<
     std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>>
 RecordQueue::getRecords(
     std::function<c10::time_t(c10::approx_time_t)> time_converter,
-    uint64_t start_time_us,
-    uint64_t end_time_us) {
+    uint64_t start_time_ns,
+    uint64_t end_time_ns) {
   auto converter = [&](c10::approx_time_t t) {
     return t == std::numeric_limits<c10::approx_time_t>::min()
         ? std::numeric_limits<c10::time_t>::min()
@@ -1405,10 +1409,19 @@ RecordQueue::getRecords(
   }
 
   if (python_tracer_) {
-    for (const auto& i : python_tracer_->getEvents(
-             converter,
-             python_enters,
-             static_cast<c10::time_t>(end_time_us * 1000))) {
+    std::vector<std::shared_ptr<torch::profiler::impl::Result>> ev;
+    try {
+      ev = python_tracer_->getEvents(
+          converter, python_enters, static_cast<c10::time_t>(end_time_ns));
+    } catch (std::exception& e) {
+      // Normally addKinetoEvents() below will stop the trace - but if an
+      // exception happens here then the events will never be stopped and future
+      // runs will be broken - so make sure to stopTrace() if we see an
+      // exception.
+      torch::profiler::impl::kineto::stopTrace();
+      throw;
+    }
+    for (const auto& i : ev) {
       out.push_back(i);
     }
     python_tracer_.reset();
@@ -1428,7 +1441,7 @@ RecordQueue::getRecords(
     }
   }
 
-  auto trace = addKinetoEvents(out, start_time_us, end_time_us, config_);
+  auto trace = addKinetoEvents(out, start_time_ns, end_time_ns, config_);
 
   std::stable_sort(out.begin(), out.end(), [](const auto& a, const auto& b) {
     return a->start_time_ns_ < b->start_time_ns_;

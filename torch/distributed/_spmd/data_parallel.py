@@ -6,7 +6,6 @@ from typing import Any, cast, Dict, List, Optional, Tuple
 
 import torch
 
-import torch.distributed.distributed_c10d as c10d
 import torch.fx as fx
 import torch.library
 import torch.nn as nn
@@ -134,7 +133,7 @@ def _gen_shard_strategy(
 ) -> PlacementStrategy:
     """Util function to generate a shard strategy on shard_dim."""
     return PlacementStrategy(
-        output_spec=DTensorSpec(mesh=mesh, placements=(Shard(shard_dim),)),
+        output_specs=DTensorSpec(mesh=mesh, placements=(Shard(shard_dim),)),
         input_specs=input_specs,
     )
 
@@ -144,7 +143,7 @@ def _gen_replicate_strategy(
 ) -> PlacementStrategy:
     """Util function to generate a replicate strategy."""
     return PlacementStrategy(
-        output_spec=DTensorSpec(mesh=mesh, placements=(Replicate(),)),
+        output_specs=DTensorSpec(mesh=mesh, placements=(Replicate(),)),
         input_specs=input_specs,
     )
 
@@ -158,9 +157,8 @@ def _gen_partial_strategy(mesh: DeviceMesh) -> PlacementStrategy:
     # TODO: Only NCCL supports AVG so using backend like Gloo would
     # crash, we should figure out a way to support avg reduction
     # for non-NCCL backend
-    reduce_op = c10d.ReduceOp.AVG  # type: ignore[attr-defined]
     return PlacementStrategy(
-        output_spec=DTensorSpec(mesh=mesh, placements=(_Partial(reduce_op),)),
+        output_specs=DTensorSpec(mesh=mesh, placements=(_Partial("avg"),)),
     )
 
 
@@ -312,7 +310,7 @@ def build_data_parallel_strategies(
                         output_spec = batch_dim_analyzer.compute_act_spec(node, mesh)
 
                         shard_strategy = PlacementStrategy(
-                            output_spec=output_spec, input_specs=[arg_node_spec]
+                            output_specs=output_spec, input_specs=[arg_node_spec]
                         )
                         dp_strategy_map[node] = DataParallelStrategy(
                             NodeType.ACT, [shard_strategy]
@@ -457,7 +455,7 @@ def build_data_parallel_strategies(
                         output_spec = batch_dim_analyzer.compute_act_spec(node, mesh)
 
                         act_strategy = PlacementStrategy(
-                            output_spec=output_spec, input_specs=input_specs
+                            output_specs=output_spec, input_specs=input_specs
                         )
 
                         dp_strategy_map[node] = DataParallelStrategy(
@@ -485,7 +483,7 @@ def build_data_parallel_strategies(
 
                     act_spec = batch_dim_analyzer.compute_act_spec(node, mesh)
                     op_strategy = PlacementStrategy(
-                        output_spec=act_spec, input_specs=input_specs
+                        output_specs=act_spec, input_specs=input_specs
                     )
                     dp_strategy_map[node] = DataParallelStrategy(
                         NodeType.ACT, [op_strategy]
@@ -541,7 +539,7 @@ def mark_data_parallel_shardings(
                 # mark activation as sharded on batch dim
                 node_sharding = node_strategies[0]
 
-            node.meta["sharding"] = node_sharding
+            node.meta["sharding"] = node_sharding  # type: ignore[possibly-undefined]
 
             placeholder_idx += 1
         elif node.op == "call_function":

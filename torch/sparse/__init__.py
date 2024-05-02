@@ -6,13 +6,18 @@ from torch._C import _add_docstr, _sparse  # type: ignore[attr-defined]
 from torch import Tensor
 
 # Semi structured sparsity support
-from .semi_structured import SparseSemiStructuredTensor, to_sparse_semi_structured
+from .semi_structured import (
+    SparseSemiStructuredTensor,
+    SparseSemiStructuredTensorCUSPARSELT,
+    SparseSemiStructuredTensorCUTLASS,
+    to_sparse_semi_structured
+)
 
 # A workaround to support both TorchScript and MyPy:
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from torch.types import _dtype as DType
-    DimOrDims = Optional[Union[int, Tuple[int], List[int]]]
+    DimOrDims = Optional[Union[int, Tuple[int, ...], List[int]]]
 else:
     # The JIT doesn't understand Union, nor torch.dtype here
     DType = int
@@ -27,6 +32,8 @@ __all__ = [
     'softmax',
     'log_softmax',
     'SparseSemiStructuredTensor',
+    'SparseSemiStructuredTensorCUTLASS',
+    'SparseSemiStructuredTensorCUSPARSELT',
     'to_sparse_semi_structured',
     'as_sparse_gradcheck',
 ]

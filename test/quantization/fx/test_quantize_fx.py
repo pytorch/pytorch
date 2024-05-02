@@ -191,6 +191,7 @@ from torch.testing._internal.common_quantized import (
 from torch.testing._internal.common_utils import (
     TemporaryFileName,
     IS_ARM64,
+    skipIfTorchDynamo,
 )
 
 from torch.testing._internal.common_quantization import NodeSpec as ns
@@ -2508,7 +2509,7 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertEqual(len(qconfig_mapping.module_name_object_type_order_qconfigs), 2)
         key1 = ("mod1", torch.nn.Linear, 0)
         key2 = ("mod2", torch.nn.ReLU, 1)
-        self.assertEqual(list(qconfig_mapping.module_name_object_type_order_qconfigs)[0], key1)
+        self.assertEqual(next(iter(qconfig_mapping.module_name_object_type_order_qconfigs)), key1)
         self.assertEqual(list(qconfig_mapping.module_name_object_type_order_qconfigs)[1], key2)
         self.assertEqual(qconfig_mapping.module_name_object_type_order_qconfigs[key1], qconfig1)
         self.assertEqual(qconfig_mapping.module_name_object_type_order_qconfigs[key2], qconfig2)
@@ -2519,7 +2520,7 @@ class TestQuantizeFx(QuantizationTestCase):
         # Override existing key
         qconfig_mapping.set_module_name_object_type_order("mod1", torch.nn.Linear, 0, qconfig3)
         self.assertEqual(len(qconfig_mapping.module_name_object_type_order_qconfigs), 2)
-        self.assertEqual(list(qconfig_mapping.module_name_object_type_order_qconfigs)[0], key1)
+        self.assertEqual(next(iter(qconfig_mapping.module_name_object_type_order_qconfigs)), key1)
         self.assertEqual(list(qconfig_mapping.module_name_object_type_order_qconfigs)[1], key2)
         self.assertEqual(qconfig_mapping.module_name_object_type_order_qconfigs[key1], qconfig3)
         self.assertEqual(qconfig_mapping.module_name_object_type_order_qconfigs[key2], qconfig2)
@@ -2560,7 +2561,7 @@ class TestQuantizeFx(QuantizationTestCase):
         }
 
         with self.assertRaises(ValueError) as context:
-            m = prepare_fx(m, qconfig_dict, example_inputs=(torch.randn(1, 3, 3, 3),))
+            m = prepare_fx(m, qconfig_dict, example_inputs=(torch.randn(1, 3, 3, 3),))  # noqa: F821
         self.assertTrue(
             'Expected qconfig_dict to have the following keys:' in str(context.exception)
         )
@@ -3120,19 +3121,20 @@ class TestQuantizeFx(QuantizationTestCase):
 
         b = io.BytesIO()
         torch.save(obs_dict, b)
-        b.seek(0)
 
         # Load the stats into new model
-        model_2 = orig
-        model_2 = prepare_fx(model_2, qconfig_dict, example_inputs=(x,))
+        for weights_only in [True, False]:
+            b.seek(0)
+            model_2 = orig
+            model_2 = prepare_fx(model_2, qconfig_dict, example_inputs=(x,))
 
-        loaded_dict = torch.load(b)
-        torch.ao.quantization.load_observer_state_dict(model_2, loaded_dict)
+            loaded_dict = torch.load(b, weights_only=weights_only)
+            torch.ao.quantization.load_observer_state_dict(model_2, loaded_dict)
 
-        quant_2 = convert_fx(model_2)
+            quant_2 = convert_fx(model_2)
 
-        # Verify that loaded state dict produces same results.
-        self.assertEqual(quant(x), quant_2(x))
+            # Verify that loaded state dict produces same results.
+            self.assertEqual(quant(x), quant_2(x))
 
     @skipIfNoFBGEMM
     def test_custom_module_class(self):
@@ -4283,6 +4285,7 @@ class TestQuantizeFx(QuantizationTestCase):
         m.load_state_dict(state_dict)
         with TemporaryFileName() as fname:
             torch.save(m.state_dict(), fname)
+            # Don't test weights_only here as this is loading a ScriptModule
             m.load_state_dict(torch.load(fname))
 
         checkModel(m, data, ref_weight, ref_bias, ref_res)
@@ -6515,7 +6518,7 @@ class TestQuantizeFx(QuantizationTestCase):
 
             # Match following quantize with the specific dtypes
             self.assertEqual(len(node.users), 1)
-            user = list(node.users.keys())[0]
+            user = next(iter(node.users.keys()))
             self.assertEqual(user.target, torch.quantize_per_tensor)
             self.assertEqual(user.args[-1], target_to_expected_dtypes[node.target])
 
@@ -8717,7 +8720,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 continue
                 # fp16 dynamic quant is not supported for qnnpack
 
-            eager_qconfig_dict = {x : qconfig for x in module_types}
+            eager_qconfig_dict = dict.fromkeys(module_types, qconfig)
             model_eager = quantize_dynamic(model_eager, qconfig_spec=eager_qconfig_dict)
 
             graph_qconfig_dict = {
@@ -9261,6 +9264,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
                 out = model_quantized(input.to(device_after))
                 self.assertEqual(out.device.type, device_after)
 
+    @skipIfTorchDynamo("too slow")
     @skip_if_no_torchvision
     def test_model_dropout(self):
         from torchvision import models
@@ -9315,8 +9319,8 @@ class TestQuantizeFxModels(QuantizationTestCase):
 
         if mode == 'ddp':
             mp.spawn(run_ddp,
-                     args=(world_size, prepared),
-                     nprocs=world_size,
+                     args=(world_size, prepared),  # noqa: F821
+                     nprocs=world_size,  # noqa: F821
                      join=True)
         elif mode == 'qat':
             assert prepared.training, 'prepared must be in training mode for qat'
@@ -9361,8 +9365,8 @@ class TestQuantizeFxModels(QuantizationTestCase):
             # calibration
             if mode == 'ddp':
                 mp.spawn(run_ddp,
-                         args=(world_size, qeager),
-                         nprocs=world_size,
+                         args=(world_size, qeager),  # noqa: F821
+                         nprocs=world_size,  # noqa: F821
                          join=True)
             elif mode == 'qat':
                 assert qeager.training, 'qeager should be in training mode for qat'
@@ -9526,8 +9530,8 @@ class TestQuantizeFxModels(QuantizationTestCase):
     def test_resnet18_ddp(self):
         from torchvision import models
         from torchvision.models import quantization as quantized_models
-        eager_quantizable_model = quantized_models.__dict__[name](pretrained=False, quantize=False).eval().float()
-        model = models.__dict__[name](pretrained=False).eval().float()
+        eager_quantizable_model = quantized_models.__dict__[name](pretrained=False, quantize=False).eval().float()  # noqa: F821
+        model = models.__dict__[name](pretrained=False).eval().float()  # noqa: F821
         self._test_model_impl(
             'ddp', 'resnet18', model, eager_quantizable_model)
 

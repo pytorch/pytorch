@@ -459,7 +459,7 @@ class OrderedSet(Generic[T]):
         if iterable is None:
             self.storage = {}
         else:
-            self.storage = {k: None for k in iterable}
+            self.storage = dict.fromkeys(iterable)
 
     def __contains__(self, item: T) -> bool:
         return item in self.storage

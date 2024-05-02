@@ -8,6 +8,7 @@ from .parallel import DataParallel as DataParallel
 from . import init
 from . import functional
 from . import utils
+from . import attention
 
 
 def factory_kwargs(kwargs):

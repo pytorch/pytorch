@@ -219,7 +219,7 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_1d(
       *output = -cur_weight * input[t];
     }
   } else {
-    // If the only element was omited, we get 0. See the discussion in
+    // If the only element was omitted, we get 0. See the discussion in
     // https://github.com/pytorch/pytorch/pull/64572#issuecomment-926504162
     *output = scalar_t{0};
     *total_weight = scalar_t{0};
@@ -408,7 +408,7 @@ template <typename scalar_t, typename index_t>
 __global__ void nll_loss_backward_no_reduce_cuda_kernel(
   int batch_size,
   const index_t *target,
-  PackedTensorAccessor64<scalar_t, 1> grad_output,
+  PackedTensorAccessor64<const scalar_t, 1> grad_output,
   PackedTensorAccessor64<scalar_t, 2> grad_input,
   const scalar_t *weights,
   int64_t n_classes,
@@ -520,7 +520,7 @@ void nll_loss_backward_out_cuda_template(
                        at::cuda::getCurrentCUDAStream()>>>(
                         batch_size,
                         target.const_data_ptr<index_t>(),
-                        grad_output.packed_accessor64<scalar_t, 1>(),
+                        grad_output.packed_accessor64<const scalar_t, 1>(),
                         grad_input.packed_accessor64<scalar_t, 2>(),
                         weight.defined() ? weight_.const_data_ptr<scalar_t>() : nullptr,
                         n_classes,

@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional, Set
 
 __all__ = ['TimerRequest', 'TimerClient', 'RequestQueue', 'TimerServer', 'configure', 'expires']
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 class TimerRequest:
     """
@@ -170,7 +170,7 @@ class TimerServer(abc.ABC):
         try:
             return self._reap_worker(worker_id)
         except Exception:
-            log.exception(
+            logger.exception(
                 "Uncaught exception thrown from _reap_worker(), "
                 "check that the implementation correctly catches exceptions",
             )
@@ -181,7 +181,7 @@ class TimerServer(abc.ABC):
             try:
                 self._run_watchdog()
             except Exception:
-                log.exception("Error running watchdog")
+                logger.exception("Error running watchdog")
 
     def _run_watchdog(self):
         batch_size = max(1, self._request_queue.size())
@@ -190,16 +190,16 @@ class TimerServer(abc.ABC):
         now = time.time()
         reaped_worker_ids = set()
         for worker_id, expired_timers in self.get_expired_timers(now).items():
-            log.info(
+            logger.info(
                 "Reaping worker_id=[%s]."
                 " Expired timers: %s",
                 worker_id, self._get_scopes(expired_timers)
             )
             if self._reap_worker_no_throw(worker_id):
-                log.info("Successfully reaped worker=[%s]", worker_id)
+                logger.info("Successfully reaped worker=[%s]", worker_id)
                 reaped_worker_ids.add(worker_id)
             else:
-                log.error(
+                logger.error(
                     "Error reaping worker=[%s]. Will retry on next watchdog.", worker_id
                 )
         self.clear_timers(reaped_worker_ids)
@@ -208,7 +208,7 @@ class TimerServer(abc.ABC):
         return [r.scope_id for r in timer_requests]
 
     def start(self) -> None:
-        log.info(
+        logger.info(
             "Starting %s..."
             " max_interval=%s,"
             " daemon=%s",
@@ -217,21 +217,21 @@ class TimerServer(abc.ABC):
         self._watchdog_thread = threading.Thread(
             target=self._watchdog_loop, daemon=self._daemon
         )
-        log.info("Starting watchdog thread...")
+        logger.info("Starting watchdog thread...")
         self._watchdog_thread.start()
 
     def stop(self) -> None:
-        log.info("Stopping %s", type(self).__name__)
+        logger.info("Stopping %s", type(self).__name__)
         self._stop_signaled = True
         if self._watchdog_thread:
-            log.info("Stopping watchdog thread...")
+            logger.info("Stopping watchdog thread...")
             self._watchdog_thread.join(self._max_interval)
             self._watchdog_thread = None
         else:
-            log.info("No watchdog thread running, doing nothing")
+            logger.info("No watchdog thread running, doing nothing")
 
 
-_timer_client = None
+_timer_client: Optional[TimerClient] = None
 
 
 def configure(timer_client: TimerClient):
@@ -240,7 +240,7 @@ def configure(timer_client: TimerClient):
     """
     global _timer_client
     _timer_client = timer_client
-    log.info("Timer client configured to: %s", type(_timer_client).__name__)
+    logger.info("Timer client configured to: %s", type(_timer_client).__name__)
 
 
 @contextmanager

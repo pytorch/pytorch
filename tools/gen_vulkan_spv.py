@@ -2,21 +2,22 @@
 
 import argparse
 import array
+import codecs
 import copy
 import glob
+import io
 import os
 import re
 import sys
+from itertools import product
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import subprocess
 import textwrap
-from collections import OrderedDict
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import yaml
-from torchgen.code_template import CodeTemplate
 from yaml.constructor import ConstructorError
 from yaml.nodes import MappingNode
 
@@ -25,9 +26,90 @@ try:
 except ImportError:
     from yaml import Loader  # type: ignore[assignment, misc]
 
-H_NAME = "spv.h"
-CPP_NAME = "spv.cpp"
-DEFAULT_ENV = {"precision": "highp", "format": "rgba32f"}
+CPP_H_NAME = "spv.h"
+CPP_SRC_NAME = "spv.cpp"
+
+DEFAULT_ENV: Dict[str, Any] = {
+    "PRECISION": "highp",
+    "FLOAT_IMAGE_FORMAT": "rgba16f",
+    "INT_IMAGE_FORMAT": "rgba32i",
+    "UINT_IMAGE_FORMAT": "rgba32ui",
+}
+
+TYPES_ENV: Dict[str, Any] = {
+    "IMAGE_FORMAT": {
+        "float": "rgba32f",
+        "half": "rgba16f",
+        "int": "rgba32i",
+        "uint": "rgba32ui",
+        "int8": "rgba8i",
+        "uint8": "rgba8ui",
+    },
+    "IMAGE_T": {
+        3: {
+            "float": "image3D",
+            "half": "image3D",
+            "int": "iimage3D",
+            "uint": "uimage3D",
+        },
+        2: {
+            "float": "image2D",
+            "half": "image2D",
+            "int": "iimage2D",
+            "uint": "uimage2D",
+        },
+    },
+    "SAMPLER_T": {
+        3: {
+            "float": "sampler3D",
+            "half": "sampler3D",
+            "int": "isampler3D",
+            "uint": "usampler3D",
+        },
+        2: {
+            "float": "sampler2D",
+            "half": "sampler2D",
+            "int": "isampler2D",
+            "uint": "usampler2D",
+        },
+    },
+    "VEC4_T": {
+        "float": "vec4",
+        "half": "vec4",
+        "int": "ivec4",
+        "uint": "uvec4",
+        "int8": "vec4",
+        "uint8": "uvec4",
+    },
+    "T": {
+        "float": "float",
+        "half": "float",
+        "int": "int",
+        "uint": "uint",
+        "int8": "int",
+        "uint8": "uint8",
+    },
+}
+
+FUNCS_ENV: Dict[str, Any] = {
+    "GET_POS": {
+        3: lambda pos: pos,
+        2: lambda pos: f"{pos}.xy",
+    }
+}
+
+
+def extract_filename(path: str, keep_ext: bool = True) -> Any:
+    if keep_ext:
+        return os.path.basename(path)
+    else:
+        return os.path.basename(path).split(".")[0]
+
+
+############################
+#  SPIR-V Code Generation  #
+############################
+
 
 # https://gist.github.com/pypt/94d747fe5180851196eb
 class UniqueKeyLoader(Loader):
@@ -64,62 +146,314 @@ class UniqueKeyLoader(Loader):
         return mapping
 
 
-class VulkanShaderGenerator:
-    standard_header = """
-#version 450 core
-#define PRECISION $precision
-#define FORMAT $format
+# https://github.com/google/XNNPACK/blob/master/tools/xngen.py
+def extract_leading_whitespace(line: str) -> str:
+    match = re.match(r"\s*", line)
+    return match.group(0) if match else ""
 
-"""
 
-    def __init__(self: "VulkanShaderGenerator") -> None:
-        self.ops_template_params: Dict[Any, Any] = {}
+# https://github.com/google/XNNPACK/blob/master/tools/xngen.py
+def escape(line: str) -> str:
+    output_parts = []
+    while "${" in line:
+        start_pos = line.index("${")
+        end_pos = line.index("}", start_pos + 2)
+        if start_pos != 0:
+            output_parts.append('"' + line[:start_pos].replace('"', '\\"') + '"')
+        output_parts.append("str(" + line[start_pos + 2 : end_pos] + ")")
+        line = line[end_pos + 1 :]
+    if line:
+        output_parts.append('"' + line.replace('"', '\\"') + '"')
+    return " + ".join(output_parts)
 
-    def add_params_yaml(self, parameters_yaml_file):  # type: ignore[no-untyped-def]
-        all_template_params = OrderedDict()
-        with open(parameters_yaml_file) as f:
+
+# https://github.com/google/XNNPACK/blob/master/tools/xngen.py
+def preprocess(
+    input_text: str, variables: Dict[str, Any], input_path: str = "codegen"
+) -> str:
+    input_lines = input_text.splitlines()
+    python_lines = []
+
+    blank_lines = 0
+
+    last_indent = ""
+
+    # List of tuples (total_index, python_indent)
+    indent_stack = [("", "")]
+
+    # Indicates whether this is the first line inside Python
+    # code block (i.e. for, while, if, elif, else)
+    python_block_start = True
+    for i, input_line in enumerate(input_lines):
+        if input_line == "":
+            blank_lines += 1
+            continue
+        # Skip lint markers.
+        if "LINT" in input_line:
+            continue
+
+        input_indent = extract_leading_whitespace(input_line)
+        if python_block_start:
+            assert input_indent.startswith(last_indent)
+            extra_python_indent = input_indent[len(last_indent) :]
+            python_indent = indent_stack[-1][1] + extra_python_indent
+            indent_stack.append((input_indent, python_indent))
+            assert input_indent.startswith(indent_stack[-1][0])
+        else:
+            while not input_indent.startswith(indent_stack[-1][0]):
+                del indent_stack[-1]
+        python_block_start = False
+
+        python_indent = indent_stack[-1][1]
+        stripped_input_line = input_line.strip()
+        if stripped_input_line.startswith("$") and not stripped_input_line.startswith(
+            "${"
+        ):
+            if stripped_input_line.endswith(":"):
+                python_block_start = True
+            while blank_lines != 0:
+                python_lines.append(python_indent + "print(file=OUT_STREAM)")
+                blank_lines -= 1
+            python_lines.append(python_indent + stripped_input_line.replace("$", ""))
+        else:
+            assert input_line.startswith(python_indent)
+            while blank_lines != 0:
+                python_lines.append(python_indent + "print(file=OUT_STREAM)")
+                blank_lines -= 1
+            python_lines.append(
+                python_indent
+                + "print(%s, file=OUT_STREAM)"
+                % escape(input_line[len(python_indent) :])
+            )
+        last_indent = input_indent
+
+    while blank_lines != 0:
+        python_lines.append(python_indent + "print(file=OUT_STREAM)")
+        blank_lines -= 1
+
+    exec_globals = dict(variables)
+    output_stream = io.StringIO()
+    exec_globals["OUT_STREAM"] = output_stream
+
+    python_bytecode = compile("\n".join(python_lines), input_path, "exec")
+    exec(python_bytecode, exec_globals)
+
+    return output_stream.getvalue()
+
+
+class SPVGenerator:
+    def __init__(
+        self,
+        src_dir_paths: Union[str, List[str]],
+        env: Dict[Any, Any],
+        glslc_path: Optional[str],
+    ) -> None:
+        if isinstance(src_dir_paths, str):
+            self.src_dir_paths = [src_dir_paths]
+        else:
+            self.src_dir_paths = src_dir_paths
+
+        self.env = env
+        self.glslc_path = glslc_path
+
+        self.glsl_src_files: Dict[str, str] = {}
+        self.template_yaml_files: List[str] = []
+
+        self.addSrcAndYamlFiles(self.src_dir_paths)
+        self.shader_template_params: Dict[Any, Any] = {}
+        for yaml_file in self.template_yaml_files:
+            self.parseTemplateYaml(yaml_file)
+
+        self.output_shader_map: Dict[str, Tuple[str, Dict[str, str]]] = {}
+        self.constructOutputMap()
+
+    def addSrcAndYamlFiles(self, src_dir_paths: List[str]) -> None:
+        for src_path in src_dir_paths:
+            # Collect glsl source files
+            glsl_files = glob.glob(
+                os.path.join(src_path, "**", "*.glsl*"), recursive=True
+            )
+            for file in glsl_files:
+                if len(file) > 1:
+                    self.glsl_src_files[extract_filename(file, keep_ext=False)] = file
+            # Collect template yaml files
+            yaml_files = glob.glob(
+                os.path.join(src_path, "**", "*.yaml"), recursive=True
+            )
+            for file in yaml_files:
+                if len(file) > 1:
+                    self.template_yaml_files.append(file)
+
+    def generateVariantCombinations(
+        self,
+        iterated_params: Dict[str, Any],
+        exclude_params: Optional[Set[str]] = None,
+    ) -> List[Any]:
+        if exclude_params is None:
+            exclude_params = set()
+        all_iterated_params = []
+        for param_name, value_list in iterated_params.items():
+            if param_name not in exclude_params:
+                param_values = []
+                for value in value_list:
+                    suffix = value.get("SUFFIX", value["VALUE"])
+                    param_values.append((param_name, suffix, value["VALUE"]))
+                all_iterated_params.append(param_values)
+
+        return list(product(*all_iterated_params))
+
+    def parseTemplateYaml(self, yaml_file: str) -> None:
+        with open(yaml_file) as f:
             contents = yaml.load(f, Loader=UniqueKeyLoader)
-            for key in contents:
-                all_template_params[key] = contents[key]
-        self.validate_and_construct_op_params(all_template_params)  # type: ignore[no-untyped-call]
+            for template_name, params_dict in contents.items():
+                if template_name in self.shader_template_params:
+                    raise KeyError(f"{template_name} params file is defined twice")
 
-    def validate_and_construct_op_params(self, all_template_params):  # type: ignore[no-untyped-def]
-        for op in all_template_params:
-            if op in self.ops_template_params:
-                raise KeyError(f"{op} params file has already been parsed")
-            op_params_default_vals = all_template_params[op][
-                "parameter_names_with_default_values"
-            ]
-            template_params_set = set(op_params_default_vals.keys())
-            self.ops_template_params[op] = []
-            self.ops_template_params[op].append(op_params_default_vals)
-            op_template_params_values = all_template_params[op]["parameter_values"]
-            for param_vals in op_template_params_values:
-                param_vals_set = set(param_vals.keys())
-                missing_keys = template_params_set - param_vals_set
-                invalid_keys = param_vals_set - template_params_set
-                if (len(invalid_keys)) > 0:
-                    raise KeyError(f"Invalid keys {invalid_keys} are found")
-                param_vals_copy = copy.deepcopy(op_params_default_vals)
-                for key in param_vals:
-                    param_vals_copy[key] = param_vals[key]
-                self.ops_template_params[op].append(param_vals_copy)
+                default_params = params_dict["parameter_names_with_default_values"]
+                params_names = set(default_params.keys()).union({"NAME"})
 
-    def generate(self, glsl_template_in, out_dir):  # type: ignore[no-untyped-def]
-        glsl_template_name = os.path.basename(glsl_template_in)
-        op_name, extension_name = glsl_template_name.split(".")
-        if extension_name != "glslt":
-            raise TypeError(f"invalid file type for glsl template {extension_name}")
-        if op_name not in self.ops_template_params:
-            raise KeyError(f"{op_name} params have not been populated")
-        code_template = CodeTemplate.from_file(glsl_template_in)
-        for template_params in self.ops_template_params[op_name]:
-            content = VulkanShaderGenerator.standard_header
-            output_file_name = template_params["NAME"] + ".glsl"
-            content += code_template.substitute(template_params)
-            output_file = os.path.join(out_dir, output_file_name)
-            with open(output_file, "w") as f:
-                f.write(content)
+                self.shader_template_params[template_name] = []
+
+                default_iterated_params = params_dict.get(
+                    "generate_variant_forall", None
+                )
+
+                for variant in params_dict["shader_variants"]:
+                    variant_params_names = set(variant.keys())
+                    invalid_keys = (
+                        variant_params_names
+                        - params_names
+                        - {"generate_variant_forall"}
+                    )
+                    assert len(invalid_keys) == 0
+
+                    iterated_params = variant.get(
+                        "generate_variant_forall", default_iterated_params
+                    )
+
+                    if iterated_params is not None:
+                        variant_combinations = self.generateVariantCombinations(
+                            iterated_params, variant_params_names
+                        )
+
+                        for combination in variant_combinations:
+                            default_params_copy = copy.deepcopy(default_params)
+                            for key in variant:
+                                if key != "generate_variant_forall":
+                                    default_params_copy[key] = variant[key]
+
+                            variant_name = variant["NAME"]
+                            for param_value in combination:
+                                default_params_copy[param_value[0]] = param_value[2]
+                                if len(param_value[1]) > 0:
+                                    variant_name = f"{variant_name}_{param_value[1]}"
+
+                            default_params_copy["NAME"] = variant_name
+
+                            self.shader_template_params[template_name].append(
+                                default_params_copy
+                            )
+                    else:
+                        default_params_copy = copy.deepcopy(default_params)
+                        for key in variant:
+                            default_params_copy[key] = variant[key]
+
+                        self.shader_template_params[template_name].append(
+                            default_params_copy
+                        )
+
+    def create_shader_params(
+        self, variant_params: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, str]:
+        if variant_params is None:
+            variant_params = {}
+        shader_params = copy.deepcopy(self.env)
+        for key, value in variant_params.items():
+            shader_params[key] = value
+
+        shader_dtype = shader_params.get("DTYPE", "float")
+
+        if shader_dtype == "int":
+            shader_params["FORMAT"] = self.env["INT_IMAGE_FORMAT"]
+        elif shader_dtype == "uint":
+            shader_params["FORMAT"] = self.env["UINT_IMAGE_FORMAT"]
+        elif shader_dtype == "int32":
+            shader_params["FORMAT"] = "rgba32i"
+        elif shader_dtype == "uint32":
+            shader_params["FORMAT"] = "rgba32ui"
+        elif shader_dtype == "int8":
+            shader_params["FORMAT"] = "rgba8i"
+        elif shader_dtype == "uint8":
+            shader_params["FORMAT"] = "rgba8ui"
+        elif shader_dtype == "float32":
+            shader_params["FORMAT"] = "rgba32f"
+        # Assume float by default
+        else:
+            shader_params["FORMAT"] = self.env["FLOAT_IMAGE_FORMAT"]
+
+        return shader_params
+
+    def constructOutputMap(self) -> None:
+        for shader_name, params in self.shader_template_params.items():
+            for variant in params:
+                source_glsl = self.glsl_src_files[shader_name]
+
+                self.output_shader_map[variant["NAME"]] = (
+                    source_glsl,
+                    self.create_shader_params(variant),
+                )
+
+        for shader_name, source_glsl in self.glsl_src_files.items():
+            if shader_name not in self.shader_template_params:
+                self.output_shader_map[shader_name] = (
+                    source_glsl,
+                    self.create_shader_params(),
+                )
+
+    def generateSPV(self, output_dir: str) -> Dict[str, str]:
+        output_file_map = {}
+        for shader_name in self.output_shader_map:
+            source_glsl = self.output_shader_map[shader_name][0]
+            shader_params = self.output_shader_map[shader_name][1]
+
+            with codecs.open(source_glsl, "r", encoding="utf-8") as input_file:
+                input_text = input_file.read()
+                output_text = preprocess(input_text, shader_params)
+
+            glsl_out_path = os.path.join(output_dir, f"{shader_name}.glsl")
+            with codecs.open(glsl_out_path, "w", encoding="utf-8") as output_file:
+                output_file.write(output_text)
+
+            # If no GLSL compiler is specified, then only write out the generated GLSL shaders.
+            # This is mainly for testing purposes.
+            if self.glslc_path is not None:
+                spv_out_path = os.path.join(output_dir, f"{shader_name}.spv")
+
+                cmd = [
+                    self.glslc_path,
+                    "-fshader-stage=compute",
+                    glsl_out_path,
+                    "-o",
+                    spv_out_path,
+                    "--target-env=vulkan1.0",
+                    "-Werror",
+                ] + [
+                    arg
+                    for src_dir_path in self.src_dir_paths
+                    for arg in ["-I", src_dir_path]
+                ]
+
+                print("glslc cmd:", cmd)
+                subprocess.check_call(cmd)
+
+                output_file_map[spv_out_path] = glsl_out_path
+
+        return output_file_map
+
+
+##############################################
+#  Shader Info and Shader Registry Handling  #
+##############################################
 
 
 @dataclass
@@ -238,198 +572,138 @@ def getShaderInfo(srcFilePath: str) -> ShaderInfo:
     return shader_info
 
 
-def genGLSLFromGLSLT(src_dir_path: str, tmp_dir_path: str) -> None:
-    template_dir_path = os.path.join(src_dir_path, "templates")
-    vexs = glob.glob(os.path.join(template_dir_path, "**", "*.yaml"), recursive=True)
-    parameter_yaml_files = []
-    for f in vexs:
-        if len(f) > 1:
-            parameter_yaml_files.append(f)
-    generator = VulkanShaderGenerator()
-    for params_yaml in parameter_yaml_files:
-        generator.add_params_yaml(params_yaml)  # type: ignore[no-untyped-call]
+##########################
+#  C++ File Generation  #
+#########################
 
-    vexs = glob.glob(os.path.join(src_dir_path, "**", "*.glslt"), recursive=True)
-    templateSrcPaths = []
-    for f in vexs:
-        if len(f) > 1:
-            templateSrcPaths.append(f)
-            templateSrcPaths.sort()
-    for glslt in templateSrcPaths:
-        generator.generate(glslt, tmp_dir_path)  # type: ignore[no-untyped-call]
+cpp_template = """
+#include <ATen/native/vulkan/api/ShaderRegistry.h>
+#include <stdint.h>
+#include <vector>
+
+using namespace at::native::vulkan;
+
+namespace at {{
+namespace native {{
+namespace vulkan {{
+
+namespace {{
+
+{spv_bin_arrays}
+
+}}
+
+static void register_fn() {{
+
+{register_shader_infos}
+
+{shader_info_registry}
+
+}}
+
+static const api::ShaderRegisterInit register_shaders(&register_fn);
+
+}}
+}}
+}}
+
+"""
 
 
-def genCppH(
-    hFilePath: str,
-    cppFilePath: str,
-    srcDirPaths: str,
-    glslcPath: str,
-    tmpDirPath: str,
-    env: Dict[Any, Any],
-) -> None:
-    print(
-        "hFilePath:{} cppFilePath:{} srcDirPaths:{} glslcPath:{} tmpDirPath:{}".format(
-            hFilePath, cppFilePath, srcDirPaths, glslcPath, tmpDirPath
+def generateSpvBinStr(spvPath: str, name: str) -> Tuple[int, str]:
+    with open(spvPath, "rb") as fr:
+        next_bin = array.array("I", fr.read())
+        sizeBytes = 4 * len(next_bin)
+        spv_bin_str = "const uint32_t {}_bin[] = {{\n{}\n}};".format(
+            name,
+            textwrap.indent(",\n".join(str(x) for x in next_bin), "  "),
         )
+
+    return sizeBytes, spv_bin_str
+
+
+def generateShaderInfoStr(shader_info: ShaderInfo, name: str, sizeBytes: int) -> str:
+    tile_size = (
+        f"{{{', '.join(str(x) for x in shader_info.tile_size)}}}"
+        if (len(shader_info.tile_size) > 0)
+        else "std::vector<uint32_t>()"
     )
 
-    templateSrcPaths = []
+    shader_info_layouts = "{{{}}}".format(",\n ".join(shader_info.layouts))
 
-    for srcDirPath in srcDirPaths:
-        vexs = glob.glob(os.path.join(srcDirPath, "**", "*.glsl"), recursive=True)
-        for f in vexs:
-            if len(f) > 1:
-                templateSrcPaths.append(f)
-                templateSrcPaths.sort()
+    shader_info_args = [
+        f'"{name}"',
+        f"{name}_bin",
+        str(sizeBytes),
+        shader_info_layouts,
+        tile_size,
+        storageTypeToEnum[shader_info.weight_storage_type],
+        storageTypeToEnum[shader_info.bias_storage_type],
+    ]
 
-        # Now add glsl files that are generated from templates
-        genGLSLFromGLSLT(srcDirPath, tmpDirPath)
-
-    vexs = glob.glob(os.path.join(tmpDirPath, "**", "*.glsl"), recursive=True)
-    for f in vexs:
-        if len(f) > 1:
-            templateSrcPaths.append(f)
-            templateSrcPaths.sort()
-    print(f"templateSrcPaths:{templateSrcPaths}")
-
-    spvPaths = {}
-    for templateSrcPath in templateSrcPaths:
-        print(f"templateSrcPath {templateSrcPath}")
-        name = getName(templateSrcPath).replace("_glsl", "")
-        print(f"name {name}")
-
-        codeTemplate = CodeTemplate.from_file(templateSrcPath)
-        srcPath = tmpDirPath + "/" + name + ".glsl"
-        content = codeTemplate.substitute(env)
-        with open(srcPath, "w") as fw:
-            fw.write(content)
-
-        spvPath = tmpDirPath + "/" + name + ".spv"
-        print(f"spvPath {spvPath}")
-
-        cmd = [
-            glslcPath,
-            "-fshader-stage=compute",
-            srcPath,
-            "-o",
-            spvPath,
-            "--target-env=vulkan1.0",
-            "-Werror",
-        ] + [arg for srcDirPath in srcDirPaths for arg in ["-I", srcDirPath]]
-
-        print("\nglslc cmd:", cmd)
-
-        subprocess.check_call(cmd)
-        spvPaths[spvPath] = templateSrcPath
-
-    h = "#pragma once\n"
-    h += "#include <ATen/native/vulkan/api/Types.h>\n"
-    h += "#include <ATen/native/vulkan/api/vk_api.h>\n"
-    h += "#include <c10/util/flat_hash_map.h>\n"
-    h += "#include <string>\n"
-
-    nsbegin = "namespace at {\nnamespace native {\nnamespace vulkan {\n"
-    nsend = "} // namespace vulkan\n} // namespace native\n} // namespace at\n"
-
-    anon_ns_begin = "namespace {\n"
-    anon_ns_end = "} // namespace\n"
-
-    h += nsbegin
-
-    # Forward declaration of ShaderInfo
-    h += "namespace api {\nstruct ShaderInfo;\n} // namespace api\n"
-    h += "typedef ska::flat_hash_map<std::string, api::ShaderInfo> ShaderListing;\n"
-    h += "typedef ska::flat_hash_map<std::string, std::string> RegistryKeyMap;\n"
-    h += "typedef ska::flat_hash_map<std::string, RegistryKeyMap> ShaderRegistry;\n"
-    h += "extern const ShaderListing shader_infos;\n"
-    h += "extern ShaderRegistry shader_registry;\n"
-    h += "inline const ShaderListing& get_shader_infos() {\n  return shader_infos;\n}\n"
-    h += (
-        "inline ShaderRegistry& get_shader_registry() {\n  return shader_registry;\n}\n"
+    shader_info_str = textwrap.indent(
+        "api::shader_registry().register_shader(\n  api::ShaderInfo(\n{args}));\n".format(
+            args=textwrap.indent(",\n".join(shader_info_args), "     "),
+        ),
+        "    ",
     )
 
-    h += nsend
+    return shader_info_str
 
-    cpp = "#include <ATen/native/vulkan/api/Shader.h>\n"
-    cpp += f"#include <ATen/native/vulkan/{H_NAME}>\n"
-    cpp += "#include <stdint.h>\n"
-    cpp += "#include <vector>\n"
-    cpp += nsbegin
 
-    shader_info_bin_code = []
-    shader_info_cpp_code = []
-    shader_info_registry_code = []
+def generateShaderDispatchStr(shader_info: ShaderInfo, name: str) -> str:
+    if shader_info.register_for is None:
+        return ""
 
-    for spvPath, srcPath in spvPaths.items():
+    (op_name, registry_keys) = shader_info.register_for
+    for registry_key in registry_keys:
+        shader_dispatch_str = textwrap.indent(
+            f'api::shader_registry().register_op_dispatch("{op_name}", api::DispatchKey::{registry_key.upper()}, "{name}");',
+            "    ",
+        )
+
+    return shader_dispatch_str
+
+
+def genCppFiles(
+    spv_files: Dict[str, str], cpp_header_path: str, cpp_src_file_path: str
+) -> None:
+    spv_bin_strs = []
+    register_shader_info_strs = []
+    shader_registry_strs = []
+
+    for spvPath, srcPath in spv_files.items():
         name = getName(spvPath).replace("_spv", "")
 
-        print(f"spvPath:{spvPath}")
-        with open(spvPath, "rb") as fr:
-            next_bin = array.array("I", fr.read())
-            sizeBytes = 4 * len(next_bin)
-            shader_info_bin_code.append(
-                "const uint32_t {}_bin[] = {{\n{}\n}};".format(
-                    name,
-                    textwrap.indent(",\n".join(str(x) for x in next_bin), "  "),
-                ),
-            )
+        sizeBytes, spv_bin_str = generateSpvBinStr(spvPath, name)
+        spv_bin_strs.append(spv_bin_str)
 
         shader_info = getShaderInfo(srcPath)
 
-        tile_size = (
-            f"{{{', '.join(str(x) for x in shader_info.tile_size)}}}"
-            if (len(shader_info.tile_size) > 0)
-            else "std::vector<uint32_t>()"
-        )
-
-        shader_info_layouts = "{{{}}}".format(",\n ".join(shader_info.layouts))
-
-        shader_info_args = [
-            f'"vulkan.{name}"',
-            f"{name}_bin",
-            str(sizeBytes),
-            shader_info_layouts,
-            tile_size,
-            storageTypeToEnum[shader_info.weight_storage_type],
-            storageTypeToEnum[shader_info.bias_storage_type],
-        ]
-
-        shader_info_cpp_code.append(
-            textwrap.indent(
-                '{{"{}",\n api::ShaderInfo(\n{})}}'.format(
-                    name,
-                    textwrap.indent(",\n".join(shader_info_args), "     "),
-                ),
-                "    ",
-            ),
+        register_shader_info_strs.append(
+            generateShaderInfoStr(shader_info, name, sizeBytes)
         )
 
         if shader_info.register_for is not None:
-            (op_name, registry_keys) = shader_info.register_for
-            for registry_key in registry_keys:
-                shader_info_registry_code.append(
-                    textwrap.indent(
-                        f'{{"{op_name}", {{{{"{registry_key}", "{name}"}}}}}}',
-                        "        ",
-                    ),
-                )
+            shader_registry_strs.append(generateShaderDispatchStr(shader_info, name))
 
-    cpp += anon_ns_begin
-    cpp += "\n".join(shader_info_bin_code) + "\n"
-    cpp += anon_ns_end
+    spv_bin_arrays = "\n".join(spv_bin_strs)
+    register_shader_infos = "\n".join(register_shader_info_strs)
+    shader_info_registry = "\n".join(shader_registry_strs)
 
-    cpp += "const ShaderListing shader_infos = {{\n{}}};\n".format(
-        ",\n".join(shader_info_cpp_code),
+    cpp = cpp_template.format(
+        spv_bin_arrays=spv_bin_arrays,
+        register_shader_infos=register_shader_infos,
+        shader_info_registry=shader_info_registry,
     )
-    cpp += "ShaderRegistry shader_registry = {{\n{}}};\n".format(
-        ",\n".join(shader_info_registry_code),
-    )
-    cpp += nsend
 
-    with open(hFilePath, "w") as fw:
-        fw.write(h)
-    with open(cppFilePath, "w") as fw:
+    with open(cpp_src_file_path, "w") as fw:
         fw.write(cpp)
+
+
+##########
+#  Main  #
+##########
 
 
 def parse_arg_env(items: Dict[Any, Any]) -> Dict[Any, Any]:
@@ -459,7 +733,11 @@ def main(argv: List[str]) -> int:
         "--env", metavar="KEY=VALUE", nargs="*", help="Set a number of key-value pairs"
     )
     options = parser.parse_args()
+
+    DEFAULT_ENV.update(TYPES_ENV)
+    DEFAULT_ENV.update(FUNCS_ENV)
     env = DEFAULT_ENV
+
     for key, value in parse_arg_env(options.env).items():
         env[key] = value
 
@@ -469,13 +747,13 @@ def main(argv: List[str]) -> int:
     if not os.path.exists(options.tmp_dir_path):
         os.makedirs(options.tmp_dir_path)
 
-    genCppH(
-        hFilePath=options.output_path + "/spv.h",
-        cppFilePath=options.output_path + "/spv.cpp",
-        srcDirPaths=options.glsl_paths,
-        glslcPath=options.glslc_path,
-        tmpDirPath=options.tmp_dir_path,
-        env=env,
+    shader_generator = SPVGenerator(options.glsl_paths, env, options.glslc_path)
+    output_spv_files = shader_generator.generateSPV(options.tmp_dir_path)
+
+    genCppFiles(
+        output_spv_files,
+        f"{options.output_path}/{CPP_H_NAME}",
+        f"{options.output_path}/{CPP_SRC_NAME}",
     )
 
     return 0

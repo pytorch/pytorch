@@ -1,8 +1,5 @@
 #pragma once
 
-#include <cstdint>
-#include <utility>
-
 #include <cuda_runtime_api.h>
 
 #include <c10/core/DeviceGuard.h>
@@ -52,8 +49,7 @@
  * a kernel on the same stream from two different threads.
  */
 
-namespace c10 {
-namespace cuda {
+namespace c10::cuda {
 
 static constexpr int max_compile_time_stream_priorities = 4;
 
@@ -260,8 +256,7 @@ C10_API void setCurrentCUDAStream(CUDAStream stream);
 
 C10_API std::ostream& operator<<(std::ostream& stream, const CUDAStream& s);
 
-} // namespace cuda
-} // namespace c10
+} // namespace c10::cuda
 
 namespace std {
 template <>

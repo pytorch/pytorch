@@ -20,8 +20,7 @@
 #include <ATen/ops/upsample_bicubic2d_native.h>
 #endif
 
-namespace at {
-namespace meta {
+namespace at::meta {
 
 TORCH_META_FUNC(upsample_bicubic2d) (
   const Tensor& input, IntArrayRef output_size, bool align_corners, c10::optional<double> scales_h, c10::optional<double> scales_w
@@ -101,13 +100,13 @@ TORCH_META_FUNC(_upsample_bicubic2d_aa_backward) (
   set_output_raw_strided(0, input_size, {}, grad_output.options());
 }
 
-} // namespace meta
-namespace native {
+} // namespace at::meta
+namespace at::native {
 namespace {
 
 template <typename scalar_t>
 static void upsample_bicubic2d_backward_out_frame(
-    scalar_t* odata,
+    const scalar_t* odata,
     scalar_t* idata,
     int64_t input_height,
     int64_t input_width,
@@ -137,7 +136,7 @@ static void upsample_bicubic2d_backward_out_frame(
     }
     for (const auto i : c10::irange(start, end)) {
       scalar_t* in = idata + i * input_slice_size;
-      scalar_t* out = odata + i * output_slice_size;
+      const scalar_t* out = odata + i * output_slice_size;
       for (const auto output_y : c10::irange(output_height)) {
         for (const auto output_x : c10::irange(output_width)) {
 
@@ -206,7 +205,7 @@ static void upsample_bicubic2d_backward_kernel(
   AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16,
       grad_output.scalar_type(), "upsample_bicubic2d_backward", [&] {
         scalar_t* idata = grad_input.mutable_data_ptr<scalar_t>();
-        scalar_t* odata = grad_output.data_ptr<scalar_t>();
+        const scalar_t* odata = grad_output.const_data_ptr<scalar_t>();
 
         upsample_bicubic2d_backward_out_frame<scalar_t>(
             odata,
@@ -303,5 +302,4 @@ DEFINE_DISPATCH(upsample_bicubic2d_kernel);
 DEFINE_DISPATCH(_upsample_bicubic2d_aa_kernel);
 DEFINE_DISPATCH(_upsample_bicubic2d_aa_backward_kernel);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

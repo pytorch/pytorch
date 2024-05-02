@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: quantization"]
+from typing import Set
 
 import torch
 import torch.nn as nn
@@ -157,7 +158,7 @@ class TestFxModelReportDetector(QuantizationTestCase):
             # there should only be one conv there in this model
             self.assertEqual(per_channel_info["conv"]["backend"], torch.backends.quantized.engine)
             self.assertEqual(len(per_channel_info), 1)
-            self.assertEqual(list(per_channel_info)[0], "conv")
+            self.assertEqual(next(iter(per_channel_info)), "conv")
             self.assertEqual(
                 per_channel_info["conv"]["per_channel_quantization_supported"],
                 True,
@@ -198,7 +199,7 @@ class TestFxModelReportDetector(QuantizationTestCase):
                 DEFAULT_NO_OPTIMS_ANSWER_STRING.format(torch.backends.quantized.engine),
             )
             # pick a random key to look at
-            rand_key: str = list(per_channel_info.keys())[0]
+            rand_key: str = next(iter(per_channel_info.keys()))
             self.assertEqual(per_channel_info[rand_key]["backend"], torch.backends.quantized.engine)
             self.assertEqual(len(per_channel_info), 2)
 
@@ -1345,7 +1346,7 @@ class TestFxDetectInputWeightEqualization(QuantizationTestCase):
                 # assert that each of the desired modules have the observers inserted
                 for fqn, module in prepared_for_callibrate_model.named_modules():
                     # check if module is a supported module
-                    is_in_include_list = sum([isinstance(module, x) for x in mods_to_check]) > 0
+                    is_in_include_list = sum(isinstance(module, x) for x in mods_to_check) > 0
 
                     if is_in_include_list:
                         # make sure it has the observer attribute
@@ -1562,7 +1563,7 @@ class TestFxDetectOutliers(QuantizationTestCase):
             obs_name_to_find = InputWeightEqualizationDetector.DEFAULT_PRE_OBSERVER_NAME
 
             number_of_obs_found = sum(
-                [1 if obs_name_to_find in str(node.target) else 0 for node in prepared_for_callibrate_model.graph.nodes]
+                1 if obs_name_to_find in str(node.target) else 0 for node in prepared_for_callibrate_model.graph.nodes
             )
             self.assertEqual(number_of_obs_found, correct_number_of_obs_inserted)
 
@@ -1752,7 +1753,7 @@ class TestFxDetectOutliers(QuantizationTestCase):
                     assert sum(counts_info) >= 2
 
                     # half of the recorded max values should be what we set
-                    matched_max = sum([val == 3.28e8 for val in module_dict[OutlierDetector.MAX_VALS_KEY]])
+                    matched_max = sum(val == 3.28e8 for val in module_dict[OutlierDetector.MAX_VALS_KEY])
                     self.assertEqual(matched_max, param_size / 2)
 
 

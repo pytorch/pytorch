@@ -37,29 +37,9 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
           "The current padding scheme leads to unequal padding on the left "
           "and right, which is not supported by cudnn.");
     }
-    // dilated convolution supported by some algorithms in cuDNN v6
-#if !(CUDNN_VERSION_MIN(6, 0, 0))
-    OPERATOR_NEEDS_FEATURE(
-        dilation_h() == 1 && dilation_w() == 1,
-        "The cudnn convolution does not support dilation yet.");
-#endif
-    // dilated grouped convolution supported in cuDNN v7.1
-#if !(CUDNN_VERSION_MIN(7, 1, 0))
-    if (group_ != 1) {
-      for (int dim = 0; dim < kernel_.size(); ++dim) {
-        OPERATOR_NEEDS_FEATURE(
-            dilation_[dim] == 1,
-            "When group is used, dilation should not be set at the same time.");
-      }
-    }
-#endif
 
-#if CUDNN_VERSION_MIN(7, 0, 0)
     // verify TensorCore math is supported
     enable_tensor_core_ &= TensorCoreAvailable();
-#else
-    enable_tensor_core_ = false;
-#endif
 
     bool individual_force_algo = OperatorBase::HasArgument("force_algo_fwd") ||
         OperatorBase::HasArgument("force_algo_dgrad") ||
@@ -108,11 +88,7 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
       int H,
       int W,
       int D) {
-#if CUDNN_VERSION_MIN(7, 0, 0)
     const int CC = C;
-#else
-    const int CC = C / group_;
-#endif
     switch (order_) {
       case StorageOrder::NHWC:
         if (size == 4) {
@@ -182,7 +158,6 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
       int dilation_height = 0;
       int dilation_width = 0;
 
-#if CUDNN_VERSION_MIN(6, 0, 0)
       CUDNN_ENFORCE(cudnnGetConvolution2dDescriptor(
           input,
           &pad_height,
@@ -193,19 +168,7 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
           &dilation_width,
           &mode,
           &dataType));
-#else
-      CUDNN_ENFORCE(cudnnGetConvolution2dDescriptor(
-          input,
-          &pad_height,
-          &pad_width,
-          &stride_height,
-          &stride_width,
-          &dilation_height,
-          &dilation_width,
-          &mode));
-#endif
 
-#if CUDNN_VERSION_MIN(6, 0, 0)
       CUDNN_ENFORCE(cudnnSetConvolution2dDescriptor(
           copy,
           pad_height,
@@ -216,17 +179,6 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
           dilation_width,
           mode,
           dataType));
-#else
-      CUDNN_ENFORCE(cudnnSetConvolution2dDescriptor(
-          copy,
-          pad_height,
-          pad_width,
-          stride_height,
-          stride_width,
-          dilation_height,
-          dilation_width,
-          mode));
-#endif
     } else {
       cudnnConvolutionMode_t mode;
       cudnnDataType_t dataType;
@@ -278,7 +230,6 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
   }
 
   void SetConvDescFromArguments() {
-#if CUDNN_VERSION_MIN(6, 0, 0)
     if (kernel_.size() == 1 || kernel_.size() == 2) {
       CUDNN_ENFORCE(cudnnSetConvolution2dDescriptor(
           conv_desc_,
@@ -300,29 +251,6 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
           CUDNN_CROSS_CORRELATION,
           compute_type_));
     }
-#else
-    if (kernel_.size() == 2) {
-      CUDNN_ENFORCE(cudnnSetConvolution2dDescriptor(
-          conv_desc_,
-          pad_t(),
-          pad_l(),
-          stride_h(),
-          stride_w(),
-          1,
-          1,
-          CUDNN_CROSS_CORRELATION));
-    } else {
-      vector<int> ones(dilation_.size(), 1);
-      CUDNN_ENFORCE(cudnnSetConvolutionNdDescriptor(
-          conv_desc_,
-          kernel_.size(),
-          pads_.data(),
-          stride_.data(),
-          ones.data(),
-          CUDNN_CROSS_CORRELATION,
-          compute_type_));
-    }
-#endif
   }
 
   void SetConvDescComputeType(
@@ -338,7 +266,6 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
       int dilation_height = 0;
       int dilation_width = 0;
 
-#if CUDNN_VERSION_MIN(6, 0, 0)
       CUDNN_ENFORCE(cudnnGetConvolution2dDescriptor(
           conv_desc,
           &pad_height,
@@ -349,19 +276,7 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
           &dilation_width,
           &mode,
           &dataType));
-#else
-      CUDNN_ENFORCE(cudnnGetConvolution2dDescriptor(
-          conv_desc,
-          &pad_height,
-          &pad_width,
-          &stride_height,
-          &stride_width,
-          &dilation_height,
-          &dilation_width,
-          &mode));
-#endif
 
-#if CUDNN_VERSION_MIN(6, 0, 0)
       CUDNN_ENFORCE(cudnnSetConvolution2dDescriptor(
           conv_desc,
           pad_height,
@@ -372,17 +287,6 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
           dilation_width,
           mode,
           math));
-#else
-      CUDNN_ENFORCE(cudnnSetConvolution2dDescriptor(
-          conv_desc,
-          pad_height,
-          pad_width,
-          stride_height,
-          stride_width,
-          dilation_height,
-          dilation_width,
-          mode));
-#endif
     } else {
       cudnnConvolutionMode_t mode;
       cudnnDataType_t dataType;
@@ -523,7 +427,8 @@ bool CudnnConvOp::DoRunWithType() {
   auto* Y = Output(0, output_sizes, at::dtype<T_Y>());
 
   int N = 0, C = 0, H = 0, W = 0, D = 0, H_out = 0, W_out = 0, D_out = 0;
-  int group_offset_X = 0, group_offset_Y = 0;
+  [[maybe_unused]] int group_offset_X = 0;
+  [[maybe_unused]] int group_offset_Y = 0;
 
   switch (order_) {
     case StorageOrder::NHWC:
@@ -576,9 +481,6 @@ bool CudnnConvOp::DoRunWithType() {
     return true;
   }
 
-#if !CUDNN_VERSION_MIN(7, 0, 0)
-  int group_offset_filter = filter.numel() / group_;
-#endif
 
   // Set up the cudnn algorithms & workspace if necessary
   bool input_changed = (X.sizes() != cudnn_input_dims_);
@@ -592,11 +494,7 @@ bool CudnnConvOp::DoRunWithType() {
     if (filter_changed) {
       cudnn_filter_dims_ = filter.sizes().vec();
       if (kernel_.size() == 1 || kernel_.size() == 2) {
-#if CUDNN_VERSION_MIN(7, 0, 0)
         const int MM = M;
-#else
-        const int MM = M / group_;
-#endif
         CUDNN_ENFORCE(cudnnSetFilter4dDescriptor(
             filter_desc_,
             cudnnTypeWrapper<T_W>::type,
@@ -607,12 +505,6 @@ bool CudnnConvOp::DoRunWithType() {
             kernel_.size() == 1 ? 1 : kernel_w()));
       } else {
         vector<int> dims(filter.sizes().begin(), filter.sizes().end());
-#if !CUDNN_VERSION_MIN(7, 0, 0)
-        // We only need to divide dims by group_ when CUDNN version < 7.0
-        // see CUDA group convolution doc: https://fburl.com/dgj6dvpd
-        order_ == StorageOrder::NCHW ? dims[1] /= group_
-                                     : dims[filter.ndim() - 1] /= group_;
-#endif
         CUDNN_ENFORCE(cudnnSetFilterNdDescriptor(
             filter_desc_,
             cudnnTypeWrapper<T_W>::type,
@@ -674,7 +566,6 @@ bool CudnnConvOp::DoRunWithType() {
     compute_type_ = DetermineComputeTypeFromInput(X);
     SetConvDescFromArguments();
 
-#if CUDNN_VERSION_MIN(7, 0, 0)
     if (enable_tensor_core_) {
       CUDNN_ENFORCE(
           cudnnSetConvolutionMathType(conv_desc_, CUDNN_TENSOR_OP_MATH));
@@ -682,7 +573,6 @@ bool CudnnConvOp::DoRunWithType() {
 
     // enable cuDNN conv groups
     CUDNN_CHECK(cudnnSetConvolutionGroupCount(conv_desc_, group_));
-#endif
 
     if (force_algo_[ALGO_FWD] >= 0) {
       algo_ = (cudnnConvolutionFwdAlgo_t)force_algo_[ALGO_FWD];
@@ -808,7 +698,6 @@ bool CudnnConvOp::DoRunWithType() {
 
   // Now, actually run the computation.
   // Run directly through cuDNN if possible
-#if CUDNN_VERSION_MIN(7, 0, 0)
   cudnn_wrapper_.with_cudnn_state(cudnn_state_, [&](CuDNNState* state) {
     CUDNN_ENFORCE(cudnnConvolutionForward(
         state->cudnn_handle(),
@@ -825,27 +714,6 @@ bool CudnnConvOp::DoRunWithType() {
         top_desc_,
         Y->template mutable_data<T_Y>()));
   });
-#else
-  // otherwise manually run through groups
-  for (int i = 0; i < group_; ++i) {
-    cudnn_wrapper_.with_cudnn_state(cudnn_state_, [&](CuDNNState* state) {
-      CUDNN_ENFORCE(cudnnConvolutionForward(
-          state->cudnn_handle(),
-          cudnnTypeWrapper<T_X>::kOne(),
-          bottom_desc_,
-          X.template data<T_X>() + i * group_offset_X,
-          filter_desc_,
-          filter.template data<T_W>() + i * group_offset_filter,
-          conv_desc_,
-          algo_,
-          state->workspace().get(cudnn_ws_nbytes_),
-          cudnn_ws_nbytes_,
-          cudnnTypeWrapper<T_Y>::kZero(),
-          top_desc_,
-          Y->template mutable_data<T_Y>() + i * group_offset_Y));
-    });
-  }
-#endif
   // Bias
   if (InputSize() == 3) {
     auto& bias = Input(BIAS);
@@ -905,7 +773,8 @@ bool CudnnConvGradientOp::DoRunWithType() {
 
   const int M = filter.dim32(0);
   int N = 0, C = 0, H = 0, W = 0, D = 0, H_out = 0, W_out = 0, D_out = 0;
-  int group_offset_X = 0, group_offset_Y = 0;
+  [[maybe_unused]] int group_offset_X = 0;
+  [[maybe_unused]] int group_offset_Y = 0;
 
   switch (order_) {
     case StorageOrder::NHWC:
@@ -953,9 +822,6 @@ bool CudnnConvGradientOp::DoRunWithType() {
       "If you set group, the number of output channels should be divisible "
       "by group.");
 
-#if !CUDNN_VERSION_MIN(7, 0, 0)
-  int group_offset_filter = filter.numel() / group_;
-#endif
   if (kernel_.size() == 1) {
     ConvPoolOpBase<CUDAContext>::ComputePads({H});
   } else if (kernel_.size() == 2) {
@@ -1003,11 +869,7 @@ bool CudnnConvGradientOp::DoRunWithType() {
     if (filter_changed) {
       cudnn_filter_dims_ = filter.sizes().vec();
       if (kernel_.size() == 1 || kernel_.size() == 2) {
-#if CUDNN_VERSION_MIN(7, 0, 0)
         const int MM = M;
-#else
-        const int MM = M / group_;
-#endif
         CUDNN_ENFORCE(cudnnSetFilter4dDescriptor(
             filter_desc_,
             cudnnTypeWrapper<T_W>::type,
@@ -1018,12 +880,6 @@ bool CudnnConvGradientOp::DoRunWithType() {
             kernel_.size() == 1 ? 1 : kernel_w()));
       } else {
         vector<int> dims(filter.sizes().begin(), filter.sizes().end());
-#if !CUDNN_VERSION_MIN(7, 0, 0)
-        // We only need to divide dims by group_ when CUDNN version < 7.0
-        // see CUDA group convolution doc: https://fburl.com/dgj6dvpd
-        order_ == StorageOrder::NCHW ? dims[1] /= group_
-                                     : dims[filter.ndim() - 1] /= group_;
-#endif
 
         CUDNN_ENFORCE(cudnnSetFilterNdDescriptor(
             filter_desc_,
@@ -1091,7 +947,6 @@ bool CudnnConvGradientOp::DoRunWithType() {
     DuplicateConvDesc(
         conv_desc_, kernel_.size(), dilation_.size(), bwd_data_conv_desc_);
 
-#if CUDNN_VERSION_MIN(7, 0, 0)
     if (enable_tensor_core_) {
       CUDNN_ENFORCE(cudnnSetConvolutionMathType(
           bwd_filter_conv_desc_, CUDNN_TENSOR_OP_MATH));
@@ -1102,7 +957,6 @@ bool CudnnConvGradientOp::DoRunWithType() {
     // set cuDNN groups if appropriate
     CUDNN_CHECK(cudnnSetConvolutionGroupCount(bwd_filter_conv_desc_, group_));
     CUDNN_CHECK(cudnnSetConvolutionGroupCount(bwd_data_conv_desc_, group_));
-#endif
 
     // Choose dW algorithm
     if (force_algo_[ALGO_WGRAD] >= 0) {
@@ -1388,7 +1242,6 @@ bool CudnnConvGradientOp::DoRunWithType() {
         dbias->template mutable_data<T_DB>()));
   }
 
-#if CUDNN_VERSION_MIN(7, 0, 0)
   cudnn_wrapper_.with_cudnn_state(cudnn_state_, [&](CuDNNState* state) {
     CUDNN_ENFORCE(cudnnConvolutionBackwardFilter(
         state->cudnn_handle(),
@@ -1427,45 +1280,6 @@ bool CudnnConvGradientOp::DoRunWithType() {
           dX->template mutable_data<T_DX>()));
     }
   });
-#else
-  for (int i = 0; i < group_; ++i) {
-    cudnn_wrapper_.with_cudnn_state(cudnn_state_, [&](CuDNNState* state) {
-      CUDNN_ENFORCE(cudnnConvolutionBackwardFilter(
-          state->cudnn_handle(),
-          cudnnTypeWrapper<T_X>::kOne(),
-          bottom_desc_,
-          X.template data<T_X>() + i * group_offset_X,
-          top_desc_,
-          dY.template data<T_DY>() + i * group_offset_Y,
-          bwd_filter_conv_desc_,
-          bwd_filter_algo_,
-          state->workspace().get(cudnn_ws_nbytes_),
-          cudnn_ws_nbytes_,
-          cudnnTypeWrapper<T_DW>::kZero(),
-          filter_desc_,
-          dfilter->template mutable_data<T_DW>() + i * group_offset_filter));
-      if (OutputSize() == 3 || (no_bias_ && (OutputSize() == 2))) {
-        // Compute the gradient w.r.t. the input.
-        auto* dX = Output(no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD);
-        dX->ResizeLike(X);
-        CUDNN_ENFORCE(cudnnConvolutionBackwardData(
-            state->cudnn_handle(),
-            cudnnTypeWrapper<T_W>::kOne(),
-            filter_desc_,
-            filter.template data<T_W>() + i * group_offset_filter,
-            top_desc_,
-            dY.template data<T_DY>() + i * group_offset_Y,
-            bwd_data_conv_desc_,
-            bwd_data_algo_,
-            state->workspace().get(cudnn_ws_nbytes_),
-            cudnn_ws_nbytes_,
-            cudnnTypeWrapper<T_DX>::kZero(),
-            bottom_desc_,
-            dX->template mutable_data<T_DX>() + i * group_offset_X));
-      }
-    });
-  }
-#endif
   return true;
 }
 

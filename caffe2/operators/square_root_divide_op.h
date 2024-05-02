@@ -43,9 +43,9 @@ class SquareRootDivideOp final : public Operator<Context> {
     auto* dataPtr = data.template data<TData>();
     auto* yPtr = Y->template mutable_data<TData>();
     for (const auto i : c10::irange(0U, batchSize)) {
-      auto scale = scalePtr[i];
-      CAFFE_ENFORCE(scale >= 0, scale, " < 0");
-      auto multiplier = scale == 0 ? 1.0 : 1 / std::sqrt(scale);
+      auto scale_2 = scalePtr[i];
+      CAFFE_ENFORCE(scale_2 >= 0, scale_2, " < 0");
+      auto multiplier = scale_2 == 0 ? 1.0 : 1 / std::sqrt(scale_2);
       math::Scale<float, TData, Context>(
           exampleSize,
           multiplier,

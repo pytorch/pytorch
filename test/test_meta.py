@@ -8,11 +8,12 @@ from enum import Enum
 from torch.overrides import resolve_name
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from torch.utils import _pytree as pytree
-from torch._subclasses.meta_utils import MetaConverter, assert_metadata_eq
+from torch._subclasses.meta_utils import MetaConverter, assert_metadata_eq, is_sparse_any
 import torch.utils._python_dispatch
 from torch._dispatch.python import enable_python_dispatcher
 from torch._ops import OpOverload, OpOverloadPacket
 from torch.testing import make_tensor
+from torch.testing._internal.common_utils import unMarkDynamoStrictTest
 from torch.testing._internal.common_utils import (
     TestCase,
     skipIfCrossRef,
@@ -63,6 +64,9 @@ i32 = torch.int32
 i64 = torch.int64
 b8 = torch.bool
 u8 = torch.uint8
+u16 = torch.uint16
+u32 = torch.uint32
+u64 = torch.uint64
 
 foreach_op_db = (
     foreach_unary_op_db +
@@ -282,6 +286,14 @@ class TestMetaConverter(TestCase):
         m = MetaConverter()(y)
         self.assertMetadataMatches(m, y)
 
+    def test_inplace_set_storage(self):
+        x = torch.tensor([0, 1], dtype=torch.int64)
+        storage = x.untyped_storage()
+        ssize = storage.size()
+        meta = torch.empty((), dtype=torch.int64)
+        meta.set_(storage, 0, (), ())
+        self.assertEqual(storage.size(), ssize)
+
     @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
     def test_weakref(self):
         x = torch.randn(4, 4, 4)
@@ -291,9 +303,20 @@ class TestMetaConverter(TestCase):
         self.assertIs(y, z)
         self.assertEqual(len(m.tensor_memo), 1)
         self.assertEqual(len(m.storage_memo), 1)
+        self.assertEqual(len(m.describer.lookup_tensor), 1)
+        self.assertEqual(len(m.describer.lookup_storage), 1)
         del x
+        # Entries from Tensor -> int get deallocated when the real tensor
+        # disappears...
+        self.assertEqual(len(m.describer.lookup_tensor), 0)
+        self.assertEqual(len(m.describer.lookup_storage), 0)
+        del y
+        del z
+        # ... but the int -> FakeTensor entries don't die until the fake
+        # tensors themselves die (because the user may have held onto the
+        # int key and are expecting to get a consistent fake tensor in
+        # this case)
         self.assertEqual(len(m.tensor_memo), 0)
-        m.check_for_expired_weak_storages()
         self.assertEqual(len(m.storage_memo), 0)
         li = []
         r = []
@@ -301,9 +324,14 @@ class TestMetaConverter(TestCase):
             li.append(torch.rand([i]))
             r.append(m(li[-1]))
         self.assertEqual(len(m.tensor_memo), 4)
+        self.assertEqual(len(m.storage_memo), 4)
+        self.assertEqual(len(m.describer.lookup_tensor), 4)
+        self.assertEqual(len(m.describer.lookup_storage), 4)
         del li
+        self.assertEqual(len(m.describer.lookup_tensor), 0)
+        self.assertEqual(len(m.describer.lookup_storage), 0)
+        del r
         self.assertEqual(len(m.tensor_memo), 0)
-        m.check_for_expired_weak_storages()
         self.assertEqual(len(m.storage_memo), 0)
 
     @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
@@ -400,22 +428,24 @@ def assert_ref_meta_equal(test_case, func, meta_rs, rs, msg_callable):
         if not isinstance(r, torch.Tensor):
             continue
         test_assert(isinstance(meta_r, torch.Tensor), f"but real {i}th result is Tensor")
-        test_assert(meta_r.dtype == r.dtype, f"but real dtype was {r.dtype}")
-        test_assert(meta_r.shape == r.shape, f"but real shape was {r.shape}")
+        test_assert(meta_r.dtype == r.dtype, f"for element {i}, was {meta_r.dtype} but real dtype was {r.dtype}")
+        test_assert(meta_r.shape == r.shape, f"for element {i}, was {meta_r.shape} but real shape was {r.shape}")
         # See https://github.com/pytorch/pytorch/issues/78050
         if should_check_strides(func) == CheckStrides.ALL:
             same_strides, _ = torch._prims_common.check_all_strides(meta_r, r)
-            test_assert(same_strides, f"but real stride was {r.stride()}")
+            test_assert(same_strides, f"for element {i}, was {meta_r.stride()} but real stride was {r.stride()}")
         elif should_check_strides(func) == CheckStrides.SIGNIFICANT:
             same_strides, _ = torch._prims_common.check_significant_strides(meta_r, r)
-            test_assert(same_strides, f"but real stride was {r.stride()}")
+            test_assert(same_strides, f"for element {i}, was {meta_r.stride()} but real stride was {r.stride()}")
         test_assert(
             meta_r.storage_offset() == r.storage_offset(),
-            f"but real storage_offset was {r.storage_offset()}")
-        test_assert(meta_r.requires_grad == r.requires_grad, f"but real requires_grad was {r.requires_grad}")
+            f"for element {i}, was {meta_r.storage_offset()} but real storage_offset was {r.storage_offset()}")
+        test_assert(meta_r.requires_grad == r.requires_grad,
+                    f"for element {i}, was {meta_r.requires_grad} but real requires_grad was {r.requires_grad}")
         if func not in CHECK_CONJ_SKIPS:
-            test_assert(meta_r.is_conj() == r.is_conj(), f"but real is_conj was {r.is_conj()}")
-        test_assert(meta_r.is_neg() == r.is_neg(), f"but real is_neg was {r.is_neg()}")
+            test_assert(meta_r.is_conj() == r.is_conj(),
+                        f"for element {i}, was {meta_r.is_conj()} but real is_conj was {r.is_conj()}")
+        test_assert(meta_r.is_neg() == r.is_neg(), f"for element {i}, was {meta_r.is_neg()} but real is_neg was {r.is_neg()}")
 
 
 # This environment variable controls whether or not we print expected failure
@@ -487,7 +517,9 @@ def verbose_print(e):
             return self.s
 
     def go(t):
-        if isinstance(t, torch.Tensor):
+        if is_sparse_any(t):
+            return t
+        elif isinstance(t, torch.Tensor):
             return Lit(f"{t} stride={t.stride()}")
         else:
             return t
@@ -638,18 +670,13 @@ meta_function_expected_failures = {
     torch.Tensor.nonzero : {f64, i32, c128, i64, i16, c32, f16, u8, c64, bf16, b8, i8, f32},
     torch.Tensor.item : {f64, i32, c128, i64, i16, f16, u8, c32, c64, bf16, b8, i8, f32},
     torch.bincount : {i32, i64, u8, i16, i8},
-    torch.frexp : {f64, f16, bf16, f32},
-    torch.functional.unique : {f64, i32, i64, u8, i16, f16, bf16, b8, i8, f32},
-    torch.functional.unique_consecutive : {f64, i32, i64, u8, i16, f16, bf16, b8, i8, f32},
-    torch.histc : {f64, f16, bf16, f32},
+    torch.functional.unique : {f64, i32, i64, u8, i16, f16, bf16, b8, i8, f32, u16, u32, u64},
+    torch.functional.unique_consecutive : {f64, i32, i64, u8, i16, f16, bf16, b8, i8, f32, u16, u32, u64},
     torch.histogram : {f64, f32},
     torch.histogramdd : {f64, f32},
     torch.kthvalue : {f64, i32, i64, u8, i16, f16, bf16, i8, f32},
     torch.nn.functional.ctc_loss : {f64, f32},
     torch.nn.functional.gaussian_nll_loss : {f16, f64, bf16, f32},
-    torch.nn.functional.one_hot : {i64},
-    torch.linalg.eig : {f64, f32, c128, c64},
-    torch.linalg.eigvals : {f64, f32, c128, c64},
     torch.linalg.lstsq : {f64, f32, c128, c64},
 }
 
@@ -693,12 +720,12 @@ meta_function_skips = {
     torch.equal : {bf16, i8, c32, i64, u8, c128, b8, f64, i16, i32, f32, f16, c64},
     torch.nanmean : {bf16, f64, f32, f16, c32, c64, c128},
     torch.nn.functional.cross_entropy : {bf16, f64, f32},
-    torch.nn.functional.interpolate : {bf16, f64, f32, u8},
     torch.nn.functional.nll_loss : {bf16, f64, f32},
     torch.linalg.cond : {c128, c64, f32, f64},
     torch.linalg.vecdot : {bf16, f64, f32, f16},
     torch.empty : {bf16, i8, c32, i64, u8, c128, b8, f64, i16, i32, f32, f16, c64},
     torch.Tensor.addbmm_: {bf16, c128, c64, f32, f64, i16, i32, i64, i8, u8},
+    torch.nn.functional.one_hot : {i64},
 }
 
 
@@ -707,9 +734,12 @@ meta_function_device_expected_failures_only_outplace = defaultdict(dict)
 meta_function_device_skips = defaultdict(dict)
 
 meta_function_device_expected_failures['cpu'] = {
+    # TODO: The decomps for these batch norm ops return different dtypes depending
+    # on the device. We should make this work better with meta tensors.
     torch.native_batch_norm: {bf16, f16},
     torch._native_batch_norm_legit: {bf16, f16},
-    torch.native_layer_norm: {bf16},
+    torch.ops.aten._batch_norm_with_update: {bf16, f16},
+    torch.native_layer_norm: {bf16, f16},
 }
 
 meta_function_device_expected_failures['cuda'] = {
@@ -718,13 +748,15 @@ meta_function_device_expected_failures['cuda'] = {
     torch.functional.unique: {f16},  # aten::_unique2, aten::unique_dim
     torch.functional.unique_consecutive: {f16},  # aten::unique_consecutive
     torch.geqrf: {f32, f64},  # aten::geqrf
-    torch.histc: {i16, i32, i64, i8},  # aten::histc, aten::histc.out
     torch.kthvalue: {f16},  # aten::kthvalue.values
 }
 
 meta_function_device_skips['cpu'] = {
+    # TODO: The decomps for these batch norm ops return different dtypes depending
+    # on the device. We should make this work better with meta tensors.
     torch.native_batch_norm: {f32, f64},
     torch._native_batch_norm_legit: {f32, f64},
+    torch.ops.aten._batch_norm_with_update: {f32, f64},
 }
 
 meta_function_device_skips['cuda'] = {
@@ -797,7 +829,6 @@ class MetaCrossRefFunctionMode(torch.overrides.TorchFunctionMode):
 meta_dispatch_expected_failures = {
     aten.allclose.default: {f16, bf16, f32, f64, c64, c128},  # NotImplementedError: 'aten::_local_scalar_dense'
     aten.geqrf.default : {c64, c128, f64, f32},
-    aten.linalg_eig.default : {c64, c128, f64, f32},
     aten.linalg_lstsq.default : {c64, c128, f64, f32},
     aten.masked_select.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
     aten.masked_select.out : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
@@ -810,17 +841,14 @@ meta_dispatch_expected_failures = {
     aten._histogramdd_from_bin_cts.default : {f32, f64},
     aten._histogramdd_from_bin_tensors.default : {f32, f64},
     aten._local_scalar_dense.default : {c32, c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
-    aten._unique2.default : {i8, f64, i64, f16, bf16, f32, i32, b8, i16, u8},
+    aten._unique2.default : {i8, f64, i64, f16, bf16, f32, i32, b8, i16, u8, u16, u32, u64},
     aten.bincount.default : {i64, i8, i32, i16, u8},
     aten.equal.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
-    aten.frexp.Tensor : {bf16, f32, f16, f64},
-    aten.histc.default : {bf16, f32, f64},
-    aten.histc.out : {bf16, f32, f64},
     aten.histogram.bin_ct : {f32, f64},
     aten.histogram.bins_tensor : {f32, f64},
     aten.kthvalue.default : {i8, f64, i64, f16, bf16, f32, i32, i16, u8},
-    aten.unique_consecutive.default : {i8, f64, i64, f16, bf16, f32, i32, b8, i16, u8},
-    aten.unique_dim.default : {i8, f64, i64, f16, bf16, f32, i32, b8, i16, u8},
+    aten.unique_consecutive.default : {i8, f64, i64, f16, bf16, f32, i32, b8, i16, u8, u16, u32, u64},
+    aten.unique_dim.default : {i8, f64, i64, f16, bf16, f32, i32, b8, i16, u8, u16, u32, u64},
     aten.upsample_nearest3d.vec : {bf16, f32, f64, u8},
 
 }
@@ -851,12 +879,14 @@ meta_dispatch_device_expected_failures = defaultdict(dict)
 meta_dispatch_device_skips = defaultdict(dict)
 
 meta_dispatch_device_expected_failures['cpu'] = {
+    # TODO: The decomps for these batch norm ops return different dtypes depending
+    # on the device. We should make this work better with meta tensors.
     aten.native_batch_norm.default: {bf16, f16},
     aten._native_batch_norm_legit.default: {bf16, f16},
     aten._native_batch_norm_legit.no_stats: {bf16, f16},
-    aten.native_layer_norm.default: {bf16},
-    aten.histc.default: {f16},
-    aten.histc.out: {f16},
+    aten._batch_norm_with_update.default: {bf16, f16},
+
+    aten.native_layer_norm.default: {bf16, f16},
 }
 
 meta_dispatch_device_expected_failures['cuda'] = {
@@ -865,8 +895,6 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten._use_cudnn_ctc_loss.Tensor: {f32, f64},  # aten::_use_cudnn_ctc_loss.Tensor
     aten.cudnn_grid_sampler.default: {f16, f32, f64},  # aten::cudnn_grid_sampler
     aten.geqrf.default: {f32, f64},  # aten::geqrf
-    aten.histc.default: {i16, i32, i64, i8},  # aten::histc
-    aten.histc.out: {i16, i32, i64, i8},  # aten::histc.out
     aten.kthvalue.default: {f16},  # aten::kthvalue.values
     aten.linalg_eigvalsh.out: {f32, f64},  # aten::linalg_eigvalsh.out
     aten.log_sigmoid_forward.default: {bf16, f16, f64, f32},
@@ -878,9 +906,13 @@ meta_dispatch_device_expected_failures['cuda'] = {
 
 meta_dispatch_device_skips['cpu'] = {
     aten._embedding_bag_forward_only.default: {bf16, f16, f32, f64},
+
+    # TODO: The decomps for these batch norm ops return different dtypes depending
+    # on the device. We should make this work better with meta tensors.
     aten.native_batch_norm.default: {f32, f64},
     aten._native_batch_norm_legit.default: {f32, f64},
     aten._native_batch_norm_legit.no_stats: {f32, f64},
+    aten._batch_norm_with_update.default: {f32, f64},
 
     # If the computation dtype is different from the input
     # dtype this will fail. CPU execution may also have a
@@ -1107,6 +1139,7 @@ class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
 # inconsistencies between CUDA and CPU, and running on CUDA makes it easier
 # to ignore the CPU case when inconsistencies arise.  Ideally we deal
 # with the inconsistencies but this takes time.
+@unMarkDynamoStrictTest
 class TestMeta(TestCase):
     # Copies inputs to inplace operations to avoid inplace modifications
     #   to leaves requiring gradient
@@ -1324,26 +1357,22 @@ class TestMeta(TestCase):
 
     @onlyCPU
     def test_meta_autograd_no_error(self):
-        lib = torch.library.Library("meta_test", "DEF")
-        impl_cpu = torch.library.Library("meta_test", "IMPL", "CPU")
-        impl_meta = torch.library.Library("meta_test", "IMPL", "Meta")
+        with torch.library._scoped_library("meta_test", "DEF") as lib:
+            with torch.library._scoped_library("meta_test", "IMPL", "CPU") as impl_cpu:
+                with torch.library._scoped_library("meta_test", "IMPL", "Meta") as impl_meta:
+                    def foo_impl(x):
+                        return x + 1
 
-        def foo_impl(x):
-            return x + 1
+                    lib.define("foo(Tensor a) -> Tensor")
+                    impl_meta.impl("foo", foo_impl)
+                    impl_cpu.impl("foo", foo_impl)
 
-        lib.define("foo(Tensor a) -> Tensor")
-        impl_meta.impl("foo", foo_impl)
-        impl_cpu.impl("foo", foo_impl)
-
-        a = torch.ones(2, device='meta')
-        # The point of the test is that this should not error:
-        # We have a fallthrough kernel registered to the AutogradMeta
-        # key for custom ops, so it's fine that `foo()` doesn't have
-        # an autograd kernel.
-        b = torch.ops.meta_test.foo.default(a)
-        del impl_meta
-        del impl_cpu
-        del lib
+                    a = torch.ones(2, device='meta')
+                    # The point of the test is that this should not error:
+                    # We have a fallthrough kernel registered to the AutogradMeta
+                    # key for custom ops, so it's fine that `foo()` doesn't have
+                    # an autograd kernel.
+                    b = torch.ops.meta_test.foo.default(a)
 
     def test_huber_loss_backward(self):
         inps = [torch.rand(2**52, device='meta') for _ in range(3)]

@@ -59,6 +59,8 @@ buf0.users = [NodeUser(node=SchedulerNode(name='buf1'), can_inplace=True, is_wea
 buf0.group.device = cpu
 buf0.group.iteration = ((256,), ())
 buf0.sizes = ([256], [])
+arg0_1_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
+buf0_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
 class buf0_loop_body:
     var_ranges = {z0: 256}
     index0 = z0
@@ -80,6 +82,8 @@ buf1.users = [NodeUser(node=ExternKernelSchedulerNode(name='buf2'), can_inplace=
 buf1.group.device = cpu
 buf1.group.iteration = ((256,), ())
 buf1.sizes = ([256], [])
+buf0_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
+buf1_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
 class buf1_loop_body:
     var_ranges = {z0: 256}
     index0 = z0
@@ -103,7 +107,7 @@ buf2.node.kernel = extern_kernels.mm""",
         self.assertExpectedInline(
             open(filename / "ir_post_fusion.txt").read().rstrip(),
             """\
-buf0_buf1: FusedSchedulerNode(NoneType)
+buf0_buf1: FusedSchedulerNode(SchedulerNode,SchedulerNode)
 buf0_buf1.writes = [MemoryDep('buf0', c0, {c0: 256}), MemoryDep('buf1', c0, {c0: 256})]
 buf0_buf1.unmet_dependencies = []
 buf0_buf1.met_dependencies = [MemoryDep('arg0_1', c0, {c0: 256})]
@@ -117,6 +121,8 @@ buf0_buf1.users = []
     buf0.group.device = cpu
     buf0.group.iteration = ((256,), ())
     buf0.sizes = ([256], [])
+    arg0_1_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
+    buf0_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
     class buf0_loop_body:
         var_ranges = {z0: 256}
         index0 = z0
@@ -137,6 +143,8 @@ buf0_buf1.users = []
     buf1.group.device = cpu
     buf1.group.iteration = ((256,), ())
     buf1.sizes = ([256], [])
+    buf0_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
+    buf1_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
     class buf1_loop_body:
         var_ranges = {z0: 256}
         index0 = z0
@@ -162,7 +170,7 @@ buf2.node.kernel = extern_kernels.mm""",
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
     from torch.testing._internal.inductor_utils import HAS_CPU
 
     if HAS_CPU:

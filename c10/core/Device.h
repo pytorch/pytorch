@@ -5,6 +5,7 @@
 #include <c10/util/Exception.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <iosfwd>
 #include <string>
@@ -141,9 +142,9 @@ struct C10_API Device final {
     return type_ == DeviceType::Metal;
   }
 
-  /// Return true if the device is of ORT type.
-  bool is_ort() const noexcept {
-    return type_ == DeviceType::ORT;
+  /// Return true if the device is of MAIA type.
+  bool is_maia() const noexcept {
+    return type_ == DeviceType::MAIA;
   }
 
   /// Return true if the device is of META type.

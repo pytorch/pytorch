@@ -5,7 +5,7 @@ import warnings
 
 import numpy as np
 import torch
-from torch.library import Library
+from torch.library import _scoped_library, Library
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -38,7 +38,7 @@ class TestAutogradFallback(TestCase):
         return getattr(getattr(torch.ops, self.test_ns), name).default
 
     def get_lib(self):
-        lib = Library(self.test_ns, "FRAGMENT")
+        lib = Library(self.test_ns, "FRAGMENT")  # noqa: TOR901
         self.lib = lib
         return lib
 
@@ -146,166 +146,167 @@ class TestAutogradFallback(TestCase):
             # To be clear, none of these situations are OK and will lead
             # to other problems down the line. We're testing them because
             # it is fairly common to actually do these things.
-            lib = Library(self.test_ns, "FRAGMENT")
-            lib.define("foo(Tensor self) -> Tensor")
-            lib.impl("foo", lambda x: x, "CPU")
-            op = self.get_op("foo")
+            with _scoped_library(self.test_ns, "FRAGMENT") as lib:
+                lib.define("foo(Tensor self) -> Tensor")
+                lib.impl("foo", lambda x: x, "CPU")
+                op = self.get_op("foo")
 
-            x = torch.randn(3, requires_grad=True)
-            y = op(x).sum()
-            with self._check_ctx(mode):
-                y.backward()
-                self.assertEqual(x.grad, torch.ones_like(x))
+                x = torch.randn(3, requires_grad=True)
+                y = op(x).sum()
+                with self._check_ctx(mode):
+                    y.backward()
+                    self.assertEqual(x.grad, torch.ones_like(x))
 
-            lib.define("bar(Tensor(a!) self) -> Tensor(a!)")
-            lib.impl("bar", lambda x: x, "CPU")
-            op = self.get_op("bar")
+                lib.define("bar(Tensor(a!) self) -> Tensor(a!)")
+                lib.impl("bar", lambda x: x, "CPU")
+                op = self.get_op("bar")
 
-            x = torch.randn(3, requires_grad=True)
-            y = op(x).sum()
-            with self._check_ctx(mode):
-                y.backward()
-                self.assertEqual(x.grad, torch.ones_like(x))
+                x = torch.randn(3, requires_grad=True)
+                y = op(x).sum()
+                with self._check_ctx(mode):
+                    y.backward()
+                    self.assertEqual(x.grad, torch.ones_like(x))
 
     @parametrize("mode", ("nothing", "warn"))
     def test_composite_registered_to_cpu(self, mode):
         with autograd_fallback_mode(mode):
-            lib = Library(self.test_ns, "FRAGMENT")
-            lib.define("foo(Tensor self) -> Tensor")
-            lib.impl("foo", lambda x: x.sin().sum(), "CPU")
-            op = self.get_op("foo")
+            with _scoped_library(self.test_ns, "FRAGMENT") as lib:
+                lib.define("foo(Tensor self) -> Tensor")
+                lib.impl("foo", lambda x: x.sin().sum(), "CPU")
+                op = self.get_op("foo")
 
-            x = torch.randn(3, requires_grad=True)
-            y = op(x)
-            with self._check_ctx(mode):
-                y.backward()
-                self.assertEqual(x.grad, x.cos())
+                x = torch.randn(3, requires_grad=True)
+                y = op(x)
+                with self._check_ctx(mode):
+                    y.backward()
+                    self.assertEqual(x.grad, x.cos())
 
     @parametrize("mode", ("nothing", "warn"))
     def test_autograd_function_registered_to_cpu(self, mode):
         with autograd_fallback_mode(mode):
-            lib = Library(self.test_ns, "FRAGMENT")
-            lib.define("foo(Tensor self) -> Tensor")
+            with _scoped_library(self.test_ns, "FRAGMENT") as lib:
+                lib.define("foo(Tensor self) -> Tensor")
 
-            class NumpySin(torch.autograd.Function):
-                @staticmethod
-                def forward(ctx, x):
-                    ctx.save_for_backward(x)
-                    return torch.tensor(np.sin(x.cpu().numpy()))
+                class NumpySin(torch.autograd.Function):
+                    @staticmethod
+                    def forward(ctx, x):
+                        ctx.save_for_backward(x)
+                        return torch.tensor(np.sin(x.cpu().numpy()))
 
-                @staticmethod
-                def backward(ctx, gx):
-                    (x,) = ctx.saved_tensors
-                    return gx * x.cos()
+                    @staticmethod
+                    def backward(ctx, gx):
+                        (x,) = ctx.saved_tensors
+                        return gx * x.cos()
 
-            lib.impl("foo", NumpySin.apply, "CPU")
-            op = self.get_op("foo")
+                lib.impl("foo", NumpySin.apply, "CPU")
+                op = self.get_op("foo")
 
-            x = torch.randn(3, requires_grad=True)
-            y = op(x).sum()
-            with self._check_ctx(mode):
-                y.backward()
-                self.assertEqual(x.grad, x.cos())
+                x = torch.randn(3, requires_grad=True)
+                y = op(x).sum()
+                with self._check_ctx(mode):
+                    y.backward()
+                    self.assertEqual(x.grad, x.cos())
 
     @parametrize("mode", ("nothing", "warn"))
     def test_inplace_autograd_function_registered_to_cpu(self, mode):
         with autograd_fallback_mode(mode):
-            lib = Library(self.test_ns, "FRAGMENT")
-            lib.define("foo(Tensor(a!) self) -> Tensor(a!)")
+            with _scoped_library(self.test_ns, "FRAGMENT") as lib:
+                lib.define("foo(Tensor(a!) self) -> Tensor(a!)")
 
-            class NumpySin_(torch.autograd.Function):
-                @staticmethod
-                def forward(ctx, x):
-                    ctx.save_for_backward(x.clone())
-                    x_np = x.detach().numpy()
-                    np.sin(x_np, out=x_np)
-                    ctx.mark_dirty(x)
-                    return x
+                class NumpySin_(torch.autograd.Function):
+                    @staticmethod
+                    def forward(ctx, x):
+                        ctx.save_for_backward(x.clone())
+                        x_np = x.detach().numpy()
+                        np.sin(x_np, out=x_np)
+                        ctx.mark_dirty(x)
+                        return x
 
-                @staticmethod
-                def backward(ctx, gx):
-                    (x,) = ctx.saved_tensors
-                    return gx * x.cos()
+                    @staticmethod
+                    def backward(ctx, gx):
+                        (x,) = ctx.saved_tensors
+                        return gx * x.cos()
 
-            lib.impl("foo", NumpySin_.apply, "CPU")
-            op = self.get_op("foo")
+                lib.impl("foo", NumpySin_.apply, "CPU")
+                op = self.get_op("foo")
 
-            x = torch.randn(3, requires_grad=True)
-            z = x.clone()
-            w = z[0]
-            y = op(w)
+                x = torch.randn(3, requires_grad=True)
+                z = x.clone()
+                w = z[0]
+                y = op(w)
 
-            expected = torch.zeros_like(x)
-            expected[0] = x[0].cos()
-            with self._check_ctx(mode):
-                (gx,) = torch.autograd.grad(y, x, torch.ones_like(y), retain_graph=True)
-                self.assertEqual(gx, expected)
+                expected = torch.zeros_like(x)
+                expected[0] = x[0].cos()
+                with self._check_ctx(mode):
+                    (gx,) = torch.autograd.grad(
+                        y, x, torch.ones_like(y), retain_graph=True
+                    )
+                    self.assertEqual(gx, expected)
 
-            expected = torch.ones_like(x)
-            expected[0] = x[0].cos()
-            with self._check_ctx(mode):
-                (gx,) = torch.autograd.grad(z, x, torch.ones_like(z))
-                self.assertEqual(gx, expected)
+                expected = torch.ones_like(x)
+                expected[0] = x[0].cos()
+                with self._check_ctx(mode):
+                    (gx,) = torch.autograd.grad(z, x, torch.ones_like(z))
+                    self.assertEqual(gx, expected)
 
     @parametrize("mode", ("nothing", "warn"))
     def test_inplace_on_tensor_that_does_not_require_grad(self, mode):
         # We don't do anything special (that is, we don't rebase history).
         # See NOTE [autograd fallback and in-place operations] for why
         with autograd_fallback_mode(mode):
-            lib = Library(self.test_ns, "FRAGMENT")
+            with _scoped_library(self.test_ns, "FRAGMENT") as lib:
+                # Correct usage of (a!)
+                lib.define("foo(Tensor(a!) self, Tensor other) -> Tensor(a!)")
 
-            # Correct usage of (a!)
-            lib.define("foo(Tensor(a!) self, Tensor other) -> Tensor(a!)")
+                def foo_impl(x, y):
+                    x_d = x.detach()
+                    y = y.detach()
+                    x_d.add_(y)
+                    return x
 
-            def foo_impl(x, y):
-                x_d = x.detach()
-                y = y.detach()
-                x_d.add_(y)
-                return x
+                lib.impl("foo", foo_impl, "CPU")
+                foo = self.get_op("foo")
 
-            lib.impl("foo", foo_impl, "CPU")
-            foo = self.get_op("foo")
+                # Incorrect usage of (a!): user doesn't return tensor as-is
+                lib.define("bar(Tensor(a!) self, Tensor other) -> Tensor(a!)")
 
-            # Incorrect usage of (a!): user doesn't return tensor as-is
-            lib.define("bar(Tensor(a!) self, Tensor other) -> Tensor(a!)")
+                def bar_impl(x, y):
+                    x_d = x.detach()
+                    y = y.detach()
+                    x_d.add_(y)
+                    return x_d.clone()
 
-            def bar_impl(x, y):
-                x_d = x.detach()
-                y = y.detach()
-                x_d.add_(y)
-                return x_d.clone()
+                lib.impl("bar", bar_impl, "CPU")
+                bar = self.get_op("bar")
 
-            lib.impl("bar", bar_impl, "CPU")
-            bar = self.get_op("bar")
+                # User mutated input tensor but didn't return it.
+                lib.define("baz(Tensor(a!) self, Tensor other) -> ()")
 
-            # User mutated input tensor but didn't return it.
-            lib.define("baz(Tensor(a!) self, Tensor other) -> ()")
+                def baz_impl(x, y):
+                    x_d = x.detach()
+                    y = y.detach()
+                    x_d.add_(y)
 
-            def baz_impl(x, y):
-                x_d = x.detach()
-                y = y.detach()
-                x_d.add_(y)
+                lib.impl("baz", baz_impl, "CPU")
+                baz = self.get_op("baz")
 
-            lib.impl("baz", baz_impl, "CPU")
-            baz = self.get_op("baz")
+                # Test in-place on non-view
+                for op in (foo, bar, baz):
+                    x = torch.randn(3)
+                    y = torch.randn(3, requires_grad=True)
+                    with self.assertRaisesRegex(RuntimeError, "does not require grad"):
+                        z = x.clone()
+                        op(z, y)
+                        torch.autograd.grad(z, y, torch.ones_like(z), allow_unused=True)
 
-            # Test in-place on non-view
-            for op in (foo, bar, baz):
-                x = torch.randn(3)
-                y = torch.randn(3, requires_grad=True)
-                with self.assertRaisesRegex(RuntimeError, "does not require grad"):
-                    z = x.clone()
-                    op(z, y)
-                    torch.autograd.grad(z, y, torch.ones_like(z), allow_unused=True)
-
-            # Test in-place on view
-            for op in (foo, bar, baz):
-                x = torch.randn(3)
-                y = torch.randn(3, requires_grad=True)
-                with self.assertRaisesRegex(RuntimeError, "does not require grad"):
-                    z = x[:]
-                    op(z, y)
-                    torch.autograd.grad(z, x, torch.ones_like(z), allow_unused=True)
+                # Test in-place on view
+                for op in (foo, bar, baz):
+                    x = torch.randn(3)
+                    y = torch.randn(3, requires_grad=True)
+                    with self.assertRaisesRegex(RuntimeError, "does not require grad"):
+                        z = x[:]
+                        op(z, y)
+                        torch.autograd.grad(z, x, torch.ones_like(z), allow_unused=True)
 
     @parametrize("mode", ("nothing", "warn"))
     def test_post_autograd_returns_leaf(self, mode):

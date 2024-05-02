@@ -1,7 +1,11 @@
 import contextlib
+from typing import Callable, List, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import torch
 
 # Executed in the order they're registered
-INTERMEDIATE_HOOKS = []
+INTERMEDIATE_HOOKS: List[Callable[[str, "torch.Tensor"], None]] = []
 
 
 @contextlib.contextmanager

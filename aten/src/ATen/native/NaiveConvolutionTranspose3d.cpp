@@ -18,8 +18,7 @@
 #include <ATen/ops/sum.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 template<typename scalar_t>
 void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t lda, scalar_t *x, int64_t incx, scalar_t beta, scalar_t *y, int64_t incy);
@@ -330,7 +329,7 @@ void slow_conv_transpose3d_out_cpu_template(
 
           // Unpack columns back into input:
           at::native::col2vol<scalar_t>(
-              columns.data_ptr<scalar_t>(),
+              columns.const_data_ptr<scalar_t>(),
               n_output_plane,
               output_depth,
               output_height,
@@ -563,8 +562,8 @@ void slow_conv_transpose3d_backward_out_cpu_template(
 
           // Do GEMM (note: this is a bit confusing because gemm assumes
           // column-major matrices)
-          auto gemm_in_ptr = need_columns ? grad_columns.data_ptr<scalar_t>()
-              : grad_output_n.data_ptr<scalar_t>();
+          auto gemm_in_ptr = need_columns ? grad_columns.const_data_ptr<scalar_t>()
+              : grad_output_n.const_data_ptr<scalar_t>();
           cpublas::gemm(
               TransposeType::NoTranspose,
               TransposeType::NoTranspose,
@@ -783,8 +782,8 @@ void slow_conv_transpose3d_acc_grad_parameters_cpu(
 
             // Do GEMM (note: this is a bit confusing because gemm assumes
             // column-major matrices)
-            auto gemm_in_ptr = need_columns ? columns.data_ptr<scalar_t>()
-                : grad_output_n.data_ptr<scalar_t>();
+            auto gemm_in_ptr = need_columns ? columns.const_data_ptr<scalar_t>()
+                : grad_output_n.const_data_ptr<scalar_t>();
             cpublas::gemm(
                 TransposeType::Transpose,
                 TransposeType::NoTranspose,
@@ -998,5 +997,4 @@ static std::tuple<Tensor, Tensor, Tensor> slow_conv_transpose3d_backward_cpu(
 
 REGISTER_ALL_CPU_DISPATCH(slow_conv_transpose3d_backward_stub, &slow_conv_transpose3d_backward_cpu);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

@@ -1,7 +1,7 @@
 import logging
 import typing
 from collections import Counter
-from typing import Dict, Set
+from typing import Dict, List, Set
 
 import torch
 import torch._guards
@@ -78,12 +78,9 @@ def remove_no_ops(
         replacement.meta.update(node.meta)
         graph.erase_node(node)
 
-    for node in graph.nodes:
-        if node.op != "call_function":
-            continue
-
+    for node in graph.find_nodes(op="call_function", target=aten.add.Tensor):
         # TODO handle Tensor-Scalar adds, it's a different schema
-        if node.target == aten.add.Tensor and len(node.args) == 2:
+        if len(node.args) == 2:
             if (
                 not any(e in zeros for e in node.args)
                 or node.kwargs.get("alpha", 1) != 1
@@ -93,25 +90,46 @@ def remove_no_ops(
             replace_index = 1 if node.args[0] in zeros else 0
             replace_no_op(node, replace_index)
 
-        elif node.target == aten.sub.Tensor and len(node.args) == 2:
+    for node in graph.find_nodes(op="call_function", target=aten.sub.Tensor):
+        if len(node.args) == 2:
             if node.args[1] not in zeros or node.kwargs.get("alpha", 1) != 1:
                 continue
 
             replace_no_op(node, 0)
 
-        elif node.target == aten.mul.Tensor and len(node.args) == 2:
+    for node in graph.find_nodes(op="call_function", target=aten.mul.Tensor):
+        if len(node.args) == 2:
             if not any(e in ones for e in node.args):
                 continue
 
             replace_input_index = 1 if node.args[0] in ones else 0
             replace_no_op(node, replace_input_index)
 
-        elif (
-            node.target == aten.div.Tensor
-            and len(node.args) == 2
-            and node.args[1] in ones
-        ):
+    for node in graph.find_nodes(op="call_function", target=aten.div.Tensor):
+        if len(node.args) == 2 and node.args[1] in ones:
             replace_no_op(node, 0)
+
+    # meta tensors returned from the graph have no data and can be replaced with empty_strided
+    for output_node in graph.find_nodes(op="output"):
+        had_meta_return = False
+
+        def visit(n):
+            nonlocal had_meta_return
+            val = n.meta.get("val")
+            if isinstance(val, torch.Tensor) and val.device.type == "meta":
+                with graph.inserting_before(output_node):
+                    n.replace_all_uses_with(
+                        graph.call_function(
+                            torch.ops.aten.empty_strided.default,
+                            args=(val.size(), val.stride()),
+                            kwargs={"dtype": val.dtype, "device": val.device},
+                        )
+                    )
+                had_meta_return = True
+
+        torch.fx.map_arg(output_node.args, visit)
+        if had_meta_return:
+            graph.eliminate_dead_code()
 
 
 @torch.utils._python_dispatch._disable_current_modes()
@@ -124,13 +142,7 @@ def remove_redundant_views(gm: torch.fx.GraphModule):
     views: Dict[torch.fx.Node, Dict[torch.dtype, torch.fx.Node]] = {}
     graph = gm.graph
 
-    for node in graph.nodes:
-        if node.op != "call_function":
-            continue
-
-        if node.target != torch.ops.aten.view.dtype:
-            continue
-
+    for node in graph.find_nodes(op="call_function", target=torch.ops.aten.view.dtype):
         src = node.args[0]
         to_type = node.args[1]
         existing_views = views.get(src)
@@ -156,10 +168,7 @@ def remove_redundant_views(gm: torch.fx.GraphModule):
 
     # Clean up unused views.
     while True:
-        unused_views = []
-        for alias in views:
-            if not alias.users:
-                unused_views.append(alias)
+        unused_views = [alias for alias in views if not alias.users]
         if len(unused_views) == 0:
             break
         for unused in unused_views:
@@ -177,6 +186,9 @@ class UniformValueConstantFolder(ConstantFolder):
         super().__init__(gm, skip_constructors)
         self.node_storages_ptrs: Dict[torch.fx.Node, int] = {}
         self.constant_data_ptrs: Dict[torch.fx.Node, StorageWeakRef] = {}
+        # we may constant fold a tensor which in the graph has a sym size
+        # see: [constant folding refining of symints]
+        self.node_replacements_shapes: Dict[torch.fx.Node, List[int]] = {}
 
     def insertable_tensor_check(self, t: torch.Tensor) -> bool:
         # TODO - we could also Tensors which get replaced with arange here
@@ -190,6 +202,9 @@ class UniformValueConstantFolder(ConstantFolder):
     def add_node_replacement(self, node: torch.fx.Node, tensor: torch.Tensor) -> None:
         self.node_replacements[node] = tensor.flatten()[0].item()
         self.constant_data_ptrs[node] = StorageWeakRef(tensor.untyped_storage())
+        shape = list(tensor.shape)
+        assert all(type(dim) is int for dim in shape)
+        self.node_replacements_shapes[node] = shape
 
 
 @torch.utils._python_dispatch._disable_current_modes()
@@ -203,6 +218,15 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
     cf.run()
 
     node_replacements = cf.node_replacements
+
+    # note: [constant folding refining of symints]
+    # constant folding will partially evaluate a graph such that values which have dependencies which
+    # are entirely known at compile time may also become compile time constants. in some cases,
+    # this will include symints which we had not yet previously deduced are guaranteed a
+    # constant value and is then deduced in constant folding. an example is:
+    # unbacked_symint_eq_11 = torch.full((), 11).item()
+    # torch.full((unbacked_symint_eq_11,), 0)
+    node_replacements_shapes = cf.node_replacements_shapes
 
     graph = gm.graph
 
@@ -219,6 +243,10 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
     for node, value in node_replacements.items():
         # we dont have a functional way right now of instantiating a non-contiguous tensor with full/zeros/ones right now
         # hasn't shown up to be important yet
+        if "val" not in node.meta:
+            # This can only happen in AOTI
+            continue
+
         fake_tensor = node.meta["val"]
         if not fake_tensor.is_contiguous(memory_format=torch.contiguous_format):
             continue
@@ -235,10 +263,16 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
             ):
                 value = node.args[1]
 
-            # zeros, and ones just get traced into full, so we insert those
+            # refines symints, see [constant folding refining of symints] above
+            for runtime_size, compile_time_size in zip(
+                node_replacements_shapes[node], fake_tensor.shape
+            ):
+                torch._check(runtime_size == compile_time_size)
+
+            # zeros and ones just get traced into full, so we insert those
             new_node = graph.call_function(
                 aten.full.default,
-                args=(list(fake_tensor.shape), value),
+                args=(node_replacements_shapes[node], value),
                 kwargs={
                     "dtype": fake_tensor.dtype,
                     "layout": torch.strided,
@@ -266,15 +300,22 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
     """
     lazy_init()
     count = 0
+    if config.joint_custom_pre_pass is not None:
+        config.joint_custom_pre_pass(graph.graph)
+        count += 1
 
     if config.joint_graph_constant_folding:
         constant_fold_uniform_value(graph)
 
     if config.pattern_matcher:
-        count += patterns.apply(graph.graph)
+        count += patterns.apply(graph.graph)  # type: ignore[arg-type]
 
     if not config.fallback_random:
         count += replace_random_passes(graph)
+
+    if config.joint_custom_post_pass is not None:
+        config.joint_custom_post_pass(graph.graph)
+        count += 1
 
     if count:
         stable_topological_sort(graph.graph)
@@ -317,7 +358,7 @@ def pointless_view(match: Match, arg, size):
     """Remove no-op view"""
     graph = match.graph
     node = match.output_node()
-    arg_size = list(node.args[0].meta["val"].shape)
+    arg_size = list(node.args[0].meta["val"].shape)  # type: ignore[union-attr]
     if size == arg_size:
         node.replace_all_uses_with(node.args[0])
         match.erase_nodes(graph)

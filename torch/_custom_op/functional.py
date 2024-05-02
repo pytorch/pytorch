@@ -1,11 +1,20 @@
-import torch
-from torch.library import Library
-from torch._ops import OpOverload
-from torchgen.model import FunctionSchema, OperatorName, SchemaKind, BaseTy, BaseType
-from torch._C import _ExcludeDispatchKeyGuard, DispatchKeySet, DispatchKey
-from .autograd import autograd_not_implemented
-import torch.utils._pytree as pytree
 import weakref
+
+import torch
+import torch.utils._pytree as pytree
+from torch._C import _ExcludeDispatchKeyGuard, DispatchKey, DispatchKeySet
+from torch._ops import OpOverload
+from torch.library import Library
+from torchgen.model import (
+    BaseTy,
+    BaseType,
+    FunctionSchema,
+    OperatorName,
+    OptionalType,
+    SchemaKind,
+)
+
+from .autograd import autograd_not_implemented
 
 
 def register_functional_op(
@@ -66,7 +75,7 @@ def construct_functional_impl(mutable_op):
         extra_rets = []
         for is_write, arg in zip(mutable_args(mutable_op), args):
             if is_write:
-                cloned = arg.clone()
+                cloned = arg.clone() if arg is not None else None
                 new_args.append(cloned)
                 extra_rets.append(cloned)
             else:
@@ -117,6 +126,8 @@ def construct_functionalization_kernel(mutable_op, functional_op):
                              if is_write]
         assert len(new_values_to_propagate) == len(inputs_to_replace)
         for new_value, arg in zip(new_values_to_propagate, inputs_to_replace):
+            if (arg is None and new_value is None) or (arg is not None and new_value is not None):
+                continue
             torch._C._propagate_xla_data(arg, new_value)
             torch._C._replace_(arg, new_value)
             torch._C._commit_update(arg)
@@ -156,9 +167,12 @@ def validate(mutable_op: OpOverload):
                 "not return the mutated value or aliases)")
     for arg in schema.arguments.flat_all:
         # construct_functionalization_kernel assumes this for simplicity
-        if arg.type.is_tensor_like() and arg.type != BaseType(BaseTy.Tensor):
+        if arg.type.is_tensor_like() and (
+            arg.type != BaseType(BaseTy.Tensor)
+            and arg.type != OptionalType(BaseType(BaseTy.Tensor))
+        ):
             raise NotImplementedError(
-                "NYI: register_functional_op(op) where op accepts Optional or List of tensors."
+                "NYI: register_functional_op(op) where op has a List[Tensor] input."
                 "Please file an issue.")
 
 

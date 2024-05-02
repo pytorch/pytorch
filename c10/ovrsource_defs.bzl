@@ -8,6 +8,7 @@ cpu_supported_platforms = [
     "ovr_config//os:macos",
     "ovr_config//os:windows-x86_64",
     "ovr_config//runtime:arm64-linux-ubuntu-neon",
+    "ovr_config//os:linux-arm64",
 ]
 
 cuda_supported_platforms = [
@@ -104,6 +105,7 @@ def define_ovrsource_targets():
         ("#cmakedefine C10_BUILD_SHARED_LIBS", ""),
         ("#cmakedefine C10_USE_NUMA", ""),
         ("#cmakedefine C10_USE_MSVC_STATIC_RUNTIME", ""),
+        ("#cmakedefine C10_USE_ROCM_KERNEL_ASSERT", ""),
     ]
 
     mobile_c10_cmake_defines = [

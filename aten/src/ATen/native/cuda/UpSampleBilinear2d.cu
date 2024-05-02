@@ -37,7 +37,7 @@ __global__ void upsample_bilinear2d_out_frame(
     const accscalar_t rheight,
     const accscalar_t rwidth,
     const bool align_corners,
-    const PackedTensorAccessor<scalar_t, 4> idata,
+    const PackedTensorAccessor<const scalar_t, 4> idata,
     PackedTensorAccessor<scalar_t, 4> odata) {
   int index = threadIdx.x + blockIdx.x * blockDim.x;
 
@@ -337,7 +337,7 @@ static void upsample_bilinear2d_out_cuda_template(
 
       using accscalar_t = at::acc_type<scalar_t, true>;
 
-      auto idata = input.packed_accessor64<scalar_t, 4>();
+      auto idata = input.packed_accessor64<const scalar_t, 4>();
       auto odata = output.packed_accessor64<scalar_t, 4>();
 
       const accscalar_t rheight = area_pixel_compute_scale<accscalar_t>(
@@ -474,7 +474,7 @@ C10_LAUNCH_BOUNDS_1(256) // 256 performs better then 1024
 __global__ void upsample_gen2d_aa_out_frame(
     const accscalar_t height_scale,
     const accscalar_t width_scale,
-    const PackedTensorAccessor64<scalar_t, 4> idata,
+    const PackedTensorAccessor64<const scalar_t, 4> idata,
     PackedTensorAccessor64<scalar_t, 4> odata,
     const InterpFilter & interp_filter) {
 
@@ -568,7 +568,7 @@ __global__ void upsample_gen2d_aa_backward_out_frame(
     const accscalar_t height_scale,
     const accscalar_t width_scale,
     PackedTensorAccessor64<scalar_t, 4> idata,
-    const PackedTensorAccessor64<scalar_t, 4> odata,
+    const PackedTensorAccessor64<const scalar_t, 4> odata,
     const InterpFilter & interp_filter) {
 
   const int batchsize = idata.size(0);
@@ -704,7 +704,7 @@ static void upsample_gen2d_aa_out_cuda_template(
       input.scalar_type(), "upsample_bilinear2d_out_frame", [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
 
-        auto idata = input.packed_accessor64<scalar_t, 4>();
+        auto idata = input.packed_accessor64<const scalar_t, 4>();
         auto odata = output_c.packed_accessor64<scalar_t, 4>();
 
         const accscalar_t height_scale = area_pixel_compute_scale<accscalar_t>(
@@ -807,7 +807,7 @@ static void upsample_gen2d_aa_backward_out_cuda_template(
         using accscalar_t = at::acc_type<scalar_t, true>;
 
         auto idata = grad_input.packed_accessor64<scalar_t, 4>();
-        auto odata = grad_output.packed_accessor64<scalar_t, 4>();
+        auto odata = grad_output.packed_accessor64<const scalar_t, 4>();
 
         const accscalar_t height_scale = area_pixel_compute_scale<accscalar_t>(
             input_height, output_height, align_corners, scales_h);

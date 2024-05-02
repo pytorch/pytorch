@@ -87,7 +87,7 @@ const std::vector<double> doubles {
 };
 
 template <class T,
-  typename std::enable_if<std::is_floating_point<T>::value,T>::type* = nullptr>
+  typename std::enable_if_t<std::is_floating_point_v<T>, T>* = nullptr>
 void assert_eq(T val, T act, T exp) {
   if (std::isnan(act) || std::isnan(exp)) {
     return;
@@ -96,7 +96,7 @@ void assert_eq(T val, T act, T exp) {
 }
 
 template <class T,
-  typename std::enable_if<std::is_integral<T>::value, T>::type* = nullptr>
+  typename std::enable_if_t<std::is_integral_v<T>, T>* = nullptr>
 void assert_eq(T val, T act, T exp) {
   if (val != 0 && act == 0) {
     return;
@@ -112,12 +112,12 @@ void assert_eq(T val, T act, T exp) {
 }
 
 template <class T,
-  typename std::enable_if<std::is_floating_point<T>::value,T>::type* = nullptr>
+  typename std::enable_if_t<std::is_floating_point_v<T>, T>* = nullptr>
 T typed_pow(T base, T exp) {
   return std::pow(base, exp);
 }
 template <class T,
-  typename std::enable_if<std::is_integral<T>::value,T>::type* = nullptr>
+  typename std::enable_if_t<std::is_integral_v<T>, T>* = nullptr>
 T typed_pow(T base, T exp) {
   return native::powi(base, exp);
 }

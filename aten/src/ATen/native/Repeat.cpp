@@ -16,8 +16,8 @@
 
 template <typename index_t>
 static void compute_cpu(
-    index_t* repeat_ptr,
-    int64_t* cumsum_ptr,
+    const index_t* repeat_ptr,
+    const int64_t* cumsum_ptr,
     index_t* result_ptr,
     int64_t size,
     int64_t result_size) {
@@ -37,8 +37,7 @@ static void compute_cpu(
   });
 }
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor repeat_interleave_cpu(
     const Tensor& repeat,
@@ -124,5 +123,4 @@ Tensor repeat_interleave_symint(
   return input.clone(at::MemoryFormat::Contiguous).flatten(dim, dim + 1);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

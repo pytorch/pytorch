@@ -1,14 +1,16 @@
 #pragma once
 
+// @lint-ignore-every CLANGTIDY facebook-hte-BadMemberName
+
 #ifdef USE_VULKAN_API
 
-#include <ATen/native/vulkan/api/Common.h>
+#include <ATen/native/vulkan/api/vk_api.h>
+
 #include <ATen/native/vulkan/api/Resource.h>
 #include <ATen/native/vulkan/api/Shader.h>
-#include <c10/util/SmallVector.h>
-#include <c10/util/flat_hash_map.h>
 
 #include <mutex>
+#include <unordered_map>
 
 namespace at {
 namespace native {
@@ -21,8 +23,10 @@ struct PipelineBarrier final {
     VkPipelineStageFlags dst;
   } stage;
 
-  c10::SmallVector<BufferMemoryBarrier, 4u> buffers;
-  c10::SmallVector<ImageMemoryBarrier, 4u> images;
+  std::vector<BufferMemoryBarrier> buffers;
+  std::vector<ImageMemoryBarrier> images;
+  std::vector<VkBufferMemoryBarrier> buffer_barrier_handles;
+  std::vector<VkImageMemoryBarrier> image_barrier_handles;
 
   inline operator bool() const {
     return (0u != stage.src) || (0u != stage.dst) || !buffers.empty() ||
@@ -45,7 +49,7 @@ VkImageLayout vk_layout(const PipelineStageFlags, const MemoryAccessFlags);
 
 class PipelineLayout final {
  public:
-  explicit PipelineLayout(const VkDevice, const VkDescriptorSetLayout);
+  explicit PipelineLayout(VkDevice, VkDescriptorSetLayout);
 
   PipelineLayout(const PipelineLayout&) = delete;
   PipelineLayout& operator=(const PipelineLayout&) = delete;
@@ -79,9 +83,9 @@ class ComputePipeline final {
   };
 
   explicit ComputePipeline(
-      const VkDevice device,
+      VkDevice device,
       const Descriptor& descriptor,
-      const VkPipelineCache pipeline_cache);
+      VkPipelineCache pipeline_cache);
 
   ComputePipeline(const ComputePipeline&) = delete;
   ComputePipeline& operator=(const ComputePipeline&) = delete;
@@ -108,7 +112,7 @@ class ComputePipeline final {
 
 class PipelineLayoutCache final {
  public:
-  explicit PipelineLayoutCache(const VkDevice device);
+  explicit PipelineLayoutCache(VkDevice device);
 
   PipelineLayoutCache(const PipelineLayoutCache&) = delete;
   PipelineLayoutCache& operator=(const PipelineLayoutCache&) = delete;
@@ -122,9 +126,8 @@ class PipelineLayoutCache final {
   using Value = PipelineLayout;
 
   struct Hasher {
-    inline size_t operator()(
-        const VkDescriptorSetLayout descriptor_layout) const {
-      return c10::get_hash(descriptor_layout);
+    inline size_t operator()(VkDescriptorSetLayout descriptor_layout) const {
+      return std::hash<VkDescriptorSetLayout>()(descriptor_layout);
     }
   };
 
@@ -134,7 +137,7 @@ class PipelineLayoutCache final {
   std::mutex cache_mutex_;
 
   VkDevice device_;
-  ska::flat_hash_map<Key, Value, Hasher> cache_;
+  std::unordered_map<Key, Value, Hasher> cache_;
 
  public:
   VkPipelineLayout retrieve(const Key&);
@@ -143,7 +146,7 @@ class PipelineLayoutCache final {
 
 class ComputePipelineCache final {
  public:
-  explicit ComputePipelineCache(const VkDevice device);
+  explicit ComputePipelineCache(VkDevice device);
 
   ComputePipelineCache(const ComputePipelineCache&) = delete;
   ComputePipelineCache& operator=(const ComputePipelineCache&) = delete;
@@ -159,13 +162,20 @@ class ComputePipelineCache final {
   struct Hasher {
     inline size_t operator()(
         const ComputePipeline::Descriptor& descriptor) const {
-      return c10::get_hash(
-          descriptor.pipeline_layout,
-          descriptor.shader_module,
-          descriptor.local_work_group.data[0u],
-          descriptor.local_work_group.data[1u],
-          descriptor.local_work_group.data[2u]);
-    };
+      size_t seed = 0;
+      seed = utils::hash_combine(
+          seed, std::hash<VkPipelineLayout>()(descriptor.pipeline_layout));
+      seed = utils::hash_combine(
+          seed, std::hash<VkShaderModule>()(descriptor.shader_module));
+      seed = utils::hash_combine(
+          seed, std::hash<uint32_t>()(descriptor.local_work_group.data[0u]));
+      seed = utils::hash_combine(
+          seed, std::hash<uint32_t>()(descriptor.local_work_group.data[1u]));
+      seed = utils::hash_combine(
+          seed, std::hash<uint32_t>()(descriptor.local_work_group.data[2u]));
+
+      return seed;
+    }
   };
 
  private:
@@ -175,7 +185,7 @@ class ComputePipelineCache final {
 
   VkDevice device_;
   VkPipelineCache pipeline_cache_;
-  ska::flat_hash_map<Key, Value, Hasher> cache_;
+  std::unordered_map<Key, Value, Hasher> cache_;
 
  public:
   VkPipeline retrieve(const Key&);

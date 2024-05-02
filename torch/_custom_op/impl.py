@@ -14,6 +14,8 @@ from torch._library.abstract_impl import AbstractImplCtx
 from torch.library import get_ctx
 
 from .autograd import autograd_kernel_indirection, construct_autograd_kernel
+import torch._library.infer_schema
+from torch._library.infer_schema import infer_schema
 
 """
 For a detailed guide on custom ops, please see
@@ -769,112 +771,6 @@ def validate_function_matches_schema(
     compare(kwargonly, schema.arguments.flat_kwarg_only)
 
 
-def infer_schema(prototype_function: typing.Callable) -> str:
-    sig = inspect.signature(prototype_function)
-
-    def error_fn(what):
-        raise ValueError(
-            f"custom_op(...)(func): {what} " f"Got func with signature {sig})"
-        )
-
-    params = [
-        parse_param(name, param, error_fn) for name, param in sig.parameters.items()
-    ]
-    ret = parse_return(sig.return_annotation, error_fn)
-    return f"({', '.join(params)}) -> {ret}"
-
-
-def parse_param(name, param, error_fn):
-    if not supported_param(param):
-        error_fn("We do not support positional-only args, varargs, or varkwargs.")
-
-    if param.annotation is inspect.Parameter.empty:
-        error_fn(f"Parameter {name} must have a type annotation.")
-
-    if param.annotation not in SUPPORTED_PARAM_TYPES.keys():
-        error_fn(
-            f"Parameter {name} has unsupported type {param.annotation}. "
-            f"The valid types are: {SUPPORTED_PARAM_TYPES.keys()}."
-        )
-
-    if param.default is not inspect.Parameter.empty:
-        error_fn(
-            f"Parameter {name} has a default value; this is not supported. "
-            f"If you want to use default values then create a function with "
-            f"default values that calls the CustomOp"
-        )
-
-    return f"{SUPPORTED_PARAM_TYPES[param.annotation]} {name}"
-
-
-def derived_types(
-    base_type, cpp_type, list_base, optional_base_list, optional_list_base
-):
-    result = [
-        (base_type, cpp_type),
-        (typing.Optional[base_type], f"{cpp_type}?"),
-    ]
-    if list_base:
-        result.append((typing.Sequence[base_type], f"{cpp_type}[]"))  # type: ignore[valid-type]
-    if optional_base_list:
-        result.append((typing.Sequence[typing.Optional[base_type]], f"{cpp_type}?[]"))  # type: ignore[valid-type]
-    if optional_list_base:
-        result.append((typing.Optional[typing.Sequence[base_type]], f"{cpp_type}[]?"))  # type: ignore[valid-type]
-    return result
-
-
-def get_supported_param_types():
-    data = [
-        # (python type, schema type, type[] variant, type?[] variant, type[]? variant
-        (torch.Tensor, "Tensor", True, True, False),
-        (int, "SymInt", True, False, True),
-        (float, "float", True, False, True),
-        (bool, "bool", True, False, True),
-        (str, "str", False, False, False),
-        (torch.types.Number, "Scalar", True, False, False),
-        (torch.dtype, "ScalarType", False, False, False),
-        (torch.device, "Device", False, False, False),
-    ]
-    result = []
-    for line in data:
-        result.extend(derived_types(*line))
-    return dict(result)
-
-
-SUPPORTED_RETURN_TYPES = {
-    torch.Tensor: "Tensor",
-    typing.List[torch.Tensor]: "Tensor[]",
-    int: "SymInt",
-    float: "float",
-    bool: "bool",
-    torch.types.Number: "Scalar",
-}
-
-
-def parse_return(annotation, error_fn):
-    origin = typing.get_origin(annotation)
-    if origin is not tuple:
-        if annotation not in SUPPORTED_RETURN_TYPES.keys():
-            error_fn(
-                f"Return has unsupported type {annotation}. "
-                f"The valid types are: {SUPPORTED_RETURN_TYPES}."
-            )
-        return SUPPORTED_RETURN_TYPES[annotation]
-
-    args = typing.get_args(annotation)
-    for arg in args:
-        if arg not in SUPPORTED_RETURN_TYPES:
-            error_fn(
-                f"Return has unsupported type {annotation}. "
-                f"The valid types are: {SUPPORTED_RETURN_TYPES}."
-            )
-
-    return "(" + ", ".join([SUPPORTED_RETURN_TYPES[arg] for arg in args]) + ")"
-
-
-SUPPORTED_PARAM_TYPES = get_supported_param_types()
-
-
 def report_error_callback(custom_op: typing.Any, key: str) -> None:
     if key == "Undefined":
         raise NotImplementedError(
@@ -958,14 +854,14 @@ def get_abstract_impl(qualname):
     return custom_op._get_impl("abstract").func
 
 
-def _custom_op_with_schema(qualname, schema):
+def _custom_op_with_schema(qualname, schema, needs_fixed_stride_order=True):
     ns, name = qualname.split("::")
     schema_str = f"{name}{schema}"
     function_schema = FunctionSchema.parse(schema_str)
     validate_schema(function_schema)
-
+    tags = [torch._C.Tag.needs_fixed_stride_order] if needs_fixed_stride_order else []
     lib = library.Library(ns, "FRAGMENT")
-    lib.define(schema_str)
+    lib.define(schema_str, tags=tags)
     ophandle = find_ophandle_or_throw(ns, function_schema.name)
     result = CustomOp(lib, ns, function_schema, name, ophandle, _private_access=True)
     result._register_autograd_kernel_indirection()

@@ -1,10 +1,7 @@
 #pragma once
 
 #include <torch/csrc/distributed/c10d/Backend.hpp>
-#include <condition_variable>
 #include <memory>
-#include <mutex>
-#include <stdexcept>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -631,11 +628,15 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         backendTypeToBackend_.end()) {
       auto existingBackend = backendTypeToBackend_.at(backendType);
       deviceTypeToBackend_[deviceType] = existingBackend;
+      TORCH_CHECK(
+          existingBackend->getBoundDeviceId() ==
+          (*backend)->getBoundDeviceId());
     } else {
       // check if backend has value
       if (backend.has_value()) {
         deviceTypeToBackend_[deviceType] = backend.value();
         backendTypeToBackend_[backendType] = backend.value();
+        (*backend)->setBoundDeviceId(bound_device_id_);
       }
     }
   }
@@ -670,7 +671,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     std::vector<c10::Device> devices;
     devices.reserve(deviceTypes_.size());
     for (auto& dt : deviceTypes_) {
-      devices.push_back(c10::Device(dt));
+      devices.emplace_back(dt);
     }
     return devices;
   }
@@ -690,9 +691,27 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
 
   const std::string& getGroupName() const;
   void setGroupName(const std::string& name);
+  const std::string& getGroupDesc() const;
+  void setGroupDesc(const std::string& name);
   void enableCollectivesTiming();
 
   void release_resources() override;
+
+  // ProcessGroups optionally can be "bound" to a specific device.
+  // Currently this is only for nccl and allows for some opt-in
+  // optimizations such as automatic use of ncclCommSplit.  The device
+  // is specified in `init_process_group` and eventually makes it
+  // here and then down into the actual backend instances.
+  c10::optional<at::Device> getBoundDeviceId() const {
+    return bound_device_id_;
+  }
+
+  void setBoundDeviceId(c10::optional<at::Device> device) {
+    if (device) {
+      TORCH_CHECK(device->has_index(), "setBoundDeviceId must have an index");
+    }
+    bound_device_id_ = device;
+  }
 
  protected:
   // Implementations of this interface need to call this to setup
@@ -704,10 +723,11 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   const int size_;
   const c10::intrusive_ptr<Options> options_;
   const BackendType backendType_;
+  std::string pg_desc_;
 
   // Debug level setting. It is parsed once when ProcessGroup is constructed and
   // remains the same across use of this process group.
-  DebugLevel dist_debug_level_;
+  DebugLevel dist_debug_level_{DebugLevel::Off};
 
   // Backend classes for this ProcessGroup
   std::unordered_set<c10::DeviceType> deviceTypes_;
@@ -716,6 +736,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       deviceTypeToBackend_;
   std::unordered_map<BackendType, c10::intrusive_ptr<Backend>>
       backendTypeToBackend_;
+
+  c10::optional<at::Device> bound_device_id_;
 };
 
 } // namespace c10d

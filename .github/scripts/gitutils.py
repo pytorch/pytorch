@@ -145,11 +145,28 @@ class GitRepo:
         rc = self._run_git("rev-list", revision_range, "--", ".").strip()
         return rc.split("\n") if len(rc) > 0 else []
 
-    def current_branch(self) -> str:
-        return self._run_git("symbolic-ref", "--short", "HEAD").strip()
+    def branches_containing_ref(
+        self, ref: str, *, include_remote: bool = True
+    ) -> List[str]:
+        rc = (
+            self._run_git("branch", "--remote", "--contains", ref)
+            if include_remote
+            else self._run_git("branch", "--contains", ref)
+        )
+        return [x.strip() for x in rc.split("\n") if x.strip()] if len(rc) > 0 else []
+
+    def current_branch(self) -> Optional[str]:
+        try:
+            return self._run_git("symbolic-ref", "--short", "HEAD").strip()
+        except RuntimeError:
+            # we are in detached HEAD state
+            return None
 
     def checkout(self, branch: str) -> None:
         self._run_git("checkout", branch)
+
+    def create_branch_and_checkout(self, branch: str) -> None:
+        self._run_git("checkout", "-b", branch)
 
     def fetch(self, ref: Optional[str] = None, branch: Optional[str] = None) -> None:
         if branch is None and ref is None:
@@ -263,6 +280,7 @@ class GitRepo:
 
     def cherry_pick_commits(self, from_branch: str, to_branch: str) -> None:
         orig_branch = self.current_branch()
+        assert orig_branch is not None, "Must be on a branch"
         self.checkout(to_branch)
         from_commits, to_commits = self.compute_branch_diffs(from_branch, to_branch)
         if len(from_commits) == 0:
@@ -387,13 +405,28 @@ def _shasum(value: str) -> str:
     return m.hexdigest()
 
 
-def are_ghstack_branches_in_sync(repo: GitRepo, head_ref: str) -> bool:
+def is_commit_hash(ref: str) -> bool:
+    "True if ref is hexadecimal number, else false"
+    try:
+        int(ref, 16)
+    except ValueError:
+        return False
+    return True
+
+
+def are_ghstack_branches_in_sync(
+    repo: GitRepo, head_ref: str, base_ref: Optional[str] = None
+) -> bool:
     """Checks that diff between base and head is the same as diff between orig and its parent"""
     orig_ref = re.sub(r"/head$", "/orig", head_ref)
-    base_ref = re.sub(r"/head$", "/base", head_ref)
+    if base_ref is None:
+        base_ref = re.sub(r"/head$", "/base", head_ref)
     orig_diff_sha = _shasum(repo.diff(f"{repo.remote}/{orig_ref}"))
     head_diff_sha = _shasum(
-        repo.diff(f"{repo.remote}/{base_ref}", f"{repo.remote}/{head_ref}")
+        repo.diff(
+            base_ref if is_commit_hash(base_ref) else f"{repo.remote}/{base_ref}",
+            f"{repo.remote}/{head_ref}",
+        )
     )
     return orig_diff_sha == head_diff_sha
 

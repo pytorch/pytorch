@@ -1,11 +1,13 @@
 import copyreg
 import functools
+import logging
 import sys
 import traceback
 import warnings
 from collections import defaultdict
-from contextlib import nullcontext
-from typing import Any, DefaultDict, List, Optional
+from typing import Any, Callable, DefaultDict, Generic, List, Optional
+
+from typing_extensions import ParamSpec
 
 import torch
 
@@ -178,7 +180,7 @@ def _get_async_or_non_blocking(function_name, non_blocking, kwargs):
 # be a TypedStorage
 def _rebuild_tensor(storage, storage_offset, size, stride):
     # first construct a tensor with the correct dtype/device
-    t = torch.tensor([], dtype=storage.dtype, device=storage._untyped_storage.device)
+    t = torch.empty((0,), dtype=storage.dtype, device=storage._untyped_storage.device)
     return t.set_(storage._untyped_storage, storage_offset, size, stride)
 
 
@@ -210,6 +212,29 @@ def _rebuild_tensor_v2(
     # OrderedDict.  See Note [Don't serialize hooks]
     tensor._backward_hooks = backward_hooks
     return tensor
+
+
+def _rebuild_tensor_v3(
+    storage,
+    storage_offset,
+    size,
+    stride,
+    requires_grad,
+    backward_hooks,
+    dtype,
+    metadata=None,
+):
+    t = torch.empty(
+        (0,),
+        dtype=dtype,
+        device=storage._untyped_storage.device,
+        requires_grad=requires_grad,
+    )
+    t.set_(storage._untyped_storage, storage_offset, size, stride)
+    if metadata:
+        set_tensor_metadata(t, metadata)
+    t._backward_hooks = backward_hooks
+    return t
 
 
 _sparse_tensors_to_validate: List["torch.Tensor"] = []
@@ -470,22 +495,6 @@ def _import_dotted_name(name):
     return obj
 
 
-# Taken from python 3.5 docs
-def _accumulate(iterable, fn=lambda x, y: x + y):
-    "Return running totals"
-    # _accumulate([1,2,3,4,5]) --> 1 3 6 10 15
-    # _accumulate([1,2,3,4,5], operator.mul) --> 1 2 6 24 120
-    it = iter(iterable)
-    try:
-        total = next(it)
-    except StopIteration:
-        return
-    yield total
-    for element in it:
-        total = fn(total, element)
-        yield total
-
-
 def _flatten_dense_tensors(tensors):
     """Flatten dense tensors into a contiguous 1D buffer. Assume tensors are of
     same dense type.
@@ -704,6 +713,8 @@ def _get_available_device_type():
         return "cuda"
     if hasattr(torch, "xpu") and torch.xpu.is_available():  # type: ignore[attr-defined]
         return "xpu"
+    if hasattr(torch, "mtia") and torch.mtia.is_available():
+        return "mtia"
     custom_backend_name = torch._C._get_privateuse1_backend_name()
     custom_device_mod = getattr(torch, custom_backend_name, None)
     if custom_device_mod and custom_device_mod.is_available():
@@ -718,6 +729,8 @@ def _get_device_attr(get_member):
         return get_member(torch.cuda)
     if device_type and device_type.lower() == "xpu":
         return get_member(torch.xpu)  # type: ignore[attr-defined]
+    if device_type and device_type.lower() == "mtia":
+        return get_member(torch.mtia)
     if device_type == torch._C._get_privateuse1_backend_name():
         return get_member(getattr(torch, device_type))
     # add more available device types here
@@ -842,24 +855,20 @@ def classproperty(func):
     return _ClassPropertyDescriptor(func)
 
 
-# Whether we are compiling with torch.compile or not
-def is_compiling():
-    return False
+def is_compiling() -> bool:
+    """
+    Indicates whether we are tracing/compiling with torch.compile() or torch.export().
+
+    TODO(khabinov): we should deprecate this function and use torch.compiler.is_compiling().
+    """
+    return torch.compiler.is_compiling()
 
 
 def _functionalize_sync(t):
     # This code lives in python instead of C++ since conditioning on a certain python subclass
     # is much more of a pain in C++.
-    from torch._subclasses.functional_tensor import (
-        FunctionalTensor,
-        maybe_disable_functional_mode,
-    )
+    from torch._subclasses.functional_tensor import FunctionalTensor
 
-    ctx = (
-        maybe_disable_functional_mode
-        if isinstance(t, FunctionalTensor)
-        else nullcontext
-    )
     if isinstance(t, FunctionalTensor):
         # If a FunctionalTensorMode is active while syncing, we don't want it to intercept any ops that get called
         # when we sync our inner tensor.
@@ -893,3 +902,65 @@ def _get_device_module(device_type: str):
             f"Device '{device_type}' does not have a corresponding module registered as 'torch.{device_type}'."
         )
     return device_module
+
+
+def _dummy_type(name: str) -> type:
+    def get_err_fn(is_init: bool):
+        def err_fn(obj, *args, **kwargs):
+            if is_init:
+                class_name = obj.__class__.__name__
+            else:
+                class_name = obj.__name__
+            raise RuntimeError(f"Tried to instantiate dummy base class {class_name}")
+
+        return err_fn
+
+    return type(
+        name, (object,), {"__init__": get_err_fn(True), "__new__": get_err_fn(False)}
+    )
+
+
+class _LazySeedTracker:
+    # Since seeding is memory-less, only track the latest seed.
+    # Note: `manual_seed_all` followed by `manual_seed` overwrites
+    # the seed on current device. We track the order of **latest**
+    # calls between these two API.
+    def __init__(self):
+        self.manual_seed_all_cb = None
+        self.manual_seed_cb = None
+        self.call_order = []
+
+    def queue_seed_all(self, cb, traceback):
+        self.manual_seed_all_cb = (cb, traceback)
+        # update seed_all to be latest
+        self.call_order = [self.manual_seed_cb, self.manual_seed_all_cb]
+
+    def queue_seed(self, cb, traceback):
+        self.manual_seed_cb = (cb, traceback)
+        # update seed to be latest
+        self.call_order = [self.manual_seed_all_cb, self.manual_seed_cb]
+
+    def get_calls(self) -> List:
+        return self.call_order
+
+
+logger = logging.getLogger(__name__)
+P = ParamSpec("P")
+
+
+class CallbackRegistry(Generic[P]):
+    def __init__(self, name: str):
+        self.name = name
+        self.callback_list: List[Callable[P, None]] = []
+
+    def add_callback(self, cb: Callable[P, None]) -> None:
+        self.callback_list.append(cb)
+
+    def fire_callbacks(self, *args: P.args, **kwargs: P.kwargs) -> None:
+        for cb in self.callback_list:
+            try:
+                cb(*args, **kwargs)
+            except Exception as e:
+                logger.exception(
+                    "Exception in callback for %s registered with gpu trace", self.name
+                )

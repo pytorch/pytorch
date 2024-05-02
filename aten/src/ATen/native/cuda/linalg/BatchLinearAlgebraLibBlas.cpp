@@ -133,7 +133,7 @@ static void apply_lu_solve_batched_cublas(const Tensor& LU, const Tensor& pivots
   TORCH_INTERNAL_ASSERT(batchCount(LU) == batchCount(pivots.unsqueeze(-1)), "batch_size of LU and pivots must be the same");
   const auto trans = to_cublas(transpose);
 
-  auto pivots_data = pivots.data_ptr<int>();
+  auto pivots_data = pivots.const_data_ptr<int>();
   auto batch_size = cuda_int_cast(batchCount(LU), "batch_size");;
   auto m = cuda_int_cast(LU.size(-2), "m");
   auto nrhs = cuda_int_cast(B.size(-1), "nrhs");
@@ -142,12 +142,12 @@ static void apply_lu_solve_batched_cublas(const Tensor& LU, const Tensor& pivots
 
   Tensor lu_ptr_array = get_device_pointers<scalar_t>(LU);
   Tensor b_ptr_array = get_device_pointers<scalar_t>(B);
-  auto lu_ptr_array_data = reinterpret_cast<scalar_t**>(lu_ptr_array.data_ptr());
+  auto lu_ptr_array_data = reinterpret_cast<const scalar_t* const*>(lu_ptr_array.const_data_ptr());
   auto b_ptr_array_data = reinterpret_cast<scalar_t**>(b_ptr_array.data_ptr());
 
   auto handle = at::cuda::getCurrentCUDABlasHandle();
-  at::cuda::blas::getrsBatched(handle, trans, m, nrhs, lu_ptr_array_data,
-    lda, pivots_data, b_ptr_array_data, lda, &info, batch_size);
+  at::cuda::blas::getrsBatched(handle, trans, m, nrhs, const_cast<scalar_t**>(lu_ptr_array_data),
+    lda, const_cast<int*>(pivots_data), b_ptr_array_data, lda, &info, batch_size);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info == 0);
 }
 
@@ -218,6 +218,20 @@ static void apply_triangular_solve_batched(const Tensor& A, const Tensor& B, boo
 }
 
 void triangular_solve_batched_cublas(const Tensor& A, const Tensor& B, bool left, bool upper, TransposeType transpose, bool unitriangular) {
+  // Workaround the following a bug on CUDA < 12.1
+  // RuntimeError: CUDA error: CUBLAS_STATUS_EXECUTION_FAILED when calling `cublasStrsmBatched
+  // See https://github.com/pytorch/pytorch/issues/79191#issuecomment-1154222580
+#if defined(CUSOLVER_VERSION) && CUSOLVER_VERSION < 12100
+  constexpr auto max_batch_size = 524280;
+  if (B.size(-1) > max_batch_size) {
+    auto n_chunks = (B.size(-1) + max_batch_size - 1) / max_batch_size; // ceildiv
+    auto splits = B.split(n_chunks, /*dim=*/-1);
+    for (const Tensor& b : splits) {
+      triangular_solve_batched_cublas(A, b, left, upper, transpose, unitriangular);
+    }
+    return;
+  }
+#endif
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(A.scalar_type(), "triangular_solve_cuda", [&]{
     apply_triangular_solve_batched<scalar_t>(A, B, left, upper, transpose, unitriangular);
   });

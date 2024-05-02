@@ -1,12 +1,12 @@
 import functools
 import os
-from io import BytesIO
 import shutil
 
 import sys
+from io import BytesIO
 
 import torch
-from torch.jit.mobile import _load_for_lite_interpreter, _export_operator_list
+from torch.jit.mobile import _export_operator_list, _load_for_lite_interpreter
 
 _OPERATORS = set()
 _FILENAMES = []
@@ -36,7 +36,13 @@ def save_model(cls):
 @save_model
 class ModelWithDTypeDeviceLayoutPinMemory(torch.nn.Module):
     def forward(self, x: int):
-        a = torch.ones(size=[3, x], dtype=torch.int64, layout=torch.strided, device="cpu", pin_memory=False)
+        a = torch.ones(
+            size=[3, x],
+            dtype=torch.int64,
+            layout=torch.strided,
+            device="cpu",
+            pin_memory=False,
+        )
         return a
 
 
@@ -54,25 +60,34 @@ class ModelWithTensorOptional(torch.nn.Module):
 @save_model
 class ModelWithScalarList(torch.nn.Module):
     def forward(self, a: int):
-        values = torch.tensor([4., 1., 1., 16.], )
+        values = torch.tensor(
+            [4.0, 1.0, 1.0, 16.0],
+        )
         if a == 0:
-            return torch.gradient(values, spacing=torch.scalar_tensor(2., dtype=torch.float64))
+            return torch.gradient(
+                values, spacing=torch.scalar_tensor(2.0, dtype=torch.float64)
+            )
         elif a == 1:
-            return torch.gradient(values, spacing=[torch.tensor(1.).item()])
+            return torch.gradient(values, spacing=[torch.tensor(1.0).item()])
 
 
 # upsample_linear1d.vec(Tensor input, int[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
 @save_model
 class ModelWithFloatList(torch.nn.Upsample):
     def __init__(self):
-        super().__init__(scale_factor=(2.0,), mode="linear", align_corners=False, recompute_scale_factor=True)
+        super().__init__(
+            scale_factor=(2.0,),
+            mode="linear",
+            align_corners=False,
+            recompute_scale_factor=True,
+        )
 
 
 # index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
 @save_model
 class ModelWithListOfOptionalTensors(torch.nn.Module):
     def forward(self, index):
-        values = torch.tensor([[4., 1., 1., 16.]])
+        values = torch.tensor([[4.0, 1.0, 1.0, 16.0]])
         return values[torch.tensor(0), index]
 
 
@@ -93,13 +108,14 @@ class ModelWithTensors(torch.nn.Module):
         b = torch.ones_like(a)
         return a + b
 
+
 @save_model
 class ModelWithStringOptional(torch.nn.Module):
     def forward(self, b):
         a = torch.tensor(3, dtype=torch.int64)
         out = torch.empty(size=[1], dtype=torch.float)
         torch.div(b, a, out=out)
-        return [torch.div(b, a, rounding_mode='trunc'), out]
+        return [torch.div(b, a, rounding_mode="trunc"), out]
 
 
 @save_model
@@ -133,7 +149,7 @@ if __name__ == "__main__":
             ModelWithMultipleOps(),
         ]
         shutil.copyfile(ops_yaml, backup)
-        with open(ops_yaml, 'a') as f:
+        with open(ops_yaml, "a") as f:
             for op in _OPERATORS:
                 f.write(f"- {op}\n")
     elif command == "shutdown":

@@ -1,3 +1,4 @@
+#include <string_view>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <cstdint>
 #include <type_traits>
@@ -41,9 +42,14 @@
 #include <ATen/native/transformers/cuda/mem_eff_attention/gemm_kernel_utils.h>
 #include <ATen/native/transformers/cuda/mem_eff_attention/pytorch_utils.h>
 #endif
-namespace at {
 
-namespace native {
+#ifdef __HIP_PLATFORM_AMD__
+#include <ATen/native/cudnn/hip/MHA.h>
+#else
+#include <ATen/native/cudnn/MHA.h>
+#endif
+
+namespace at::native {
 
 std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
     const Tensor& grad_out,
@@ -71,8 +77,23 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
   c10::optional<at::Tensor> dk{c10::nullopt};
   c10::optional<at::Tensor> dv{c10::nullopt};
 
-  //  The kernel computes irregadless we will drop for this functions return
+  //  The kernel computes irregardless we will drop for this functions return
   Tensor grad_softmax;
+
+  // Currently unused args:
+  c10::optional<at::Tensor> alibi_slopes{c10::nullopt};
+
+  bool determinisitic{false};
+  auto& ctx = at::globalContext();
+  if (ctx.deterministicAlgorithms()) {
+    if (ctx.deterministicAlgorithmsWarnOnly()) {
+      TORCH_WARN_ONCE(
+          "Flash Attention defaults to a non-deterministic algorithm. ",
+          "To explicitly enable determinism call torch.use_deterministic_algorithms(True, warn_only=False).");
+    } else {
+      determinisitic = true;
+    }
+  }
 
   // We check the whether the cumulative_sequence_length_q is defined
   // in order to determine whether we are using varlen or dense forward
@@ -90,6 +111,7 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
         dv,
         cumulative_sequence_length_q,
         cumulative_sequence_length_k,
+        alibi_slopes,
         max_seqlen_batch_q,
         max_seqlen_batch_k,
         dropout_p,
@@ -98,9 +120,10 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
         is_causal,
         -1, /*window_size_left*/
         -1, /*window_size_right*/
+        determinisitic,
         philox_seed,
         philox_offset);
-    return std::make_tuple(dQuery, dKey, dValue);
+    return std::make_tuple(std::move(dQuery), std::move(dKey), std::move(dValue));
   } else {
     // Dense forward
     auto [dQuery, dKey, dValue, dSoftmax] = pytorch_flash::mha_bwd(
@@ -113,11 +136,13 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
         dq,
         dk,
         dv,
+        alibi_slopes,
         dropout_p,
         softmax_scale,
         is_causal,
         -1, /*window_size_left*/
         -1, /*window_size_right*/
+        determinisitic,
         philox_seed,
         philox_offset);
     return std::make_tuple(std::move(dQuery), std::move(dKey), std::move(dValue));
@@ -127,6 +152,52 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
   return std::make_tuple(Tensor(), Tensor(), Tensor());
 }
 
+std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_backward_cuda(
+    const Tensor& grad_out,
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const Tensor& out,
+    const Tensor& logsumexp,
+    const Tensor& cumulative_sequence_length_q,
+    const Tensor& cumulative_sequence_length_k,
+    const int64_t max_seqlen_batch_q,
+    const int64_t max_seqlen_batch_k,
+    double dropout_p,
+    bool is_causal,
+    const Tensor& philox_seed,
+    const Tensor& philox_offset,
+    c10::optional<double> scale) {
+    const int64_t batch_size = query.size(0);
+    const int64_t num_heads = query.size(1);
+    const int64_t head_dim = query.size(3);
+
+    const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
+
+    auto dq = at::empty_like(query);
+    auto dk = at::empty_like(key);
+    auto dv = at::empty_like(value);
+    run_cudnn_SDP_bprop(batch_size /*int64_t b*/,
+                        num_heads /*int64_t h*/,
+                        max_seqlen_batch_q /*int64_t s_q*/,
+                        max_seqlen_batch_k /*int64_t s_kv*/,
+                        head_dim /*int64_t d*/,
+                        softmax_scale /*float scaling_factor*/,
+                        is_causal /*bool is_causal*/,
+                        dropout_p /*float dropout_probability*/,
+                        query /*const Tensor& q*/,
+                        key /*const Tensor& k*/,
+                        value /*const Tensor& v*/,
+                        out /*const Tensor& o*/,
+                        grad_out/*const Tensor& dO*/,
+                        logsumexp.unsqueeze(-1)/*const Tensor& softmaxstats*/,
+                        dq/*Tensor& dQ*/,
+                        dk/*Tensor& dK*/,
+                        dv/*Tensor& dV*/,
+                        philox_seed/*Tensor& dropoutseed*/,
+                        philox_offset/*Tensor& dropoutoffset*/);
+    return std::make_tuple(dq, dk, dv);
+}
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>
 _efficient_attention_backward(
@@ -153,7 +224,8 @@ _efficient_attention_backward(
     int64_t custom_mask_type,
     const bool bias_requires_grad,
     const c10::optional<double> scale,
-    c10::optional <int64_t> num_splits_key) {
+    c10::optional <int64_t> num_splits_key,
+    const c10::optional<int64_t> window_size) {
   #if defined(USE_MEM_EFF_ATTENTION)
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{}, Tensor{});
@@ -212,7 +284,7 @@ _efficient_attention_backward(
     TORCH_CHECK(cu_seqlens_q->size(0) == cu_seqlens_k->size(0));
     TORCH_CHECK(query.size(0) == 1, "cu_seqlen only supports batch_size=1");
     TORCH_CHECK(max_seqlen_q > 0, "max_seqlen_q required with `cu_seqlens_q`");
-    TORCH_CHECK(max_seqlen_k > 0, "max_seqlen_q required with `cu_seqlens_q`");
+    TORCH_CHECK(max_seqlen_k > 0, "max_seqlen_k required with `cu_seqlens_k`");
     TORCH_CHECK(
         max_seqlen_k <= key.size(1), "Invalid max_seqlen_k:", max_seqlen_k);
     TORCH_CHECK(
@@ -321,12 +393,12 @@ _efficient_attention_backward(
     TORCH_INTERNAL_ASSERT(delta.size(2) == M);
 
     typename Kernel::Params p;
-    p.query_ptr = (scalar_t*)query.data_ptr();
-    p.key_ptr = (scalar_t*)key.data_ptr();
-    p.value_ptr = (scalar_t*)value.data_ptr();
-    p.logsumexp_ptr = (typename Kernel::lse_scalar_t*)logsumexp.data_ptr();
-    p.output_ptr = (scalar_t*)out.data_ptr();
-    p.grad_output_ptr = (scalar_t*)grad_out.data_ptr();
+    p.query_ptr = (const scalar_t*)query.const_data_ptr();
+    p.key_ptr = (const scalar_t*)key.const_data_ptr();
+    p.value_ptr = (const scalar_t*)value.const_data_ptr();
+    p.logsumexp_ptr = (typename Kernel::lse_scalar_t const *)logsumexp.const_data_ptr();
+    p.output_ptr = (const scalar_t*)out.const_data_ptr();
+    p.grad_output_ptr = (const scalar_t*)grad_out.const_data_ptr();
     p.grad_query_ptr = (scalar_t*)grad_q.data_ptr();
     p.grad_key_ptr = (scalar_t*)grad_k.data_ptr();
     p.grad_value_ptr = (scalar_t*)grad_v.data_ptr();
@@ -340,8 +412,11 @@ _efficient_attention_backward(
     p.custom_mask_type = custom_mask_type;
     p.scale = sdp::calculate_scale(query, scale).as_float_unchecked();
     if (cu_seqlens_q.has_value()) {
-      p.cu_seqlens_q_ptr = (int32_t*)cu_seqlens_q->data_ptr();
-      p.cu_seqlens_k_ptr = (int32_t*)cu_seqlens_k->data_ptr();
+      p.cu_seqlens_q_ptr = (const int32_t*)cu_seqlens_q->const_data_ptr();
+      p.cu_seqlens_k_ptr = (const int32_t*)cu_seqlens_k->const_data_ptr();
+    }
+    if (window_size.has_value()) {
+      p.window_size = *window_size;
     }
 
     ASSIGN_CHECK_OVERFLOW(p.lse_strideB, logsumexp.stride(0));
@@ -540,8 +615,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
   Tensor grad_out_t = grad_out_.transpose(1,2);
   Tensor out_t = out.transpose(1,2);
 
-  Tensor grad_q, grad_k, grad_v;
-  std::tie(grad_q, grad_k, grad_v) = at::_flash_attention_backward(
+  auto [grad_q, grad_k, grad_v] = at::_flash_attention_backward(
     grad_out_t,
     q_t,
     k_t,
@@ -592,14 +666,14 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
 
   Tensor grad_q, grad_k, grad_v, grad_bias;
 
-  // This is needed because SaveVarible automatically converts
+  // This is needed because SaveVariable automatically converts
   // c10::optional to undefined tensor
   c10::optional<Tensor> kernel_bias;
   if (attn_bias.defined()) {
     kernel_bias = attn_bias;
   }
   // Will add with signauter changes for dropout and bias
-  // We are only handiling Dense inputs, but this should be passed
+  // We are only handling Dense inputs, but this should be passed
   // from forward to backward
   int64_t max_seqlen_q = q_t.size(1);
   int64_t max_seqlen_k = k_t.size(1);
@@ -631,5 +705,4 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
       grad_q.transpose(1, 2), grad_k.transpose(1, 2), grad_v.transpose(1, 2), grad_bias);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

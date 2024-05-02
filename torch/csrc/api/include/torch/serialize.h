@@ -28,7 +28,7 @@ namespace torch {
 ///   torch::nn::Linear model(3, 4);
 ///   torch::save(model, "model.pt");
 ///
-///   torch::optim::SGD sgd(/*lr=*/0.9);
+///   torch::optim::SGD sgd(model->parameters(), 0.9); // 0.9 is learning rate
 ///   std::ostringstream stream;
 ///   // Note that the same stream cannot be used in multiple torch::save(...)
 ///   // invocations, otherwise the header will be corrupted.
@@ -94,7 +94,7 @@ TORCH_API torch::IValue pickle_load(const std::vector<char>& data);
 ///   torch::nn::Linear model(3, 4);
 ///   torch::load(model, "model.pt");
 ///
-///   torch::optim::SGD sgd(/*lr=*/0.9);
+///   torch::optim::SGD sgd(model->parameters(), 0.9); // 0.9 is learning rate
 ///   std::istringstream stream("...");
 ///   torch::load(sgd, stream);
 ///

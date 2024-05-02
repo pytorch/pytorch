@@ -1,10 +1,14 @@
 #pragma once
 
+// @lint-ignore-every CLANGTIDY facebook-hte-BadMemberName
+
+#include <functional>
 #ifdef USE_VULKAN_API
+
+#include <ATen/native/vulkan/api/vk_api.h>
 
 #include <ATen/native/vulkan/api/Adapter.h>
 #include <ATen/native/vulkan/api/Command.h>
-#include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Pipeline.h>
 
 namespace at {
@@ -96,7 +100,7 @@ class QueryPool final {
 
   void extract_results();
   void print_results();
-  uint64_t get_total_op_ns(std::string op_name);
+  uint64_t get_total_op_ns(const std::string& op_name);
   uint64_t ns_per_tick_;
   void shader_log_for_each(std::function<void(const ShaderDuration&)> fn);
   /**

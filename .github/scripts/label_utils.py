@@ -44,6 +44,10 @@ def get_last_page_num_from_header(header: Any) -> int:
     # Link info looks like: <https://api.github.com/repositories/65600975/labels?per_page=100&page=2>;
     # rel="next", <https://api.github.com/repositories/65600975/labels?per_page=100&page=3>; rel="last"
     link_info = header["link"]
+    # Docs does not specify that it should be present for projects with just few labels
+    # And https://github.com/malfet/deleteme/actions/runs/7334565243/job/19971396887 it's not the case
+    if link_info is None:
+        return 1
     prefix = "&page="
     suffix = ">;"
     return int(
@@ -70,15 +74,23 @@ def gh_get_labels(org: str, repo: str) -> List[str]:
 
 
 def gh_add_labels(
-    org: str, repo: str, pr_num: int, labels: Union[str, List[str]]
+    org: str, repo: str, pr_num: int, labels: Union[str, List[str]], dry_run: bool
 ) -> None:
+    if dry_run:
+        print(f"Dryrun: Adding labels {labels} to PR {pr_num}")
+        return
     gh_fetch_url_and_headers(
         url=f"https://api.github.com/repos/{org}/{repo}/issues/{pr_num}/labels",
         data={"labels": labels},
     )
 
 
-def gh_remove_label(org: str, repo: str, pr_num: int, label: str) -> None:
+def gh_remove_label(
+    org: str, repo: str, pr_num: int, label: str, dry_run: bool
+) -> None:
+    if dry_run:
+        print(f"Dryrun: Removing {label} from PR {pr_num}")
+        return
     gh_fetch_url_and_headers(
         url=f"https://api.github.com/repos/{org}/{repo}/issues/{pr_num}/labels/{label}",
         method="DELETE",

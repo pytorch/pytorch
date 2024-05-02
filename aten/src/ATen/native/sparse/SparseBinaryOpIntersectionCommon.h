@@ -23,8 +23,7 @@
 #define NAME "sparse_binary_op_intersection_cpu"
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -87,7 +86,7 @@ TensorIterator make_value_selection_intersection_iter(
         lhs_values.sizes(),
         // remove nnz dim for smooth broadcasting
         rhs_values.sizes().slice(1));
-    // update nnz dim to be the lenght of an index
+    // update nnz dim to be the length of an index
     sizes[0] = lhs_select_idx.numel();
     return sizes;
   }();
@@ -271,7 +270,7 @@ void _sparse_binary_op_intersection_kernel_impl(
       .build();
 
     {
-      const auto* RESTRICT ptr_indices = indices.data_ptr<index_t>();
+      const auto* RESTRICT ptr_indices = indices.const_data_ptr<index_t>();
 
       KernelLauncher::launch(iter,
           // NOTE: capture by value required by CUDA
@@ -349,8 +348,8 @@ void _sparse_binary_op_intersection_kernel_impl(
       .build();
 
     {
-      const auto* RESTRICT ptr_indices = source_indices.data_ptr<index_t>();
-      const auto* RESTRICT ptr_sorted_hash = sorted_hash.data_ptr<int64_t>();
+      const auto* RESTRICT ptr_indices = source_indices.const_data_ptr<index_t>();
+      const auto* RESTRICT ptr_sorted_hash = sorted_hash.const_data_ptr<int64_t>();
       const auto sorted_hash_len = sorted_hash.numel();
       auto* RESTRICT ptr_intersection_count = intersection_count.data_ptr<int64_t>();
       auto* RESTRICT ptr_intersection_first_idx = intersection_first_idx.data_ptr<int64_t>();
@@ -478,4 +477,4 @@ void _sparse_binary_op_intersection_kernel_out(
 
 } // anonymous namespace
 
-}} // at::native
+} // at::native

@@ -117,11 +117,14 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
     save_var = at::empty({ num_features }, weight_t.options());
     MIOPEN_CHECK(miopenBatchNormalizationForwardTraining(
       handle, mode, &one, &zero,
-      idesc.desc(), input->data_ptr(),
+      idesc.desc(), input->const_data_ptr(),
       idesc.desc(), output->data_ptr(),
       wdesc.desc(),
-      weight->data_ptr(),
-      bias->data_ptr(),
+      // NOTE: MIOpen docs say that the bnScale and bnBias args are only inputs,
+      // not outputs. However, unfortunately the function signature only takes
+      // non-const pointers, presumably by accident
+      const_cast<void*>(weight->const_data_ptr()),
+      const_cast<void*>(bias->const_data_ptr()),
       exponential_average_factor,
       at::maybe_data_ptr(running_mean),
       at::maybe_data_ptr(running_var),
@@ -133,11 +136,14 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
     save_var = at::empty({0}, weight_t.options());
     MIOPEN_CHECK(miopenBatchNormalizationForwardInference(
       handle, mode, &one, &zero,
-      idesc.desc(), input->data_ptr(),
+      idesc.desc(), input->const_data_ptr(),
       idesc.desc(), output->data_ptr(),
       wdesc.desc(),
-      weight->data_ptr(),
-      bias->data_ptr(),
+      // NOTE: MIOpen docs say that the bnScale and bnBias args are only inputs,
+      // not outputs. However, unfortunately the function signature only takes
+      // non-const pointers, presumably by accident
+      const_cast<void*>(weight->const_data_ptr()),
+      const_cast<void*>(bias->const_data_ptr()),
       running_mean->data_ptr(),
       running_var->data_ptr(),
       epsilon));
@@ -216,15 +222,15 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
 
   MIOPEN_CHECK(miopenBatchNormalizationBackward(
     handle, mode, &one, &zero, &one, &zero,
-    idesc.desc(), input->data_ptr(),
-    idesc.desc(), grad_output->data_ptr(),
+    idesc.desc(), input->const_data_ptr(),
+    idesc.desc(), grad_output->const_data_ptr(),
     idesc.desc(), grad_input_t.data_ptr(),
-    wdesc.desc(), weight->data_ptr(),
+    wdesc.desc(), weight->const_data_ptr(),
     grad_weight_t.data_ptr(),
     grad_bias_t.data_ptr(),
     epsilon,
-    save_mean->data_ptr(),
-    save_var->data_ptr()));
+    save_mean->const_data_ptr(),
+    save_var->const_data_ptr()));
 
   return std::tuple<Tensor,Tensor,Tensor>{grad_input_t, grad_weight_t, grad_bias_t};
 }

@@ -16,24 +16,23 @@ set PATH=C:\Program Files\CMake\bin;C:\Program Files\7-Zip;C:\ProgramData\chocol
 
 set INSTALLER_DIR=%SCRIPT_HELPERS_DIR%\installation-helpers
 
-
-call %INSTALLER_DIR%\install_mkl.bat
-if errorlevel 1 exit /b
-if not errorlevel 0 exit /b
-
 call %INSTALLER_DIR%\install_magma.bat
-if errorlevel 1 exit /b
-if not errorlevel 0 exit /b
+if errorlevel 1 goto fail
+if not errorlevel 0 goto fail
 
 call %INSTALLER_DIR%\install_sccache.bat
-if errorlevel 1 exit /b
-if not errorlevel 0 exit /b
+if errorlevel 1 goto fail
+if not errorlevel 0 goto fail
 
 :: Miniconda has been installed as part of the Windows AMI with all the dependencies.
 :: We just need to activate it here
 call %INSTALLER_DIR%\activate_miniconda3.bat
-if errorlevel 1 exit /b
-if not errorlevel 0 exit /b
+if errorlevel 1 goto fail
+if not errorlevel 0 goto fail
+
+call pip install mkl-include==2021.4.0 mkl-devel==2021.4.0
+if errorlevel 1 goto fail
+if not errorlevel 0 goto fail
 
 :: Override VS env here
 pushd .
@@ -42,8 +41,8 @@ if "%VC_VERSION%" == "" (
 ) else (
     call "C:\Program Files (x86)\Microsoft Visual Studio\%VC_YEAR%\%VC_PRODUCT%\VC\Auxiliary\Build\vcvarsall.bat" x64 -vcvars_ver=%VC_VERSION%
 )
-if errorlevel 1 exit /b
-if not errorlevel 0 exit /b
+if errorlevel 1 goto fail
+if not errorlevel 0 goto fail
 @echo on
 popd
 
@@ -53,12 +52,12 @@ set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION%
 
 if x%CUDA_VERSION:.=%==x%CUDA_VERSION% (
     echo CUDA version %CUDA_VERSION% format isn't correct, which doesn't contain '.'
-    exit /b 1
+    goto fail
 )
 rem version transformer, for example 10.1 to 10_1.
 if x%CUDA_VERSION:.=%==x%CUDA_VERSION% (
     echo CUDA version %CUDA_VERSION% format isn't correct, which doesn't contain '.'
-    exit /b 1
+    goto fail
 )
 set VERSION_SUFFIX=%CUDA_VERSION:.=_%
 set CUDA_PATH_V%VERSION_SUFFIX%=%CUDA_PATH%
@@ -89,8 +88,8 @@ set SCCACHE_IGNORE_SERVER_IO_ERROR=1
 sccache --stop-server
 sccache --start-server
 sccache --zero-stats
-set CC=sccache-cl
-set CXX=sccache-cl
+set CMAKE_C_COMPILER_LAUNCHER=sccache
+set CMAKE_CXX_COMPILER_LAUNCHER=sccache
 
 set CMAKE_GENERATOR=Ninja
 
@@ -102,8 +101,8 @@ if "%USE_CUDA%"=="1" (
   :: CMake requires a single command as CUDA_NVCC_EXECUTABLE, so we push the wrappers
   :: randomtemp.exe and sccache.exe into a batch file which CMake invokes.
   curl -kL https://github.com/peterjc123/randomtemp-rust/releases/download/v0.4/randomtemp.exe --output %TMP_DIR_WIN%\bin\randomtemp.exe
-  if errorlevel 1 exit /b
-  if not errorlevel 0 exit /b
+  if errorlevel 1 goto fail
+  if not errorlevel 0 goto fail
   echo @"%TMP_DIR_WIN%\bin\randomtemp.exe" "%TMP_DIR_WIN%\bin\sccache.exe" "%CUDA_PATH%\bin\nvcc.exe" %%* > "%TMP_DIR%/bin/nvcc.bat"
   cat %TMP_DIR%/bin/nvcc.bat
   set CUDA_NVCC_EXECUTABLE=%TMP_DIR%/bin/nvcc.bat
@@ -115,8 +114,8 @@ if "%USE_CUDA%"=="1" (
 set
 
 python setup.py bdist_wheel
-if errorlevel 1 exit /b
-if not errorlevel 0 exit /b
+if errorlevel 1 goto fail
+if not errorlevel 0 goto fail
 sccache --show-stats
 python -c "import os, glob; os.system('python -mpip install --no-index --no-deps ' + glob.glob('dist/*.whl')[0])"
 (
@@ -136,3 +135,8 @@ python -c "import os, glob; os.system('python -mpip install --no-index --no-deps
 
 sccache --show-stats --stats-format json | jq .stats > sccache-stats-%BUILD_ENVIRONMENT%-%OUR_GITHUB_JOB_ID%.json
 sccache --stop-server
+
+exit /b 0
+
+:fail
+exit /b 1

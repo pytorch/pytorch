@@ -39,7 +39,7 @@ Tried the following paths, but none existed:
 def repair_depfile(depfile: TextIO, include_dirs: List[Path]) -> None:
     changes_made = False
     out = ""
-    for line in depfile.readlines():
+    for line in depfile:
         if ":" in line:
             colon_pos = line.rfind(":")
             out += line[: colon_pos + 1]

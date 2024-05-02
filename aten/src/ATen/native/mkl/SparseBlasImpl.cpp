@@ -316,7 +316,7 @@ void addmm_sparse_result(
   }
 
   // MKL doesn't have an interface to compute alpha*(A*B) + beta*C at once
-  Tensor mat1_mat2 = at::empty(result.sizes(), result.options());
+  Tensor mat1_mat2 = at::zeros(result.sizes(), result.options());
   indices_to_mkl_compatible_inplace(mat1_mat2);
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(

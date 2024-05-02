@@ -24,5 +24,4 @@ if __name__ == "__main__":
     if args.segfault:
         ctypes.string_at(0)
     else:
-
         print(f"{args.msg} from {rank}")

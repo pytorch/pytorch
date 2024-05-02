@@ -1022,6 +1022,33 @@ def max_unpool3d(
     return torch._C._nn.max_unpool3d(input, indices, output_size, _stride, padding)
 
 
+def lp_pool3d(
+    input: Tensor, norm_type: Union[int, float],
+    kernel_size: BroadcastingList3[int],
+    stride: Optional[BroadcastingList3[int]] = None,
+    ceil_mode: bool = False
+) -> Tensor:
+    r"""
+    Apply a 3D power-average pooling over an input signal composed of several input planes.
+
+    If the sum of all inputs to the power of `p` is
+    zero, the gradient is set to zero as well.
+
+    See :class:`~torch.nn.LPPool3d` for details.
+    """
+    if has_torch_function_unary(input):
+        return handle_torch_function(
+            lp_pool3d, (input,), input, norm_type, kernel_size, stride=stride, ceil_mode=ceil_mode
+        )
+    kd, kw, kh = utils._triple(kernel_size)
+    if stride is not None:
+        out = avg_pool3d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
+    else:
+        out = avg_pool3d(input.pow(norm_type), kernel_size, padding=0, ceil_mode=ceil_mode)
+
+    return (torch.sign(out) * relu(torch.abs(out))).mul(kd * kw * kh).pow(1.0 / norm_type)
+
+
 def lp_pool2d(
     input: Tensor, norm_type: Union[int, float],
     kernel_size: BroadcastingList2[int],
@@ -1518,6 +1545,8 @@ def hardtanh(input: Tensor, min_val: float = -1., max_val: float = 1., inplace: 
     """
     if has_torch_function_unary(input):
         return handle_torch_function(hardtanh, (input,), input, min_val=min_val, max_val=max_val, inplace=inplace)
+    if min_val > max_val:
+        raise ValueError("min_val cannot be greater than max_val")
     if inplace:
         result = torch._C._nn.hardtanh_(input, min_val, max_val)
     else:
@@ -2545,6 +2574,21 @@ def layer_norm(
         )
     return torch.layer_norm(input, normalized_shape, weight, bias, eps, torch.backends.cudnn.enabled)
 
+def rms_norm(
+    input: Tensor,
+    normalized_shape: List[int],
+    weight: Optional[Tensor] = None,
+    eps: Optional[float] = None,
+) -> Tensor:
+    r"""Apply Root Mean Square Layer Normalization.
+
+    See :class:`~torch.nn.RMSNorm` for details.
+    """
+    if has_torch_function_variadic(input, weight):
+        return handle_torch_function(
+            rms_norm, (input, weight), input, normalized_shape, weight=weight, eps=eps
+        )
+    return torch.rms_norm(input, normalized_shape, weight, eps)
 
 def group_norm(
     input: Tensor, num_groups: int, weight: Optional[Tensor] = None, bias: Optional[Tensor] = None, eps: float = 1e-5
@@ -3116,8 +3160,8 @@ def binary_cross_entropy(
         reduction_enum = _Reduction.get_enum(reduction)
     if target.size() != input.size():
         raise ValueError(
-            "Using a target size ({}) that is different to the input size ({}) is deprecated. "
-            "Please ensure they have the same size.".format(target.size(), input.size())
+            f"Using a target size ({target.size()}) that is different to the input size ({input.size()}) is deprecated. "
+            "Please ensure they have the same size."
         )
 
     if weight is not None:
@@ -3166,7 +3210,7 @@ def binary_cross_entropy_with_logits(
             operations. For a target of size [B, C, H, W] (where B is batch size) pos_weight of
             size [B, C, H, W] will apply different pos_weights to each element of the batch or
             [C, H, W] the same pos_weights across the batch. To apply the same positive weight
-            along all spacial dimensions for a 2D multi-class target [C, H, W] use: [C, 1, 1].
+            along all spatial dimensions for a 2D multi-class target [C, H, W] use: [C, 1, 1].
             Default: ``None``
 
     Examples::
@@ -4033,7 +4077,7 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
                 # Use slow decomp whose backward will be in terms of index_put
                 # importlib is required because the import cannot be top level
                 # (cycle) and cannot be nested (TS doesn't support)
-                return importlib.import_module('torch._decomp.decompositions').upsample_bilinear2d_vec(
+                return importlib.import_module('torch._decomp.decompositions')._upsample_linear_vec(
                     input, output_size, align_corners, scale_factors)
         return torch._C._nn.upsample_bilinear2d(input, output_size, align_corners, scale_factors)
     if input.dim() == 5 and mode == "trilinear":
@@ -4418,8 +4462,7 @@ def affine_grid(theta: Tensor, size: List[int], align_corners: Optional[bool] = 
     return torch.affine_grid_generator(theta, size, align_corners)
 
 
-pad = _add_docstr(
-    torch._C._nn.pad,
+def pad(input: Tensor, pad: List[int], mode: str = "constant", value: Optional[float] = None) -> Tensor:
     r"""
 pad(input, pad, mode="constant", value=None) -> Tensor
 
@@ -4480,7 +4523,21 @@ Examples::
     >>> print(out.size())
     torch.Size([3, 9, 7, 3])
 
-""")
+"""
+    if has_torch_function_unary(input):
+        return handle_torch_function(
+            torch.nn.functional.pad, (input,), input, pad, mode=mode, value=value)
+    if not torch.jit.is_scripting():
+        if torch.are_deterministic_algorithms_enabled() and input.is_cuda:
+            if mode == 'replicate':
+                # Use slow decomp whose backward will be in terms of index_put.
+                # importlib is required because the import cannot be top level
+                # (cycle) and cannot be nested (TS doesn't support)
+                return importlib.import_module('torch._decomp.decompositions')._replication_pad(
+                    input, pad
+                )
+    return torch._C._nn.pad(input, pad, mode, value)
+
 # TODO: Fix via https://github.com/pytorch/pytorch/issues/75798
 pad.__module__ = "torch.nn.functional"
 
@@ -4640,6 +4697,8 @@ def triplet_margin_loss(
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
         reduction_enum = _Reduction.get_enum(reduction)
+    if margin <= 0:
+        raise ValueError(f"margin must be greater than 0, got {margin}")
     return torch.triplet_margin_loss(anchor, positive, negative, margin, p, eps, swap, reduction_enum)
 
 
@@ -4679,6 +4738,10 @@ def triplet_margin_with_distance_loss(
     # Check validity of reduction mode
     if reduction not in ("mean", "sum", "none"):
         raise ValueError(f"{reduction} is not a valid value for reduction")
+
+    # Check validity of margin
+    if margin <= 0:
+        raise ValueError(f"margin must be greater than 0, got {margin}")
 
     # Check dimensions
     a_dim = anchor.ndim
@@ -4925,13 +4988,12 @@ scaled_dot_product_attention(query, key, value, attn_mask=None, dropout_p=0.0, i
 
 Computes scaled dot product attention on query, key and value tensors, using
 an optional attention mask if passed, and applying dropout if a probability
-greater than 0.0 is specified.
+greater than 0.0 is specified. The optional scale argument can only be specified as a keyword argument.
 
 .. code-block:: python
 
     # Efficient implementation equivalent to the following:
     def scaled_dot_product_attention(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False, scale=None) -> torch.Tensor:
-        # Efficient implementation equivalent to the following:
         L, S = query.size(-2), key.size(-2)
         scale_factor = 1 / math.sqrt(query.size(-1)) if scale is None else scale
         attn_bias = torch.zeros(L, S, dtype=query.dtype)
@@ -4970,14 +5032,14 @@ Note:
     is used, the following functions are provided for enabling and disabling implementations.
     The context manager is the preferred mechanism:
 
-        - :func:`torch.backends.cuda.sdp_kernel`: A context manager used to enable/disable any of the implementations.
-        - :func:`torch.backends.cuda.enable_flash_sdp`: Enables or Disables FlashAttention.
-        - :func:`torch.backends.cuda.enable_mem_efficient_sdp`: Enables or Disables Memory-Efficient Attention.
-        - :func:`torch.backends.cuda.enable_math_sdp`: Enables or Disables the PyTorch C++ implementation.
+        - :func:`torch.nn.attention.sdpa_kernel`: A context manager used to enable or disable any of the implementations.
+        - :func:`torch.backends.cuda.enable_flash_sdp`: Globally enables or disables FlashAttention.
+        - :func:`torch.backends.cuda.enable_mem_efficient_sdp`: Globally enables or disables  Memory-Efficient Attention.
+        - :func:`torch.backends.cuda.enable_math_sdp`: Globally enables or disables  the PyTorch C++ implementation.
 
     Each of the fused kernels has specific input limitations. If the user requires the use of a specific fused implementation,
-    disable the PyTorch C++ implementation using :func:`torch.backends.cuda.sdp_kernel`.
-    In the event that a fused implementation is not available, an error will be raised with the
+    disable the PyTorch C++ implementation using :func:`torch.nn.attention.sdpa_kernel`.
+    In the event that a fused implementation is not available, a warning will be raised with the
     reasons why the fused implementation cannot run.
 
     Due to the nature of fusing floating point operations, the output of this function may be different
@@ -4993,13 +5055,14 @@ Args:
     query (Tensor): Query tensor; shape :math:`(N, ..., L, E)`.
     key (Tensor): Key tensor; shape :math:`(N, ..., S, E)`.
     value (Tensor): Value tensor; shape :math:`(N, ..., S, Ev)`.
-    attn_mask (optional Tensor): Attention mask; shape :math:`(N, ..., L, S)`. Two types of masks are supported.
+    attn_mask (optional Tensor): Attention mask; shape must be broadcastable to the shape of attention weights,
+        which is :math:`(N,..., L, S)`. Two types of masks are supported.
         A boolean mask where a value of True indicates that the element *should* take part in attention.
         A float mask of the same type as query, key, value that is added to the attention score.
     dropout_p (float): Dropout probability; if greater than 0.0, dropout is applied
-    is_causal (bool): If true, assumes causal attention masking and errors if both attn_mask and is_causal
+    is_causal (bool): If true, assumes upper left causal attention masking and errors if both attn_mask and is_causal
         are set.
-    scale (optional float): Scaling factor applied prior to softmax. If None, the default value is set
+    scale (optional float, keyword-only): Scaling factor applied prior to softmax. If None, the default value is set
         to :math:`\frac{1}{\sqrt{E}}`.
 
 
@@ -5013,7 +5076,7 @@ Shape legend:
     - :math:`E: \text{Embedding dimension of the query and key}`
     - :math:`Ev: \text{Embedding dimension of the value}`
 
-Examples::
+Examples:
 
     >>> # Optionally use the context manager to ensure one of the fused kernels is run
     >>> query = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
@@ -5021,6 +5084,7 @@ Examples::
     >>> value = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
     >>> with torch.backends.cuda.sdp_kernel(enable_math=False):
     >>>     F.scaled_dot_product_attention(query,key,value)
+
 
 .. _FlashAttention-2\: Faster Attention with Better Parallelism and Work Partitioning:
     https://arxiv.org/abs/2307.08691
@@ -5362,7 +5426,7 @@ def multi_head_attention_forward(
         assert bias_v is None
 
     #
-    # reshape q, k, v for multihead attention and make em batch first
+    # reshape q, k, v for multihead attention and make them batch first
     #
     q = q.view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
     if static_k is None:
@@ -5418,7 +5482,7 @@ def multi_head_attention_forward(
 
     if need_weights:
         B, Nt, E = q.shape
-        q_scaled = q / math.sqrt(E)
+        q_scaled = q * math.sqrt(1.0 / float(E))
 
         assert not (is_causal and attn_mask is None), "FIXME: is_causal not implemented for need_weights"
 

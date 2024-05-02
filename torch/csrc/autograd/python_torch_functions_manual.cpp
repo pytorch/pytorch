@@ -9,7 +9,7 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/jit/frontend/tracer.h>
-#include <torch/csrc/utils/cuda_lazy_init.h>
+#include <torch/csrc/utils/device_lazy_init.h>
 #include <torch/csrc/utils/out_types.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
@@ -61,7 +61,7 @@ inline Tensor dispatch_range(
     const Scalar& end,
     const Scalar& step,
     const TensorOptions& options) {
-  torch::utils::maybe_initialize_cuda(options);
+  torch::utils::maybe_initialize_device(options);
   pybind11::gil_scoped_release no_gil;
   DeviceGuard device_guard(options.device());
   return torch::range(start, end, step, options);
@@ -664,6 +664,25 @@ static PyObject* THPVariable__functionalize_sync(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPVariable__functionalize_apply_view_metas(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser(
+      {"_functionalize_apply_view_metas(Tensor tensor, Tensor base)"},
+      /*traceable=*/true);
+
+  ParsedArgs<4> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto tensor = r.tensor(0);
+  TORCH_INTERNAL_ASSERT(
+      at::functionalization::impl::isFunctionalTensor(tensor));
+  auto impl = at::functionalization::impl::unsafeGetFunctionalWrapper(tensor);
+  return wrap(impl->apply_view_metas(r.tensor(1)));
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPVariable__functionalize_mark_mutation_hidden_from_autograd(
     PyObject* self,
     PyObject* args,
@@ -775,6 +794,10 @@ static PyMethodDef torch_functions_manual[] = {
      nullptr},
     {"_functionalize_sync",
      castPyCFunctionWithKeywords(THPVariable__functionalize_sync),
+     METH_VARARGS | METH_KEYWORDS | METH_STATIC,
+     nullptr},
+    {"_functionalize_apply_view_metas",
+     castPyCFunctionWithKeywords(THPVariable__functionalize_apply_view_metas),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
     {"_enable_functionalization",

@@ -1,40 +1,41 @@
 # Owner(s): ["module: optimizer", "module: LrScheduler" ]
-import types
-import warnings
 import math
 import pickle
+import tempfile
+import types
+import warnings
 from functools import partial
 
 import torch
 import torch.nn.functional as F
 from torch.nn import Parameter
-from torch.optim import Adam, SGD
+from torch.optim import Adam, Rprop, SGD
 from torch.optim.lr_scheduler import (
+    ChainedScheduler,
+    ConstantLR,
+    CosineAnnealingLR,
+    CosineAnnealingWarmRestarts,
+    CyclicLR,
+    EPOCH_DEPRECATION_WARNING,
+    ExponentialLR,
     LambdaLR,
+    LinearLR,
+    LRScheduler,
     MultiplicativeLR,
+    MultiStepLR,
+    OneCycleLR,
+    PolynomialLR,
+    ReduceLROnPlateau,
     SequentialLR,
     StepLR,
-    MultiStepLR,
-    ConstantLR,
-    LinearLR,
-    ExponentialLR,
-    CosineAnnealingLR,
-    ReduceLROnPlateau,
-    LRScheduler,
-    CyclicLR,
-    CosineAnnealingWarmRestarts,
-    OneCycleLR,
-    ChainedScheduler,
-    PolynomialLR,
-    EPOCH_DEPRECATION_WARNING,
 )
 from torch.optim.swa_utils import SWALR
 from torch.testing._internal.common_utils import (
-    TestCase,
+    instantiate_parametrized_tests,
     load_tests,
     parametrize,
-    instantiate_parametrized_tests,
-    skipIfTorchDynamo
+    skipIfTorchDynamo,
+    TestCase,
 )
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -52,7 +53,6 @@ class TestLRScheduler(TestCase):
         def forward(self, x):
             return self.conv2(F.relu(self.conv1(x)))
 
-
     class LambdaLRTestObject:
         def __init__(self, value):
             self.value = value
@@ -65,6 +65,7 @@ class TestLRScheduler(TestCase):
                 return self.__dict__ == other.__dict__
             else:
                 return False
+
     exact_dtype = True
 
     def setUp(self):
@@ -112,7 +113,9 @@ class TestLRScheduler(TestCase):
         with self.assertRaises(TypeError):
             scheduler = MultiStepLR(optimizer, gamma=1, milestones=[10, 20])
 
-    @skipIfTorchDynamo("Torchdynamo keeps references to optim in the guards and the stack of the graph break frames")
+    @skipIfTorchDynamo(
+        "Torchdynamo keeps references to optim in the guards and the stack of the graph break frames"
+    )
     def test_no_cyclic_references(self):
         import gc
 
@@ -132,7 +135,9 @@ class TestLRScheduler(TestCase):
             gc.collect(), 0, msg="Optimizer should be garbage-collected on __del__"
         )
 
-    @skipIfTorchDynamo("Torchdynamo keeps references to optim in the guards and the stack of the graph break frames")
+    @skipIfTorchDynamo(
+        "Torchdynamo keeps references to optim in the guards and the stack of the graph break frames"
+    )
     def test_no_cyclic_references_in_step(self):
         import gc
         import weakref
@@ -347,9 +352,7 @@ class TestLRScheduler(TestCase):
         from torch.nn import Parameter
 
         epochs = 10
-        optimizer = SGD(
-            [Parameter(torch.randn(2, 2, requires_grad=True))], 0.1
-        )
+        optimizer = SGD([Parameter(torch.randn(2, 2, requires_grad=True))], 0.1)
         targets = [[0.1] * 3 + [0.01] * 3 + [0.001] * 3 + [0.0001]]
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 3, gamma=0.1)
         self._test_get_last_lr(scheduler, targets, epochs)
@@ -685,6 +688,16 @@ class TestLRScheduler(TestCase):
             cooldown=5,
         )
         self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
+
+    def test_reduce_lr_on_plateau_get_last_lr_before_step(self):
+        for param_group in self.opt.param_groups:
+            param_group["lr"] = 0.5
+        scheduler = ReduceLROnPlateau(
+            self.opt,
+        )
+        self.assertEqual(
+            scheduler.get_last_lr(), [0.5 for param_group in self.opt.param_groups]
+        )
 
     def test_sequentiallr1(self):
         epochs = 19
@@ -1510,8 +1523,12 @@ class TestLRScheduler(TestCase):
 
     def test_cycle_lr_cycle_momentum_fail_with_momentumless_optimizer(self):
         with self.assertRaises(ValueError):
-            adam_opt = Adam(self.net.parameters())
-            scheduler = CyclicLR(adam_opt, base_lr=1, max_lr=5, cycle_momentum=True)
+            rprop_opt = Rprop(self.net.parameters())
+            scheduler = CyclicLR(rprop_opt, base_lr=1, max_lr=5, cycle_momentum=True)
+
+    def test_cycle_lr_cycle_momentum_with_beta1_optimizer(self):
+        adam_opt = Adam(self.net.parameters())
+        scheduler = CyclicLR(adam_opt, base_lr=1, max_lr=5, cycle_momentum=True)
 
     def test_cycle_lr_removed_after_out_of_scope(self):
         import gc
@@ -1543,7 +1560,9 @@ class TestLRScheduler(TestCase):
         def scale_fn(_):
             return 0.5
 
-        scheduler = CyclicLR(adam_opt, base_lr=1, max_lr=5, cycle_momentum=False, scale_fn=scale_fn)
+        scheduler = CyclicLR(
+            adam_opt, base_lr=1, max_lr=5, cycle_momentum=False, scale_fn=scale_fn
+        )
         state = scheduler.state_dict()
         self.assertNotIn("_scale_fn_ref", state)
         self.assertIs(state["_scale_fn_custom"], None)
@@ -1559,7 +1578,9 @@ class TestLRScheduler(TestCase):
 
         scale_fn = ScaleFn()
 
-        scheduler = CyclicLR(adam_opt, base_lr=1, max_lr=5, cycle_momentum=False, scale_fn=scale_fn)
+        scheduler = CyclicLR(
+            adam_opt, base_lr=1, max_lr=5, cycle_momentum=False, scale_fn=scale_fn
+        )
         state = scheduler.state_dict()
         self.assertNotIn("_scale_fn_ref", state)
         self.assertEqual(state["_scale_fn_custom"], scale_fn.__dict__)
@@ -1569,11 +1590,17 @@ class TestLRScheduler(TestCase):
         adam_opt = Adam(self.net.parameters())
 
         # Case 1: Built-in mode
-        scheduler = CyclicLR(adam_opt, base_lr=1, max_lr=5, cycle_momentum=False, mode="triangular2")
-        restored_scheduler = CyclicLR(adam_opt, base_lr=1, max_lr=5, cycle_momentum=False)
+        scheduler = CyclicLR(
+            adam_opt, base_lr=1, max_lr=5, cycle_momentum=False, mode="triangular2"
+        )
+        restored_scheduler = CyclicLR(
+            adam_opt, base_lr=1, max_lr=5, cycle_momentum=False
+        )
         restored_scheduler.load_state_dict(scheduler.state_dict())
         self.assertTrue(restored_scheduler.mode == scheduler.mode == "triangular2")
-        self.assertIsNotNone(restored_scheduler._scale_fn_ref) and self.assertIsNotNone(scheduler._scale_fn_ref)
+        self.assertIsNotNone(restored_scheduler._scale_fn_ref) and self.assertIsNotNone(
+            scheduler._scale_fn_ref
+        )
         self.assertIs(restored_scheduler._scale_fn_custom, None)
         self.assertIs(scheduler._scale_fn_custom, None)
 
@@ -1581,8 +1608,12 @@ class TestLRScheduler(TestCase):
         def scale_fn(_):
             return 0.5
 
-        scheduler = CyclicLR(adam_opt, base_lr=1, max_lr=5, cycle_momentum=False, scale_fn=scale_fn)
-        restored_scheduler = CyclicLR(adam_opt, base_lr=1, max_lr=5, cycle_momentum=False, scale_fn=scale_fn)
+        scheduler = CyclicLR(
+            adam_opt, base_lr=1, max_lr=5, cycle_momentum=False, scale_fn=scale_fn
+        )
+        restored_scheduler = CyclicLR(
+            adam_opt, base_lr=1, max_lr=5, cycle_momentum=False, scale_fn=scale_fn
+        )
         restored_scheduler.load_state_dict(scheduler.state_dict())
         self.assertIs(scheduler._scale_fn_custom, scale_fn)
         self.assertIs(restored_scheduler._scale_fn_custom, scale_fn)
@@ -1675,6 +1706,54 @@ class TestLRScheduler(TestCase):
             max_momentum=22,
             total_steps=10,
         )
+        self._test_cycle_lr(scheduler, lr_targets, momentum_targets, 10)
+
+    def test_onecycle_lr_legacy_state_dict(self):
+        scheduler = OneCycleLR(
+            self.opt,
+            max_lr=25,
+            final_div_factor=2,
+            base_momentum=1,
+            max_momentum=22,
+            total_steps=10,
+            anneal_strategy="cos",
+        )
+        delattr(scheduler, "_anneal_func_type")
+        state_dict = scheduler.state_dict()
+        self.assertNotIn("anneal_func_type", state_dict)
+        state_dict["anneal_func"] = OneCycleLR._annealing_cos
+        scheduler.load_state_dict(state_dict)
+
+        def annealing_cos(start, end, pct):
+            cos_out = math.cos(math.pi * pct) + 1
+            return end + (start - end) / 2.0 * cos_out
+
+        lr_target = [
+            1,
+            13,
+            25,
+            annealing_cos(25, 0.5, 1 / 7.0),
+            annealing_cos(25, 0.5, 2 / 7.0),
+            annealing_cos(25, 0.5, 3 / 7.0),
+            annealing_cos(25, 0.5, 4 / 7.0),
+            annealing_cos(25, 0.5, 5 / 7.0),
+            annealing_cos(25, 0.5, 6 / 7.0),
+            0.5,
+        ]
+        momentum_target = [
+            22,
+            11.5,
+            1,
+            annealing_cos(1, 22, 1 / 7.0),
+            annealing_cos(1, 22, 2 / 7.0),
+            annealing_cos(1, 22, 3 / 7.0),
+            annealing_cos(1, 22, 4 / 7.0),
+            annealing_cos(1, 22, 5 / 7.0),
+            annealing_cos(1, 22, 6 / 7.0),
+            22,
+        ]
+        lr_targets = [lr_target, lr_target]
+        momentum_targets = [momentum_target, momentum_target]
         self._test_cycle_lr(scheduler, lr_targets, momentum_targets, 10)
 
     def test_cycle_lr_with_adam(self):
@@ -2241,36 +2320,88 @@ class TestLRScheduler(TestCase):
 
         self.assertLessEqual(last_lr, max_lr)
 
-
-    @parametrize("LRClass", [
-        partial(LambdaLR, lr_lambda=lambda e: e // 10),
-        partial(MultiplicativeLR, lr_lambda=lambda: 0.95),
-        partial(StepLR, step_size=30),
-        partial(MultiStepLR, milestones=[30, 80]),
-        ConstantLR,
-        LinearLR,
-        partial(ExponentialLR, gamma=0.9),
-        lambda opt, **kwargs: SequentialLR(
-            opt, schedulers=[ConstantLR(opt), ConstantLR(opt)], milestones=[2], **kwargs),
-        PolynomialLR,
-        partial(CosineAnnealingLR, T_max=10),
-        ReduceLROnPlateau,
-        partial(CyclicLR, base_lr=0.01, max_lr=0.1),
-        partial(CosineAnnealingWarmRestarts, T_0=20),
-        partial(OneCycleLR, max_lr=0.01, total_steps=10),
-    ])
+    @parametrize(
+        "LRClass",
+        [
+            partial(LambdaLR, lr_lambda=lambda e: e // 10),
+            partial(MultiplicativeLR, lr_lambda=lambda: 0.95),
+            partial(StepLR, step_size=30),
+            partial(MultiStepLR, milestones=[30, 80]),
+            ConstantLR,
+            LinearLR,
+            partial(ExponentialLR, gamma=0.9),
+            lambda opt, **kwargs: SequentialLR(
+                opt,
+                schedulers=[ConstantLR(opt), ConstantLR(opt)],
+                milestones=[2],
+                **kwargs,
+            ),
+            PolynomialLR,
+            partial(CosineAnnealingLR, T_max=10),
+            ReduceLROnPlateau,
+            partial(CyclicLR, base_lr=0.01, max_lr=0.1),
+            partial(CosineAnnealingWarmRestarts, T_0=20),
+            partial(OneCycleLR, max_lr=0.01, total_steps=10),
+        ],
+    )
     def test_lr_scheduler_verbose_deprecation_warning(self, LRClass):
         """Check that a deprecating warning with verbose parameter."""
-        with self.assertWarnsOnceRegex(UserWarning, "The verbose parameter is deprecated"):
+        with self.assertWarnsOnceRegex(
+            UserWarning, "The verbose parameter is deprecated"
+        ):
             LRClass(self.opt, verbose=True)
 
-        with self.assertWarnsOnceRegex(UserWarning, "The verbose parameter is deprecated"):
+        with self.assertWarnsOnceRegex(
+            UserWarning, "The verbose parameter is deprecated"
+        ):
             LRClass(self.opt, verbose=False)
 
         # No warning is raised when verbose is the default value.
         with warnings.catch_warnings():
             warnings.simplefilter("error", UserWarning)
             LRClass(self.opt)
+
+    @parametrize(
+        "LRClass",
+        [
+            partial(LambdaLR, lr_lambda=lambda e: e // 10),
+            partial(MultiplicativeLR, lr_lambda=lambda: 0.95),
+            partial(StepLR, step_size=30),
+            partial(MultiStepLR, milestones=[30, 80]),
+            ConstantLR,
+            LinearLR,
+            partial(ExponentialLR, gamma=0.9),
+            PolynomialLR,
+            partial(CosineAnnealingLR, T_max=10),
+            lambda opt, **kwargs: ChainedScheduler(
+                schedulers=[ConstantLR(opt), ConstantLR(opt)], **kwargs
+            ),
+            lambda opt, **kwargs: SequentialLR(
+                opt,
+                schedulers=[ConstantLR(opt), ConstantLR(opt)],
+                milestones=[2],
+                **kwargs,
+            ),
+            ReduceLROnPlateau,
+            partial(CyclicLR, base_lr=0.01, max_lr=0.1),
+            partial(OneCycleLR, max_lr=0.01, total_steps=10, anneal_strategy="linear"),
+            partial(CosineAnnealingWarmRestarts, T_0=20),
+        ],
+    )
+    @parametrize("weights_only", [True, False])
+    def test_lr_scheduler_state_dict_load(self, LRClass, weights_only):
+        scheduler = LRClass(self.opt)
+        state_dict = scheduler.state_dict()
+
+        with tempfile.TemporaryFile() as f:
+            torch.save(state_dict, f)
+            f.seek(0)
+            state_dict_loaded = torch.load(f, weights_only=weights_only)
+            self.assertEqual(state_dict, state_dict_loaded)
+            # Make sure state_dict can be loaded
+            scheduler2 = LRClass(self.opt)
+            scheduler2.load_state_dict(state_dict_loaded)
+            self.assertEqual(scheduler2.state_dict(), state_dict)
 
 
 instantiate_parametrized_tests(TestLRScheduler)

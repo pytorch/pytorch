@@ -35,7 +35,9 @@ constexpr auto exclude_keys_for_meta_dispatch =
     c10::DispatchKeySet({
         c10::DispatchKey::FuncTorchDynamicLayerBackMode,
         c10::DispatchKey::FuncTorchDynamicLayerFrontMode,
-        c10::DispatchKey::Python
+        c10::DispatchKey::Python,
+        c10::DispatchKey::PreDispatch,
+
     });
 
 // Helper around at::has_internal_overlap.
@@ -83,8 +85,8 @@ inline c10::List<Tensor> to_meta(const c10::List<Tensor>& t_list) {
   return outputs;
 }
 
-inline c10::List<c10::optional<Tensor>> to_meta(const c10::List<c10::optional<Tensor>>& t_list) {
-  c10::List<c10::optional<Tensor>> outputs;
+inline c10::List<::std::optional<Tensor>> to_meta(const c10::List<::std::optional<Tensor>>& t_list) {
+  c10::List<::std::optional<Tensor>> outputs;
   outputs.reserve(t_list.size());
   for (const auto i : c10::irange(t_list.size())) {
     outputs.push_back(to_meta(t_list[i]));

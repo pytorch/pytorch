@@ -31,7 +31,7 @@ jobs:
     with:
       build-environment: linux-jammy-py3.8-gcc11
       docker-image: ${{ needs.docs-build.outputs.docker-image }}
-      push: ${{ github.event_name == 'schedule' || startsWith(github.event.ref, 'refs/tags/v') }}
+      push: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.event.ref, 'refs/tags/v') }}
       run-doxygen: true
     secrets:
       GH_PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
@@ -40,16 +40,14 @@ jobs:
     runs-on: ubuntu-latest
     environment: update-commit-hash
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
       - name: update-vision-commit-hash
-        uses: ./.github/actions/update-commit-hash
+        uses: pytorch/test-infra/.github/actions/update-commit-hash@main
         if: ${{ github.event_name == 'schedule' }}
         with:
           repo-name: vision
           branch: main
+          pin-folder: .github/ci_commit_pins
+          test-infra-ref: main
           updatebot-token: ${{ secrets.UPDATEBOT_TOKEN }}
           pytorchbot-token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
 
@@ -57,16 +55,14 @@ jobs:
     runs-on: ubuntu-latest
     environment: update-commit-hash
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
       - name: update-audio-commit-hash
-        uses: ./.github/actions/update-commit-hash
+        uses: pytorch/test-infra/.github/actions/update-commit-hash@main
         if: ${{ github.event_name == 'schedule' }}
         with:
           repo-name: audio
           branch: main
+          pin-folder: .github/ci_commit_pins
+          test-infra-ref: main
           updatebot-token: ${{ secrets.UPDATEBOT_TOKEN }}
           pytorchbot-token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
 
@@ -74,16 +70,13 @@ jobs:
     runs-on: ubuntu-latest
     environment: update-commit-hash
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
       - name: update-executorch-commit-hash
-        uses: ./.github/actions/update-commit-hash
+        uses: pytorch/test-infra/.github/actions/update-commit-hash@main
         if: ${{ github.event_name == 'schedule' }}
         with:
           repo-name: executorch
           branch: main
           pin-folder: .ci/docker/ci_commit_pins
+          test-infra-ref: main
           updatebot-token: ${{ secrets.UPDATEBOT_TOKEN }}
           pytorchbot-token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}

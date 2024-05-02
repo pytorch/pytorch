@@ -28,7 +28,21 @@ on:
         description: |
           If this is set, our linter will use this to make sure that every other
           job with the same `sync-tag` is identical.
-
+      s3-bucket:
+        description: S3 bucket to download artifact
+        required: false
+        type: string
+        default: "gha-artifacts"
+      aws-role-to-assume:
+        description: role to assume for downloading artifacts
+        required: false
+        type: string
+        default: ""
+      upload-aws-role-to-assume:
+        description: role to assume for downloading artifacts
+        required: false
+        type: string
+        default: ""
     secrets:
       GH_PYTORCHBOT_TOKEN:
         required: false
@@ -82,6 +96,14 @@ jobs:
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
 
+      - name: configure aws credentials
+        if : ${{ inputs.aws-role-to-assume != '' }}
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: ${{ inputs.aws-role-to-assume }}
+          role-session-name: gha-linux-test
+          aws-region: us-east-1
+
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
@@ -97,6 +119,7 @@ jobs:
         uses: ./.github/actions/download-build-artifacts
         with:
           name: ${{ inputs.build-environment }}
+          s3-bucket: ${{ inputs.s3-bucket }}
 
       - name: Generate netrc (only for docs-push)
         if: inputs.push
@@ -156,6 +179,14 @@ jobs:
         uses: ./.github/actions/chown-workspace
         if: always()
 
+      - name: configure aws credentials
+        if : ${{ inputs.upload-aws-role-to-assume != '' }}
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: ${{ inputs.upload-aws-role-to-assume }}
+          role-session-name: gha-linux-test
+          aws-region: us-east-1
+
       - name: Upload Python Docs Preview
         uses: seemethere/upload-artifact-s3@v5
         if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'python' && steps.build-docs.outcome == 'success' }}
@@ -163,7 +194,7 @@ jobs:
           retention-days: 14
           s3-bucket: doc-previews
           if-no-files-found: error
-          path: pytorch.github.io/docs/main/
+          path: pytorch_docs/main/
           s3-prefix: pytorch/pytorch/${{ github.event.pull_request.number }}
 
       - name: Upload C++ Docs Preview

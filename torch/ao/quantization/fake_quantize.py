@@ -120,6 +120,9 @@ class FakeQuantize(FakeQuantizeBase):
           clamp(round(x/scale + zero_point), quant_min, quant_max) - zero_point
         ) * scale
 
+    * :attr:`is_dynamic` indicates whether the fake quantie is a placeholder for dynamic quantization
+      operators (choose_qparams -> q -> dq) or static quantization operators (q -> dq)
+
     * :attr:`scale` defines the scale factor used for quantization.
 
     * :attr:`zero_point` specifies the quantized value to which 0 in floating point maps to
@@ -147,7 +150,7 @@ class FakeQuantize(FakeQuantizeBase):
     scale: torch.Tensor
     zero_point: torch.Tensor
 
-    def __init__(self, observer=MovingAverageMinMaxObserver, quant_min=None, quant_max=None, **observer_kwargs):
+    def __init__(self, observer=MovingAverageMinMaxObserver, quant_min=None, quant_max=None, is_dynamic=False, **observer_kwargs):
         super().__init__()
         # Populate quant_min/quant_max to observer_kwargs if valid
         if quant_min is not None and quant_max is not None:
@@ -163,11 +166,13 @@ class FakeQuantize(FakeQuantizeBase):
             assert torch.iinfo(dtype).min <= quant_min, 'quant_min out of bound'
             assert quant_max <= torch.iinfo(dtype).max, 'quant_max out of bound'
             observer_kwargs.update({"quant_min": quant_min, "quant_max": quant_max})
+        observer_kwargs["is_dynamic"] = is_dynamic
         self.activation_post_process = observer(**observer_kwargs)
         # TODO: keeping self.quant_min/max for BC; remove after a couple releases
         # Users should use self.activation_post_process.quant_min
         self.quant_min = self.activation_post_process.quant_min
         self.quant_max = self.activation_post_process.quant_max
+        self.is_dynamic = self.activation_post_process.is_dynamic
         if _is_float_qparams(self.activation_post_process.qscheme):
             zero_point_dtype = torch.float
         else:
@@ -212,12 +217,10 @@ class FakeQuantize(FakeQuantizeBase):
 
     @torch.jit.export
     def extra_repr(self):
-        return 'fake_quant_enabled={}, observer_enabled={}, ' \
-               'quant_min={}, quant_max={}, dtype={}, qscheme={}, ch_axis={}, ' \
-               'scale={}, zero_point={}'.format(
-                   self.fake_quant_enabled, self.observer_enabled,
-                   self.activation_post_process.quant_min, self.activation_post_process.quant_max,
-                   self.dtype, self.qscheme, self.ch_axis, self.scale, self.zero_point)
+        return f'fake_quant_enabled={self.fake_quant_enabled}, observer_enabled={self.observer_enabled}, ' \
+               f'quant_min={self.activation_post_process.quant_min}, quant_max={self.activation_post_process.quant_max}, ' \
+               f'dtype={self.dtype}, qscheme={self.qscheme}, ch_axis={self.ch_axis}, ' \
+               f'scale={self.scale}, zero_point={self.zero_point}'
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         # We cannot currently register scalar values as buffers, so need to manually
@@ -269,7 +272,7 @@ class FixedQParamsFakeQuantize(FakeQuantize):
     # TODO: rename observer to observer_ctr
     def __init__(self, observer):
         super().__init__(observer=observer)
-        assert type(self.activation_post_process) == FixedQParamsObserver,\
+        assert type(self.activation_post_process) == FixedQParamsObserver, \
             f"{self.__class__.__name__}'s observer must be a {FixedQParamsObserver.__name__}"
         self._observer_ctr = observer
         self.scale = self.activation_post_process.scale
@@ -284,11 +287,10 @@ class FixedQParamsFakeQuantize(FakeQuantize):
     @torch.jit.export
     def extra_repr(self):
         """Define a string representation of the object's attributes."""
-        return 'fake_quant_enabled={}, observer_enabled={}, scale={}, zero_point={}, ' \
-               'dtype={}, quant_min={}, quant_max={}, qscheme={}'.format(
-                   self.fake_quant_enabled, self.observer_enabled,
-                   self.scale, self.zero_point, self.dtype,
-                   self.activation_post_process.quant_min, self.activation_post_process.quant_max, self.qscheme)
+        return f'fake_quant_enabled={self.fake_quant_enabled}, observer_enabled={self.observer_enabled}, ' \
+               f'scale={self.scale}, zero_point={self.zero_point}, ' \
+               f'dtype={self.dtype}, quant_min={self.activation_post_process.quant_min}, ' \
+               f'quant_max={self.activation_post_process.quant_max}, qscheme={self.qscheme}'
 
 
 class FusedMovingAvgObsFakeQuantize(FakeQuantize):
@@ -317,7 +319,7 @@ class FusedMovingAvgObsFakeQuantize(FakeQuantize):
         **observer_kwargs: Any
     ) -> None:
         super().__init__(observer, quant_min, quant_max, **observer_kwargs)
-        assert isinstance(self.activation_post_process, (MovingAverageMinMaxObserver, MovingAveragePerChannelMinMaxObserver)),\
+        assert isinstance(self.activation_post_process, (MovingAverageMinMaxObserver, MovingAveragePerChannelMinMaxObserver)), \
             "Fused observer+fake_quant module only works with MovingAverageMinMaxObserver"
         self.register_buffer("fake_quant_enabled", torch.tensor([1], dtype=torch.long))
         self.register_buffer("observer_enabled", torch.tensor([1], dtype=torch.long))
@@ -330,18 +332,10 @@ class FusedMovingAvgObsFakeQuantize(FakeQuantize):
     @torch.jit.export
     def extra_repr(self) -> str:
         return (
-            "fake_quant_enabled={}, observer_enabled={}, scale={}, zero_point={}, "
-            "dtype={}, quant_min={}, quant_max={}, qscheme={}, reduce_range={}".format(
-                self.fake_quant_enabled,
-                self.observer_enabled,
-                self.scale,
-                self.zero_point,
-                self.dtype,
-                self.activation_post_process.quant_min,
-                self.activation_post_process.quant_max,
-                self.qscheme,
-                self.activation_post_process.reduce_range,
-            )
+            f"fake_quant_enabled={self.fake_quant_enabled}, observer_enabled={self.observer_enabled}, "
+            f"scale={self.scale}, zero_point={self.zero_point}, dtype={self.dtype}, "
+            f"quant_min={self.activation_post_process.quant_min}, quant_max={self.activation_post_process.quant_max}, "
+            f"qscheme={self.qscheme}, reduce_range={self.activation_post_process.reduce_range}"
         )
 
     def forward(self, X: torch.Tensor) -> torch.Tensor:
@@ -374,8 +368,9 @@ Default fake_quant for weights.
 Observer is memoryless since averaging_constant is 1.
 """
 
-default_dynamic_fake_quant = FakeQuantize.with_args(observer=MovingAverageMinMaxObserver, quant_min=0, quant_max=255,
-                                                    dtype=torch.quint8, averaging_constant=1)
+default_dynamic_fake_quant = FakeQuantize.with_args(
+    observer=MovingAverageMinMaxObserver, quant_min=0, quant_max=255, is_dynamic=True,
+    dtype=torch.quint8, averaging_constant=1)
 """
 Default dynamic fake_quant for activations.
 """

@@ -75,6 +75,7 @@ Sections start with a reference to the source file where the code related to the
   - [Testing Autodiff](#testing-autodiff)
 - [Python Printer](#python-printer)
 - [Python Bindings](#python-bindings)
+  - [Graph Manipulation](#graph-manipulation)
 
 <!-- tocstop -->
 
@@ -1522,3 +1523,13 @@ def forward(self,
 # Python Bindings
 
 TODO: Script Module, torch.jit.trace, __constant__ handling, weak script modules
+
+## Graph Manipulation
+
+Python bindings for manipulating TorchScript IR exists in [python_ir.cpp](https://github.com/pytorch/pytorch/blob/58e7ec5843e63ee044e0a4f5aa2583a056a64078/torch/csrc/jit/python/python_ir.cpp#L4). In general, graph structures should look the same as the representation described above in [Core Program Representation](#core-program-representation).
+
+Things to watch out for:
+* You may need to first inline your graph (`torch._C._jit_pass_inline`) or recursively traverse CallFunction nodes (`for x in graph.findAllNodes("prim::CallFunction")`) if you want to recursively modify your graph and the functions it calls
+* To insert a graph after node n, use the context manager `with graph.insert_point_guard(new_node)`
+
+See more examples in [test_python_ir.py](https://github.com/pytorch/pytorch/blob/main/test/jit/test_python_ir.py)

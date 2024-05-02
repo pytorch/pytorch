@@ -4,6 +4,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import torch
 import torch.fx
+
 from torch.fx._compatibility import compatibility
 from torch.fx.node import map_arg
 
@@ -109,13 +110,24 @@ class _MinimizerBase:
             [TensorOrTensors, TensorOrTensors, Names], Tuple[float, bool]
         ],
         settings: _MinimizerSettingBase,
+        module_exporter: Optional[
+            Callable[
+                [Tensors, torch.fx.GraphModule, str],
+                None
+            ]
+        ] = None,
+        exclusion_fn: Optional[
+            Callable[[NodeList, int, int], None]
+        ] = None,
     ):
         assert isinstance(module, torch.fx.GraphModule)
 
         self.module = module
         self.sample_input = sample_input
         self.compare_fn = compare_fn
+        self.module_exporter = module_exporter
         self.settings = settings
+        self.exclusion_fn = exclusion_fn
 
         # Stores outputs of run_a function
         self.a_outputs: Dict[str, Any] = {}
@@ -351,21 +363,34 @@ class _MinimizerBase:
             if node.op == "output":
                 result_key = map_arg(node.args, lambda x: x.name)
 
-        a_result = self.run_a(submodule, a_input)
-        b_result = self.run_b(submodule, b_input)
-        self._store_outputs(a_result, b_result, submodule)
+        try:
+            a_result = self.run_a(submodule, a_input)
+            b_result = self.run_b(submodule, b_input)
+            self._store_outputs(a_result, b_result, submodule)
+        except Exception as e:
+            report.append(f"Exception raised when running {submod_name}: {e}")
+            raise FxNetMinimizerRunFuncError(  # noqa: TRY200
+                f"Exception raised when running {submod_name}: {e}"
+            )
 
         # Compare results
         names: Names = output_names
         if output_names is None:
-            names = [str(v) for v in result_key]
+            names = [str(v) for v in result_key]  # type: ignore[possibly-undefined]
 
         numeric_result, bool_result = self.compare_fn(a_result, b_result, names)
 
-        self.results[result_key] = numeric_result
+        self.results[result_key] = numeric_result  # type: ignore[possibly-undefined]
         report.append(f"Numerical accuracy = {numeric_result}")
         if not bool_result:
             report.append(f"Result mismatch for {result_key}")
+            if self.module_exporter:
+                self.module_exporter(
+                    a_input, submodule, str(result_key[0]) + "_cpu",
+                )
+                self.module_exporter(
+                    b_input, submodule, str(result_key[0]) + "_acc",
+                )
             raise FxNetMinimizerResultMismatchError(f"Result mismatch for {result_key}")
 
     def _binary_search_impl(
@@ -374,26 +399,32 @@ class _MinimizerBase:
         """
         Recursive binary search implementation.
         """
+        culprits: NodeSet = set()
         nodes: NodeList = all_nodes[start_idx:end_idx]
 
         report: List[str] = []
-        self.reports.append(report)
+        if self.exclusion_fn is not None:
+            self.exclusion_fn(nodes, start_idx, end_idx)
+            if len(nodes) == 0:
+                report = ["All nodes are excluded by user"]
+                self.reports.append(report)
+                return culprits
+
+        first_node_name = nodes[0].name
+        output_node_name = nodes[-1].name
         self.iteration += 1
-        report.append(f"Binary search iteration {self.iteration}.")
+        self.reports.append(report)
+        report.append(f"Binary search iteration {self.iteration}")
         report.append(
-            f"From node index {start_idx} to {end_idx-1}. "
+            f"From node index {start_idx}:{first_node_name} to {end_idx-1}:{output_node_name}. "
             f"Size of the interested node list is {len(nodes)}"
         )
-
         cur_nodes: NodeSet = set(nodes)
-
-        for node in nodes:
-            if node in self.fusions:
-                cur_nodes.update(self.fusions[node])
 
         try:
             split_module, submod_name = self._build_submodule(cur_nodes)
-            self._run_and_compare(split_module, submod_name, [])
+            self._run_and_compare(split_module, submod_name, [output_node_name])
+
         except (FxNetMinimizerRunFuncError, FxNetMinimizerResultMismatchError):
 
             if len(nodes) == 1:
@@ -451,6 +482,14 @@ class _MinimizerBase:
             report.append(f"Visit node: {node.name}")
 
             _LOGGER.info("Visit node: %s", node.name)
+            node_list: NodeList = [node]
+            if self.exclusion_fn is not None:
+                self.exclusion_fn(node_list, -1, -1)
+                if len(node_list) == 0:
+                    report.append(f"User exclusion : {node.name}")
+                    self.print_report(report)
+                    return culprits
+
             cur_nodes: NodeSet = {node}
 
             if node in self.fusions:
@@ -472,6 +511,33 @@ class _MinimizerBase:
                 self.print_report(report)
                 if not self.settings.find_all:
                     return culprits
+
+        return culprits
+
+    def _defined_traverse(self, nodes: NodeList) -> NodeSet:
+        """
+        run user defined `nodes` and determine if it is a culprit.
+        """
+        culprits: NodeSet = set()
+        if self.exclusion_fn is not None:
+            self.exclusion_fn(nodes, -1, -1)
+        if len(nodes) == 0:
+            report = ["All nodes are excluded by user"]
+            self.reports.append(report)
+            return culprits
+
+        first_node_name = nodes[0].name
+        output_node_name = nodes[-1].name
+        report = [f"Defined graph from {first_node_name} to {output_node_name}"]
+        cur_nodes: NodeSet = set(nodes)
+        try:
+            split_module, submod_name = self._build_submodule(cur_nodes)
+            self._run_and_compare(split_module, submod_name, [output_node_name])
+            self.print_report(report)
+        except (FxNetMinimizerResultMismatchError, FxNetMinimizerRunFuncError):
+            report.append(f"Found culprit {cur_nodes}")
+            self.print_report(report)
+            return culprits
 
         return culprits
 
@@ -520,7 +586,14 @@ class _MinimizerBase:
         """
         culprits: NodeSet = set()
         nodes: NodeList = all_nodes[start_idx:end_idx]
-
+        cur_nodes: NodeSet = set(nodes)
+        if self.exclusion_fn is not None:
+            self.exclusion_fn(nodes, start_idx, end_idx)
+            cur_nodes = set(nodes)
+        else:
+            for node in nodes:
+                if node in self.fusions:
+                    cur_nodes.update(self.fusions[node])
         report: List[str] = []
         self.reports.append(report)
         self.iteration += 1
@@ -529,12 +602,6 @@ class _MinimizerBase:
             f"From node index {start_idx} to {end_idx-1}. "
             f"Size of the interested node list is {len(nodes)}"
         )
-
-        cur_nodes: NodeSet = set(nodes)
-
-        for node in nodes:
-            if node in self.fusions:
-                cur_nodes.update(self.fusions[node])
 
         try:
             split_module, submod_name = self._build_submodule(cur_nodes)
@@ -546,7 +613,7 @@ class _MinimizerBase:
             return culprits
         except (FxNetMinimizerRunFuncError):
             culprits.update(cur_nodes)
-            report.append(f"Found culprit from run error: {node}")
+            report.append(f"Found culprit from run error: {cur_nodes}")
             self.print_report(report)
             return culprits
         else:
@@ -678,9 +745,12 @@ class _MinimizerBase:
         if self.settings.traverse_method == "accumulate":
             return self._accumulate_traverse(nodes)
 
-        if(self.settings.traverse_method == "skip"):
+        if self.settings.traverse_method == "skip":
             if (skip_nodes is None):
                 raise RuntimeError("'skip_nodes' can't be None when 'traverse_method' is 'skip'.")
             return self._skip_traverse(nodes, skip_nodes)
+
+        if self.settings.traverse_method == "defined":
+            return self._defined_traverse(nodes)
 
         raise RuntimeError(f"Unknown traverse method {self.settings.traverse_method}!")

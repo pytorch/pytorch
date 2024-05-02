@@ -124,8 +124,8 @@ void THP_decodeInt16Buffer(
     bool do_byte_swap,
     size_t len) {
   for (const auto i : c10::irange(len)) {
-    dst[i] =
-        (int16_t)(do_byte_swap ? decodeUInt16ByteSwapped(src) : decodeUInt16(src));
+    dst[i] = (int16_t)(do_byte_swap ? decodeUInt16ByteSwapped(src)
+                                    : decodeUInt16(src));
     src += sizeof(int16_t);
   }
 }
@@ -136,8 +136,8 @@ void THP_decodeInt32Buffer(
     bool do_byte_swap,
     size_t len) {
   for (const auto i : c10::irange(len)) {
-    dst[i] =
-        (int32_t)(do_byte_swap ? decodeUInt32ByteSwapped(src) : decodeUInt32(src));
+    dst[i] = (int32_t)(do_byte_swap ? decodeUInt32ByteSwapped(src)
+                                    : decodeUInt32(src));
     src += sizeof(int32_t);
   }
 }
@@ -148,8 +148,8 @@ void THP_decodeInt64Buffer(
     bool do_byte_swap,
     size_t len) {
   for (const auto i : c10::irange(len)) {
-    dst[i] =
-        (int64_t)(do_byte_swap ? decodeUInt64ByteSwapped(src) : decodeUInt64(src));
+    dst[i] = (int64_t)(do_byte_swap ? decodeUInt64ByteSwapped(src)
+                                    : decodeUInt64(src));
     src += sizeof(int64_t);
   }
 }
