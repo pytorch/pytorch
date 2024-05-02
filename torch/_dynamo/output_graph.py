@@ -27,6 +27,7 @@ from torch.fx._lazy_graph_module import _make_graph_module  # type: ignore[attr-
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.symbolic_shapes import free_symbols, is_symbolic, ShapeEnv
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
+from torch.fx.passes.tensorify_float_inputs import tensorify_float_inputs
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from . import config, logging as torchdynamo_logging, variables
@@ -1240,6 +1241,9 @@ class OutputGraph:
                 self.shape_env,
                 name,
             )
+
+        tensorify_float_inputs(fx.GraphModule(root, self.graph), self.shape_env)
+
         # NB: deferred runtime asserts can keep graphargs live, so make sure
         # those are inserted before pruning
         self.remove_unused_graphargs()

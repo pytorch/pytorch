@@ -867,7 +867,7 @@ def bound_sympy(
         #      size variables can come with a lower bound of 2, as we specialise on 0 and 1
         unbounded_ranges: Dict[sympy.Symbol, ValueRanges] = {}
         for s in unbounded_vars:
-            assert s.is_integer  # type: ignore[attr-defined]
+            assert s.is_integer, f"{expr} {ranges}"  # type: ignore[attr-defined]
             if s.is_positive:  # type: ignore[attr-defined]
                 lower = 1
             elif s.is_nonnegative:  # type: ignore[attr-defined]
