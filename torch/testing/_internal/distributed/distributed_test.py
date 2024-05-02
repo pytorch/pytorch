@@ -82,7 +82,6 @@ from torch.testing._internal.common_utils import (
     IS_SANDCASTLE,
     skip_but_pass_in_sandcastle,
     skip_but_pass_in_sandcastle_if,
-    TemporaryFileName,
 )
 
 import torch.distributed.optim.post_localSGD_optimizer as post_localSGD_optimizer
@@ -209,11 +208,16 @@ def get_profiling_event(event_name, profiler, dedup_gpu_user_annotation=False):
 def get_profiler_nccl_meta(prof):
     """Torch profiler includes nccl metadata in an inserted operator called "record_param_comms"
     We will need to test metadata obtained from profiler here"""
-    with TemporaryFileName(mode="w+") as fname:
-        prof.export_chrome_trace(fname)
-        with open(fname) as f:
-            events = json.load(f)["traceEvents"]
-    print(f"Trace saved to {fname}")
+    tf = tempfile.NamedTemporaryFile(
+        mode="w+t", suffix=".json", delete=False
+    )
+    tf.close()
+    trace_file = tf.name
+
+    prof.export_chrome_trace(trace_file)
+    with open(trace_file) as f:
+        events = json.load(f)["traceEvents"]
+    print(f"Trace saved to {trace_file}")
 
     return [e for e in events if e.get("name") == "record_param_comms"]
 
@@ -675,7 +679,6 @@ class DistributedTest:
             """Torch profiler includes nccl metadata in an inserted operator called "record_param_comms"
             We test for basic fields in this profiler event that correspond to the nccl communication
             collectives"""
-            # prof.export_chrome_trace(f"/tmp/test_dpp_trace_{self.rank}.json")
             nccl_meta_events = get_profiler_nccl_meta(prof)
             self.assertGreater(len(nccl_meta_events), 0)
 
