@@ -209,7 +209,6 @@ class TorchBenchmarkRunner(BenchmarkRunner):
     @property
     def guard_on_nn_module_models(self):
         return {
-            "detectron2_fcos_r_50_fpn",
             "vision_maskrcnn",
         }
 
