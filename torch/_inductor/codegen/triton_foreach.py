@@ -6,6 +6,7 @@ from typing import Dict, List, Tuple
 from sympy import Integer
 
 from .. import metrics
+from ..runtime.hints import DeviceProperties
 from ..scheduler import SchedulerNode
 from ..utils import ceildiv, Placeholder
 from ..virtualized import V
@@ -157,8 +158,7 @@ class ForeachKernel(Kernel):
         _, _, signature = self.args.python_argdefs()
         triton_meta = {
             "signature": signature_to_meta(signature, size_dtype=size_dtype),
-            "device": V.graph.scheduler.current_device.index,
-            "device_type": V.graph.scheduler.current_device.type,
+            "device": DeviceProperties.create(V.graph.scheduler.current_device),
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]

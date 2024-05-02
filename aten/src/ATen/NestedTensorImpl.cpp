@@ -81,7 +81,7 @@ inline std::vector<int64_t> construct_opt_sizes(const at::Tensor& sizes) {
   std::vector<int64_t> result(1, sizes.sizes()[0]);
   if (sizes.dim() > 0) {
     size_t nested_dim = result.size();
-    int64_t* sizes_ptr = sizes.data_ptr<int64_t>();
+    const int64_t* sizes_ptr = sizes.const_data_ptr<int64_t>();
     result.resize(nested_dim + sizes.sizes()[1]);
     int64_t sizes_size_0 = sizes.sizes()[0];
     int64_t sizes_size_1 = sizes.sizes()[1];
@@ -114,7 +114,7 @@ at::Tensor construct_nested_strides(const at::Tensor& sizes) {
     return sizes;
   }
   at::Tensor strides = sizes.new_empty(sizes.sizes());
-  const int64_t* sizes_ptr = sizes.data_ptr<int64_t>();
+  const int64_t* sizes_ptr = sizes.const_data_ptr<int64_t>();
   int64_t* strides_ptr = strides.data_ptr<int64_t>();
   for (int64_t i = 0; i < sizes.size(0); i++) {
     strides_ptr[orig_dim - 1] = 1;
@@ -152,7 +152,7 @@ at::Tensor construct_offsets(const at::Tensor& sizes) {
     std::iota(offsets_ptr, offsets_ptr + ntensors, 0);
     return offsets;
   }
-  const int64_t* sizes_ptr = sizes.data_ptr<int64_t>();
+  const int64_t* sizes_ptr = sizes.const_data_ptr<int64_t>();
   offsets_ptr[0] = 0;
   for (const auto i : c10::irange(ntensors - 1)) {
     const int64_t row_product = std::accumulate(sizes_ptr, sizes_ptr + orig_dim, 1, std::multiplies());
@@ -344,7 +344,7 @@ int64_t get_numel_from_nested_size_tensor(const at::Tensor& tensor) {
       static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
       static_cast<uint64_t>(std::numeric_limits<size_t>::max()));
 
-  const int64_t* sizes_ptr = tensor.data_ptr<int64_t>();
+  const int64_t* sizes_ptr = tensor.const_data_ptr<int64_t>();
   const auto nt_dim = tensor.size(1);
   uint64_t num_elements{0};
 

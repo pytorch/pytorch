@@ -323,7 +323,7 @@ void cacheAllocatorDeregisterHook(
   }
 }
 
-#if defined(IS_NCCL_EXP) && defined(NCCL_COMM_DUMP)
+#if defined(IS_NCCLX) && defined(NCCL_COMM_DUMP)
 std::string dump_nccl_trace() {
   std::unordered_map<
       std::string /* ncclUniqueID */,
@@ -2999,7 +2999,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_sparse(
     const AllreduceOptions& opts) {
   TORCH_CHECK(tensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
   auto tensor = tensors.back();
-#ifdef IS_NCCL_EXP
+#ifdef IS_NCCLX
   tensor = tensor.coalesce();
   at::Tensor outputTensor =
       torch::zeros(tensor.sizes(), tensor.options().layout(torch::kStrided));

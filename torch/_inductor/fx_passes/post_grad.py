@@ -44,7 +44,7 @@ from ..pattern_matcher import (
 from ..utils import decode_device, is_pointwise_use
 from ..virtualized import V
 from .ddp_fusion import fuse_ddp_communication
-from .group_batch_fusion import group_batch_fusion_passes
+from .group_batch_fusion import group_batch_fusion_passes, POST_GRAD_FUSIONS
 from .pre_grad import is_same_dict, save_inductor_dict
 from .reinplace import reinplace_inplaceable_ops
 from .split_cat import POST_GRAD_PATTERNS
@@ -54,7 +54,6 @@ log = logging.getLogger(__name__)
 aten = torch.ops.aten
 prims = torch.ops.prims
 
-pattern_matcher_passes = POST_GRAD_PATTERNS.values()
 # First pass_patterns[0] are applied, then [1], then [2]
 pass_patterns = [
     PatternMatcherPass(),
@@ -89,7 +88,11 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         remove_noop_ops(gm.graph)
         for patterns in pass_patterns:
             patterns.apply(gm.graph)  # type: ignore[arg-type]
-        for pattern_matcher_pass in pattern_matcher_passes:
+        for pass_name in config.post_grad_fusion_options:
+            # skip all patterns for group batch fusions
+            if pass_name in POST_GRAD_FUSIONS:
+                continue
+            pattern_matcher_pass = POST_GRAD_PATTERNS[pass_name]
             inductor_before_change = save_inductor_dict(
                 [pattern_matcher_pass.pass_name]
             )
