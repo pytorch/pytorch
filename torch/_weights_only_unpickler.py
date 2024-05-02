@@ -77,6 +77,7 @@ def _mark_safe_globals(safe_globals: List[Any]):
 
 
 def _get_safe_globals() -> List[Any]:
+    global _marked_safe_globals_list
     return _marked_safe_globals_list
 
 

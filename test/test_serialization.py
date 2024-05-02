@@ -29,7 +29,7 @@ from torch.serialization import check_module_version_greater_or_equal, get_defau
 from torch.testing._internal.common_utils import (
     IS_FILESYSTEM_UTF8_ENCODING, TemporaryDirectoryName,
     TestCase, IS_WINDOWS, TEST_DILL, run_tests, download_file, BytesIOContext, TemporaryFileName,
-    parametrize, instantiate_parametrized_tests, AlwaysWarnTypedStorageRemoval, serialTest)
+    parametrize, instantiate_parametrized_tests, AlwaysWarnTypedStorageRemoval, serialTest, skipIfTorchDynamo)
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_dtype import all_types_and_complex_and
 
@@ -4130,6 +4130,7 @@ class TestSubclassSerialization(TestCase):
             f.seek(0)
             tensor2 = torch.load(f)
 
+    @skipIfTorchDynamo("name 'SYNTHETIC_LOCAL' is not defined")
     def test_safe_globals_for_weights_only(self):
         # Doing the import here as this test later dels the import from sys.modules
         from torch.testing._internal.two_tensor import TwoTensor
@@ -4198,6 +4199,8 @@ class TestSubclassSerialization(TestCase):
         with BytesIOContext() as f:
             torch.save(inp, f)
             f.seek(0)
+            loaded = torch.load(f, weights_only=True)
+            self.assertEqual(loaded['weight'], inp['weight'])
 
             restore_methods = dict()
             methods = [func for func in dir(subclass) if callable(getattr(subclass, func))]
@@ -4207,6 +4210,7 @@ class TestSubclassSerialization(TestCase):
                     setattr(subclass, method, self._create_bad_func(method))
             try:
                 # Unsafe load should attempt to run __getattribute__ in rebuild_tensor_v2
+                f.seek(0)
                 with self.assertRaisesRegex(RuntimeError, "running __getattribute__"):
                     torch.load(f, weights_only=False)
                 f.seek(0)
@@ -4226,10 +4230,6 @@ class TestSubclassSerialization(TestCase):
                 subclass.__setattr__ = restore_methods['__setattr__']
                 f.seek(0)
                 loaded = torch.load(f, weights_only=True)
-                # Need to restore to do the `assertEqual`
-                for method, func in restore_methods.items():
-                    setattr(subclass, method, func)
-                self.assertEqual(loaded['weight'], inp['weight'])
             finally:
                 for method, func in restore_methods.items():
                     setattr(subclass, method, func)
@@ -4242,7 +4242,7 @@ class TestSubclassSerialization(TestCase):
 
         spoof_mod = SpoofModule('bla')
         spoof_mod.TestEmptySubclass = TestEmptySubclass
-        inp = TestEmptySubclass(torch.randn(2, 3))
+        inp = {'weight': TestEmptySubclass(torch.randn(2, 3))}
         TestEmptySubclass.__module__ = 'spoof_mod'
         sys.modules['spoof_mod'] = spoof_mod
 
