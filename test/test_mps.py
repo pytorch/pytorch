@@ -3158,7 +3158,7 @@ class TestMPS(TestCaseMPS):
         helper((2, 8, 4, 5))
 
     def test_rand_like(self):
-        t = torch.ones(3,2,2).to('mps').permute(2,0,1)
+        t = torch.ones(3, 2, 2).to('mps').permute(2, 0, 1)
         t_rand = torch.rand_like(t)
 
         self.assertFalse(torch.allclose(t_rand, t))
