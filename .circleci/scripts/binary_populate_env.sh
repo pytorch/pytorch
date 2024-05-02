@@ -5,7 +5,9 @@ export TZ=UTC
 tagged_version() {
   GIT_DIR="${workdir}/pytorch/.git"
   GIT_DESCRIBE="git --git-dir ${GIT_DIR} describe --tags --match v[0-9]*.[0-9]*.[0-9]*"
-  if [[ ! -d "${GIT_DIR}" ]]; then
+  if [[ -n "${CIRCLE_TAG:-}" ]]; then
+    echo "${CIRCLE_TAG}"
+  elif [[ ! -d "${GIT_DIR}" ]]; then
     echo "Abort, abort! Git dir ${GIT_DIR} does not exists!"
     kill $$
   elif ${GIT_DESCRIBE} --exact >/dev/null; then
