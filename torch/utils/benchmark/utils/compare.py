@@ -315,6 +315,7 @@ class Compare:
         self._highlight_warnings = True
 
     def print(self):
+        """Print formatted table"""
         print(str(self))
 
     def _render(self):
