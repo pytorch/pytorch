@@ -1,13 +1,13 @@
 #pragma once
 
+#ifdef USE_C10D_NCCL
+
 #if defined(__linux__)
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 #endif
-
-#ifdef USE_C10D_NCCL
 
 #include <atomic>
 #include <chrono>
