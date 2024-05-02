@@ -1516,7 +1516,7 @@ void _linalg_check_errors(
   } else {
     // Find the first non-zero info
     auto infos_cpu = infos.to(at::kCPU);
-    auto ptr = infos_cpu.data_ptr<int32_t>();
+    auto ptr = infos_cpu.const_data_ptr<int32_t>();
     auto n = infos.numel();
     auto info_ptr = std::find_if(ptr, ptr + n, [](int32_t x) { return x != 0; });
     info = *info_ptr;
@@ -2794,13 +2794,13 @@ static void linalg_eig_make_complex_eigenvectors_impl(Tensor& result, const Tens
   auto matrix_stride = matrixStride(real_vectors);
 
   auto result_data = result.data_ptr<c10::complex<scalar_t>>();
-  auto real_vectors_data = real_vectors.data_ptr<scalar_t>();
-  auto values_data = complex_values.data_ptr<c10::complex<scalar_t>>();
+  auto real_vectors_data = real_vectors.const_data_ptr<scalar_t>();
+  auto values_data = complex_values.const_data_ptr<c10::complex<scalar_t>>();
 
   for (auto b = decltype(batch_size){0}; b < batch_size; b++) {
-    scalar_t* vecs = &real_vectors_data[b * matrix_stride];
+    const scalar_t* vecs = &real_vectors_data[b * matrix_stride];
     c10::complex<scalar_t>* res = &result_data[b * matrix_stride];
-    c10::complex<scalar_t>* vals = &values_data[b * n];
+    const c10::complex<scalar_t>* vals = &values_data[b * n];
     for (auto j = decltype(n){0}; j < n; j++) {
       if (vals[j].imag() == 0.0) {  // eigenvalue is real, then v(j) = VR(:,j)
         for (auto i = decltype(n){0}; i < n; i++) {
