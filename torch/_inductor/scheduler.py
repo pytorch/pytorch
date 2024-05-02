@@ -28,6 +28,7 @@ import sympy
 import torch
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
+from torch.utils._sympy.symbol import free_symbol_is_type, SymT
 from torch.utils._triton import has_triton
 
 from . import comms, config, dependencies, ir, metrics
@@ -41,7 +42,6 @@ from .utils import (
     cache_on_self,
     cmp,
     device_need_guard,
-    free_symbol_has,
     get_device_tflops,
     get_dtype_size,
     get_gpu_dram_gbps,
@@ -2192,8 +2192,8 @@ class Scheduler:
             return (
                 self.mutation_renames.get(read.name, read.name) == write.name
                 and (isinstance(read, MemoryDep) and isinstance(write, MemoryDep))
-                and not free_symbol_has(read.index, "tmp")
-                and not free_symbol_has(write.index, "tmp")
+                and not free_symbol_is_type(read.index, SymT.TMP)
+                and not free_symbol_is_type(write.index, SymT.TMP)
                 and read.index == write.index
                 and len(read.size) >= len(write.size)
                 and read.size[: len(write.size)] == write.size

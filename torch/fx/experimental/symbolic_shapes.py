@@ -68,6 +68,7 @@ from torch.utils._traceback import format_frame, CapturedTraceback
 from torch._utils_internal import signpost_event
 from torch._subclasses.meta_utils import is_sparse_any
 import torch.utils._pytree as pytree
+from torch.utils._sympy.symbol import SymT, make_symbol, symbol_is_type
 
 from torch._logging import LazyString
 
@@ -439,7 +440,7 @@ def has_free_symbols(val: Union[SymInt, torch.Tensor]) -> bool:
 # Like free_symbols, but filtered to only report unbacked symbols
 def free_unbacked_symbols(x):
     # NB: keep synced with is_unbacked_symint
-    return {s for s in free_symbols(x) if s.name.startswith(("u", "f"))}
+    return {s for s in free_symbols(x) if symbol_is_type(s, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT))}
 
 # WARNING: Don't use this on Dynamo produced graphs, they don't have meta
 # setup!
@@ -1644,7 +1645,7 @@ class DimConstraints:
                 # We are given a congruence of the form base % divisor == 0 with a free variable s. So:
                 # - we transform this into an equation of the form base = divisor * tmp;
                 # - we solve this equation for s to get a linear solution with free variable tmp.
-                tmp = sympy.Symbol("tmp", integer=True)
+                tmp = sympy.Symbol("reduce_congruences_tmp", integer=True)
                 symbol, solution = sympy.solve_linear(base - divisor * tmp, symbols=[s])
                 # See https://docs.sympy.org/latest/modules/solvers/solvers.html#sympy.solvers.solvers.solve_linear
                 # for how to interpret the results.
@@ -2998,7 +2999,7 @@ class ShapeEnv:
     def create_unbacked_symfloat(self):
         """Create a symbolic float without a hint value
         """
-        symbol: sympy.Symbol = sympy.Symbol(f"f{next(self.unbacked_symfloat_counter)}")
+        symbol: sympy.Symbol = make_symbol(SymT.UNBACKED_FLOAT, next(self.unbacked_symfloat_counter))
         self.counter["create_unbacked_symbol"] += 1
         if not self._ignore_fresh_unbacked_symbols_tls():
             self.pending_fresh_unbacked_symbols.append(symbol)
@@ -3016,7 +3017,7 @@ class ShapeEnv:
     def create_unbacked_symint(self):
         """Create a symbolic integer without a hint value
         """
-        symbol: sympy.Symbol = sympy.Symbol(f"u{next(self.unbacked_symint_counter)}", integer=True)
+        symbol: sympy.Symbol = make_symbol(SymT.UNBACKED_INT, next(self.unbacked_symint_counter), integer=True)
         if not self._ignore_fresh_unbacked_symbols_tls():
             self.pending_fresh_unbacked_symbols.append(symbol)
         self.counter["create_unbacked_symbol"] += 1
@@ -3033,14 +3034,13 @@ class ShapeEnv:
     def is_unbacked_symint(self, symbol: sympy.Symbol) -> bool:
         """Check if a sympy symbol matches the naming convention for unbacked symbols
         """
-        # NB: keep synced with free_unbacked_symbols
-        return str(symbol).startswith("u")
+        return symbol_is_type(symbol, SymT.UNBACKED_INT)
 
     @record_shapeenv_event()
     def create_unbacked_symbool(self):
         """Create a symbolic boolean without a hint value
         """
-        symbol: sympy.Symbol = sympy.Symbol(f"u{next(self.unbacked_symint_counter)}", integer=True)
+        symbol: sympy.Symbol = make_symbol(SymT.UNBACKED_INT, next(self.unbacked_symint_counter), integer=True)
         if not self._ignore_fresh_unbacked_symbols_tls():
             self.pending_fresh_unbacked_symbols.append(symbol)
         self.counter["create_unbacked_symbol"] += 1
@@ -3152,7 +3152,7 @@ class ShapeEnv:
             # If we're not duck shaping, we always create a new symbol
             # Even if we're duck shaping, if we haven't seen this particular
             # value before, we also create a new symbol
-            sympy_expr = sympy.Symbol(f"s{len(self.var_to_val)}", positive=positive, integer=True)
+            sympy_expr = make_symbol(SymT.SIZE, len(self.var_to_val), positive=positive, integer=True)
             # We always associate vars to vals
             if isinstance(val, int):
                 self.var_to_val[sympy_expr] = sympy.Integer(val)
@@ -4063,7 +4063,7 @@ class ShapeEnv:
             # we have to increase it by offset (and conversely, the new
             # variables have to have their value range bounds adjusted as
             # well)
-            s = sympy.Symbol(f"shape_{idx}", positive=True, integer=True)
+            s = sympy.Symbol(f"evaluate_static_shape_{idx}", positive=True, integer=True)
 
             # Note:
             #   Offset might be a fraction(e.g. aten.split.Tensor), but shapes are always integers.
@@ -4847,7 +4847,7 @@ class ShapeEnv:
             stack = CapturedTraceback.extract(skip=1)
             ra = RuntimeAssert(expr, msg, stack)
             # TODO: Do this in a way that is less janky than int(s.name[1:])
-            cands = sorted([s for s in expr.free_symbols if s.name.startswith("u")], key=lambda s: int(s.name[1:]))
+            cands = sorted([s for s in expr.free_symbols if symbol_is_type(s, SymT.UNBACKED_INT)], key=lambda s: int(s.name[1:]))
             # Is None when prefer_deferred_runtime_asserts_over_guards=True
             # and the guard in question has no unbacked SymInts in front
             ix = cands[-1] if cands else None
