@@ -1,6 +1,7 @@
 import collections
 import dataclasses
 import io
+import operator
 import os
 import pickle
 import queue
@@ -28,8 +29,8 @@ import torch
 from torch import Tensor
 from torch._utils import _get_available_device_type, _get_device_module
 from torch.distributed._shard._utils import narrow_tensor_by_index
+from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
 from torch.distributed.checkpoint.staging import BlockingAsyncStager
-
 from torch.futures import Future
 
 from .metadata import Metadata, MetadataIndex
@@ -180,7 +181,7 @@ class _OverlappingCpuLoader(_TensorLoader):
         if self.started:
             return
         self.started = True
-        self.items.sort(key=lambda x: x[0])
+        self.items.sort(key=operator.itemgetter(0))
         self._refill()
 
     def values(self) -> Iterator[Tuple[torch.Tensor, object]]:
@@ -221,7 +222,7 @@ def _split_by_size_and_type(bins: int, items: List[WriteItem]) -> List[List[Writ
 
     for wi in tensor_w:
         # TODO replace with headq
-        idx = min(enumerate(bucket_sizes), key=lambda x: x[1])[0]
+        idx = min(enumerate(bucket_sizes), key=operator.itemgetter(1))[0]
         buckets[idx].append(wi)
         bucket_sizes[idx] += _item_size(wi)
 
@@ -450,10 +451,10 @@ class _FileSystemWriter(StorageWriter):
         self.fs.mkdir(self.path)
         return plan
 
-    def prepare_global_plan(self, global_plan: List[SavePlan]) -> List[SavePlan]:
+    def prepare_global_plan(self, plans: List[SavePlan]) -> List[SavePlan]:
         new_plans = [
             dataclasses.replace(plan, storage_data=_StoragePrefix(f"__{i}_"))
-            for i, plan in enumerate(global_plan)
+            for i, plan in enumerate(plans)
         ]
         return new_plans
 
@@ -622,8 +623,8 @@ class FileSystemReader(StorageReader):
     def prepare_local_plan(self, plan: LoadPlan) -> LoadPlan:
         return plan
 
-    def prepare_global_plan(self, global_plan: List[LoadPlan]) -> List[LoadPlan]:
-        return global_plan
+    def prepare_global_plan(self, plans: List[LoadPlan]) -> List[LoadPlan]:
+        return plans
 
     @property
     def checkpoint_id(self) -> Union[str, os.PathLike]:
