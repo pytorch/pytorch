@@ -1,7 +1,6 @@
 import logging
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
-from ... import ir
 from ...autotune_process import CUDABenchmarkRequest
 from ...ir import (
     Buffer,
@@ -144,7 +143,9 @@ class CUDATemplateKernel(CUDAKernel):
         return f"PT_EXPORT int {self.kernel_name}({', '.join(arg_defs)}, {self._EXTRA_CPP_ARGS})"
 
     def call_kernel(
-        self, name: str, node: "CUDATemplateBuffer", epilogue_nodes: List[ir.Buffer]  # type: ignore[name-defined]
+        self,
+        name: str,
+        node: "CUDATemplateBuffer",  # type: ignore[name-defined]
     ) -> None:
         """
         Generates code to call the kernel through V.graph.wrapper_code.
@@ -188,6 +189,23 @@ class CUDATemplateKernel(CUDAKernel):
         if node is None:
             return "void"
         return DTYPE_TO_CPP.get(node.get_layout().dtype)
+
+    def cutlass_dtype(self, node: IRNode, default_dtype="void") -> Optional[str]:
+        # Helper method, called into from CUTLASSGemmTemplate
+        if node is None:
+            return default_dtype
+        from torch._inductor.codegen.cuda.cuda_template import CUTLASSTemplate
+
+        return CUTLASSTemplate._DTYPE_TO_CUTLASS[node.get_layout().dtype]
+
+    def max_valid_index(self, node: IRNode, default=-1):
+        # Helper method, called into from CUTLASSGemmTemplate
+        if node is None:
+            return default
+        max_valid_offset = 0
+        for i in range(len(node.get_size())):
+            max_valid_offset += (node.get_size()[i] - 1) * node.get_stride()[i]
+        return max_valid_offset
 
     def offset(self, node: IRNode) -> str:
         """
@@ -343,13 +361,6 @@ class CUDATemplateCaller(ChoiceCaller):
         """Information returned here is logged to the autotune log file when that is enabled."""
         if self.info_kwargs is not None and "op" in self.info_kwargs:
             op: Any = self.info_kwargs["op"]
-            epilogue_node_names: List[str] = [
-                getattr(en, "name", "no_name")
-                for en in self.info_kwargs.get("epilogue_nodes", [])  # type: ignore[union-attr]
-            ]
-            epilogue_node_strs: List[str] = [
-                str(en) for en in self.info_kwargs.get("epilogue_nodes", [])  # type: ignore[union-attr]
-            ]
             return {
                 "backend": "CUDA",
                 "op_type": type(op).__name__,
@@ -360,8 +371,6 @@ class CUDATemplateCaller(ChoiceCaller):
                 "kernel_schedule": str(op.kernel_schedule),
                 "element_accumulator": str(op.accumulator_type()),
                 "op_name": str(op.procedural_name()),
-                "epilogue_node_names": epilogue_node_names,  # type: ignore[dict-item]
-                "epilogue_node_strs": epilogue_node_strs,  # type: ignore[dict-item]
                 "instruction_shape": str(
                     op.tile_description.math_instruction.instruction_shape
                 ),

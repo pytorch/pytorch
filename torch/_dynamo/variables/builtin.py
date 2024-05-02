@@ -1186,6 +1186,11 @@ class BuiltinVariable(VariableTracker):
                         obj.source.make_guard(GuardBuilder.TUPLE_ITERATOR_LEN)
                     )
                 else:
+                    if getattr(obj, "source", False) and isinstance(
+                        obj, ConstDictVariable
+                    ):
+                        tx.output.guard_on_key_order.add(obj.source.name())
+
                     install_guard(obj.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
 
             if self.fn == iter and isinstance(obj, variables.RangeVariable):
