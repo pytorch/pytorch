@@ -8,6 +8,7 @@ from torch.nn.modules.module import (
 )
 from torch.utils._pytree import tree_flatten
 
+from typing import Set
 
 class ModuleTracker:
     """
@@ -16,7 +17,8 @@ class ModuleTracker:
     executed).
 
     You can access the ``parents`` attribute on this context manager to get the set of all the
-    Modules currently being executed via their fqn.
+    Modules currently being executed via their fqn (fully qualified named, also used as the key within
+    the state_dict).
     You can access the ``is_bw`` attribute to know if you are currently running in backward or not.
 
     Note that the ``parents`` is never empty and always contains the "Global" key. The ``is_bw`` flag
@@ -38,6 +40,16 @@ class ModuleTracker:
 
             mod(torch.rand(2, 2))
 
+    """
+
+    parents: Set[str]
+    """
+    A Set containing the fqn for each module currently running their forward
+    """
+
+    is_bw: bool
+    """
+    A boolean marking if this is currently running during the backward pass or not
     """
 
     def __init__(self):
