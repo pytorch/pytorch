@@ -99,7 +99,7 @@ def _get_value(x):
     if not torch.jit.is_scripting() and is_compiling():
         return x
     else:
-        return x.item()
+        return x.item() if isinstance(x, torch.Tensor) else x
 
 
 def _stack_if_compiling(x):
@@ -116,6 +116,16 @@ def _dispatch_sqrt(
         return x.sqrt()
     else:
         return math.sqrt(x)
+
+
+def _disable_dynamo_if_unsupported(func):
+    def maybe_fallback(self, *args, **kwargs):
+        if is_compiling() and not kwargs.get("capturable", False):
+            torch._disable_dynamo(functools.partial(func))(self, *args, **kwargs)
+        else:
+            func(self, *args, **kwargs)
+
+    return maybe_fallback
 
 
 # For any optimizer with a faster implementation, we attempt to default to the

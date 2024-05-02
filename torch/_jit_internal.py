@@ -380,7 +380,12 @@ def get_type_hint_captures(fn):
     # This may happen in cases where the function is synthesized dynamically at runtime.
     src = loader.get_source(fn)
     if src is None:
-        src = inspect.getsource(fn)
+        try:
+            src = inspect.getsource(fn)
+        except OSError as e:
+            raise OSError(
+                f"Failed to get source for {fn} using inspect.getsource"
+            ) from e
 
     # Gather a dictionary of parameter name -> type, skipping any parameters whose annotated
     # types are strings. These are only understood by TorchScript in the context of a type annotation
@@ -981,7 +986,7 @@ def _get_overloaded_methods(method, mod_class):
     mod_class_fileno = get_source_lines_and_file(mod_class)[1]
     mod_end_fileno = mod_class_fileno + len(get_source_lines_and_file(mod_class)[0])
     if not (method_line_no >= mod_class_fileno and method_line_no <= mod_end_fileno):
-        raise Exception(
+        raise Exception(  # noqa: TRY002
             "Overloads are not useable when a module is redeclared within the same file: "
             + str(method)
         )

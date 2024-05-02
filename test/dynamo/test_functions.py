@@ -54,6 +54,16 @@ def constant3(a, b):
     return a - b + (1.0 + 2)
 
 
+_variable = 0
+
+
+def update_global(x):
+    global _variable
+    _variable += 1
+    # Check that updated global variable value is picked up
+    return x * _variable
+
+
 def func_with_default(a, b, some_default_arg=True):
     if some_default_arg:
         return a - b
@@ -682,6 +692,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return x - 1
 
     @make_test
+    def test_tensor_is_complex(x):
+        if x.is_complex():
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
     def test_get_privateuse1_name(x):
         if torch._C._get_privateuse1_backend_name() == "privateuseone":
             return x + 1
@@ -1283,6 +1300,22 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_namedtuple_user_methods(a, b):
         mytuple = FunctionTests.MyNamedTuple(a, b)
         return mytuple.add(), mytuple.static_method(), mytuple.class_method()
+
+    @make_test
+    def test_namedtuple_hasattr(a, b):
+        mytuple = FunctionTests.MyNamedTuple(a, b)
+
+        def isinstance_namedtuple(obj) -> bool:
+            return (
+                isinstance(obj, tuple)
+                and hasattr(obj, "_asdict")
+                and hasattr(obj, "_fields")
+            )
+
+        if isinstance_namedtuple(mytuple):
+            return a + b
+        else:
+            return a - b
 
     @make_test
     def test_is_quantized(a, b):

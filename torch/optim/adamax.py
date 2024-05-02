@@ -7,6 +7,7 @@ from .optimizer import (
     _capturable_doc,
     _default_to_fused_or_foreach,
     _differentiable_doc,
+    _disable_dynamo_if_unsupported,
     _foreach_doc,
     _get_scalar_dtype,
     _get_value,
@@ -215,6 +216,7 @@ Adamax.__doc__ = (
 )
 
 
+@_disable_dynamo_if_unsupported
 def adamax(
     params: List[Tensor],
     grads: List[Tensor],
@@ -448,7 +450,7 @@ def _multi_tensor_adamax(
             bias_corrections = [
                 1 - beta1 ** _get_value(step) for step in grouped_state_steps
             ]
-            step_size = [(lr / bc) * -1 for bc in bias_corrections]
+            step_size = [(_get_value(lr) / bc) * -1 for bc in bias_corrections]
             torch._foreach_addcdiv_(
                 grouped_params, grouped_exp_avgs, grouped_exp_infs, step_size
             )
