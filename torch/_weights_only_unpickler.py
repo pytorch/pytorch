@@ -169,6 +169,7 @@ class Unpickler:
         self.readline = file.readline
         self.read = file.read
         self.memo: Dict[int, Any] = {}
+        self.tensor_subclasses_found = set()
 
     def load(self):
         """Read a pickled object representation from the open file.
@@ -269,6 +270,7 @@ class Unpickler:
                                     f"version for one of these methods:{error}. Please check whether you trust these "
                                     "methods and allowlist the subclass with `torch.serialization.mark_safe_globals` if so."
                                 )
+                            self.tensor_subclasses_found.add(class_type)
                             self.append(class_type)
                         else:
                             raise RuntimeError(f"Unsupported class {full_path}")
@@ -288,15 +290,21 @@ class Unpickler:
                     raise RuntimeError(
                         f"Trying to call reduce for unrecognized function {func}"
                     )
-                # Prevent tensor subclass that is pushed onto stack in GLOBAL from
-                # being instantiated by the func(*args)
-                if (
+                # Prevent tensor subclass type that is pushed onto stack in GLOBAL from
+                # being passed as arg anywhere except the first arg of _rebuild_from_type_v2
+                arg_is_subclass_type = [
+                    i
+                    for i, arg in enumerate(args)
+                    if isinstance(arg, type) and arg in self.tensor_subclasses_found
+                ]
+                if len(arg_is_subclass_type) > 0 and not (
                     func is torch._tensor._rebuild_from_type_v2
-                    and args[0] not in _tensor_rebuild_functions()
+                    and arg_is_subclass_type == [1]
                 ):
                     raise RuntimeError(
-                        f"Trying to call _rebuild_from_type_v2 with unsupported first arg {args[0]}"
+                        "user defined tensor subclasses can only be passed as the second arg of _rebuild_from_type_v2"
                     )
+
                 self.stack[-1] = func(*args)
             elif key[0] == BUILD[0]:
                 state = self.stack.pop()

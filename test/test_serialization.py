@@ -4310,7 +4310,7 @@ class TestSubclassSerialization(TestCase):
 
         with TemporaryFileName() as f:
             torch.save(inp, f)
-            with self.assertRaisesRegex(pickle.UnpicklingError, "_rebuild_from_type_v2 with unsupported first arg"):
+            with self.assertRaisesRegex(pickle.UnpicklingError, "second arg of _rebuild_from_type_v2"):
                 loaded = torch.load(f, weights_only=True)
 
 
