@@ -557,6 +557,8 @@ def _export_non_strict(
             return TensorArgument(name=node.name)
         elif isinstance(val, torch.SymInt):
             return SymIntArgument(name=node.name)
+        elif isinstance(val, torch.ScriptObject):
+            return CustomObjArgument(name=node.name, class_fqn=val._type().qualified_name())  # type: ignore[attr-defined]
         elif isinstance(val, FakeScriptObject):
             return CustomObjArgument(name=node.name, class_fqn=val.script_class_name)
         elif isinstance(val, (int, bool, str, float, type(None))):
@@ -596,7 +598,7 @@ def _export_non_strict(
     )
 
     constants = rewrite_script_object_meta(gm)
-    attr_constants = lift_constants_pass(gm, export_graph_signature, constant_attrs)
+    constants.update(lift_constants_pass(gm, export_graph_signature, constant_attrs))
 
     # prettify names for placeholder nodes
     placeholder_naming_pass(
