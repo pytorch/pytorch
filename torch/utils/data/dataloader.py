@@ -597,7 +597,17 @@ class _BaseDataLoaderIter:
         self._timeout = loader.timeout
         self._collate_fn = loader.collate_fn
         self._sampler_iter = iter(self._index_sampler)
-        self._base_seed = torch.empty((), dtype=torch.int64).random_(generator=loader.generator).item()
+
+        def init_base_seed():
+            tmp_generator = torch.Generator()
+            if loader.generator is None:
+                initial_seed = torch.initial_seed()
+            else:
+                initial_seed = loader.generator.initial_seed()
+            tmp_generator.manual_seed(initial_seed)
+            return torch.empty((), dtype=torch.int64).random_(generator=tmp_generator).item()
+
+        self._base_seed = init_base_seed()
         self._persistent_workers = loader.persistent_workers
         self._num_yielded = 0
         self._profile_name = f"enumerate(DataLoader)#{self.__class__.__name__}.__next__"
