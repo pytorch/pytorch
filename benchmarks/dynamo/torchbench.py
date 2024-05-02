@@ -206,14 +206,6 @@ class TorchBenchmarkRunner(BenchmarkRunner):
     def skip_models_due_to_control_flow(self):
         return self._skip["control_flow"]
 
-    @property
-    def guard_on_nn_module_models(self):
-        return {
-            "moco",
-            "detectron2_fcos_r_50_fpn",
-            "vision_maskrcnn",
-        }
-
     def load_model(
         self,
         device,
