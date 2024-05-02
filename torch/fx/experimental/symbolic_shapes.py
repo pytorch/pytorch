@@ -3398,7 +3398,7 @@ class ShapeEnv:
         # TODO: Make this more efficient by binding all the size/stride/offsets
         # to locals before performing tests on them.
 
-        from torch._dynamo.source import TensorPropertySource, TensorProperty, NegateSource
+        from torch._dynamo.source import TensorPropertySource, TensorProperty
 
         # Actual codegen must be delayed as we don't necessarily know what
         # the symbol mapping is
@@ -3491,8 +3491,6 @@ class ShapeEnv:
                     symbol_to_source[s].append(source)
                     if constraint is not None:
                         symbol_to_constraints[s].add(constraint)
-                elif isinstance(-s, sympy.Symbol):
-                    symbol_to_source[-s].append(NegateSource(source))
                 else:
                     constraint_violated = False
                     if isinstance(constraint, StrictMinMaxConstraint):
