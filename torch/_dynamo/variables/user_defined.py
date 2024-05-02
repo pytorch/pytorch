@@ -837,9 +837,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 unimplemented("UserDefined with non-function __getattr__")
 
         if isinstance(subobj, property):
-            # Rewrite the source being explicit about reading it statically.
             if self.source:
-                source = AttrSource(self.source, name, get_static=True)
+                # Read the class attribute to reach the property
+                source = AttrSource(AttrSource(self.source, "__class__"), name)
+                # Get the getter function
                 source = AttrSource(source, "fget")
             return variables.UserMethodVariable(
                 subobj.fget, self, source=source
