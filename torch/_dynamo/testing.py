@@ -103,7 +103,7 @@ def reduce_to_scalar_loss(out):
     """Reduce the output of a model to get scalar loss"""
     if isinstance(out, torch.Tensor):
         # Mean does not work on integer tensors
-        return out.sum() / torch.tensor(out.numel(), device=out.device)
+        return out.sum() / out.numel()
     elif isinstance(out, (list, tuple)):
         return sum(reduce_to_scalar_loss(x) for x in out) / len(out)
     elif type(out).__name__ in (
@@ -339,6 +339,12 @@ def skipIfNotPy311(fn):
     if sys.version_info >= (3, 11):
         return fn
     return unittest.skip(fn)
+
+
+def xfailIfPy312(fn):
+    if sys.version_info >= (3, 12):
+        return unittest.expectedFailure(fn)
+    return fn
 
 
 # Controls tests generated in test/inductor/test_torchinductor_dynamic_shapes.py
