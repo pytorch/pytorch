@@ -230,7 +230,7 @@ def async_save(
     if isinstance(storage_writer, AsyncStager):
         staged_state_dict = storage_writer.stage(state_dict)
     else:  # provides bwc for storage_writers not implementing AsyncStager
-        staged_state_dict = _offload_state_dict_to_cpu(state_dict)
+        staged_state_dict = _offload_state_dict_to_cpu(state_dict, type_check=False)
 
     executor = ThreadPoolExecutor(max_workers=1)
     f: Future = executor.submit(
@@ -247,7 +247,7 @@ def async_save(
         isinstance(storage_writer, AsyncStager)
         and storage_writer.should_synchronize_after_execute
     ):
-        storage_writer.synchronize_staging()  # expectation is that we wait for stage, in the case
+        storage_writer.synchronize_staging()
 
     return f
 

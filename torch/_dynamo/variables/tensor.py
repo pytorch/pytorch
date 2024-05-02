@@ -524,6 +524,10 @@ class TensorVariable(VariableTracker):
         if self.dtype is not None:
             return ConstantVariable.create(self.dtype.is_floating_point)
 
+    def method_is_complex(self):
+        if self.dtype is not None:
+            return ConstantVariable.create(self.dtype.is_complex)
+
     def method_is_contiguous(self, memory_format=None):
         memory_format = (
             memory_format.as_python_constant()
@@ -993,7 +997,7 @@ class SymNodeVariable(VariableTracker):
         except GuardOnDataDependentSymNode as e:
             raise UserError(  # noqa: TRY200
                 UserErrorType.ANTI_PATTERN,
-                f"Consider annotating your code using torch._constrain_as_*(). {str(e)}",
+                f"Consider annotating your code using torch._check*(). {str(e)}",
                 case_name="constrain_as_size_example",
             )
 

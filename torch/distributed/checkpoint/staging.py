@@ -4,6 +4,8 @@ from typing_extensions import Protocol
 
 from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
 
+__all__ = ["AsyncStager"]
+
 
 @runtime_checkable
 class AsyncStager(Protocol):
@@ -28,7 +30,7 @@ class AsyncStager(Protocol):
         the serialization thread starts and before returning from dcp.async_save. If this is set to False,
         the assumption is the user has defined a custom synchronization point for the the purpose of further
         optimizing save latency in the training loop (for example, by overlapping staging with the
-        forward/backward pass), and it is respondsibility is on the user to call `AsyncStager.synchronize_staging`
+        forward/backward pass), and it is the respondsibility of the user to call `AsyncStager.synchronize_staging`
         at the appropriate time.
 
     """
