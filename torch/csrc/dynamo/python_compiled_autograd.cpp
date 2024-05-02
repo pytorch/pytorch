@@ -353,6 +353,7 @@ CacheNode* _compiled_autograd_impl(
   calls.reserve(
       check_exec_info ? graph_task.exec_info_.size() : dependencies.size() + 1);
 
+  bool already_logged_node_miss = false;
   while (!worklist.empty()) {
     std::shared_ptr<Node> fn = std::move(worklist.back());
     worklist.pop_back();
@@ -367,10 +368,12 @@ CacheNode* _compiled_autograd_impl(
         node_args.collect(call.node->next_edges());
       }
       CacheKey key = node_args.key();
-      if (is_verbose_logging_enabled &&
+      if (is_verbose_logging_enabled && !already_logged_node_miss &&
           cache->lookup(key, /*create=*/false) == nullptr) {
-        vcout() << "Creating cache entry for " << fn->name()
-                << ", with key of size " << key.key_size << std::endl;
+        vcout() << "cache miss: mismatch starting " << fn->name()
+                << " (NodeCall " << calls.size() - 1 << "), with key of size "
+                << key.key_size << std::endl;
+        already_logged_node_miss = true;
       }
       cache = cache->lookup(key);
     }
