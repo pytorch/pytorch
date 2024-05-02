@@ -86,6 +86,7 @@ decomps_to_exclude = [
     aten.clamp_max,
     aten.clamp_min,
     aten.glu,  # inductor lowers this directly
+    aten.select_scatter,  # need to be in the ATen graph in order for it to work with the re-inplacing pass
     aten.split.Tensor,  # inductor lowers this directly
     aten.squeeze,  # inductor lowers this directly
     aten.sum,  # inductor lowers this directly

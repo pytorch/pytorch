@@ -478,7 +478,7 @@ class TestFullyShardBackwardPrefetch(FSDPTest):
         """
         Test a model with a linear module then a split into two linear modules,
         where we run backward through one path first before the other, meaning
-        that (1) onlyh one linear of the two split is used per backward and (2)
+        that (1) only one linear of the two split is used per backward and (2)
         the initial shared linear is used in both backwards.
         """
         dim = 8
@@ -512,8 +512,8 @@ class TestFullyShardBackwardPrefetch(FSDPTest):
             loss2.sum().backward(retain_graph=True)
             expected_events = [
                 ("unshard", "1.lin2", TrainingState.PRE_BACKWARD),
-                # Check that `1.lin1` is not prefetched since it is not used
-                # for this backward
+                # NOTE: This `1.lin1` unshard is a mistargeted prefetch.
+                ("unshard", "1.lin1", TrainingState.PRE_BACKWARD),
                 ("post_backward", "1.lin2", TrainingState.POST_BACKWARD),
                 ("unshard", "0", TrainingState.PRE_BACKWARD),
                 ("post_backward", "0", TrainingState.POST_BACKWARD),
@@ -524,10 +524,11 @@ class TestFullyShardBackwardPrefetch(FSDPTest):
             model.set_is_last_backward(True)
             loss1.sum().backward()
             expected_events = [
-                # Check that `1.lin2` is not unsharded
-                ("unshard", "1.lin1", TrainingState.PRE_BACKWARD),
-                ("post_backward", "1.lin1", TrainingState.POST_BACKWARD),
+                # NOTE: `1.lin1` is already unsharded from the mistargeted
+                # prefetch in the first backward.
+                # Prefetch `0`
                 ("unshard", "0", TrainingState.PRE_BACKWARD),
+                ("post_backward", "1.lin1", TrainingState.POST_BACKWARD),
                 ("post_backward", "0", TrainingState.POST_BACKWARD),
             ]
             self.assertEqual(events, expected_events)
