@@ -1475,7 +1475,9 @@ class GuardBuilder(GuardBuilderBase):
                 self._produce_guard_code(guard, [shape_guard], shape_env=True)
 
     def TENSOR_MATCH(self, guard: Guard, value=None):
-        if guard.is_nn_module() or match_on_id_for_tensor(guard):
+        if (
+            not torch._dynamo.config.guard_nn_modules and guard.is_nn_module()
+        ) or match_on_id_for_tensor(guard):
             self.ID_MATCH(guard)
         else:
             if isinstance(value, TensorWeakRef):
