@@ -402,15 +402,15 @@ def _multi_tensor_adadelta(
             torch._foreach_add_(device_state_steps, 1)
 
         if maximize:
-            device_grads = list(torch._foreach_neg(device_grads))
+            device_grads = torch._foreach_neg(device_grads)  # type: ignore[assignment]
 
         if weight_decay != 0:
             # Re-use the intermediate memory (device_grads) already allocated for maximize
             if maximize:
                 torch._foreach_add_(device_grads, device_params, alpha=weight_decay)
             else:
-                device_grads = list(
-                    torch._foreach_add(device_grads, device_params, alpha=weight_decay)
+                device_grads = torch._foreach_add(  # type: ignore[assignment]
+                    device_grads, device_params, alpha=weight_decay
                 )
 
         torch._foreach_mul_(device_square_avgs, rho)
