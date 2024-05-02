@@ -228,6 +228,7 @@ struct CacheNode {
   std::vector<CacheKeyBuffer> key_storage;
   std::vector<SizeInput> expected_sizes;
 
+  THPObjectPtr runtime_wrapper;
   THPObjectPtr compiled_fn;
 };
 
@@ -504,7 +505,9 @@ CacheNode* _compiled_autograd_impl(
       }
     }
 
-    cache->compiled_fn = check(call_end_capture(py_compiler, state.outputs));
+    PyObject* res = check(call_end_capture(py_compiler, state.outputs));
+    cache->runtime_wrapper = PyTuple_GetItem(res, 0);
+    cache->compiled_fn = PyTuple_GetItem(res, 1);
     state.debug_asserts();
   } // End cache miss region
 
@@ -552,7 +555,7 @@ variable_list compiled_autograd(
       &hooks);
 
   THPObjectPtr pyresult(check(PyObject_CallFunctionObjArgs(
-      cache->compiled_fn.get(), inputs.get(), sizes.get(), hooks.get(), NULL)));
+      cache->runtime_wrapper.get(), cache->compiled_fn.get(), inputs.get(), sizes.get(), hooks.get(), NULL)));
   variable_list outputs = THPVariable_UnpackList(pyresult);
   TORCH_INTERNAL_ASSERT(outputs.size() == output_edges.size());
   return outputs;

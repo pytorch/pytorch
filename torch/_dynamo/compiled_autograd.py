@@ -220,7 +220,13 @@ class AutogradCompilerInstance:
             "compiled_autograd_graph",
             payload_fn=lambda: graph.print_readable(print_output=False),
         )
-        return self.compiler_fn(graph)
+
+        def runtime_wrapper(compiled_fn, inputs, sizes, hooks):
+            breakpoint()
+            # insert inspecting code here
+            return compiled_fn(inputs, sizes, hooks)
+
+        return runtime_wrapper, self.compiler_fn(graph)
 
     def reorder_accumulate_grad_nodes(self):
         """
