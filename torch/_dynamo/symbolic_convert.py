@@ -788,7 +788,9 @@ class InstructionTranslatorBase(
                 return self.step_graph_break(inst)
 
         if trace_bytecode_log.isEnabledFor(logging.DEBUG):
-            trace_bytecode_log.debug("TRACE %s %s %s", inst.opname, inst.argval, self.stack)
+            trace_bytecode_log.debug(
+                "TRACE %s %s %s", inst.opname, inst.argval, self.stack
+            )
 
         self.update_block_stack(inst)
 

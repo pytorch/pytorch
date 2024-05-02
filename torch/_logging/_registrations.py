@@ -64,7 +64,7 @@ register_artifact(
 )
 register_artifact(
     "trace_bytecode",
-    "As we trace bytecode, prints the instruction and the current stack."
+    "As we trace bytecode, prints the instruction and the current stack.",
 )
 register_artifact(
     "aot_graphs",
