@@ -4059,6 +4059,15 @@ class TestEmptySubclassSpoof(TestEmptySubclass):
 class TestWrapperSubclassSpoof(TestWrapperSubclass):
     ...
 
+class RebuildFromTypeV2Spoof(torch.Tensor):
+    def __new__(cls, elem, naughty, **kwargs):
+        if naughty:
+            raise RuntimeError("naughty")
+        return super().__new__(cls, elem)
+
+    def __reduce_ex__(self, protocol):
+        return (torch._tensor._rebuild_from_type_v2, (RebuildFromTypeV2Spoof, torch.Tensor, (True), {}))
+
 
 class TestSubclassSerialization(TestCase):
     def test_tensor_subclass_wrapper_serialization(self):
@@ -4294,6 +4303,16 @@ class TestSubclassSerialization(TestCase):
         finally:
             TestEmptySubclass.__module__ = __name__
             del sys.modules['spoof_mod']
+
+    def test_rebuild_from_type_v2_spoof(self):
+        t = RebuildFromTypeV2Spoof(torch.randn(2, 3), False)
+        inp = {'weight': t}
+
+        with TemporaryFileName() as f:
+            torch.save(inp, f)
+            with self.assertRaisesRegex(pickle.UnpicklingError, "_rebuild_from_type_v2 with unsupported first arg"):
+                loaded = torch.load(f, weights_only=True)
+
 
 
 instantiate_device_type_tests(TestBothSerialization, globals())

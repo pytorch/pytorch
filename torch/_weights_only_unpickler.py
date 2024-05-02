@@ -100,6 +100,21 @@ def _get_user_allowed_globals():
     return rc
 
 
+def _tensor_rebuild_functions():
+    return {
+        torch._utils._rebuild_parameter,
+        torch._utils._rebuild_parameter_with_state,
+        torch._utils._rebuild_qtensor,
+        torch._utils._rebuild_tensor,
+        torch._utils._rebuild_tensor_v2,
+        torch._utils._rebuild_tensor_v3,
+        torch._utils._rebuild_sparse_tensor,
+        torch._utils._rebuild_meta_tensor_no_storage,
+        torch._utils._rebuild_nested_tensor,
+        torch._utils._rebuild_wrapper_subclass,
+    }
+
+
 # Unpickling machinery
 @_functools.lru_cache(maxsize=1)
 def _get_allowed_globals():
@@ -139,18 +154,7 @@ def _get_allowed_globals():
     ]:
         rc[str(qt)] = qt
     # Rebuild functions
-    for f in [
-        torch._utils._rebuild_parameter,
-        torch._utils._rebuild_parameter_with_state,
-        torch._utils._rebuild_qtensor,
-        torch._utils._rebuild_tensor,
-        torch._utils._rebuild_tensor_v2,
-        torch._utils._rebuild_tensor_v3,
-        torch._utils._rebuild_sparse_tensor,
-        torch._utils._rebuild_meta_tensor_no_storage,
-        torch._utils._rebuild_nested_tensor,
-        torch._utils._rebuild_wrapper_subclass,
-    ]:
+    for f in _tensor_rebuild_functions():
         rc[f"torch._utils.{f.__name__}"] = f
 
     # Handles Tensor Subclasses, Tensor's with attributes.
@@ -283,6 +287,15 @@ class Unpickler:
                 ):
                     raise RuntimeError(
                         f"Trying to call reduce for unrecognized function {func}"
+                    )
+                # Prevent tensor subclass that is pushed onto stack in GLOBAL from
+                # being instantiated by the func(*args)
+                if (
+                    func is torch._tensor._rebuild_from_type_v2
+                    and args[0] not in _tensor_rebuild_functions()
+                ):
+                    raise RuntimeError(
+                        f"Trying to call _rebuild_from_type_v2 with unsupported first arg {args[0]}"
                     )
                 self.stack[-1] = func(*args)
             elif key[0] == BUILD[0]:
