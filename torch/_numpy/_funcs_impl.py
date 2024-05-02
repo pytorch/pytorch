@@ -2008,7 +2008,7 @@ def min_scalar_type(a: ArrayLike, /):
     from ._dtypes import DType
 
     if a.numel() > 1:
-        # numpy docs: "For non-scalar array a, returns the vector’s dtype unmodified."
+        # numpy docs: "For non-scalar array a, returns the vector's dtype unmodified."
         return DType(a.dtype)
 
     if a.dtype == torch.bool:
