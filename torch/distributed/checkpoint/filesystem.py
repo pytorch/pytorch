@@ -11,6 +11,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import (
+    Any,
     Callable,
     cast,
     Dict,
@@ -28,6 +29,8 @@ import torch
 from torch import Tensor
 from torch._utils import _get_available_device_type, _get_device_module
 from torch.distributed._shard._utils import narrow_tensor_by_index
+from torch.distributed.checkpoint.staging import BlockingAsyncStager
+
 from torch.futures import Future
 
 from .metadata import Metadata, MetadataIndex
@@ -393,7 +396,7 @@ class FileSystem(FileSystemBase):
         return False
 
 
-class FileSystemWriter(StorageWriter):
+class _FileSystemWriter(StorageWriter):
     """
     Basic implementation of StorageWriter using file IO.
 
@@ -414,6 +417,8 @@ class FileSystemWriter(StorageWriter):
         sync_files: bool = True,
         thread_count: int = 1,
         per_thread_copy_ahead: int = 10_000_000,
+        *args: Any,
+        **kwargs: Any,
     ) -> None:
         """
         Initialize the writer pointing to `path`.
@@ -631,3 +636,51 @@ class FileSystemReader(StorageReader):
     @classmethod
     def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
         return FileSystem.validate_checkpoint_id(checkpoint_id)
+
+
+class FileSystemWriter(_FileSystemWriter, BlockingAsyncStager):
+    """
+    Basic implementation of StorageWriter using file IO.
+
+    This implementation makes the following assumptions and simplifications:
+
+    * The checkpoint path is an empty or non-existing directory.
+    * File creation is atomic
+
+    The checkpoint consist of one file per write request plus
+    a `.metadata` file with the serialized metadata.
+
+    """
+
+    def __init__(
+        self,
+        path: Union[str, os.PathLike],
+        single_file_per_rank: bool = True,
+        sync_files: bool = True,
+        thread_count: int = 1,
+        per_thread_copy_ahead: int = 10_000_000,
+        cache_staged_state_dict: bool = False,
+    ) -> None:
+        """
+        Initialize the writer pointing to `path`.
+
+        Args:
+            path: directory where the checkpoint will be written to.
+            single_file_per_rank: Produce one file per rank instead of one file per tensor/blob. Default to True.
+            sync_files : force files to be synced to permanent storage. Default to True.
+            thread_count: Number of IO threads to use to write. Default to 1.
+            per_thread_copy_ahead: How many bytes to copy from the GPU ahead of saving then. Default 10Mb.
+            cache_staged_state_dict: Whether to cache the staged state_dict. This option decreases staging latency
+                at the cost of increases memory usage. Additionally, if this parameter is set to True, it's the expectation
+                that the stager is maintained and re-used for multiple dcp.async_save calls. Default to False.
+
+        N. B. If sync_files is disabled, there's no guarantee that the checkpoint will be consistent in the case of a failure.
+        """
+        super().__init__(
+            path=path,
+            single_file_per_rank=single_file_per_rank,
+            sync_files=sync_files,
+            thread_count=thread_count,
+            per_thread_copy_ahead=per_thread_copy_ahead,
+            cache_staged_state_dict=cache_staged_state_dict,
+        )
