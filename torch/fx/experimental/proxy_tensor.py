@@ -1185,20 +1185,19 @@ class _MakefxTracer:
         else:
             self.fx_tracer = PythonKeyTracer()
 
-        if self.tracing_mode == "real":
-            pass
-        elif self.tracing_mode == "fake":
+        if self.tracing_mode == "fake":
             import torch._dynamo
             fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(args)
             if fake_tensor_mode is None:
                 import torch._functorch.config as _config
                 with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
-                    self.fake_tensor_mode = FakeTensorMode(
+                    fake_tensor_mode = FakeTensorMode(
                         allow_fallback_kernels=True,
                         allow_non_fake_inputs=self._allow_non_fake_inputs,
                         shape_env=ShapeEnv(),
                         static_shapes=True,
                     )
+            self.fake_tensor_mode = fake_tensor_mode
         elif self.tracing_mode == "symbolic":
             import torch._dynamo
             fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(args)
@@ -1206,16 +1205,15 @@ class _MakefxTracer:
                 shape_env = ShapeEnv()
                 import torch._functorch.config as _config
                 with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
-                    self.fake_tensor_mode = FakeTensorMode(
+                    fake_tensor_mode = FakeTensorMode(
                         allow_fallback_kernels=False,
                         allow_non_fake_inputs=self._allow_non_fake_inputs,
                         shape_env=shape_env)
-            else:
-                shape_env = fake_tensor_mode.shape_env
-                assert shape_env is not None, "shape_env should be set if tracing with 'symbolic'"
-
+            assert fake_tensor_mode.shape_env is not None, "shape_env should be set if tracing with 'symbolic'"
+            self.fake_tensor_mode = fake_tensor_mode
         else:
-            raise AssertionError(f"Unexpected tracing type: {self.tracing_mode}")
+            if not self.tracing_mode == "real":
+                raise AssertionError(f"Unexpected tracing type: {self.tracing_mode}")
 
         self.proxy_mode = ProxyTorchDispatchMode(
             self.fx_tracer,
@@ -1232,25 +1230,19 @@ class _MakefxTracer:
         # We want example values of parent graph and subgraphs to share the same fake_tensor_mode
         self.fake_tensor_mode = parent_tracer.fake_tensor_mode
 
-        # Tracer maintains a bunch of states while tracing.
-        # These states are mostly useful for metadata and etc.
-        # We copy them over but reset some pf the states that
-        # are necessary for subgraphs
         def _create_sub_fx_tracer(parent_tracer):
             if type(parent_tracer) == PythonKeyTracer:
                 sub_tracer = PythonKeyTracer()
             elif type(parent_tracer) == _ModuleStackTracer:
                 sub_tracer = _ModuleStackTracer(parent_tracer.scope_root)
                 # We want sub_tracer to share the same states as parent tracer
-                # for below states to correctly compute the metadata
+                # for below states to correctly compute some metadata
                 sub_tracer.scope_root = parent_tracer.scope_root
                 sub_tracer.proxy_paths = parent_tracer.proxy_paths
                 sub_tracer.proxy_modules = parent_tracer.proxy_modules
             else:
                 raise RuntimeError(f"Unexpected tracer type: {type(parent_tracer)}.")
 
-            sub_tracer.torch_fn_metadata = parent_tracer.torch_fn_metadata
-            sub_tracer.torch_fn_counts = parent_tracer.torch_fn_counts
             return sub_tracer
 
         self.fx_tracer = _create_sub_fx_tracer(parent_tracer.fx_tracer)
