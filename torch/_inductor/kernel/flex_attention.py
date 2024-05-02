@@ -197,20 +197,19 @@ def _get_default_config(query):
     head_dim = query.get_size()[-1]
     default_config = None
 
-    if torch.cuda.get_device_capability() >= (9, 0):  # H100
+    if head_dim <= 256 and torch.cuda.get_device_capability() >= (9, 0):  # H100
         if dtype == torch.float32:
             default_config = (64, 64, 4, 3)
         else:
             default_config = (128, 64, 4, 3)
         default_config = _h100_default_config.get((dtype, head_dim), default_config)
-    elif torch.cuda.get_device_capability() >= (8, 0):  # A100
+    elif head_dim <= 256 and torch.cuda.get_device_capability() >= (8, 0):  # A100
         if dtype == torch.float32:
             default_config = (64, 64, 4, 3)
         else:
             default_config = (128, 64, 4, 3)
         default_config = _a100_default_config.get((dtype, head_dim), default_config)
-
-    else:
+    else:  # modest hardware or extremely large head_dim
         if dtype == torch.float32:
             default_config = (32, 16, 4, 3)
         else:
