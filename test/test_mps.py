@@ -673,7 +673,6 @@ def mps_ops_modifier(ops):
         'index_reducemean': None,
         'index_reduceamax': None,
         'index_reduceamin': None,
-        'isin': None,
         'isneginf': None,
         'isposinf': None,
         'kthvalue': None,
@@ -899,6 +898,9 @@ def mps_ops_modifier(ops):
             'fft.rfft2': None,
             'fft.rfftn': None,
             'stft': None,
+            # Error in TestConsistencyCPU.test_output_match_isin_cpu_int32,
+            # not reproducible in later OS. Added assert to op if used in < 14.0
+            'isin': None,
         })
 
     UNDEFINED_XFAILLIST = {
@@ -8166,6 +8168,46 @@ class TestLogical(TestCaseMPS):
                 self.assertEqual(z, z_cpu)
 
         [helper(dtype) for dtype in [torch.float32, torch.float16, torch.int32, torch.int16, torch.uint8, torch.int8, torch.bool]]
+
+    @unittest.skipIf(product_version < 14.0, "Skipped on MacOS < 14.0")
+    def test_isin(self):
+        def helper(dtype):
+            shapes = [([2, 5], [3, 5, 2]), ([10, 3, 5], [20, 1, 3]),
+                      ([5], [10]), ([0], [5]), ([5], [0])]
+            for shape_tuple in shapes:
+                for inverted in [True, False]:
+                    if dtype.is_floating_point:
+                        # Half is not supported for CPU isin. Compute reference in FP32
+                        A = torch.randn(size=shape_tuple[0], device='cpu', dtype=torch.float32)
+                        B = torch.randn(size=shape_tuple[1], device='cpu', dtype=torch.float32)
+                    else:
+                        A = torch.randint(0, 100, size=shape_tuple[0], device='cpu', dtype=dtype)
+                        B = torch.randint(0, 100, size=shape_tuple[1], device='cpu', dtype=dtype)
+
+                    A_mps = A.clone().detach().to('mps')
+                    B_mps = B.clone().detach().to('mps')
+
+                    cpu_ref = torch.isin(A, B, invert=inverted)
+                    if dtype is torch.float16:
+                        cpu_ref.type(dtype)
+
+                    mps_out = torch.isin(A_mps, B_mps, invert=inverted)
+                    self.assertEqual(mps_out, cpu_ref)
+
+        [helper(dtype) for dtype in [torch.float32, torch.float16, torch.int32, torch.int16, torch.uint8, torch.int8]]
+
+    @unittest.skipIf(product_version < 14.0, "Skipped on MacOS < 14.0")
+    def test_isin_asserts(self):
+        A = torch.randn(size=[1, 4], device='mps', dtype=torch.float32)
+        B = torch.randn(size=[1, 4], device='mps', dtype=torch.float16)
+        with self.assertRaisesRegex(RuntimeError, 'Expected elements.dtype()*'):
+            out = torch.isin(A, B)
+
+
+        C = torch.randn(size=[1, 4], device='mps', dtype=torch.float32)
+        D = torch.randn(size=[1, 4], device='cpu', dtype=torch.float32)
+        with self.assertRaisesRegex(RuntimeError, 'Expected elements.is_mps()*'):
+            out = torch.isin(C, D)
 
 class TestSmoothL1Loss(TestCaseMPS):
 
