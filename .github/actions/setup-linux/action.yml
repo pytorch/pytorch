@@ -1,0 +1,132 @@
+name: Setup Linux
+
+description: Set up Docker workspace on EC2
+
+runs:
+  using: composite
+  steps:
+    - name: Display EC2 information
+      shell: bash
+      run: |
+        set -euo pipefail
+        function get_ec2_metadata() {
+          # Pulled from instance metadata endpoint for EC2
+          # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
+          category=$1
+          # If it is GCP runner (runner name contains gcp), do not run this
+          runner_name_str=${{ runner.name }}
+          if [[ -f /.inarc ]]; then
+            echo "ARC Runner, no info on ec2 metadata"
+          elif [[ $runner_name_str == *"gcp"* ]]; then
+            echo "Runner is from Google Cloud Platform, No info on ec2 metadata"
+          else
+            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+          fi
+        }
+        echo "ami-id: $(get_ec2_metadata ami-id)"
+        echo "instance-id: $(get_ec2_metadata instance-id)"
+        echo "instance-type: $(get_ec2_metadata instance-type)"
+        echo "system info $(uname -a)"
+
+    - name: Check if in a ARC runner
+      shell: bash
+      id: check_arc_runner
+      run: echo "IN_ARC_RUNNER=$([ -f /.inarc ] && echo true || echo false)"  >> $GITHUB_OUTPUT
+
+    - name: Start docker if docker deamon is not running
+      shell: bash
+      if: ${{ steps.check_arc_runner.outputs.IN_ARC_RUNNER == 'false' }}
+      run: |
+        if systemctl is-active --quiet docker; then
+            echo "Docker daemon is running...";
+        else
+            echo "Starting docker deamon..." && sudo systemctl start docker;
+        fi
+
+    - name: Log in to ECR
+      uses: nick-fields/retry@3e91a01664abd3c5cd539100d10d33b9c5b68482
+      env:
+        AWS_RETRY_MODE: standard
+        AWS_MAX_ATTEMPTS: "5"
+        AWS_DEFAULT_REGION: us-east-1
+      with:
+        shell: bash
+        timeout_minutes: 5
+        max_attempts: 3
+        retry_wait_seconds: 30
+        command: |
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+
+    - name: Preserve github env variables for use in docker
+      shell: bash
+      run: |
+        env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+        env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+
+    - name: Kill any existing containers, clean up images
+      if: ${{ steps.check_arc_runner.outputs.IN_ARC_RUNNER == 'false' }}
+      shell: bash
+      run: |
+        # ignore expansion of "docker ps -q" since it could be empty
+        # shellcheck disable=SC2046
+        docker stop $(docker ps -q) || true
+        # Prune all of the docker images
+        docker system prune -af
+
+    - name: Manually resolve download.pytorch.org
+      shell: bash
+      continue-on-error: true
+      run: |
+        set +e
+        set -x
+
+        PT_DOMAIN=download.pytorch.org
+        # TODO: Flaky access to download.pytorch.org https://github.com/pytorch/pytorch/issues/100400,
+        # cleaning this up once the issue is fixed. There are more than one resolved IP here, the last
+        # one is returned at random
+        RESOLVED_IP=$(dig -4 +short "${PT_DOMAIN}" | tail -n1)
+
+        if [ -z "${RESOLVED_IP}" ]; then
+          echo "Couldn't resolve ${PT_DOMAIN}, retrying with Google DNS..."
+          RESOLVED_IP=$(dig -4 +short "${PT_DOMAIN}" @8.8.8.8 | tail -n1)
+
+          if [ -z "${RESOLVED_IP}" ]; then
+            echo "Couldn't resolve ${PT_DOMAIN}, exiting..."
+            exit 1
+          fi
+        fi
+
+        if grep -r "${PT_DOMAIN}" /etc/hosts; then
+          # Clean up any old records first
+          sudo sed -i "/${PT_DOMAIN}/d" /etc/hosts
+        fi
+
+        echo "${RESOLVED_IP} ${PT_DOMAIN}" | sudo tee -a /etc/hosts
+        cat /etc/hosts
+
+    - name: Check that the docker daemon is running
+      shell: bash
+      continue-on-error: true
+      if: ${{ steps.check_arc_runner.outputs.IN_ARC_RUNNER == 'true' }}
+      run: |
+        set +x
+
+        max_attempts=30
+        delay=10
+        attempt=1
+
+        for attempt in $(seq 1 $max_attempts); do
+          echo "Attempt $attempt of $max_attempts: Checking if Docker daemon is running..."
+          if docker info > /dev/null 2>&1; then
+            echo "Docker is running. Proceeding with the next steps"
+            exit 0
+          else
+            echo "Docker is not running yet."
+            echo "Retrying in $delay seconds..."
+            sleep $delay
+          fi
+        done
+        echo "Reached maximum attempts to connect to Docker. Exiting."
+        exit 1
