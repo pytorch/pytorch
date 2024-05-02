@@ -308,6 +308,7 @@ jobs:
     needs: manywheel-py3_8-cuda12_4-build
     uses: ./.github/workflows/_binary-test-linux.yml
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 =======
     needs: manywheel-py3_8-rocm5_7-build
@@ -377,6 +378,8 @@ jobs:
     needs: manywheel-py3_8-rocm5_7-test
 >>>>>>> 2aec3faa327 (test_onednn)
 >>>>>>> 12affba5e3c (Udate builder branch)
+=======
+>>>>>>> 14a32cea679 (rebase)
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -578,7 +581,11 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
+<<<<<<< HEAD
           ref: atalman_onednn_22
+=======
+          ref: atalman_numpy_conda
+>>>>>>> 14a32cea679 (rebase)
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -894,6 +901,7 @@ jobs:
     needs: manywheel-py3_9-cuda12_4-build
     uses: ./.github/workflows/_binary-test-linux.yml
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 =======
     needs: manywheel-py3_9-rocm5_7-build
@@ -963,6 +971,8 @@ jobs:
     needs: manywheel-py3_9-rocm5_7-test
 >>>>>>> 2aec3faa327 (test_onednn)
 >>>>>>> 12affba5e3c (Udate builder branch)
+=======
+>>>>>>> 14a32cea679 (rebase)
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -1164,7 +1174,11 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
+<<<<<<< HEAD
           ref: atalman_onednn_22
+=======
+          ref: atalman_numpy_conda
+>>>>>>> 14a32cea679 (rebase)
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -1480,6 +1494,7 @@ jobs:
     needs: manywheel-py3_10-cuda12_4-build
     uses: ./.github/workflows/_binary-test-linux.yml
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 =======
     needs: manywheel-py3_10-rocm5_7-build
@@ -1549,6 +1564,8 @@ jobs:
     needs: manywheel-py3_10-rocm5_7-test
 >>>>>>> 2aec3faa327 (test_onednn)
 >>>>>>> 12affba5e3c (Udate builder branch)
+=======
+>>>>>>> 14a32cea679 (rebase)
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -1750,7 +1767,11 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
+<<<<<<< HEAD
           ref: atalman_onednn_22
+=======
+          ref: atalman_numpy_conda
+>>>>>>> 14a32cea679 (rebase)
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -2066,6 +2087,7 @@ jobs:
     needs: manywheel-py3_11-cuda12_4-build
     uses: ./.github/workflows/_binary-test-linux.yml
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 =======
     needs: manywheel-py3_11-rocm5_7-build
@@ -2135,6 +2157,8 @@ jobs:
     needs: manywheel-py3_11-rocm5_7-test
 >>>>>>> 2aec3faa327 (test_onednn)
 >>>>>>> 12affba5e3c (Udate builder branch)
+=======
+>>>>>>> 14a32cea679 (rebase)
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -2336,7 +2360,11 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
+<<<<<<< HEAD
           ref: atalman_onednn_22
+=======
+          ref: atalman_numpy_conda
+>>>>>>> 14a32cea679 (rebase)
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -2652,6 +2680,7 @@ jobs:
     needs: manywheel-py3_12-cuda12_4-build
     uses: ./.github/workflows/_binary-test-linux.yml
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 =======
     needs: manywheel-py3_12-rocm5_7-build
@@ -2721,6 +2750,8 @@ jobs:
     needs: manywheel-py3_12-rocm5_7-test
 >>>>>>> 2aec3faa327 (test_onednn)
 >>>>>>> 12affba5e3c (Udate builder branch)
+=======
+>>>>>>> 14a32cea679 (rebase)
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -2924,7 +2955,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: atalman_numpy_conda
           submodules: recursive
           repository: pytorch/builder
           path: builder
