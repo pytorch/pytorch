@@ -188,6 +188,7 @@ class DefaultLoadPlanner(LoadPlanner):
         self.is_coordinator = is_coordinator
 
     def create_local_plan(self) -> LoadPlan:
+        assert self.metadata is not None
         return create_default_local_load_plan(self.state_dict, self.metadata)
 
     def create_global_plan(self, global_plan: List[LoadPlan]) -> List[LoadPlan]:
@@ -266,10 +267,11 @@ class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
     def set_up_planner(
         self,
         state_dict: STATE_DICT_TYPE,
-        metadata: Metadata,
+        metadata: Optional[Metadata],
         is_coordinator: bool,
     ) -> None:
         assert not state_dict
+        assert metadata is not None
 
         # rebuild the state dict from the metadata
         for k, v in metadata.state_dict_metadata.items():

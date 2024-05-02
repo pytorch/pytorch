@@ -167,7 +167,7 @@ class DynamicMetaLoadPlanner(DefaultLoadPlanner):
     def set_up_planner(
         self,
         state_dict: STATE_DICT_TYPE,
-        metadata: Metadata,
+        metadata: Optional[Metadata],
         is_coordinator: bool,
     ) -> None:
         """Setups of the planner, extnding default behavior by creating the Metadata object from the state dict"""
