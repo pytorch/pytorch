@@ -7,16 +7,17 @@ import torch
 import torch.distributed as dist
 from torch.distributed._state_dict_utils import _offload_state_dict_to_cpu
 from torch.distributed.checkpoint import FileSystemWriter
+
+from torch.distributed.checkpoint._storage_utils import _storage_setup
+from torch.distributed.checkpoint.default_planner import DefaultSavePlanner
 from torch.distributed.checkpoint.logger import _dcp_method_logger
-from torch.distributed.checkpoint.planner import SavePlan
+from torch.distributed.checkpoint.metadata import Metadata, STATE_DICT_TYPE
+from torch.distributed.checkpoint.planner import SavePlan, SavePlanner
+from torch.distributed.checkpoint.staging import AsyncStager
 from torch.distributed.checkpoint.stateful import Stateful
+from torch.distributed.checkpoint.storage import StorageWriter
 from torch.distributed.distributed_c10d import _get_default_group
 
-from ._storage_utils import _storage_setup
-from .default_planner import DefaultSavePlanner
-from .metadata import Metadata, STATE_DICT_TYPE
-from .planner import SavePlanner
-from .storage import StorageWriter
 from .utils import _api_bc_check, _DistWrapper, _profile
 
 
@@ -225,20 +226,28 @@ def async_save(
         # buffer makes no sense
         storage_writer.per_thread_copy_ahead = 0
 
-    cpu_state_dict = _offload_state_dict_to_cpu(
-        _stateful_to_state_dict(state_dict), type_check=False
-    )
+    state_dict = _stateful_to_state_dict(state_dict)
+    if isinstance(storage_writer, AsyncStager):
+        staged_state_dict = storage_writer.stage(state_dict)
+    else:  # provides bwc for storage_writers not implementing AsyncStager
+        staged_state_dict = _offload_state_dict_to_cpu(state_dict, type_check=False)
 
     executor = ThreadPoolExecutor(max_workers=1)
     f: Future = executor.submit(
         save,
-        cpu_state_dict,
+        staged_state_dict,
         checkpoint_id=checkpoint_id,
         storage_writer=storage_writer,
         planner=planner,
         process_group=process_group,
     )
     f.add_done_callback(lambda f: executor.shutdown(wait=False))
+
+    if (
+        isinstance(storage_writer, AsyncStager)
+        and storage_writer.should_synchronize_after_execute
+    ):
+        storage_writer.synchronize_staging()
 
     return f
 

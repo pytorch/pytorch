@@ -1642,10 +1642,10 @@ class CosineAnnealingWarmRestarts(LRScheduler):
 
     Args:
         optimizer (Optimizer): Wrapped optimizer.
-        T_0 (int): Number of iterations for the first restart.
-        T_mult (int, optional): A factor increases :math:`T_{i}` after a restart. Default: 1.
+        T_0 (int): Number of iterations until the first restart.
+        T_mult (int, optional): A factor by which :math:`T_{i}` increases after a restart. Default: 1.
         eta_min (float, optional): Minimum learning rate. Default: 0.
-        last_epoch (int, optional): The index of last epoch. Default: -1.
+        last_epoch (int, optional): The index of the last epoch. Default: -1.
         verbose (bool): If ``True``, prints a message to stdout for
             each update. Default: ``False``.
 
