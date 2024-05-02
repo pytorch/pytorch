@@ -4051,6 +4051,14 @@ class TestGetStateSubclass(torch.Tensor):
 class TestEmptySubclass(torch.Tensor):
     ...
 
+# ONLY use this for the subclass spoof test since we modify them
+# Cannot define locally in test or pickle will fail.
+class TestEmptySubclassSpoof(TestEmptySubclass):
+    ...
+
+class TestWrapperSubclassSpoof(TestWrapperSubclass):
+    ...
+
 
 class TestSubclassSerialization(TestCase):
     def test_tensor_subclass_wrapper_serialization(self):
@@ -4192,13 +4200,15 @@ class TestSubclassSerialization(TestCase):
 
     @parametrize("wrapper", (True, False))
     def test_tensor_subclass_method_spoofing(self, wrapper):
-        # Define this locally since we will add state to it
-        subclass = TestWrapperSubclass if wrapper else TestEmptySubclass
-        inp = {'weight': subclass(torch.randn(2, 3))}
+        subclass = TestWrapperSubclassSpoof if wrapper else TestEmptySubclassSpoof
+        t = subclass(torch.randn(2, 3))
+        # To trigger setattr for the non-wrapper case
+        if not wrapper:
+            t.foo = 'bar'
+        inp = {'weight': t}
 
-        with BytesIOContext() as f:
+        with TemporaryFileName() as f:
             torch.save(inp, f)
-            f.seek(0)
             loaded = torch.load(f, weights_only=True)
             self.assertEqual(loaded['weight'], inp['weight'])
 
@@ -4208,35 +4218,56 @@ class TestSubclassSerialization(TestCase):
                 if method != "__class__":
                     restore_methods[method] = getattr(subclass, method)
                     setattr(subclass, method, self._create_bad_func(method))
+            # These additional methods might be called during getattr or setattr
+            # but are not in methods above (not defined on tensor base class)
+            subclass.__get__ = self._create_bad_func("__get__")
+            subclass.__set__ = self._create_bad_func("__set__")
+            subclass.__getattr__ = self._create_bad_func("__getattr__")
+            restore_methods["__get__"] = None
+            restore_methods["__getattr__"] = None
+            restore_methods["__set__"] = None
+
             try:
-                # Unsafe load should attempt to run __getattribute__ in rebuild_tensor_v2
-                f.seek(0)
+                # Unsafe load should throw the following RuntimeErrors
+                # (indicating that these methods are called)
                 with self.assertRaisesRegex(RuntimeError, "running __getattribute__"):
                     torch.load(f, weights_only=False)
-                f.seek(0)
-                with self.assertRaisesRegex(pickle.UnpicklingError,
-                                            "methods __setstate__=True __getattribute__=True __setattr__=True"):
-                    torch.load(f, weights_only=True)
-                subclass.__setstate__ = restore_methods['__setstate__']
-                f.seek(0)
-                with self.assertRaisesRegex(pickle.UnpicklingError,
-                                            "methods __setstate__=False __getattribute__=True __setattr__=True"):
-                    torch.load(f, weights_only=True)
                 subclass.__getattribute__ = restore_methods['__getattribute__']
-                f.seek(0)
-                with self.assertRaisesRegex(pickle.UnpicklingError,
-                                            "methods __setstate__=False __getattribute__=False __setattr__=True"):
-                    torch.load(f, weights_only=True)
+                with self.assertRaisesRegex(RuntimeError, "running __setstate__"):
+                    torch.load(f, weights_only=False)
+                subclass.__setstate__ = restore_methods['__setstate__']
+                with self.assertRaisesRegex(RuntimeError, "running __setattr__"):
+                    torch.load(f, weights_only=False)
                 subclass.__setattr__ = restore_methods['__setattr__']
-                f.seek(0)
-                loaded = torch.load(f, weights_only=True)
+                # should finally work
+                torch.load(f, weights_only=False)
+
+                # Safe load should catch that methods are called
+                subclass.__setstate__ = self._create_bad_func("__setstate__")
+                subclass.__getattribute__ = self._create_bad_func("__getattribute__")
+                subclass.__setattr__ = self._create_bad_func("__setattr__")
+                with self.assertRaisesRegex(pickle.UnpicklingError,
+                                            "methods: __getattribute__=True __getattr__=True __get__=True "
+                                            "__setattr__=True __set__=True __setstate__=True"):
+                    torch.load(f, weights_only=True)
+                risky_methods = ['__get__', '__set__', '__getattr__', '__setattr__', '__getattribute__', '__setstate__']
+                for i, meth in enumerate(risky_methods):
+                    setattr(subclass, meth, restore_methods[meth])
+                    if i != len(risky_methods) - 1:
+                        # When the given methods are not all back to default, load should throw
+                        # RuntimeError for the given method
+                        with self.assertRaisesRegex(pickle.UnpicklingError, f"{meth}=False"):
+                            torch.load(f, weights_only=True)
+                    else:
+                        # When the given methods are all back to default, load should finally work
+                        loaded = torch.load(f, weights_only=True)
             finally:
                 for method, func in restore_methods.items():
                     setattr(subclass, method, func)
+                a = subclass(torch.randn(2, 3))
 
     def test_tensor_subclass_parent_module_method_spoofing(self):
-        # Simulates user doing `import spoof_mod`
-        # Where `spoof_mod contains TestEmptySubclass`
+        # Simulates user doing `import spoof_mod` where `spoof_mod` contains `TestEmptySubclass`
         class SpoofModule(ModuleType):
             pass
 
@@ -4247,9 +4278,8 @@ class TestSubclassSerialization(TestCase):
         sys.modules['spoof_mod'] = spoof_mod
 
         try:
-            with BytesIOContext() as f:
+            with TemporaryFileName() as f:
                 torch.save(inp, f)
-                f.seek(0)
                 torch.load(f, weights_only=True)
                 restore_methods = dict()
                 methods = [func for func in dir(SpoofModule) if callable(getattr(SpoofModule, func))]
@@ -4259,14 +4289,11 @@ class TestSubclassSerialization(TestCase):
                         setattr(SpoofModule, method, self._create_bad_func(method))
                 SpoofModule.__get__ = self._create_bad_func("__get__")
                 SpoofModule.__getattr__ = self._create_bad_func("__getattr__")
-                f.seek(0)
                 loaded = torch.load(f, weights_only=True)
                 self.assertEqual(loaded['weight'], inp['weight'])
         finally:
             TestEmptySubclass.__module__ = __name__
             del sys.modules['spoof_mod']
-
-
 
 
 instantiate_device_type_tests(TestBothSerialization, globals())

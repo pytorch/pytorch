@@ -210,41 +210,60 @@ class Unpickler:
                             )
 
                         class_type = getattr_static(modules[module], name)
+                        # issubclass/isinstance(A, B) call __subclasscheck__ or __instancecheck__
+                        # of the metaclass of B, so there should not be a way to spoof this
                         if isinstance(class_type, type) and issubclass(
                             class_type, torch.Tensor
                         ):
-                            # Is class_type.method overridable? class_type.method accesses should call PyInstanceMethod_Function   # noqa: B950
+                            # class_type.method accesses should call PyInstanceMethod_Function
                             # https://github.com/python/cpython/blob/a37b0932285b5e883b13a46ff2a32f15d7339894/Objects/classobject.c#L374  # noqa: B950
 
-                            # Tensor.__getattribute__ is called by the getattr call in `_rebuild_from_type_v2`
-                            custom_get_attr = (
+                            # getattr is called by the getattr call in `_rebuild_from_type_v2`
+                            custom_get_attribute = (
                                 class_type.__getattribute__
                                 is not torch.Tensor.__getattribute__
                             )
+                            try:
+                                custom_get = class_type.__get__ is not None
+                            except AttributeError:
+                                custom_get = False
+                            try:
+                                custom_get_attr = class_type.__getattr__ is not None
+                            except AttributeError:
+                                custom_get_attr = False
                             # Tensor.__setstate__ might be called in `_rebuild_from_type_v2`
                             custom_set_state = (
                                 class_type.__setstate__ is not torch.Tensor.__setstate__
                             )
-                            # Tensor.__setattr__ might be called in `torch._utils._set_obj_state`
+                            # setattr is called in `torch._utils._set_obj_state`
                             custom_set_attr = (
                                 class_type.__setattr__ is not object.__setattr__
                             )
+                            try:
+                                custom_set = class_type.__set__ is not None
+                            except AttributeError:
+                                custom_set = False
                             # tp_alloc is called by `Tensor._rebuild_wrapper_subclass` and `Tensor.as_subclass`
                             custom_tp_alloc = not torch._C._check_tp_alloc_is_default(
                                 class_type
                             )
-                            if (
-                                custom_get_attr
-                                or custom_set_attr
-                                or custom_set_state
-                                or custom_tp_alloc
-                            ):
+                            custom_methods = {
+                                "__getattribute__": custom_get_attribute,
+                                "__getattr__": custom_get_attr,
+                                "__get__": custom_get,
+                                "__setattr__": custom_set_attr,
+                                "__set__": custom_set,
+                                "__setstate__": custom_set_state,
+                                "tp_alloc": custom_tp_alloc,
+                            }
+                            if any(custom_methods.values()):
+                                error = ""
+                                for k, v in custom_methods.items():
+                                    error += f" {k}={v}"
                                 raise RuntimeError(
                                     f"Trying to unpickle tensor subclass `{full_path}` that has defined a custom "
-                                    f"version for one of these methods __setstate__={custom_set_state} "
-                                    f"__getattribute__={custom_get_attr} __setattr__={custom_set_attr} or "
-                                    f"tp_alloc={custom_tp_alloc}. Please check whether these methods are "
-                                    "safe and allowlist them with `torch.serialization.mark_safe_globals` if so."
+                                    f"version for one of these methods:{error}. Please check whether you trust these "
+                                    "methods and allowlist the subclass with `torch.serialization.mark_safe_globals` if so."
                                 )
                             self.append(class_type)
                         else:
