@@ -21,6 +21,7 @@
 
 import functools as _functools
 from collections import Counter, OrderedDict
+from inspect import getattr_static
 from pickle import (
     APPEND,
     APPENDS,
@@ -62,16 +63,26 @@ from pickle import (
 )
 from struct import unpack
 from sys import maxsize, modules
-from typing import Any, Callable, Dict, List
+from types import ModuleType
+from typing import Any, Dict, List
 
 import torch
 
-_marked_safe_globals_list: List[Callable] = []
+_marked_safe_globals_list: List[Any] = []
 
 
-def _mark_safe_globals(safe_globals: List[Callable]):
+def _mark_safe_globals(safe_globals: List[Any]):
     global _marked_safe_globals_list
     _marked_safe_globals_list += safe_globals
+
+
+def _get_safe_globals() -> List[Any]:
+    return _marked_safe_globals_list
+
+
+def _clear_safe_globals():
+    global _marked_safe_globals_list
+    _marked_safe_globals_list = []
 
 
 # Separate from _get_allowed_globals because of the lru_cache on _get_allowed_globals
@@ -190,28 +201,49 @@ class Unpickler:
                             "that provides it."
                         )
                     else:
-                        class_type = getattr(modules[module], name)
+                        # Check that module is really a ModuleType
+                        if not isinstance(modules[module], ModuleType):
+                            raise RuntimeError(
+                                f"Found GLOBAL {full_path} but sys.modules[{module}] is not a ModuleType, "
+                                f"got {type(modules[module])}."
+                            )
+
+                        class_type = getattr_static(modules[module], name)
                         if isinstance(class_type, type) and issubclass(
                             class_type, torch.Tensor
                         ):
-                            # Tensor.__setstate__ is called by `_rebuild_from_type_v2`
+                            # Is class_type.method overridable? class_type.method accesses should call PyInstanceMethod_Function   # noqa: B950
+                            # https://github.com/python/cpython/blob/a37b0932285b5e883b13a46ff2a32f15d7339894/Objects/classobject.c#L374  # noqa: B950
+
+                            # Tensor.__getattribute__ is called by the getattr call in `_rebuild_from_type_v2`
+                            custom_get_attr = (
+                                class_type.__getattribute__
+                                is not torch.Tensor.__getattribute__
+                            )
+                            # Tensor.__setstate__ might be called in `_rebuild_from_type_v2`
                             custom_set_state = (
-                                getattr(
-                                    class_type,
-                                    "__setstate__",
-                                    torch.Tensor.__setstate__,
-                                )
-                                is not torch.Tensor.__setstate__
+                                class_type.__setstate__ is not torch.Tensor.__setstate__
+                            )
+                            # Tensor.__setattr__ might be called in `torch._utils._set_obj_state`
+                            custom_set_attr = (
+                                class_type.__setattr__ is not object.__setattr__
                             )
                             # tp_alloc is called by `Tensor._rebuild_wrapper_subclass` and `Tensor.as_subclass`
                             custom_tp_alloc = not torch._C._check_tp_alloc_is_default(
                                 class_type
                             )
-                            if custom_set_state or custom_tp_alloc:
+                            if (
+                                custom_get_attr
+                                or custom_set_attr
+                                or custom_set_state
+                                or custom_tp_alloc
+                            ):
                                 raise RuntimeError(
                                     f"Trying to unpickle tensor subclass `{full_path}` that has defined a custom "
-                                    "`__setstate__` and/or `tp_alloc`. Please check whether these methods are safe "
-                                    "and allowlist them with `torch.serialization.mark_safe_globals` if so."
+                                    f"version for one of these methods __setstate__={custom_set_state} "
+                                    f"__getattribute__={custom_get_attr} __setattr__={custom_set_attr} or "
+                                    f"tp_alloc={custom_tp_alloc}. Please check whether these methods are "
+                                    "safe and allowlist them with `torch.serialization.mark_safe_globals` if so."
                                 )
                             self.append(class_type)
                         else:

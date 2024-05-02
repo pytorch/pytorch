@@ -18,6 +18,7 @@ import platform
 from collections import OrderedDict
 from copy import deepcopy
 from itertools import product
+from types import ModuleType
 
 from torch._utils_internal import get_file_path_2
 from torch._utils import _rebuild_tensor
@@ -31,6 +32,11 @@ from torch.testing._internal.common_utils import (
     parametrize, instantiate_parametrized_tests, AlwaysWarnTypedStorageRemoval, serialTest)
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_dtype import all_types_and_complex_and
+
+if not IS_WINDOWS:
+    from mmap import MAP_SHARED, MAP_PRIVATE
+else:
+    MAP_SHARED, MAP_PRIVATE = None, None
 
 # These tests were all copied from `test/test_torch.py` at some point, so see
 # the actual blame, see this revision
@@ -925,7 +931,7 @@ class TestSerialization(TestCase, SerializationMixin):
             test(fname)
 
         if IS_FILESYSTEM_UTF8_ENCODING:
-            with TemporaryDirectoryName(suffix='非ASCIIパス') as dname:
+            with TemporaryDirectoryName(suffix='\u975eASCII\u30d1\u30b9') as dname:
                 with TemporaryFileName(dir=dname) as fname:
                     test(fname)
 
@@ -3955,6 +3961,32 @@ class TestSerialization(TestCase, SerializationMixin):
             for v in result.values():
                 self.assertTrue(v.is_cuda)
 
+    def test_serialization_mmap_loading_options(self):
+        if IS_WINDOWS:
+            with self.assertRaisesRegex(RuntimeError, "Changing the default mmap options is currently not supported"):
+                torch.serialization.set_default_mmap_options(2)
+            return
+        m = torch.nn.Linear(3, 5)
+        sd = m.state_dict()
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(sd, f)
+            # with MmapVisibility.MAP_PRIVATE, should not be able to modify file
+            sd_loaded = torch.load(f.name, mmap=True)
+            sd_loaded['weight'][0][0] = 0
+            sd_loaded2 = torch.load(f.name, mmap=True)
+            self.assertEqual(sd_loaded2['weight'], sd['weight'])
+            # with MmapVisibility.MAP_SHARED, should be able to modify file
+            torch.serialization.set_default_mmap_options(MAP_SHARED)
+            try:
+                sd_loaded = torch.load(f.name, mmap=True)
+                sd_loaded['weight'][0][0] = 0
+                sd_loaded2 = torch.load(f.name, mmap=True)
+                self.assertNotEqual(sd_loaded2['weight'], sd['weight'])
+                self.assertEqual(sd_loaded2['weight'][0][0].item(), 0)
+                self.assertEqual(sd_loaded2['weight'], sd_loaded['weight'])
+            finally:
+                torch.serialization.set_default_mmap_options(MAP_PRIVATE)
+
     @parametrize('dtype', (torch.float8_e5m2, torch.float8_e4m3fn, torch.complex32))
     @parametrize('weights_only', (True, False))
     def test_serialization_dtype(self, dtype, weights_only):
@@ -4098,7 +4130,7 @@ class TestSubclassSerialization(TestCase):
             f.seek(0)
             tensor2 = torch.load(f)
 
-    def test_allowlist_for_weights_only(self):
+    def test_safe_globals_for_weights_only(self):
         # Doing the import here as this test later dels the import from sys.modules
         from torch.testing._internal.two_tensor import TwoTensor
         t = TwoTensor(torch.randn(2, 3), torch.randn(2, 3))
@@ -4118,7 +4150,7 @@ class TestSubclassSerialization(TestCase):
                 sd = torch.load(f, weights_only=True)
 
             # Loading tensor subclass with weights_only=True should work
-            # if __setstate__ and tp_alloc are not overriden and user has imported the subclass
+            # if target methods are not overriden and user has imported the subclass
             from torch.testing._internal.two_tensor import TwoTensor
             f.seek(0)
             sd = torch.load(f, weights_only=True)
@@ -4131,18 +4163,108 @@ class TestSubclassSerialization(TestCase):
             restore_setstate = TwoTensor.__setstate__
             try:
                 TwoTensor.__setstate__ = lambda self, state: self.__dict__.update(state)
-                with self.assertRaisesRegex(pickle.UnpicklingError, "defined a custom `__setstate__`"):
+                with self.assertRaisesRegex(pickle.UnpicklingError, "__setstate__=True"):
                     torch.load(f, weights_only=True)
 
                 # Loading tensor subclass with overriden __setstate__ with weights_only=True should work
                 # if the class is marked safe
                 f.seek(0)
                 torch.serialization.mark_safe_globals([TwoTensor])
+                self.assertTrue(torch.serialization.get_safe_globals() == [TwoTensor])
                 sd = torch.load(f, weights_only=True)
                 self.assertEqual(sd['t'], t)
                 self.assertEqual(sd['p'], p)
+
+                # Should fail again when safe globals are cleared
+                torch.serialization.clear_safe_globals()
+                f.seek(0)
+                with self.assertRaisesRegex(pickle.UnpicklingError, "__setstate__=True"):
+                    torch.load(f, weights_only=True)
+
             finally:
                 TwoTensor.__setstate__ = restore_setstate
+
+    def _create_bad_func(self, name):
+        def bad_func(self, *args, **kwargs):
+            raise RuntimeError(f"running {name}")
+        return bad_func
+
+    @parametrize("wrapper", (True, False))
+    def test_tensor_subclass_method_spoofing(self, wrapper):
+        # Define this locally since we will add state to it
+        subclass = TestWrapperSubclass if wrapper else TestEmptySubclass
+        inp = {'weight': subclass(torch.randn(2, 3))}
+
+        with BytesIOContext() as f:
+            torch.save(inp, f)
+            f.seek(0)
+
+            restore_methods = dict()
+            methods = [func for func in dir(subclass) if callable(getattr(subclass, func))]
+            for method in methods:
+                if method != "__class__":
+                    restore_methods[method] = getattr(subclass, method)
+                    setattr(subclass, method, self._create_bad_func(method))
+            try:
+                # Unsafe load should attempt to run __getattribute__ in rebuild_tensor_v2
+                with self.assertRaisesRegex(RuntimeError, "running __getattribute__"):
+                    torch.load(f, weights_only=False)
+                f.seek(0)
+                with self.assertRaisesRegex(pickle.UnpicklingError,
+                                            "methods __setstate__=True __getattribute__=True __setattr__=True"):
+                    torch.load(f, weights_only=True)
+                subclass.__setstate__ = restore_methods['__setstate__']
+                f.seek(0)
+                with self.assertRaisesRegex(pickle.UnpicklingError,
+                                            "methods __setstate__=False __getattribute__=True __setattr__=True"):
+                    torch.load(f, weights_only=True)
+                subclass.__getattribute__ = restore_methods['__getattribute__']
+                f.seek(0)
+                with self.assertRaisesRegex(pickle.UnpicklingError,
+                                            "methods __setstate__=False __getattribute__=False __setattr__=True"):
+                    torch.load(f, weights_only=True)
+                subclass.__setattr__ = restore_methods['__setattr__']
+                f.seek(0)
+                loaded = torch.load(f, weights_only=True)
+                # Need to restore to do the `assertEqual`
+                for method, func in restore_methods.items():
+                    setattr(subclass, method, func)
+                self.assertEqual(loaded['weight'], inp['weight'])
+            finally:
+                for method, func in restore_methods.items():
+                    setattr(subclass, method, func)
+
+    def test_tensor_subclass_parent_module_method_spoofing(self):
+        # Simulates user doing `import spoof_mod`
+        # Where `spoof_mod contains TestEmptySubclass`
+        class SpoofModule(ModuleType):
+            pass
+
+        spoof_mod = SpoofModule('bla')
+        spoof_mod.TestEmptySubclass = TestEmptySubclass
+        inp = TestEmptySubclass(torch.randn(2, 3))
+        TestEmptySubclass.__module__ = 'spoof_mod'
+        sys.modules['spoof_mod'] = spoof_mod
+
+        try:
+            with BytesIOContext() as f:
+                torch.save(inp, f)
+                f.seek(0)
+                torch.load(f, weights_only=True)
+                restore_methods = dict()
+                methods = [func for func in dir(SpoofModule) if callable(getattr(SpoofModule, func))]
+                for method in methods:
+                    if method != "__class__":
+                        restore_methods[method] = getattr(SpoofModule, method)
+                        setattr(SpoofModule, method, self._create_bad_func(method))
+                SpoofModule.__get__ = self._create_bad_func("__get__")
+                SpoofModule.__getattr__ = self._create_bad_func("__getattr__")
+                f.seek(0)
+                loaded = torch.load(f, weights_only=True)
+                self.assertEqual(loaded['weight'], inp['weight'])
+        finally:
+            TestEmptySubclass.__module__ = __name__
+            del sys.modules['spoof_mod']
 
 
 

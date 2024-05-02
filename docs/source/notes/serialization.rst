@@ -392,4 +392,8 @@ The following utility functions are related to serialization:
 .. autofunction:: register_package
 .. autofunction:: get_default_load_endianness
 .. autofunction:: set_default_load_endianness
+.. autofunction:: get_default_mmap_options
+.. autofunction:: set_default_mmap_options
+.. autofunction:: clear_safe_globals
+.. autofunction:: get_safe_globals
 .. autofunction:: mark_safe_globals
