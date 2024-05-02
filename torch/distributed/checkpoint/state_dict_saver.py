@@ -6,7 +6,6 @@ from typing import cast, Optional, Union
 import torch
 import torch.distributed as dist
 from torch.distributed._state_dict_utils import _offload_state_dict_to_cpu
-from torch.distributed.checkpoint import FileSystemWriter
 
 from torch.distributed.checkpoint._storage_utils import _storage_setup
 from torch.distributed.checkpoint.default_planner import DefaultSavePlanner
@@ -221,10 +220,6 @@ def async_save(
     storage_writer = cast(
         StorageWriter, _storage_setup(storage_writer, checkpoint_id, reader=False)
     )
-    if isinstance(storage_writer, FileSystemWriter):
-        # in the async case, the state dict is already on CPU, so maintaining this
-        # buffer makes no sense
-        storage_writer.per_thread_copy_ahead = 0
 
     state_dict = _stateful_to_state_dict(state_dict)
     if isinstance(storage_writer, AsyncStager):
