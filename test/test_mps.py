@@ -232,6 +232,7 @@ def mps_ops_modifier(ops):
         '__rmul__',
         '__getitem__',
         'add',
+        'argwhere',
         'atleast_1d',
         'atleast_2d',
         'atleast_3d',
