@@ -156,11 +156,6 @@ def mps_ops_grad_modifier(ops):
         # On the backward pass for `sort` both are used (values and indices), thus resulting in a issmatch between CPU and MPS.
         # Running `msort` with stable `sort` passes.
         'msort': [torch.float16],
-
-        # See https://github.com/pytorch/pytorch/issues/106112 for more information
-        'cumprod': [torch.float32, torch.float16],
-        # See https://github.com/pytorch/pytorch/issues/109166 for more information
-        'masked.cumprod': [torch.float16],
     }
 
     SKIPLIST_GRAD = {
