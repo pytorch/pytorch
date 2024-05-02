@@ -9,7 +9,6 @@ import functools
 import logging
 import operator
 import os
-import tempfile
 from typing import Any, cast, Dict, List
 
 import torch
@@ -32,6 +31,10 @@ from .schemas import AOTConfig  # noqa: F401
 log = logging.getLogger(__name__)
 
 
+class BypassAOTAutogradCache(Exception):
+    pass
+
+
 def fake_tensor_from_meta(tensor_meta):
     fake_mode = detect_fake_mode()
     with fake_mode:
@@ -44,18 +47,6 @@ def fake_tensor_from_meta(tensor_meta):
                 requires_grad=tensor_meta.requires_grad,
             ),
         )
-
-
-class BypassAOTAutogradCache(Exception):
-    pass
-
-
-cache = tempfile.mkdtemp()
-
-
-def cache_dir():
-    """Returns the directory where we store AOTAutograd cache entries."""
-    return cache
 
 
 def check_node_safe(node: Node):
