@@ -98,6 +98,14 @@ class TestFlopCounter(TestCase):
 
         self.assertExpectedInline(get_total_flops(mode), """5184""")
 
+    def test_backward_reset(self):
+        with FlopCounterMode() as mode:
+            a = T(4, 5, requires_grad=True)
+            a.mm(a.t()).sum().backward()
+            a.mm(a.t()).sum().backward()
+
+        self.assertExpectedInline(get_total_flops(mode), """960""")
+
     def test_torchscript(self):
         def foo(x):
             return torch.mm(x, x)
@@ -226,8 +234,7 @@ class TestFlopCounter(TestCase):
         x = torch.rand(1, 4, 30, 2)
         model = torch.nn.ConvTranspose2d(4, 8, (2, 2), stride=2)
 
-        mode = FlopCounterMode(model)
-        with mode:
+        with FlopCounterMode() as mode:
             for i in range(50):
                 out = model(x)
                 out.sum().backward()
@@ -334,14 +341,13 @@ class TestFlopCounter(TestCase):
         model = torch.nn.Linear(100, 100)
         x = torch.randn(3, 100)
 
-        flop_counter = FlopCounterMode(model)
-        with flop_counter:
-            self.assertEqual(len(model._forward_pre_hooks), 1)
-            self.assertEqual(len(model._forward_hooks), 1)
+        with FlopCounterMode() as mode:
+            self.assertEqual(len(torch.nn.modules.module._global_forward_pre_hooks), 1)
+            self.assertEqual(len(torch.nn.modules.module._global_forward_hooks), 1)
             model(x).sum().backward()
 
-        self.assertEqual(len(model._forward_pre_hooks), 0)
-        self.assertEqual(len(model._forward_hooks), 0)
+        self.assertEqual(len(torch.nn.modules.module._global_forward_pre_hooks), 0)
+        self.assertEqual(len(torch.nn.modules.module._global_forward_hooks), 0)
 
     def test_pytrees(self):
         class Foo(torch.nn.Module):
@@ -359,8 +365,7 @@ class TestFlopCounter(TestCase):
                 return self.b(self.a(x))
 
         mod = Mod()
-        mode = FlopCounterMode(mod)
-        with mode:
+        with FlopCounterMode() as mode:
             mod({'a': torch.randn(10, 10, requires_grad=True).clone()})['a'].sum().backward()
         self.assertExpectedInline((mode.flop_counts['Mod'][torch.ops.aten.mm]), """12000""")
 
@@ -369,13 +374,14 @@ class TestFlopCounter(TestCase):
                 return (torch.mm(x, x),)
 
         mod = Mod2()
-        mode = FlopCounterMode(mod)
-        with mode:
+        with FlopCounterMode() as mode:
             mod(torch.randn(10, 10, requires_grad=True))[0].sum().backward()
         self.assertExpectedInline((mode.flop_counts['Mod2'][torch.ops.aten.mm]), """6000""")
 
-
-
+    def test_warning(self):
+        mod = torch.nn.Linear(2, 2)
+        with self.assertWarnsRegex(UserWarning, "not needed"):
+            FlopCounterMode(mod)
 
 
 if __name__ == '__main__':
