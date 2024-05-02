@@ -17,7 +17,7 @@ from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_SCIPY, IS_MACOS, IS_WINDOWS, slowTest,
      TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU, iter_indices,
      make_fullrank_matrices_with_distinct_singular_values,
-     freeze_rng_state, IS_SANDCASTLE, TEST_OPT_EINSUM, parametrize, skipIfTorchDynamo,
+     freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, parametrize, skipIfTorchDynamo,
      setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, has_hipsolver,
@@ -1223,6 +1223,9 @@ class TestLinalg(TestCase):
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble, torch.bfloat16, torch.float16)
     def test_vector_norm(self, device, dtype):
+        if IS_ARM64 and device == 'cpu' and dtype in [torch.float16, torch.bfloat16, torch.float32]:
+            raise unittest.SkipTest("Fails on ARM, see https://github.com/pytorch/pytorch/issues/125438")
+        # have to use torch.randn(...).to(bfloat16) instead of
         # This test compares torch.linalg.vector_norm's output with
         # torch.linalg.norm given a flattened tensor
         ord_vector = [0, 0.9, 1, 2, 3, inf, -0.5, -1, -2, -3, -inf]
@@ -5582,6 +5585,8 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                   torch.half))
     @dtypes(torch.bfloat16, torch.half, torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_addmv(self, device, dtype):
+        if IS_ARM64 and device == 'cpu' and dtype == torch.float16:
+            raise unittest.SkipTest("Fails on ARM, see https://github.com/pytorch/pytorch/issues/125438")
         # have to use torch.randn(...).to(bfloat16) instead of
         # torch.randn(..., dtype=bfloat16). randn does not support
         # bfloat16 yet.
