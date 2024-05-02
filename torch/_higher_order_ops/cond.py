@@ -159,11 +159,9 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
         isinstance(o, torch.Tensor) for o in operands
     ), "Cond operands must be a list of tensors"
 
-    pre_dispatch = getattr(proxy_mode, "pre_dispatch", False)
-
     with disable_proxy_modes_tracing():
-        true_graph = reenter_make_fx(true_fn, pre_dispatch)(*operands)
-        false_graph = reenter_make_fx(false_fn, pre_dispatch)(*operands)
+        true_graph = reenter_make_fx(true_fn)(*operands)
+        false_graph = reenter_make_fx(false_fn)(*operands)
 
     true_outs = []
     false_outs = []
