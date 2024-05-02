@@ -30,6 +30,8 @@ from torch.distributed._tensor.placement_types import (
 )
 from torch.distributed.device_mesh import DeviceMesh
 
+# TODO: Couple more places to rename foreach_list to list strategy
+
 
 aten = torch.ops.aten
 # leave the remaining pointwise_ops list here for convenience,
@@ -408,6 +410,20 @@ pointwise_ops = [
 def pointwise_strategy(
     mesh: DeviceMesh, op_schema: OpSchema, linearity: bool = False
 ) -> OpStrategy:
+    """
+    Pointwise operators can follow the strategy of its first argument
+    For example, c = add(a, b). If a is sharded, we can follow the
+    sharding of a to generate the strategy for b.
+
+    Args:
+        mesh (DeviceMesh): device mesh for pointwise ops
+        op_schema (OpSchema): schema of the operator to generate strategy for
+        linearity (bool): whether this op supports broadcasting or not
+
+    Returns:
+        OpStrategy: generated strategy
+    """
+
     max_shards_strategy_index = -1
     max_shards = -1
 
@@ -445,6 +461,12 @@ def common_pointwise_strategy(
     followed_strategy: OpStrategy,
     linearity: bool,
 ) -> OpStrategy:
+    """
+    TODO: This seems very similar to the pointwise_strategy,
+    Write some docs so I can understand this better
+    """
+
+
     # handle broadcasting
     common_shape = torch.broadcast_shapes(
         *[arg.output_shape for arg in args_schema if isinstance(arg, OpStrategy)]
@@ -567,7 +589,7 @@ for_each_linearity_ops = [
 ]
 
 
-def foreach_list_pointwise_strategy(
+def list_pointwise_strategy(
     mesh: DeviceMesh, op_schema: OpSchema, linearity: bool = False
 ) -> StrategyType:
     """
@@ -614,21 +636,40 @@ def foreach_list_pointwise_strategy(
     return TupleStrategy(foreach_strategy_list)
 
 
-def foreach_list_linear_pointwise_strategy(
+def list_linear_pointwise_strategy(
     mesh: DeviceMesh, op_schema: OpSchema
 ) -> StrategyType:
     """
     for each list op stratgy that supports linearity
     """
-    return foreach_list_pointwise_strategy(mesh, op_schema, linearity=True)
+    return list_pointwise_strategy(mesh, op_schema, linearity=True)
 
 
 for op in for_each_ops:
     register_op_strategy(op, schema_info=RuntimeSchemaInfo(needs_pytree=True))(
-        foreach_list_pointwise_strategy
+        list_pointwise_strategy
     )
 
 for op in for_each_linearity_ops:
     register_op_strategy(op, schema_info=RuntimeSchemaInfo(needs_pytree=True))(
-        foreach_list_linear_pointwise_strategy
+        list_linear_pointwise_strategy
     )
+
+# TODO: What's a linearity op exactly? Maybe write a docsrting somewhere
+fused_ops = [
+    # This is only op I'm enabling right now
+    aten._fused_adam_.default,
+
+    # These are all the ops with fused in their name
+    # fused_ops = [op for op in dir(torch.ops.aten) if 'fused' in op]
+
+    # _fused_dropout
+    # _fused_moving_avg_obs_fq_helper
+    # _thnn_fused_lstm_cell
+    # _thnn_fused_lstm_cell_backward_impl
+]
+
+for op in fused_ops:
+    register_op_strategy(
+        op, schema_info=RuntimeSchemaInfo(needs_pytree=True)
+    )(list_pointwise_strategy)

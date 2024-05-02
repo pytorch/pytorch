@@ -33,9 +33,11 @@ def _shard_dim_alltoall_meta(input, gather_dim, shard_dim, group_name):
 def shard_dim_alltoall(input, gather_dim, shard_dim, mesh, mesh_dim):
     if mesh.device_type == "cpu":
         # Gloo does not support alltoall, so falling back to allgather + chunk
-        logger.warning(
-            "CPU process group does not support alltoall yet, falling back with allgather + chunk!"
-        )
+
+        ## NOISY!!
+        # logger.warning(
+        #     "CPU process group does not support alltoall yet, falling back with allgather + chunk!"
+        # )
         out = funcol.all_gather_tensor(input, gather_dim, (mesh, mesh_dim))
         if isinstance(out, funcol.AsyncCollectiveTensor):
             # stick to the same behavior for the alltoall case, remove this once we enable alltoall async

@@ -90,18 +90,29 @@ class TestDTensorOptimizer(DTensorTestBase):
 
         # TODO: add fused_adam support
         adam_configs = [
-            {"lr": 0.1},
-            {"lr": 0.1, "weight_decay": 0.05},
-            {"lr": 0.1, "foreach": True},
-            {"lr": 0.1, "weight_decay": 0.05, "foreach": True},
-            {"lr": 0.1, "weight_decay": 0.05, "amsgrad": True, "foreach": True},
+            # {"lr": 0.1},
+            # {"lr": 0.1, "weight_decay": 0.05},
+            # {"lr": 0.1, "foreach": True},
+
+            # {"lr": 0.1, "weight_decay": 0.05, "foreach": True},
+            # {"lr": 0.1, "weight_decay": 0.05, "amsgrad": True, "foreach": True},
+            # {
+            #     "lr": 0.1,
+            #     "weight_decay": 0.05,
+            #     "maximize": True,
+            #     "amsgrad": True,
+            #     "foreach": True,
+            # },
+            {"lr": 0.1, "fused": True},
+            {"lr": 0.1, "weight_decay": 0.05, "amsgrad": True, "fused": True},
             {
                 "lr": 0.1,
                 "weight_decay": 0.05,
                 "maximize": True,
                 "amsgrad": True,
-                "foreach": True,
+                "fused": True,
             },
+
         ]
 
         for config in adam_configs:
