@@ -299,7 +299,7 @@ def _verify_options(
             )
             optim_state_dict_config = FullOptimStateDictConfig(
                 offload_to_cpu=options.cpu_offload,
-                rank0_only=(options.cpu_offload or options.broadcast_from_rank0)
+                rank0_only=(options.cpu_offload or options.broadcast_from_rank0),
             )
             state_dict_type = StateDictType.FULL_STATE_DICT
         else:

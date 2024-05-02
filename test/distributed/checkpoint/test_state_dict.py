@@ -23,6 +23,7 @@ from torch.distributed.checkpoint.state_dict import (
     _patch_model_state_dict,
     _patch_optimizer_state_dict,
     get_model_state_dict,
+    get_optimizer_state_dict,
     get_state_dict,
     set_model_state_dict,
     set_optimizer_state_dict,
@@ -607,7 +608,11 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             fsdp_optim.step()
 
             def check(equal):
-                fsdp_states, fsdp_optim_states = get_state_dict(
+                fsdp_states = get_model_state_dict(
+                    fsdp_model,
+                    options=StateDictOptions(full_state_dict=True),
+                )
+                fsdp_optim_states = get_optimizer_state_dict(
                     fsdp_model,
                     fsdp_optim,
                     options=StateDictOptions(full_state_dict=True),
