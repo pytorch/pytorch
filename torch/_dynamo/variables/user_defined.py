@@ -13,6 +13,7 @@ import sys
 import threading
 import types
 import warnings
+import logging
 
 from typing import Dict, Generic, List
 
@@ -54,6 +55,9 @@ from ..utils import (
 from .base import MutableLocal, VariableTracker
 from .ctx_manager import GenericContextWrappingVariable, NullContextVariable
 from .dicts import DefaultDictVariable
+
+
+log = logging.getLogger(__name__)
 
 
 def is_standard_setattr(val):
@@ -828,6 +832,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             subobj = self._getattr_static(name)
         except AttributeError:
             subobj = NO_SUCH_SUBOBJ
+            log.warning(f"NO_SUCH_SUBOBJ: {self.value} {name}")
             getattr_fn = self._check_for_getattr()
             if isinstance(getattr_fn, types.FunctionType):
                 return variables.UserMethodVariable(
