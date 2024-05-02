@@ -14,7 +14,7 @@ Background_Matting,pass_due_to_skip,0
 
 
 
-DALLE2_pytorch,pass,13
+DALLE2_pytorch,pass,12
 
 
 
@@ -178,7 +178,7 @@ hf_T5_base,eager_fail_to_run,0
 
 
 
-hf_T5_generate,pass,6
+hf_T5_generate,pass,5
 
 
 

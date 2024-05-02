@@ -22,6 +22,7 @@ import re
 import subprocess
 import sys
 import threading
+import time
 import unittest
 from dataclasses import dataclass, field
 from typing import List, Optional
@@ -1640,6 +1641,137 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                 json.load(f)
 
         event_list.table()
+
+    def _check_all_gpu_present(self, gpu_dict, max_gpu_count):
+        for i in range(0, max_gpu_count):
+            self.assertEqual(gpu_dict["GPU " + str(i)], 1)
+
+    # Do json sanity testing. Checks that all events are between profiler start and end
+    # also checks to see that GPU values are present in trace if cuda is used
+    def _validate_basic_json(self, traceEvents, cuda_available=False):
+        MAX_GPU_COUNT = 8
+        PROFILER_IDX = -4
+        RECORD_END = -1
+        RECORD_START = -2
+        traceEventProfiler = traceEvents[PROFILER_IDX]
+
+        self.assertTrue(traceEventProfiler["name"] == "PyTorch Profiler (0)")
+        self.assertTrue(traceEvents[RECORD_END]["name"] == "Record Window End")
+        self.assertTrue(
+            traceEvents[RECORD_START]["name"] == "Iteration Start: PyTorch Profiler"
+        )
+        # check that the profiler starts/ends within the record interval
+        self.assertGreaterEqual(
+            traceEventProfiler["ts"],
+            traceEvents[RECORD_START]["ts"],
+            "Profiler starts before record!",
+        )
+        self.assertLessEqual(
+            traceEventProfiler["ts"] + traceEventProfiler["dur"],
+            traceEvents[RECORD_END]["ts"],
+            "Profiler ends after record end!",
+        )
+
+        gpu_dict = collections.defaultdict(int)
+        for i, traceEvent in enumerate(traceEvents):
+            if (
+                i == len(traceEvents) + RECORD_END
+                or i == len(traceEvents) + RECORD_START
+            ):
+                continue
+            # make sure all valid trace events are within the bounds of the profiler
+            if "ts" in traceEvent:
+                self.assertGreaterEqual(
+                    traceEvent["ts"],
+                    traceEventProfiler["ts"],
+                    "Trace event is out of bounds",
+                )
+            # some python events seem to go a little past record end probably because
+            # of some clock inaccuracies so just compare events ending to RECORD_END
+            if "dur" in traceEvent:
+                self.assertLessEqual(
+                    traceEvent["ts"] + traceEvent["dur"],
+                    traceEvents[RECORD_END]["ts"],
+                    "Trace event ends too late!",
+                )
+            gpu_value = traceEvent.get("args", {}).get("labels", None)
+            if gpu_value and "GPU" in gpu_value:
+                gpu_dict[gpu_value] += 1
+                self.assertTrue(
+                    traceEvents[i + 1]["args"]["sort_index"]
+                    == 0x1000000 + int(gpu_value.split()[1])
+                )
+
+        # only check that gpu labels are present if cuda available
+        if cuda_available:
+            self._check_all_gpu_present(gpu_dict, MAX_GPU_COUNT)
+
+    def _test_chrome_trace_basic_helper(self, with_cuda=False):
+        if with_cuda:
+            device = "cuda"
+        else:
+            device = "cpu"
+        x, y = (torch.rand(4, 4).to(device) for _ in range(2))
+
+        with profile(with_stack=True) as p:
+            torch.add(x, y)
+        with TemporaryFileName(mode="w+") as fname:
+            p.export_chrome_trace(fname)
+            with open(fname) as f:
+                report = json.load(f)
+                self._validate_basic_json(report["traceEvents"], with_cuda)
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    def test_basic_chrome_trace(self):
+        self._test_chrome_trace_basic_helper()
+        if torch.cuda.is_available():
+            self._test_chrome_trace_basic_helper(with_cuda=True)
+
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    def test_profiler_time_scale(self):
+        MARGIN_ERROR = 0.5
+        SEC_TO_US = 1000 * 1000
+        WAIT_TIME = 10
+        with profile() as p:
+            with torch.profiler.record_function("test_span"):
+                for i in range(WAIT_TIME):
+                    torch.rand(4, 4)
+                    time.sleep(1)
+        events = p.events()
+
+        # make sure function events are scaled appropriately
+        self.assertTrue(events[0].name == "test_span")
+        test_span = events[0]
+        self.assertGreaterEqual(
+            test_span.cpu_time / SEC_TO_US,
+            WAIT_TIME - MARGIN_ERROR,
+            "event out of range",
+        )
+        self.assertLessEqual(
+            test_span.cpu_time / SEC_TO_US,
+            WAIT_TIME + MARGIN_ERROR,
+            "event out of range",
+        )
+
+        # make sure tracing is scaled appropriately
+        with TemporaryFileName(mode="w+") as fname:
+            p.export_chrome_trace(fname)
+            with open(fname) as f:
+                report = json.load(f)
+            events = report["traceEvents"]
+            for event in events:
+                if event["name"] == "test_span":
+                    self.assertGreaterEqual(
+                        event["dur"] / SEC_TO_US,
+                        WAIT_TIME - MARGIN_ERROR,
+                        "profiling out of range",
+                    )
+                    self.assertLessEqual(
+                        event["dur"] / SEC_TO_US,
+                        WAIT_TIME + MARGIN_ERROR,
+                        "profiling out of range",
+                    )
 
 
 class SimpleNet(nn.Module):
