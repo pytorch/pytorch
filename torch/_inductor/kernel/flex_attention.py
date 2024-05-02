@@ -179,7 +179,7 @@ _h100_default_config = {
     (torch.float32, 256): (32, 32, 4, 3),
     (torch.bfloat16, 64): (128, 64, 4, 3),
     (torch.bfloat16, 128): (64, 32, 4, 3),
-    (torch.bfloat16, 256): (64, 16, 4, 3),
+    (torch.bfloat16, 256): (64, 32, 4, 3),
 }
 
 _a100_default_config = {
