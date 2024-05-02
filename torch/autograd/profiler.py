@@ -7,6 +7,7 @@ from warnings import warn
 import torch
 
 import torch.cuda
+from torch._C import _get_privateuse1_backend_name
 from torch._C._profiler import _ExperimentalConfig
 
 from torch.autograd import (
@@ -240,7 +241,9 @@ class profile:
                 use_kineto
             ), "Device-only events supported only with Kineto (use_kineto=True)"
 
-        VALID_DEVICE_OPTIONS = ["cuda", "xpu", "privateuseone"]
+        VALID_DEVICE_OPTIONS = ["cuda", "xpu"]
+        if _get_privateuse1_backend_name() != "privateuseone":
+            VALID_DEVICE_OPTIONS.append(_get_privateuse1_backend_name())
         if self.use_device not in VALID_DEVICE_OPTIONS:
             warn(f"The {self.use_device} is not a valid device option.")
             self.use_device = None
@@ -283,7 +286,6 @@ class profile:
                 self.profiler_kind = ProfilerState.KINETO_PRIVATEUSE1_FALLBACK
             else:
                 self.kineto_activities.add(ProfilerActivity.PrivateUse1)
-                self.profiler_kind = ProfilerState.KINETO_PRIVATEUSE1
 
         assert (
             len(self.kineto_activities) > 0
@@ -328,10 +330,10 @@ class profile:
     def __exit__(self, exc_type, exc_val, exc_tb):
         if not self.enabled:
             return
-        if self.use_device == "cuda":
-            torch.cuda.synchronize()
-        elif self.use_device == "xpu":
-            torch.xpu.synchronize()
+        if self.use_device and hasattr(torch, self.use_device):
+            device_module = getattr(torch, self.use_device)
+            if hasattr(device_module, "synchronize"):
+                device_module.synchronize()
 
         t0 = perf_counter_ns()
         self.kineto_results = _disable_profiler()
@@ -558,7 +560,10 @@ class profile:
                 and fe.id in device_corr_map
             ):
                 for f_evt in device_corr_map[fe.id]:
-                    if f_evt.device_type == DeviceType.CUDA:
+                    if (
+                        f_evt.device_type == DeviceType.CUDA
+                        or f_evt.device_type == DeviceType.PrivateUse1
+                    ):
                         fe.append_kernel(
                             f_evt.name,
                             f_evt.device_index,
