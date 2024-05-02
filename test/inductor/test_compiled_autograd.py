@@ -1432,8 +1432,14 @@ main()
         stdout = stdout.decode("utf-8")
 
         patterns = [
-            r"\[python_compiled_autograd.cpp\] cache miss: mismatch starting torch::autograd::GraphRoot \(NodeCall 0\), with key of size (\d+)\n",
-            r"\[python_compiled_autograd.cpp\] cache miss: mismatch starting torch::autograd::AccumulateGrad \(NodeCall 5\), with key of size (\d+)\n",
+            (
+                r"\[python_compiled_autograd.cpp\] cache miss: mismatch starting torch::autograd::GraphRoot "
+                r"\(NodeCall 0\), with key of size (\d+)\n"
+            ),
+            (
+                r"\[python_compiled_autograd.cpp\] cache miss: mismatch starting torch::autograd::AccumulateGrad "
+                r"\(NodeCall 5\), with key of size (\d+)\n"
+            ),
             r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
             r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
             r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
@@ -1449,45 +1455,53 @@ main()
         self.assertEqual(len(matches[0]), len(patterns))
 
     def test_snapshot_verbose_logs_flag(self):
-        def fn():
-            model = torch.nn.Sequential(
-                torch.nn.Linear(4, 4),
-                torch.nn.ReLU(),
-                torch.nn.Linear(4, 4),
-                torch.nn.ReLU(),
-            )
-            x = torch.randn([2, 4])
-            result = model(x).sum()
+        script = """
+import torch
+
+def compiler_fn(gm):
+    return torch.compile(gm, backend="eager")
+
+def main():
+    model = torch.nn.Sequential(
+        torch.nn.Linear(4, 4),
+        torch.nn.ReLU(),
+        torch.nn.Linear(4, 4),
+        torch.nn.ReLU(),
+    )
+
+    for i in [10, 20, 100, 10]:
+        x = torch.randn([i, 4])
+        result = model(x).sum()
+        with torch._dynamo.compiled_autograd.enable(compiler_fn):
+            torch._logging.set_logs(compiled_autograd_verbose=True)  # ignored
             result.backward()
-            yield model[0].weight.grad
-            yield model[0].bias.grad
-            yield model[2].weight.grad
-            yield model[2].bias.grad
 
-        logs, ctx = logs_to_string(
-            torch._dynamo.compiled_autograd.__name__, "compiled_autograd_verbose"
-        )
-        with ctx():
-            with compiled_autograd.enable(compiler_fn):
-                # unused, verbose level already snapshot with contextmanager
-                torch._logging.set_logs(compiled_autograd_verbose=True)
-                fn()
+main()
+"""
+        stdout, _ = self.run_process_no_exception(script)
+        stdout = stdout.decode("utf-8")
 
-        unexpected_logs = [
-            "SumBackward0 (NodeCall 1)",
-            "ReluBackward0 (NodeCall 2)",
-            "AddmmBackward0 (NodeCall 3)",
-            "TBackward0 (NodeCall 4)",
-            "torch::autograd::AccumulateGrad (NodeCall 5)",
-            "ReluBackward0 (NodeCall 6)",
-            "AddmmBackward0 (NodeCall 7)",
-            "TBackward0 (NodeCall 8)",
-            "torch::autograd::AccumulateGrad (NodeCall 9)",
-            "torch::autograd::AccumulateGrad (NodeCall 10)",
-            "torch::autograd::AccumulateGrad (NodeCall 11)",
+        patterns = [
+            (
+                r"\[python_compiled_autograd.cpp\] cache miss: mismatch starting torch::autograd::GraphRoot "
+                r"\(NodeCall 0\), with key of size (\d+)\n"
+            ),
+            (
+                r"\[python_compiled_autograd.cpp\] cache miss: mismatch starting torch::autograd::AccumulateGrad "
+                r"\(NodeCall 5\), with key of size (\d+)\n"
+            ),
+            r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
+            r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
+            r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
+            r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
+            r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
+            r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
+            r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
         ]
 
-        self.assertEqual(sum(1 for e in unexpected_logs if e in logs.getvalue()), 0)
+        pattern = r"".join(patterns)
+        matches = re.findall(pattern, stdout)
+        self.assertEqual(len(matches), 0)
 
 
 def load_test_module(name):
