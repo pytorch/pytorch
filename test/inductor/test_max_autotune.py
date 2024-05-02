@@ -250,13 +250,13 @@ class TestMaxAutotune(TestCase):
             def __init__(self, key, is_autotune=False):
                 pass
 
-            def get(self, filenames):
+            def get(self, filename):
                 nonlocal cache
                 nonlocal num_get
-                ret = {
-                    file: json.loads(cache[file]) for file in filenames if file in cache
-                }
-                num_get += len(ret)
+                if filename not in cache:
+                    return None
+                ret = json.loads(cache[filename])
+                num_get += 1
                 return ret
 
             def put(self, filename, data):
@@ -445,6 +445,22 @@ class TestMaxAutotune(TestCase):
         counters.clear()
 
         fn_c = torch.compile(mode="max-autotune-no-cudagraphs")(fn)
+        self.assertEqual(counters["inductor"]["select_algorithm_precompile"], 0)
+
+    @skipIfRocm
+    @fresh_inductor_cache()
+    @config.patch(search_autotune_cache=True)
+    def test_search_autotune_cache(self):
+        def fn(a, b, c):
+            a = (a @ b) @ c
+            a, b, c = (t.to(torch.float16) for t in [a, b, c])
+            return (a @ b) @ c
+
+        fn_c = torch.compile()(fn)
+        inputs = [torch.rand([256, 256], device="cuda") for _ in range(3)]
+        from torch._dynamo.utils import counters
+
+        self.assertEqual(fn(*inputs), fn_c(*inputs), atol=1e-2, rtol=1e-2)
         self.assertEqual(counters["inductor"]["select_algorithm_precompile"], 0)
 
     @config.patch(autotune_local_cache=False, autotune_remote_cache=False)
