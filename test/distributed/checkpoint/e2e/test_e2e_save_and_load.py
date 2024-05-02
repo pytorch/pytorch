@@ -211,10 +211,18 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
     @with_comms
     @skip_if_lt_x_gpu(4)
     @with_temp_dir
-    def test_e2e_async(self):
-        self._run_e2e_test(compile=False, model_type=ModelType.FSDP, async_op=True)
+    @parametrize("cache_staged_state_dict", [False, True])
+    def test_e2e_async_cached(self, cache_staged_state_dict):
+        self._run_e2e_test(
+            compile=False,
+            model_type=ModelType.FSDP,
+            async_op=True,
+            cache_staged_state_dict=cache_staged_state_dict,
+        )
 
-    def _run_e2e_test(self, compile, model_type, async_op=False):
+    def _run_e2e_test(
+        self, compile, model_type, async_op=False, cache_staged_state_dict=False
+    ):
         model, optim = self._create_model(compile, ModelType.NONE)
         _train(model, optim, train_steps=2)
 
@@ -230,7 +238,10 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
         }
 
         if async_op:
-            f = saver.async_save(sd, checkpoint_id=self.temp_dir)
+            writer = DCP.FileSystemWriter(
+                self.temp_dir, cache_staged_state_dict=cache_staged_state_dict
+            )
+            f = saver.async_save(sd, storage_writer=writer)
             t = time.monotonic()
             while not f.done():
                 time.sleep(1)

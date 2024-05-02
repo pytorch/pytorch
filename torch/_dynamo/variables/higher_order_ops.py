@@ -530,7 +530,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return OutDtypeHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "wrap":
             return WrapHigherOrderVariable(value, source, **kwargs)
-        elif value.__name__ == "templated_attention":
+        elif value.__name__ == "flex_attention":
             return TemplatedAttentionHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ in (
             "wrap_activation_checkpoint",
@@ -1475,7 +1475,7 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         self, tx, query: "VariableTracker", score_function: "VariableTracker"
     ):
         from torch._dynamo.symbolic_convert import InstructionTranslator
-        from torch._higher_order_ops.templated_attention import TransformGetItemToIndex
+        from torch._higher_order_ops.flex_attention import TransformGetItemToIndex
         from .builder import SourcelessBuilder
 
         tx: InstructionTranslator = tx
@@ -1511,14 +1511,14 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 score_function,
                 new_args,
                 {},  # expect only args no kwargs for now
-                description="templated_attention",
+                description="flex_attention",
                 source_target=self.value,
                 set_subgraph_inputs="flatten_manual",
             )
 
         body_name = add_subgraph(
             tx,
-            "templated_attention",
+            "flex_attention",
             torch.fx.GraphModule(tx.output.nn_modules, body_graph),
         )
 
