@@ -428,16 +428,7 @@ def _multi_tensor_asgd(
             torch._foreach_copy_(grouped_etas, new_etas)
         else:
             step = grouped_state_steps[0].item()
-            new_etas = []
-            new_mus = []
-
-            for i in range(len(grouped_mus)):
-                new_eta = _to_tensor(
-                    lr / (1 + lambd * lr * step**alpha), device=device
-                )
-                new_etas.append(new_eta)
-                new_mu = _to_tensor(1 / max(1, step - t0), device=device)
-                new_mus.append(new_mu)
-
+            new_etas = [_to_tensor(lr / (1 + lambd * lr * step**alpha), device=device)] * len(grouped_mus)
+            new_mus = [_to_tensor(1 / max(1, step - t0), device=device)] * len(grouped_mus)
             torch._foreach_copy_(grouped_etas, new_etas)
             torch._foreach_copy_(grouped_mus, new_mus)
