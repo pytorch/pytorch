@@ -227,11 +227,9 @@ CI_SERIAL_LIST = [
     "nn/test_pooling",
     "nn/test_convolution",  # Doesn't respect set_per_process_memory_fraction, results in OOM for other tests in slow gradcheck
     "distributions/test_distributions",
-    "test_modules",  # failed test due to mismatched elements
     "functorch/test_vmap",  # OOM
     "test_fx",  # gets SIGKILL
     "test_dataloader",  # frequently hangs for ROCm
-    "test_schema_check",  # Cause CUDA illegal memory access https://github.com/pytorch/pytorch/issues/95749
     "functorch/test_memory_efficient_fusion",  # Cause CUDA OOM on ROCm
     "test_utils",  # OOM
     "test_sort_and_select",  # OOM

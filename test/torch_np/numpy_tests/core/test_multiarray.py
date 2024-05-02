@@ -3713,14 +3713,10 @@ class TestTake(TestCase):
         y = np.take(x, [1, 2, 3], out=x[2:5], mode="wrap")
         assert_equal(y, np.array([1, 2, 3]))
 
-<<<<<<< HEAD
-    @parametrize("shape", [(1, 2), (1,), ()])
-=======
     @parametrize(
         "shape",
         [subtest((1, 2)), subtest((1,)), subtest((), decorators=[xfailIfTorchDynamo])],
     )
->>>>>>> 641f8b107b6 ([dynamo] Support ndarray.dtype attribute access)
     def test_ret_is_out(self, shape):
         # 0d arrays should not be an exception to this rule
         x = np.arange(5)
