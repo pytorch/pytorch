@@ -703,7 +703,8 @@ class FakeTensor(torch.Tensor):
         for _ in range(self.shape[0]):
             s = shape_env.create_unbacked_symint()
             # max value?
-            torch._constrain_as_size(s, min=2)
+            torch._check_is_size(s)
+            torch._check(s >= 2)
             out.append(s)
         return out
 
