@@ -362,10 +362,19 @@ debug_index_asserts = False
 is_nightly_or_source = "dev" in torch.__version__ or "git" in torch.__version__
 developer_warnings = is_fbcode() or is_nightly_or_source
 
-# The multiprocessing start method to use for inductor workers in the codecache.
+
+# The start method to use for inductor workers in the codecache. Valid options are
+# "fork" or "spawn" for multiprocessing, or "threads" to use threads.
 # TODO: fork is not safe in a multithreaded environment, we should evaluate changing
 # the default to spawn.
-worker_start_method = "fork"
+def decide_worker_start_method():
+    method = os.environ.get("TORCHINDUCTOR_PARALLEL_COMPILE_METHOD", "threads")
+    if method not in ["threads", "fork", "spawn"]:
+        raise RuntimeError(f"Invalid TORCHINDUCTOR_PARALLEL_COMPILE_METHOD: {method}")
+    return method
+
+
+worker_start_method = decide_worker_start_method()
 
 # Flags to turn on all_reduce fusion. These 2 flags should be automaticaly turned
 # on by DDP and should not be set by the users.

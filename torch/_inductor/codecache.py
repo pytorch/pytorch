@@ -2902,7 +2902,7 @@ class AsyncCompile:
 
     @staticmethod
     @functools.lru_cache(1)
-    def pool() -> ThreadPoolExecutor:
+    def thread_pool() -> ThreadPoolExecutor:
         assert config.compile_threads > 1
         return ThreadPoolExecutor(config.compile_threads)
 
@@ -2934,7 +2934,7 @@ class AsyncCompile:
 
     @classmethod
     def warm_pool(cls) -> None:
-        if config.compile_threads <= 1:
+        if config.compile_threads <= 1 or config.worker_start_method == "threads":
             return
         _compile_start()
         pool = cls.process_pool()
@@ -2966,14 +2966,20 @@ class AsyncCompile:
     def submit(cls, task: Callable[..., Any]) -> Any:
         if config.compile_threads <= 1:
             return task()
-        return cls.pool().submit(task)
+        return cls.thread_pool().submit(task)
 
     def triton(self, kernel_name: str, source_code: str, device_str: str = "cuda"):
         _compile_start()
         _set_triton_ptxas_path()
 
         kernel = TritonCodeCache.load(kernel_name, source_code)
-        if config.compile_threads > 1:
+        if config.compile_threads <= 1:
+            kernel.precompile()
+            return kernel
+        elif config.worker_start_method == "threads":
+            future = self.thread_pool().submit(kernel.precompile)
+            return TritonFuture(kernel, future)
+        else:
             return TritonFuture(
                 kernel,
                 self.process_pool().submit(
@@ -2981,9 +2987,6 @@ class AsyncCompile:
                     kernel._reload_in_subproc,
                 ),
             )
-        else:
-            kernel.precompile()
-            return kernel
 
     def multi_kernel(self, *args, **kwargs) -> Any:
         from torch._inductor.codegen.multi_kernel import MultiKernelCall
