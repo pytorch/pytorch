@@ -1602,7 +1602,7 @@ def _new_process_group_helper(
             break
 
         # Process group wrapper initialization for supported PGs when TORCH_DISTRIBUTED_DEBUG is set
-        if backend_str in [Backend.GLOO, Backend.NCCL, Backend.UCC]:
+        if backend_str in [Backend.GLOO, Backend.NCCL, Backend.UCC] or backend_str.upper() in Backend._plugins:
             # In debug mode and if GLOO is available, wrap in a wrapper PG that
             # enables enhanced collective checking for debuggability.
             if get_debug_level() == DebugLevel.DETAIL:
@@ -1878,6 +1878,9 @@ def send(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, t
     """
     Send a tensor synchronously.
 
+    .. warning::
+        ``tag`` is not supported with the NCCL backend.
+
     Args:
         tensor (Tensor): Tensor to send.
         dst (int): Destination rank on global process group (regardless of ``group`` argument).
@@ -1912,6 +1915,9 @@ def send(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, t
 def recv(tensor: torch.Tensor, src: Optional[int] = None, group: Optional[ProcessGroup] = None, tag: int = 0) -> int:
     """
     Receives a tensor synchronously.
+
+    .. warning::
+        ``tag`` is not supported with the NCCL backend.
 
     Args:
         tensor (Tensor): Tensor to fill with received data.
