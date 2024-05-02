@@ -99,7 +99,7 @@ def _get_value(x):
     if not torch.jit.is_scripting() and is_compiling():
         return x
     else:
-        return x.item()
+        return x.item() if isinstance(x, torch.Tensor) else x
 
 
 def _stack_if_compiling(x):

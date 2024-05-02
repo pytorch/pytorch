@@ -1228,6 +1228,7 @@ class TestLinalg(TestCase):
         # torch.linalg.norm given a flattened tensor
         ord_vector = [0, 0.9, 1, 2, 3, inf, -0.5, -1, -2, -3, -inf]
         input_sizes = [
+            (1, ),
             (10, ),
             (4, 5),
             (3, 4, 5),
@@ -1281,15 +1282,17 @@ class TestLinalg(TestCase):
         else:
             raise RuntimeError("Unsupported dtype")
 
-        for input_size, ord, keepdim, norm_dtype in product(input_sizes, ord_vector, [True, False], norm_dtypes):
-            input = make_tensor(input_size, dtype=dtype, device=device, low=-9, high=9)
-            for dim in [None, random.randint(0, len(input_size) - 1)]:
-                run_test_case(
-                    input,
-                    ord,
-                    dim,
-                    keepdim,
-                    norm_dtype)
+        for amp in [False, True]:
+            with torch.autocast(device_type=device, enabled=amp):
+                for input_size, ord, keepdim, norm_dtype in product(input_sizes, ord_vector, [True, False], norm_dtypes):
+                    input = make_tensor(input_size, dtype=dtype, device=device, low=-9, high=9)
+                    for dim in [None, random.randint(0, len(input_size) - 1)]:
+                        run_test_case(
+                            input,
+                            ord,
+                            dim,
+                            keepdim,
+                            norm_dtype)
 
     def test_vector_norm_dim_tuple_arg(self, device):
         test_cases = [
@@ -1950,7 +1953,7 @@ class TestLinalg(TestCase):
 
         # if out tensor with floating dtype is passed for complex output an error is thrown
         if not dtype.is_complex:
-            # The characteristic equation is p(λ) = λ^2 − 2λ + 5 = 0, with roots λ = 1±2i
+            # The characteristic equation is p(lambda) = lambda^2 - 2lambda + 5 = 0, with roots lambda = 1[+-]2i
             a = torch.tensor([[3., -2.], [4., -1.]], dtype=dtype, device=device)
             out0 = torch.empty(0, device=device, dtype=dtype)
             out1 = torch.empty(0, device=device, dtype=dtype)
@@ -2117,7 +2120,7 @@ class TestLinalg(TestCase):
 
         # if out tensor with floating dtype is passed for complex output an error is thrown
         if not dtype.is_complex:
-            # The characteristic equation is p(λ) = λ^2 − 2λ + 5 = 0, with roots λ = 1±2i
+            # The characteristic equation is p(lambda) = lambda^2 - 2lambda + 5 = 0, with roots lambda = 1[+-]2i
             a = torch.tensor([[3., -2.], [4., -1.]], dtype=dtype, device=device)
             out = torch.empty(0, device=device, dtype=dtype)
             with self.assertRaisesRegex(RuntimeError, "Expected eigenvalues to be safely castable"):
@@ -5794,7 +5797,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         self.assertEqual(c, cpu_result)
 
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
-    @unittest.skipIf(SM90OrLater, "Expected failure on sm90")
+    @unittest.skipIf(SM90OrLater and not TEST_WITH_ROCM, "Expected failure on sm90")
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @onlyCUDA
     @parametrize("k", [16, 32])
@@ -5802,9 +5805,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @parametrize("use_transpose_a", [True, False])
     @parametrize("use_transpose_b", [True, False])
     def test__int_mm(self, device, k, n, use_transpose_a, use_transpose_b):
-        if TEST_WITH_ROCM:
-            self.skipTest("_int_mm not compiled for ROCM")
-
         def genf_int_float(x, y, use_transpose):
             if use_transpose:
                 x, y = y, x
@@ -5837,7 +5837,10 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         SM80OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0)
         SM70 = torch.cuda.is_available() and torch.cuda.get_device_capability() == (7, 0)
         SM75 = torch.cuda.is_available() and torch.cuda.get_device_capability() == (7, 5)
-        if version >= (11, 7):
+
+        if TEST_WITH_ROCM:
+            _test(17, k, n, use_transpose_a, use_transpose_b, True)
+        elif version >= (11, 7):
             if not use_transpose_a and use_transpose_b:
                 if SM80OrLater or (version >= (12, 3) and (SM70 or SM75)):
                     _test(17, k, n, use_transpose_a, use_transpose_b, version > (11, 7))

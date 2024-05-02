@@ -2,6 +2,7 @@ from typing import List, Optional
 
 import torch
 from torch import Tensor
+from torch.utils._foreach_utils import _get_fused_kernels_supported_devices
 from .optimizer import (
     _default_to_fused_or_foreach,
     _differentiable_doc,
@@ -54,6 +55,17 @@ class SGD(Optimizer):
 
         if fused:
             self._step_supports_amp_scaling = True
+
+            fused_supported_devices = _get_fused_kernels_supported_devices()
+            if not all(
+                p.device.type in fused_supported_devices and torch.is_floating_point(p)
+                for pg in self.param_groups
+                for p in pg["params"]
+            ):
+                raise RuntimeError(
+                    "`fused=True` requires all the params to be floating point Tensors of "
+                    f"supported devices: {fused_supported_devices}."
+                )
             if differentiable:
                 raise RuntimeError("`fused` does not support `differentiable`")
             if foreach:
@@ -415,7 +427,12 @@ def _multi_tensor_sgd(
                 device_grads = bufs
 
         if not device_has_sparse_grad:
-            torch._foreach_add_(device_params, device_grads, alpha=-lr)
+            # handle internal item() call if lr is a tensor
+            if isinstance(lr, torch.Tensor) and torch._utils.is_compiling():
+                grads_x_lr = torch._foreach_mul(device_grads, -lr)
+                torch._foreach_add_(device_params, grads_x_lr)
+            else:
+                torch._foreach_add_(device_params, device_grads, alpha=-lr)
         else:
             # foreach APIs don't support sparse
             for i in range(len(device_params)):
