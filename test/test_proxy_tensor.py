@@ -1347,7 +1347,7 @@ def forward(self, crop_camera_1, mask_1):
                 for s in p.shape:
                     guard_int(s)
             x = x[mask]
-            torch._constrain_as_value(x.shape[0], min=1)
+            torch._check(x.shape[0] >= 1)
             for p in params.values():
                 p.grad = None
             return torch.func.functional_call(mod, {**params, **buffers}, (x,)).sum()
@@ -1498,6 +1498,7 @@ def forward(self, x_1, y_1):
             # tolist not directly supported atm
             sizes = [lengths[i].item() for i in range(lengths.size(0))]
             for s in sizes:
+                # TODO(avik): no assertion generated with torch._check_is_size?
                 torch._constrain_as_size(s)
             return torch.split(values, sizes)
 

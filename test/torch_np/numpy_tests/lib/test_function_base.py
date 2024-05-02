@@ -3834,13 +3834,13 @@ class TestMedian(TestCase):
             subtest(
                 (0, 1),
                 decorators=[
-                    xfail,
+                    skip(reason="Tuple axes"),
                 ],
             ),
             subtest(
                 (-3, -1),
                 decorators=[
-                    xfail,
+                    skip(reason="Tuple axes"),
                 ],
             ),
         ],
