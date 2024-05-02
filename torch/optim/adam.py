@@ -7,6 +7,7 @@ from .optimizer import (
     _capturable_doc,
     _default_to_fused_or_foreach,
     _differentiable_doc,
+    _disable_dynamo_if_unsupported,
     _dispatch_sqrt,
     _foreach_doc,
     _fused_doc,
@@ -314,6 +315,7 @@ Adam.__doc__ = (
 )
 
 
+@_disable_dynamo_if_unsupported
 def adam(
     params: List[Tensor],
     grads: List[Tensor],
@@ -677,12 +679,6 @@ def _multi_tensor_adam(
 
             torch._foreach_div_(exp_avg_sq_sqrt, bias_correction2_sqrt)
             torch._foreach_add_(exp_avg_sq_sqrt, eps)
-
-            if isinstance(step_size, torch.Tensor):
-                # if we're compiling here (only happens in the rare case
-                # if a user deletes the capturable flag) we can't run addcdiv
-                # with step_size on cuda
-                step_size = step_size.to("cpu")
 
             torch._foreach_addcdiv_(
                 device_params, device_exp_avgs, exp_avg_sq_sqrt, step_size

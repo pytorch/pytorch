@@ -28,6 +28,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo)
 from types import ModuleType
 from typing import List, Tuple, Type, Set, Dict
+import operator
 
 # List of all namespaces containing modules to test.
 MODULE_NAMESPACES: List[ModuleType] = [
@@ -3374,7 +3375,7 @@ module_db: List[ModuleInfo] = [
                        unittest.expectedFailure,
                        'TestModule',
                        'test_memory_format',
-                       active_if=lambda p: p['training'],
+                       active_if=operator.itemgetter('training'),
                    ),)
                ),
     ModuleInfo(torch.nn.AdaptiveAvgPool3d,
@@ -3413,7 +3414,7 @@ module_db: List[ModuleInfo] = [
                        unittest.expectedFailure,
                        'TestModule',
                        'test_memory_format',
-                       active_if=lambda p: p['training'],
+                       active_if=operator.itemgetter('training'),
                        device_type='cuda',
                    ),
                    # error: input types 'tensor<f32>' and 'tensor<15x10xf16>' are not broadcast compatible
@@ -3440,13 +3441,13 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(
                        unittest.expectedFailure, 'TestEagerFusionModuleInfo',
                        'test_aot_autograd_symbolic_module_exhaustive',
-                       active_if=lambda p: p['training']
+                       active_if=operator.itemgetter('training')
                    ),
                    # torch._subclasses.fake_tensor.DataDependentOutputException: aten._local_scalar_dense.default
                    DecorateInfo(
                        unittest.expectedFailure, 'TestEagerFusionModuleInfo',
                        'test_aot_autograd_module_exhaustive',
-                       active_if=lambda p: p['training']
+                       active_if=operator.itemgetter('training')
                    ))
                ),
     ModuleInfo(torch.nn.BatchNorm2d,
@@ -3461,13 +3462,13 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(
                        unittest.expectedFailure, 'TestEagerFusionModuleInfo',
                        'test_aot_autograd_symbolic_module_exhaustive',
-                       active_if=lambda p: p['training']
+                       active_if=operator.itemgetter('training')
                    ),
                    # torch._subclasses.fake_tensor.DataDependentOutputException: aten._local_scalar_dense.default
                    DecorateInfo(
                        unittest.expectedFailure, 'TestEagerFusionModuleInfo',
                        'test_aot_autograd_module_exhaustive',
-                       active_if=lambda p: p['training']
+                       active_if=operator.itemgetter('training')
                    ),)
                ),
     ModuleInfo(torch.nn.BatchNorm3d,
@@ -3481,13 +3482,13 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(
                        unittest.expectedFailure, 'TestEagerFusionModuleInfo',
                        'test_aot_autograd_symbolic_module_exhaustive',
-                       active_if=lambda p: p['training']
+                       active_if=operator.itemgetter('training')
                    ),
                    # torch._subclasses.fake_tensor.DataDependentOutputException: aten._local_scalar_dense.default
                    DecorateInfo(
                        unittest.expectedFailure, 'TestEagerFusionModuleInfo',
                        'test_aot_autograd_module_exhaustive',
-                       active_if=lambda p: p['training']
+                       active_if=operator.itemgetter('training')
                    ),)
                ),
     ModuleInfo(torch.nn.CELU,
@@ -3870,7 +3871,7 @@ module_db: List[ModuleInfo] = [
                        unittest.expectedFailure,
                        'TestModule',
                        'test_memory_format',
-                       active_if=lambda p: p['training'],
+                       active_if=operator.itemgetter('training'),
                        device_type='mps',
                    ),)
                ),
@@ -4070,7 +4071,7 @@ module_db: List[ModuleInfo] = [
                        unittest.expectedFailure,
                        'TestModule',
                        'test_memory_format',
-                       active_if=lambda p: p['training'],
+                       active_if=operator.itemgetter('training'),
                        device_type='mps',
                    ),),
                supports_gradgrad=False),
@@ -4193,7 +4194,7 @@ module_db: List[ModuleInfo] = [
                        unittest.expectedFailure,
                        'TestModule',
                        'test_memory_format',
-                       active_if=lambda p: p['training'],
+                       active_if=operator.itemgetter('training'),
                        device_type='mps',
                    ),)
                ),
@@ -4235,7 +4236,7 @@ module_db: List[ModuleInfo] = [
                        unittest.expectedFailure,
                        'TestModule',
                        'test_memory_format',
-                       active_if=lambda p: p['training'],
+                       active_if=operator.itemgetter('training'),
                        device_type='mps',
                    ),)
                ),
@@ -4298,7 +4299,7 @@ module_db: List[ModuleInfo] = [
                        unittest.expectedFailure,
                        'TestModule',
                        'test_memory_format',
-                       active_if=lambda p: p['training'],
+                       active_if=operator.itemgetter('training'),
                        device_type='mps',
                    ),)
                ),
@@ -4311,7 +4312,7 @@ module_db: List[ModuleInfo] = [
                        unittest.expectedFailure,
                        'TestModule',
                        'test_memory_format',
-                       active_if=lambda p: p['training'],
+                       active_if=operator.itemgetter('training'),
                        device_type='mps',
                    ),)
                ),
