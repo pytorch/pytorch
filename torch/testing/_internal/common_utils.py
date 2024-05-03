@@ -4112,17 +4112,15 @@ def noncontiguous_like(t):
     result.requires_grad_(t.requires_grad)
     return result
 
-# TODO: remove this (prefer make_symmetric_matrices below)
 def random_symmetric_matrix(l, *batches, **kwargs):
     dtype = kwargs.get('dtype', torch.double)
     device = kwargs.get('device', 'cpu')
-    A = torch.randn(*(batches + (l, l)), dtype=dtype, device=device)
-    A = (A + A.mT).div_(2)
-    return A
+    shape = (batches + (l, l))
+    return _make_symmetric_matrices(*shape, device=device, dtype=dtype)
 
 # Creates a symmetric matrix or batch of symmetric matrices
 # Shape must be a square matrix or batch of square matrices
-def make_symmetric_matrices(*shape, device, dtype):
+def _make_symmetric_matrices(*shape, device, dtype):
     assert shape[-1] == shape[-2]
     t = make_tensor(shape, device=device, dtype=dtype)
     t = (t + t.mT).div_(2)
@@ -4161,20 +4159,15 @@ def random_hermitian_psd_matrix(matrix_size, *batch_dims, dtype=torch.double, de
     A = torch.randn(*(batch_dims + (matrix_size, matrix_size)), dtype=dtype, device=device)
     return A @ A.mH
 
-
-# TODO: remove this (prefer make_symmetric_pd_matrices below)
 def random_symmetric_pd_matrix(matrix_size, *batch_dims, **kwargs):
     dtype = kwargs.get('dtype', torch.double)
     device = kwargs.get('device', 'cpu')
-    A = torch.randn(*(batch_dims + (matrix_size, matrix_size)),
-                    dtype=dtype, device=device)
-    return torch.matmul(A, A.mT) \
-        + torch.eye(matrix_size, dtype=dtype, device=device) * 1e-5
-
+    shape = (batch_dims + (matrix_size, matrix_size))
+    return _make_symmetric_pd_matrices(*shape, device=device, dtype=dtype)
 
 # Creates a symmetric positive-definite matrix or batch of
 #   such matrices
-def make_symmetric_pd_matrices(*shape, device, dtype):
+def _make_symmetric_pd_matrices(*shape, device, dtype):
     assert shape[-1] == shape[-2]
     t = make_tensor(shape, device=device, dtype=dtype)
     i = torch.eye(shape[-1], device=device, dtype=dtype) * 1e-5
