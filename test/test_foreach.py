@@ -164,20 +164,22 @@ class TestForeach(TestCase):
         wrapped_op, _, inplace_op, _ = self._get_funcs(op)
 
         for sample in op.sample_zero_size_inputs(device, dtype):
-            if op.supports_out:
+            if op.method_variant is not None:
                 wrapped_op(
                     (sample.input, *sample.args),
                     is_cuda=self.is_cuda,
                     expect_fastpath=True,
                     zero_size=True,
                 )
-            with InplaceForeachVersionBumpCheck(self, sample.input):
-                inplace_op(
-                    (sample.input, *sample.args),
-                    is_cuda=self.is_cuda,
-                    expect_fastpath=True,
-                    zero_size=True,
-                )
+
+            if op.inplace_variant is not None:
+                with InplaceForeachVersionBumpCheck(self, sample.input):
+                    inplace_op(
+                        (sample.input, *sample.args),
+                        is_cuda=self.is_cuda,
+                        expect_fastpath=True,
+                        zero_size=True,
+                    )
 
     @skipIfRocmVersionLessThan((6, 0))
     @ops(
@@ -1225,12 +1227,16 @@ class TestForeach(TestCase):
         "inplace", (False, True), name_fn=lambda x: "inplace" if x else "outplace"
     )
     def test_autodiff(self, device, dtype, op, inplace):
-        if not (op.supports_autograd or op.supports_forward_ad):
-            self.skipTest("neither reverse mode nor forward mode supported")
         if (not inplace) and not op.supports_out:
             self.skipTest("out-of-place not implemented")
         if inplace and op.has_no_in_place:
             self.skipTest("in-place not implemented")
+        if not (
+            op.supports_autograd
+            or op.supports_inplace_autograd
+            or op.supports_forward_ad
+        ):
+            self.skipTest("neither reverse mode nor forward mode supported")
 
         # note(crcrpar): without this, some unary functions fail, unlike inplace and/or complex.
         if (
