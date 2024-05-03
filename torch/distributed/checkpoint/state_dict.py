@@ -215,6 +215,8 @@ def _iterate_valid_model_state(model):
         for name, obj in chain(
             module.named_buffers(recurse=False), module.named_parameters(recurse=False)
         ):
+            if name in module._non_persistent_buffers_set:
+                continue
             new_fqn = f"{curr_fqn}{name}"
             yield new_fqn, obj
 

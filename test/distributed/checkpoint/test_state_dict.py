@@ -555,6 +555,17 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
 
         self.assertEqual(original_keys, new_keys)
 
+    @with_comms
+    @skip_if_lt_x_gpu(1)
+    def test_non_persistent_buffers(self) -> None:
+        model = CompositeParamModel(device=torch.device("cuda"))
+        model.register_buffer(
+            "dont_save_me", torch.rand(100, device="cuda"), persistent=False
+        )
+        ddp_model = DDP(copy.deepcopy(model))
+        set_model_state_dict(ddp_model, get_model_state_dict(ddp_model))
+        self.assertEqual(model.state_dict(), get_model_state_dict(ddp_model))
+
 
 if __name__ == "__main__":
     run_tests()
