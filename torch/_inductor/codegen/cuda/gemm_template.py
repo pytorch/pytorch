@@ -1244,21 +1244,27 @@ class CKGemmTemplate(CKTemplate):
         K = X_meta.size[-1]
         N = W_meta.size[-1]
 
-        if not any(m_padding in op.gemm_specialization for m_padding in ["MPadding", "MNPadding", "MKPadding", "MNKPadding"]):
-            if M % op.m_per_block != 0:
-                return None
-        if not any(n_padding in op.gemm_specialization for n_padding in ["NPadding", "MNPadding", "NKPadding", "MNKPadding"]):
-            if N % op.n_per_block != 0:
-                return None
-        if not any(k_padding in op.gemm_specialization for k_padding in ["KPadding", "MKPadding", "NKPadding", "MNKPadding"]):
-            if K % op.k_per_block != 0:
-                return None
+        if cutlass_utils.is_static_int(M):
+            if not any(m_padding in op.gemm_specialization for m_padding in ["MPadding", "MNPadding", "MKPadding", "MNKPadding"]):
+                if M % op.m_per_block != 0:
+                    return None
+        if cutlass_utils.is_static_int(N):
+            if not any(n_padding in op.gemm_specialization for n_padding in ["NPadding", "MNPadding", "NKPadding", "MNKPadding"]):
+                if N % op.n_per_block != 0:
+                    return None
+        if cutlass_utils.is_static_int(K):
+            if not any(k_padding in op.gemm_specialization for k_padding in ["KPadding", "MKPadding", "NKPadding", "MNKPadding"]):
+                if K % op.k_per_block != 0:
+                    return None
 
-        if (K if op.a_layout == "Row" else M) % op.a_block_transfer_src_scalar_per_vector != 0:
+        a_contig_size = K if op.a_layout == "Row" else M if op.a_layout == "Col" else None
+        if cutlass_utils.is_static_int(a_contig_size) and a_contig_size % op.a_block_transfer_src_scalar_per_vector != 0:
             return None
-        if (N if op.b_layout == "Row" else K) % op.b_block_transfer_src_scalar_per_vector != 0:
+        b_contig_size = N if op.b_layout == "Row" else K if op.b_layout == "Col" else None
+        if cutlass_utils.is_static_int(b_contig_size) and b_contig_size % op.b_block_transfer_src_scalar_per_vector != 0:
             return None
-        if (N if op.c_layout == "Row" else M) % op.c_shuffle_block_transfer_scalar_per_vector_n_per_block != 0:
+        c_contig_size = N if op.c_layout == "Row" else M if op.c_layout == "Col" else None
+        if cutlass_utils.is_static_int(c_contig_size) and c_contig_size % op.c_shuffle_block_transfer_scalar_per_vector_n_per_block != 0:
             return None
 
         # TBD disable instances with invalid number of pipeline prefetch stages
