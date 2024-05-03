@@ -122,10 +122,13 @@ class TunableOp {
       TUNABLE_LOG2("finding fastest for ", op_sig, '(', params_sig, ')', " out of ", op_names_.size(), " candidates");
       auto min_duration_ms = std::numeric_limits<double>::infinity();
       std::string id_name = "Default";
+      ParamsT* reference_params = nullptr;
 
       // calcaulte a reference answer for numerical check
-      ParamsT* reference_params = params->DeepCopy(false);
-      TORCH_CHECK(ops_[ResultEntry::Default()]->Call(reference_params) == OK);
+      if (ctx->IsNumericsCheckEnabled()) {
+        reference_params = params->DeepCopy(false);
+        TORCH_CHECK(ops_[ResultEntry::Default()]->Call(reference_params) == OK);
+      }
 
       // need copies of params to reuse
       // make as many copies as will fill the requested rotating buffer size, if requested
@@ -237,7 +240,9 @@ class TunableOp {
       for (size_t i = 0; i < reusable_params.size(); i++) {
         reusable_params[i]->Delete();
       }
-      reference_params->Delete();
+      if (reference_params) {
+        reference_params->Delete();
+      }
 
       TUNABLE_LOG2("└──found fastest for ", op_sig, '(', params_sig, ") ", id_name);
       return ResultEntry(id_name, min_duration_ms);
