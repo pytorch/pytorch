@@ -40,6 +40,7 @@ from torch._guards import detect_fake_mode
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch._utils_internal import log_export_usage
+from torch.export.dynamic_shapes import _combine_args
 from torch.export.exported_program import OutputKind
 from torch.fx._utils import first_call_function_nn_module_stack
 from torch.fx.experimental.symbolic_shapes import (
@@ -444,7 +445,7 @@ def _export_to_torch_ir(
         except GuardOnDataDependentSymNode as e:
             raise UserError(  # noqa: TRY200
                 UserErrorType.ANTI_PATTERN,
-                f"Consider annotating your code using torch._constrain_as_*(). {str(e)}",
+                f"Consider annotating your code using torch._check*(). {str(e)}",
                 case_name="constrain_as_size_example",
             )
 
@@ -639,6 +640,37 @@ def _get_params_buffers(mod: torch.nn.Module) -> Dict[str, torch.Tensor]:
     for name, buffer in mod.named_buffers(remove_duplicate=False):
         params_buffers[name] = buffer
     return params_buffers
+
+
+def _get_forward_arg_names(
+    mod: torch.nn.Module,
+    args: Tuple[Any, ...],
+    kwargs: Optional[Dict[str, Any]] = None,
+) -> List[str]:
+    """
+    Gets the argument names to forward that are used, for restoring the
+    original signature when unlifting the exported program module.
+    - Positional args: retain the original argument names, and enumerate
+        *args as args_0, args_1, ...
+    - Keyword args: retain the original kwarg names in the order specified
+        by the user. This order seems to matter for the current state of
+        export lifted modules.
+    """
+    sig = inspect.signature(mod.forward)
+    _args = sig.bind_partial(*args).arguments
+
+    names: List[str] = []
+    for name, value in _args.items():
+        # handle variable number of positional args
+        if sig.parameters[name].kind == inspect._ParameterKind.VAR_POSITIONAL:
+            names.extend([f"{name}_{i}" for i, _ in enumerate(value)])
+        else:
+            names.append(name)
+    # order of kwargs matters for input spec
+    if kwargs:
+        names.extend([kwarg for kwarg, _ in kwargs.items()])
+
+    return names
 
 
 def _rewrite_dynamo_tensor_constants(
@@ -870,8 +902,6 @@ def _export(
     Returns:
         An ExportedProgram containing the traced method.
     """
-    from .dynamic_shapes import _process_dynamic_shapes
-
     if not isinstance(args, tuple):
         raise UserError(
             UserErrorType.INVALID_INPUT,
@@ -888,10 +918,12 @@ def _export(
     _EXPORT_FLAGS = flags
 
     kwargs = kwargs or {}
-    _process_dynamic_shapes(mod, args, kwargs, dynamic_shapes)  # TODO(avik): remove
+    if isinstance(dynamic_shapes, torch.export.ShapesCollection):
+        dynamic_shapes = dynamic_shapes.dynamic_shapes(mod, args, kwargs)
 
     flat_args, orig_in_spec = pytree.tree_flatten((args, kwargs))
     original_state_dict = mod.state_dict(keep_vars=True)
+    forward_arg_names = _get_forward_arg_names(mod, args, kwargs)
 
     if not strict:
         out_spec = None
@@ -1023,9 +1055,11 @@ def _export(
         except (ConstraintViolationError, ValueRangeError) as e:
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: TRY200
 
+        combined_args = _combine_args(mod, args, kwargs)
         range_constraints = make_constraints(
             fake_mode,
             ep_non_strict.gm,
+            combined_args,
             dynamic_shapes,
             num_lifted,
         )
@@ -1034,6 +1068,7 @@ def _export(
 
         gm = ep_non_strict.gm
 
+        gm.meta["forward_arg_names"] = forward_arg_names
         module_call_signatures = {
             strip_root(fqn): ModuleCallSignature(inputs=[], outputs=[], **specs)
             for fqn, specs in module_call_specs.items()
@@ -1221,6 +1256,7 @@ def _export(
         for k, v in dynamo_fake_mode.shape_env.var_to_range.items()
         if free_unbacked_symbols(k)
     }
+    gm.meta["forward_arg_names"] = forward_arg_names
 
     num_lifted = next(
         (
@@ -1230,9 +1266,11 @@ def _export(
         ),
         len(export_graph_signature.input_specs),
     )
+    combined_args = _combine_args(mod, args, kwargs)
     range_constraints = make_constraints(
         dynamo_fake_mode,
         gm,
+        combined_args,
         dynamic_shapes,
         num_lifted,
     )
