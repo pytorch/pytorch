@@ -1251,7 +1251,9 @@ void ProcessGroupNCCL::heartbeatMonitor() {
         if (globalStore_->check({std::string(EXCEPTION_DUMP)})) {
           int timeOutRank = -1;
           if (!shouldDump_.load()) {
-            LOG(ERROR) << logPrefix() << "First PG on this rank detecting the dump signal through tcpstore.";
+            LOG(ERROR)
+                << logPrefix()
+                << "First PG on this rank detecting the dump signal through tcpstore.";
           }
           shouldDump_.store(true);
           try {
@@ -1299,7 +1301,9 @@ void ProcessGroupNCCL::heartbeatMonitor() {
         heartBeatCounter = heartbeat;
       } else {
         if (!shouldDump_.load()) {
-          LOG(ERROR) << logPrefix() << "First PG on this rank that detected no heartbeat of its watchdog.";
+          LOG(ERROR)
+              << logPrefix()
+              << "First PG on this rank that detected no heartbeat of its watchdog.";
         }
         shouldDump_.store(true);
         // No heartbeat increase detected and timeout.
@@ -1577,14 +1581,14 @@ void ProcessGroupNCCL::watchdogHandler() {
       if (work.exception()) {
         // log as soon as exception is detected
         LOG(ERROR) << c10::str(
-              logPrefix(),
-              "Exception (either an error or timeout) detected by watchdog at work: ",
-              work.seq_,
-              ", last enqueued NCCL work: ",
-              lastEnqueuedSeq_,
-              ", last completed NCCL work: ",
-              lastCompletedSeq_,
-              ".");
+            logPrefix(),
+            "Exception (either an error or timeout) detected by watchdog at work: ",
+            work.seq_,
+            ", last enqueued NCCL work: ",
+            lastEnqueuedSeq_,
+            ", last completed NCCL work: ",
+            lastCompletedSeq_,
+            ".");
         // try to dump flight records if exception happens.
         // Flight recorder behavior should be independent of desync Debug
         if (dumpOnException_) {
@@ -1595,7 +1599,8 @@ void ProcessGroupNCCL::watchdogHandler() {
                 reinterpret_cast<uint8_t*>(&rank) + sizeof(rank));
             globalStore_->set(std::string(EXCEPTION_DUMP), vec);
             if (!shouldDump_.load()) {
-              LOG(ERROR) << logPrefix() << "First watchdog to set the dump signal.";
+              LOG(ERROR) << logPrefix()
+                         << "First watchdog to set the dump signal.";
             }
             // signal the monitor thread to start dumping
             shouldDump_.store(true);
