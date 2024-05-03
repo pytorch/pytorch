@@ -17,7 +17,7 @@ from ._compatibility import compatibility
 __all__ = ["immutable_list", "immutable_dict"]
 
 
-_T = TypeVar("T")
+_T = TypeVar("_T")
 
 
 _help_mutation = """\
