@@ -126,7 +126,15 @@ D = 64
 
 
 class TestTemplatedSDPA(InductorTestCase):
-    def run_test(self, score_mod: Callable, dtype: torch.dtype = torch.float16, B: int=B, H: int=H, S:int = S, D:int = D):
+    def run_test(
+        self,
+        score_mod: Callable,
+        dtype: torch.dtype = torch.float16,
+        B: int = B,
+        H: int = H,
+        S: int = S,
+        D: int = D,
+    ):
         sdpa_partial = create_attention(score_mod)
         compiled_sdpa = torch.compile(sdpa_partial)
         q = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
@@ -296,7 +304,9 @@ class TestTemplatedSDPA(InductorTestCase):
 
         def create_padded_dense_wrapper(orig_score_mod):
             def njt_score_mod(qk, b, h, q, kv):
-                return torch.where(qk <= seq_len[b], orig_score_mod(qk, b, h, q, kv), -float("inf"))
+                return torch.where(
+                    qk <= seq_len[b], orig_score_mod(qk, b, h, q, kv), -float("inf")
+                )
 
             return njt_score_mod
 
@@ -331,7 +341,7 @@ class TestTemplatedSDPA(InductorTestCase):
         self.run_test(score_mod_scale, dtype)
 
     @supported_platform
-    @expectedFailure # If we capture a tensor then we can perform a reduction on it.
+    @expectedFailure  # If we capture a tensor then we can perform a reduction on it.
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_captured_reduction(self, dtype):
         scale = torch.randn((B, 8), device="cuda")
