@@ -408,6 +408,7 @@ class TensorMeta:
     sizes: torch._prims_common.ShapeType
     strides: torch._prims_common.StrideType
     offset: int
+    name: Optional[str] = None
 
     @classmethod
     def from_irnodes(
@@ -440,6 +441,7 @@ class TensorMeta:
                 node.get_layout().offset,
                 fallback=config.unbacked_symint_fallback,
             ),
+            name=node.get_name(),
         )
 
     def to_tensor(self) -> torch.Tensor:
@@ -715,7 +717,8 @@ class CUDABenchmarkRequest(BenchmarkRequest):
         if self._workspace_size_updated:
             return
         self.ensure_dll_loaded()
-        args = [c_void_p(None) for _ in range(len(self.input_tensor_meta) + 1)]
+        unique_input_count = len({meta.name for meta in self.input_tensor_meta})
+        args = [c_void_p(None) for _ in range(unique_input_count + 1)]
         stream_ptr = c_void_p(torch.cuda.current_stream().cuda_stream)
 
         run_method = getattr(self.DLL, self.kernel_name)
