@@ -491,11 +491,7 @@ class DisableContext(_TorchDynamoContext):
         super().__init__(callback=None)
 
     def __call__(self, fn):
-        # public api for compiler config/options
-        def get_compiler_config():
-            return self.compiler_config
-
-        # Earlier this caode was in the base class _TorchDynamoContext. But we
+        # Earlier this code was in the base class _TorchDynamoContext. But we
         # moved it here to have better code organization. For disable, we just
         # want the callback to be None. We don't have to check trace_rules or
         # create any wrapper.
@@ -535,17 +531,11 @@ class DisableContext(_TorchDynamoContext):
             finally:
                 set_eval_frame(prior)
 
-        # hooks to properly handle inlining
         _fn._torchdynamo_disable = True  # type: ignore[attr-defined]
 
         # Save the function pointer to find the original callable while nesting
         # of decorators.
         _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
-
-        # when compiling user function instead of nn.Module
-        # provide public api _fn.get_compiler_config()
-        assert not hasattr(_fn, "get_compiler_config")
-        _fn.get_compiler_config = get_compiler_config  # type: ignore[attr-defined]
 
         return _fn
 
