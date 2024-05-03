@@ -3,6 +3,9 @@ import os
 import sys
 import typing
 
+print(f"*** sys.path = {sys.path}", file=sys.stderr)
+print(f"*** PYTHON_PATH = {os.environ.get('PYTHON_PATH', '<empty>')}", file=sys.stderr)
+
 from torch._inductor.codecache import _set_triton_ptxas_path, caching_device_properties
 from torch._inductor.compile_worker.subproc_pool import Pipe, SubprocMain
 from torch._inductor.compile_worker.watchdog import _async_compile_initializer
