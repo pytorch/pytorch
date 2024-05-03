@@ -218,29 +218,53 @@ private:
 
 template <typename T>
 struct ScaledGemmParams : OpParams {
+  ScaledGemmParams() {
+    duplicate_inputs_ = false;
+  }
+
   std::string Signature() const override {
     return c10::str(transa, transb, "_", m, "_", n, "_", k);
   }
 
-  ScaledGemmParams* DeepCopy() const {
+  size_t GetSize(bool duplicate_inputs) const {
+    size_t size = sizeof(T) * ldc * n;
+    if (duplicate_inputs) {
+      size += sizeof(T) * lda * ((transa == 'n' || transa == 'N') ? k : m);
+      size += sizeof(T) * ldb * ((transb == 'n' || transb == 'N') ? n : k);
+    }
+    return size;
+  }
+
+  ScaledGemmParams* DeepCopy(bool duplicate_inputs) const {
     ScaledGemmParams* copy = new ScaledGemmParams;
     *copy = *this;
     c10::DeviceIndex device = 0;
     AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
-    size_t c_size = m * n * sizeof(T);
+    size_t c_size = ldc * n * sizeof(T);
     copy->c = c10::cuda::CUDACachingAllocator::raw_alloc(c_size);
     AT_CUDA_CHECK(c10::cuda::CUDACachingAllocator::memcpyAsync(
         copy->c, device, c, device, c_size, getCurrentCUDAStream(device), true));
+    if (duplicate_inputs) {
+      size_t a_size = sizeof(T) * lda * ((transa == 'n' || transa == 'N') ? k : m);
+      size_t b_size = sizeof(T) * ldb * ((transb == 'n' || transb == 'N') ? n : k);
+      copy->a = c10::cuda::CUDACachingAllocator::raw_alloc(a_size);
+      copy->b = c10::cuda::CUDACachingAllocator::raw_alloc(b_size);
+      copy->duplicate_inputs_ = true;
+    }
     return copy;
   }
 
   // only call on object returned by DeepCopy
   void Delete() {
     c10::cuda::CUDACachingAllocator::raw_delete(c);
+    if (duplicate_inputs_) {
+      c10::cuda::CUDACachingAllocator::raw_delete(const_cast<void*>(a));
+      c10::cuda::CUDACachingAllocator::raw_delete(const_cast<void*>(b));
+    }
   }
 
   TuningStatus NumericalCheck(ScaledGemmParams<T> *other) {
-    return detail::NumericalCheck(c_dtype, c, other->c, m*n) ? OK : FAIL;
+    return detail::NumericalCheck(c_dtype, c, other->c, ldc*n) ? OK : FAIL;
   }
 
   char transa;
@@ -264,6 +288,8 @@ struct ScaledGemmParams : OpParams {
   ScalarType c_dtype;
   void* amax_ptr;
   bool use_fast_accum;
+private:
+  bool duplicate_inputs_;
 };
 
 } // namespace at::cuda::tunable
