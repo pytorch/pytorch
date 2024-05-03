@@ -75,7 +75,6 @@ def gc_context():
         yield
     finally:
         # TODO: add logging for the gc details/time
-        gc.collect()
         if is_enabled:
             gc.enable()
 
@@ -132,6 +131,7 @@ class _StateDictInfo(StateDictOptions):
     fsdp_modules: List[nn.Module] = field(default_factory=list)
 
 
+@functools.lru_cache(maxsize=None)
 def _get_fqns(
     model: nn.Module,
     name: str,
