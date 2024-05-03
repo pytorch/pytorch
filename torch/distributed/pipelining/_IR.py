@@ -1353,7 +1353,9 @@ def pipeline(
 class ArgsChunkSpec:
     """
     Example:
-    >>> # The numbers here are tensor chunking dimensions for each positional argument (3 of them)
+    >>> # xdoctest: +SKIP
+    >>> # There are three positional arguments to the model, and
+    >>> # we are chunking them along dimension 0, 0 and 1, respectively
     >>> with ArgsChunkSpec((0, 0, 1)):
     >>>     pipe = pipeline(model, num_chunks, example_args)
     """
@@ -1381,6 +1383,7 @@ class ArgsChunkSpec:
 class KwargsChunkSpec:
     """
     Example:
+    >>> # xdoctest: +SKIP
     >>> # Chunk dimension 0 for the "id" argument, 1 for the "mask" argument
     >>> with KwargsChunkSpec({"id": 0, "mask": 1}):
     >>>     pipe = pipeline(model, num_chunks, (), example_kwargs)
