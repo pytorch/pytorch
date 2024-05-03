@@ -29,49 +29,18 @@ jobs:
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       ISSUE_NUMBER: ${{ inputs.issue_number }}
+      USERNAME: ${{ inputs.user_name }}
     steps:
-      - name: Check if user is in arc_users.yml
+      - name: Get the workflow type for the current user
         id: set-condition
         run: |
           curr_branch="${{ inputs.curr_branch }}"
           echo "Current branch is '$curr_branch'"
 
-          if [[ "$curr_branch" == "nightly" || "$curr_branch" == "main" || "$curr_branch" == "release/"* || "$curr_branch" == "landchecks/"* ]]; then
-            echo "workflow-type=label" >> "$GITHUB_OUTPUT"
-          else
-            REPO_OWNER="pytorch"
-            REPO_NAME="test-infra"
-            ISSUE_NUMBER="$ISSUE_NUMBER"
-
-            COMMENTS=$(curl -H "Authorization: token $GITHUB_TOKEN" "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/issues/$ISSUE_NUMBER/comments")
-            USER_LIST=$(echo "$COMMENTS" | tr -d '\r\n' | jq '.[0].body' -r)
-            RUN_OPTION=$(echo "$COMMENTS" | tr -d '\r\n' | jq '.[1].body' --raw-output)
-
-            WORKFLOW_TYPE_RG="rg"
-            WORKFLOW_TYPE_LABEL="label"
-            WORKFLOW_TYPE_BOTH="both"
-
-            if [[ ${USER_LIST:0:1} == "!" ]]; then
-              # Disable ARC runners for everyone.
-              echo "workflow-type=$WORKFLOW_TYPE_LABEL" >> "$GITHUB_OUTPUT"
-            elif [[ ${USER_LIST:0:1} == "*" ]]; then
-              if [[ "$RUN_OPTION" == "$WORKFLOW_TYPE_BOTH" ]]; then
-                # Use ARC runners and old runners for everyone.
-                echo "workflow-type=$WORKFLOW_TYPE_BOTH" >> "$GITHUB_OUTPUT"
-              else
-                # Use only ARC runners for everyone.
-                echo "workflow-type=$WORKFLOW_TYPE_RG" >> "$GITHUB_OUTPUT"
-              fi
-            elif echo "$USER_LIST" | grep -q "${{ inputs.user_name }}"; then
-              if [[ "$RUN_OPTION" == "$WORKFLOW_TYPE_BOTH" ]]; then
-                # Use ARC runners and old runners for a specific user.
-                echo "workflow-type=$WORKFLOW_TYPE_BOTH" >> "$GITHUB_OUTPUT"
-              else
-                # Use only ARC runners for a specific user.
-                echo "workflow-type=$WORKFLOW_TYPE_RG" >> "$GITHUB_OUTPUT"
-              fi
-            else
-              # Use old runners by default.
-              echo "workflow-type=$WORKFLOW_TYPE_LABEL" >> "$GITHUB_OUTPUT"
-            fi
-          fi
+          WORKFLOW_TYPE="$(python3 .github/scripts/get_workflow_type.py \
+            --github-token $GITHUB_TOKEN \
+            --github-issue $ISSUE_NUMBER \
+            --github-branch $curr_branch \
+            --github-user $USERNAME)"
+          echo "${WORKFLOW_TYPE}"
+          echo "workflow-type=$WORKFLOW_TYPE" >> "$GITHUB_OUTPUT"
