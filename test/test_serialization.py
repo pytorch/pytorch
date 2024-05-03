@@ -4001,6 +4001,7 @@ class TestSerialization(TestCase, SerializationMixin):
             self.assertEqual(y['x'][:2].to(dtype=torch.float32), torch.tensor([-0.25, 0.25]))
 
     @parametrize('filename', (True, False))
+    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
     def test_filewriter_metadata_writing(self, filename):
         sd = torch.nn.Linear(3, 5).state_dict()
         weight_nbytes = sd['weight'].untyped_storage().nbytes()
