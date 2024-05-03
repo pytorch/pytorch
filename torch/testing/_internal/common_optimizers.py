@@ -319,6 +319,9 @@ def optim_inputs_func_adadelta(device, dtype=None):
         OptimizerInput(
             params=None, kwargs={"rho": 0.95, "weight_decay": 0.9}, desc="rho"
         ),
+        OptimizerInput(
+            params=None,kwargs={'maximize':True},desc="maximize, no weight_decay"
+        ),
     ] + (cuda_supported_configs if "cuda" in str(device) else [])
 
 
@@ -516,6 +519,11 @@ def optim_inputs_func_adamax(device, dtype=None):
             kwargs={"weight_decay": 0.1, "maximize": True},
             desc="maximize",
         ),
+        OptimizerInput(
+            params=None,
+            kwargs={"maximize":True},
+            desc="maximize, no weight_decay",
+        ),
     ] + (cuda_supported_configs if "cuda" in str(device) else [])
 
 
@@ -658,6 +666,28 @@ def optim_inputs_func_nadam(device, dtype=None):
             },
             desc="decoupled_weight_decay",
         ),
+        OptimizerInput(
+            params=None,
+            kwargs={
+                "weight_decay":0.1,
+            },
+            desc="weight_decay, no momentum_decay",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={
+                "decoupled_weight_decay":True,
+            },
+            desc="decoupled_weight_decay, no weight_decay, no momentum_decay",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={
+                "decoupled_weight_decay":True,
+                "weight_decay":0.1,
+            },
+            desc="decoupled_weight_decay, weight_decay",
+        ),
     ] + (cuda_supported_configs if "cuda" in str(device) else [])
 
 
@@ -720,6 +750,13 @@ def optim_inputs_func_radam(device=None, dtype=None):
             params=None,
             kwargs={"weight_decay": 0.1, "decoupled_weight_decay": True},
             desc="decoupled_weight_decay",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={
+                "decoupled_weight_decay":True,
+            },
+            desc="decoupled_weight_decay, no weight_decay",
         ),
     ] + (cuda_supported_configs if "cuda" in str(device) else [])
 
@@ -790,6 +827,21 @@ def optim_inputs_func_rmsprop(device, dtype=None):
                 "maximize": True,
             },
             desc="maximize",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={
+                "maximize":True,
+            },
+            desc="maximize, no weight_decay",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={
+                "maximize":True,
+                "weight_decay":0.1,
+            },
+            desc="maximize, weight_decay",
         ),
     ] + (cuda_supported_configs if "cuda" in str(device) else [])
 
