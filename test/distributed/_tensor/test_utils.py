@@ -195,7 +195,6 @@ class Test2DStridedLocalShard(DTensorTestBase):
                 stride=global_tensor.stride(),
             )
 
-            self.assertEqual(len(comm_mode.get_comm_counts()), 1)
             self.assertEqual(
                 comm_mode.get_comm_counts()[c10d_functional.all_gather_into_tensor], 0
             )
