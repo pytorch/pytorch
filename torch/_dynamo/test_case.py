@@ -70,3 +70,4 @@ class TestCase(TorchTestCase):
         if self._prior_is_grad_enabled is not torch.is_grad_enabled():
             log.warning("Running test changed grad mode")
             torch.set_grad_enabled(self._prior_is_grad_enabled)
+        torch.fx.traceback.current_meta.clear()
