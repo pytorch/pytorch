@@ -1213,6 +1213,14 @@ class CKGemmTemplate(CKTemplate):
         return res
 
     def filter_op(self, op: CKGemmOperation) -> Optional[CKGemmOperation]:
+        """
+        Determines whether a given op definition is suitable for the current
+        input / output of the operation that this template implements.
+
+        Filter is based on inputs' dtype, layout and statically inferred size.
+
+        Returns None if the op is not suitable, otherwise returns the op to be used.
+        """
         # TBD return None if alignment or layout or dtype is invalid
         def torch_layout_to_ck_layout(torch_layout):
             if torch_layout.stride[-1] == 1:
