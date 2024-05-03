@@ -31,6 +31,11 @@ jobs:
       ISSUE_NUMBER: ${{ inputs.issue_number }}
       USERNAME: ${{ inputs.user_name }}
     steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          fetch-depth: 1
+          submodules: true
       - name: Get the workflow type for the current user
         id: set-condition
         run: |
