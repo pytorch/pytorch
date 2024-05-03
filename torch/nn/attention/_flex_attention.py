@@ -1,10 +1,12 @@
-"""This module implements the user facing API for templated attention in PyTorch."""
+"""This module implements the user facing API for flex_attention in PyTorch."""
 import functools
-from typing import Callable, Tuple
+from typing import Callable
 
 import torch
-from torch._higher_order_ops.templated_attention import (
-    templated_attention as templated_attention_hop,
+from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
+from torch._higher_order_ops.utils import _set_compilation_env
+from torch.fx.experimental.proxy_tensor import (
+    _temp_remove_pre_dispatch_torch_function_mode,
 )
 from torch.nn.attention._utils import _validate_sdpa_input
 
@@ -26,12 +28,12 @@ _score_mod_signature = Callable[
 ]
 
 
-def _templated_attention(
+def _flex_attention(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
     score_mod: _score_mod_signature,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> torch.Tensor:
     r"""This function implements scaled dot product attention with an arbitrary attention score modification function.
 
     This function computes the scaled dot product attention between query, key, and value tensors with a user-defined
@@ -74,11 +76,16 @@ def _templated_attention(
         - :math:`Ev: \text{Embedding dimension of the value}`
 
     .. warning::
-        `torch.nn.attention.templated_attention` is a prototype feature in PyTorch. It doesn't support training currently.
+        `torch.nn.attention.flex_attention` is a prototype feature in PyTorch. It doesn't support training currently.
         Please look forward to a more stable implementation in a future version of PyTorch.
         Read more about feature classification at: https://pytorch.org/blog/pytorch-feature-classification-changes/#prototype
 
     """
+
+    if torch.compiler.is_dynamo_compiling():
+        out, _ = flex_attention_hop(query, key, value, score_mod)
+        return out
+
     # Some basic input validation
     _validate_sdpa_input(query, key, value)
     # This will restriction will be removed in newer version of the kernel
@@ -86,13 +93,20 @@ def _templated_attention(
         raise ValueError(
             "NYI: The target sequence length (L) of the query tensor must match the source sequence length (S) of the key tensor."
         )
-    out, _ = templated_attention_hop(query, key, value, score_mod)
 
-    # Drop the logsumexp value since this is only needed for backwards
-    return out
+    if not torch._dynamo.is_dynamo_supported():
+        raise RuntimeError("flex_attention requires dynamo support.")
+
+    with _set_compilation_env():
+        with torch._dynamo.utils.disable_cache_limit():
+            with _temp_remove_pre_dispatch_torch_function_mode():
+                out, _ = torch.compile(
+                    flex_attention_hop, backend="eager", fullgraph=True
+                )(query, key, value, score_mod)
+                return out
 
 
-"""Some common used score_mod functions for templated attention in PyTorch."""
+"""Some common used score_mod functions for flex_attention in PyTorch."""
 
 
 def _identity(
