@@ -3222,9 +3222,9 @@ class CppKernelDispatcher(CppKernel):
 
     def codegen_scalar_kernel(self, code):
         if self.scalar_kernel:
-            if self.tiling_ranges[0] == 0:
+            if not self.split or self.tiling_ranges[0] == 0:
                 self.gen_kernel(self.scalar_kernel, code)
-            elif self.tiling_ranges[0] == self.sizes[0]:
+            elif self.split and self.tiling_ranges[0] == self.sizes[0]:
                 return
             else:
                 code.splice(self.scalar_condition)
