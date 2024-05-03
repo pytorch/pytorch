@@ -258,7 +258,7 @@ main()
         self.assertNotEqual(grads[1], None)
         self.assertNotEqual(grads[2], None)
 
-    def test_inputs_aliasing_bytecode_attr_mutations(self):
+    def test_bytecode_inputs_aliasing_attr_mutations(self):
         # Freeze compiled autograd graph
         compiler = torch._dynamo.compiled_autograd.AutogradCompilerInstance(compiler_fn)
         param = torch.ones(100)
@@ -309,7 +309,9 @@ main()
         finally:
             handle.remove()
 
-    def test_inputs_aliasing_bytecode_stack_restore(self):
+    def test_bytecode_inputs_aliasing_stack_restore(self):
+        # For some reason, dynamo chokes when tracing `add_1 = add + inputs[1]` if `test_custom_fn_output_metadata`
+        # runs before this test. This currently works because default order is alphabetical.
         from torch.testing._internal.logging_tensor import LoggingTensor
 
         # Create a graph that allows inputs stealing
@@ -1381,6 +1383,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent, m) {
             "torch::autograd::AccumulateGrad (NodeCall 11)",
         ]
 
+        torch._logging.set_logs(compiled_autograd_verbose=False)
         self.assertEqual(
             sum(1 for e in expected_logs if e in logs.getvalue()), len(expected_logs)
         )
@@ -1439,6 +1442,7 @@ main()
             r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
             r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
         ]
+        torch._logging.set_logs(compiled_autograd_verbose=False)
 
         pattern = r"".join(patterns)
         matches = re.findall(pattern, stdout)
@@ -1469,6 +1473,7 @@ main()
                 # unused, verbose level already snapshot with contextmanager
                 torch._logging.set_logs(compiled_autograd_verbose=True)
                 fn()
+                torch._logging.set_logs(compiled_autograd_verbose=False)
 
         unexpected_logs = [
             "SumBackward0 (NodeCall 1)",
