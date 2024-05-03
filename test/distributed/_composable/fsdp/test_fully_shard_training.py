@@ -16,6 +16,7 @@ from torch.distributed._composable.fsdp import (
     FSDPModule,
     fully_shard,
     OffloadPolicy,
+    register_fsdp_forward_method,
 )
 from torch.distributed._tensor import DTensor, init_device_mesh
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
@@ -1137,6 +1138,58 @@ class TestFullyShardHSDPTraining(FSDPTest):
                 _optim.step()
                 _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
             check_sharded_parity(self, ref_model, model)
+
+
+class TestFullyShardCustomForwardMethod(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_register_fsdp_forward_method(self):
+        """Based on https://github.com/pytorch/pytorch/issues/109385"""
+
+        class VisionTransformer(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.patch_proj = nn.Conv2d(3, 1024, kernel_size=14, stride=14)
+
+            def forward_features(self, imgs: torch.Tensor) -> torch.Tensor:
+                return self.patch_proj(imgs).flatten(2).transpose(1, 2)
+
+            def forward(self, imgs: torch.Tensor) -> torch.Tensor:
+                return self.forward_features(imgs).sum(dim=1)
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.vit, self.projector = VisionTransformer(), nn.Linear(1024, 256)
+
+            def forward(self, imgs: torch.Tensor) -> torch.Tensor:
+                # Run `vit.forward_features`, which is not `forward`!
+                patch_embeddings = self.vit.forward_features(imgs)
+                return self.projector(patch_embeddings)
+
+        torch.manual_seed(42)
+        model = Model()
+        for param in model.parameters():
+            dist.broadcast(param.detach(), src=0)
+        ref_model = copy.deepcopy(model).cuda()
+        fully_shard(model.vit)
+        fully_shard(model.projector)
+        fully_shard(model)
+        register_fsdp_forward_method(model.vit, "forward_features")
+
+        torch.manual_seed(42 + self.rank + 1)
+        inp = torch.randn(4, 3, 224, 224, device="cuda")
+        ref_loss = ref_model(inp).sum()
+        loss = model(inp).sum()
+        self.assertEqual(ref_loss, loss)
+        ref_loss.backward()
+        loss.backward()
+        for param in ref_model.parameters():
+            dist.all_reduce(param.grad, op=dist.ReduceOp.AVG)
+        check_sharded_parity(self, ref_model, model)
 
 
 if __name__ == "__main__":

@@ -1276,6 +1276,16 @@ def init_process_group(
 
     set_pytorch_distributed_envs_from_justknobs()
 
+    # Depending on the import order, some trace_rules functions may be evaluated
+    # during the import phase. In such a case, these functions may not correctly
+    # add the distributed related rules due to import circular dependency.
+    # We need to clear the lru_cache during the runtime to ensure the correctness
+    # of these trace_rules.
+    #
+    # Since this API must be called before all distributed code being compiled,
+    # clearing the cache here should be safe.
+    torch._dynamo.trace_rules.clear_lru_cache()
+
     assert (store is None) or (
         init_method is None
     ), "Cannot specify both init_method and store."
@@ -1602,7 +1612,7 @@ def _new_process_group_helper(
             break
 
         # Process group wrapper initialization for supported PGs when TORCH_DISTRIBUTED_DEBUG is set
-        if backend_str in [Backend.GLOO, Backend.NCCL, Backend.UCC]:
+        if backend_str in [Backend.GLOO, Backend.NCCL, Backend.UCC] or backend_str.upper() in Backend._plugins:
             # In debug mode and if GLOO is available, wrap in a wrapper PG that
             # enables enhanced collective checking for debuggability.
             if get_debug_level() == DebugLevel.DETAIL:
@@ -1878,6 +1888,9 @@ def send(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, t
     """
     Send a tensor synchronously.
 
+    .. warning::
+        ``tag`` is not supported with the NCCL backend.
+
     Args:
         tensor (Tensor): Tensor to send.
         dst (int): Destination rank on global process group (regardless of ``group`` argument).
@@ -1912,6 +1925,9 @@ def send(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, t
 def recv(tensor: torch.Tensor, src: Optional[int] = None, group: Optional[ProcessGroup] = None, tag: int = 0) -> int:
     """
     Receives a tensor synchronously.
+
+    .. warning::
+        ``tag`` is not supported with the NCCL backend.
 
     Args:
         tensor (Tensor): Tensor to fill with received data.

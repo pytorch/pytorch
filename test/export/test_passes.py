@@ -13,10 +13,6 @@ from typing import List, Set
 import torch
 from functorch.experimental.control_flow import cond
 from torch._dynamo.eval_frame import is_dynamo_supported
-from torch._export.non_strict_utils import (
-    _fakify_script_objects,
-    _gather_constant_attrs,
-)
 from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
 from torch._export.passes.functionalize_side_effectful_ops_pass import (
     _FunctionalizeSideEffectfulOpsPass,
@@ -38,24 +34,26 @@ from torch._export.utils import (
     sequential_split,
 )
 from torch._higher_order_ops.auto_functionalize import auto_functionalized
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch.export import export
 from torch.export._remove_auto_functionalized_pass import (
     unsafe_remove_auto_functionalized_pass,
 )
 from torch.export._remove_effect_tokens_pass import _remove_effect_tokens
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.passes.infra.partitioner import Partition
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.library import _scoped_library, impl
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
+    find_library_location,
+    IS_FBCODE,
+    IS_MACOS,
+    IS_SANDCASTLE,
     IS_WINDOWS,
     run_tests,
     skipIfTorchDynamo,
     TestCase,
 )
-from torch.testing._internal.torchbind_impls import init_torchbind_implementations
 from torch.utils import _pytree as pytree
 
 
@@ -87,53 +85,6 @@ def _get_output_names(gm: torch.fx.GraphModule) -> List[str]:
     # if isinstance(args, tuple) and len(args) == 1:
     #     args = args[0]
     return [str(arg) for arg in args]
-
-
-class ModelsWithScriptObjectAttr:
-    class Simple(torch.nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
-
-    class SimpleWithAttrInContainer(torch.nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
-            self.pytree_attr2 = [
-                torch.classes._TorchScriptTesting._Foo(1, 2),
-                {
-                    torch.classes._TorchScriptTesting._Foo(3, 4),
-                },
-                {"foo": torch.classes._TorchScriptTesting._Foo(5, 6)},
-            ]
-
-    class NestedWithAttrInContainer(torch.nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
-            self.pytree_attr2 = [
-                torch.classes._TorchScriptTesting._Foo(1, 2),
-                {
-                    torch.classes._TorchScriptTesting._Foo(3, 4),
-                },
-                {"foo": torch.classes._TorchScriptTesting._Foo(5, 6)},
-            ]
-            self.sub_mod = ModelsWithScriptObjectAttr.Simple()
-            self.sub_mod2 = ModelsWithScriptObjectAttr.SimpleWithAttrInContainer()
-
-    class MoreNestedWithAttrInContainer(torch.nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
-            self.pytree_attr2 = [
-                torch.classes._TorchScriptTesting._Foo(1, 2),
-                {
-                    torch.classes._TorchScriptTesting._Foo(3, 4),
-                },
-                {"foo": torch.classes._TorchScriptTesting._Foo(5, 6)},
-            ]
-            self.sub_mod = ModelsWithScriptObjectAttr.Simple()
-            self.sub_mod2 = ModelsWithScriptObjectAttr.NestedWithAttrInContainer()
 
 
 def _set_grad_enabled_tests():
@@ -262,7 +213,17 @@ class TestPasses(TestCase):
         self.SEQUENTIAL_SPLIT_INLINE_TESTS = _sequential_split_inline_tests()
         self.SET_GRAD_ENABLED_TESTS = _set_grad_enabled_tests()
 
-        init_torchbind_implementations()
+        if IS_SANDCASTLE or IS_FBCODE:
+            torch.ops.load_library(
+                "//caffe2/test/cpp/jit:test_custom_class_registrations"
+            )
+        elif IS_MACOS:
+            raise unittest.SkipTest("non-portable load_library call used in test")
+        else:
+            lib_file_path = find_library_location("libtorchbind_test.so")
+            if IS_WINDOWS:
+                lib_file_path = find_library_location("torchbind_test.dll")
+            torch.ops.load_library(str(lib_file_path))
 
     def tearDown(self):
         self.SEQUENTIAL_SPLIT_INLINE_TESTS.clear()
@@ -460,7 +421,8 @@ class TestPasses(TestCase):
 
         m = MyModule()
         inputs = (torch.ones(2, 3),)
-        ep = torch.export.export(m, inputs, strict=False)
+        with enable_torchbind_tracing():
+            ep = torch.export.export(m, inputs, strict=False)
 
         inp = torch.randn(2, 3)
         orig_res = m(inp)
@@ -473,48 +435,6 @@ class TestPasses(TestCase):
         self.assertTrue(torch.allclose(orig_res, ep_res))
         self.assertTrue(torch.allclose(orig_res, without_token_res))
 
-    def test_fakify_script_objects(self):
-        for m in [
-            ModelsWithScriptObjectAttr.Simple(),
-            ModelsWithScriptObjectAttr.SimpleWithAttrInContainer(),
-            ModelsWithScriptObjectAttr.NestedWithAttrInContainer(),
-            ModelsWithScriptObjectAttr.MoreNestedWithAttrInContainer(),
-        ]:
-            constant_attrs = _gather_constant_attrs(m)
-            fake_mode = FakeTensorMode(
-                shape_env=ShapeEnv(tracked_fakes=[]),
-                allow_non_fake_inputs=True,
-            )
-            with _fakify_script_objects(m, tuple(), {}, fake_mode) as (
-                patched_mod,
-                _,
-                _,
-                fake_constant_attrs,
-                fake_to_real,
-            ):
-                self.assertEqual(len(fake_constant_attrs), len(constant_attrs))
-                for fake_obj, fqn in fake_constant_attrs.items():
-                    self.assertEqual(constant_attrs[fake_to_real[fake_obj]], fqn)
-
-    # TODO: _gather_constants doesn't recursively look into the pytree containers.
-    @unittest.expectedFailure
-    def test_fakify_script_objects_properly_handle_containers(self):
-        m = ModelsWithScriptObjectAttr.SimpleWithAttrInContainer()
-        constant_attrs = _gather_constant_attrs(m)
-        fake_mode = FakeTensorMode(
-            shape_env=ShapeEnv(tracked_fakes=[]),
-            allow_non_fake_inputs=True,
-        )
-        with _fakify_script_objects(m, tuple(), {}, fake_mode) as (
-            patched_mod,
-            _,
-            _,
-            fake_constant_attrs,
-            fake_to_real,
-        ):
-            self.assertTrue("attr" in fake_constant_attrs.values())
-            self.assertTrue("pytree_attr2" in fake_constant_attrs.values())
-
     def test_runtime_assert_inline_constraints_for_item(self) -> None:
         class M(torch.nn.Module):
             def __init__(self):
@@ -522,7 +442,8 @@ class TestPasses(TestCase):
 
             def forward(self, x):
                 b = x.item()
-                torch._constrain_as_value(b, min=2, max=5)
+                torch._check(b >= 2)
+                torch._check(b <= 5)
                 return b
 
         x = torch.tensor([2])
@@ -545,7 +466,8 @@ class TestPasses(TestCase):
 
             def forward(self, x):
                 b = x.nonzero()
-                torch._constrain_as_value(b.shape[0], min=3, max=5)
+                torch._check(b.shape[0] >= 3)
+                torch._check(b.shape[0] <= 5)
                 return b
 
         x = torch.tensor([2, 1, 2, 3, 5, 0])
@@ -586,12 +508,14 @@ class TestPasses(TestCase):
             def forward(self, pred, x, y):
                 def true_fn(x, y):
                     b = x.item()
-                    torch._constrain_as_value(b, min=2, max=5)
+                    torch._check(b >= 2)
+                    torch._check(b <= 5)
                     return x - b
 
                 def false_fn(x, y):
                     c = y.item()
-                    torch._constrain_as_value(c, min=2, max=5)
+                    torch._check(c >= 2)
+                    torch._check(c <= 5)
                     return y - c
 
                 ret = cond(pred, true_fn, false_fn, [x, y])
@@ -611,7 +535,8 @@ class TestPasses(TestCase):
         class Foo(torch.nn.Module):
             def forward(self, x):
                 a = x.item()
-                torch._constrain_as_value(a, 4, 7)
+                torch._check(a >= 4)
+                torch._check(a <= 7)
                 return torch.empty((a, 4))
 
         f = Foo()
@@ -619,8 +544,8 @@ class TestPasses(TestCase):
         ep = torch.export.export(f, (torch.tensor([7]),))
         gm = ep.graph_module
         FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range.default",
-            1,
+            "torch.ops.aten._assert_async.msg",
+            2,
             exactly=True,
         ).run(gm.code)
 
@@ -638,10 +563,10 @@ class TestPasses(TestCase):
         self.assertEqual(dep_token.shape, torch.Size([]))
 
         FileCheck().check_count(
-            "torch.ops.aten._functional_sym_constrain_range", 1, exactly=True
+            "torch.ops.aten._functional_assert_async.msg", 2, exactly=True
         ).run(gm.code)
         FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range.default", 0, exactly=True
+            "torch.ops.aten._assert_async.msg", 0, exactly=True
         ).run(gm.code)
 
     def test_math_ops(self):
