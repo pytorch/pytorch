@@ -1,5 +1,6 @@
 import copy
 import enum
+from functools import lru_cache
 import logging
 import os
 import random
@@ -1510,7 +1511,14 @@ class CKGemmTemplate(CKTemplate):
         log.debug(f"ck instances filtered: {len(filtered_instances)}")
         return filtered_instances
 
-    def gen_ops(self):
+    @lru_cache(None)
+    def gen_ops(self) -> List[CKGemmOperation]:
+        """
+        Creates a list of `CKGemmOperation` instances that match the GEMM operation this template represents.
+        The instances are guaranteed to have the correct layout, dtype and dimension padding for the GEMM input arguments.
+
+        An instance may invalidate the GEMM configuration at runtime; such instances will be assigned +inf runtime by the autotune process.
+        """
         return self._gen_ops_preselected() if config.rocm.use_preselected_instances else self._gen_ops_library()
 
     @staticmethod
