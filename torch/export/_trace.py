@@ -36,6 +36,7 @@ from torch._functorch.aot_autograd import aot_export_module
 from torch._guards import detect_fake_mode
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch._utils_internal import log_export_usage
+from torch.export.dynamic_shapes import _combine_args
 from torch.export.exported_program import OutputKind
 from torch.fx._utils import first_call_function_nn_module_stack
 from torch.fx.experimental.symbolic_shapes import (
@@ -1061,9 +1062,11 @@ def _export(
         except (ConstraintViolationError, ValueRangeError) as e:
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: TRY200
 
+        combined_args = _combine_args(mod, args, kwargs)
         range_constraints = make_constraints(
             fake_mode,
             ep_non_strict.gm,
+            combined_args,
             dynamic_shapes,
             num_lifted,
         )
@@ -1269,9 +1272,11 @@ def _export(
         ),
         len(export_graph_signature.input_specs),
     )
+    combined_args = _combine_args(mod, args, kwargs)
     range_constraints = make_constraints(
         dynamo_fake_mode,
         gm,
+        combined_args,
         dynamic_shapes,
         num_lifted,
     )
