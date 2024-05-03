@@ -3124,13 +3124,14 @@ class CppKernelDispatcher(CppKernel):
     def gen_tiling_conditions(self):
         if len(self.tiling_ranges) == 1:
             # generate 1-d tiling condition
-            if self.tiling_ranges[0] != 0:
+            if self.tiling_ranges[0] == 0:
+                self.loops[0].steps = 1
+            elif self.tiling_ranges[0] == self.sizes[0]:
+                return
+            else:
                 self.vec_condition.writeline(
                     f"if ({self.itervars[0]} < {cexpr_index(self.tiling_ranges[0])})"
                 )
-            else:
-                self.loops[0].steps = 1
-            if self.tiling_ranges[0] != 0 and self.tiling_ranges[0] != self.sizes[0]:
                 self.scalar_condition.writeline(
                     f"if ({self.itervars[0]} >= {cexpr_index(self.tiling_ranges[0])})"
             )
@@ -3221,7 +3222,11 @@ class CppKernelDispatcher(CppKernel):
 
     def codegen_scalar_kernel(self, code):
         if self.scalar_kernel:
-            if len(self.scalar_condition._lines) > 0:
+            if self.tiling_ranges[0] == 0:
+                self.gen_kernel(self.scalar_kernel, code)
+            elif self.tiling_ranges[0] == self.sizes[0]:
+                return
+            else:
                 code.splice(self.scalar_condition)
                 with contextlib.ExitStack() as stack:
                     stack.enter_context(code.indent())
@@ -3235,11 +3240,9 @@ class CppKernelDispatcher(CppKernel):
                         for k, v in self.reduction_var_dict.items():
                             self.replace_loop_vars(self.scalar_kernel.stores._lines, k, v["new_var"])
                     self.gen_kernel(self.scalar_kernel, code)
-            else:
-                self.gen_kernel(self.scalar_kernel, code)
 
     def codegen_vec_kernel(self, code):
-        if self.vec_kernel and len(self.vec_condition._lines) > 0:
+        if self.vec_kernel and self.tiling_ranges[0] != 0:
             code.splice(self.vec_condition)
             with contextlib.ExitStack() as stack:
                 stack.enter_context(code.indent())
@@ -3268,6 +3271,10 @@ class CppKernelDispatcher(CppKernel):
         # float tmp_acc0 = 0; -> float tmp_acc0_arr[n];
         if not self.need_arr_acc_var:
             return
+
+        if self.tiling_ranges[0] == 0 or self.tiling_ranges[0] == self.sizes[0]:
+            return
+
         new_prefix = IndentedBuffer()
         for i in range(len(self.scalar_kernel.reduction_prefix._lines)):
             line = self.scalar_kernel.reduction_prefix._lines[i]
@@ -3295,6 +3302,8 @@ class CppKernelDispatcher(CppKernel):
         # out_ptr0[x1] = tmp_acc0; ->
         # out_ptr0[x1_tail] = tmp_acc0_arr[x1_tail - start_idx];
         if not self.need_arr_acc_var:
+            return
+        if self.tiling_ranges[0] == 0 or self.tiling_ranges[0] == self.sizes[0]:
             return
         for i in range(len(self.scalar_kernel.reduction_suffix._lines)):
             line = self.scalar_kernel.reduction_suffix._lines[i]
