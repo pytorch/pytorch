@@ -603,6 +603,14 @@ class TestOptimRenewed(TestCase):
                     loss = output.sum()
                     loss.backward()
 
+                if i == 4:
+                    # Freeze a layer to test if the step of this layer in 'fused' or 'foreach'
+                    # is same as the step in 'forloop'.
+                    model[2].requires_grad_(False)
+                if i == 5:
+                    # Unfreeze the layer
+                    model[2].requires_grad_(True)
+
                 optimizer.step()
                 state.append(optimizer.state)
                 updated_params.append(model.parameters())

@@ -427,8 +427,13 @@ def _multi_tensor_asgd(
             torch._foreach_mul_(new_etas, lr)
             torch._foreach_copy_(grouped_etas, new_etas)
         else:
-            step = grouped_state_steps[0].item()
-            new_eta = _to_tensor(lr / (1 + lambd * lr * step**alpha), device=device)
-            new_mu = _to_tensor(1 / max(1, step - t0), device=device)
-            torch._foreach_copy_(grouped_etas, [new_eta] * len(grouped_mus))
-            torch._foreach_copy_(grouped_mus, [new_mu] * len(grouped_mus))
+            new_etas = [
+                torch.as_tensor(lr / (1 + lambd * lr * step**alpha), device=device)
+                for step in grouped_state_steps
+            ]
+            new_mus = [
+                torch.as_tensor(1 / max(1, step - t0), device=device)
+                for step in grouped_state_steps
+            ]
+            torch._foreach_copy_(grouped_etas, new_etas)
+            torch._foreach_copy_(grouped_mus, new_mus)
