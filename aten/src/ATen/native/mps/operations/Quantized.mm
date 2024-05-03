@@ -151,7 +151,7 @@ Tensor _weight_int4pack_mm_mps(const Tensor& A, const Tensor& B, int64_t qGroupS
   std::array<uint32_t, 3> sizes = {static_cast<uint32_t>(M),
                                    static_cast<uint32_t>(K),
                                    static_cast<uint32_t>(N)};
-  static bool firstCapture = true;
+  static bool firstCapture = false;
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       NSError *err = nil;
