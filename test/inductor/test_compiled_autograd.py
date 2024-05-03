@@ -269,7 +269,7 @@ main()
         param_proxy, activ_proxy = proxies
         buf = activ_proxy * 2
         torch.ops.inductor.accumulate_grad_.default(param_proxy, buf)
-        compiled_fn = compiler.end_capture(buf)
+        runtime_wrapper, compiled_fn = compiler.end_capture(buf)
 
         def bytecode_hook(code, out_code):
             import dis
@@ -306,7 +306,7 @@ main()
         torch._dynamo.reset()
         handle = torch._dynamo.convert_frame.register_bytecode_hook(bytecode_hook)
         try:
-            compiled_fn(inputs=[param, activ], sizes=(), hooks=())
+            runtime_wrapper(compiled_fn=compiled_fn, inputs=[param, activ], sizes=(), hooks=())
         finally:
             handle.remove()
 
