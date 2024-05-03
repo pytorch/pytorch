@@ -612,7 +612,7 @@ def distribute_tensor(
             )
         return tensor
 
-    local_tensor = tensor
+    local_tensor = tensor.detach()
 
     # distribute the tensor according to the placements.
     placements = list(placements)
@@ -637,7 +637,7 @@ def distribute_tensor(
     # detach the local tensor passed to DTensor since after the construction
     # of DTensor, autograd would work on top of DTensor instead of local tensor
     return DTensor(
-        local_tensor.detach().requires_grad_(tensor.requires_grad),
+        local_tensor.requires_grad_(tensor.requires_grad),
         device_mesh,
         placements,
         shape=tensor.size(),
