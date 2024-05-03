@@ -17,7 +17,7 @@ from ._compatibility import compatibility
 __all__ = ["immutable_list", "immutable_dict"]
 
 
-T = TypeVar("T")
+_T = TypeVar("T")
 
 
 _help_mutation = """\
@@ -35,10 +35,10 @@ def _no_mutation(self, *args, **kwargs):
 
 
 def _create_immutable_container_class(
-    base: Type[T],
+    base: Type[_T],
     mutable_functions: Iterable[str],
     namespace: Optional[Dict[str, Any]] = None,
-) -> Type[T]:
+) -> Type[_T]:
     namespace = namespace or {}
     namespace.update((method, _no_mutation) for method in mutable_functions)
     container_class = type("immutable_" + base.__name__, (base,), namespace)
