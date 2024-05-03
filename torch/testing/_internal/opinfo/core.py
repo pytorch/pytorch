@@ -2714,7 +2714,6 @@ class ForeachFuncInfo(OpInfo):
     backward_requires_result: bool = False
 
     def __post_init__(self):
-        super().__post_init__()
         (
             foreach_method,
             foreach_method_inplace,
@@ -2750,6 +2749,9 @@ class ForeachFuncInfo(OpInfo):
             # because maximum ref does not support inplace or scalar
             self.ref = torch.clamp_min
             self.ref_inplace = torch.Tensor.clamp_min_
+
+        # The following sets `dtypesIfCUDA` and `dtypesIfROCM` accordingly.
+        super().__post_init__()
 
     def sample_zero_size_inputs(self, device, dtype, requires_grad=False, **kwargs):
         if not hasattr(self.sample_inputs_func, "sample_zero_size_tensor_inputs"):
