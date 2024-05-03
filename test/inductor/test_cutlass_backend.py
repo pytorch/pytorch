@@ -676,27 +676,45 @@ class TestCutlassBackend(TestCase):
     def test_get_max_alignment(self):
         l4 = FixedLayout("cpu", torch.half, size=(1, 2, 4), stride=(0, 4, 1))
         m4 = get_max_alignment(l4)
-        self.assertEqual(m4 , 4, "Wrong max alignment. Should have been 4. (simple, contiguous case)")
+        self.assertEqual(
+            m4, 4, "Wrong max alignment. Should have been 4. (simple, contiguous case)"
+        )
 
         l4_2 = FixedLayout("cpu", torch.half, size=(1, 4, 2), stride=(0, 1, 4))
         m4_2 = get_max_alignment(l4_2)
-        self.assertEqual(m4_2,4, "Wrong max alignment. Should have been 4. Did not deal with strides correctly")
+        self.assertEqual(
+            m4_2,
+            4,
+            "Wrong max alignment. Should have been 4. Did not deal with strides correctly",
+        )
 
         l1 = FixedLayout("cpu", torch.half, size=(2, 4, 2), stride=(23, 1, 4))
         m1 = get_max_alignment(l1)
-        self.assertEqual(m1,1, "Wrong max alignment. Should have been 1. Did not take stride into account correctly")
+        self.assertEqual(
+            m1,
+            1,
+            "Wrong max alignment. Should have been 1. Did not take stride into account correctly",
+        )
 
         l2 = FixedLayout("cpu", torch.half, size=(1, 2, 4), stride=(0, 4, 1), offset=6)
         m2 = get_max_alignment(l2)
-        self.assertEqual(m2 ,2, "Wrong max alignment. Should have been 2. (due to choice of offset)")
+        self.assertEqual(
+            m2, 2, "Wrong max alignment. Should have been 2. (due to choice of offset)"
+        )
 
-        l8 = FixedLayout("cpu", torch.half, size=(2, 2, 8), stride=(32, 8, 1), offset=24)
+        l8 = FixedLayout(
+            "cpu", torch.half, size=(2, 2, 8), stride=(32, 8, 1), offset=24
+        )
         m8 = get_max_alignment(l8)
-        self.assertEqual(m8 , 8, "Wrong max alignment. Should have been 8.")
+        self.assertEqual(m8, 8, "Wrong max alignment. Should have been 8.")
 
-        l4 = FixedLayout("cpu", torch.float32, size=(2, 2, 8), stride=(32, 8, 1), offset=24)
+        l4 = FixedLayout(
+            "cpu", torch.float32, size=(2, 2, 8), stride=(32, 8, 1), offset=24
+        )
         m4 = get_max_alignment(l4)
-        self.assertEqual(m4, 4, "Wrong max alignment. Should have been 4 (due to float32 dtype ).")
+        self.assertEqual(
+            m4, 4, "Wrong max alignment. Should have been 4 (due to float32 dtype )."
+        )
 
 
 if __name__ == "__main__":
