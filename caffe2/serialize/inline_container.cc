@@ -93,7 +93,15 @@ static std::string parentdir(const std::string& name) {
     end = name.find_last_of('\\');
   }
 
-  if(end == std::string::npos) {
+  #ifdef WIN32
+  if (end != std::string::npos && end > 1 && name[end - 1] == ':') {
+    // This is a Windows root directory, so include the slash in
+    // the parent directory
+    end++;
+  }
+  #endif
+
+  if (end == std::string::npos) {
     return "";
   }
 
