@@ -2471,7 +2471,7 @@ def forward(self, x):
         mod = Mod()
         torch._dynamo.export(mod)(y)
 
-        with self.assertRaisesRegex(ConstraintViolationError, "dimx = None  # 3"):
+        with self.assertRaisesRegex(ConstraintViolationError, "dimx = 3"):
             torch._dynamo.export(mod, dynamic_shapes=({0: torch.export.Dim("dimx")},))(
                 y
             )

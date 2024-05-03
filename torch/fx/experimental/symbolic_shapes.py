@@ -1960,7 +1960,7 @@ class DimConstraints:
                 if "eq" in c:
                     other = c["eq"]
                     if isinstance(other, int):
-                        others.append(f"{k} = None  # {other}")
+                        others.append(f"{k} = {other}")
                     elif self._is_supported_equivalence(other):
                         s = next(iter(other.free_symbols))
                         if s not in results:
