@@ -121,9 +121,15 @@ def _dispatch_sqrt(
 def _disable_dynamo_if_unsupported(func):
     def maybe_fallback(self, *args, **kwargs):
         if is_compiling() and not kwargs.get("capturable", False):
-            torch._disable_dynamo(functools.partial(func))(self, *args, **kwargs)
+            import torch._dynamo
+
+            @torch._disable_dynamo
+            def disabled_func(self, *args, **kwargs):
+                return func(self, *args, **kwargs)
+
+            disabled_func(self, *args, **kwargs)
         else:
-            func(self, *args, **kwargs)
+            return func(self, *args, **kwargs)
 
     return maybe_fallback
 
