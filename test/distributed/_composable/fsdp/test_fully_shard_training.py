@@ -42,6 +42,7 @@ from torch.testing._internal.common_fsdp import (
     FSDPTestMultiThread,
     MLP,
     patch_all_gather,
+    patch_all_reduce,
     patch_reduce_scatter,
     test_compiled_fsdp,
 )
@@ -650,7 +651,7 @@ class TestFullyShardSharedParams(FSDPTest):
 class TestFullyShardGradientAccumulation(FSDPTest):
     @property
     def world_size(self) -> int:
-        return min(2, torch.cuda.device_count())
+        return min(4, torch.cuda.device_count())
 
     @skip_if_lt_x_gpu(2)
     def test_gradient_accumulation(self):
@@ -658,8 +659,13 @@ class TestFullyShardGradientAccumulation(FSDPTest):
         Tests gradient accumulation with/without gradient reduction and
         with/without resharding after backward.
         """
+        meshes = [init_device_mesh("cuda", (self.world_size,))]  # always test FSDP
+        if self.world_size == 4:  # test HSDP too if enough GPUs
+            shard_size, replicate_size = 2, 2
+            meshes.append(init_device_mesh("cuda", (replicate_size, shard_size)))
         self.run_subtests(
             {
+                "mesh": meshes,
                 "reshard_after_forward": [True, False, 2],
                 # "all": disable reduce-scatter for all modules
                 # "root_only": disable reduce-scatter for root's linear only
@@ -673,6 +679,7 @@ class TestFullyShardGradientAccumulation(FSDPTest):
 
     def _test_gradient_accumulation(
         self,
+        mesh: DeviceMesh,
         reshard_after_forward: Union[bool, int],
         mode: str,
         reshard_after_backward: bool,
@@ -692,15 +699,13 @@ class TestFullyShardGradientAccumulation(FSDPTest):
         global_batch_size = local_batch_size * self.world_size
         if mode == "some_mlps":
             num_mlps_to_disable_reduce_scatter = 2
-        model = nn.Sequential(
-            *(
-                [nn.Linear(lin_dim, lin_dim)]
-                + [MLP(lin_dim, torch.device("cpu")) for _ in range(num_mlps)]
-            )
-        )
+        modules = [nn.Linear(lin_dim, lin_dim)]
+        modules.extend(MLP(lin_dim) for _ in range(num_mlps))
+        model = nn.Sequential(*modules)
         ref_model = copy.deepcopy(model).cuda()
         fully_shard_fn = functools.partial(
             fully_shard,
+            mesh=mesh,
             reshard_after_forward=reshard_after_forward,
             offload_policy=offload_policy,
         )
@@ -710,10 +715,11 @@ class TestFullyShardGradientAccumulation(FSDPTest):
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
 
+        # TODO: Migrate to `CommDebugMode` once it supports c10d collectives.
         orig_all_gather = dist.all_gather_into_tensor
-        all_gather_count = 0
         orig_reduce_scatter = dist.reduce_scatter_tensor
-        reduce_scatter_count = 0
+        orig_all_reduce = dist.all_reduce
+        all_gather_count, reduce_scatter_count, all_reduce_count = 0, 0, 0
 
         def all_gather_with_count(*args, **kwargs):
             nonlocal all_gather_count
@@ -725,11 +731,16 @@ class TestFullyShardGradientAccumulation(FSDPTest):
             reduce_scatter_count += 1
             return orig_reduce_scatter(*args, **kwargs)
 
+        def all_reduce_with_count(*args, **kwargs):
+            nonlocal all_reduce_count
+            all_reduce_count += 1
+            return orig_all_reduce(*args, **kwargs)
+
         torch.manual_seed(1)  # same on all ranks
         for iter_idx in range(5):
             with patch_all_gather(all_gather_with_count), patch_reduce_scatter(
                 reduce_scatter_with_count
-            ):
+            ), patch_all_reduce(all_reduce_with_count):
                 for microbatch_idx in range(num_microbatches):
                     is_last_microbatch = microbatch_idx == num_microbatches - 1
                     if mode == "all":
@@ -757,10 +768,7 @@ class TestFullyShardGradientAccumulation(FSDPTest):
                         * local_batch_size
                     ].detach()
                     losses: List[torch.Tensor] = []
-                    for _model, _optim, inp in (
-                        (ref_model, ref_optim, global_inp),
-                        (model, optim, local_inp),
-                    ):
+                    for _model, inp in ((ref_model, global_inp), (model, local_inp)):
                         losses.append(_model(inp).sum())
                         losses[-1].backward()
                     dist.all_reduce(losses[1])  # partial -> replicated
@@ -779,7 +787,13 @@ class TestFullyShardGradientAccumulation(FSDPTest):
                 # Expect additional reduce-scatters for all MLPs
                 expected_reduce_scatter_count += (num_mlps) * (num_microbatches - 1)
             self.assertEqual(reduce_scatter_count, expected_reduce_scatter_count)
-            reduce_scatter_count = 0
+            # Exclude the loss all-reduce per microbatch in our training loop
+            all_reduce_count -= num_microbatches
+            if mesh.ndim == 2:
+                self.assertEqual(all_reduce_count, expected_reduce_scatter_count)
+            else:
+                self.assertEqual(all_reduce_count, 0)
+            reduce_scatter_count = all_reduce_count = 0
 
             # Expect one all-gather per MLP plus one for the root's linear in
             # the first microbatch's forward
@@ -873,8 +887,7 @@ class TestFullyShardGradientAccumulation(FSDPTest):
             ref_losses.append(ref_model(inp).sum())
             ref_losses[-1].backward()
         for param in ref_model.parameters():
-            dist.all_reduce(param.grad)
-            param.grad.detach().div_(self.world_size)
+            dist.all_reduce(param.grad, op=dist.ReduceOp.AVG)
 
         for loss, ref_loss in zip(losses, ref_losses):
             self.assertEqual(loss, ref_loss)
