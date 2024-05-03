@@ -4847,7 +4847,7 @@ class ShapeEnv:
             stack = CapturedTraceback.extract(skip=1)
             ra = RuntimeAssert(expr, msg, stack)
             # TODO: Do this in a way that is less janky than int(s.name[1:])
-            cands = sorted([s for s in expr.free_symbols if symbol_is_type(s, SymT.UNBACKED_INT)], key=lambda s: int(s.name[1:]))
+            cands = sorted(s for s in expr.free_symbols if symbol_is_type(s, SymT.UNBACKED_INT), key=lambda s: int(s.name[1:]))
             # Is None when prefer_deferred_runtime_asserts_over_guards=True
             # and the guard in question has no unbacked SymInts in front
             ix = cands[-1] if cands else None
