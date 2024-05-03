@@ -9616,6 +9616,16 @@ foreach_unary_op_db: List[OpInfo] = [
         supports_autograd=True,
         supports_inplace_autograd=True,
         supports_forward_ad=True,
+        decorators=(
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestForeach",
+                "test_parity",
+                device_type="cuda",
+                dtypes=complex_types(),
+                active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
+            ),
+        ),
     ),
     ForeachFuncInfo(
         'erf',
@@ -9623,6 +9633,16 @@ foreach_unary_op_db: List[OpInfo] = [
         supports_autograd=True,
         supports_inplace_autograd=True,
         supports_forward_ad=True,
+        decorators=(
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestForeach",
+                "test_parity",
+                device_type="cuda",
+                dtypes=complex_types(),
+                active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
+            ),
+        ),
     ),
     ForeachFuncInfo(
         'erfc',
@@ -9630,6 +9650,16 @@ foreach_unary_op_db: List[OpInfo] = [
         supports_autograd=True,
         supports_inplace_autograd=True,
         supports_forward_ad=True,
+        decorators=(
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestForeach",
+                "test_parity",
+                device_type="cuda",
+                dtypes=complex_types(),
+                active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
+            ),
+        ),
     ),
     ForeachFuncInfo(
         'expm1',
@@ -9645,6 +9675,16 @@ foreach_unary_op_db: List[OpInfo] = [
         supports_autograd=True,
         supports_inplace_autograd=True,
         supports_forward_ad=True,
+        decorators=(
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestForeach",
+                "test_parity",
+                device_type="cuda",
+                dtypes=complex_types(),
+                active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
+            ),
+        ),
     ),
     ForeachFuncInfo(
         'log1p',
@@ -9659,6 +9699,16 @@ foreach_unary_op_db: List[OpInfo] = [
         supports_autograd=True,
         supports_inplace_autograd=True,
         supports_forward_ad=True,
+        decorators=(
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestForeach",
+                "test_parity",
+                device_type="cuda",
+                dtypes=complex_types(),
+                active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
+            ),
+        ),
     ),
     ForeachFuncInfo(
         'frac',
@@ -9666,6 +9716,16 @@ foreach_unary_op_db: List[OpInfo] = [
         supports_autograd=True,
         supports_inplace_autograd=True,
         supports_forward_ad=True,
+        decorators=(
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestForeach",
+                "test_parity",
+                device_type="cuda",
+                dtypes=complex_types(),
+                active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
+            ),
+        ),
     ),
     ForeachFuncInfo(
         'reciprocal',
@@ -9682,6 +9742,16 @@ foreach_unary_op_db: List[OpInfo] = [
         supports_inplace_autograd=True,
         supports_forward_ad=True,
         backward_requires_result=True,
+        decorators=(
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestForeach",
+                "test_parity",
+                device_type="cuda",
+                dtypes=complex_types(),
+                active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
+            ),
+        ),
     ),
     ForeachFuncInfo(
         'trunc',
@@ -9689,6 +9759,16 @@ foreach_unary_op_db: List[OpInfo] = [
         supports_autograd=True,
         supports_inplace_autograd=True,
         supports_forward_ad=True,
+        decorators=(
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestForeach",
+                "test_parity",
+                device_type="cuda",
+                dtypes=complex_types(),
+                active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
+            ),
+        ),
     ),
     ForeachFuncInfo(
         'abs',
@@ -9717,6 +9797,16 @@ foreach_unary_op_db: List[OpInfo] = [
         supports_autograd=True,
         supports_inplace_autograd=True,
         supports_forward_ad=True,
+        decorators=(
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestForeach",
+                "test_parity",
+                device_type="cuda",
+                dtypes=complex_types(),
+                active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
+            ),
+        ),
     ),
     ForeachFuncInfo(
         'lgamma',
@@ -9731,6 +9821,14 @@ foreach_unary_op_db: List[OpInfo] = [
                          "test_dispatch_meta_inplace", dtypes=integral_types_and(torch.bool)),
             DecorateInfo(unittest.skip("In-place lgamma not supported for integral tensors"), "TestMeta",
                          "test_meta_inplace", dtypes=integral_types_and(torch.bool)),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestForeach",
+                "test_parity",
+                device_type="cuda",
+                dtypes=complex_types(),
+                active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
+            ),
         ),
     ),
 ]
@@ -9834,6 +9932,14 @@ foreach_binary_op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestForeach",
+                "test_parity",
+                device_type="cuda",
+                dtypes=complex_types(),
+                active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
+            ),
         ),
     ),
     ForeachFuncInfo(
@@ -9851,6 +9957,14 @@ foreach_binary_op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestForeach",
+                "test_parity",
+                device_type="cuda",
+                dtypes=complex_types(),
+                active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
+            ),
         ),
     ),
     # note(crcrpar): forward ad not implemented.
@@ -9869,6 +9983,14 @@ foreach_binary_op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestForeach",
+                "test_parity",
+                device_type="cuda",
+                dtypes=complex_types(),
+                active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
+            ),
         ),
     ),
     # note(crcrpar): forward ad not implemented.
@@ -9887,6 +10009,14 @@ foreach_binary_op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestForeach",
+                "test_parity",
+                device_type="cuda",
+                dtypes=complex_types(),
+                active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
+            ),
         ),
     ),
     ForeachFuncInfo(
