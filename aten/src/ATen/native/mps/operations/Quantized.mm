@@ -10,6 +10,8 @@
 #include <ATen/ops/empty.h>
 #endif
 #include <ATen/native/mps/OperationUtils.h>
+// For Metal3_1
+#include <ATen/native/mps/MPSGraphSonomaOps.h>
 #include <fmt/format.h>
 
 #include <Metal/MTLCaptureManager.h>
