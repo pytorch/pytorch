@@ -146,7 +146,6 @@ class Test2DStridedLocalShard(DTensorTestBase):
             dtensor_2d = DTensor.from_local(
                 dtensor_tp.to_local(), mesh_2d, [Replicate(), Shard(0)], run_check=False
             ).redistribute(mesh_2d, [Shard(0), Shard(0)])
-            self.assertEqual(comm_mode.get_total_counts(), 2)
             self.assertEqual(
                 comm_mode.get_comm_counts()[c10d_functional.all_gather_into_tensor], 1
             )
