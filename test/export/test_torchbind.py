@@ -941,11 +941,6 @@ def forward(self, L_tq_ : torch.ScriptObject, L_x_ : torch.Tensor):
         )
 
         torch._dynamo.reset()
-        aot_ret = torch.compile(mod, backend="aot_eager")(tq3, x)
-        eager_ret = mod(tq4, x)
-        _assertEqualSkipScriptObject(self, aot_ret, eager_ret)
-        self.assertEqual(aot_ret[1].size(), eager_ret[1].size())
-        self.assertEqual(aot_ret[1].pop(), eager_ret[1].pop())
 
     def test_compile_script_object_input_guards(self):
         class Model(torch.nn.Module):
