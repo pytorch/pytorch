@@ -9826,7 +9826,7 @@ foreach_unary_op_db: List[OpInfo] = [
                 "TestForeach",
                 "test_parity",
                 device_type="cuda",
-                dtypes=complex_types(),
+                dtypes=complex_types() + (torch.bfloat16,),
                 active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
             ),
         ),
