@@ -14,18 +14,18 @@ from torch.utils._pytree import tree_flatten
 class ModuleTracker:
     """
     ``ModuleTracker`` is a context manager that tracks the nn.Module hierarchy during execution
-    so that other system which Module is currently being executed (or its backward is being
+    so that other system can query which Module is currently being executed (or its backward is being
     executed).
 
     You can access the ``parents`` attribute on this context manager to get the set of all the
-    Modules currently being executed via their fqn (fully qualified named, also used as the key within
+    Modules currently being executed via their fqn (fully qualified name, also used as the key within
     the state_dict).
     You can access the ``is_bw`` attribute to know if you are currently running in backward or not.
 
-    Note that the ``parents`` is never empty and always contains the "Global" key. The ``is_bw`` flag
+    Note that ``parents`` is never empty and always contains the "Global" key. The ``is_bw`` flag
     will remain ``True`` after the forward until another Module is executed. If you need it to be
     more accurate, please submit an issue requesting this. Adding a map from fqn to the module instance
-    is possible but not done yet, please submit and issue requesting this if you need it.
+    is possible but not done yet, please submit an issue requesting this if you need it.
 
     Example usage
 
@@ -68,7 +68,7 @@ class ModuleTracker:
         if mod not in self._seen_modules:
             for name, submod in mod.named_children():
                 self._known_modules[submod] = f"{mod_name}.{name}"
-        return self._known_modules[mod]
+        return mod_name
 
     def _get_append_fn(self, name, is_bw):
         def fn(*args):
@@ -78,7 +78,7 @@ class ModuleTracker:
             if name in self.parents:
                 print(
                     "The module hierarchy tracking seems to be messed up."
-                    "Please file a bug to PyTorch`)"
+                    "Please file a bug to PyTorch."
                 )
             self.parents.add(name)
 
