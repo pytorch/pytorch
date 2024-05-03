@@ -705,9 +705,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             example_value = self.value(*args, **kwargs)
             source = RandomValueSource(random_call_index)
             tx.output.random_calls.append((self.value, args, kwargs))
-            return VariableBuilder(tx, source).wrap_unspecialized_primitive(
-                example_value
-            )
+            return VariableBuilder(tx, source).wrap_symint(example_value)
         elif istype(self.value, types.MethodType):
             func = self.value.__func__
             obj = self.value.__self__
