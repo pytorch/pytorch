@@ -339,7 +339,7 @@ def print_performance(
 ):
     timings = torch.tensor([timed(fn, args, times, device) for _ in range(repeat)])
     took = torch.median(timings) / times
-    print(f"{took/baseline:.6f}")
+    print(f"{took / baseline:.6f}")
     return took
 
 
