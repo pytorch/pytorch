@@ -12,7 +12,7 @@ on:
         type: string
         description: Current branch.
       issue_number:
-        required: true
+        required: false
         type: string
         default: "5132"
 
