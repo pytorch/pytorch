@@ -1,4 +1,4 @@
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Type, TypeVar
 
 from torch.utils._pytree import (
     _dict_flatten,
@@ -16,6 +16,10 @@ from ._compatibility import compatibility
 
 __all__ = ["immutable_list", "immutable_dict"]
 
+
+T = TypeVar("T")
+
+
 _help_mutation = """\
 If you are attempting to modify the kwargs or args of a torch.fx.Node object,
 instead create a new copy of it and assign the copy to the node:
@@ -30,16 +34,20 @@ def _no_mutation(self, *args, **kwargs):
     )
 
 
-def _create_immutable_container(base, mutable_functions):
-    container = type("immutable_" + base.__name__, (base,), {})
-    for attr in mutable_functions:
-        setattr(container, attr, _no_mutation)
-    return container
+def _create_immutable_container_class(
+    base: Type[T],
+    mutable_functions: Iterable[str],
+    namespace: Optional[Dict[str, Any]] = None,
+) -> Type[T]:
+    namespace = namespace or {}
+    namespace.update((method, _no_mutation) for method in mutable_functions)
+    container_class = type("immutable_" + base.__name__, (base,), namespace)
+    return container_class
 
 
-immutable_list = _create_immutable_container(
+immutable_list = _create_immutable_container_class(
     list,
-    [
+    (
         "__setitem__",
         "__delitem__",
         "__iadd__",
@@ -52,16 +60,18 @@ immutable_list = _create_immutable_container(
         "remove",
         "sort",
         "reverse",
-    ],
+    ),
+    namespace={
+        "__hash__": lambda self: hash(tuple(self)),
+        "__reduce__": lambda self: (type(self), (tuple(self),)),
+    },
 )
-immutable_list.__reduce__ = lambda self: (immutable_list, (tuple(iter(self)),))
-immutable_list.__hash__ = lambda self: hash(tuple(self))
+immutable_list = compatibility(is_backward_compatible=True)(immutable_list)
 
-compatibility(is_backward_compatible=True)(immutable_list)
 
-immutable_dict = _create_immutable_container(
+immutable_dict = _create_immutable_container_class(
     dict,
-    [
+    (
         "__setitem__",
         "__delitem__",
         "__ior__",
@@ -70,25 +80,16 @@ immutable_dict = _create_immutable_container(
         "popitem",
         "update",
         "setdefault",
-    ],
+    ),
+    namespace={
+        "__hash__": lambda self: hash(tuple(self.items())),
+        "__reduce__": lambda self: (type(self), (tuple(self.items()),)),
+    },
 )
-immutable_dict.__reduce__ = lambda self: (immutable_dict, (iter(self.items()),))
-immutable_dict.__hash__ = lambda self: hash(tuple(self.items()))
-compatibility(is_backward_compatible=True)(immutable_dict)
+immutable_dict = compatibility(is_backward_compatible=True)(immutable_dict)
 
 
 # Register immutable collections for PyTree operations
-def _immutable_dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
-    return _dict_flatten(d)
-
-
-def _immutable_dict_unflatten(
-    values: Iterable[Any],
-    context: Context,
-) -> Dict[Any, Any]:
-    return immutable_dict(_dict_unflatten(values, context))
-
-
 def _immutable_list_flatten(d: List[Any]) -> Tuple[List[Any], Context]:
     return _list_flatten(d)
 
@@ -100,17 +101,28 @@ def _immutable_list_unflatten(
     return immutable_list(_list_unflatten(values, context))
 
 
-register_pytree_node(
-    immutable_dict,
-    _immutable_dict_flatten,
-    _immutable_dict_unflatten,
-    serialized_type_name="torch.fx.immutable_collections.immutable_dict",
-    flatten_with_keys_fn=_dict_flatten_with_keys,
-)
+def _immutable_dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
+    return _dict_flatten(d)
+
+
+def _immutable_dict_unflatten(
+    values: Iterable[Any],
+    context: Context,
+) -> Dict[Any, Any]:
+    return immutable_dict(_dict_unflatten(values, context))
+
+
 register_pytree_node(
     immutable_list,
     _immutable_list_flatten,
     _immutable_list_unflatten,
     serialized_type_name="torch.fx.immutable_collections.immutable_list",
     flatten_with_keys_fn=_list_flatten_with_keys,
+)
+register_pytree_node(
+    immutable_dict,
+    _immutable_dict_flatten,
+    _immutable_dict_unflatten,
+    serialized_type_name="torch.fx.immutable_collections.immutable_dict",
+    flatten_with_keys_fn=_dict_flatten_with_keys,
 )
