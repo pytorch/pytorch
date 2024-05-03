@@ -70,7 +70,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _batch_norm_with_update_mkldnn(
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> _batch_norm_no_update_mkldnn(
     const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
-    Tensor& running_mean, Tensor& running_var, double momentum, double eps) {
+    const c10::optional<Tensor>& running_mean, const c10::optional<Tensor>& running_var, double momentum, double eps) {
   TORCH_CHECK(false, "_batch_norm_no_update_mkldnn: ATen not compiled with MKLDNN support");
 }
 
