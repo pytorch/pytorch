@@ -238,7 +238,6 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             orig_dtype=orig_params[0].dtype,
             reduce_dtype=reduce_scatter_dtype,
             device=self.device,
-            divide_factors=fsdp_param_group._grad_divide_factors,
             all_reduce_group=None,
             all_reduce_stream=all_reduce_stream,
         )
