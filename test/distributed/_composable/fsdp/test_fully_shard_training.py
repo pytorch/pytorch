@@ -658,8 +658,8 @@ class TestFullyShardGradientAccumulation(FSDPTest):
         Tests gradient accumulation with/without gradient reduction and
         with/without resharding after backward.
         """
-        meshes = [init_device_mesh("cuda", (self.world_size,))]
-        if self.world_size == 4:  # test HSDP too
+        meshes = [init_device_mesh("cuda", (self.world_size,))]  # always test FSDP
+        if self.world_size == 4:  # test HSDP too if enough GPUs
             shard_size, replicate_size = 2, 2
             meshes.append(init_device_mesh("cuda", (replicate_size, shard_size)))
         self.run_subtests(
