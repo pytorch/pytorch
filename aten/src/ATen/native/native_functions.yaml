@@ -7463,7 +7463,7 @@
     MkldnnCPU: mkldnn_reorder_conv2d_weight
   autogen: mkldnn_reorder_conv2d_weight.out
 
-- func: mkldnn_reorder_conv3d_weight(Tensor self, SymInt[3] padding=0, SymInt[3] stride=1, SymInt[3] dilation=1, SymInt groups=1) -> Tensor
+- func: mkldnn_reorder_conv3d_weight(Tensor self, SymInt[3] padding=0, SymInt[3] stride=1, SymInt[3] dilation=1, SymInt groups=1, SymInt[]? input_size=None) -> Tensor
   variants: function
   python_module: nn
   dispatch:
