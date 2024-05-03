@@ -192,7 +192,6 @@ class CachingAutotuner(KernelInterface):
             compiled_binaries = []
             if not self.configs:
                 raise RuntimeError("No triton configs are available")
-
             for c in self.configs:
                 try:
                     compiled_binary, launcher = self._precompile_config(
@@ -200,11 +199,8 @@ class CachingAutotuner(KernelInterface):
                     )
                 except OutOfResources as e:
                     if len(self.configs) == 1:
-                        raise RuntimeError(
-                            f"Failed to compile triton config: {c}. "
-                            f"Report a fatal compilation error. "
-                            f"{e}"
-                        )
+                        # There are no valid Triton configs
+                        raise e
                     # Skip the config if we run out of resource
                     continue
                 self.launchers.append(launcher)
@@ -332,7 +328,18 @@ class CachingAutotuner(KernelInterface):
                 ),
             )
 
-            target = (compile_meta["device_type"], compile_meta["cc"])
+            cc_str = str(compile_meta["cc"])
+            if "gfx10" in cc_str or "gfx11" in cc_str:
+                rocm_warp_size = 32
+            else:
+                rocm_warp_size = 64
+
+            target = (
+                (compile_meta["device_type"], compile_meta["cc"])
+                if not torch.version.hip
+                else [compile_meta["device_type"], compile_meta["cc"], rocm_warp_size]
+            )
+
             options = {
                 "num_warps": compile_meta["num_warps"],
                 "num_stages": compile_meta["num_stages"],
@@ -694,18 +701,12 @@ class CachingAutotuner(KernelInterface):
 
         from torch._inductor.codecache import CudaKernelParamCache
 
-        if self.device_props.type != "hip":
-            CudaKernelParamCache.set(key, params, launcher.bin.asm["cubin"])
-        else:
-            # There is some divergence between CUDA and ROCm here.
-            # On ROCm's triton we only have the the path to the binary, not the binary itself.
-            # For ROCm we will copy the binary to the new location instead of writing to file
-            import pathlib
-
-            launcher.bin.asm["hsaco"] = pathlib.Path(
-                launcher.bin.asm["hsaco_path"]
-            ).read_bytes()
-            CudaKernelParamCache.set(key, params, launcher.bin.asm["hsaco"])
+        binary = (
+            launcher.bin.asm["cubin"]
+            if self.device_props.type != "hip"
+            else launcher.bin.asm["hsaco"]
+        )
+        CudaKernelParamCache.set(key, params, binary)
 
         self.cuda_kernel_saved = True
 
@@ -717,7 +718,7 @@ class CachingAutotuner(KernelInterface):
         E.g., assuming regular autotune only get one config C1; while max-autotune get 4 configs C1, C2, C3, C4
         and max-autotune figure out C3 is the best.
 
-        Then if coordinate descnt tuning is run with max-autotune disabled, it will start from C1;
+        Then if coordinate desecnt tuning is run with max-autotune disabled, it will start from C1;
         while if coordinate descent tuning is run with max-autotune enabled, it will start from C3.
         """
         if (
@@ -793,15 +794,16 @@ class CachingAutotuner(KernelInterface):
         # manager is a nullcontext.
         if autograd_profiler._is_profiler_enabled:
             # grid can be a tuple of ints or a string.
-            grid_info = (
-                grid if isinstance(grid, tuple) else getattr(grid, "grid_fn_str", None)
-            )
+            if isinstance(grid, tuple):
+                grid_info = str(grid)
+            else:
+                grid_info = getattr(grid, "grid_fn_str", "")
             with torch._C._profiler._RecordFunctionFast(
                 self.inductor_meta.get("kernel_name", "triton kernel"),
                 args,
                 {
-                    "kernel_file": self.filename,
-                    "kernel_type": "triton",
+                    "kernel_file": "" if self.filename is None else self.filename,
+                    "kernel_backend": "triton",
                     "grid": grid_info,
                     "stream": stream,
                 },
@@ -1268,7 +1270,11 @@ def triton_config_reduction(size_hints, x, r, num_stages=1, num_warps=None) -> C
     cfg = {"XBLOCK": x, "RBLOCK": r}
     if num_warps is None:
         num_warps = conditional_product(x, r) // 128
-    num_warps = next_power_of_2(min(max(num_warps, 2), 8))
+    # On AMD GPU each warp has 64 lanes which is double the size on NV GPU,
+    # therefore using half the number of warps here correspondingly.
+    default_num_warps = 4 if torch.version.hip else 8
+    min_num_warps = 1 if torch.version.hip else 2
+    num_warps = next_power_of_2(min(max(num_warps, min_num_warps), default_num_warps))
     check_config(cfg, xnumel=size_hints[0])
     assert r <= TRITON_MAX_BLOCK["R"], f"increase TRITON_MAX_BLOCK['r'] to {r}"
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
