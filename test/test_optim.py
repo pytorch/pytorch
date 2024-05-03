@@ -28,14 +28,6 @@ from torch.testing._internal.common_dtype import floating_types_and
 
 FP16_REDUCED_PRECISION = {'atol': 1e-5, 'rtol': 1e-4}
 
-def with_inductor_if_compiling(fn):
-    """ For peak memory tests, use inductor instead of eager backend """
-    if TEST_WITH_TORCHDYNAMO:
-        return torch.compile(fn, dynamic=False)
-    else:
-        return fn
-
-
 def rosenbrock(tensor):
     assert tensor.size() == torch.Size([2]), f"Requires tensor with 2 scalars but got {tensor.size()}"
     x, y = tensor
@@ -803,7 +795,6 @@ class TestOptimRenewed(TestCase):
 
     @onlyCUDA
     @optims([optim for optim in optim_db if "foreach" in optim.supported_impls], dtypes=[torch.float32])
-    @with_inductor_if_compiling
     def test_peak_memory_foreach(self, device, dtype, optim_info):
         nparams = 10
         optim_inputs = optim_info.optim_inputs_func(device=device)
@@ -838,7 +829,7 @@ class TestOptimRenewed(TestCase):
             nintermediates = 1  # we expect a budget of 1 intermediate most of the time
 
             # Check the param group directly to handle if the compiler set capturable
-            if kwargs.get("capturable", False) or optim_cls.__name__ in ["Adadelta", "ASGD", "RAdam"]:
+            if optimizer.param_groups[0].get("capturable", False) or optim_cls.__name__ in ["Adadelta", "ASGD", "RAdam"]:
                 # with capturable in Adam(W), we have 2 extra intermediates for the bias_corrections
                 # with Adadelta, we have 2 extra for (acc_delta + eps) and (square_avg + eps)
                 # ASGD allocates axs, 2x mus, 2x etas, and grads at the same time
@@ -846,18 +837,33 @@ class TestOptimRenewed(TestCase):
                 if optim_cls.__name__ == "NAdam":
                     # with capturable in NAdam, we have 3 extra intermediates for the
                     # bias_correction, mus, and mu_nexts
-                    nintermediates = 5
+                    if TEST_WITH_TORCHDYNAMO:
+                        # With dynamo, the eager/FX backend appears to hold memory longer than
+                        # vanilla eager: https://github.com/pytorch/pytorch/issues/125511
+                        nintermediates = 8
+                    else:
+                        nintermediates = 5
 
                 if optim_cls.__name__ == "RAdam":
                     # RAdam has four intermediates with capturable
                     # num, unrect_step_size, buffer, grouped_grads
-                    nintermediates = 4
+                    if TEST_WITH_TORCHDYNAMO:
+                        # With dynamo, the eager/FX backend appears to hold memory than
+                        # vanilla eager: https://github.com/pytorch/pytorch/issues/125511
+                        nintermediates = 6
+                    else:
+                        nintermediates = 4
 
             elif optim_cls.__name__ in ["NAdam", "Adagrad", "RMSprop"]:
                 # NAdam uses two intermediates at the same time (grads & exp_avg_sq_sqrt)
                 # Adagrad uses std and grads at the same time
                 # RMSprop uses avg and grads
                 nintermediates = 2
+
+            # Dynamo ST uses less mem than eager in the case of Adam/Adagrad/Nadam/RAdam
+            # which makes the foreach memory check fail
+            if TEST_WITH_TORCHDYNAMO:
+                st_max_mem += 6000
 
             expected_max_mem = st_max_mem + intermediate_size * nintermediates
             # hipcc currently can't generate efficient code for the small buffer optimization
