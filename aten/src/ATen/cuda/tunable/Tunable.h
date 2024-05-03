@@ -11,6 +11,7 @@
 
 #include <c10/util/CallOnce.h>
 
+#include <fstream>
 #include <functional>
 #include <iostream>
 #include <memory>
@@ -23,13 +24,42 @@
 
 namespace at::cuda::tunable {
 
-static void TunableLog(const std::string& msg) {
-  static const char *env = getenv("PYTORCH_TUNABLEOP_VERBOSE");
-  if (env != nullptr && strcmp(env, "1") == 0) {
-    std::cerr << msg << std::endl;
+namespace detail {
+
+struct MaybeDelete {
+  bool owns_pointer;
+  void operator()(std::ostream* os) const { if (owns_pointer) delete os; }
+};
+
+using OstreamPtr = std::unique_ptr<std::ostream, MaybeDelete>;
+
+static OstreamPtr get_stream(std::string filename) {
+  if (filename.compare("out") == 0) {
+    return OstreamPtr { &std::cout, MaybeDelete {false} };
+  }
+  else if (filename.compare("err") == 0) {
+    return OstreamPtr { &std::cerr, MaybeDelete {false} };
+  }
+  else {
+    return OstreamPtr { new std::ofstream {filename.c_str()}, MaybeDelete {true} };
   }
 }
-#define TUNABLE_LOG(...) TunableLog(c10::str(__VA_ARGS__))
+
+}
+
+static void TunableLog(int level, const std::string& msg) {
+  static const char *env_file = getenv("PYTORCH_TUNABLEOP_VERBOSE_FILENAME");
+  static const char *env_verbose = getenv("PYTORCH_TUNABLEOP_VERBOSE");
+  static int level_user = env_verbose ? atoi(env_verbose) : 0;
+  static auto streamptr = detail::get_stream(env_file ? env_file : "err");
+  if (level_user >= level) {
+    (*streamptr) << msg <<std::endl;
+  }
+}
+#define TUNABLE_LOGV(LEVEL, ...) TunableLog(LEVEL, c10::str(__VA_ARGS__))
+#define TUNABLE_LOG1(...) TUNABLE_LOGV(1, __VA_ARGS__)
+#define TUNABLE_LOG2(...) TUNABLE_LOGV(2, __VA_ARGS__)
+#define TUNABLE_LOG3(...) TUNABLE_LOGV(3, __VA_ARGS__)
 
 enum TORCH_CUDA_CPP_API TuningStatus {
   OK = 0,

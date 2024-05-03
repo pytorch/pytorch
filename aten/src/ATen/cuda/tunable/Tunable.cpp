@@ -65,14 +65,14 @@ ResultEntry TuningResultsManager::Lookup(const std::string& op_signature, const 
   std::scoped_lock l{lock_};
   auto kernel_map_it = results_.find(op_signature);
   if (kernel_map_it == results_.cend()) {
-    TUNABLE_LOG("missing op_signature, returning null ResultEntry");
+    TUNABLE_LOG3("missing op_signature, returning null ResultEntry");
     return ResultEntry::Null();
   }
 
   const auto& km = kernel_map_it->second;
   auto it = km.find(params_signature);
   if (it == km.cend()) {
-    TUNABLE_LOG("missing params_signature, returning null ResultEntry");
+    TUNABLE_LOG3("missing params_signature, returning null ResultEntry");
     return ResultEntry::Null();
   }
   return it->second;
@@ -85,14 +85,14 @@ inline void TuningResultsManager::AddImpl(const std::string& op_signature,
   auto it = kernel_map.find(params_signature);
   if (it != kernel_map.end()) {
     if (it->second != best) {
-      TUNABLE_LOG(op_signature, "(", params_signature, ") already has a best kernel ",
+      TUNABLE_LOG1(op_signature, "(", params_signature, ") already has a best kernel ",
           "id=", it->second, " selected, want to add a different best kernel ", best,
           ", the new kernel id will be ignored.");
     }
     return;
   }
 
-  TUNABLE_LOG(op_signature, "(", params_signature, ") -> ", best);
+  TUNABLE_LOG2(op_signature, "(", params_signature, ") -> ", best);
   kernel_map.emplace(params_signature, best);
 }
 
@@ -120,7 +120,7 @@ void TuningResultsManager::Delete(const std::string& op_signature, const std::st
     return;
   }
 
-  TUNABLE_LOG(op_signature, "(", params_signature, ")");
+  TUNABLE_LOG2(op_signature, "(", params_signature, ")");
   it->second.erase(it2);
 }
 
@@ -131,7 +131,7 @@ inline void TuningResultsManager::DisjointMergeImpl(
   auto it = results.find(op_signature);
   if (it == results.end()) {
     for (const auto& [param_sig, kernel_id] : kernel_map) {
-      TUNABLE_LOG(op_signature, "(", param_sig, ") -> ", kernel_id);
+      TUNABLE_LOG2(op_signature, "(", param_sig, ") -> ", kernel_id);
     }
     results[op_signature] = kernel_map;
     return;
@@ -143,7 +143,7 @@ inline void TuningResultsManager::DisjointMergeImpl(
 }
 
 void TuningResultsManager::Load(const std::unordered_map<std::string, KernelMap>& results_to_load) {
-  TUNABLE_LOG("Loading results");
+  TUNABLE_LOG1("Loading results");
   std::scoped_lock l{lock_};
   for (const auto& [op_signature, kernel_map] : results_to_load) {
     DisjointMergeImpl(op_signature, kernel_map, results_);
@@ -194,12 +194,12 @@ static bool CheckMandatoryKeys(
   for (const auto& k : TuningResultsValidator::mandatory_keys) {
     if (gv_funcs.find(k) == gv_funcs.end()) {
       passed = false;
-      TUNABLE_LOG("key=\"", k, "\" is not registered for Get and Validate. ");
+      TUNABLE_LOG1("key=\"", k, "\" is not registered for Get and Validate. ");
     }
 
     if (to_check.find(k) == to_check.end()) {
       passed = false;
-      TUNABLE_LOG("key=\"", k, "\" is not provided for validation. ");
+      TUNABLE_LOG1("key=\"", k, "\" is not provided for validation. ");
     }
   }
   return passed;
@@ -318,13 +318,13 @@ TuningContext::~TuningContext() {
   if (IsTunableOpEnabled() && IsTuningEnabled() && !filename.empty() && write_file_on_exit_) {
     if (results_count_from_input_file_ < GetTuningResultsManager().GetSize()) {
       if (results_count_from_input_file_ > 0) {
-        TUNABLE_LOG("additional tuning results available, rewriting file ", filename);
+        TUNABLE_LOG1("additional tuning results available, rewriting file ", filename);
       }
       else {
-        TUNABLE_LOG("writing file ", filename);
+        TUNABLE_LOG1("writing file ", filename);
       }
       if (!WriteFile(filename)) {
-        TUNABLE_LOG("failed to write file ", filename);
+        TUNABLE_LOG1("failed to write file ", filename);
       }
     }
   }
@@ -333,17 +333,16 @@ TuningContext::~TuningContext() {
 void TuningContext::EnableTunableOp(bool value) {
   enable_ = value;
   if (value) {
-    TUNABLE_LOG("Enable TunableOp");
+    TUNABLE_LOG1("Enable TunableOp");
   }
   else {
-    TUNABLE_LOG("Disable TunableOp");
+    TUNABLE_LOG1("Disable TunableOp");
   }
 }
 
 bool TuningContext::IsTunableOpEnabled() const {
   static const char *env = std::getenv("PYTORCH_TUNABLEOP_ENABLED");
   if (env != nullptr && strcmp(env, "1") == 0) {
-    //TUNABLE_LOG("PYTORCH_TUNABLEOP_ENABLED=1");
     return true;
   }
   return enable_;
@@ -352,17 +351,16 @@ bool TuningContext::IsTunableOpEnabled() const {
 void TuningContext::EnableTuning(bool value) {
   tuning_enable_ = value;
   if (value) {
-    TUNABLE_LOG("Enable Tuning for TunableOp");
+    TUNABLE_LOG1("Enable Tuning for TunableOp");
   }
   else {
-    TUNABLE_LOG("Disable Tuning for TunableOp");
+    TUNABLE_LOG1("Disable Tuning for TunableOp");
   }
 }
 
 bool TuningContext::IsTuningEnabled() const {
   static const char *env = std::getenv("PYTORCH_TUNABLEOP_TUNING");
   if (env != nullptr && strcmp(env, "0") == 0) {
-    //TUNABLE_LOG("PYTORCH_TUNABLEOP_TUNING=1");
     return false;
   }
   return tuning_enable_;
@@ -533,13 +531,13 @@ std::string TuningContext::GetFilename() const {
 
 bool TuningContext::ReadFile(const std::string& filename_) {
   std::string filename = filename_.empty() ? GetFilename() : filename_;
-  TUNABLE_LOG("reading tuning results from ", filename);
+  TUNABLE_LOG1("reading tuning results from ", filename);
   ResultsMap results;
   std::unordered_map<std::string, std::string> validators;
   std::string line;
   std::ifstream file(filename);
   if (!file) {
-    TUNABLE_LOG("could not open ", filename, " for reading tuning results");
+    TUNABLE_LOG1("could not open ", filename, " for reading tuning results");
     return false;
   }
   while (std::getline(file, line)) {
@@ -554,7 +552,7 @@ bool TuningContext::ReadFile(const std::string& filename_) {
     }
     if (parts[0] == "Validator" && parts.size() >= 3) {
       validators[parts[1]] = parts[2];
-      TUNABLE_LOG("Validator ", parts[1], "=", parts[2]);
+      TUNABLE_LOG1("Validator ", parts[1], "=", parts[2]);
     }
     else if (parts.size() >= 4) {
       results[parts[0]].emplace(parts[1], ResultEntry(parts[2], atof(parts[3].c_str())));
@@ -564,7 +562,7 @@ bool TuningContext::ReadFile(const std::string& filename_) {
       results[parts[0]].emplace(parts[1], ResultEntry(parts[2], 0));
     }
     else {
-      TUNABLE_LOG("could not parse line: ", line);
+      TUNABLE_LOG1("could not parse line: ", line);
     }
   }
   if (GetTuningResultsValidator().ValidateAll(validators) != FAIL) {
@@ -572,7 +570,7 @@ bool TuningContext::ReadFile(const std::string& filename_) {
     results_count_from_input_file_ = manager_.GetSize();
   }
   else {
-    TUNABLE_LOG("results validator check failed");
+    TUNABLE_LOG1("results validator check failed");
     return false;
   }
   return true;
@@ -582,7 +580,7 @@ bool TuningContext::WriteFile(const std::string& filename_) {
   std::string filename = filename_.empty() ? GetFilename() : filename_;
   std::ofstream file(filename, std::ios::out | std::ios::trunc);
   if (!file.good()) {
-    TUNABLE_LOG("error opening tuning results file for writing ", filename);
+    TUNABLE_LOG1("error opening tuning results file for writing ", filename);
     return false;
   }
   auto validators = GetTuningResultsValidator().GetAllValidators();

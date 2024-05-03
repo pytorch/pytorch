@@ -63,7 +63,7 @@ class TunableOp {
         result = ResultEntry::Default();
       }
       if (result == ResultEntry::Null()) {
-        TUNABLE_LOG("no result, using default");
+        TUNABLE_LOG2("no result, using default");
         result = ResultEntry::Default();
       }
       auto iter = ops_.find(result);
@@ -119,7 +119,7 @@ class TunableOp {
       TuningContext* ctx = getTuningContext();
       auto op_sig = Signature();
       auto params_sig = params->Signature();
-      TUNABLE_LOG("finding fastest for ", op_sig, '(', params_sig, ')', " out of ", op_names_.size(), " candidates");
+      TUNABLE_LOG2("finding fastest for ", op_sig, '(', params_sig, ')', " out of ", op_names_.size(), " candidates");
       auto min_duration_ms = std::numeric_limits<double>::infinity();
       std::string id_name = "Default";
 
@@ -135,12 +135,9 @@ class TunableOp {
       size_t param_count = (rotating_size / param_size) + 1;
       constexpr size_t MB = 1024*1024;
       if (use_buffer_rotation) {
-        TUNABLE_LOG("Rotating buffer ", rotating_size/MB, " MiB. ",
+        TUNABLE_LOG2("Rotating buffer ", rotating_size/MB, " MiB. ",
             "Needed Size: ", param_size/MB, " MiB. ",
             "Needed number of param copies: ", param_count);
-      }
-      else {
-        TUNABLE_LOG("Rotating buffer not requested");
       }
 
       std::vector<ParamsT*> reusable_params(param_count);
@@ -155,20 +152,20 @@ class TunableOp {
           ParamsT* numerical_params = params->DeepCopy(false);
           auto status = candidate->Call(numerical_params);
           if (status != OK) {
-            TUNABLE_LOG("├──unsupported id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
+            TUNABLE_LOG3("├──unsupported id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
             continue;
           }
           status = reference_params->NumericalCheck(numerical_params);
           numerical_params->Delete();
           if (status != OK) {
-            TUNABLE_LOG("├──numerics check failed for id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
+            TUNABLE_LOG3("├──numerics check failed for id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
             continue;
           }
         }
         else {
           auto status = candidate->Call(reusable_params[0]);
           if (status != OK) {
-            TUNABLE_LOG("├──unsupported id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
+            TUNABLE_LOG3("├──unsupported id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
             continue;
           }
         }
@@ -178,7 +175,7 @@ class TunableOp {
         auto approx_duration = Profile(candidate, reusable_params, approx_num_iter);
         // bail if too slow
         if (approx_duration > 2 * min_duration_ms) {
-          TUNABLE_LOG("├──skip slow instance id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
+          TUNABLE_LOG3("├──skip slow instance id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
           continue;
         }
 
@@ -224,14 +221,14 @@ class TunableOp {
         // do the full warmup followed by tuning
         double warmup_ms = warmup_iter * approx_duration;
         double tuning_ms = tuning_iter * approx_duration;
-        TUNABLE_LOG("├──tuning using "
+        TUNABLE_LOG3("├──tuning using "
             "warmup iters ", warmup_iter, " [", warmup_ms, " ms] "
             "and tuning iters ", tuning_iter, " [", tuning_ms, " ms] ",
             "instance id=", i, ", ", op_sig, "(", params_sig, ") ", op_names_[i]);
         WarmUp(candidate, reusable_params, warmup_iter);
         auto duration_ms = Profile(candidate, reusable_params, tuning_iter);
         if (duration_ms < min_duration_ms) {
-          TUNABLE_LOG("├──found better instance id=", i, ". " , duration_ms, "ms. ", op_names_[i]);
+          TUNABLE_LOG3("├──found better instance id=", i, ". " , duration_ms, "ms. ", op_names_[i]);
           min_duration_ms = duration_ms;
           id_name = op_names_[i];
         }
@@ -242,7 +239,7 @@ class TunableOp {
       }
       reference_params->Delete();
 
-      TUNABLE_LOG("└──found fastest for ", op_sig, '(', params_sig, ") ", id_name);
+      TUNABLE_LOG2("└──found fastest for ", op_sig, '(', params_sig, ") ", id_name);
       return ResultEntry(id_name, min_duration_ms);
     }
 

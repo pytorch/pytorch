@@ -66,7 +66,7 @@ static bool NumericalCheck(ScalarType dtype, void* c, void* other_c, int64_t siz
     return false;
   }
   else {
-    TUNABLE_LOG("├──verify numerics: atol=", last_succeed_atol, ", rtol=", last_succeed_rtol);
+    TUNABLE_LOG3("├──verify numerics: atol=", last_succeed_atol, ", rtol=", last_succeed_rtol);
   }
 
   return true;
