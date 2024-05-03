@@ -10,7 +10,7 @@
 # - `collections.Counter`
 # - `collections.OrderedDict`
 # Additionally, users can allowlist classes they have deemed as safe using
-# `_mark_safe_globals()` (`torch.serialization.mark_safe_globals`)
+# `_add_safe_globals()` (`torch.serialization.add_safe_globals`)
 
 # Based of https://github.com/python/cpython/blob/main/Lib/pickle.py
 # Expected to be useful for loading PyTorch model weights
@@ -63,7 +63,6 @@ from pickle import (
 )
 from struct import unpack
 from sys import maxsize, modules
-from types import ModuleType
 from typing import Any, Dict, List
 
 import torch
@@ -71,7 +70,7 @@ import torch
 _marked_safe_globals_list: List[Any] = []
 
 
-def _mark_safe_globals(safe_globals: List[Any]):
+def _add_safe_globals(safe_globals: List[Any]):
     global _marked_safe_globals_list
     _marked_safe_globals_list += safe_globals
 
@@ -89,7 +88,7 @@ def _clear_safe_globals():
 # Separate from _get_allowed_globals because of the lru_cache on _get_allowed_globals
 # For example if user had a script like
 #   torch.load(file_a)
-#   torch.serialization._mark_safe_globals([torch.foo])
+#   torch.serialization._add_safe_globals([torch.foo])
 #   torch.load(file_b)
 # the dynamic additions to safe_globals would not be picked up by
 # _get_allowed_globals due to the lru_cache
@@ -169,6 +168,10 @@ class Unpickler:
         self.readline = file.readline
         self.read = file.read
         self.memo: Dict[int, Any] = {}
+        # tensor subclass types found from GLOBAL instructions that have passed the criteria
+        # to be allowed as the second argument to `torch._tensor._rebuild_from_type_v2`
+        # This enables rebuilding of tensor subclasses defined outside the `torch` package.
+        # See [Note: Criteria for allowing out-of-core tensor subclasses] for details on the criteria.
         self.tensor_subclasses_found = set()
 
     def load(self):
@@ -196,33 +199,46 @@ class Unpickler:
                 elif full_path in _get_user_allowed_globals():
                     self.append(_get_user_allowed_globals()[full_path])
                 else:
-                    # For tensor subclasses.
+                    # The logic in this branch handles user-defined tensor subclasses.
+                    # [Note: Criteria for allowing out-of-core tensor subclasses]
+                    # GLOBAL '<module>.<tensor subclass>' instructions will get the class and push it
+                    # onto the unpickler's stack if they satisfy the following conditions:
+                    # (1) The <module> that defines them is in `sys.modules`
+                    #     (we will use getattr_static to access it to ensure no code execution)
+                    # (2) They inherit from `torch.Tensor`
+                    # (2) The class is not overriding any of the `torch.Tensor` methods listed here:
+                    #     `__getattr__`, `__get__`, `__getattribute__`, `__setstate__`, `__set__`,
+                    #     and `tp_alloc`
+                    #     The methods that we ban overriding were selected in a test-driven manner
+                    #     by overriding every callable method on a tensor subclass and determinining
+                    #     which might get called when unpickling.
+                    # Further, these classes are only ever allowed as argument 2 of
+                    # `torch._tensor._rebuild_from_type_v2`.
                     if module == "__builtin__":
                         raise RuntimeError(f"Unsupported class {full_path}")
                     elif module not in modules:
                         raise RuntimeError(
-                            f"Found global `{full_path}` in the checkpoint but `{module}` was "
-                            f"not found in `sys.modules`, please import `{name}` from `{module}` "
-                            f"if `{full_path}` is a tensor subclass and you trust the package "
-                            "that provides it."
+                            f"Found GLOBAL `{full_path}` instruction in the pickle file but `{full_path}` was "
+                            f"not in the pre-defined list of allowed globals. This is expected behavior if "
+                            f"`{full_path}` is a user-defined tensor subclass not defined in the `torch` package. "
+                            f"If this is the case, we expect `{module}` to be present in `sys.modules` (i.e. it "
+                            "must be imported in the current environment), but this was not the case. "
+                            f"If you intend to unpickle a `{full_path}` please import `{name}` from `{module}`. "
+                            f"Note that having this imported will *only* allow the type `{full_path}` to be passed "
+                            "as the second argument to `torch._tensor._rebuild_from_type_v2`, which should enable "
+                            "the tensor subclass to be unpickled without any arbitrary code execution as long as "
+                            # If the user imports and these are overridden the next error will prompt them to use
+                            # torch.serialization.add_safe_globals.
+                            "a pre-defined list of methods called when unpickling are not overridden. In particular, "
+                            "the methods are `__getattr__`, `__get__`, `__getattribute__`, `__setstate__`, `__set__`, "
+                            "as well as the implementation of `tp_alloc`."
                         )
                     else:
-                        # Check that module is really a ModuleType
-                        if not isinstance(modules[module], ModuleType):
-                            raise RuntimeError(
-                                f"Found GLOBAL {full_path} but sys.modules[{module}] is not a ModuleType, "
-                                f"got {type(modules[module])}."
-                            )
-
                         class_type = getattr_static(modules[module], name)
-                        # issubclass/isinstance(A, B) call __subclasscheck__ or __instancecheck__
-                        # of the metaclass of B, so there should not be a way to spoof this
+                        # None of the objects here contain any data from the pickle so this is safe
                         if isinstance(class_type, type) and issubclass(
                             class_type, torch.Tensor
                         ):
-                            # class_type.method accesses should call PyInstanceMethod_Function
-                            # https://github.com/python/cpython/blob/a37b0932285b5e883b13a46ff2a32f15d7339894/Objects/classobject.c#L374  # noqa: B950
-
                             # getattr is called by the getattr call in `_rebuild_from_type_v2`
                             custom_get_attribute = (
                                 class_type.__getattribute__
@@ -249,8 +265,8 @@ class Unpickler:
                             except AttributeError:
                                 custom_set = False
                             # tp_alloc is called by `Tensor._rebuild_wrapper_subclass` and `Tensor.as_subclass`
-                            custom_tp_alloc = not torch._C._check_tp_alloc_is_default(
-                                class_type
+                            has_custom_tp_alloc = (
+                                not torch._C._check_tp_alloc_is_default(class_type)
                             )
                             custom_methods = {
                                 "__getattribute__": custom_get_attribute,
@@ -259,7 +275,7 @@ class Unpickler:
                                 "__setattr__": custom_set_attr,
                                 "__set__": custom_set,
                                 "__setstate__": custom_set_state,
-                                "tp_alloc": custom_tp_alloc,
+                                "tp_alloc": has_custom_tp_alloc,
                             }
                             if any(custom_methods.values()):
                                 error = ""
@@ -268,12 +284,17 @@ class Unpickler:
                                 raise RuntimeError(
                                     f"Trying to unpickle tensor subclass `{full_path}` that has defined a custom "
                                     f"version for one of these methods:{error}. Please check whether you trust these "
-                                    "methods and allowlist the subclass with `torch.serialization.mark_safe_globals` if so."
+                                    "methods and allowlist the subclass with `torch.serialization.add_safe_globals` if so."
                                 )
                             self.tensor_subclasses_found.add(class_type)
                             self.append(class_type)
                         else:
-                            raise RuntimeError(f"Unsupported class {full_path}")
+                            raise RuntimeError(
+                                f"Unsupported global: GLOBAL {full_path} was not an allowed global by default. "
+                                "Please use `torch.serialization.add_safe_globals` to allowlist this global "
+                                "if you trust this class/function."
+                            )
+
             elif key[0] == NEWOBJ[0]:
                 args = self.stack.pop()
                 cls = self.stack.pop()

@@ -396,4 +396,4 @@ The following utility functions are related to serialization:
 .. autofunction:: set_default_mmap_options
 .. autofunction:: clear_safe_globals
 .. autofunction:: get_safe_globals
-.. autofunction:: mark_safe_globals
+.. autofunction:: add_safe_globals

@@ -32,6 +32,7 @@ from torch.testing._internal.common_utils import (
     parametrize, instantiate_parametrized_tests, AlwaysWarnTypedStorageRemoval, serialTest, skipIfTorchDynamo)
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_dtype import all_types_and_complex_and
+from torch.testing._internal.two_tensor import TwoTensor  # noqa: F401
 
 if not IS_WINDOWS:
     from mmap import MAP_SHARED, MAP_PRIVATE
@@ -1026,7 +1027,7 @@ class TestSerialization(TestCase, SerializationMixin):
             self.assertIsNone(torch.load(f, weights_only=False))
             f.seek(0)
             # Safe load should assert
-            with self.assertRaisesRegex(pickle.UnpicklingError, "Unsupported class"):
+            with self.assertRaisesRegex(pickle.UnpicklingError, "Unsupported class __builtin__.print"):
                 torch.load(f, weights_only=True)
 
     @parametrize('weights_only', (False, True))
@@ -4002,6 +4003,50 @@ class TestSerialization(TestCase, SerializationMixin):
             y['even'][0] = torch.tensor(-0.25, dtype=dtype)
             self.assertEqual(y['x'][:2].to(dtype=torch.float32), torch.tensor([-0.25, 0.25]))
 
+    @parametrize('filename', (True, False))
+    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
+    def test_filewriter_metadata_writing(self, filename):
+        sd = torch.nn.Linear(3, 5).state_dict()
+        weight_nbytes = sd['weight'].untyped_storage().nbytes()
+        bias_nbytes = sd['bias'].untyped_storage().nbytes()
+        # TemporaryFileName will give a string
+        # NamedTemporaryFile will be treated as a buffer
+        file_creation_func = TemporaryFileName if filename else tempfile.NamedTemporaryFile
+
+        with file_creation_func() as f, file_creation_func() as g:
+            # save state_dict in f
+            torch.save(sd, f)
+            if not filename:
+                f.seek(0)
+            # extract 'data.pkl' for use in our fake checkpoint
+            with torch.serialization._open_file_like(f, 'rb') as opened_file:
+                with torch.serialization._open_zipfile_reader(opened_file) as zip_file:
+                    data_file = io.BytesIO(zip_file.get_record('data.pkl'))
+                    data_0_offset = zip_file.get_record_offset('data/0')
+                    data_1_offset = zip_file.get_record_offset('data/1')
+
+            # write nulls for 'data/0' and 'data/1'
+            with open(f if filename else f.name, 'rb+') as opened_f:
+                opened_f.seek(data_0_offset)
+                opened_f.write(b'0' * weight_nbytes)
+                opened_f.seek(data_1_offset)
+                opened_f.write(b'0' * bias_nbytes)
+
+            with torch.serialization._open_zipfile_writer(g) as zip_file:
+                data_value = data_file.getvalue()
+                zip_file.write_record('data.pkl', data_value, len(data_value))
+                zip_file.write_record('byteorder', sys.byteorder, len(sys.byteorder))
+                # Only write metadata for storages
+                zip_file.write_record_metadata('data/0', weight_nbytes)
+                zip_file.write_record_metadata('data/1', bias_nbytes)
+
+            if not filename:
+                f.seek(0)
+                g.seek(0)
+            sd_loaded = torch.load(g)
+            sd_loaded_ref = torch.load(f)
+            self.assertEqual(sd_loaded, sd_loaded_ref)
+
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):
             return super().run(*args, **kwargs)
@@ -4147,61 +4192,6 @@ class TestSubclassSerialization(TestCase):
             f.seek(0)
             tensor2 = torch.load(f)
 
-    @skipIfTorchDynamo("name 'SYNTHETIC_LOCAL' is not defined")
-    def test_safe_globals_for_weights_only(self):
-        # Doing the import here as this test later dels the import from sys.modules
-        from torch.testing._internal.two_tensor import TwoTensor
-        t = TwoTensor(torch.randn(2, 3), torch.randn(2, 3))
-        p = torch.nn.Parameter(t)
-        sd = OrderedDict([('t', t), ('p', p)])
-
-        with tempfile.NamedTemporaryFile() as f:
-            torch.save(sd, f)
-            # unimport TwoTensor
-            del sys.modules['torch.testing._internal.two_tensor']
-
-            # Loading tensor subclass with weights_only=True should fail
-            # if tensor subclass has not been imported
-            with self.assertRaisesRegex(pickle.UnpicklingError,
-                                        "`torch.testing._internal.two_tensor` was not found in `sys.modules`"):
-                f.seek(0)
-                sd = torch.load(f, weights_only=True)
-
-            # Loading tensor subclass with weights_only=True should work
-            # if target methods are not overriden and user has imported the subclass
-            from torch.testing._internal.two_tensor import TwoTensor
-            f.seek(0)
-            sd = torch.load(f, weights_only=True)
-            self.assertEqual(sd['t'], t)
-            self.assertEqual(sd['p'], p)
-
-            # Loading tensor subclass with weights_only=True should fail
-            # if __setstate__ is overriden
-            f.seek(0)
-            restore_setstate = TwoTensor.__setstate__
-            try:
-                TwoTensor.__setstate__ = lambda self, state: self.__dict__.update(state)
-                with self.assertRaisesRegex(pickle.UnpicklingError, "__setstate__=True"):
-                    torch.load(f, weights_only=True)
-
-                # Loading tensor subclass with overriden __setstate__ with weights_only=True should work
-                # if the class is marked safe
-                f.seek(0)
-                torch.serialization.mark_safe_globals([TwoTensor])
-                self.assertTrue(torch.serialization.get_safe_globals() == [TwoTensor])
-                sd = torch.load(f, weights_only=True)
-                self.assertEqual(sd['t'], t)
-                self.assertEqual(sd['p'], p)
-
-                # Should fail again when safe globals are cleared
-                torch.serialization.clear_safe_globals()
-                f.seek(0)
-                with self.assertRaisesRegex(pickle.UnpicklingError, "__setstate__=True"):
-                    torch.load(f, weights_only=True)
-
-            finally:
-                TwoTensor.__setstate__ = restore_setstate
-
     def _create_bad_func(self, name):
         def bad_func(self, *args, **kwargs):
             raise RuntimeError(f"running {name}")
@@ -4209,6 +4199,21 @@ class TestSubclassSerialization(TestCase):
 
     @parametrize("wrapper", (True, False))
     def test_tensor_subclass_method_spoofing(self, wrapper):
+        '''
+        This tests seeks to do the following:
+            - determine which methods of a tensor subclass might be called during unpickling (weights_only=False)
+              we consider these methods "risky" for weights_only
+            - ensure that we ban overriding this group of methods on a tensor subclass by default (weights_only=True)
+            - ensure that tensor subclass that doesn't override any of these can be unpickled (weights_only=True)
+
+        We achieve this by overriding all methods of a tensor subclass to raise a RuntimeError
+        when called. We then try to unpickle a tensor subclass with weights_only=False and ensure that
+        only the RuntimeErrors that we expect are thrown.
+
+        We then load with weights_only and ensure that weights_only will fail unless all the risky methods
+        are not overriden by resetting the risky methods to the non-overriden version in a loop and calling load.
+        The final weights_only load call when all the risky methods are no longer overriden.
+        '''
         subclass = TestWrapperSubclassSpoof if wrapper else TestEmptySubclassSpoof
         t = subclass(torch.randn(2, 3))
         # To trigger setattr for the non-wrapper case
@@ -4237,8 +4242,7 @@ class TestSubclassSerialization(TestCase):
             restore_methods["__set__"] = None
 
             try:
-                # Unsafe load should throw the following RuntimeErrors
-                # (indicating that these methods are called)
+                # Check that weights_only=False load raises the RuntimeErrors we expect
                 with self.assertRaisesRegex(RuntimeError, "running __getattribute__"):
                     torch.load(f, weights_only=False)
                 subclass.__getattribute__ = restore_methods['__getattribute__']
@@ -4251,7 +4255,7 @@ class TestSubclassSerialization(TestCase):
                 # should finally work
                 torch.load(f, weights_only=False)
 
-                # Safe load should catch that methods are called
+                # Check that weights_only=True catches that risky methods are overriden
                 subclass.__setstate__ = self._create_bad_func("__setstate__")
                 subclass.__getattribute__ = self._create_bad_func("__getattribute__")
                 subclass.__setattr__ = self._create_bad_func("__setattr__")
@@ -4263,19 +4267,88 @@ class TestSubclassSerialization(TestCase):
                 for i, meth in enumerate(risky_methods):
                     setattr(subclass, meth, restore_methods[meth])
                     if i != len(risky_methods) - 1:
-                        # When the given methods are not all back to default, load should throw
-                        # RuntimeError for the given method
+                        # When the given methods are not all back to default, load should still throw
+                        # but reflect which methods are no longer overriden
                         with self.assertRaisesRegex(pickle.UnpicklingError, f"{meth}=False"):
                             torch.load(f, weights_only=True)
                     else:
-                        # When the given methods are all back to default, load should finally work
+                        # When the given methods are all back to default, weights_only load should finally work
                         loaded = torch.load(f, weights_only=True)
             finally:
                 for method, func in restore_methods.items():
                     setattr(subclass, method, func)
                 a = subclass(torch.randn(2, 3))
 
+    @skipIfTorchDynamo("name 'SYNTHETIC_LOCAL' is not defined")
+    def test_safe_globals_for_weights_only(self):
+        '''
+        Tests import semantic for tensor subclass and the {add/get/clear}_safe_globals APIs
+        '''
+        # Needed to prevent UnboundLocalError: local variable 'TwoTensor' referenced before assignment
+        global TwoTensor
+        t = TwoTensor(torch.randn(2, 3), torch.randn(2, 3))
+        p = torch.nn.Parameter(t)
+        sd = OrderedDict([('t', t), ('p', p)])
+
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(sd, f)
+            # unimport TwoTensor
+            try:
+                del sys.modules['torch.testing._internal.two_tensor']
+
+                # Loading tensor subclass with weights_only=True should fail
+                # if tensor subclass has not been imported
+                with self.assertRaisesRegex(pickle.UnpicklingError,
+                                            "expect `torch.testing._internal.two_tensor` to be present in `sys.modules`"):
+                    f.seek(0)
+                    sd = torch.load(f, weights_only=True)
+
+                # Loading tensor subclass with weights_only=True should work
+                # if target methods are not overriden and user has imported the subclass
+                from torch.testing._internal.two_tensor import TwoTensor
+                f.seek(0)
+                sd = torch.load(f, weights_only=True)
+                self.assertEqual(sd['t'], t)
+                self.assertEqual(sd['p'], p)
+
+                # Loading tensor subclass with weights_only=True should fail
+                # if __setstate__ is overriden
+                f.seek(0)
+                restore_setstate = TwoTensor.__setstate__
+                try:
+                    TwoTensor.__setstate__ = lambda self, state: self.__dict__.update(state)
+                    with self.assertRaisesRegex(pickle.UnpicklingError, "__setstate__=True"):
+                        torch.load(f, weights_only=True)
+
+                    # Loading tensor subclass with overriden __setstate__ with weights_only=True should work
+                    # if the class is marked safe
+                    f.seek(0)
+                    torch.serialization.add_safe_globals([TwoTensor])
+                    self.assertTrue(torch.serialization.get_safe_globals() == [TwoTensor])
+                    sd = torch.load(f, weights_only=True)
+                    self.assertEqual(sd['t'], t)
+                    self.assertEqual(sd['p'], p)
+
+                    # Should fail again when safe globals are cleared
+                    torch.serialization.clear_safe_globals()
+                    f.seek(0)
+                    with self.assertRaisesRegex(pickle.UnpicklingError, "__setstate__=True"):
+                        torch.load(f, weights_only=True)
+                finally:
+                    TwoTensor.__setstate__ = restore_setstate
+            finally:
+                from torch.testing._internal.two_tensor import TwoTensor
+
+
     def test_tensor_subclass_parent_module_method_spoofing(self):
+        '''
+        Tests that weights_only load does not call any methods of the parent module
+        that contains the tensor subclass.
+
+        We achieve this by overriding all methods of the module to raise a RuntimeError
+        when called. We then try to unpickle a tensor subclass with weights_only=True and ensure that
+        no RuntimeErrors are thrown.
+        '''
         # Simulates user doing `import spoof_mod` where `spoof_mod` contains `TestEmptySubclass`
         class SpoofModule(ModuleType):
             pass

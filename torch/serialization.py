@@ -60,7 +60,7 @@ __all__ = [
     'set_default_load_endianness',
     'clear_safe_globals',
     'get_safe_globals',
-    'mark_safe_globals',
+    'add_safe_globals',
 ]
 
 
@@ -162,14 +162,14 @@ def get_safe_globals() -> List[Any]:
     '''
     return _weights_only_unpickler._get_safe_globals()
 
-def mark_safe_globals(safe_globals: List[Any]) -> None:
+def add_safe_globals(safe_globals: List[Any]) -> None:
     '''
     Marks the given globals as safe for ``weights_only`` load.
 
     Args:
         safe_globals (List[Any]): list of globals to mark as safe
     '''
-    _weights_only_unpickler._mark_safe_globals(safe_globals)
+    _weights_only_unpickler._add_safe_globals(safe_globals)
 
 def _is_zipfile(f) -> bool:
     # This is a stricter implementation than zipfile.is_zipfile().

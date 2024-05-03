@@ -1683,7 +1683,6 @@ class Kernel(CodeGen):
             x: self.args.size(x)
             for x in sorted_symbols
             if x.name.startswith(("s", "u", "ps"))
-            or (x.name.startswith("i") and not x.name.startswith("idx"))
         }
         return sympy_subs(index, replacements)
 
