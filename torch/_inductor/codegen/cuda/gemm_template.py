@@ -1440,6 +1440,7 @@ class CKGemmTemplate(CKTemplate):
             block_gemm_pipeline_scheduler="BlockGemmPipelineScheduler::Intrawave",
             block_gemm_pipeline_version="BlockGemmPipelineVersion::v3")]
 
+    @lru_cache(None)
     def _gen_ops_library(self) -> List[CKGemmOperation]:
         """
         Parse the Universal Gemm instances defined in the composable kernel library folder.
@@ -1491,27 +1492,15 @@ class CKGemmTemplate(CKTemplate):
                         )
                     )
 
-        filtered_instances = list(filter(lambda op: self.filter_op(op), substitute_instances))
-        log.debug(f"ck instances filtered: {len(filtered_instances)}")
-        # chosen_instances = filtered_instances[:config.rocm.n_max_profiling_configs]
-        # NB: when using a fixed list order, most likely we will pick the subset of instances
-        # which are very similar to each other. Randomizing the choice seems to solve this.
-        random.seed(-11)
-        chosen_instances = random.sample(filtered_instances, config.rocm.n_max_profiling_configs) if config.rocm.n_max_profiling_configs else filtered_instances
-        log.debug(f"generated {len(chosen_instances)} ck instances: {chosen_instances}")
+        return substitute_instances
 
-        return chosen_instances
-
+    @lru_cache(None)
     def _gen_ops_preselected(self) -> List[CKGemmOperation]:
         """
         Parse the preselected Universal Gemm instances
         """
-        unfiltered_instances = self._parse_instances(self.preselected_instances.split('\n'))
-        filtered_instances = list(filter(lambda op: self.filter_op(op), unfiltered_instances))
-        log.debug(f"ck instances filtered: {len(filtered_instances)}")
-        return filtered_instances
+        return self._parse_instances(self.preselected_instances.split('\n'))
 
-    @lru_cache(None)
     def gen_ops(self) -> List[CKGemmOperation]:
         """
         Creates a list of `CKGemmOperation` instances that match the GEMM operation this template represents.
@@ -1519,7 +1508,14 @@ class CKGemmTemplate(CKTemplate):
 
         An instance may invalidate the GEMM configuration at runtime; such instances will be assigned +inf runtime by the autotune process.
         """
-        return self._gen_ops_preselected() if config.rocm.use_preselected_instances else self._gen_ops_library()
+        unfiltered_instances = self._gen_ops_preselected() if config.rocm.use_preselected_instances else self._gen_ops_library()
+        filtered_instances = list(filter(lambda op: self.filter_op(op), unfiltered_instances))
+        # NB: when using a fixed list order, most likely we will pick the subset of instances
+        # which are very similar to each other. Randomizing the choice seems to solve this.
+        random.seed(-11)
+        chosen_instances = random.sample(filtered_instances, config.rocm.n_max_profiling_configs) if config.rocm.n_max_profiling_configs else filtered_instances
+        log.debug(f"generated {len(chosen_instances)} ck instances: {chosen_instances}")
+        return chosen_instances
 
     @staticmethod
     def add_ck_gemm_choices(
