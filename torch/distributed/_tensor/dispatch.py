@@ -1,4 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+import contextlib
 import functools
 import operator
 from typing import cast, Dict, List, Optional, Sequence, Tuple
@@ -179,15 +180,15 @@ class OpDispatcher:
 
             # run local op computation with potentially modified args/kwargs
             local_tensor_args = cast(Tuple[object, ...], local_tensor_args)
-            if op_call in self._random_ops and is_rng_supported_mesh(mesh):
-                if not random._rng_tracker:
+            if op_call in self._random_ops:
+                if not random._rng_tracker and is_rng_supported_mesh(mesh):
                     # Default to `OffsetBasedRNGTracker` if the parallelism API
                     # did not already construct one
                     random._rng_tracker = random.OffsetBasedRNGTracker(mesh.device_type)
                 # For DTensor random operator, run it within a distribute region
                 with random._rng_tracker._distribute_region(
                     cast(dtensor.DTensor, args[0])._spec
-                ):
+                ) if random._rng_tracker else contextlib.nullcontext():
                     local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
             else:
                 local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
