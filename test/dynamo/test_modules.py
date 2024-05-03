@@ -28,6 +28,16 @@ except ImportError:
     import test_functions
 
 
+_variable = 0
+_variable1 = 0
+
+
+def update_global():
+    global _variable, _variable1
+    _variable += 1
+    _variable1 += 1
+
+
 class BasicModule(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -1951,6 +1961,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled_func(inp).item(), 16)
         self.assertRegex(failure_reason, r"^___check_obj_id\(L\['m'\]._forward_hooks")
 
+    @patch.object(torch._dynamo.config, "guard_nn_modules", False)
     @patch.object(torch._dynamo.config, "skip_nnmodule_hook_guards", True)
     def test_hooks_skip_guards(self):
         class TestModule(torch.nn.Module):
@@ -2434,6 +2445,22 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         compiled_model(input)
 
         self.assertEqual(model.x, compiled_model.x)
+
+    def test_globals_change_in_other_file(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            update_global()
+            a = test_functions.update_global(x)
+            # Ensure that the updated global values are read
+            return x * a * (_variable + _variable1 + test_functions._variable)
+
+        res = fn(torch.ones(10))
+        self.assertEqual(_variable, 1)
+        self.assertEqual(_variable1, 1)
+        # Ensure that the reconstructed bytecode updates the global value in the
+        # other file.
+        self.assertEqual(test_functions._variable, 1)
+        self.assertEqual(res, 3 * torch.ones(10))
 
 
 if __name__ == "__main__":

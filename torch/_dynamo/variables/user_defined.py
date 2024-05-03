@@ -2,6 +2,7 @@
 
 import collections
 import contextlib
+import enum
 import functools
 import importlib
 import inspect
@@ -107,7 +108,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         from .. import trace_rules
-        from . import ConstantVariable
+        from . import ConstantVariable, EnumVariable
         from .builder import VariableBuilder
 
         if name == "__name__":
@@ -144,14 +145,16 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if self.value is collections.OrderedDict and name == "fromkeys":
             return super().var_getattr(tx, name)
 
-        if name in getattr(self.value, "__dict__", {}) or (
+        if ConstantVariable.is_literal(obj):
+            return ConstantVariable.create(obj)
+        elif isinstance(obj, enum.Enum):
+            return EnumVariable(obj)
+        elif name in getattr(self.value, "__dict__", {}) or (
             self.value.__module__.startswith("torch.")
             or self.value.__module__ == "torch"
         ):
             if source:
                 return VariableBuilder(tx, source)(obj)
-        elif ConstantVariable.is_literal(obj):
-            return ConstantVariable.create(obj)
 
         return super().var_getattr(tx, name)
 
@@ -834,9 +837,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 unimplemented("UserDefined with non-function __getattr__")
 
         if isinstance(subobj, property):
-            # Rewrite the source being explicit about reading it statically.
             if self.source:
-                source = AttrSource(self.source, name, get_static=True)
+                # Read the class attribute to reach the property
+                source = AttrSource(AttrSource(self.source, "__class__"), name)
+                # Get the getter function
                 source = AttrSource(source, "fget")
             return variables.UserMethodVariable(
                 subobj.fget, self, source=source
