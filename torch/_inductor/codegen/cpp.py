@@ -1539,7 +1539,14 @@ class CppVecOverrides(CppOverrides):
     @staticmethod
     def where(a, b, c):
         assert isinstance(V.kernel, CppVecKernel)
-        return f"decltype({b})::blendv({c}, {b}, {V.kernel._get_mask_cast(a, b.dtype)})"
+        if b.dtype == torch.bool:
+            assert c.dtype == torch.bool
+            blendv_a = f"{V.kernel._get_mask_cast(a, torch.float)}"
+            blendv_b = f"{V.kernel._get_mask_cast(b, torch.float)}"
+            blendv_c = f"{V.kernel._get_mask_cast(c, torch.float)}"
+            return f"decltype({b})::blendv({blendv_c}, {blendv_b}, {blendv_a})"
+        else:
+            return f"decltype({b})::blendv({c}, {b}, {V.kernel._get_mask_cast(a, b.dtype)})"
 
     @staticmethod
     def sign(x):
@@ -2007,9 +2014,18 @@ class CppKernel(Kernel):
     def codegen_loops_impl(self, loop_nest, code, worksharing):
         threads = parallel_num_threads()
         assert self.call_ranges is not None
-        par_depth = self.decide_parallel_depth(
-            self.call_ranges[: loop_nest.max_parallel_depth()], threads
-        )
+        kernels = loop_nest.get_kernels()
+        if any(isinstance(kernel, OuterLoopFusedKernel) for kernel in kernels):
+            assert len(kernels) == 1
+            assert isinstance(kernels[0], OuterLoopFusedKernel)
+            par_depth = kernels[0].decide_parallel_depth(
+                loop_nest.max_parallel_depth(), threads
+            )
+        else:
+            par_depth = self.decide_parallel_depth(
+                loop_nest.max_parallel_depth(), threads
+            )
+
         with contextlib.ExitStack() as stack:
             if par_depth:
                 if loop_nest.is_reduction_only():
@@ -2142,7 +2158,9 @@ class CppKernel(Kernel):
         else:
             return "TORCH_CHECK"
 
-    def decide_parallel_depth(self, ranges, threads):
+    def decide_parallel_depth(self, max_parallel_depth, threads):
+        assert self.call_ranges is not None
+        ranges = self.call_ranges[:max_parallel_depth]
         seq = self.size_hint()
         par = 1
         depth = 0
@@ -2318,7 +2336,7 @@ class CppVecKernel(CppKernel):
             assert vec_var.is_vec
             code = BracesBuffer()
             code.writeline("[&]")
-            with self.swap_buffers(code), code.indent():
+            with code.indent():
                 vec_dtype = vec_var.dtype
                 assert vec_dtype is not None
                 if vec_dtype == torch.bool:
@@ -2339,7 +2357,7 @@ class CppVecKernel(CppKernel):
         assert opt_ctx is not None
         code = BracesBuffer()
         code.writeline("[&]")
-        with self.swap_buffers(code), code.indent():
+        with code.indent():
             result_size = get_result_size(dtype)
             result_declare = (
                 f"__at_align__ std::array<{DTYPE_TO_CPP[dtype]}, {result_size}> tmpbuf;"
@@ -2659,7 +2677,7 @@ class CppVecKernel(CppKernel):
                 mean, m2, weight = reduction_project(reduction_type, next_value)
             return f"welford_combine({var}, {{{mean}, {m2}, {weight}}})"
         else:
-            raise NotImplementedError()
+            raise NotImplementedError
 
     def indirect_assert(self, var, lower, upper, mask=None):
         assert not mask, "do not support mask in indirect_indexing assertion"
@@ -2869,20 +2887,11 @@ class CppVecKernelChecker(CppVecKernel):
         self.exit_stack = contextlib.ExitStack()
 
         # Cache all the load result
-        self.load_supported_dtypes: List[torch.dtype] = [
+        self.supported_dtypes: List[torch.dtype] = [
             torch.float,
             torch.bfloat16,
             torch.float16,
             torch.bool,
-            torch.uint8,
-            torch.int8,
-            torch.int32,
-            torch.int64,
-        ]
-        self.store_supported_dtypes: List[torch.dtype] = [
-            torch.float,
-            torch.bfloat16,
-            torch.float16,
             torch.uint8,
             torch.int8,
             torch.int32,
@@ -2907,7 +2916,7 @@ class CppVecKernelChecker(CppVecKernel):
                 self.disable_vec("not a loop")
                 return var
 
-            if load_dtype not in self.load_supported_dtypes and (
+            if load_dtype not in self.supported_dtypes and (
                 index.has(self.itervars[self.tiling_idx])
                 or free_symbol_startswith(index, "tmp")
             ):
@@ -2928,7 +2937,7 @@ class CppVecKernelChecker(CppVecKernel):
             assert opt_ctx
             opt_ctx.dtype = store_dtype
 
-            if store_dtype not in self.store_supported_dtypes:
+            if store_dtype not in self.supported_dtypes:
                 self.disable_vec(f"{store_dtype} not supported by store")
                 return self.simd_vec
 
@@ -3032,18 +3041,7 @@ class CppVecKernelChecker(CppVecKernel):
                         ):
                             opt_ctx.dtype = torch.float32
 
-                    supported_dtypes = [
-                        torch.float,
-                        torch.bfloat16,
-                        torch.float16,
-                        torch.bool,
-                        torch.uint8,
-                        torch.int8,
-                        torch.int32,
-                        torch.int64,
-                    ]
-
-                    if opt_ctx.dtype not in supported_dtypes:
+                    if opt_ctx.dtype not in self.supported_dtypes:
                         self.disable_vec(f"constant dtype: {opt_ctx.dtype}")
                     return val
 
@@ -3116,16 +3114,7 @@ class CppVecKernelChecker(CppVecKernel):
 
             @staticmethod
             def to_dtype(x, dtype, src_dtype=None):
-                if dtype not in [
-                    torch.float,
-                    torch.bfloat16,
-                    torch.float16,
-                    torch.bool,
-                    torch.uint8,
-                    torch.int8,
-                    torch.int32,
-                    torch.int64,
-                ]:
+                if dtype not in self.supported_dtypes:
                     self.disable_vec(f"to_dtype: {dtype}")
                 return x
 
@@ -3565,6 +3554,25 @@ class OuterLoopFusedKernel(CppKernel):
         super().__init__(kernel_group.args, kernel_group.ws.num_threads)
         self.inner: List["LoopLevel"] = []
 
+    def decide_parallel_depth(self, max_parallel_depth, threads) -> int:
+        kernels_parallel_depth = []
+        nested_kernels: List[List[CppKernel]] = [
+            loop.get_kernels() for loop in self.inner
+        ]
+        for kernels in nested_kernels:
+            # For any ScalarKernel, VecKernel, or Tile2DKernel,
+            # they should all have the same call_ranges
+            call_ranges = kernels[0].call_ranges
+            assert call_ranges is not None
+            assert all(kernel.call_ranges == call_ranges for kernel in kernels)
+            kernels_parallel_depth.append(
+                kernels[0].decide_parallel_depth(len(call_ranges), threads)
+            )
+        return min(
+            max_parallel_depth,
+            max(kernels_parallel_depth),
+        )
+
 
 class ReasonFusedNodes(Enum):
     SAME_VARS_REDUCE = "same_vars_reduce"
@@ -3623,8 +3631,7 @@ class CppScheduling(BaseScheduling):
                             if var_ranges is None:
                                 var_ranges = v
                             assert var_ranges == v, (var_ranges, v, node.snodes)
-                            for expr in exprs:
-                                indexing_exprs.add(expr)
+                            indexing_exprs.update(exprs)
                         return var_ranges, list(indexing_exprs)
                     else:
                         assert isinstance(node, SchedulerNode)
@@ -4291,3 +4298,13 @@ class LoopNestWithSplit:
         if depth == 0:
             self.root = split_loops
         return split_loops
+
+    def get_kernels(self) -> List[CppKernel]:
+        """Get all kernel objects under this loop nest"""
+        if self.kernel:
+            return [self.kernel]
+        kernels: List[CppKernel] = []
+        assert self.root is not None
+        for loop in self.root:
+            kernels += loop.get_kernels()
+        return kernels

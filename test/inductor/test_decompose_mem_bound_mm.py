@@ -7,6 +7,8 @@ import torch
 import torch._inductor
 from torch._dynamo.utils import counters
 from torch._inductor.test_case import run_tests, TestCase
+from torch._inductor.utils import run_and_get_code
+from torch.testing import FileCheck
 
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -48,7 +50,9 @@ class MyModule3(torch.nn.Module):
 
 @requires_cuda
 @torch._inductor.config.patch(
-    decompose_mem_bound_mm=True,
+    post_grad_fusion_options={
+        "decompose_mm_pass": {},
+    }
 )
 @instantiate_parametrized_tests
 class TestDecomposeMemMM(TestCase):
@@ -233,6 +237,23 @@ class TestDecomposeMemMM(TestCase):
             1 if has_bias else 2,
         )
         counters.clear()
+
+    def test_realize_input(self):
+        m = 20480
+        k = 5
+        n = 2
+        torch._logging.set_logs(inductor=logging.DEBUG)
+        input1 = torch.randn(m, k, device="cuda").T.contiguous()
+        input2 = torch.randn(k, n, device="cuda")
+
+        @torch.compile()
+        def foo(x, y):
+            return x.T.contiguous() @ y
+
+        out, code = run_and_get_code(foo, input1, input2)
+
+        # two kernels generated
+        FileCheck().check_count(".run(", 2, exactly=True).run(code[0])
 
 
 if __name__ == "__main__":

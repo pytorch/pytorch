@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import functools
+import os
 import pickle
 import unittest
 from typing import List
@@ -14,10 +15,13 @@ from torch._inductor.codecache import (
     CUDACodeCache,
     FxGraphCachePickler,
     FxGraphHashDetails,
+    PyCodeCache,
     TensorMetadata,
     TensorMetadataAndValues,
 )
+from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import run_tests, TestCase
+from torch._inductor.utils import clear_inductor_caches, fresh_inductor_cache
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
@@ -34,6 +38,10 @@ from torch.testing._internal.inductor_utils import (
 from torch.utils._triton import has_triton
 
 HAS_TRITON = has_triton()
+
+if HAS_TRITON:
+    import triton
+    from torch.testing._internal.triton_utils import add_kernel
 
 requires_gpu = functools.partial(unittest.skipIf, not HAS_GPU, "requires gpu")
 requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires triton")
@@ -92,6 +100,10 @@ class TestFxGraphCache(TestCase):
         super().setUp()
         counters.clear()
 
+    def reset(self):
+        torch._dynamo.reset()
+        clear_inductor_caches()
+
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
     @parametrize("device", (GPU_TYPE, "cpu"))
@@ -118,13 +130,17 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(fn(a, b), compiled_fn(a, b))
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+        self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 0)
 
         # A second call should hit. (First reset so in-memory guards
         # don't prevent compilation).
-        torch._dynamo.reset()
+        for m in torch._inductor.codecache.PyCodeCache.cache.values():
+            os.remove(m.__file__)
+        self.reset()
         self.assertEqual(fn(a, b), compiled_fn(a, b))
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
 
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
@@ -157,7 +173,7 @@ class TestFxGraphCache(TestCase):
         # The second should see all hits. (First reset so in-memory guards
         # don't prevent compilation).
         counters.clear()
-        torch._dynamo.reset()
+        self.reset()
         grads2 = compiled_fn(mod, inp)
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
         self.assertGreater(counters["inductor"]["fxgraph_cache_hit"], 0)
@@ -207,7 +223,7 @@ class TestFxGraphCache(TestCase):
 
             # A second call should hit. (Reset here to force compilation).
             counters.clear()
-            torch._dynamo.reset()
+            self.reset()
             res2 = compiled_fn(a, b)
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
             self.assertGreater(counters["inductor"]["fxgraph_cache_hit"], 0)
@@ -250,7 +266,7 @@ class TestFxGraphCache(TestCase):
 
             # A second call should hit.
             counters.clear()
-            torch._dynamo.reset()
+            self.reset()
             res2 = compiled_fn(x)
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
             self.assertGreater(counters["inductor"]["fxgraph_cache_hit"], 0)
@@ -287,6 +303,33 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
 
+    @requires_gpu()
+    @requires_triton()
+    @config.patch({"fx_graph_cache": True})
+    def test_higher_order_op_bypass(self):
+        """
+        Verify that we bypass the cache when we have higher order ops.
+        """
+
+        def fn(x, y):
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (  # noqa: E731
+                triton.cdiv(n_elements, meta["BLOCK_SIZE"]),
+            )
+            add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=4)
+            return output
+
+        compiled_fn = torch.compile(fn, fullgraph=True)
+
+        x = torch.randn(4, device="cuda")
+        y = torch.randn(4, device="cuda")
+        compiled_fn(x, y)
+
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+        self.assertGreater(counters["inductor"]["fxgraph_cache_bypass"], 0)
+
     @config.patch({"fx_graph_cache": True})
     def test_generated_kernel_count(self):
         """
@@ -310,7 +353,7 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(metrics.generated_kernel_count, 1)
 
         # Verify the "hit" case
-        torch._dynamo.reset()
+        self.reset()
         self.assertEqual(fn(a, b), compiled_fn(a, b))
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
         self.assertEqual(metrics.generated_kernel_count, 2)
@@ -336,14 +379,14 @@ class TestFxGraphCache(TestCase):
 
         # A second call should hit.
         counters.clear()
-        torch._dynamo.reset()
+        self.reset()
         self.assertEqual(fn(a, b), compiled_fn(a, b))
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
         # Clear the cache; now we should miss.
         counters.clear()
-        torch._dynamo.reset()
+        self.reset()
         torch._inductor.codecache.FxGraphCache.clear()
         self.assertEqual(fn(a, b), compiled_fn(a, b))
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
@@ -551,6 +594,29 @@ class TestFxGraphCacheHashing(TestCase):
             assert cmd_parts[0] == "nvcc", cmd_parts
             assert "-Wsomething" in cmd_parts, cmd_parts
             assert "-DNDEBUG" in cmd_parts, cmd_parts
+
+
+class TestUtils(TestCase):
+    def test_fresh_inductor_cache(self):
+        def fn(x, y):
+            return x + y
+
+        a = torch.rand(10)
+        b = torch.rand(10)
+
+        with fresh_inductor_cache():
+            self.assertEqual(len(PyCodeCache.cache.keys()), 0)
+            res1 = torch.compile(fn)(a, b)
+            cache_dir1 = cache_dir()
+
+        torch._dynamo.reset()
+        with fresh_inductor_cache():
+            self.assertEqual(len(PyCodeCache.cache.keys()), 0)
+            res2 = torch.compile(fn)(a, b)
+            cache_dir2 = cache_dir()
+
+        self.assertEqual(res1, res2)
+        self.assertNotEqual(cache_dir1, cache_dir2)
 
 
 if __name__ == "__main__":

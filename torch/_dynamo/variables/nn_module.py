@@ -31,6 +31,7 @@ from ..utils import (
     nnmodule_has_hooks,
     object_has_getattribute,
     proxy_args_kwargs,
+    set_example_value,
 )
 from .base import MutableLocal, typestr, VariableTracker
 from .functions import invoke_and_store_as_constant
@@ -153,7 +154,7 @@ class NNModuleVariable(VariableTracker):
         # Mark the class dynamic unless its module initialization
         if tx.f_code.co_name != "__init__":
             GenerationTracker.mark_class_dynamic(type(mod))
-        raise UnspecializeRestartAnalysis()
+        raise UnspecializeRestartAnalysis
 
     def _custom_getattr_fallback(self, base, tx, name, options):
         """Check for a __getattr__ and handle it specially if it is implemented"""
@@ -339,9 +340,10 @@ class NNModuleVariable(VariableTracker):
                     # If so at least some changes are needed, we don't allow inlining
                     # the call_wrapped currently, and maybe other issues too
                     fn = mod.forward
+                    fn_source = AttrSource(self.source, "forward")
                 else:
                     fn = mod._call_impl
-                fn_source = AttrSource(self.source, "__call__")
+                    fn_source = AttrSource(self.source, "_call_impl")
                 if istype(fn, types.MethodType):
                     fn = fn.__func__
                     fn_source = AttrSource(fn_source, "__func__")
@@ -376,7 +378,7 @@ class NNModuleVariable(VariableTracker):
                 tuple(),
                 {},
             )
-            mod_proxy.node.meta["example_value"] = module
+            set_example_value(mod_proxy.node, module)
 
             proxy_args, proxy_kwargs = proxy_args_kwargs(args, kwargs)
 
@@ -790,7 +792,10 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                     kwargs,
                 )
 
-            if id(method.__code__) in self._nn_module_method_ids():
+            if (
+                hasattr(method, "__code__")
+                and id(method.__code__) in self._nn_module_method_ids()
+            ):
                 unimplemented(f"UnspecializedNNModuleVariable missing {name}")
 
             # "_parameters" in self.value.__dict__ checks that module is initialized
