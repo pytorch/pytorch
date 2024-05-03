@@ -112,16 +112,10 @@ All python APIs exist in the `torch.cuda.tunable` module.
 | is_enabled() -> bool | |
 | tuning_enable(val: bool = True) -> None | Default is True. |
 | tuning_is_enabled() -> bool | |
-| numerics_check_enable(val: bool = True) -> None | Default is True. |
-| numerics_check_is_enabled() -> bool | |
 | set_max_tuning_duration(duration: int) -> None | |
 | get_max_tuning_duration() -> int | |
 | set_max_tuning_iterations(iterations: int) -> None | |
 | get_max_tuning_iterations() -> int | |
-| set_max_warmup_duration(duration: int) -> None | |
-| get_max_warmup_duration() -> int | |
-| set_max_warmup_iterations(iterations: int) -> None | |
-| get_max_warmup_iterations() -> int | |
 | set_filename(filename: str, insert_device_ordinal: bool = False) -> None | |
 | get_filename() -> str | |
 | get_results() -> Tuple[str, str, str, float] | |
@@ -144,20 +138,10 @@ at::cuda::tunable::getTuningContext()->EnableTunableOp(true);
 | bool IsTunableOpEnabled() const; | |
 | void EnableTuning(bool value); | |
 | bool IsTuningEnabled() const; | |
-| void EnableNumericsCheck(bool value); | |
-| bool IsNumericsCheckEnabled() const; | |
 | void SetMaxTuningDurationMs(int max_duration_ms); | |
 | int GetMaxTuningDurationMs() const; | |
 | void SetMaxTuningIterations(int max_iter); | |
 | int GetMaxTuningIterations() const; | |
-| void SetMaxWarmupDurationMs(int max_duration_ms); | |
-| int GetMaxWarmupDurationMs() const; | |
-| void SetMaxWarmupIterations(int max_iter); | |
-| int GetMaxWarmupIterations() const; | |
-| void EnableICacheFlush(bool value); | |
-| bool IsICacheFlushEnabled() const; | |
-| void SetRotatingBufferSize(int size); | |
-| int GetRotatingBufferSize() const; | |
 | TuningResults GetTuningResults(); | |
 | void SetFilename(const std::string& filename, bool insert_device_ordinal=false); | |
 | std::string GetFilename() const; | |
