@@ -4561,6 +4561,35 @@ def forward(self, x):
         self.assertEqual(div_spec.arg.name, "div")
         self.assertEqual(div_spec.arg.value, "floor")
 
+    def test_nested_dynamic_shapes_spec(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                (a0, a1), (b0, b1), (c0, c1, c2) = x
+                return a0 + a1 + b0 + b1 + c0 + c1 + c2
+
+        f = Foo()
+        inputs = (
+            (1, 2),
+            (
+                torch.randn(4, 4),
+                torch.randn(4, 4),
+            ),
+            (
+                torch.randn(4, 4),
+                torch.randn(4, 4),
+                torch.randn(4, 4),
+            ),
+        )
+        # make sure this gets parsed correctly as 7 individual inputs, not 3 tensors
+        dynamic_shapes = {
+            "x": (
+                (None, None),
+                (None, None),
+                (None, None, None),
+            )
+        }
+        export(f, (inputs,), dynamic_shapes=dynamic_shapes)
+
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):
