@@ -8,6 +8,7 @@ from typing import (
     Callable,
     cast,
     Dict,
+    Generator,
     Iterable,
     List,
     no_type_check,
@@ -185,9 +186,46 @@ def _get_fqns(
                 fqn_obj_names.append(curr_obj_name)
         else:
             fqn_obj_names.append(curr_obj_name)
-            curr_obj = getattr(curr_obj, curr_obj_name)
+            if curr_obj_name == nn.modules.module._EXTRA_STATE_KEY_SUFFIX:
+                if i != len(obj_names) - 1:
+                    raise RuntimeError("Expect `_extra_state` to be the last obj name")
+            else:
+                curr_obj = getattr(curr_obj, curr_obj_name)
 
     return {".".join(fqn_obj_names).replace(_CHECKPOINT_PREFIX, "")}
+
+
+class _EXTRA_STATE:
+    pass
+
+
+def _iterate_valid_model_state(model):
+    visited_modules: Set[nn.Module] = set()
+
+    def recurse(module: nn.Module, curr_fqn: str) -> Generator:
+        visited_modules.add(module)
+
+        curr_fqn = f"{curr_fqn}." if curr_fqn else ""
+        for name, submodule in module.named_children():
+            if submodule in visited_modules:
+                continue
+            new_fqn = f"{curr_fqn}{name}"
+            yield from recurse(submodule, new_fqn)
+
+        for name, obj in chain(
+            module.named_buffers(recurse=False), module.named_parameters(recurse=False)
+        ):
+            new_fqn = f"{curr_fqn}{name}"
+            yield new_fqn, obj
+
+        if (
+            getattr(module.__class__, "get_extra_state", nn.Module.get_extra_state)
+            != nn.Module.get_extra_state
+        ):
+            new_fqn = f"{curr_fqn}{nn.modules.module._EXTRA_STATE_KEY_SUFFIX}"
+            yield new_fqn, _EXTRA_STATE()
+
+    yield from recurse(model, "")
 
 
 def _verify_options(
@@ -212,11 +250,13 @@ def _verify_options(
         Union[str, torch.Tensor], Union[Set[str], torch.Tensor]
     ] = {}
     all_fqns = set()
-    for name, param in chain(model.named_parameters(), model.named_buffers()):
+    for name, param in _iterate_valid_model_state(model):
         fqns = _get_fqns(model, name)
-        fqn_param_mapping[param] = fqns
+        if not isinstance(param, _EXTRA_STATE):
+            fqn_param_mapping[param] = fqns
         for fqn in fqns:
-            fqn_param_mapping[fqn] = param
+            if not isinstance(param, _EXTRA_STATE):
+                fqn_param_mapping[fqn] = param
             all_fqns.add(fqn)
 
     submodule_prefixes: Set[str] = set()
@@ -384,7 +424,7 @@ def _get_model_state_dict(
                 state_dict.pop(fqn)
 
     for key, p in list(state_dict.items()):
-        if p.is_meta:
+        if torch.is_tensor(p) and p.is_meta:
             state_dict.pop(key)
 
     if info.full_state_dict:
@@ -406,7 +446,7 @@ def _load_model_state_dict(
     if not info.handle_model or not state_dict:
         return _IncompatibleKeys({}, {})
 
-    for key, _ in chain(model.named_parameters(), model.named_buffers()):
+    for key, _ in _iterate_valid_model_state(model):
         fqns = _get_fqns(model, key)
         fqns_with_prefix = _get_fqns(
             model, key, skip_ddp_prefix=False, skip_compiler_prefix=False
