@@ -9,8 +9,10 @@
 # - `torch.nn.Parameter`
 # - `collections.Counter`
 # - `collections.OrderedDict`
-# Additionally, users can allowlist classes they have deemed as safe using
+# Additionally, users can use an allowlist for adding classes they have deemed as safe using
 # `_add_safe_globals()` (`torch.serialization.add_safe_globals`)
+# `_clear_safe_globals()` (`torch.serialization.clear_safe_globals`)
+# `_get_safe_globals()` (`torch.serialization.get_safe_globals`)
 
 # Based of https://github.com/python/cpython/blob/main/Lib/pickle.py
 # Expected to be useful for loading PyTorch model weights
@@ -219,7 +221,8 @@ class Unpickler:
                     elif module not in modules:
                         raise RuntimeError(
                             f"Found GLOBAL `{full_path}` instruction in the pickle file but `{full_path}` was "
-                            f"not in the pre-defined list of allowed globals. This is expected behavior if "
+                            f"not in the pre-defined list of allowed globals that are considered safe by the "
+                            "weights_only unpickler for rebuilding state_dicts. This is the expected behavior if "
                             f"`{full_path}` is a user-defined tensor subclass not defined in the `torch` package. "
                             f"If this is the case, we expect `{module}` to be present in `sys.modules` (i.e. it "
                             "must be imported in the current environment), but this was not the case. "

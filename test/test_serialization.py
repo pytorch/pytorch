@@ -4096,7 +4096,7 @@ class TestGetStateSubclass(torch.Tensor):
 class TestEmptySubclass(torch.Tensor):
     ...
 
-# ONLY use this for the subclass spoof test since we modify them
+# ONLY use SubclassSpoof subclasses for the subclass spoof tests since we modify them
 # Cannot define locally in test or pickle will fail.
 class TestEmptySubclassSpoof(TestEmptySubclass):
     ...
@@ -4345,7 +4345,7 @@ class TestSubclassSerialization(TestCase):
         Tests that weights_only load does not call any methods of the parent module
         that contains the tensor subclass.
 
-        We achieve this by overriding all methods of the module to raise a RuntimeError
+        We achieve this by overriding all methods of a module we add to sys.modules to raise a RuntimeError
         when called. We then try to unpickle a tensor subclass with weights_only=True and ensure that
         no RuntimeErrors are thrown.
         '''
