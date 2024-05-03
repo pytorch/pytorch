@@ -1,4 +1,3 @@
-#include <stdexcept>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -9,12 +8,11 @@
 #include <ATen/ops/_weight_int8pack_mm_native.h>
 #include <ATen/ops/empty.h>
 #endif
+#include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/OperationUtils.h>
 // For Metal3_1
 #include <ATen/native/mps/MPSGraphSonomaOps.h>
 #include <fmt/format.h>
-
-#include <Metal/MTLCaptureManager.h>
 
 namespace at::native {
 
@@ -89,7 +87,8 @@ static id<MTLLibrary> compileQuantizedOpsLibrary(id<MTLDevice> device) {
   MTLCompileOptions* options = [[MTLCompileOptions new] autorelease];
   [options setLanguageVersion:is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS) ? MTLLanguageVersion3_1
                                                                                       : MTLLanguageVersion2_3];
-  binaryLibrary = [device newLibraryWithSource:[NSString stringWithCString:METAL_QUANTIZED encoding:NSASCIIStringEncoding]
+  binaryLibrary = [device newLibraryWithSource:[NSString stringWithCString:METAL_QUANTIZED
+                                                                  encoding:NSASCIIStringEncoding]
                                        options:options
                                          error:&error];
   TORCH_CHECK(binaryLibrary, "Failed to create metal quantized library, error: ", [[error description] UTF8String]);
@@ -148,25 +147,15 @@ Tensor _weight_int4pack_mm_mps(const Tensor& A, const Tensor& B, int64_t qGroupS
   // A is sizes.x x sizes.y
   // B.T is sizes.z x sizes.y
   // C is sizes.x x sizes
-  std::array<uint32_t, 3> sizes = {static_cast<uint32_t>(M),
-                                   static_cast<uint32_t>(K),
-                                   static_cast<uint32_t>(N)};
+  std::array<uint32_t, 3> sizes = {static_cast<uint32_t>(M), static_cast<uint32_t>(K), static_cast<uint32_t>(N)};
   static bool firstCapture = false;
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
-      NSError *err = nil;
-      MTLCaptureManager *manager = [MTLCaptureManager sharedCaptureManager];
-      if (firstCapture) {
-        //mpsStream->synchronize(SyncType::COMMIT);
-        MTLCaptureDescriptor* captureDescriptor = [MTLCaptureDescriptor new];
-        captureDescriptor.captureObject = device;
-        captureDescriptor.destination = MTLCaptureDestinationGPUTraceDocument;
-        captureDescriptor.outputURL = [NSURL fileURLWithPath:@"int4packmm.gputrace"];
-        auto rc = [manager startCaptureWithDescriptor:captureDescriptor error:&err];
-        TORCH_CHECK(rc, "Failed to start capture, error :", [[err description] UTF8String]);
-      }
+      auto& profiler = getMPSProfiler();
+      if (profiler.isCaptureEnabled())
+        profiler.startCapture(__func__);
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      const std::string kernel =  fmt::format("int4pack_mm_{}_{}",qGroupSize, scalarToMetalTypeString(A.scalar_type()));
+      const std::string kernel = fmt::format("int4pack_mm_{}_{}", qGroupSize, scalarToMetalTypeString(A.scalar_type()));
       id<MTLComputePipelineState> quantizedPSO = quantizedPipelineState(device, kernel);
       [computeEncoder setComputePipelineState:quantizedPSO];
       mtl_setBuffer(computeEncoder, A, 0);
@@ -175,11 +164,9 @@ Tensor _weight_int4pack_mm_mps(const Tensor& A, const Tensor& B, int64_t qGroupS
       mtl_setBuffer(computeEncoder, C, 3);
       [computeEncoder setBytes:sizes.data() length:sizeof(uint32_t) * sizes.size() atIndex:4];
       mtl_dispatch1DJob(computeEncoder, quantizedPSO, C.numel());
-      if (firstCapture) {
-        mpsStream->synchronize(SyncType::COMMIT);
-        [manager stopCapture];
-        firstCapture = false;
-      }
+      mpsStream->synchronize(SyncType::COMMIT);
+      if (profiler.isCapturing())
+        profiler.stopCapture();
     }
   });
   return C;
