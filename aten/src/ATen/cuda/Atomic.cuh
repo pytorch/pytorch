@@ -447,9 +447,8 @@ __inline__ __device__ c10::complex<float> complex_max(c10::complex<float> a, c10
         __fmul_rn(b.imag(),b.imag())
       )
     );
-    return std::max<float>(a_magnitude, b_magnitude);
+    return (a_magnitude > b_magnitude) ? a : b;
   }
-
 }
 
 
@@ -537,7 +536,7 @@ __inline__ __device__ c10::complex<float> complex_min(c10::complex<float> a, c10
         __fmul_rn(b.imag(),b.imag())
       )
     );
-    return std::min<float>(a_magnitude, b_magnitude);
+    return (a_magnitude < b_magnitude) ? a : b;
   }
 }
 
