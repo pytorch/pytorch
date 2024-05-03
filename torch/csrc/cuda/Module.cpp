@@ -1453,32 +1453,6 @@ PyObject* THCPModule_cuda_tunableop_tuning_is_enabled(
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_cuda_tunableop_numerics_check_enable(
-    PyObject* _unused,
-    PyObject* arg) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(
-      THPUtils_checkBool(arg),
-      "cuda_tunableop_numerics_check_enable expects a bool, but got ",
-      THPUtils_typename(arg));
-  at::cuda::tunable::getTuningContext()->EnableNumericsCheck(
-      THPUtils_unpackBool(arg));
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-PyObject* THCPModule_cuda_tunableop_numerics_check_is_enabled(
-    PyObject* _unused,
-    PyObject* noarg) {
-  HANDLE_TH_ERRORS
-  if (at::cuda::tunable::getTuningContext()->IsNumericsCheckEnabled()) {
-    Py_RETURN_TRUE;
-  } else {
-    Py_RETURN_FALSE;
-  }
-  END_HANDLE_TH_ERRORS
-}
-
 PyObject* THCPModule_cuda_tunableop_write_file_on_exit(
     PyObject* _unused,
     PyObject* arg) {
@@ -1536,52 +1510,6 @@ PyObject* THCPModule_cuda_tunableop_get_max_tuning_iterations(
   HANDLE_TH_ERRORS
   return THPUtils_packInt32(
       at::cuda::tunable::getTuningContext()->GetMaxTuningIterations());
-  END_HANDLE_TH_ERRORS
-}
-
-PyObject* THCPModule_cuda_tunableop_set_max_warmup_duration(
-    PyObject* _unused,
-    PyObject* arg) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(
-      THPUtils_checkLong(arg),
-      "cuda_tunableop_set_max_warmup_duration expects an int, but got ",
-      THPUtils_typename(arg));
-  auto duration = static_cast<int>(THPUtils_unpackLong(arg));
-  at::cuda::tunable::getTuningContext()->SetMaxWarmupDurationMs(duration);
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-PyObject* THCPModule_cuda_tunableop_get_max_warmup_duration(
-    PyObject* _unused,
-    PyObject* noargs) {
-  HANDLE_TH_ERRORS
-  return THPUtils_packInt32(
-      at::cuda::tunable::getTuningContext()->GetMaxWarmupDurationMs());
-  END_HANDLE_TH_ERRORS
-}
-
-PyObject* THCPModule_cuda_tunableop_set_max_warmup_iterations(
-    PyObject* _unused,
-    PyObject* arg) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(
-      THPUtils_checkLong(arg),
-      "cuda_tunableop_set_max_warmup_iterations expects an int, but got ",
-      THPUtils_typename(arg));
-  auto iterations = static_cast<int>(THPUtils_unpackLong(arg));
-  at::cuda::tunable::getTuningContext()->SetMaxWarmupIterations(iterations);
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-PyObject* THCPModule_cuda_tunableop_get_max_warmup_iterations(
-    PyObject* _unused,
-    PyObject* noargs) {
-  HANDLE_TH_ERRORS
-  return THPUtils_packInt32(
-      at::cuda::tunable::getTuningContext()->GetMaxWarmupIterations());
   END_HANDLE_TH_ERRORS
 }
 
@@ -1742,55 +1670,6 @@ PyObject* THCPModule_cuda_tunableop_get_validators(
         outer_tuple.get(), validator_index++, inner_tuple.release());
   }
   return outer_tuple.release();
-  END_HANDLE_TH_ERRORS
-}
-
-PyObject* THCPModule_cuda_tunableop_icache_flush_enable(
-    PyObject* _unused,
-    PyObject* arg) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(
-      THPUtils_checkBool(arg),
-      "cuda_tunableop_icache_flush_enable expects a bool, but got ",
-      THPUtils_typename(arg));
-  at::cuda::tunable::getTuningContext()->EnableICacheFlush(
-      THPUtils_unpackBool(arg));
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-PyObject* THCPModule_cuda_tunableop_icache_flush_is_enabled(
-    PyObject* _unused,
-    PyObject* noarg) {
-  HANDLE_TH_ERRORS
-  if (at::cuda::tunable::getTuningContext()->IsICacheFlushEnabled()) {
-    Py_RETURN_TRUE;
-  } else {
-    Py_RETURN_FALSE;
-  }
-  END_HANDLE_TH_ERRORS
-}
-
-PyObject* THCPModule_cuda_tunableop_set_rotating_buffer_size(
-    PyObject* _unused,
-    PyObject* arg) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(
-      THPUtils_checkLong(arg),
-      "cuda_tunableop_set_rotating_buffer_size expects an int, but got ",
-      THPUtils_typename(arg));
-  auto size = static_cast<int>(THPUtils_unpackLong(arg));
-  at::cuda::tunable::getTuningContext()->SetRotatingBufferSize(size);
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-PyObject* THCPModule_cuda_tunableop_get_rotating_buffer_size(
-    PyObject* _unused,
-    PyObject* noargs) {
-  HANDLE_TH_ERRORS
-  return THPUtils_packInt32(
-      at::cuda::tunable::getTuningContext()->GetRotatingBufferSize());
   END_HANDLE_TH_ERRORS
 }
 
@@ -1987,14 +1866,6 @@ static struct PyMethodDef _THCPModule_methods[] = {
      THCPModule_cuda_tunableop_write_file_on_exit,
      METH_O,
      nullptr},
-    {"_cuda_tunableop_numerics_check_enable",
-     THCPModule_cuda_tunableop_numerics_check_enable,
-     METH_O,
-     nullptr},
-    {"_cuda_tunableop_numerics_check_is_enabled",
-     THCPModule_cuda_tunableop_numerics_check_is_enabled,
-     METH_NOARGS,
-     nullptr},
     {"_cuda_tunableop_set_max_tuning_duration",
      THCPModule_cuda_tunableop_set_max_tuning_duration,
      METH_O,
@@ -2009,22 +1880,6 @@ static struct PyMethodDef _THCPModule_methods[] = {
      nullptr},
     {"_cuda_tunableop_get_max_tuning_iterations",
      THCPModule_cuda_tunableop_get_max_tuning_iterations,
-     METH_NOARGS,
-     nullptr},
-    {"_cuda_tunableop_set_max_warmup_duration",
-     THCPModule_cuda_tunableop_set_max_warmup_duration,
-     METH_O,
-     nullptr},
-    {"_cuda_tunableop_get_max_warmup_duration",
-     THCPModule_cuda_tunableop_get_max_warmup_duration,
-     METH_NOARGS,
-     nullptr},
-    {"_cuda_tunableop_set_max_warmup_iterations",
-     THCPModule_cuda_tunableop_set_max_warmup_iterations,
-     METH_O,
-     nullptr},
-    {"_cuda_tunableop_get_max_warmup_iterations",
-     THCPModule_cuda_tunableop_get_max_warmup_iterations,
      METH_NOARGS,
      nullptr},
     {"_cuda_tunableop_set_filename",
@@ -2049,22 +1904,6 @@ static struct PyMethodDef _THCPModule_methods[] = {
      nullptr},
     {"_cuda_tunableop_get_validators",
      THCPModule_cuda_tunableop_get_validators,
-     METH_NOARGS,
-     nullptr},
-    {"_cuda_tunableop_icache_flush_enable",
-     THCPModule_cuda_tunableop_icache_flush_enable,
-     METH_O,
-     nullptr},
-    {"_cuda_tunableop_icache_flush_is_enabled",
-     THCPModule_cuda_tunableop_icache_flush_is_enabled,
-     METH_NOARGS,
-     nullptr},
-    {"_cuda_tunableop_set_rotating_buffer_size",
-     THCPModule_cuda_tunableop_set_rotating_buffer_size,
-     METH_O,
-     nullptr},
-    {"_cuda_tunableop_get_rotating_buffer_size",
-     THCPModule_cuda_tunableop_get_rotating_buffer_size,
      METH_NOARGS,
      nullptr},
     {nullptr}};

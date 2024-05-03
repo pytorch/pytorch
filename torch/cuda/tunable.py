@@ -73,19 +73,13 @@ completely silent, besides file output, unless there is a warning or error
 during its use. The verbose option is only available by setting the environment
 variable PYTORCH_TUNABLEOP_VEROBSE=1.
 
-A Note on Tuning Behavior, Warmup, and Cache Effects
-====================================================
+A Note on Tuning Behavior
+=========================
 
 Tuning an operator consists of iterating through the list or registered
 implementations and profiling each one. The profile is established by running a
 single implementation in a loop multiple times and taking the average execution
-time. There is also an optional warmup phase prior to tuning that can help with
-reaching stable power states by the hardware. During tuning of a workload the
-various hardware caches will more likely produce hits than when not tuning.
-There are options for flushing the instruction cache and rotate the input
-tensors which might help produce a more faithful profile of the tuned operator
-as if the operator were run within a larger workload instead of in a tight,
-repetitive loop.
+time.
 
 By default, each possible solution for a given operator will be run for either
 100 iterations or as many iterations that can be run within 30ms, whichever is
@@ -128,16 +122,10 @@ __all__ = [
     "is_enabled",
     "tuning_enable",
     "tuning_is_enabled",
-    "numerics_check_enable",
-    "numerics_check_is_enabled",
     "set_max_tuning_duration",
     "get_max_tuning_duration",
     "set_max_tuning_iterations",
     "get_max_tuning_iterations",
-    "set_max_warmup_duration",
-    "get_max_warmup_duration",
-    "set_max_warmup_iterations",
-    "get_max_warmup_iterations",
     "set_filename",
     "get_filename",
     "get_results",
@@ -145,8 +133,6 @@ __all__ = [
     "write_file_on_exit",
     "write_file",
     "read_file",
-    "icache_flush_enable",
-    "icache_flush_is_enabled",
     "set_rotating_buffer_size",
     "get_rotating_buffer_size",
 ]
@@ -176,20 +162,6 @@ def tuning_is_enabled() -> bool:
     return torch._C._cuda_tunableop_tuning_is_enabled()
 
 
-def numerics_check_enable(val: bool = True) -> None:
-    r"""Enable an accuracy check of all possible TunableOp solutions.
-
-    Compare the results of each possible solution against the default solution
-    and reject those with low accuracy.
-    """
-    torch._C._cuda_tunableop_numerics_check_enable(val)
-
-
-def numerics_check_is_enabled() -> bool:
-    r"""Returns whether to perform the numerics check."""
-    return torch._C._cuda_tunableop_numerics_check_is_enabled()
-
-
 def set_max_tuning_duration(duration: int) -> None:
     r"""Set max time in milliseconds to spend tuning a given solution.
 
@@ -216,34 +188,6 @@ def set_max_tuning_iterations(iterations: int) -> None:
 def get_max_tuning_iterations() -> int:
     r"""Get max iterations to spend tuning a given solution."""
     return torch._C._cuda_tunableop_get_max_tuning_iterations()
-
-
-def set_max_warmup_duration(duration: int) -> None:
-    r"""Set max time in milliseconds to spend warming up before tuning.
-
-    If both max warmup duration and iterations are set, the smaller of the two
-    will be honored. It is possible to disable warmup by running for 0ms.
-    """
-    torch._C._cuda_tunableop_set_max_warmup_duration(duration)
-
-
-def get_max_warmup_duration() -> int:
-    r"""Get max time to spend warmup up before tuning."""
-    return torch._C._cuda_tunableop_get_max_warmup_duration()
-
-
-def set_max_warmup_iterations(iterations: int) -> None:
-    r"""Set max number of iterations to spend warming up before tuning.
-
-    If both max warmup duration and iterations are set, the smaller of the two
-    will be honored. It is possible to disable warmup by running 0 iterations.
-    """
-    torch._C._cuda_tunableop_set_max_warmup_iterations(iterations)
-
-
-def get_max_warmup_iterations() -> int:
-    r"""Get max number of iterations to spend warming up before tuning."""
-    return torch._C._cuda_tunableop_get_max_warmup_iterations()
 
 
 def set_filename(filename: str, insert_device_ordinal: bool = False) -> None:
@@ -298,30 +242,3 @@ def read_file(filename: Optional[str] = None) -> bool:
     if filename is None:
         filename = get_filename()
     return torch._C._cuda_tunableop_read_file(filename)
-
-
-def icache_flush_enable(val: bool = True) -> None:
-    r"""Flush instruction cache before each tuning iteration.
-
-    Currently implemented for ROCm PyTorch only.
-    """
-    torch._C._cuda_tunableop_icache_flush_enable(val)
-
-
-def icache_flush_is_enabled() -> bool:
-    r"""Return whether instruction cache flush is enabled."""
-    return torch._C._cuda_tunableop_icache_flush_is_enabled()
-
-
-def set_rotating_buffer_size(size: int) -> None:
-    r"""Set size of buffer in MB to use during tuning.
-
-    Setting this to a value that matches your device's cache size will ensure
-    the cache is cold for each tuning iteration.
-    """
-    torch._C._cuda_tunableop_set_rotating_buffer_size(size)
-
-
-def get_rotating_buffer_size() -> int:
-    r"""Return the buffer size to use during tuning."""
-    return torch._C._cuda_tunableop_get_rotating_buffer_size()
