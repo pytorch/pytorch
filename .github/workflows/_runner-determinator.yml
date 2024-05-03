@@ -38,7 +38,7 @@ jobs:
           submodules: true
 
       - name: Install dependencies
-        run: python3 -m pip install urllib3==2.2.1 PyGithub==2.3.0
+        run: python3 -m pip install urllib3==1.26.18 PyGithub==2.3.0
 
       - name: Get the workflow type for the current user
         id: set-condition
