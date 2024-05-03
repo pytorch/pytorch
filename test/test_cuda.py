@@ -38,7 +38,11 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
 )
-from torch.testing._internal.common_optimizers import optim_db, optims
+from torch.testing._internal.common_optimizers import (
+    optim_db, 
+    optims,
+    _get_optim_inputs_including_global_cliquey_kwargs,
+    OptimizerErrorEnum)
 from torch.testing._internal.common_utils import (
     freeze_rng_state,
     gcIfJetson,
@@ -4744,6 +4748,19 @@ class TestCudaOptims(TestCase):
                 )
             ],
         }
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device,dtype,optim_info,
+                         skip=("differentiable",))
+        has_betas = any("betas" in error_inp.optimizer_error_input.kwargs 
+                        for error_inp in optim_info.optim_error_inputs_func(device="cpu",dtype=dtype))
+        for optim_input in all_optim_inputs:
+            kwargs = optim_input.kwargs
+            if "lr" in kwargs:
+                del kwargs["lr"]
+            kwargs["lr"]=0.1
+            if has_betas and optim_cls != torch.optim.Adamax:
+                kwargs["betas"] = (0.8,0.7)
+            print(optim_cls,kwargs)
+
         for kwargs in optKwargs[optim_cls]:
             for kwarg in kwargs:
                 with self.subTest(optimizer_ctor=optim_cls, kwargs=kwarg):
