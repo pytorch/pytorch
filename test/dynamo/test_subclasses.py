@@ -1495,10 +1495,6 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
                 or nt_view_name == "subclass_dense"
             ):
                 self.assertExpectedInline(guard_str, """Eq(s3 - 1, s0)""")
-            elif nt_view_name.startswith("base_is_nt_False_"):
-                # TODO: this is a "do I need to resize storage" guard,
-                # probably don't actually want to see this
-                self.assertExpectedInline(guard_str, """8*s1*s3 <= 8*s0*s1""")
             else:
                 self.assertExpectedInline(guard_str, """""")
             return gm
