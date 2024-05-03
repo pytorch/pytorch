@@ -144,16 +144,16 @@ Tensor _weight_int4pack_mm_mps(const Tensor& A, const Tensor& B, int64_t qGroupS
   auto C = at::empty({M, N}, A.options());
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* mpsStream = getCurrentMPSStream();
-  // A is sizes.x x sizes.y
-  // B.T is sizes.z x sizes.y
-  // C is sizes.x x sizes
   std::array<uint32_t, 3> sizes = {static_cast<uint32_t>(M), static_cast<uint32_t>(K), static_cast<uint32_t>(N)};
   static bool firstCapture = false;
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
+#if _CAPTURE_KERNEL
       auto& profiler = getMPSProfiler();
-      if (profiler.isCaptureEnabled())
+      if (profiler.isCaptureEnabled()) {
         profiler.startCapture(__func__, mpsStream);
+      }
+#endif
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
       const std::string kernel = fmt::format("int4pack_mm_{}_{}", qGroupSize, scalarToMetalTypeString(A.scalar_type()));
       id<MTLComputePipelineState> quantizedPSO = quantizedPipelineState(device, kernel);
@@ -164,8 +164,11 @@ Tensor _weight_int4pack_mm_mps(const Tensor& A, const Tensor& B, int64_t qGroupS
       mtl_setBuffer(computeEncoder, C, 3);
       [computeEncoder setBytes:sizes.data() length:sizeof(uint32_t) * sizes.size() atIndex:4];
       mtl_dispatch1DJob(computeEncoder, quantizedPSO, C.numel());
-      if (profiler.isCapturing())
+#if _CAPTURE_KERNEL
+      if (profiler.isCapturing()) {
         profiler.stopCapture(mpsStream);
+      }
+#endif
     }
   });
   return C;

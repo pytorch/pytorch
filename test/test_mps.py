@@ -9054,7 +9054,7 @@ class TestLinalgMPS(TestCaseMPS):
     @parametrize("m", [32, 64])
     @parametrize("k", [32, 64])
     @parametrize("n", [48, 64])
-    def test__int4_mm(self,  m, k, n):
+    def test__int4_mm(self, m, k, n):
         q_group = 32
         inner_k_tiles = 2
 
