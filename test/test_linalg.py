@@ -4485,22 +4485,13 @@ class TestLinalg(TestCase):
         assert torch.cuda.tunable.tuning_is_enabled() is False
         torch.cuda.tunable.tuning_enable(True)
         assert torch.cuda.tunable.tuning_is_enabled()
-        assert torch.cuda.tunable.numerics_check_is_enabled(), "TunableOp numeric check should be enabled by default"
-        torch.cuda.tunable.numerics_check_enable(False)
-        assert torch.cuda.tunable.numerics_check_is_enabled() is False
-        torch.cuda.tunable.numerics_check_enable(True)
-        assert torch.cuda.tunable.numerics_check_is_enabled()
         assert torch.cuda.tunable.get_max_tuning_duration() == 30
         assert torch.cuda.tunable.get_max_tuning_iterations() == 100
-        assert torch.cuda.tunable.get_max_warmup_duration() == 0
-        assert torch.cuda.tunable.get_max_warmup_iterations() == 0
 
         torch.cuda.tunable.enable()
         # set these to single iterations to keep it short but still exercise the code
         torch.cuda.tunable.set_max_tuning_duration(1)
         torch.cuda.tunable.set_max_tuning_iterations(1)
-        torch.cuda.tunable.set_max_warmup_duration(1)
-        torch.cuda.tunable.set_max_warmup_iterations(1)
 
         make_arg = partial(make_tensor, device=device, dtype=dtype)
 
@@ -4545,11 +4536,8 @@ class TestLinalg(TestCase):
         torch.cuda.tunable.set_filename(filename1)  # reset back to default filename for next unit test
         torch.cuda.tunable.set_max_tuning_duration(30)
         torch.cuda.tunable.set_max_tuning_iterations(100)
-        torch.cuda.tunable.set_max_warmup_duration(0)
-        torch.cuda.tunable.set_max_warmup_iterations(0)
         assert torch.cuda.tunable.is_enabled() is False, "TunableOp should be off after resetting"
         assert torch.cuda.tunable.get_max_tuning_iterations() == 100
-        assert torch.cuda.tunable.get_max_warmup_iterations() == 0
 
     @dtypes(torch.float, torch.complex64)
     def test_matmul_out_kernel_errors_with_autograd(self, device, dtype):
