@@ -2626,17 +2626,20 @@ def _nvcc_compiler_options() -> List[str]:
 
 def _ck_include_paths() -> List[str]:
     from torch.utils import cpp_extension
-
-    return [f"{cpp_extension._join_rocm_home('include')}",
-            f"{os.path.join(config.rocm.ck_dir, 'include')}"]
+    rocm_include = os.path.join(config.rocm.rocm_home, 'include') if config.rocm.rocm_home else f"{cpp_extension._join_rocm_home('include')}"
+    ck_include = os.path.join(config.rocm.ck_dir, 'include')
+    return [rocm_include, ck_include]
 
 
 def _hip_lib_options() -> List[str]:
     from torch.utils import cpp_extension
 
+    rocm_lib_dir = os.path.join(config.rocm.rocm_home, 'include') if config.rocm.rocm_home else cpp_extension._join_rocm_home('lib')
+    hip_lib_dir = os.path.join(config.rocm.rocm_home, 'hip', 'lib') if config.rocm.rocm_home else cpp_extension._join_rocm_home('hip', 'lib')
+
     return [
-        f"-L{cpp_extension._join_rocm_home('lib')}",
-        f"-L{cpp_extension._join_rocm_home('hip', 'lib')}",
+        f"-L{rocm_lib_dir}",
+        f"-L{hip_lib_dir}",
         "-lamdhip64",
     ]
 
