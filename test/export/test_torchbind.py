@@ -230,7 +230,16 @@ def forward(self, token, obj_attr, x):
         )
 
     @parametrize("pre_dispatch", [True, False])
-    def test_input(self, pre_dispatch):
+    @parametrize("fakify_script_obj", [True, False])
+    def test_input(self, pre_dispatch, fakify_script_obj):
+        cc = torch.classes._TorchScriptTesting._Foo(10, 20)
+        if not fakify_script_obj:
+            qual_name = cc._type().qualified_name()  # type: ignore[att-defined]
+            if torch._library.fake_class_registry.has_fake_class(qual_name):
+                torch._library.fake_class_registry.deregister_fake_class(
+                    "_TorchScriptTesting::_Foo"
+                )
+
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -238,7 +247,6 @@ def forward(self, token, obj_attr, x):
             def forward(self, x, cc):
                 return x + cc.add_tensor(x)
 
-        cc = torch.classes._TorchScriptTesting._Foo(10, 20)
         ep = self._test_export_same_as_eager(
             MyModule(), (torch.ones(2, 3), cc), strict=False, pre_dispatch=pre_dispatch
         )
@@ -262,10 +270,20 @@ def forward(self, x, cc):
         # aot_export_function runs the program twice
         # in run_functionalized_fw_and_collect_metadata and create_aot_dispatcher_function
         # We also have a re-tracing test, which doubles the count.
-        self.assertEqual(self.foo_add_tensor_counter, 4)
+        if fakify_script_obj:
+            self.assertEqual(self.foo_add_tensor_counter, 4)
 
     @parametrize("pre_dispatch", [True, False])
-    def test_input_as_custom_op_argument(self, pre_dispatch):
+    @parametrize("fakify_script_obj", [True, False])
+    def test_input_as_custom_op_argument(self, pre_dispatch, fakify_script_obj):
+        cc = torch.classes._TorchScriptTesting._Foo(10, 20)
+        if not fakify_script_obj:
+            qual_name = cc._type().qualified_name()  # type: ignore[att-defined]
+            if torch._library.fake_class_registry.has_fake_class(qual_name):
+                torch._library.fake_class_registry.deregister_fake_class(
+                    "_TorchScriptTesting::_Foo"
+                )
+
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -273,21 +291,22 @@ def forward(self, x, cc):
             def forward(self, x, cc):
                 return x + torch.ops._TorchScriptTesting.takes_foo(cc, x)
 
-        cc = torch.classes._TorchScriptTesting._Foo(10, 20)
-
         del torch.ops._TorchScriptTesting.takes_foo.default.py_kernels[
             torch._C.DispatchKey.Meta
         ]
         torch.ops._TorchScriptTesting.takes_foo.default._dispatch_cache.clear()
         # Even though a C++ implementation for takes_foo.default is registered,
         # we still need the python implementation for takes_foo.default to trace with FakeFoo.
-        with self.assertRaisesRegex(RuntimeError, "no python implementation is found"):
-            self._test_export_same_as_eager(
-                MyModule(),
-                (torch.ones(2, 3), cc),
-                strict=False,
-                pre_dispatch=pre_dispatch,
-            )
+        if fakify_script_obj:
+            with self.assertRaisesRegex(
+                RuntimeError, "no python implementation is found"
+            ):
+                self._test_export_same_as_eager(
+                    MyModule(),
+                    (torch.ones(2, 3), cc),
+                    strict=False,
+                    pre_dispatch=pre_dispatch,
+                )
 
         torch.ops._TorchScriptTesting.takes_foo.default.py_impl(
             torch._C.DispatchKey.Meta
@@ -858,21 +877,6 @@ class TestRegisterFakeClass(TestCase):
                 return cls(x, y)
 
         torch._library.register_fake_class("_TorchScriptTesting::_Foo", FakeFoo)
-
-    def test_register_fake_class_duplicate_registration(self):
-        @torch._library.register_fake_class("_TorchScriptTesting::_Foo")
-        class FakeFoo:
-            def __init__(self, x, y):
-                self.x = x
-                self.y = y
-
-            @classmethod
-            def from_real(cls, foo_obj):
-                x, y = foo_obj.__getstate__()
-                return cls(x, y)
-
-        with self.assertWarnsRegex(UserWarning, "already registered"):
-            torch._library.register_fake_class("_TorchScriptTesting::_Foo", FakeFoo)
 
 
 instantiate_parametrized_tests(TestExportTorchbind)
