@@ -22,6 +22,10 @@ static const char* METAL_QUANTIZED = R"BINARY_QUANTIZED(
 #include <metal_stdlib>
 using namespace metal;
 
+// A is sizes.x x sizes.y
+// B.T is sizes.z x sizes.y
+// C is sizes.x x sizes.z
+
 template<typename T, unsigned groupSize>
 kernel void int4pack_mm(
     constant T                 * A              [[buffer(0)]],
@@ -30,24 +34,25 @@ kernel void int4pack_mm(
     device   T                 * outputData     [[buffer(3)]],
     constant uint3             & sizes          [[buffer(4)]],
     uint                         thread_index   [[thread_position_in_grid]]) {
-    const uint lda = sizes.y;
-    const uint ldb = groupSize;
-    const uint ldc = sizes.x;
-    const uint m = thread_index / sizes.x;
-    const uint n = thread_index % sizes.x;
-    if (n >= sizes.x || m >= sizes.z) {
-        return;
-    }
-    const uint32_t n_block = sizes.y / groupSize;
+    const uint lda = sizes.x;
+    const uint ldc = sizes.z;
+    const uint m = thread_index / sizes.z; // 0..sizes.x-1
+    const uint n = thread_index % sizes.z; // 0..sizes.z-1
+    const uint nb = n / 32;
+    const uint ldb = min(32U,  sizes.z - nb * 32);
+    const uint32_t k_block = (sizes.y + groupSize - 1) / groupSize;
+    constant T *A_ptr = A + m * lda;
+    constant uchar *B_ptr = B + (nb * sizes.y / 2);
+
     float rc = 0.0;
     uint k = 0;
-    for (uint32_t kb = 0; kb < n_block ; kb ++) {
+    for (uint32_t kb = 0; kb < k_block ; kb ++) {
       const T scale = scalesAndZeros[(kb * ldc + n) * 2 + 0];
       const T zero = scalesAndZeros[(kb * ldc + n) * 2 + 1] - scale * T(8);
-      for(uint idx = 0; idx < groupSize; idx++, k++) {
-        const auto a_val = float(A[m * lda + k]);
-        uchar b_val = B[(k * ldb + n)/2];
-        b_val = (n & 1) == 0 ? (b_val >> 4) & 0x0f : b_val & 0x0f;
+      for(uint idx = 0; idx < groupSize && k < sizes.y; idx++, k++) {
+        const auto a_val = float(A_ptr[k]);
+        uchar b_val = B_ptr[(k * ldb + (n % 32))/2];
+        b_val = (n & 1) == 0 ? b_val & 0x0f : (b_val >> 4);
         rc += a_val * float(scale * T(b_val) + zero);
       }
     }
@@ -138,6 +143,9 @@ Tensor _weight_int4pack_mm_mps(const Tensor& A, const Tensor& B, int64_t qGroupS
   auto C = at::empty({M, N}, A.options());
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* mpsStream = getCurrentMPSStream();
+  // A is sizes.x x sizes.y
+  // B.T is sizes.z x sizes.y
+  // C is sizes.x x sizes
   std::array<uint32_t, 3> sizes = {static_cast<uint32_t>(M),
                                    static_cast<uint32_t>(K),
                                    static_cast<uint32_t>(N)};
