@@ -32,6 +32,7 @@
 #include <ATen/ops/mm_native.h>
 #include <ATen/ops/mul.h>
 #include <ATen/ops/relu.h>
+#include <ATen/ops/ones.h>
 #include <ATen/ops/scalar_tensor_native.h>
 #include <ATen/ops/vdot_native.h>
 #endif
@@ -988,6 +989,10 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   else
 #endif
   {
+#if defined(USE_ROCM)
+    auto dummy_options = TensorOptions().dtype(kFloat).device(kCUDA);
+    auto dummy_scale = at::ones(1, dummy_options);
+#endif
     at::cuda::blas::scaled_gemm(
         args.transa,
         args.transb,
@@ -1005,7 +1010,11 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
         bias ? bias->data_ptr(): nullptr,
         bias ? bias->scalar_type() : isFloat8Type(out_dtype_) ? at::ScalarType::Half : out_dtype_,
         args.result->data_ptr(),
+#if !defined(USE_ROCM)
         scale_result ? scale_result->data_ptr() : nullptr,
+#else
+        scale_result ? scale_result->data_ptr() : dummy_scale.data_ptr(),
+#endif
         args.result_ld,
         out_dtype_,
         amax.data_ptr(),
