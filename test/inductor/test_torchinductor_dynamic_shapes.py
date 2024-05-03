@@ -780,7 +780,9 @@ class TestInductorDynamic(TestCase):
         @torch.compile(fullgraph=True, dynamic=True)
         def f(x):
             a = x.item()
-            torch._constrain_as_size(a, min=1, max=10)
+            torch._check_is_size(a)
+            torch._check(a >= 1)
+            torch._check(a <= 10)
             return torch.ones(a, a)
 
         f(torch.tensor([5], device=device))

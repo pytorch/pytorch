@@ -1677,7 +1677,7 @@ class TestOptimRenewed(TestCase):
                 optimizers.append(optimizer)
         self._compare_between(inpts, models, optimizers)
 
-    @onlyCPU
+    @onlyNativeDeviceTypes
     @optims([optim for optim in optim_db if "fused" in optim.supported_impls], dtypes=[torch.float32])
     def test_grad_scaling_autocast_fused_optimizers(self, device, dtype, optim_info):
         # This ut is from test_cuda.py test_grad_scaling_autocast_fused_optimizers
@@ -1689,11 +1689,13 @@ class TestOptimRenewed(TestCase):
         optim_cls = optim_info.optim_cls
         for optim_input in optim_inputs:
             kwargs = optim_input.kwargs
+            kwargs["fused"] = True
             for _separate_unscale in (True, False):
                 self._grad_scaling_autocast_fused_optimizers(
-                    optimizer_ctor=optim_cls, optimizer_kwargs=kwargs, separate_unscale=_separate_unscale)
+                    device=device, optimizer_ctor=optim_cls, optimizer_kwargs=kwargs, separate_unscale=_separate_unscale)
 
-    def _grad_scaling_autocast_fused_optimizers(self, optimizer_ctor, optimizer_kwargs, separate_unscale):
+    def _grad_scaling_autocast_fused_optimizers(self, device, optimizer_ctor, optimizer_kwargs, separate_unscale):
+        torch.manual_seed(20)
         (
             mod_control, mod_scaling, opt_control, opt_scaling, data, loss_fn, _,
         ) = _create_scaling_case(optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs, device='cpu')
@@ -1704,30 +1706,35 @@ class TestOptimRenewed(TestCase):
             kwargs['lr'] = 1.0
         opt_control = optimizer_ctor(mod_control.parameters(), **kwargs)
 
-        scaler = torch.cpu.amp.GradScaler(init_scale=128.0)
+        scaler_scaling = torch.amp.GradScaler(device, init_scale=128.0)
+        scaler_control = torch.amp.GradScaler(device, init_scale=128.0)
+        tracker = TensorTracker()
         for input, target in data:
             opt_control.zero_grad()
-            with torch.autocast('cpu', dtype=torch.half):
+            with torch.autocast(device_type=device, dtype=torch.half):
                 output_control = mod_control(input)
                 loss_control = loss_fn(output_control, target)
-            scaler.scale(loss_control).backward()
-            scaler.step(opt_control)
-            scaler.update()
+            scaler_control.scale(loss_control).backward()
+            scaler_control.step(opt_control)
+            scaler_control.update()
 
             opt_scaling.zero_grad()
-            with torch.autocast('cpu', dtype=torch.half):
+            with torch.autocast(device_type=device, dtype=torch.half):
                 output_scaling = mod_scaling(input)
                 loss_scaling = loss_fn(output_scaling, target)
-            scaler.scale(loss_scaling).backward()
+            scaler_scaling.scale(loss_scaling).backward()
             if separate_unscale:
-                scaler.unscale_(opt_scaling)
-            scaler.step(opt_scaling)
-            scaler.update()
+                scaler_scaling.unscale_(opt_scaling)
+            scaler_scaling.step(opt_scaling)
+            scaler_scaling.update()
 
-            self.assertEqual(loss_control, loss_scaling,)
+            tracker.add(loss_control)
+            tracker.pop_check_set(loss_scaling, self)
             for param_control, param_scaling in zip(mod_control.parameters(), mod_scaling.parameters()):
-                self.assertEqual(param_control.grad, param_scaling.grad,)
-                self.assertEqual(param_control, param_scaling,)
+                tracker.add(param_control.grad)
+                tracker.pop_check_set(param_scaling.grad, self)
+                tracker.add(param_control)
+                tracker.pop_check_set(param_scaling, self)
 
                 state_control, state_scaling = opt_control.state[param_control], opt_scaling.state[param_scaling]
 
@@ -1735,7 +1742,8 @@ class TestOptimRenewed(TestCase):
                     actual = state_scaling[k]
                     if k == "step":
                         actual = actual.squeeze()
-                    self.assertEqual(state_control[k], actual,)
+                    tracker.add(state_control[k])
+                    tracker.pop_check_set(actual, self)
 
     @onlyCUDA
     @optims([o for o in optim_db if "foreach" in o.supported_impls], dtypes=[torch.float32])
