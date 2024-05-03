@@ -2714,6 +2714,7 @@ class ForeachFuncInfo(OpInfo):
     backward_requires_result: bool = False
 
     def __post_init__(self):
+        super().__post_init__()
         (
             foreach_method,
             foreach_method_inplace,
