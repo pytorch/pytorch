@@ -31,7 +31,7 @@ PROTOCOL_VERSION = 1001
 STORAGE_KEY_SEPARATOR = ','
 
 FILE_LIKE: TypeAlias = Union[str, os.PathLike, BinaryIO, IO[bytes]]
-MAP_LOCATION: TypeAlias = Optional[Union[Callable[[torch.Storage, str], torch.Storage], torch.device, str, Dict[str, str]]]
+MAP_LOCATION: TypeAlias = Optional[Union[Callable[[Storage, str], Storage], torch.device, str, Dict[str, str]]]
 STORAGE: TypeAlias = Union[Storage, torch.storage.TypedStorage, torch.UntypedStorage]
 
 
