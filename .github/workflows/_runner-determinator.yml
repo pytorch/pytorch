@@ -47,9 +47,9 @@ jobs:
           echo "Current branch is '$curr_branch'"
 
           WORKFLOW_TYPE="$(python3 .github/scripts/get_workflow_type.py \
-            --github-token $GITHUB_TOKEN \
-            --github-issue $ISSUE_NUMBER \
-            --github-branch $curr_branch \
-            --github-user $USERNAME)"
+            --github-token "$GITHUB_TOKEN" \
+            --github-issue "$ISSUE_NUMBER" \
+            --github-branch "$curr_branch" \
+            --github-user "$USERNAME")"
           echo "${WORKFLOW_TYPE}"
           echo "workflow-type=$WORKFLOW_TYPE" >> "$GITHUB_OUTPUT"
