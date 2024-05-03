@@ -9,9 +9,9 @@ from torch.distributed._tensor import DeviceMesh, DTensor
 
 from torch.distributed._tensor.debug.comm_mode import CommDebugMode
 from torch.distributed._tensor.placement_types import Shard
+from torch.testing._internal.common_distributed import requires_nccl
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import MLPModule
-from torch.testing._internal.common_distributed import requires_nccl
 from torch.testing._internal.distributed.fake_pg import FakeStore
 
 c10d_functional = torch.ops.c10d_functional
