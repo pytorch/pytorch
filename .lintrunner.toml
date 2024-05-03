@@ -1622,7 +1622,6 @@ exclude_patterns = [
     'torch/functional.py',
     'torch/futures/__init__.py',
     'torch/fx/__init__.py',
-    'torch/fx/_compatibility.py',
     'torch/fx/_symbolic_trace.py',
     'torch/fx/annotate.py',
     'torch/fx/config.py',
