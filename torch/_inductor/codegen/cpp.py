@@ -3137,6 +3137,25 @@ class CppKernelDispatcher(CppKernel):
             )
         elif len(self.tiling_ranges) == 2:
             # generate 2-d tiling condition
+            if self.tiling_ranges[0] == 0:
+                self.loops[0].steps = 1
+                self.loops[1].steps = 1
+                self.split = False
+                return
+
+            if self.tiling_ranges[1] == 0:
+                self.loops[0].steps = 1
+                self.vec_condition.writeline(
+                    f"if ({self.itervars[0]} < {cexpr_index(self.tiling_ranges[0])} && "
+                    + f"{self.itervars[1]} >= {cexpr_index(self.tiling_ranges[1])})"
+                )
+                self.scalar_condition.writeline(
+                    f"if ({self.itervars[0]} >= {cexpr_index(self.tiling_ranges[0])} && "
+                    + f"{self.itervars[1]} == 0)"
+                )
+                return
+            
+            
             self.tile2d_condition.writeline(
                 f"if ({self.itervars[0]} < {cexpr_index(self.tiling_ranges[0])} && "
                 + f"{self.itervars[1]} < {cexpr_index(self.tiling_ranges[1])})"
@@ -3224,7 +3243,7 @@ class CppKernelDispatcher(CppKernel):
         if self.scalar_kernel:
             if not self.split or self.tiling_ranges[0] == 0:
                 self.gen_kernel(self.scalar_kernel, code)
-            elif self.split and self.tiling_ranges[0] == self.sizes[0]:
+            elif self.split and self.tiling_ranges[0] == self.sizes[0] and len(self.sizes) == 1:
                 return
             else:
                 code.splice(self.scalar_condition)
