@@ -176,3 +176,16 @@ Note that since we split our model into three stages, we must run this script wi
 .. code-block:: bash
 
   torchrun --nproc_per_node=3 example.py
+
+Microbatch Utilities
+====================
+
+.. automodule:: torch.distributed.pipelining.microbatch
+
+.. currentmodule:: torch.distributed.pipelining.microbatch
+
+.. autoclass:: TensorChunkSpec
+
+.. autofunction:: split_args_kwargs_into_chunks
+
+.. autofunction:: merge_chunks

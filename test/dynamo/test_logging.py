@@ -710,6 +710,7 @@ exclusions = {
     "not_implemented",
     "trace_source",
     "trace_call",
+    "trace_bytecode",
     "custom_format_test_artifact",
     "onnx",
     "onnx_diagnostics",

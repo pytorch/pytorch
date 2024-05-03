@@ -434,7 +434,7 @@ static void cumulative_op_impl(const Tensor& self,
 
   // issue #103810551: cumsum / cumprod are broken for int8, int16 and as chances for overflow are pretty high, cast to
   // int32 fixed in macOS 13.3
-  bool castInputData = (isIntegralType(input.scalar_type(), false) && input.scalar_type() != ScalarType::Int &&
+  bool castInputData = (isIntegralType(input.scalar_type(), true) && input.scalar_type() != ScalarType::Int &&
                         input.scalar_type() != ScalarType::Long);
 
   TORCH_CHECK(macOS13_3_plus || input.scalar_type() != ScalarType::Long,
