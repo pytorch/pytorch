@@ -907,7 +907,7 @@ def mps_ops_modifier(ops):
             'stft': None,
             # Error in TestConsistencyCPU.test_output_match_isin_cpu_int32,
             # not reproducible in later OS. Added assert to op if used in < 14.0
-            'isin': None,
+            'isin': [torch.int32],
         })
 
     UNDEFINED_XFAILLIST = {
