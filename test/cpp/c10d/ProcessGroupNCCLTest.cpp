@@ -840,7 +840,7 @@ TEST_F(ProcessGroupNCCLTest, testSplittingCommunicator) {
   multiThreadRun(testSplittingCommunicator);
 }
 
-#ifdef IS_NCCL_EXP
+#ifdef IS_NCCLX
 TEST_F(ProcessGroupNCCLTest, testSparseAllreduce) {
   if (skipTest()) {
     return;
