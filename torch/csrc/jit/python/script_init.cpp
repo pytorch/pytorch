@@ -974,7 +974,10 @@ void initJitScriptBindings(PyObject* module) {
           [mm_name](const Object& self, py::args args, py::kwargs kwargs) {
             auto method = self.find_method(mm_name);
             if (!method) {
-              std::string msg = fmt::format("'{}' is not implemented for {}", mm_name, self.type()->str());
+              std::string msg = fmt::format(
+                  "'{}' is not implemented for {}",
+                  mm_name,
+                  self.type()->str());
               throw c10::NotImplementedError(msg);
             }
             return invokeScriptMethodFromPython(
