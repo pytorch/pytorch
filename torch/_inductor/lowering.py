@@ -5711,6 +5711,8 @@ def with_effects(token, op, *args, **kwargs):
 
 
 try:
+    import torch.distributed._functional_collectives
+
     _c10d_functional = torch.ops._c10d_functional
 
     @register_lowering(_c10d_functional.all_reduce)
