@@ -23,7 +23,6 @@ from .utils import (
     VarRanges,
 )
 from .virtualized import OpsHandler, ReductionType, V
-from torch._inductor import ir
 
 log = logging.getLogger(__name__)
 is_indirect = re.compile(r"indirect|tmp").search
@@ -64,6 +63,12 @@ class MemoryDep(Dep):
     def __repr__(self):
         return f"MemoryDep({self.name!r}, {self.index}, {self.ranges})"
 
+    def get_offset(self):
+        """
+        Return the offset by setting every variable to be 0.
+        """
+        return sympy_subs(self.index, {v: 0 for v in self.var_names})
+
     def normalize_with_stride_order(self, prefix="x"):
         r"""
         Used to decide if two MemoryDep does not equal due to different loop orders.
@@ -71,10 +76,12 @@ class MemoryDep(Dep):
         both and check if they are equal after that. If yes, then the mismatch is
         caused by different loop orders.
         """
+        # import here to avoid circular import
+        from torch._inductor import ir
         strides = V.graph.sizevars.stride_hints(self.index, self.var_names)
 
         # pick a loop order with stride ordered decreasingly
-        order = list(sorted(range(len(strides)), key=strides.__getitem__, reverse=True))
+        order = sorted(range(len(strides)), key=strides.__getitem__, reverse=True)
         stride_reorder = ir.same_reorder(order)
         sizes = self.size
         var_names = self.var_names
@@ -85,19 +92,23 @@ class MemoryDep(Dep):
         new_simplified_sizes, reindex, prune = V.graph.sizevars._simplify_loops(
             new_reordered_var_names,
             new_reordered_sizes,
-            index_prevent_reordering([self.index], new_reordered_var_names, new_reordered_sizes),
+            index_prevent_reordering(
+                [self.index], new_reordered_var_names, new_reordered_sizes
+            ),
         )
 
         # now let's create new symbols with the passed in prefix
         var_ranges, add_var = var_builder(prefix)
-        replacement = dict(zip(new_reordered_var_names, reindex([add_var(x) for x in new_simplified_sizes])))
+        replacement = dict(
+            zip(
+                new_reordered_var_names,
+                reindex([add_var(x) for x in new_simplified_sizes]),
+            )
+        )
         new_index = sympy_subs(sympy.expand(self.index), replacement)
 
         out = MemoryDep(
-            self.name,
-            new_index,
-            list(var_ranges.keys()),
-            list(var_ranges.values())
+            self.name, new_index, list(var_ranges.keys()), list(var_ranges.values())
         )
         return out
 
@@ -105,7 +116,6 @@ class MemoryDep(Dep):
     def ranges(self) -> Dict[sympy.Symbol, sympy.Expr]:
         """{c0: 128, c1: 512, ...}"""
         return dict(zip(self.var_names, self.size))
-
 
     def get_numel(self) -> sympy.Expr:
         if self.is_indirect():
