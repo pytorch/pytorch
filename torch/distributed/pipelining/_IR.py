@@ -303,7 +303,7 @@ def _pipe_split():
     return None
 
 
-@torch.library.impl_abstract("pippy::_pipe_split")
+@torch.library.impl_abstract("pippy::_pipe_split")  # type: ignore[no-redef]
 def _pipe_split():  # noqa: F811
     return None
 
@@ -324,12 +324,12 @@ def pipe_split():
     no-op if your annotated module is run eagerly.
 
     Example:
-    def forward(self, x):
-        x = torch.mm(x, self.mm_param)
-        x = torch.relu(x)
-        pipe_split()
-        x = self.lin(x)
-        return x
+    >>> def forward(self, x):
+    >>>     x = torch.mm(x, self.mm_param)
+    >>>     x = torch.relu(x)
+    >>>     pipe_split()
+    >>>     x = self.lin(x)
+    >>>     return x
 
     The above example will be split into two stages.
     """
@@ -683,7 +683,7 @@ class Pipe(QualnameMapMixin, torch.nn.Module):
 
         if split_policy is not None:
             logger.info("Auto-splitting model")
-            traced = split_policy(traced)
+            traced = split_policy(traced)  # type: ignore[arg-type]
 
         if PIPPY_VERBOSITY == "DEBUG":
             logger.debug("Traced original model:")
@@ -1353,9 +1353,9 @@ def pipeline(
 class ArgsChunkSpec:
     """
     Example:
-    # The numbers here are tensor chunking dimensions for each positional argument (3 of them)
-    with ArgsChunkSpec((0, 0, 1)):
-        pipe = pipeline(model, num_chunks, example_args)
+    >>> # The numbers here are tensor chunking dimensions for each positional argument (3 of them)
+    >>> with ArgsChunkSpec((0, 0, 1)):
+    >>>     pipe = pipeline(model, num_chunks, example_args)
     """
 
     def __init__(
@@ -1381,9 +1381,9 @@ class ArgsChunkSpec:
 class KwargsChunkSpec:
     """
     Example:
-    # Chunk dimension 0 for the "id" argument, 1 for the "mask" argument
-    with KwargsChunkSpec({"id": 0, "mask": 1}):
-        pipe = pipeline(model, num_chunks, (), example_kwargs)
+    >>> # Chunk dimension 0 for the "id" argument, 1 for the "mask" argument
+    >>> with KwargsChunkSpec({"id": 0, "mask": 1}):
+    >>>     pipe = pipeline(model, num_chunks, (), example_kwargs)
     """
 
     def __init__(
