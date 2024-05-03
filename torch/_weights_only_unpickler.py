@@ -219,6 +219,7 @@ class Unpickler:
                     if module == "__builtin__":
                         raise RuntimeError(f"Unsupported class {full_path}")
                     elif module not in modules:
+                        # TODO: add a link here to a doc that explains to users what we mean by trust
                         raise RuntimeError(
                             f"Found GLOBAL `{full_path}` instruction in the pickle file but `{full_path}` was "
                             f"not in the pre-defined list of allowed globals that are considered safe by the "
