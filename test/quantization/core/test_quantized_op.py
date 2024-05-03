@@ -1391,6 +1391,7 @@ class TestQuantizedOps(TestCase):
            padding=st.integers(0, 2),
            ceil_mode=st.booleans())
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
+    @unittest.skipIf(torch.backends.cudnn.version() <= 90100, "cuDNN maxpool2d mishandles -128 before v90100")
     def test_max_pool2d_cudnn(self, X, kernel, stride, dilation, padding, ceil_mode):
         X, (scale, zero_point, torch_type) = X
         assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
