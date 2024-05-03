@@ -36,7 +36,7 @@ kernel void int4pack_mm(
     device   T                 * outputData     [[buffer(3)]],
     constant uint3             & sizes          [[buffer(4)]],
     uint                         thread_index   [[thread_position_in_grid]]) {
-    const uint lda = sizes.x;
+    const uint lda = sizes.y;
     const uint ldc = sizes.z;
     const uint m = thread_index / sizes.z; // 0..sizes.x-1
     const uint n = thread_index % sizes.z; // 0..sizes.z-1
@@ -44,7 +44,7 @@ kernel void int4pack_mm(
     const uint ldb = min(32U,  sizes.z - nb * 32);
     const uint32_t k_block = (sizes.y + groupSize - 1) / groupSize;
     constant T *A_ptr = A + m * lda;
-    constant uchar *B_ptr = B + (nb * sizes.y / 2);
+    constant uchar *B_ptr = B + (nb * 16 * sizes.y);
 
     float rc = 0.0;
     uint k = 0;
