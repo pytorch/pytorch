@@ -1,9 +1,15 @@
 name: inductor-micro-benchmark
 
 on:
+  schedule:
+    - cron: 0 7 * * *
   push:
     tags:
       - ciflow/inductor-micro-benchmark/*
+  # TODO: The pull_request trigger can be removed before landing the change. This is for testing the initial version of the workflow
+  pull_request:
+    paths:
+      - .github/workflows/inductor-micro-benchmark.yml
   workflow_dispatch:
 
 
@@ -14,7 +20,7 @@ concurrency:
 permissions: read-all
 
 jobs:
-  linux-focal-cuda12_1-py3_10-gcc9-inductor-build:
+  linux-focal-cuda12_1-py3_10-gcc9-inductor-micro-benchmark-build:
     name: cuda12.1-py3.10-gcc9-sm80
     uses: ./.github/workflows/_linux-build.yml
     with:
@@ -23,18 +29,16 @@ jobs:
       cuda-arch-list: '8.0'
       test-matrix: |
         { include: [
-          { config: "inductor-micro-benchmark", shard: 1, num_shards: 1, runner: "linux.gcp.a100.large" },
+          { config: "inductor-micro-benchmark", shard: 1, num_shards: 1, runner: "linux.gcp.a100" },
         ]}
 
-  linux-focal-cuda12_1-py3_10-gcc9-inductor-test-nightly:
+  linux-focal-cuda12_1-py3_10-gcc9-inductor-micro-benchmark-test:
     name: cuda12.1-py3.10-gcc9-sm80
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-focal-cuda12_1-py3_10-gcc9-inductor-build
-    if: github.event.schedule == '0 7 * * 1-6'
+    needs: linux-focal-cuda12_1-py3_10-gcc9-inductor-micro-benchmark-build
     with:
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm80
-      dashboard-tag: inductor-micro-benchmark-a100
-      docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.test-matrix }}
+      docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-micro-benchmark-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-micro-benchmark-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
       timeout-minutes: 720
