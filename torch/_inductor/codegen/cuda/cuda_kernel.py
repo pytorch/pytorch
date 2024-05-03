@@ -1,7 +1,6 @@
 import logging
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
-from ... import ir
 from ...autotune_process import CUDABenchmarkRequest
 from ...ir import (
     Buffer,
@@ -144,7 +143,9 @@ class CUDATemplateKernel(CUDAKernel):
         return f"PT_EXPORT int {self.kernel_name}({', '.join(arg_defs)}, {self._EXTRA_CPP_ARGS})"
 
     def call_kernel(
-        self, name: str, node: "CUDATemplateBuffer", epilogue_nodes: List[ir.Buffer]  # type: ignore[name-defined]
+        self,
+        name: str,
+        node: "CUDATemplateBuffer",  # type: ignore[name-defined]
     ) -> None:
         """
         Generates code to call the kernel through V.graph.wrapper_code.
@@ -360,13 +361,6 @@ class CUDATemplateCaller(ChoiceCaller):
         """Information returned here is logged to the autotune log file when that is enabled."""
         if self.info_kwargs is not None and "op" in self.info_kwargs:
             op: Any = self.info_kwargs["op"]
-            epilogue_node_names: List[str] = [
-                getattr(en, "name", "no_name")
-                for en in self.info_kwargs.get("epilogue_nodes", [])  # type: ignore[union-attr]
-            ]
-            epilogue_node_strs: List[str] = [
-                str(en) for en in self.info_kwargs.get("epilogue_nodes", [])  # type: ignore[union-attr]
-            ]
             return {
                 "backend": "CUDA",
                 "op_type": type(op).__name__,
@@ -377,8 +371,6 @@ class CUDATemplateCaller(ChoiceCaller):
                 "kernel_schedule": str(op.kernel_schedule),
                 "element_accumulator": str(op.accumulator_type()),
                 "op_name": str(op.procedural_name()),
-                "epilogue_node_names": epilogue_node_names,  # type: ignore[dict-item]
-                "epilogue_node_strs": epilogue_node_strs,  # type: ignore[dict-item]
                 "instruction_shape": str(
                     op.tile_description.math_instruction.instruction_shape
                 ),
