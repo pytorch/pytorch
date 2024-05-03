@@ -54,11 +54,6 @@ void writeTextOutput(
   CAFFE_ENFORCE(blob_proto.has_tensor());
   caffe2::TensorProto tensor_proto = blob_proto.tensor();
   int dims_size = tensor_proto.dims_size();
-  long long elem_dim_size =
-      dims_size > 1 ? tensor_proto.dims(1) : tensor_proto.dims(0);
-  for (const auto i : c10::irange(2, dims_size)) {
-    elem_dim_size *= tensor_proto.dims(i);
-  }
   std::vector<std::string> lines;
   std::string dims;
   for (const auto i : c10::irange(dims_size)) {
