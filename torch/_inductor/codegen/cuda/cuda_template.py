@@ -140,6 +140,7 @@ class CUDATemplate(KernelTemplate):
                 #include <vector>
             """
         )
+
         return res
 
     def globals(self) -> IndentedBuffer:
@@ -160,10 +161,6 @@ class CUDATemplate(KernelTemplate):
                 #endif
             """
         )
-        if torch.version.cuda:
-            res.splice("using bfloat16 = nv_bfloat16;")
-        elif torch.version.hip:
-            res.splice("// using bfloat16 = hip_bfloat16;")
         return res
 
     def render(self, **kwargs) -> str:
@@ -194,6 +191,7 @@ class CUTLASSTemplate(CUDATemplate):
 
     def globals(self) -> IndentedBuffer:
         res = super().globals()
+        res.splice("using bfloat16 = nv_bfloat16;")
         res.splice(
             """
                 using namespace cute;
@@ -266,6 +264,10 @@ class CKTemplate(CUDATemplate):
         res = super().header()
         res.splice(
             """
+                // HIP headers
+
+                #include <hip/hip_bfloat16.h>
+
                 // CK headers
 
                 #ifdef DEBUG_LOG
@@ -291,6 +293,8 @@ class CKTemplate(CUDATemplate):
 
     def globals(self) -> IndentedBuffer:
         res = super().globals()
+        res.splice("using bfloat16 = hip_bfloat16;")
+
         res.splice(
             """
                 // CK globals
@@ -306,7 +310,7 @@ class CKTemplate(CUDATemplate):
                 using F16 = ck::half_t;
                 using F32 = float;
                 // using F64 = double;
-                // using BF16 = ck::bhalf_t;
+                using BF16 = ck::bhalf_t;
                 // using I32 = int32_t;
                 // using I8 = int8_t;
                 // using I4 = ck::int4_t;

@@ -972,7 +972,7 @@ def use_ck_template(layout, m, n, k):
     if gemm_size <= 0:
         # TBD: investigate if backend needs to be disabled for small gemms similar to CUTLASS
         return False
-    return _use_template_for_cuda(layout, [torch.float16])
+    return _use_template_for_cuda(layout, [torch.float16, torch.bfloat16])
 
 
 def use_aten_gemm_kernels():
