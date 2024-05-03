@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import cast, List, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
@@ -15,6 +15,7 @@ from .optimizer import (
     _use_grad_for_differentiable,
     _view_as_real,
     Optimizer,
+    ParamsT,
 )
 
 __all__ = ["NAdam", "nadam"]
@@ -23,9 +24,9 @@ __all__ = ["NAdam", "nadam"]
 class NAdam(Optimizer):
     def __init__(
         self,
-        params,
+        params: ParamsT,
         lr=2e-3,
-        betas=(0.9, 0.999),
+        betas: Tuple[float, float] = (0.9, 0.999),
         eps=1e-8,
         weight_decay=0,
         momentum_decay=4e-3,
@@ -155,13 +156,13 @@ class NAdam(Optimizer):
                 loss = closure()
 
         for group in self.param_groups:
-            params_with_grad = []
-            grads = []
-            exp_avgs = []
-            exp_avg_sqs = []
-            mu_products = []
-            state_steps = []
-            beta1, beta2 = group["betas"]
+            params_with_grad: List[Tensor] = []
+            grads: List[Tensor] = []
+            exp_avgs: List[Tensor] = []
+            exp_avg_sqs: List[Tensor] = []
+            mu_products: List[Tensor] = []
+            state_steps: List[Tensor] = []
+            beta1, beta2 = cast(Tuple[float, float], group["betas"])
 
             has_complex = self._init_group(
                 group,
@@ -294,7 +295,7 @@ def _single_tensor_nadam(
         # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
         if not torch._utils.is_compiling() and capturable:
             assert (param.is_cuda and mu_product.is_cuda and step_t.is_cuda) or (
-                param.is_xla and mu_product.is_xla and step_t.is_xla
+                param.is_xla and mu_product.is_xla and step_t.is_xla  # type: ignore[attr-defined]
             ), "If capturable=True, params, mu_products, and state_steps must be CUDA or XLA tensors."
 
         # update step
@@ -411,7 +412,7 @@ def _multi_tensor_nadam(
                 # Perform stepweight decay
                 torch._foreach_mul_(grouped_params, 1 - lr * weight_decay)
             else:
-                grouped_grads = torch._foreach_add(
+                grouped_grads = torch._foreach_add(  # type: ignore[assignment]
                     grouped_grads, grouped_params, alpha=weight_decay
                 )
 
@@ -425,6 +426,9 @@ def _multi_tensor_nadam(
 
         exp_avg_sq_sqrt = torch._foreach_sqrt(grouped_exp_avg_sqs)
 
+        bias_correction_sqrt: Union[Tuple[Tensor, ...], List[Tensor]]
+        mus: Union[Tuple[Tensor, ...], List[Tensor]]
+        mu_nexts: Union[Tuple[Tensor, ...], List[Tensor]]
         if capturable:
             # mus will be beta1 * (1 - 0.5 * 0.96 ** (step * momentum_decay))
             exponent = torch._foreach_mul(grouped_state_steps, momentum_decay)
@@ -524,10 +528,10 @@ def _multi_tensor_nadam(
             )
 
             torch._foreach_addcdiv_(
-                grouped_params, grouped_grads, exp_avg_sq_sqrt, step_size_grads
+                grouped_params, grouped_grads, exp_avg_sq_sqrt, step_size_grads  # type: ignore[arg-type]
             )
             torch._foreach_addcdiv_(
-                grouped_params, grouped_exp_avgs, exp_avg_sq_sqrt, step_size_expavg
+                grouped_params, grouped_exp_avgs, exp_avg_sq_sqrt, step_size_expavg  # type: ignore[arg-type]
             )
 
 
