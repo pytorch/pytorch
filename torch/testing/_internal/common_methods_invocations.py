@@ -9224,6 +9224,11 @@ class foreach_inputs_sample_func:
             return None
         if "foreach_pow" in opinfo.name and dtype in integral_types_and(torch.bool):
             return True
+        if any(
+                foreach_name in opinfo.name
+                for foreach_name in ("foreach_clamp_max", "foreach_clamp_min", "foreach_maximum", "foreach_minimum")
+        ) and dtype in integral_types_and(torch.bool):
+            return True
         if rightmost_arg_type == ForeachRightmostArgType.TensorList:
             disable_fastpath = "foreach_div" in opinfo.name and dtype in integral_types_and(torch.bool)
             if "foreach_add" in opinfo.name and dtype == torch.bool:
