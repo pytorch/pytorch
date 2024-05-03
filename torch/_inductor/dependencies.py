@@ -69,7 +69,7 @@ class MemoryDep(Dep):
         """
         return sympy_subs(self.index, {v: 0 for v in self.var_names})
 
-    def normalize_with_stride_order(self, prefix="x"):
+    def normalize_with_stride_order(self, prefix="t"):
         r"""
         Used to decide if two MemoryDep does not equal due to different loop orders.
         More specifically, when dep1 and dep2 are not equal, we can normalize
