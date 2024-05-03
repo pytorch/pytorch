@@ -1571,7 +1571,7 @@ class TritonKernel(Kernel):
 
     def is_indirect_indexing(self, index: sympy.Expr):
         # tmpX  means indirect indexing
-        return free_symbol_is_type(index, SymT.INDEX)
+        return free_symbol_is_type(index, SymT.TMP)
 
     def is_broadcasted(self, index: sympy.Expr):
         # Note. This may not be correct when there is indirect indexing
