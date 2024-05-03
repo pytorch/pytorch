@@ -310,6 +310,20 @@ class Tracer(TracerBase):
         self.node_name_to_scope: Dict[str, Tuple[str, type]] = {}
 
     @compatibility(is_backward_compatible=True)
+    def get_fresh_qualname(self, prefix: str):
+        """
+        Gets a fresh name for a prefix and returns it. This function ensures
+        that it will not clash with an existing attribute on the graph.
+        """
+        i = 0
+        while True:
+            qualname = f"{prefix}_{i}"
+            if not hasattr(self.root, qualname):
+                break
+            i += 1
+        return qualname
+
+    @compatibility(is_backward_compatible=True)
     def create_arg(self, a: Any) -> "Argument":
         """
         A method to specify the behavior of tracing when preparing values to
@@ -373,13 +387,7 @@ class Tracer(TracerBase):
             # Tensor was not found in the Module hierarchy, stow it away in a
             # special attribute and set the qualname to refer to that
             if not qualname:
-                i = 0
-                while True:
-                    qualname = f"_tensor_constant{i}"
-                    if not hasattr(self.root, qualname):
-                        break
-                    i += 1
-                self.tensor_attrs[a] = qualname
+                self.tensor_attrs[a] = self.get_fresh_qualname("_tensor_constant")
                 setattr(self.root, qualname, a)
 
             return self.create_node("get_attr", qualname, (), {})
@@ -389,12 +397,7 @@ class Tracer(TracerBase):
             # witness its construction. Intern this as a constant attribute
 
             # TODO: binary search
-            i = 0
-            while True:
-                qualname = f"_{a.__class__.__name__}_constant_{i}"
-                if not hasattr(self.root, qualname):
-                    break
-                i += 1
+            qualname = self.get_fresh_qualname("_{a.__class__.__name__}_constant")
             setattr(self.root, qualname, a)
 
             return self.create_node("get_attr", qualname, (), {})

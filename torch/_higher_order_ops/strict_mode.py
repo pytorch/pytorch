@@ -59,16 +59,9 @@ def trace_strict_mode(mode, strict_mode_op, callable, operands):
     with disable_proxy_modes_tracing():
         graph = make_fx(callable, pre_dispatch=pre_dispatch)(*operands)
 
-    next_name = None
-    i = 0
-    while not next_name:
-        candidate = f"strict_graph_{i}"
-        if hasattr(mode.tracer.root, candidate):
-            i += 1
-        else:
-            next_name = candidate
+    candidate = "strict_graph"
 
-    graph_name = next_name
+    graph_name = mode.tracer.get_fresh_qualname("strict_graph")
     mode.tracer.root.register_module(graph_name, graph)
 
     args = (graph, operands)

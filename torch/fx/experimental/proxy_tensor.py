@@ -591,12 +591,7 @@ class PythonKeyTracer(Tracer):
             qualname: Optional[str] = None
 
             if not qualname:
-                i = 0
-                while True:
-                    qualname = f'_param_constant{i}'
-                    if not hasattr(self.root, qualname):
-                        break
-                    i += 1
+                qualname = self.get_fresh_qualname("_param_constant")
                 setattr(self.root, qualname, a)
 
             return self.create_node('get_attr', qualname, (), {})
