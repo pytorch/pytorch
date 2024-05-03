@@ -295,30 +295,28 @@ def get_max_alignment(inductor_layout: Layout) -> int:
 
     try:
         contiguous_dim = inductor_layout.stride.index(1)
-        if is_static_int(size[contiguous_dim]) and is_static_int(offset):
-            alignments = get_alignments(dtype)
-            for alignment in alignments:
-                if (
-                    int(size[contiguous_dim]) % alignment != 0
-                    or int(offset) % alignment != 0
-                ):
-                    continue
-                do_continue = False
-                for dim in range(len(size)):
-                    # All non-contiguous strides must be aligned
-                    if dim == contiguous_dim:
-                        continue
-                    dim_stride = int(inductor_layout.stride[dim])
-                    if dim_stride % alignment != 0:
-                        do_continue = True
-                        break
-                if do_continue:
-                    continue
-                return alignment
-        return 1
     except ValueError:
         # No dim with stride 1 found, return 1
         return 1
+    if (
+        is_static_int(size[contiguous_dim])
+        and is_static_int(offset)
+        and all(is_static_int(s) for s in inductor_layout.stride)
+    ):
+        alignments = get_alignments(dtype)
+        for alignment in alignments:
+            if (
+                int(size[contiguous_dim]) % alignment != 0
+                or int(offset) % alignment != 0
+            ):
+                continue
+            if all(
+                (dim == contiguous_dim)
+                or (inductor_layout.stride[dim] % alignment == 0)
+                for dim in range(len(size))
+            ):
+                return alignment
+    return 1
 
 
 class CUDACompileSourceCapturingContext:
