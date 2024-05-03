@@ -40,16 +40,18 @@ def _create_immutable_container(base, mutable_functions):
 immutable_list = _create_immutable_container(
     list,
     [
+        "__setitem__",
         "__delitem__",
         "__iadd__",
         "__imul__",
-        "__setitem__",
-        "append",
         "clear",
+        "append",
         "extend",
         "insert",
         "pop",
         "remove",
+        "sort",
+        "reverse",
     ],
 )
 immutable_list.__reduce__ = lambda self: (immutable_list, (tuple(iter(self)),))
@@ -60,12 +62,14 @@ compatibility(is_backward_compatible=True)(immutable_list)
 immutable_dict = _create_immutable_container(
     dict,
     [
-        "__delitem__",
         "__setitem__",
+        "__delitem__",
+        "__ior__",
         "clear",
         "pop",
         "popitem",
         "update",
+        "setdefault",
     ],
 )
 immutable_dict.__reduce__ = lambda self: (immutable_dict, (iter(self.items()),))
