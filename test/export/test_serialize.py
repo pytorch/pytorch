@@ -3,7 +3,6 @@ PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
 with test_sym_bool)
 """
 
-
 # Owner(s): ["oncall: export"]
 import copy
 import io
@@ -31,15 +30,17 @@ from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.export import Dim, export, load, save
 from torch.fx.experimental.symbolic_shapes import is_concrete_int, ValueRanges
 from torch.testing._internal.common_utils import (
+    find_library_location,
     instantiate_parametrized_tests,
+    IS_FBCODE,
+    IS_MACOS,
+    IS_SANDCASTLE,
     IS_WINDOWS,
     parametrize,
     run_tests,
     TemporaryFileName,
     TestCase,
 )
-
-from torch.testing._internal.torchbind_impls import init_torchbind_implementations
 
 
 def get_filtered_export_db_tests():
@@ -346,8 +347,17 @@ class TestSerialize(TestCase):
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestDeserialize(TestCase):
     def setUp(self):
-        super().setUp()
-        init_torchbind_implementations()
+        if IS_SANDCASTLE or IS_FBCODE:
+            torch.ops.load_library(
+                "//caffe2/test/cpp/jit:test_custom_class_registrations"
+            )
+        elif IS_MACOS:
+            raise unittest.SkipTest("non-portable load_library call used in test")
+        else:
+            lib_file_path = find_library_location("libtorchbind_test.so")
+            if IS_WINDOWS:
+                lib_file_path = find_library_location("torchbind_test.dll")
+            torch.ops.load_library(str(lib_file_path))
 
     def _check_graph_nodes(self, gm1, gm2, _check_meta=True):
         # TODO: The _check_meta flag bypasses checking for
@@ -773,7 +783,7 @@ class TestDeserialize(TestCase):
         class Module(torch.nn.Module):
             def forward(self, x, y):
                 n = x.item()
-                torch._constrain_as_size(n, min=2)
+                torch._check_is_size(n)
                 return y.sum() + torch.ones(n, 5).sum()
 
         f = Module()
@@ -827,7 +837,8 @@ class TestDeserialize(TestCase):
 
         m = MyModule()
         inputs = (torch.ones(2, 3),)
-        self.check_graph(m, inputs, strict=False)
+        with enable_torchbind_tracing():
+            self.check_graph(m, inputs, strict=False)
 
     def test_custom_obj(self):
         class MyModule(torch.nn.Module):
@@ -842,7 +853,8 @@ class TestDeserialize(TestCase):
 
         m = MyModule()
         inputs = (torch.ones(2, 3),)
-        self.check_graph(m, inputs, strict=False)
+        with enable_torchbind_tracing():
+            self.check_graph(m, inputs, strict=False)
 
     def test_custom_obj_list_out(self):
         class MyModule(torch.nn.Module):
@@ -858,7 +870,8 @@ class TestDeserialize(TestCase):
 
         m = MyModule()
         inputs = (torch.ones(2, 3),)
-        self.check_graph(m, inputs, strict=False)
+        with enable_torchbind_tracing():
+            self.check_graph(m, inputs, strict=False)
 
 
 instantiate_parametrized_tests(TestDeserialize)
@@ -1048,8 +1061,17 @@ class TestSaveLoad(TestCase):
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSerializeCustomClass(TestCase):
     def setUp(self):
-        super().setUp()
-        init_torchbind_implementations()
+        if IS_SANDCASTLE or IS_FBCODE:
+            torch.ops.load_library(
+                "//caffe2/test/cpp/jit:test_custom_class_registrations"
+            )
+        elif IS_MACOS:
+            raise unittest.SkipTest("non-portable load_library call used in test")
+        else:
+            lib_file_path = find_library_location("libtorchbind_test.so")
+            if IS_WINDOWS:
+                lib_file_path = find_library_location("torchbind_test.dll")
+            torch.ops.load_library(str(lib_file_path))
 
     def test_custom_class(self):
         custom_obj = torch.classes._TorchScriptTesting._PickleTester([3, 4])

@@ -7,6 +7,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/tunable/Tunable.h>
+#include <ATen/cuda/tunable/TunableGemm.h>
 #include <ATen/native/Resize.h>
 #include <c10/util/MaybeOwned.h>
 
@@ -891,28 +892,108 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   cublasCommonArgs args(mat1, mat2, out);
   const auto out_dtype_ = args.result->scalar_type();
   TORCH_CHECK(args.transa == 't' && args.transb == 'n', "Only multiplication of row-major and column-major matrices is supported by cuBLASLt");
-  at::cuda::blas::scaled_gemm(
-      args.transa,
-      args.transb,
-      args.m,
-      args.n,
-      args.k,
-      args.mata->data_ptr(),
-      scale_a ? scale_a->data_ptr() : nullptr,
-      args.lda,
-      args.mata->scalar_type(),
-      args.matb->data_ptr(),
-      scale_b ? scale_b->data_ptr() : nullptr,
-      args.ldb,
-      args.matb->scalar_type(),
-      bias ? bias->data_ptr(): nullptr,
-      bias ? bias->scalar_type() : isFloat8Type(out_dtype_) ? at::ScalarType::Half : out_dtype_,
-      args.result->data_ptr(),
-      scale_result ? scale_result->data_ptr() : nullptr,
-      args.result_ld,
-      out_dtype_,
-      amax.data_ptr(),
-      use_fast_accum);
+#ifdef USE_ROCM
+  auto tuning_ctx = at::cuda::tunable::getTuningContext();
+  if (tuning_ctx->IsTunableOpEnabled()) {
+#define TUNABLE_DISPATCH(BLASOP_A, BLASOP_B)                            \
+        if (mat1.scalar_type() == ScalarType::Float8_e4m3fnuz) {        \
+          if (mat2.scalar_type() == ScalarType::Float8_e4m3fnuz) {      \
+            static at::cuda::tunable::ScaledGemmTunableOp<              \
+                at::Float8_e4m3fnuz, at::Float8_e4m3fnuz, scalar_t,     \
+                BLASOP_A, BLASOP_B> scaledgemm{};                       \
+            scaledgemm(&params);                                        \
+          }                                                             \
+          else if (mat2.scalar_type() == ScalarType::Float8_e5m2fnuz) { \
+            static at::cuda::tunable::ScaledGemmTunableOp<              \
+                at::Float8_e4m3fnuz, at::Float8_e5m2fnuz, scalar_t,     \
+                BLASOP_A, BLASOP_B> scaledgemm{};                       \
+            scaledgemm(&params);                                        \
+          }                                                             \
+        }                                                               \
+        else if (mat1.scalar_type() == ScalarType::Float8_e5m2fnuz) {   \
+          if (mat2.scalar_type() == ScalarType::Float8_e4m3fnuz) {      \
+            static at::cuda::tunable::ScaledGemmTunableOp<              \
+                at::Float8_e5m2fnuz, at::Float8_e4m3fnuz, scalar_t,     \
+                BLASOP_A, BLASOP_B> scaledgemm{};                       \
+            scaledgemm(&params);                                        \
+          }                                                             \
+          else if (mat2.scalar_type() == ScalarType::Float8_e5m2fnuz) { \
+            static at::cuda::tunable::ScaledGemmTunableOp<              \
+                at::Float8_e5m2fnuz, at::Float8_e5m2fnuz, scalar_t,     \
+                BLASOP_A, BLASOP_B> scaledgemm{};                       \
+            scaledgemm(&params);                                        \
+          }                                                             \
+        }
+    AT_DISPATCH_V2(out_dtype_, "_tunable_scaled_gemm", AT_WRAP([&] {
+      bool transa_ = ((args.transa != 'n') && (args.transa != 'N'));
+      bool transb_ = ((args.transb != 'n') && (args.transb != 'N'));
+      at::cuda::tunable::ScaledGemmParams<scalar_t> params;
+      params.transa = args.transa;
+      params.transb = args.transb;
+      params.m = args.m;
+      params.n = args.n;
+      params.k = args.k;
+      params.a = args.mata->data_ptr();
+      params.a_scale_ptr = scale_a ? scale_a->data_ptr() : nullptr;
+      params.lda = args.lda;
+      params.a_dtype = args.mata->scalar_type();
+      params.b = args.matb->data_ptr();
+      params.b_scale_ptr = scale_b ? scale_b->data_ptr() : nullptr;
+      params.ldb = args.ldb;
+      params.b_dtype = args.matb->scalar_type();
+      params.bias_ptr = bias ? bias->data_ptr(): nullptr;
+      params.bias_dtype = bias ? bias->scalar_type() : isFloat8Type(out_dtype_) ? at::ScalarType::Half : out_dtype_;
+      params.c = args.result->data_ptr();
+      params.c_scale_ptr = scale_result ? scale_result->data_ptr() : nullptr;
+      params.ldc = args.result_ld;
+      params.c_dtype = out_dtype_;
+      params.amax_ptr = amax.data_ptr();
+      params.use_fast_accum = use_fast_accum;
+      if (transa_ && transb_) {
+        TUNABLE_DISPATCH(at::cuda::tunable::BlasOp::T, at::cuda::tunable::BlasOp::T)
+      }
+      else if (transa_ && !transb_) {
+        TUNABLE_DISPATCH(at::cuda::tunable::BlasOp::T, at::cuda::tunable::BlasOp::N)
+      }
+      else if (!transa_ && transb_) {
+        TUNABLE_DISPATCH(at::cuda::tunable::BlasOp::N, at::cuda::tunable::BlasOp::T)
+      }
+      else if (!transa_ && !transb_) {
+        TUNABLE_DISPATCH(at::cuda::tunable::BlasOp::N, at::cuda::tunable::BlasOp::N)
+      }
+      else {
+        TORCH_CHECK(false, "unreachable");
+      }
+    }),
+    kHalf, kBFloat16, kFloat8_e4m3fnuz, kFloat8_e5m2fnuz, AT_EXPAND(AT_FLOATING_TYPES));
+#undef TUNABLE_DISPATCH
+  }
+  else
+#endif
+  {
+    at::cuda::blas::scaled_gemm(
+        args.transa,
+        args.transb,
+        args.m,
+        args.n,
+        args.k,
+        args.mata->data_ptr(),
+        scale_a ? scale_a->data_ptr() : nullptr,
+        args.lda,
+        args.mata->scalar_type(),
+        args.matb->data_ptr(),
+        scale_b ? scale_b->data_ptr() : nullptr,
+        args.ldb,
+        args.matb->scalar_type(),
+        bias ? bias->data_ptr(): nullptr,
+        bias ? bias->scalar_type() : isFloat8Type(out_dtype_) ? at::ScalarType::Half : out_dtype_,
+        args.result->data_ptr(),
+        scale_result ? scale_result->data_ptr() : nullptr,
+        args.result_ld,
+        out_dtype_,
+        amax.data_ptr(),
+        use_fast_accum);
+  }
 #else
   TORCH_CHECK(false, "_scaled_mm_out_cuda is not compiled for this platform.");
 #endif

@@ -132,6 +132,7 @@ class GuardManager:
         self.cache_entry = None
         self.extra_state = None
         self.id_matched_objs = None
+        self.no_tensor_aliasing_sources = []
 
     def get_guard_lines(self, guard):
         guard_name = guard.__class__.__name__
@@ -1475,7 +1476,9 @@ class GuardBuilder(GuardBuilderBase):
                 self._produce_guard_code(guard, [shape_guard], shape_env=True)
 
     def TENSOR_MATCH(self, guard: Guard, value=None):
-        if guard.is_nn_module() or match_on_id_for_tensor(guard):
+        if (
+            not torch._dynamo.config.guard_nn_modules and guard.is_nn_module()
+        ) or match_on_id_for_tensor(guard):
             self.ID_MATCH(guard)
         else:
             if isinstance(value, TensorWeakRef):
@@ -1858,10 +1861,11 @@ class CheckFunctionManager:
         self.check_fn.id_matched_objs = builder.id_matched_objs
 
         if config.enable_cpp_guard_manager:
-            if guards_log.isEnabledFor(logging.DEBUG):
-                guards_log.debug("%s", self.guard_manager)
-                # print(self.guard_manager)
-            # breakpoint()
+            # TODO: don't do the string rep, do something more structured here
+            torch._logging.trace_structured(
+                "dynamo_cpp_guards_str", payload_fn=lambda: str(self.guard_manager)
+            )
+            guards_log.debug("%s", self.guard_manager)
             assert self.guard_manager  # to make mypy happy
             self.guard_manager.id_matched_objs = builder.id_matched_objs
             self.check_fn = self.guard_manager
@@ -2091,6 +2095,7 @@ class CheckFunctionManager:
         # when the CacheEntry is constructed
         guard_fn.cache_entry = None
         guard_fn.extra_state = None
+        guard_fn.no_tensor_aliasing_sources = tensor_check_names
         return guard_fn
 
     def invalidate(self):
@@ -2181,6 +2186,23 @@ def is_recompiles_verbose_enabled():
     return torch._logging._internal.log_state.is_artifact_enabled("recompiles_verbose")
 
 
+def recompilation_reason_for_no_tensor_aliasing_guard(guard_manager, scope):
+    duplicate_tensors = []
+    global_scope = dict(guard_manager.global_scope)
+    ids_to_source = collections.defaultdict(list)
+    for tensor_source in guard_manager.no_tensor_aliasing_sources:  # type: ignore[attr-defined]
+        global_scope["__compile_source__"] = tensor_source
+        tensor_id = id(eval(tensor_source, global_scope, scope))
+        ids_to_source[tensor_id].append(tensor_source)
+
+    for key in ids_to_source:
+        if len(ids_to_source[key]) > 1:
+            duplicate_tensors.append(f"{ids_to_source[key]}")
+
+    reason = ", ".join(duplicate_tensors)
+    return [f"Duplicate tensors found: {reason}"]
+
+
 def get_guard_fail_reason(
     guard_fn: GuardFn,
     code: types.CodeType,
@@ -2194,6 +2216,8 @@ def get_guard_fail_reason(
     scope = {"L": f_locals, "G": guard_fn.global_scope["G"]}
     scope.update(guard_fn.closure_vars)
     reasons: List[str] = []
+
+    no_tensor_aliasing_check_failed = False
 
     verbose_code_parts: List[str] = []
     if config.enable_cpp_guard_manager:
@@ -2210,35 +2234,42 @@ def get_guard_fail_reason(
             # walk through this list and find the guard that failed. This is
             # very important for symbolic shape guards which are currently
             # installed as a lambda guard and can encompass a long list of code_parts.
+
             if len(verbose_code_parts) == 1:
-                reasons = verbose_code_parts
-                verbose_code_parts = []
+                if "Duplicate tensor found" in verbose_code_parts[0]:
+                    no_tensor_aliasing_check_failed = True
+                else:
+                    reasons = verbose_code_parts
+                    verbose_code_parts = []
     else:
         verbose_code_parts = guard_fn.verbose_code_parts
         # This is not needed for CPP guard because the verbose check is already
         # run in C++.
         scope["___check_tensors"] = scope["___check_tensors_verbose"]
 
-    for part in verbose_code_parts:
-        global_scope = dict(guard_fn.global_scope)
-        global_scope["__compile_source__"] = part
-        with report_compile_source_on_error():
-            try:
-                fail_reason = eval(part, global_scope, scope)
-            except Exception as e:
-                if is_recompiles_verbose_enabled():
-                    continue
-                else:
-                    raise
-        # Only ___check_tensors knows how to return a fancy fail reason;
-        # for everything else we just report the code that failed
+    if no_tensor_aliasing_check_failed:
+        reasons = recompilation_reason_for_no_tensor_aliasing_guard(guard_fn, scope)
+    else:
+        for part in verbose_code_parts:
+            global_scope = dict(guard_fn.global_scope)
+            global_scope["__compile_source__"] = part
+            with report_compile_source_on_error():
+                try:
+                    fail_reason = eval(part, global_scope, scope)
+                except Exception as e:
+                    if is_recompiles_verbose_enabled():
+                        continue
+                    else:
+                        raise
+            # Only ___check_tensors knows how to return a fancy fail reason;
+            # for everything else we just report the code that failed
 
-        if isinstance(fail_reason, bool) and not fail_reason:
-            fail_reason = part
-        if isinstance(fail_reason, str):
-            reasons.append(fail_reason)
-            if not is_recompiles_verbose_enabled():
-                break
+            if isinstance(fail_reason, bool) and not fail_reason:
+                fail_reason = part
+            if isinstance(fail_reason, str):
+                reasons.append(fail_reason)
+                if not is_recompiles_verbose_enabled():
+                    break
 
     reason_str = "\n".join(reasons)
     guard_failures[orig_code_map[code]].append(reason_str)
