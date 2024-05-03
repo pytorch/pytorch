@@ -1685,7 +1685,6 @@ class Kernel(CodeGen):
             for x in sorted_symbols
             if symbol_is_type(x, (SymT.UNBACKED_INT, SymT.SIZE))
             or x.name.startswith("ps")
-            or (x.name.startswith("i") and not x.name.startswith("idx"))
         }
         return sympy_subs(index, replacements)
 

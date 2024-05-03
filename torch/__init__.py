@@ -1806,7 +1806,7 @@ def compile(model: Optional[Callable] = None, *,
     results are not applicable for subsequent calls (this is called a "guard
     failure), you can use TORCH_LOGS=guards to debug these situations.
     Multiple compiled results can be associated with a frame up to
-    ``torch._dynamo.config.cache_size_limit``, which defaults to 64; at which
+    ``torch._dynamo.config.cache_size_limit``, which defaults to 8; at which
     point we will fall back to eager.  Note that compile caches are per
     *code object*, not frame; if you dynamically create multiple copies of a
     function, they will all share the same code cache.
@@ -2057,7 +2057,7 @@ def _constrain_as_size(symbol, min: Optional[builtins.int] = None, max: Optional
       GuardOnDataDependentSymNode errors upon export, since we cannot guard on unbacked SymInts.
 
     This function has unusual semantics which distinguish it from
-    constrain_as_value.  Specifically, in some circumstances in framework
+    _constrain_as_value.  Specifically, in some circumstances in framework
     code, we will treat this int as >= 2 (when we do a size-oblivious guard).
     This makes it easier to This makes it easier to use the unbacked int in
     size contexts, as we will often attempt to guard on a size being zero/one
