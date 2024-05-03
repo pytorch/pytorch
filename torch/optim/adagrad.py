@@ -6,7 +6,6 @@ from torch import Tensor
 from .optimizer import (
     _default_to_fused_or_foreach,
     _differentiable_doc,
-    _disable_dynamo_if_unsupported,
     _foreach_doc,
     _get_scalar_dtype,
     _get_value,
@@ -196,7 +195,6 @@ Adagrad.__doc__ = (
 )
 
 
-@_disable_dynamo_if_unsupported
 def adagrad(
     params: List[Tensor],
     grads: List[Tensor],
