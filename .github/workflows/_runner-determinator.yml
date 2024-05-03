@@ -39,7 +39,7 @@ jobs:
       - name: Get the workflow type for the current user
         id: set-condition
         run: |
-          python3 -m pip install PyGithub==2.3.0
+          python3 -m pip install urllib3==1.25.11 PyGithub==2.3.0
 
           curr_branch="${{ inputs.curr_branch }}"
           echo "Current branch is '$curr_branch'"
