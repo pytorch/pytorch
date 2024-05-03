@@ -1276,6 +1276,16 @@ def init_process_group(
 
     set_pytorch_distributed_envs_from_justknobs()
 
+    # Depending on the import order, some trace_rules functions may be evaluated
+    # during the import phase. In such a case, these functions may not correctly
+    # add the distributed related rules due to import circular dependency.
+    # We need to clear the lru_cache during the runtime to ensure the correctness
+    # of these trace_rules.
+    #
+    # Since this API must be called before all distributed code being compiled,
+    # clearing the cache here should be safe.
+    torch._dynamo.trace_rules.clear_lru_cache()
+
     assert (store is None) or (
         init_method is None
     ), "Cannot specify both init_method and store."
