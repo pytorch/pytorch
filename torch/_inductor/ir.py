@@ -5547,7 +5547,7 @@ class FallbackKernel(ExternKernelAlloc):
                     self.set_cpp_kernel(kernel)
                 else:
                     self.cpp_kernel_name = get_aten_cpp_kernel_name(kernel)
-                    schema = kernel._schema
+                    schema = kernel._schema  # type: ignore[union-attr]
                     self.init_args_default_value(schema)
             else:
                 self.python_kernel_name = str(kernel)
