@@ -30,7 +30,7 @@ from bisect import bisect_right
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from copy import copy
 from ctypes import c_void_p, cdll, CDLL
-from functools import partial
+from functools import lru_cache, partial
 from pathlib import Path
 from threading import Thread
 from time import sleep, time
@@ -2679,8 +2679,27 @@ def _hipcc_device_compiler_options() -> List[str]:
 
 def _hip_compiler() -> Optional[str]:
     if is_linux():
-        return "clang"
+        if config.rocm.rocm_home:
+            return os.path.join(config.rocm.rocm_home, 'llvm', 'bin', 'clang')
+        try:
+            from torch.utils import cpp_extension
+            return cpp_extension._join_rocm_home('llvm', 'bin', 'clang')
+        except OSError:
+            # neither config.rocm.rocm_home nor env variable ROCM_HOME are set
+            return "clang"
     return None
+
+
+@lru_cache(None)
+def _hip_compiler_version() -> Optional[str]:
+    hip_compiler = _hip_compiler()
+    if not hip_compiler:
+        return None
+    try:
+        import subprocess
+        return subprocess.check_output([hip_compiler, "--version"], text=True)
+    except subprocess.CalledProcessError:
+        return None
 
 
 def cuda_compile_command(
@@ -2724,7 +2743,6 @@ def cuda_compile_command(
         res = f"{compiler} {' '.join(options)} -o {dst_file} {src_file}"
     else:
         raise NotImplementedError(f"Unsupported output file suffix {dst_file_ext}!")
-    log.debug("CUDA command: %s", res)
     return res
 
 
@@ -2803,6 +2821,9 @@ class CUDACodeCache:
     cache: Dict[str, CacheEntry] = dict()
     cache_clear = staticmethod(cache.clear)
     _SOURCE_CODE_SUFFIX = "cu"
+
+    if torch.version.hip:
+        log.debug(f"HIP compiler version:\n{_hip_compiler_version()}")
 
     @classmethod
     def write(cls, source_code, dst_file_ext) -> Tuple[str, str]:
