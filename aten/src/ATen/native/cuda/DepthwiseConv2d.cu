@@ -129,7 +129,7 @@ conv_depthwise2d_forward_kernel_generic(
       for (int kW = kWmin; kW < kWmax; ++kW) {
         const int w_in = -padWidth + w * strideWidth + kW * dilationWidth;
         const index_t offset = offset0 + h_in * inputWidth + w_in;
-        value += (static_cast<acc_t>(weight.data()[weightOffset + kH * inputWidth + kW]) *
+        value += (static_cast<acc_t>(weight.data()[weightOffset + kH * kernelWidth + kW]) *
                     static_cast<acc_t>(input.data()[offset]));
       }
     }
