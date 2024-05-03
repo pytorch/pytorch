@@ -833,9 +833,11 @@ class rocm:
         ),
     )
 
-    # Number of op instance choices
+    # Number of op instance choices to trade off between runtime perf and compilation time
     n_max_profiling_configs: Optional[int] = None
 
+    # Flag to use a short list of CK instances which perform well across a variety of shapes.
+    # Currently RCR and F16 only
     use_preselected_instances: bool = False
 
 
