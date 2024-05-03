@@ -31,8 +31,9 @@ PROTOCOL_VERSION = 1001
 STORAGE_KEY_SEPARATOR = ','
 
 FILE_LIKE: TypeAlias = Union[str, os.PathLike, BinaryIO, IO[bytes]]
-MAP_LOCATION: TypeAlias = Optional[Union[Callable[[torch.Tensor, str], torch.Tensor], torch.device, str, Dict[str, str]]]
+MAP_LOCATION: TypeAlias = Optional[Union[Callable[[torch.Storage, str], torch.Storage], torch.device, str, Dict[str, str]]]
 STORAGE: TypeAlias = Union[Storage, torch.storage.TypedStorage, torch.UntypedStorage]
+
 
 IS_WINDOWS = sys.platform == "win32"
 
@@ -418,7 +419,7 @@ register_package(23, _privateuse1_tag, _privateuse1_deserialize)
 register_package(24, _hpu_tag, _hpu_deserialize)
 
 
-def location_tag(storage: Union[Storage, torch.storage.TypedStorage, torch.UntypedStorage]):
+def location_tag(storage: STORAGE):
     for _, tagger, _ in _package_registry:
         location = tagger(storage)
         if location:
