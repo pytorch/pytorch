@@ -19,13 +19,6 @@ from .optimizer import (
 __all__ = ["ASGD", "asgd"]
 
 
-def _to_tensor(x, device=None):
-    if not isinstance(x, torch.Tensor):
-        return torch.tensor(x, device=device)
-
-    return x
-
-
 class ASGD(Optimizer):
     def __init__(
         self,
@@ -308,9 +301,9 @@ def _single_tensor_asgd(
             mu.copy_(1 / torch.maximum(step_t - t0, torch.ones_like(step_t)))
         else:
             step = _get_value(step_t)
-            new_eta = _to_tensor(lr / ((1 + lambd * lr * step) ** alpha))
+            new_eta = torch.as_tensor(lr / ((1 + lambd * lr * step) ** alpha))
             eta.copy_(new_eta)
-            new_mu = _to_tensor(1 / max(1, step - t0))
+            new_mu = torch.as_tensor(1 / max(1, step - t0))
             mu.copy_(new_mu)
 
 
