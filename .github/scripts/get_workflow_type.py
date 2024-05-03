@@ -1,5 +1,5 @@
-from typing import Any
 from argparse import ArgumentParser
+from typing import Any
 
 from github import Auth, Github, Issue
 
@@ -19,9 +19,15 @@ def parse_args() -> Any:
         default="pytorch/test-infra",
         help="GitHub repo to get the issue",
     )
-    parser.add_argument("--github-issue", type=int, required=True, help="GitHub issue umber")
-    parser.add_argument("--github-user", type=str, required=True, help="GitHub username")
-    parser.add_argument("--github-branch", type=str, required=True, help="Current GitHub branch")
+    parser.add_argument(
+        "--github-issue", type=int, required=True, help="GitHub issue umber"
+    )
+    parser.add_argument(
+        "--github-user", type=str, required=True, help="GitHub username"
+    )
+    parser.add_argument(
+        "--github-branch", type=str, required=True, help="Current GitHub branch"
+    )
 
     return parser.parse_args()
 
