@@ -19,10 +19,10 @@ on:
     outputs:
       workflow-type:
         description: Type of runners to use
-        value: ${{ jobs.check-user.outputs.workflow-type }}
+        value: ${{ jobs.runner-determinator.outputs.workflow-type }}
 
 jobs:
-  check-user:
+  runner-determinator:
     runs-on: linux.4xlarge
     outputs:
       workflow-type: ${{ steps.set-condition.outputs.workflow-type }}
