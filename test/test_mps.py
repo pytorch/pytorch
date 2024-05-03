@@ -156,11 +156,6 @@ def mps_ops_grad_modifier(ops):
         # On the backward pass for `sort` both are used (values and indices), thus resulting in a issmatch between CPU and MPS.
         # Running `msort` with stable `sort` passes.
         'msort': [torch.float16],
-
-        # See https://github.com/pytorch/pytorch/issues/106112 for more information
-        'cumprod': [torch.float32, torch.float16],
-        # See https://github.com/pytorch/pytorch/issues/109166 for more information
-        'masked.cumprod': [torch.float16],
     }
 
     SKIPLIST_GRAD = {
@@ -4272,6 +4267,13 @@ class TestMPS(TestCaseMPS):
             e_string = str(e)
             self.assertEqual(e_string, "MPS does not support cumsum_out_mps op with int64 input." +
                              " Support has been added in macOS 13.3")
+
+    def test_cumsum_bool(self):
+        a = torch.ones(2**16, dtype=torch.bool)
+        t_cpu = a.cumsum(0)
+        t_mps = a.to("mps").cumsum(0)
+
+        self.assertEqual(t_cpu, t_mps)
 
     def test_cumsum_minus_one_axis(self):
         def helper(dtype):
