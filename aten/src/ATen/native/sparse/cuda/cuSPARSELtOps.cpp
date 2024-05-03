@@ -45,9 +45,6 @@ static bool isHipSparseLtSupported(int idx) {
     const static std::set<std::string> supported_archs = {"gfx940", "gfx941", "gfx942", "gfx1200", "gfx1201"};
     bool result = (supported_archs.find(arch) != supported_archs.end()) && (ROCM_VERSION >= 61000);
     cache[idx] = result;
-    if (!result) {
-        TORCH_CHECK(false, "hipSPARSELt not supported on this platform.");
-    }
     return result;
 }
 #endif
@@ -160,7 +157,7 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
   cusparseComputeType compute_type;
   auto compression_factor = 9;
   #ifdef USE_ROCM
-    auto ishipSparseLt = isHipSparseLtSupported(compressed_A.device().index());
+  TORCH_CHECK(isHipSparseLtSupported(compressed_A.device().index()), "hipSPARSELt not supported on this platform.");
   #endif
 
   switch(compressed_A.scalar_type())
@@ -174,7 +171,7 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
         break;
 
 // cuSPARSELt v0.5.2 onwards changes CUSPARSE_COMPUTE_TF32, CUSPARSE_COMPUT_16F to CUSPARSE_COMPUTE_32F
-#if ((defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 502) || (defined(USE_ROCM) && ishipSparseLt))
+#if ((defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 502) || defeined(USE_ROCM))
     case at::ScalarType::Half:
         input_type = CUDA_R_16F;
         output_type = CUDA_R_16F;
