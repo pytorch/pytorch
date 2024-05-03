@@ -860,6 +860,12 @@ def _all_to_all_single_meta(
         return input.new_empty(out_size)
 
 
+def _all_gather_into_tensor__native_meta(output, input, group_size, group_name):
+    shape = list(input.size())
+    shape[0] *= group_size
+    return input.new_empty(shape)
+
+
 def _all_gather_into_tensor_native_meta(input, group_size, group_name):
     shape = list(input.size())
     shape[0] *= group_size
@@ -894,6 +900,7 @@ def _register_ops():
         "all_reduce(Tensor self, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor",
         "all_reduce_coalesced(Tensor[] self, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor[]",
         "wait_tensor(Tensor self) -> Tensor",
+        # "all_gather_into_tensor_(Tensor(a!) output, Tensor shard, str tag, int[] ranks, int group_size) -> Tensor(a!)",
         "all_gather_into_tensor(Tensor shard, str tag, int[] ranks, int group_size) -> Tensor",
         "all_gather_into_tensor_coalesced(Tensor[] input, str tag, int[] ranks, int group_size) -> Tensor[]",
         "reduce_scatter_tensor(Tensor input, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor",
@@ -925,6 +932,9 @@ if not torch._running_with_deploy():
     _c10_lib_impl.impl("all_reduce_coalesced", _all_reduce_coalesced_meta, "Meta")
     _c10_lib_impl.impl("all_reduce_coalesced_", _all_reduce_coalesced__meta, "Meta")
     _c10_lib_impl.impl("wait_tensor", _wait_tensor_meta, "Meta")
+    _c10_lib_impl.impl(
+        "all_gather_into_tensor_", _all_gather_into_tensor__native_meta, "Meta"
+    )
     _c10_lib_impl.impl(
         "all_gather_into_tensor", _all_gather_into_tensor_native_meta, "Meta"
     )

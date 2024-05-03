@@ -280,6 +280,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.removed_inplace_buffers: Set[str] = set()
         self.mutated_buffers: Set[str] = set()
         self.never_reuse_buffers: Set[str] = set()
+        self.resize_to_zero_buffers: Set[str] = set()
         self.inplaced_to_remove: Set[str] = set()
         self.device_ops: DeviceOpOverrides = None  # type: ignore[assignment]
         self.wrapper_code: WrapperCodeGen = None  # type: ignore[assignment]

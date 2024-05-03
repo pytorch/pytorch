@@ -826,7 +826,16 @@ class IndentedBuffer:
             buf.write(line)
             buf.write("\n")
             p += 1 + line.count("\n")
-        return buf.getvalue(), linemap
+        code = buf.getvalue()
+        # DEBUG yf225
+        modify_code = False
+        if modify_code and "cuda:1" not in code:
+            if "torch.ops._c10d_functional.reduce_scatter_tensor.default" in code:  # BWD graph
+                code = """
+"""
+
+        # END DEBUG yf225
+        return code, linemap
 
     def getvalue(self) -> str:
         v, _ = self.getvaluewithlinemap()

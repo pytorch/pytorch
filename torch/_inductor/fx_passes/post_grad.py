@@ -146,10 +146,11 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     #     fsdp_fx_passes.remove_no_use_reshape(gm)  # NOTE(yf225): can't use `gm.graph.eliminate_dead_code()` to do DCE because it seems to interact badly with inplace ops
     #     fsdp_fx_passes.remove_no_use_empty(gm)  # NOTE(yf225): can't use `gm.graph.eliminate_dead_code()` to do DCE because it seems to interact badly with inplace ops
     # else:
-    fsdp_fx_passes.replace_noop_consecutive_permutes_with_original_input_if_first_permute_out_has_no_other_use(gm)
-    fsdp_fx_passes.raise_all_gather_to_overlap_with_prev_layer_compute(gm)
-    fsdp_fx_passes.sink_prev_reduce_scatter_wait_to_before_next_reduce_scatter(gm)
-    fsdp_fx_passes.decompose_all_gather_copy_in(gm)
+    # fsdp_fx_passes.replace_noop_consecutive_permutes_with_original_input_if_first_permute_out_has_no_other_use(gm)
+    # fsdp_fx_passes.raise_all_gather_to_overlap_with_prev_layer_compute(gm)
+    # fsdp_fx_passes.sink_prev_reduce_scatter_wait_to_before_next_reduce_scatter(gm)
+    # torch_log.warning(lazy_format_graph_code("before decompose_all_gather_copy_in: ", gm))
+    fsdp_fx_passes.reinplace_all_gather(gm)
 
     decompose_auto_functionalized(gm.graph)
 

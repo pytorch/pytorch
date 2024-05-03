@@ -6,10 +6,10 @@ Adapted from fsdp.py in https://github.com/pytorch/pytorch/pull/110609.
 rm artifacts/* && CUDA_VISIBLE_DEVICES=4,5 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py >artifacts/run_output.txt 2>&1
 
 # 2-gpu
-rm artifacts/* && TORCH_LOGS="aot_graphs,recompiles,+dynamo,aot,inductor" TORCH_COMPILE_DEBUG=1 CUDA_VISIBLE_DEVICES=4,5 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py >artifacts/run_output.txt 2>&1
+rm artifacts/* && TORCH_LOGS="aot_graphs,output_code,compiled_autograd,recompiles,+dynamo,aot,inductor" TORCH_COMPILE_DEBUG=1 CUDA_VISIBLE_DEVICES=4,5 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py >artifacts/run_output.txt 2>&1
 
 # 8-gpu
-rm artifacts/* && TORCH_LOGS="aot_graphs,recompiles,+dynamo,aot,inductor" TORCH_COMPILE_DEBUG=1 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=8 test_dynamo_fsdp.py >artifacts/run_output.txt 2>&1
+rm artifacts/* && TORCH_LOGS="aot_graphs,output_code,compiled_autograd,recompiles,+dynamo,aot,inductor" TORCH_COMPILE_DEBUG=1 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=8 test_dynamo_fsdp.py >artifacts/run_output.txt 2>&1
 
 CUDA_LAUNCH_BLOCKING=1 CUDA_VISIBLE_DEVICES=6,7 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py >artifacts/run_output.txt 2>&1
 
@@ -272,7 +272,7 @@ def checkpoint_wrapper(module, config):
         )
 
 
-test_case = "transformer"  # "simple_mlp" / "simple_seq_module" / "nested_fully_shard" / "transformer"
+test_case = "toy_transformer"  # "simple_mlp" / "simple_seq_module" / "nested_fully_shard" / "toy_transformer"
 balanced = True
 mixed_precision = False  # TODO(yf225): when True, fails accuracy test, needs debugging
 apply_fsdp = True
@@ -361,7 +361,8 @@ def init(activation_checkpoint):
         #     for mod in model:
         #         fully_shard(mod, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
         #     fully_shard(model, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
-    elif test_case == "transformer":
+    elif test_case == "toy_transformer":
+        torch._inductor.config.allow_buffer_reuse = False
         model_args = ModelArgs(
             dim=hidden_dim,
             n_layers=3,
@@ -480,7 +481,6 @@ def main_compiled(n_iter, activation_checkpoint, backend):
     if apply_fsdp:
         torch._dynamo.config.trace_distributed = True
         torch._functorch.config.move_view_chain_to_bwd_graph = True
-        torch._inductor.config.allow_buffer_reuse = True
 
     torch._inductor.config.triton.unique_kernel_names = True
 

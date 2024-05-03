@@ -420,7 +420,7 @@ def _propagate_node_meta(src_node, dst_node):
         dst_node.meta[k] = v
 
 
-def decompose_all_gather_copy_in(mod):
+def reinplace_all_gather(mod):
     """
     # File: /data/users/willfeng/pytorch_yf225/torch/distributed/_composable/fsdp/_fsdp_collectives.py:86 in foreach_all_gather, code: all_gather_input, all_gather_output = torch.ops.fsdp.all_gather_copy_in(all_gather_input_numel, world_size, rank, dtype, device, inp_split_sizes, param_all_gather_inputs)
     all_gather_copy_in = torch.ops.fsdp.all_gather_copy_in.default(16384256, 8, 0, torch.bfloat16, device(type='cuda', index=0), [8192000, 256, 8192000], [convert_element_type, convert_element_type_1, convert_element_type_2]);  convert_element_type = convert_element_type_1 = convert_element_type_2 = None
@@ -432,16 +432,11 @@ def decompose_all_gather_copy_in(mod):
 
     ->
 
-    empty: "bf16[131074048]" = torch.ops.aten.empty.memory_format([131074048], dtype = torch.bfloat16, device = device(type='cuda', index=0), pin_memory = False)
-    slice_1: "bf16[16384256]" = torch.ops.aten.slice.Tensor(empty, 0, 0, 16384256);  empty = None
-    split_with_sizes = torch.ops.aten.split_with_sizes.default(slice_1, [8192000, 256, 8192000])
-    getitem: "bf16[8192000]" = split_with_sizes[0]
-    getitem_1: "bf16[256]" = split_with_sizes[1]
-    getitem_2: "bf16[8192000]" = split_with_sizes[2];  split_with_sizes = None
-    copy__default = torch.ops.aten.copy_.default(getitem, convert_element_type);  getitem = convert_element_type = None
-    copy__default_1 = torch.ops.aten.copy_.default(getitem_1, convert_element_type_1);  getitem_1 = convert_element_type_1 = None
-    copy__default_2 = torch.ops.aten.copy_.default(getitem_2, convert_element_type_2);  getitem_2 = convert_element_type_2 = None
-    all_gather_into_tensor: "bf16[131074048]" = torch.ops._c10d_functional.all_gather_into_tensor.default(slice_1, 8, '0');  slice_1 = None
+    all_gather_copy_in = torch.ops.fsdp.all_gather_copy_in.default(16384256, 8, 0, torch.bfloat16, device(type='cuda', index=0), [8192000, 256, 8192000], [convert_element_type, convert_element_type_1, convert_element_type_2]);  convert_element_type = convert_element_type_1 = convert_element_type_2 = None
+    getitem: "bf16[16384256]" = all_gather_copy_in[0]
+    getitem_1: "bf16[131074048]" = all_gather_copy_in[1];  all_gather_copy_in = None
+
+    all_gather_into_tensor: "bf16[131074048]" = torch.ops._c10d_functional.all_gather_into_tensor_.default(getitem_1, getitem, 8, '0');  getitem = None
     """
     node_list = list(mod.graph.nodes)
     for i, n in enumerate(node_list):
@@ -460,42 +455,9 @@ def decompose_all_gather_copy_in(mod):
                 continue
             all_gather_node = node_list[all_gather_node_start_index]
 
-            # torch.ops.fsdp.all_gather_copy_in(all_gather_input_numel, world_size, rank, dtype, device, inp_split_sizes, param_all_gather_inputs)
-            all_gather_input_numel = all_gather_copy_in_node.args[0]
-            world_size = all_gather_copy_in_node.args[1]
-            rank = all_gather_copy_in_node.args[2]
-            dtype = all_gather_copy_in_node.args[3]
-            device = all_gather_copy_in_node.args[4]
-            inp_split_sizes = all_gather_copy_in_node.args[5]
-            param_all_gather_inputs = all_gather_copy_in_node.args[6]
-
-            # Decompose the `all_gather_copy_in` op
             with mod.graph.inserting_before(all_gather_node):
-                # Source: all_gather_output = torch.empty((all_gather_input_numel * world_size,), dtype=dtype, device=device)
-                empty_node = mod.graph.call_function(torch.ops.aten.empty.memory_format, ([all_gather_input_numel * world_size],), {"dtype": dtype, "device": device, "pin_memory": False})
-                _propagate_node_meta(all_gather_copy_in_node, empty_node)
-                # Source: all_gather_input = all_gather_output.narrow(0, all_gather_input_numel * rank, all_gather_input_numel)
-                start = all_gather_input_numel * rank
-                end = start + all_gather_input_numel
-                slice_node = mod.graph.call_function(torch.ops.aten.slice.Tensor, (empty_node, 0, start, end))
-                _propagate_node_meta(all_gather_copy_in_node, slice_node)
-                # Source: foreach_copy_dsts = torch.split(all_gather_input, inp_split_sizes)
-                split_with_sizes_node = mod.graph.call_function(torch.ops.aten.split_with_sizes.default, (slice_node, inp_split_sizes))
-                _propagate_node_meta(all_gather_copy_in_node, split_with_sizes_node)
-                getitem_nodes = []
-                for i in range(len(inp_split_sizes)):
-                    getitem_node = mod.graph.call_function(operator.getitem, (split_with_sizes_node, i))
-                    getitem_nodes.append(getitem_node)
-                    _propagate_node_meta(all_gather_copy_in_node, getitem_node)
-                # Source: torch._foreach_copy_(foreach_copy_dsts, param_all_gather_inputs)
-                inplace_copy_nodes = []
-                for i in range(len(inp_split_sizes)):
-                    inplace_copy_node = mod.graph.call_function(torch.ops.aten.copy_.default, (getitem_nodes[i], param_all_gather_inputs[i]))
-                    inplace_copy_nodes.append(inplace_copy_node)
-                    _propagate_node_meta(all_gather_copy_in_node, inplace_copy_node)
-                getitem_0_node.replace_all_uses_with(slice_node)
-                mod.graph.erase_node(getitem_1_node)
-                mod.graph.erase_node(getitem_0_node)
-                mod.graph.erase_node(all_gather_copy_in_node)
+                inplace_all_gather_node = mod.graph.call_function(torch.ops._c10d_functional.all_gather_into_tensor_.default, (getitem_1_node, getitem_0_node, *all_gather_node.args[1:]))
+            all_gather_node.replace_all_uses_with(inplace_all_gather_node, propagate_meta=True)
+            mod.graph.erase_node(all_gather_node)
     mod.graph.lint()
     mod.recompile()

@@ -5897,6 +5897,18 @@ try:
             ),
         )
 
+    @register_lowering(_c10d_functional.all_gather_into_tensor_)
+    def _all_gather_into_tensor_(output, inp, group_size, group_name):
+        ir.TensorBox.create(
+            ir._CollectiveKernel.create_inplace(
+                _c10d_functional.all_gather_into_tensor_.default,
+                [output, inp],
+                group_size,
+                group_name,
+            )
+        )
+        return output
+
     @register_lowering(_c10d_functional.reduce_scatter_tensor)
     def _reduce_scatter_tensor(inp, reduce_op, group_size, group_name):
         return ir.TensorBox.create(
