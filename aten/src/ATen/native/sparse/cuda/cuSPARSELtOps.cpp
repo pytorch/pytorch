@@ -41,7 +41,7 @@ static bool isHipSparseLtSupported(int idx) {
         return cache[idx];
     }
     hipDeviceProp_t* prop = at::cuda::getDeviceProperties(idx);
-    std::string_view arch{prop->gcnArchName};
+    std::string arch{prop->gcnArchName};
     const static std::set<std::string> supported_archs = {"gfx940", "gfx941", "gfx942", "gfx1200", "gfx1201"};
     bool result = (supported_archs.find(arch) != supported_archs.end()) && (ROCM_VERSION >= 61000);
     cache[idx] = result;
@@ -159,8 +159,12 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
   cudaDataType output_type;
   cusparseComputeType compute_type;
   auto compression_factor = 9;
-  auto ishipSparseLt = (USE_ROCM)?isHipSparseLtSupported(compressed_A.device().index()):false;
-  
+  #ifdef USE_ROCM
+    auto ishipSparseLt = isHipSparseLtSupported(compressed_A.device().index());
+  #else
+    auto ishipSparseLt = false;
+  #endif
+
   switch(compressed_A.scalar_type())
   {
 
