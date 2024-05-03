@@ -2,17 +2,17 @@ import textwrap
 from typing import Any, Callable, Dict, TypeVar
 
 
-F = TypeVar("F", bound=Callable)
+_F = TypeVar("_F", bound=Callable[..., Any])
 
 
 _BACK_COMPAT_OBJECTS: Dict[Any, None] = {}
 _MARKED_WITH_COMPATIBILITY: Dict[Any, None] = {}
 
 
-def compatibility(is_backward_compatible: bool) -> Callable[[F], F]:
+def compatibility(is_backward_compatible: bool) -> Callable[[_F], _F]:
     if is_backward_compatible:
 
-        def mark_back_compat(fn: F) -> F:
+        def mark_back_compat(fn: _F) -> _F:
             docstring = textwrap.dedent(getattr(fn, "__doc__", None) or "")
             docstring += """
 .. note::
@@ -26,7 +26,7 @@ def compatibility(is_backward_compatible: bool) -> Callable[[F], F]:
         return mark_back_compat
     else:
 
-        def mark_not_back_compat(fn: F) -> F:
+        def mark_not_back_compat(fn: _F) -> _F:
             docstring = textwrap.dedent(getattr(fn, "__doc__", None) or "")
             docstring += """
 .. warning::
