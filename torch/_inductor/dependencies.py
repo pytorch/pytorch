@@ -78,6 +78,7 @@ class MemoryDep(Dep):
         """
         # import here to avoid circular import
         from torch._inductor import ir
+
         strides = V.graph.sizevars.stride_hints(self.index, self.var_names)
 
         # pick a loop order with stride ordered decreasingly
