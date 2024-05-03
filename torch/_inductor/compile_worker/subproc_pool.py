@@ -52,6 +52,7 @@ class SubprocPool:
     """
 
     def __init__(self, nprocs: int):
+        print(f"*** SubprocPool with {nprocs} procs", file=sys.stderr)
         self.process = subprocess.Popen(
             [
                 sys.executable,
@@ -118,6 +119,7 @@ class SubprocPool:
             log.exception("failure in SubprocPool._read_thread")
 
     def shutdown(self):
+        print("*** TIME TO SHUT DOWN", file=sys.stderr)
         try:
             with self.write_lock:
                 if not self.running:
@@ -155,11 +157,24 @@ class SubprocMain:
 
     def main(self):
         while True:
-            job_id, length = _unpack_msg(self.read_pipe.read(msg_bytes))
+            try:
+                job_id, length = _unpack_msg(self.read_pipe.read(msg_bytes))
+            except Exception as ex:
+                print(f"*** Exception in unpack: {ex}", file=sys.stderr)
+                raise
             if job_id < 0:
+                print(f"*** Got job_id < 0; shutdown", file=sys.stderr)
                 return self._shutdown()
-            data = self.read_pipe.read(length)
-            self.submit(job_id, data)
+            try:
+                data = self.read_pipe.read(length)
+            except Exception as ex:
+                print(f"*** Got exception from read_pipe: {ex}", file=sys.stderr)
+                raise
+            try:
+                self.submit(job_id, data)
+            except Exception as ex:
+                print(f"*** Got exception from submit: {ex}", file=sys.stderr)
+                raise
 
     def _shutdown(self):
         with self.write_lock:
@@ -171,6 +186,7 @@ class SubprocMain:
                 pass  # parent process already shutdown
             self.read_pipe.close()
         self.pool.shutdown()
+        print(f"*** Finished _shutdown", file=sys.stderr)
 
     def submit(self, job_id, data):
         future = self.pool.submit(functools.partial(SubprocMain.do_job, data))
@@ -181,6 +197,7 @@ class SubprocMain:
             try:
                 result = future.result()
             except Exception as e:
+                print(f"*** Exception getting future result: {ex}", file=sys.stderr)
                 log.exception("Error in subprocess")
                 result = pickle.dumps(e, pickle.HIGHEST_PROTOCOL)
             assert isinstance(result, bytes)
@@ -195,9 +212,13 @@ class SubprocMain:
     @staticmethod
     def do_job(data):
         # do the pickle/unpickle in the sub-subproc
-        job = pickle.loads(data)
-        result = job()
-        return pickle.dumps(result, pickle.HIGHEST_PROTOCOL)
+        try:
+            job = pickle.loads(data)
+            result = job()
+            return pickle.dumps(result, pickle.HIGHEST_PROTOCOL)
+        except Exception as ex:
+            print(f"*** Got exception in do_job: {ex}", file=sys.stderr)
+            raise
 
 
 AnyPool = typing.Union[ProcessPoolExecutor, ThreadPoolExecutor, SubprocPool]

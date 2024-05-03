@@ -3019,4 +3019,5 @@ if (
 elif sys.version_info >= (3, 12):
     log.info("AsyncCompile.warm_pool() is broken on 3.12+.")
 else:
+    print(f"*** ASYNC WARM POOL; NOOO {config.worker_start_method}", file=sys.stderr)
     AsyncCompile.warm_pool()

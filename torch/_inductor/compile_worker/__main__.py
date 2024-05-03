@@ -38,8 +38,14 @@ def main():
     caching_device_properties()
 
     _async_compile_initializer(args.parent)
+    print(f"*** New subproc running with {args.workers} workers", file=sys.stderr)
     SubprocMain(args.workers, read_fd, write_fd).main()
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as ex:
+        print(f"*** Got exception in main: {ex}", file=sys.stderr)
+
+    print("*** sub-process main is done", file=sys.stderr)
