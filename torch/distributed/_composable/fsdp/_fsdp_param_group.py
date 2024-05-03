@@ -167,7 +167,7 @@ class FSDPParamGroup:
     def _init_grad_divide_factors(self):
         data_parallel_world_size = 1
         data_parallel_world_size *= self.mesh_info.shard_mesh_size
-        if isinstance(self.mesh_info, HSDPMeshInfo):
+        if self._is_hsdp:
             data_parallel_world_size *= self.mesh_info.replicate_mesh_size
         if self._reduce_dtype in (torch.float32, torch.bfloat16):
             # Use NCCL's AVG op to divide after reduction since it is more
@@ -348,7 +348,7 @@ class FSDPParamGroup:
                 self.device,
                 self._grad_divide_factors,
                 self._all_reduce_process_group
-                if self._should_all_reduce_grads()
+                if self._is_hsdp and self.all_reduce_grads
                 else None,
                 self.comm_ctx.all_reduce_stream,
             )
@@ -482,6 +482,10 @@ class FSDPParamGroup:
         )
 
     @property
+    def _is_hsdp(self) -> bool:
+        return isinstance(self.mesh_info, HSDPMeshInfo)
+
+    @property
     def _all_gather_process_group(self) -> dist.ProcessGroup:
         mesh_info = (
             cast(FSDPMeshInfo, self.post_forward_mesh_info)
@@ -493,18 +497,13 @@ class FSDPParamGroup:
 
     @property
     def _reduce_scatter_process_group(self) -> dist.ProcessGroup:
-        mesh_info = self.mesh_info
-        assert isinstance(mesh_info, FSDPMeshInfo)
-        return mesh_info.shard_process_group
+        assert isinstance(self.mesh_info, FSDPMeshInfo)
+        return self.mesh_info.shard_process_group
 
     @property
     def _all_reduce_process_group(self) -> dist.ProcessGroup:
-        mesh_info = self.mesh_info
-        assert isinstance(mesh_info, HSDPMeshInfo)
-        return mesh_info.replicate_process_group
-
-    def _should_all_reduce_grads(self) -> bool:
-        return isinstance(self.mesh_info, HSDPMeshInfo) and self.all_reduce_grads
+        assert isinstance(self.mesh_info, HSDPMeshInfo)
+        return self.mesh_info.replicate_process_group
 
 
 def _get_param_module_infos(
