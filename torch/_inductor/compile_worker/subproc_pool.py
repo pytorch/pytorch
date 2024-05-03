@@ -52,15 +52,16 @@ class SubprocPool:
     """
 
     def __init__(self, nprocs: int):
-        print(f"*** SubprocPool with {nprocs} procs", file=sys.stderr)
+        cmd = [
+            sys.executable,
+            "-m",
+            re.sub(r"[.][^.]*$", "", __name__),
+            f"--workers={nprocs}",
+            f"--parent={os.getpid()}",
+        ]
+        print(f"*** SubprocPool: {cmd}", file=sys.stderr)
         self.process = subprocess.Popen(
-            [
-                sys.executable,
-                "-m",
-                re.sub(r"[.][^.]*$", "", __name__),
-                f"--workers={nprocs}",
-                f"--parent={os.getpid()}",
-            ],
+            cmd,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             env={
