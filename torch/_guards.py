@@ -288,10 +288,19 @@ class Guard:
         else:
             self.code_list.extend(code_list)
 
-        assert self.obj_weakref in (
-            obj_weakref,
-            None,
-        ), "Guarded object must be identical, or None"
+        # Some objects are ephemeral, e.g., list[slice(1, 2)]. If we have
+        # multiple guards on the same object, the weakref can die between the
+        # invocation of set_export_info calls. So a dead weakref is also
+        # acceptable.
+        assert (
+            self.obj_weakref
+            in (
+                obj_weakref,
+                None,
+            )
+            or callable(self.obj_weakref)
+            and self.obj_weakref() is None
+        ), "Guarded object must be identical, None or ephemeral (dead weakref)"
         self.obj_weakref = obj_weakref
 
 
@@ -750,7 +759,7 @@ class TracingContext:
 
 
 @contextmanager
-def compile_context(context: CompileContext):
+def compile_context(context: Optional[CompileContext]):
     old_context = getattr(_TLS, "compile_context", None)
     _TLS.compile_context = context
     try:
@@ -797,17 +806,17 @@ class Source:
         return False
 
     def reconstruct(self, codegen):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def guard_source(self) -> GuardSource:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def name(self) -> str:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def make_guard(self, fn) -> Guard:
         if self.guard_source() is GuardSource.CONSTANT:
-            raise NotImplementedError()
+            raise NotImplementedError
         return Guard(self, fn)
 
     def is_nn_module(self) -> bool:

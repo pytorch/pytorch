@@ -254,12 +254,49 @@ Tensor _to_copy(
 
   // TODO: Use the dispatcher for this.
   // Currently there are unenumerated extensibility issues preventing this.
-  if (at::sparse_csr::is_sparse_compressed(self)) {
+  if (self.layout() == kSparse) {
+      TORCH_CHECK(
+          memory_format == MemoryFormat::Preserve,
+          "to(options): COO only supports memory format Preserve, but got ", memory_format,
+          " instead.");
+    if (options.device().is_meta()) {
+        return zeros_like(self, options);
+    }
+    auto indices = self._indices();
+    const auto new_indices = at::native::to(
+        indices,
+        indices.scalar_type(),
+        c10::kStrided,
+        device,
+        pin_memory,
+        non_blocking,
+        true, // force copy since we are in _to_copy
+        memory_format);
+    const auto new_values = at::native::to(
+        self._values(),
+        dtype,
+        c10::kStrided,
+        device,
+        pin_memory,
+        non_blocking,
+        true, // force copy since we are in _to_copy
+        memory_format);
+
+    return at::_sparse_coo_tensor_unsafe(
+        new_indices,
+        new_values,
+        self.sizes(),
+        options, self.is_coalesced());
+  } else if (at::sparse_csr::is_sparse_compressed(self)) {
       TORCH_CHECK(
           memory_format == MemoryFormat::Preserve,
           "to(options): ", at::sparse_csr::layoutToString(self.layout()),
           " only supports memory format Preserve, but got ", memory_format,
           " instead.");
+
+      if (options.device().is_meta()) {
+        return zeros_like(self, options);
+      }
 
       auto [compressed_indices, plain_indices] = at::sparse_csr::getCompressedPlainIndices(self);
 
@@ -1479,7 +1516,7 @@ void convert_indices_from_coo_to_csr_cpu(
     const Tensor& input,
     const int64_t size) {
   int64_t numel = input.numel();
-  const input_t* data_in = input.data_ptr<input_t>();
+  const input_t* data_in = input.const_data_ptr<input_t>();
   output_t* data_out = result.data_ptr<output_t>();
 
   if (numel == 0) {
@@ -1525,7 +1562,7 @@ void convert_indices_from_csr_to_coo_cpu(
     batch_indices.copy_(at::sparse::full_coo_indices(crow_indices.sizes().slice(0, batch_ndim), crow_indices.options())
                         .repeat_interleave(nnz, 1));
   }
-  const input_t* crow_indices_data_in = crow_indices_->data_ptr<input_t>();
+  const input_t* crow_indices_data_in = crow_indices_->const_data_ptr<input_t>();
   TORCH_INTERNAL_ASSERT(indices.is_contiguous());
   auto row0 = indices.select(0, transpose ? batch_ndim + 1 : batch_ndim + 0);
   auto row1 = indices.select(0, transpose ? batch_ndim + 0 : batch_ndim + 1);

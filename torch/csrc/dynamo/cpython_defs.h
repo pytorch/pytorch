@@ -10,7 +10,9 @@
 
 #include <internal/pycore_frame.h>
 
-int THP_PyFrame_FastToLocalsWithError(_PyInterpreterFrame* frame);
+int THP_PyFrame_FastToLocalsWithError(
+    _PyInterpreterFrame* frame,
+    int* free_vars_copied);
 
 PyFunctionObject* _PyFunction_CopyWithNewCode(
     PyFunctionObject* o,
