@@ -705,7 +705,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             example_value = self.value(*args, **kwargs)
             source = RandomValueSource(random_call_index)
             tx.output.random_calls.append((self.value, args, kwargs))
-            return VariableBuilder(tx, source).wrap_symint(example_value)
+            # TODO: arguably, this should route to wrap_symint/wrap_symfloat
+            # (currently hypothetical), but I'm not going to poke my hand in
+            # this nest for now
+            return VariableBuilder(tx, source).wrap_unspecialized_primitive(example_value)
         elif istype(self.value, types.MethodType):
             func = self.value.__func__
             obj = self.value.__self__

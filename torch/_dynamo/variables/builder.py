@@ -1321,9 +1321,7 @@ class VariableBuilder:
         # https://docs.google.com/document/d/1INSCdYu1PxXcr43HrD82OudeEuS-qxQe1yZmLg2wy6A/edit
         # but the general idea is that we generate kernels that can
         # take unspecialized floats and use them in sizevar computation
-        elif not is_constant_source(self.get_source()) and not isinstance(
-            self.get_source(), RandomValueSource
-        ):
+        elif not is_constant_source(self.get_source()):
             if torch._dynamo.config.specialize_int:
                 # If specialize_int is False, also return
                 # a constant (but this should have been handled
@@ -1374,9 +1372,14 @@ class VariableBuilder:
             self.tx.output.tracked_fakes.append(
                 TrackedFake(wrapped_value, self.source, None)
             )
+        else:
+            assert is_constant_source(self.get_source())
+            # TODO: Do I actually need guard for constant source?
+            self.install_guards(GuardBuilder.CONSTANT_MATCH)
+            return ConstantVariable.create(value=value, source=self.source)
 
-        if not isinstance(self.get_source(), RandomValueSource):
-            install_guard(self.get_source().make_guard(GuardBuilder.TYPE_MATCH))
+        assert not isinstance(self.get_source(), RandomValueSource)
+        install_guard(self.get_source().make_guard(GuardBuilder.TYPE_MATCH))
 
         options = {"source": self.get_source()}
 
@@ -1419,8 +1422,8 @@ class VariableBuilder:
             return self.tx.output.unspec_variable_map[self.name]
 
         wrapped_value = torch.tensor(value)
-        assert not isinstance(self.get_source(), RandomValueSource)
-        install_guard(self.get_source().make_guard(GuardBuilder.TYPE_MATCH))
+        if not isinstance(self.get_source(), RandomValueSource):
+            install_guard(self.get_source().make_guard(GuardBuilder.TYPE_MATCH))
 
         options = {"source": self.get_source()}
         options.update({"raw_value": value})
