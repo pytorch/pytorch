@@ -48,18 +48,18 @@ def _create_immutable_container_class(
 immutable_list = _create_immutable_container_class(
     list,
     (
-        "__setitem__",
         "__delitem__",
         "__iadd__",
         "__imul__",
-        "clear",
+        "__setitem__",
         "append",
+        "clear",
         "extend",
         "insert",
         "pop",
         "remove",
-        "sort",
         "reverse",
+        "sort",
     ),
     namespace={
         "__hash__": lambda self: hash(tuple(self)),
@@ -72,14 +72,14 @@ immutable_list = compatibility(is_backward_compatible=True)(immutable_list)
 immutable_dict = _create_immutable_container_class(
     dict,
     (
-        "__setitem__",
         "__delitem__",
         "__ior__",
+        "__setitem__",
         "clear",
         "pop",
         "popitem",
-        "update",
         "setdefault",
+        "update",
     ),
     namespace={
         "__hash__": lambda self: hash(tuple(self.items())),
