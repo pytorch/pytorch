@@ -161,8 +161,6 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
   auto compression_factor = 9;
   #ifdef USE_ROCM
     auto ishipSparseLt = isHipSparseLtSupported(compressed_A.device().index());
-  #else
-    auto ishipSparseLt = false;
   #endif
 
   switch(compressed_A.scalar_type())
@@ -176,7 +174,7 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
         break;
 
 // cuSPARSELt v0.5.2 onwards changes CUSPARSE_COMPUTE_TF32, CUSPARSE_COMPUT_16F to CUSPARSE_COMPUTE_32F
-#if ((defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 502) || ishipSparseLt)
+#if ((defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 502) || (defined(USE_ROCM) && ishipSparseLt))
     case at::ScalarType::Half:
         input_type = CUDA_R_16F;
         output_type = CUDA_R_16F;
