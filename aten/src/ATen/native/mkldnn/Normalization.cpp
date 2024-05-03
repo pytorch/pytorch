@@ -7,6 +7,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_batch_norm_with_update_native.h>
+#include <ATen/ops/_batch_norm_no_update_native.h>
 #include <ATen/ops/batch_norm_backward_native.h>
 #include <ATen/ops/_native_batch_norm_legit_native.h>
 #include <ATen/ops/_to_dense_native.h>
@@ -65,6 +66,12 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _batch_norm_with_update_mkldnn(
     const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
     Tensor& running_mean, Tensor& running_var, double momentum, double eps) {
   TORCH_CHECK(false, "_batch_norm_with_update_mkldnn: ATen not compiled with MKLDNN support");
+}
+
+std::tuple<Tensor, Tensor, Tensor, Tensor> _batch_norm_no_update_mkldnn(
+    const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
+    Tensor& running_mean, Tensor& running_var, double momentum, double eps) {
+  TORCH_CHECK(false, "_batch_norm_no_update_mkldnn: ATen not compiled with MKLDNN support");
 }
 
 std::tuple<Tensor, Tensor, Tensor> _new_batch_norm_backward_mkldnn(
@@ -214,6 +221,18 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _batch_norm_with_update_mkldnn(
   Tensor output, save_mean, save_var;
   std::tie(output, save_mean, save_var) =
     mkldnn_batch_norm(input, weight_opt, bias_opt, running_mean, running_var, /*train*/true, momentum, eps);
+  Tensor reserve = empty_mkldnn({0}, input.scalar_type());
+  return std::tuple<Tensor, Tensor, Tensor, Tensor>(output, save_mean, save_var, reserve);
+}
+
+
+std::tuple<Tensor, Tensor, Tensor, Tensor> _batch_norm_no_update_mkldnn(
+    const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
+    const c10::optional<Tensor>& running_mean, const c10::optional<Tensor>& running_var,
+    double momentum, double eps) {
+  Tensor output, save_mean, save_var;
+  std::tie(output, save_mean, save_var) =
+    mkldnn_batch_norm(input, weight_opt, bias_opt, running_mean, running_var, /*train*/false, momentum, eps);
   Tensor reserve = empty_mkldnn({0}, input.scalar_type());
   return std::tuple<Tensor, Tensor, Tensor, Tensor>(output, save_mean, save_var, reserve);
 }

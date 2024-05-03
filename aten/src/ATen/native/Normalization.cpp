@@ -867,7 +867,7 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> _batch_norm_with_update_cpu_out(
 }
 
 
-std::tuple<Tensor, Tensor, Tensor, Tensor> _batch_norm_no_update(
+std::tuple<Tensor, Tensor, Tensor, Tensor> _batch_norm_no_update_cpu(
     const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
     const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt,
     double momentum, double eps) {
