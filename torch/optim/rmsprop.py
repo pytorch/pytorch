@@ -13,6 +13,7 @@ from .optimizer import (
     _use_grad_for_differentiable,
     _view_as_real,
     Optimizer,
+    ParamsT,
 )
 
 __all__ = ["RMSprop", "rmsprop"]
@@ -21,7 +22,7 @@ __all__ = ["RMSprop", "rmsprop"]
 class RMSprop(Optimizer):
     def __init__(
         self,
-        params,
+        params: ParamsT,
         lr=1e-2,
         alpha=0.99,
         eps=1e-8,
@@ -146,12 +147,12 @@ class RMSprop(Optimizer):
                 loss = closure()
 
         for group in self.param_groups:
-            params_with_grad = []
-            grads = []
-            square_avgs = []
-            grad_avgs = []
-            momentum_buffer_list = []
-            state_steps = []
+            params_with_grad: List[Tensor] = []
+            grads: List[Tensor] = []
+            square_avgs: List[Tensor] = []
+            grad_avgs: List[Tensor] = []
+            momentum_buffer_list: List[Tensor] = []
+            state_steps: List[Tensor] = []
 
             has_complex = self._init_group(
                 group,
@@ -276,7 +277,7 @@ def _single_tensor_rmsprop(
         # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
         if not torch._utils.is_compiling() and capturable:
             assert (param.is_cuda and step.is_cuda) or (
-                param.is_xla and step.is_xla
+                param.is_xla and step.is_xla  # type: ignore[attr-defined]
             ), "If capturable=True, params and state_steps must be CUDA or XLA tensors."
 
         grad = grads[i]
@@ -347,7 +348,7 @@ def _multi_tensor_rmsprop(
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
     if not torch._utils.is_compiling() and capturable:
         assert all(
-            (p.is_cuda and step.is_cuda) or (p.is_xla and step.is_xla)
+            (p.is_cuda and step.is_cuda) or (p.is_xla and step.is_xla)  # type: ignore[attr-defined]
             for p, step in zip(params, state_steps)
         ), "If capturable=True, params and state_steps must be CUDA tensors."
 
@@ -373,7 +374,7 @@ def _multi_tensor_rmsprop(
             _view_as_real(grouped_params, *state_and_grads)
 
         if maximize:
-            grouped_grads = torch._foreach_neg(grouped_grads)
+            grouped_grads = torch._foreach_neg(grouped_grads)  # type: ignore[assignment]
 
         # Update steps
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
@@ -391,7 +392,7 @@ def _multi_tensor_rmsprop(
             if maximize:
                 torch._foreach_add_(grouped_grads, grouped_params, alpha=weight_decay)
             else:
-                grouped_grads = torch._foreach_add(
+                grouped_grads = torch._foreach_add(  # type: ignore[assignment]
                     grouped_grads, grouped_params, alpha=weight_decay
                 )
 
