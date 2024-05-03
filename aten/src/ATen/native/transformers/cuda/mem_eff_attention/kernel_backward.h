@@ -242,7 +242,7 @@ struct AttentionBackwardKernel {
   static constexpr bool kKeysQueriesAlignedToBlockSize =
       kKeysQueriesAlignedToBlockSize_;
 
-#if defined(USE_ROCM) 
+#if defined(USE_ROCM)
   static constexpr int64_t kWarpSize = __AMDGCN_WAVEFRONT_SIZE;
 #else
   static constexpr int64_t kWarpSize = 32;
