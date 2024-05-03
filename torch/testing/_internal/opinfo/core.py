@@ -25,6 +25,7 @@ from torch.testing._internal.common_dtype import (
     floating_and_complex_types,
     floating_and_complex_types_and,
     floating_types,
+    get_all_dtypes,
 )
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
@@ -2729,6 +2730,8 @@ class ForeachFuncInfo(OpInfo):
             assert torch_ref_method is None
             foreach_method = foreach_method_inplace
             torch_ref_method = torch_ref_inplace
+
+        self.dtypes = _dispatch_dtypes(get_all_dtypes(include_qint=False))
 
         self.op = foreach_method
         self.method_variant = foreach_method
