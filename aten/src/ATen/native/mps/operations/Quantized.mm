@@ -153,7 +153,7 @@ Tensor _weight_int4pack_mm_mps(const Tensor& A, const Tensor& B, int64_t qGroupS
     @autoreleasepool {
       auto& profiler = getMPSProfiler();
       if (profiler.isCaptureEnabled())
-        profiler.startCapture(__func__);
+        profiler.startCapture(__func__, mpsStream);
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
       const std::string kernel = fmt::format("int4pack_mm_{}_{}", qGroupSize, scalarToMetalTypeString(A.scalar_type()));
       id<MTLComputePipelineState> quantizedPSO = quantizedPipelineState(device, kernel);
@@ -164,9 +164,8 @@ Tensor _weight_int4pack_mm_mps(const Tensor& A, const Tensor& B, int64_t qGroupS
       mtl_setBuffer(computeEncoder, C, 3);
       [computeEncoder setBytes:sizes.data() length:sizeof(uint32_t) * sizes.size() atIndex:4];
       mtl_dispatch1DJob(computeEncoder, quantizedPSO, C.numel());
-      mpsStream->synchronize(SyncType::COMMIT);
       if (profiler.isCapturing())
-        profiler.stopCapture();
+        profiler.stopCapture(mpsStream);
     }
   });
   return C;

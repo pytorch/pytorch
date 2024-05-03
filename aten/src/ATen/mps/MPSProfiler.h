@@ -302,8 +302,8 @@ public:
   // Abstractions for GPU trace capturing
   bool isCaptureEnabled() const;
   bool isCapturing() const;
-  void startCapture(const std::string& name);
-  void stopCapture();
+  void startCapture(const std::string& name, MPSStream* stream = nullptr);
+  void stopCapture(MPSStream* stream = nullptr);
 
   // convenience functions to indicate whether signpost tracing or
   // logging are enabled for the SignpostTypes
