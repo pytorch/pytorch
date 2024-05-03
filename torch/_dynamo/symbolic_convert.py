@@ -2313,7 +2313,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                 target_values = (
                     () if ctx.target_values is None else tuple(ctx.target_values)
                 )
-                argnames_ctx_vars.append((name, tuple(target_values)))
+                argnames_ctx_vars.append((name, target_values))
                 # Replace the local with the context class
                 cg.append_output(create_instruction("LOAD_FAST", argval=name))
                 ctx.reconstruct_type(cg)
