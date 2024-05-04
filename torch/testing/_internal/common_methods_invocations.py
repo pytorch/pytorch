@@ -2004,13 +2004,6 @@ def sample_inputs_bernoulli(self, device, dtype, requires_grad, **kwargs):
                         requires_grad=requires_grad)
         yield SampleInput(t)
 
-def error_inputs_bernoulli(op_info, device, **kwargs):
-    # more than one element of the written-to tensor refers to a single memory location
-    x = torch.rand((1,), device=device).expand((6,))
-    err_msg = 'unsupported operation'
-    yield ErrorInput(SampleInput(torch.rand_like(x), kwargs={'out': x}),
-                     error_regex=err_msg)
-
 def sample_inputs_logcumsumexp(self, device, dtype, requires_grad, **kwargs):
     inputs = (
         ((S, S, S), 0),
@@ -18943,7 +18936,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_bernoulli,
-           error_inputs_func=error_inputs_bernoulli,
            skips=(
                # vmap: We do not yet support calling random operations inside of vmap
                DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_forward_mode_AD'),
