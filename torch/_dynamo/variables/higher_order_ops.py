@@ -1328,6 +1328,7 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         symbolic_locals: Dict[str, VariableTracker],
     ):
         import dataclasses
+
         if (
             loop_items := len(value.items)
         ) < torch._dynamo.config.convert_for_loops_to_function_threshold:
