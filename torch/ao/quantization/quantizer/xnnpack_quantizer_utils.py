@@ -1,6 +1,6 @@
 import itertools
 import operator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Callable, Dict, List, NamedTuple, Optional
 
 import torch
@@ -17,6 +17,7 @@ from torch.ao.quantization.pt2e.utils import (
     _is_conv_transpose_node,
 )
 from torch.ao.quantization.quantizer import (
+    DerivedQuantizationSpec,
     QuantizationAnnotation,
     QuantizationSpec,
     QuantizationSpecBase,
@@ -50,10 +51,10 @@ __all__ = [
 # In the absence of better name, just winging it with QuantizationConfig
 @dataclass(eq=True, frozen=True)
 class QuantizationConfig:
-    input_activation: Optional[QuantizationSpec]
-    output_activation: Optional[QuantizationSpec]
-    weight: Optional[QuantizationSpec]
-    bias: Optional[QuantizationSpec]
+    input_activation: Optional[QuantizationSpecBase]
+    output_activation: Optional[QuantizationSpecBase]
+    weight: Optional[QuantizationSpecBase]
+    bias: Optional[QuantizationSpecBase]
     # TODO: remove, since we can use observer_or_fake_quant_ctr to express this
     is_qat: bool = False
 
@@ -122,8 +123,10 @@ def get_input_act_qspec(quantization_config: Optional[QuantizationConfig]):
         return None
     if quantization_config.input_activation is None:
         return None
-    quantization_spec: QuantizationSpec = quantization_config.input_activation
-    assert quantization_spec.qscheme in [
+    quantization_spec = quantization_config.input_activation
+    assert isinstance(
+        quantization_spec, QuantizationSpec
+    ) and quantization_spec.qscheme in [
         torch.per_tensor_affine,
         torch.per_tensor_symmetric,
     ]
@@ -135,8 +138,10 @@ def get_output_act_qspec(quantization_config: Optional[QuantizationConfig]):
         return None
     if quantization_config.output_activation is None:
         return None
-    quantization_spec: QuantizationSpec = quantization_config.output_activation
-    assert quantization_spec.qscheme in [
+    quantization_spec = quantization_config.output_activation
+    assert isinstance(
+        quantization_spec, QuantizationSpec
+    ) and quantization_spec.qscheme in [
         torch.per_tensor_affine,
         torch.per_tensor_symmetric,
     ]
@@ -149,7 +154,8 @@ def get_weight_qspec(quantization_config: Optional[QuantizationConfig]):
     assert quantization_config is not None
     if quantization_config.weight is None:
         return None
-    quantization_spec: QuantizationSpec = quantization_config.weight
+    quantization_spec = quantization_config.weight
+    assert isinstance(quantization_spec, QuantizationSpec)
     if quantization_spec.qscheme not in [
         torch.per_tensor_symmetric,
         torch.per_channel_symmetric,
@@ -160,17 +166,35 @@ def get_weight_qspec(quantization_config: Optional[QuantizationConfig]):
     return quantization_spec
 
 
-def get_bias_qspec(quantization_config: Optional[QuantizationConfig]):
+def get_bias_qspec(
+    quantization_config: Optional[QuantizationConfig],
+    node: torch.fx.Node,
+    act_node: torch.fx.Node,
+    weight_node: torch.fx.Node,
+):
     if quantization_config is None:
         return None
     assert quantization_config is not None
     if quantization_config.bias is None:
         return None
-    quantization_spec: QuantizationSpec = quantization_config.bias
-    assert (
-        quantization_spec.dtype == torch.float
-    ), "Only float dtype for bias is supported for bias right now"
-    return quantization_spec
+    quantization_spec = quantization_config.bias
+    assert isinstance(quantization_spec, DerivedQuantizationSpec)
+    if quantization_spec.qscheme not in [
+        torch.per_tensor_symmetric,
+        torch.per_channel_symmetric,
+    ]:
+        raise ValueError(
+            f"Unsupported quantization_spec {quantization_spec} for weight"
+        )
+
+    if len(quantization_spec.derived_from) != 0:
+        raise ValueError(
+            f"Expected bias' derived nodes from quantization_spec to be empty but got {quantization_spec.derived_from}"
+        )
+
+    return replace(
+        quantization_spec, derived_from=[(act_node, node), (weight_node, node)]
+    )
 
 
 @register_annotator("linear")
@@ -183,7 +207,6 @@ def _annotate_linear(
     input_act_qspec = get_input_act_qspec(quantization_config)
     output_act_qspec = get_output_act_qspec(quantization_config)
     weight_qspec = get_weight_qspec(quantization_config)
-    bias_qspec = get_bias_qspec(quantization_config)
     for node in gm.graph.nodes:
         if node.op != "call_function" or node.target != torch.ops.aten.linear.default:
             continue
@@ -208,6 +231,12 @@ def _annotate_linear(
             )
             nodes_to_mark_annotated = [node, weight_node]
             if bias_node:
+                bias_qspec = get_bias_qspec(
+                    quantization_config,
+                    node,
+                    act_node,
+                    weight_node
+                )
                 _annotate_input_qspec_map(
                     node,
                     bias_node,
@@ -231,7 +260,6 @@ def _annotate_linear_relu(
     input_act_qspec = get_input_act_qspec(quantization_config)
     output_act_qspec = get_output_act_qspec(quantization_config)
     weight_qspec = get_weight_qspec(quantization_config)
-    bias_qspec = get_bias_qspec(quantization_config)
     for node in gm.graph.nodes:
         if node.op != "call_function" or node.target not in [
             torch.ops.aten.relu.default,
@@ -261,6 +289,12 @@ def _annotate_linear_relu(
         partition = [relu_node, linear_node, weight]
         bias = linear_node.args[2] if len(linear_node.args) > 2 else None
         if isinstance(bias, Node):
+            bias_qspec = get_bias_qspec(
+                quantization_config,
+                linear_node,
+                input_act,
+                weight
+            )
             input_qspec_map[bias] = bias_qspec
             partition.append(bias)
 
@@ -312,7 +346,12 @@ def _annotate_conv(
 
         bias = conv_node.args[2] if len(conv_node.args) > 2 else None
         if isinstance(bias, Node):
-            input_qspec_map[bias] = get_bias_qspec(quantization_config)
+            input_qspec_map[bias] = get_bias_qspec(
+                quantization_config,
+                conv_node,
+                input_act,
+                weight
+            )
             partition.append(bias)
 
         if _is_annotated(partition):
@@ -365,7 +404,12 @@ def _do_annotate_conv_relu(
         partition = [relu_node, conv_node, conv_node.args[1]]
         bias = conv_node.args[2] if len(conv_node.args) > 2 else None
         if isinstance(bias, Node):
-            input_qspec_map[bias] = get_bias_qspec(quantization_config)
+            input_qspec_map[bias] = get_bias_qspec(
+                quantization_config,
+                conv_node,
+                input_act,
+                weight
+            )
             partition.append(bias)
 
         if _is_annotated(partition):
@@ -568,7 +612,12 @@ def _do_annotate_conv_bn(
         input_qspec_map[input_node] = get_input_act_qspec(quantization_config)
         input_qspec_map[weight_node] = get_weight_qspec(quantization_config)
         if bias_node is not None:
-            input_qspec_map[bias_node] = get_bias_qspec(quantization_config)
+            input_qspec_map[bias_node] = get_bias_qspec(
+                quantization_config,
+                conv_node,
+                input_node,
+                weight_node
+            )
         conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
             input_qspec_map=input_qspec_map,
             _annotated=True,
