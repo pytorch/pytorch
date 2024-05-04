@@ -190,7 +190,23 @@ class GraphArg:
     # thing to do.  Probably should have example (which stores an int) and
     # fake_example
     _example: Union[TensorWeakRef, torch.SymInt]
-    is_unspecialized: bool
+    # When True, this indicates that this GraphArg is a Python quantity (e.g.,
+    # a float or int) which we pass to the FX graph as a Tensor.  This
+    # controls how we codegen calls into the Dynamo graph: we will call
+    # torch.as_tensor on the quantity before passing it in.
+    #
+    # Note that we typically do not pass dynamic integers as tensors, because
+    # they will most frequently just be used for size computation.  But this
+    # is a policy decision that we can change our mind on; in particular, when
+    # an int comes from a random number generator (e.g., random.randint), we
+    # DO pass it as a tensor.
+    #
+    # It's also worth noting that our current tracing rules for
+    # pass_arg_as_tensor as subtly broken: we just pun the variable as a
+    # 0d scalar Tensor and pray that the semantics are the same.  Which they
+    # often are, but not necessarily.  ezyang(May 2024) plans to fix this
+    # soon.
+    pass_arg_as_tensor: bool
     fake_tensor: Optional[torch._subclasses.fake_tensor.FakeTensor]
     # UnspecializedPythonVariable often masquerades as a tensor.
     # We MUST NOT generate shape guard code
@@ -233,7 +249,7 @@ class BackwardStateGraphArg(GraphArg):
         super().__init__(
             source=None,
             _example=BackwardState(),
-            is_unspecialized=False,
+            pass_arg_as_tensor=False,
             fake_tensor=None,
             is_tensor=False,
         )
@@ -955,7 +971,11 @@ class VariableBuilder:
             install_guard(*guards, skip=1)
 
             grapharg = GraphArg(
-                source, value, is_unspecialized=False, fake_tensor=None, is_tensor=False
+                source,
+                value,
+                pass_arg_as_tensor=False,
+                fake_tensor=None,
+                is_tensor=False,
             )
             tensor_list_proxy.node.meta["grapharg"] = grapharg
 
@@ -1288,12 +1308,12 @@ class VariableBuilder:
         self.tx.output.input_source_to_var[source] = numpy_ndarray_variable
         example_value = numpy_ndarray_variable.proxy.node.meta["example_value"]
 
-        # is_unspecialized should be true because we are wrapping a np.ndarray as argument input, and it needs to be
+        # pass_arg_as_tensor should be true because we are wrapping a np.ndarray as argument input, and it needs to be
         # converted to a tensor.
         grapharg = GraphArg(
             source,
             tensor_value,
-            is_unspecialized=True,
+            pass_arg_as_tensor=True,
             fake_tensor=example_value,
             is_tensor=True,
             example_strong_ref=tensor_value,
@@ -1404,7 +1424,7 @@ class VariableBuilder:
             proxy.node.meta["grapharg"] = GraphArg(
                 self.get_source(),
                 wrapped_value,
-                is_unspecialized=False,
+                pass_arg_as_tensor=False,
                 fake_tensor=None,
                 is_tensor=False,
                 example_strong_ref=wrapped_value,
@@ -1459,7 +1479,7 @@ class VariableBuilder:
             proxy.node.meta["grapharg"] = GraphArg(
                 self.get_source(),
                 wrapped_value,
-                is_unspecialized=True,
+                pass_arg_as_tensor=True,
                 fake_tensor=fake_tensor_value,
                 is_tensor=False,
                 example_strong_ref=wrapped_value,
