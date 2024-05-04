@@ -25,7 +25,7 @@ class SymT(Enum):
     # If one of these shows up in an indexing expression, that means an
     # indirect load is happening.
     TMP = auto()
-    # Inductor: what's this?
+    # Inductor: Placeholder variable that is later replaced with TMP
     INDIRECT = auto()
     # Inductor: Some size expressions are replaced with a precomputed size ps0
     # which is computed host side, and then directly reused in the kernel, so
