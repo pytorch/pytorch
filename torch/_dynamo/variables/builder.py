@@ -1389,13 +1389,8 @@ class VariableBuilder:
             source=self.get_source(),
         )
 
-        unspec_var = wrap_fx_proxy_cls(
-            SymNodeVariable,  # NB: this doesn't actually do anything
-            tx=self.tx,
-            proxy=proxy,
-            example_value=wrapped_value,
-            **options,
-        )
+        set_example_value(proxy.node, wrapped_value)
+        unspec_var = SymNodeVariable(proxy, wrapped_value, **options)
         self.tx.output.unspec_variable_map[self.name] = unspec_var
 
         if not is_constant_source(self.get_source()):
