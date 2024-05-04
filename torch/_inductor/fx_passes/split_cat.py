@@ -371,7 +371,7 @@ def normalize_stack_default(match: Match, *args, **kwargs):
 
     with graph.inserting_after(node):
         new_node = graph.call_function(
-            node.target,
+            node.target,  # type: ignore[arg-type]
             args=(tensors,),
             kwargs={"dim": dim},
         )
@@ -500,7 +500,7 @@ def merge_splits(
 
     to_remove = []
 
-    with graph.inserting_before(first_split):
+    with graph.inserting_before(first_split):  # type: ignore[arg-type]
         # Add the new split node
         new_split = graph.call_function(
             torch.split,

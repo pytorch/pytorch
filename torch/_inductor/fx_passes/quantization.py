@@ -1577,7 +1577,7 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number, dtype=torch.float3
                 graph.erase_node(clone_node)  # type: ignore[arg-type]
             if dtype == torch.bfloat16:
                 graph.erase_node(weight_to_bf16_node)  # type: ignore[arg-type,possibly-undefined]
-            graph.erase_node(dequant_per_channel)
+            graph.erase_node(dequant_per_channel)  # type: ignore[arg-type]
             counters["inductor"]["qconv2d_weight_prepack_matcher_count"] += 1
             counters["inductor"]["qconv2d_weight_prepack_matcher_nodes"] += len(
                 match.nodes
