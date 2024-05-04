@@ -49,10 +49,8 @@ class TensorParallelStyleTest(DTensorTestBase):
         model = nn.Linear(16, 16, device=self.device_type)
 
         default_col_parallel = ColwiseParallel()
+        colwise_mod = parallelize_module(deepcopy(model), mesh, default_col_parallel)
         with comm_mode:
-            colwise_mod = parallelize_module(
-                deepcopy(model), mesh, default_col_parallel
-            )
             out = colwise_mod(tensor)
             # ensure output shard on the last dim
             self.assertEqual(out.shape, (8, 16 // self.world_size))
@@ -65,10 +63,8 @@ class TensorParallelStyleTest(DTensorTestBase):
             self.assertEqual(comm_mode.get_total_counts(), 1)
 
         sharded_col_parallel = ColwiseParallel(input_layouts=Shard(0))
+        colwise_mod = parallelize_module(deepcopy(model), mesh, sharded_col_parallel)
         with comm_mode:
-            colwise_mod = parallelize_module(
-                deepcopy(model), mesh, sharded_col_parallel
-            )
             out = colwise_mod(tensor)
             # ensure output shard on the last dim
             self.assertEqual(out.shape, (8 * self.world_size, 16 // self.world_size))
@@ -94,10 +90,8 @@ class TensorParallelStyleTest(DTensorTestBase):
         model = nn.Embedding(16, 16, device=self.device_type)
 
         default_col_parallel = ColwiseParallel()
+        colwise_mod = parallelize_module(deepcopy(model), mesh, default_col_parallel)
         with comm_mode:
-            colwise_mod = parallelize_module(
-                deepcopy(model), mesh, default_col_parallel
-            )
             out = colwise_mod(tensor)
             # ensure output shard on the last dim
             self.assertEqual(out.shape, (4, 2, 16 // self.world_size))
@@ -119,10 +113,8 @@ class TensorParallelStyleTest(DTensorTestBase):
         model = nn.Linear(16, 16, device=self.device_type)
 
         default_row_parallel = RowwiseParallel()
+        rowwise_mod = parallelize_module(deepcopy(model), mesh, default_row_parallel)
         with comm_mode:
-            rowwise_mod = parallelize_module(
-                deepcopy(model), mesh, default_row_parallel
-            )
             out = rowwise_mod(tensor)
             # ensure output replicated
             self.assertEqual(out.shape, (8, 16))
@@ -135,10 +127,8 @@ class TensorParallelStyleTest(DTensorTestBase):
             self.assertEqual(comm_mode.get_total_counts(), 1)
 
         sharded_row_parallel = RowwiseParallel(output_layouts=Shard(0))
+        rowwise_mod = parallelize_module(deepcopy(model), mesh, sharded_row_parallel)
         with comm_mode:
-            rowwise_mod = parallelize_module(
-                deepcopy(model), mesh, sharded_row_parallel
-            )
             out = rowwise_mod(tensor)
             # ensure output replicated
             self.assertEqual(out.shape, (8 // self.world_size, 16))
@@ -163,10 +153,10 @@ class TensorParallelStyleTest(DTensorTestBase):
         tensor = torch.arange(8, device=self.device_type).reshape(4, 2)
         model = nn.Embedding(16, 16, device=self.device_type)
 
+        rowwise_mod = parallelize_module(
+            deepcopy(model), mesh, RowwiseParallel(input_layouts=Replicate())
+        )
         with comm_mode:
-            rowwise_mod = parallelize_module(
-                deepcopy(model), mesh, RowwiseParallel(input_layouts=Replicate())
-            )
             out = rowwise_mod(tensor)
             # ensure output shard on the last dim
             self.assertEqual(out.shape, (4, 2, 16))
