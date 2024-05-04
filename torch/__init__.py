@@ -37,7 +37,6 @@ else:
 
 from typing import Any, Callable, Dict, Optional, Set, Tuple, Type, TYPE_CHECKING, Union, List
 import builtins
-from . import _C as _C
 
 __all__ = [
     'typename', 'is_tensor', 'is_storage',
@@ -240,6 +239,8 @@ else:
 
 # Appease the type checker; ordinarily this binding is inserted by the
 # torch._C module initialization code in C
+if TYPE_CHECKING:
+    from . import _C as _C
 
 class SymInt:
     """
