@@ -12,6 +12,12 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # protobuf header files, because protobuf header files will transitively force
 # one to link against a specific protobuf version.
 
+# if(BUILD_LIBTORCHLESS)
+#  find_library(c10 c10 PATHS /home/sahanp/.conda/envs/pytorch-3.10/lib/python3.10/site-packages/libtorch/lib/libc10.so NO_DEFAULT_PATH)
+#  return()
+# endif()
+
+
 # ---[ Configure macro file.
 set(C10_USE_GFLAGS ${USE_GFLAGS}) # used in cmake_macros.h.in
 set(C10_USE_GLOG ${USE_GLOG}) # used in cmake_macros.h.in
@@ -42,20 +48,17 @@ file(GLOB C10_HEADERS
         macros/*.h
         util/*.h
       )
-find_library(TARGET_LIB c10 PATHS /home/sahanp/.conda/envs/pytorch-3.10/lib/python3.10/site-packages/libtorch/lib/libc10.so NO_DEFAULT_PATH)
-if(NOT TARGET_LIB)
-  add_library(c10 ${C10_SRCS} ${C10_HEADERS})
-  target_compile_options_if_supported(c10 "-Wdeprecated")
-  if(HAVE_SOVERSION)
-    set_target_properties(c10 PROPERTIES
-        VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
-  endif()
-  # If building shared library, set dllimport/dllexport proper.
-  target_compile_options(c10 PRIVATE "-DC10_BUILD_MAIN_LIB")
-  # Enable hidden visibility if compiler supports it.
-  if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
-    target_compile_options(c10 PRIVATE "-fvisibility=hidden")
-  endif()
+add_library(c10 ${C10_SRCS} ${C10_HEADERS})
+target_compile_options_if_supported(c10 "-Wdeprecated")
+if(HAVE_SOVERSION)
+  set_target_properties(c10 PROPERTIES
+      VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
+endif()
+# If building shared library, set dllimport/dllexport proper.
+target_compile_options(c10 PRIVATE "-DC10_BUILD_MAIN_LIB")
+# Enable hidden visibility if compiler supports it.
+if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
+  target_compile_options(c10 PRIVATE "-fvisibility=hidden")
 endif()
 
 option(C10_USE_IWYU "Use include-what-you-use to clean up header inclusion" OFF)

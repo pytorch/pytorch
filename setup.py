@@ -243,11 +243,23 @@ import platform
 
 BUILD_LIBTORCH_WHL = os.getenv("BUILD_LIBTORCH_WHL", "0") == "1"
 
+BUILD_PYTORCH_USING_LIBTORCH_WHL = os.getenv("BUILD_PYTORCH_USING_LIBTORCH_WHL", "0") == "1"
+
+
 # set up appropriate env variables
 if BUILD_LIBTORCH_WHL:
     # Set up environment variables for ONLY building libtorch.so and not libtorch_python.so
+
+    # functorch is not supported without python
     os.environ["BUILD_FUNCTORCH"] = "OFF"
     os.environ["BUILD_PYTHONLESS"] = "ON"
+else:
+    os.environ["BUILD_PYTHONLESS"] = "OFF"
+
+
+if BUILD_PYTORCH_USING_LIBTORCH_WHL:
+    os.environ["BUILD_LIBTORCHLESS"] = "ON"
+    os.environ["LIBTORCH_LIB_PATH"] = "/home/sahanp/.conda/envs/pytorch-3.10/lib/python3.10/site-packages/libtorch/lib/"
 
 python_min_version = (3, 8, 0)
 python_min_version_str = ".".join(map(str, python_min_version))
@@ -1248,6 +1260,7 @@ def main():
         "lib/torch_shm_manager",
         "lib/*.h",
         "lib/libtorch_python*",
+        "lib/*shm*",
         "include/*.h",
         "include/ATen/*.h",
         "include/ATen/cpu/*.h",
@@ -1408,7 +1421,7 @@ def main():
         "utils/model_dump/code.js",
         "utils/model_dump/*.mjs",
     ]
-    if not BUILD_LIBTORCH_WHL:
+    if BUILD_LIBTORCH_WHL:
         torch_package_data.extend(
             [
                 "lib/*.so*",

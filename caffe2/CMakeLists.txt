@@ -1,3 +1,12 @@
+# if(BUILD_LIBTORCHLESS)
+#  find_library(torch_cpu torch_cpu PATHS /home/sahanp/.conda/envs/pytorch-3.10/lib/python3.10/site-packages/libtorch/lib/libtorch_cpu.so NO_DEFAULT_PATH)
+#  find_library(torch torch PATHS /home/sahanp/.conda/envs/pytorch-3.10/lib/python3.10/site-packages/libtorch/lib/libtorch.so NO_DEFAULT_PATH)
+#  find_library(torch_cuda torch_cpu PATHS /home/sahanp/.conda/envs/pytorch-3.10/lib/python3.10/site-packages/libtorch/lib/libtorch_cuda.so NO_DEFAULT_PATH)
+#  find_library(torch_global_deps torch_global_deps PATHS /home/sahanp/.conda/envs/pytorch-3.10/lib/python3.10/site-packages/libtorch/lib/libtorch_global_deps.so NO_DEFAULT_PATH)
+#  return()
+# endif()
+
+
 # ---[ Generate and install header and cpp files
 include(../cmake/Codegen.cmake)
 
@@ -846,19 +855,17 @@ set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS_NON_AVX} ${Caffe2_CPU_SRCS_AVX2} ${Caffe2_
 # ==========================================================
 # END formerly-libtorch sources
 # ==========================================================
-find_library(TARGET_LIB torch_cpu PATHS /home/sahanp/.conda/envs/pytorch-3.10/lib/python3.10/site-packages/libtorch/lib/libtorch_cpu.so NO_DEFAULT_PATH)
-if(NOT TARGET_LIB)
-  add_library(torch_cpu ${Caffe2_CPU_SRCS})
-  if(HAVE_SOVERSION)
-    set_target_properties(torch_cpu PROPERTIES
-        VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
-  endif()
-  torch_compile_options(torch_cpu)  # see cmake/public/utils.cmake
-  if(BUILD_CAFFE2 AND NOT MSVC)
-    # Caffe2 has too many signed-unsigned violation, but the framework is dead
-    # So no point in fixing those
-    target_compile_options(torch_cpu PRIVATE "-Wno-sign-compare")
-  endif()
+add_library(torch_cpu ${Caffe2_CPU_SRCS})
+if(HAVE_SOVERSION)
+  set_target_properties(torch_cpu PROPERTIES
+      VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
+endif()
+torch_compile_options(torch_cpu)  # see cmake/public/utils.cmake
+if(BUILD_CAFFE2 AND NOT MSVC)
+  # Caffe2 has too many signed-unsigned violation, but the framework is dead
+  # So no point in fixing those
+  target_compile_options(torch_cpu PRIVATE "-Wno-sign-compare")
+endif()
 
 # Ignore Wdeprecated-XXX errors from third-party libraries
 if(NOT MSVC)
@@ -866,26 +873,25 @@ if(NOT MSVC)
   set_source_files_properties(${PROJECT_SOURCE_DIR}/torch/csrc/distributed/c10d/socket.cpp PROPERTIES COMPILE_OPTIONS "-Wno-error=deprecated")
 endif()
 
-  if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND NOT USE_VULKAN AND NOT USE_IOS AND NOT USE_PYTORCH_METAL AND NOT USE_COREML_DELEGATE)
-    target_compile_options_if_supported(torch_cpu "-Wmissing-prototypes")
-    target_compile_options_if_supported(torch_cpu "-Werror=missing-prototypes")
-    get_target_property(TORCH_CPU_SOURCES torch_cpu SOURCES)
-    foreach(generated_file IN LISTS GENERATED_CXX_TORCH)
-      set_source_files_properties(${generated_file} PROPERTIES COMPILE_OPTIONS "-Wno-missing-prototypes;-Wno-error=missing-prototypes")
-    endforeach()
-    foreach(source_file IN LISTS TORCH_CPU_SOURCES)
-      get_filename_component(source_file "${source_file}" REALPATH)
-      string(FIND "${source_file}" "${CMAKE_BINARY_DIR}" res)
-      if(res GREATER -1)
-        set_source_files_properties(${source_file} PROPERTIES COMPILE_OPTIONS "-Wno-missing-prototypes;-Wno-error=missing-prototypes")
-        continue()
-      endif()
-      string(FIND "${source_file}" "caffe2" res)
-      if(res GREATER -1)
-        set_source_files_properties(${source_file} PROPERTIES COMPILE_OPTIONS "-Wno-missing-prototypes;-Wno-error=missing-prototypes")
-      endif()
-    endforeach()
-  endif()
+if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND NOT USE_VULKAN AND NOT USE_IOS AND NOT USE_PYTORCH_METAL AND NOT USE_COREML_DELEGATE)
+  target_compile_options_if_supported(torch_cpu "-Wmissing-prototypes")
+  target_compile_options_if_supported(torch_cpu "-Werror=missing-prototypes")
+  get_target_property(TORCH_CPU_SOURCES torch_cpu SOURCES)
+  foreach(generated_file IN LISTS GENERATED_CXX_TORCH)
+    set_source_files_properties(${generated_file} PROPERTIES COMPILE_OPTIONS "-Wno-missing-prototypes;-Wno-error=missing-prototypes")
+  endforeach()
+  foreach(source_file IN LISTS TORCH_CPU_SOURCES)
+    get_filename_component(source_file "${source_file}" REALPATH)
+    string(FIND "${source_file}" "${CMAKE_BINARY_DIR}" res)
+    if(res GREATER -1)
+      set_source_files_properties(${source_file} PROPERTIES COMPILE_OPTIONS "-Wno-missing-prototypes;-Wno-error=missing-prototypes")
+      continue()
+    endif()
+    string(FIND "${source_file}" "caffe2" res)
+    if(res GREATER -1)
+      set_source_files_properties(${source_file} PROPERTIES COMPILE_OPTIONS "-Wno-missing-prototypes;-Wno-error=missing-prototypes")
+    endif()
+  endforeach()
 endif()
 
 option(TORCH_USE_IWYU "Use include-what-you-use to clean up header inclusion" OFF)
@@ -974,13 +980,10 @@ file(WRITE ${DUMMY_EMPTY_FILE} ${DUMMY_FILE_CONTENT})
 
 # Wrapper library for people who link against torch and expect both CPU and CUDA support
 # Contains "torch_cpu" and "torch_cuda"
-find_library(TARGET_LIB torch PATHS /home/sahanp/.conda/envs/pytorch-3.10/lib/python3.10/site-packages/libtorch/lib/libtorch.so NO_DEFAULT_PATH)
-if(NOT TARGET_LIB)
-  add_library(torch ${DUMMY_EMPTY_FILE})
-  if(HAVE_SOVERSION)
-    set_target_properties(torch PROPERTIES
-        VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
-  endif()
+add_library(torch ${DUMMY_EMPTY_FILE})
+if(HAVE_SOVERSION)
+  set_target_properties(torch PROPERTIES
+      VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
 endif()
 if(USE_ROCM)
   filter_list(__caffe2_hip_srcs_cpp Caffe2_HIP_SRCS "\\.(cu|hip)$")
@@ -991,113 +994,107 @@ endif()
 if(USE_ROCM)
   set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
   list(APPEND Caffe2_HIP_SRCS ${GENERATED_CXX_TORCH_CUDA})
-  find_library(TARGET_LIB torch_hip PATHS /home/sahanp/.conda/envs/pytorch-3.10/lib/python3.10/site-packages/libtorch/lib/libtorch_hip.so NO_DEFAULT_PATH)
-  if(NOT TARGET_LIB)
-    hip_add_library(torch_hip ${Caffe2_HIP_SRCS})
-    if(USE_FLASH_ATTENTION)
-      target_link_libraries(torch_hip PRIVATE __caffe2_aotriton)
-      add_dependencies(torch_hip aotriton_external)
-    endif()
-    set(CUDA_LINK_LIBRARIES_KEYWORD)
-    torch_compile_options(torch_hip)  # see cmake/public/utils.cmake
-    # TODO: Not totally sure if this is live or not
-    if(USE_NCCL)
-      target_link_libraries(torch_hip PRIVATE __caffe2_nccl)
-      target_compile_definitions(torch_hip PRIVATE USE_NCCL)
-    endif()
+  hip_add_library(torch_hip ${Caffe2_HIP_SRCS})
+  if(USE_FLASH_ATTENTION)
+    target_link_libraries(torch_hip PRIVATE __caffe2_aotriton)
+    add_dependencies(torch_hip aotriton_external)
+  endif()
+  set(CUDA_LINK_LIBRARIES_KEYWORD)
+  torch_compile_options(torch_hip)  # see cmake/public/utils.cmake
+  # TODO: Not totally sure if this is live or not
+  if(USE_NCCL)
+    target_link_libraries(torch_hip PRIVATE __caffe2_nccl)
+    target_compile_definitions(torch_hip PRIVATE USE_NCCL)
+  endif()
 
-    if(USE_PRECOMPILED_HEADERS)
-      target_precompile_headers(torch_hip PRIVATE
-          "$<$<COMPILE_LANGUAGE:CXX>:ATen/core/ATen_pch.h>")
-    endif()
+  if(USE_PRECOMPILED_HEADERS)
+    target_precompile_headers(torch_hip PRIVATE
+        "$<$<COMPILE_LANGUAGE:CXX>:ATen/core/ATen_pch.h>")
   endif()
 elseif(USE_CUDA)
-  find_library(TARGET_LIB torch_cpu PATHS /home/sahanp/.conda/envs/pytorch-3.10/lib/python3.10/site-packages/libtorch/lib/libtorch.so NO_DEFAULT_PATH)
-  if(NOT TARGET_LIB)
-    set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
-    list(APPEND Caffe2_GPU_SRCS ${GENERATED_CXX_TORCH_CUDA})
-    if(CUDA_SEPARABLE_COMPILATION)
-    # Separate compilation fails when kernels using `thrust::sort_by_key`
-    # are linked with the rest of CUDA code. Workaround by linking them separately.
-      add_library(torch_cuda ${Caffe2_GPU_SRCS} ${Caffe2_GPU_CU_SRCS})
-      set_property(TARGET torch_cuda PROPERTY CUDA_SEPARABLE_COMPILATION ON)
+  set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
+  list(APPEND Caffe2_GPU_SRCS ${GENERATED_CXX_TORCH_CUDA})
+  if(CUDA_SEPARABLE_COMPILATION)
+  # Separate compilation fails when kernels using `thrust::sort_by_key`
+  # are linked with the rest of CUDA code. Workaround by linking them separately.
+    add_library(torch_cuda ${Caffe2_GPU_SRCS} ${Caffe2_GPU_CU_SRCS})
+    set_property(TARGET torch_cuda PROPERTY CUDA_SEPARABLE_COMPILATION ON)
 
-      add_library(torch_cuda_w_sort_by_key OBJECT
-          ${Caffe2_GPU_SRCS_W_SORT_BY_KEY}
-          ${Caffe2_GPU_CU_SRCS_W_SORT_BY_KEY})
-      set_property(TARGET torch_cuda_w_sort_by_key PROPERTY CUDA_SEPARABLE_COMPILATION OFF)
-      target_link_libraries(torch_cuda PRIVATE torch_cuda_w_sort_by_key)
-    else()
-      add_library(torch_cuda
-          ${Caffe2_GPU_SRCS} ${Caffe2_GPU_SRCS_W_SORT_BY_KEY}
-          ${Caffe2_GPU_CU_SRCS} ${Caffe2_GPU_CU_SRCS_W_SORT_BY_KEY})
+    add_library(torch_cuda_w_sort_by_key OBJECT
+        ${Caffe2_GPU_SRCS_W_SORT_BY_KEY}
+        ${Caffe2_GPU_CU_SRCS_W_SORT_BY_KEY})
+    set_property(TARGET torch_cuda_w_sort_by_key PROPERTY CUDA_SEPARABLE_COMPILATION OFF)
+    target_link_libraries(torch_cuda PRIVATE torch_cuda_w_sort_by_key)
+  else()
+    add_library(torch_cuda
+        ${Caffe2_GPU_SRCS} ${Caffe2_GPU_SRCS_W_SORT_BY_KEY}
+        ${Caffe2_GPU_CU_SRCS} ${Caffe2_GPU_CU_SRCS_W_SORT_BY_KEY})
+  endif()
+  set(CUDA_LINK_LIBRARIES_KEYWORD)
+  torch_compile_options(torch_cuda)  # see cmake/public/utils.cmake
+  target_compile_options_if_supported(torch_cuda "-Wno-deprecated-copy")  # see cmake/public/utils.cmake
+  target_compile_definitions(torch_cuda PRIVATE USE_CUDA)
+endif()
+if(USE_CUSPARSELT)
+    target_link_libraries(torch_cuda PRIVATE torch::cusparselt)
+    target_compile_definitions(torch_cuda PRIVATE USE_CUSPARSELT)
+endif()
+if(USE_NCCL)
+  target_link_libraries(torch_cuda PRIVATE __caffe2_nccl)
+  target_compile_definitions(torch_cuda PRIVATE USE_NCCL)
+endif()
+if(USE_UCC)
+  target_link_libraries(torch_cuda PRIVATE __caffe2_ucc)
+  target_compile_definitions(torch_cuda PRIVATE USE_UCC)
+endif()
+if(USE_FLASH_ATTENTION)
+  target_compile_definitions(torch_cuda PRIVATE USE_FLASH_ATTENTION)
+endif()
+if(USE_MEM_EFF_ATTENTION)
+  target_compile_definitions(torch_cuda PRIVATE USE_MEM_EFF_ATTENTION)
+endif()
+if(BUILD_LAZY_CUDA_LINALG)
+  add_library(torch_cuda_linalg ${ATen_CUDA_LINALG_SRCS})
+  target_compile_definitions(torch_cuda_linalg PRIVATE USE_CUDA BUILD_LAZY_CUDA_LINALG)
+  # Library order is important during static linking
+  # `torch::magma` should be mentioned before other CUDA
+  # to transitively include all symbols present in torch_cuda/torch_cpu
+  if(USE_MAGMA)
+    target_link_libraries(torch_cuda_linalg PRIVATE torch::magma)
+    # CUDAHooks reports version of MAGMA PyTorch was compiled against, i.e. needs to be able to include magma headers
+    get_target_property(HOOKS_INCLUDE_DIRECTORIES torch_cuda INCLUDE_DIRECTORIES)
+    if(NOT "${MAGMA_INCLUDE_DIR}" IN_LIST HOOKS_INCLUDE_DIRECTORIES)
+      set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/detail/CUDAHooks.cpp PROPERTIES INCLUDE_DIRECTORIES  "${MAGMA_INCLUDE_DIR}")
     endif()
-    set(CUDA_LINK_LIBRARIES_KEYWORD)
-    torch_compile_options(torch_cuda)  # see cmake/public/utils.cmake
-    target_compile_options_if_supported(torch_cuda "-Wno-deprecated-copy")  # see cmake/public/utils.cmake
-    target_compile_definitions(torch_cuda PRIVATE USE_CUDA)
   endif()
-  if(USE_CUSPARSELT)
-      target_link_libraries(torch_cuda PRIVATE torch::cusparselt)
-      target_compile_definitions(torch_cuda PRIVATE USE_CUSPARSELT)
-  endif()
-  if(USE_NCCL)
-    target_link_libraries(torch_cuda PRIVATE __caffe2_nccl)
-    target_compile_definitions(torch_cuda PRIVATE USE_NCCL)
-  endif()
-  if(USE_UCC)
-    target_link_libraries(torch_cuda PRIVATE __caffe2_ucc)
-    target_compile_definitions(torch_cuda PRIVATE USE_UCC)
-  endif()
-  if(USE_FLASH_ATTENTION)
-    target_compile_definitions(torch_cuda PRIVATE USE_FLASH_ATTENTION)
-  endif()
-  if(USE_MEM_EFF_ATTENTION)
-    target_compile_definitions(torch_cuda PRIVATE USE_MEM_EFF_ATTENTION)
-  endif()
-  if(BUILD_LAZY_CUDA_LINALG)
-    add_library(torch_cuda_linalg ${ATen_CUDA_LINALG_SRCS})
-    target_compile_definitions(torch_cuda_linalg PRIVATE USE_CUDA BUILD_LAZY_CUDA_LINALG)
-    # Library order is important during static linking
-    # `torch::magma` should be mentioned before other CUDA
-    # to transitively include all symbols present in torch_cuda/torch_cpu
-    if(USE_MAGMA)
-      target_link_libraries(torch_cuda_linalg PRIVATE torch::magma)
-      # CUDAHooks reports version of MAGMA PyTorch was compiled against, i.e. needs to be able to include magma headers
-      get_target_property(HOOKS_INCLUDE_DIRECTORIES torch_cuda INCLUDE_DIRECTORIES)
-      if(NOT "${MAGMA_INCLUDE_DIR}" IN_LIST HOOKS_INCLUDE_DIRECTORIES)
-        set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/detail/CUDAHooks.cpp PROPERTIES INCLUDE_DIRECTORIES  "${MAGMA_INCLUDE_DIR}")
-      endif()
-    endif()
-    target_link_libraries(torch_cuda_linalg PRIVATE
-        torch_cpu
-        torch_cuda
-    )
-    if($ENV{ATEN_STATIC_CUDA})
-      if(CUDA_VERSION_MAJOR LESS_EQUAL 11)
-        target_link_libraries(torch_cuda_linalg PRIVATE
-            CUDA::cusolver_static
-            ${CUDAToolkit_LIBRARY_DIR}/liblapack_static.a     # needed for libcusolver_static
-        )
-      elseif(CUDA_VERSION_MAJOR GREATER_EQUAL 12)
-        target_link_libraries(torch_cuda_linalg PRIVATE
-            CUDA::cusolver_static
-            ${CUDAToolkit_LIBRARY_DIR}/libcusolver_lapack_static.a     # needed for libcusolver_static
-        )
-      endif()
-    else()
+  target_link_libraries(torch_cuda_linalg PRIVATE
+      torch_cpu
+      torch_cuda
+  )
+  if($ENV{ATEN_STATIC_CUDA})
+    if(CUDA_VERSION_MAJOR LESS_EQUAL 11)
       target_link_libraries(torch_cuda_linalg PRIVATE
-          CUDA::cusolver
+          CUDA::cusolver_static
+          ${CUDAToolkit_LIBRARY_DIR}/liblapack_static.a     # needed for libcusolver_static
+      )
+    elseif(CUDA_VERSION_MAJOR GREATER_EQUAL 12)
+      target_link_libraries(torch_cuda_linalg PRIVATE
+          CUDA::cusolver_static
+          ${CUDAToolkit_LIBRARY_DIR}/libcusolver_lapack_static.a     # needed for libcusolver_static
       )
     endif()
-    # NS: TODO, is this really necessary?
-    if(USE_MAGMA AND CAFFE2_STATIC_LINK_CUDA)
-      target_link_libraries(torch_cuda_linalg PRIVATE
-          CUDA::culibos ${CMAKE_DL_LIBS})
-    endif()
-    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/cuda/LinearAlgebraStubs.cpp PROPERTIES COMPILE_FLAGS "-DBUILD_LAZY_CUDA_LINALG")
-    install(TARGETS torch_cuda_linalg DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+  else()
+    target_link_libraries(torch_cuda_linalg PRIVATE
+        CUDA::cusolver
+    )
   endif()
+  # NS: TODO, is this really necessary?
+  if(USE_MAGMA AND CAFFE2_STATIC_LINK_CUDA)
+    target_link_libraries(torch_cuda_linalg PRIVATE
+        CUDA::culibos ${CMAKE_DL_LIBS})
+  endif()
+  set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/cuda/LinearAlgebraStubs.cpp PROPERTIES COMPILE_FLAGS "-DBUILD_LAZY_CUDA_LINALG")
+  install(TARGETS torch_cuda_linalg DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 
   if(USE_PRECOMPILED_HEADERS)
     target_precompile_headers(torch_cuda PRIVATE
@@ -1677,7 +1674,12 @@ if(USE_CUDA)
     target_link_libraries(torch_cpu PRIVATE torch::cudart)
   endif()
   target_link_libraries(torch_cuda INTERFACE torch::cudart)
-  target_link_libraries(torch_cuda PUBLIC c10_cuda torch::nvtoolsext)
+
+  if(BUILD_LIBTORCHLESS)
+    target_link_libraries(torch_cuda PUBLIC ${C10_CUDA_LIB} torch::nvtoolsext)
+  else()
+      target_link_libraries(torch_cuda PUBLIC c10_cuda torch::nvtoolsext)
+  endif()
 
   target_include_directories(
       torch_cuda INTERFACE $<INSTALL_INTERFACE:include>)
@@ -1731,35 +1733,32 @@ target_link_libraries(torch_cpu PRIVATE flatbuffers)
 # That usually leads to missing symbol errors at run-time, so to avoid a situation like
 # this we have to preload those libs in a global namespace.
 if(BUILD_SHARED_LIBS)
-  find_library(TARGET_LIB torch_global_deps PATHS /home/sahanp/.conda/envs/pytorch-3.10/lib/python3.10/site-packages/libtorch/lib/libtorch_global_deps.so NO_DEFAULT_PATH)
-  if(NOT TARGET_LIB)
-    add_library(torch_global_deps SHARED ${TORCH_SRC_DIR}/csrc/empty.c)
-  endif()
-  if(HAVE_SOVERSION)
-    set_target_properties(torch_global_deps PROPERTIES
-        VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
-  endif()
-  set_target_properties(torch_global_deps PROPERTIES LINKER_LANGUAGE C)
-  if(USE_MPI)
-    target_link_libraries(torch_global_deps MPI::MPI_CXX)
-  endif()
-  if(CAFFE2_USE_MKL)
-    target_link_libraries(torch_global_deps caffe2::mkl)
-  endif()
-  # The CUDA libraries are linked here for a different reason: in some
-  # cases we load these libraries with ctypes, and if they weren't opened
-  # with RTLD_GLOBAL, we'll do the "normal" search process again (and
-  # not find them, because they're usually in non-standard locations)
-  if(USE_CUDA)
-    target_link_libraries(torch_global_deps ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
-    target_link_libraries(torch_global_deps torch::cudart torch::nvtoolsext)
-  endif()
-  if(USE_TBB)
-    target_link_libraries(torch_global_deps TBB::tbb)
-  endif()
+  add_library(torch_global_deps SHARED ${TORCH_SRC_DIR}/csrc/empty.c)
+endif()
+if(HAVE_SOVERSION)
+  set_target_properties(torch_global_deps PROPERTIES
+      VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
+endif()
+set_target_properties(torch_global_deps PROPERTIES LINKER_LANGUAGE C)
+if(USE_MPI)
+  target_link_libraries(torch_global_deps MPI::MPI_CXX)
+endif()
+if(CAFFE2_USE_MKL)
+  target_link_libraries(torch_global_deps caffe2::mkl)
+endif()
+# The CUDA libraries are linked here for a different reason: in some
+# cases we load these libraries with ctypes, and if they weren't opened
+# with RTLD_GLOBAL, we'll do the "normal" search process again (and
+# not find them, because they're usually in non-standard locations)
+if(USE_CUDA)
+  target_link_libraries(torch_global_deps ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
+  target_link_libraries(torch_global_deps torch::cudart torch::nvtoolsext)
+endif()
+if(USE_TBB)
+  target_link_libraries(torch_global_deps TBB::tbb)
+endif()
 
   install(TARGETS torch_global_deps DESTINATION "${TORCH_INSTALL_LIB_DIR}")
-endif()
 
 # ---[ Caffe2 HIP sources.
 if(USE_ROCM)
