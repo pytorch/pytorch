@@ -310,7 +310,7 @@ class Tracer(TracerBase):
         self.node_name_to_scope: Dict[str, Tuple[str, type]] = {}
 
     @compatibility(is_backward_compatible=True)
-    def get_fresh_qualname(self, prefix: str):
+    def get_fresh_qualname(self, prefix: str) -> str:
         """
         Gets a fresh name for a prefix and returns it. This function ensures
         that it will not clash with an existing attribute on the graph.
