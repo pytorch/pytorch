@@ -1,11 +1,10 @@
 import contextlib
 
-from typing import Any, cast, Dict, List, NamedTuple, Optional, Set, Tuple, Union
+from typing import Any, cast, Dict, List, NamedTuple, Optional, Set, Tuple
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.autograd.graph import Node
 from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicates
 from torch.utils._pytree import tree_flatten, tree_unflatten
 from torch.utils.hooks import RemovableHandle
@@ -123,11 +122,6 @@ class FSDPParamGroup:
         self.comm_ctx = FSDPCommContext()
         # Group's indices in the shared post-forward order
         self._post_forward_indices: List[int] = []
-        # Used to avoid mistargeted backward prefetches when the module is used
-        # in forward but not in backward: for each forward, we record a tuple
-        # of the output's grad fns and later query the autograd engine whether
-        # any grad fn will execute in the current backward to know to prefetch.
-        self.all_forward_output_grad_fns: Set[Tuple[Node, ...]] = set()
         # Whether to reduce gradients at all (whether for FSDP or HSDP)
         self.reduce_grads: bool = True
         # Whether to all-reduce gradients for HSDP; only used if
@@ -170,32 +164,6 @@ class FSDPParamGroup:
             )
         self._reduce_dtype = next(iter(reduce_dtypes))
 
-    def _init_grad_divide_factors(self):
-        data_parallel_world_size = 1
-        data_parallel_world_size *= self.mesh_info.shard_mesh_size
-        if isinstance(self.mesh_info, HSDPMeshInfo):
-            data_parallel_world_size *= self.mesh_info.replicate_mesh_size
-        if self._reduce_dtype in (torch.float32, torch.bfloat16):
-            # Use NCCL's AVG op to divide after reduction since it is more
-            # performant and fp32 has sufficient precision
-            self._grad_divide_factors: Union[Tuple[None, None], Tuple[float, float]] = (
-                None,
-                None,
-            )
-            return
-        # Since fp16 has smaller dynamic range than fp32/bf16, we want to avoid
-        # overflow/underflow. For N data parallel workers, each worker computes
-        # g_i, and they collectively reduce (g_1 + ... + g_N) / N. To avoid
-        # overflow/underflow, we divide by ~sqrt(N) before/after the reduction.
-        factor: int = 1
-        while (
-            data_parallel_world_size % factor == 0
-            and data_parallel_world_size / factor > factor
-        ):
-            factor *= 2
-        factor = float(factor)
-        self._grad_divide_factors = (factor, data_parallel_world_size / factor)
-
     def lazy_init(self):
         # Lazy init should be idempotent
         param_names_on_meta = [
@@ -213,7 +181,6 @@ class FSDPParamGroup:
         # Initialize mixed precision attributes lazily in case the user changes
         # the parameter dtypes after construction time but before forward
         self._init_mp_dtypes()
-        self._init_grad_divide_factors()
         self._register_state_dict_hooks()
 
     # Runtime #
@@ -305,28 +272,37 @@ class FSDPParamGroup:
         self.comm_ctx.post_forward_order.append(self)
         self._post_forward_indices.append(post_forward_index)
 
-    def pre_backward(self, forward_grad_fns: Tuple[Any, ...], *unused: Any):
+    def pre_backward(self, *unused: Any):
         with torch.profiler.record_function("FSDP::pre_backward"):
             self._training_state = TrainingState.PRE_BACKWARD
             self.unshard()  # no-op if prefetched
             self.wait_for_unshard()
-            # Can be already removed if running multiple `backward`s
-            self.all_forward_output_grad_fns.discard(forward_grad_fns)
             self._prefetch_unshard()
 
     def post_backward(self, *unused: Any):
         self._training_state = TrainingState.POST_BACKWARD
+        with torch.profiler.record_function("FSDP::post_backward_accumulate"):
+            for fsdp_param in self.fsdp_params:
+                fsdp_param.accumulate_unsharded_grad_if_needed()
         with torch.profiler.record_function("FSDP::post_backward_reshard"):
             if not self.reduce_grads:
                 if self.reshard_after_backward:
                     self.reshard()
+                for fsdp_param in self.fsdp_params:
+                    fsdp_param.to_accumulated_grad_if_needed()
                 return
             # Save the autograd-computed gradients before resharding to only
             # access the unsharded parameters when their data is present
             fsdp_params_with_grad: List[FSDPParam] = []
             unsharded_grads: List[torch.Tensor] = []
             for fsdp_param in self.fsdp_params:
-                if fsdp_param.unsharded_param.grad is not None:
+                # May have an accumulated gradient of the reduce dtype if the
+                # previous backward did not reduce-scatter
+                if fsdp_param.unsharded_accumulated_grad is not None:
+                    fsdp_params_with_grad.append(fsdp_param)
+                    unsharded_grads.append(fsdp_param.unsharded_accumulated_grad_data)
+                    fsdp_param.unsharded_accumulated_grad = None
+                elif fsdp_param.unsharded_param.grad is not None:
                     fsdp_params_with_grad.append(fsdp_param)
                     unsharded_grads.append(fsdp_param.unsharded_grad_data)
                     fsdp_param.unsharded_param.grad = None
@@ -343,9 +319,8 @@ class FSDPParamGroup:
                 self._orig_dtype,
                 self._reduce_dtype,
                 self.device,
-                self._grad_divide_factors,
                 self._all_reduce_process_group
-                if self._should_all_reduce_grads()
+                if self._is_hsdp and self.all_reduce_grads
                 else None,
                 self.comm_ctx.all_reduce_stream,
             )
@@ -359,7 +334,6 @@ class FSDPParamGroup:
                 fsdp_param.grad_offload_event.synchronize()
                 fsdp_param.grad_offload_event = None
         self._post_forward_indices.clear()
-        self.all_forward_output_grad_fns.clear()
 
     def _prefetch_unshard(self):
         if self._training_state == TrainingState.PRE_BACKWARD:
@@ -369,18 +343,14 @@ class FSDPParamGroup:
             curr_index = self._post_forward_indices.pop()
             if (target_index := curr_index - 1) < 0:
                 return
+            # Prefetch naively using the reverse post-forward order, which may
+            # have mistargeted prefetches if not all modules used in forward
+            # are used in this backward
             target_fsdp_param_group = self.comm_ctx.post_forward_order[target_index]
-            if any(
-                torch._C._will_engine_execute_node(grad_fn)  # type: ignore[attr-defined]
-                for grad_fns in target_fsdp_param_group.all_forward_output_grad_fns
-                for grad_fn in grad_fns
-            ):
-                with torch.profiler.record_function(
-                    "FSDP::backward_prefetch"
-                ), target_fsdp_param_group.use_training_state(
-                    TrainingState.PRE_BACKWARD
-                ):
-                    target_fsdp_param_group.unshard()
+            with torch.profiler.record_function(
+                "FSDP::backward_prefetch"
+            ), target_fsdp_param_group.use_training_state(TrainingState.PRE_BACKWARD):
+                target_fsdp_param_group.unshard()
 
     # Utilities #
     def _to_sharded(self):
@@ -484,6 +454,10 @@ class FSDPParamGroup:
         )
 
     @property
+    def _is_hsdp(self) -> bool:
+        return isinstance(self.mesh_info, HSDPMeshInfo)
+
+    @property
     def _all_gather_process_group(self) -> dist.ProcessGroup:
         mesh_info = (
             cast(FSDPMeshInfo, self.post_forward_mesh_info)
@@ -495,18 +469,13 @@ class FSDPParamGroup:
 
     @property
     def _reduce_scatter_process_group(self) -> dist.ProcessGroup:
-        mesh_info = self.mesh_info
-        assert isinstance(mesh_info, FSDPMeshInfo)
-        return mesh_info.shard_process_group
+        assert isinstance(self.mesh_info, FSDPMeshInfo)
+        return self.mesh_info.shard_process_group
 
     @property
     def _all_reduce_process_group(self) -> dist.ProcessGroup:
-        mesh_info = self.mesh_info
-        assert isinstance(mesh_info, HSDPMeshInfo)
-        return mesh_info.replicate_process_group
-
-    def _should_all_reduce_grads(self) -> bool:
-        return isinstance(self.mesh_info, HSDPMeshInfo) and self.all_reduce_grads
+        assert isinstance(self.mesh_info, HSDPMeshInfo)
+        return self.mesh_info.replicate_process_group
 
 
 def _get_param_module_infos(

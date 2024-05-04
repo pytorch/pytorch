@@ -63,15 +63,15 @@ def throw_abstract_impl_not_imported_error(opname, module, context):
 
 
 # Meta only, act as nop otherwise.
-def compiletime_strobelight_meta(phase_name):
-    def compiletime_strobelight_meta_inner(function):
+def compile_time_strobelight_meta(phase_name):
+    def compile_time_strobelight_meta_inner(function):
         @functools.wraps(function)
         def wrapper_function(*args, **kwargs):
             return function(*args, **kwargs)
 
         return wrapper_function
 
-    return compiletime_strobelight_meta_inner
+    return compile_time_strobelight_meta_inner
 
 
 # Meta only, see
@@ -151,9 +151,29 @@ def justknobs_getval_int(name: str) -> int:
 
 @functools.lru_cache(None)
 def max_clock_rate():
-    from triton.testing import nvsmi
+    if not torch.version.hip:
+        from triton.testing import nvsmi
 
-    return nvsmi(["clocks.max.sm"])[0]
+        return nvsmi(["clocks.max.sm"])[0]
+    else:
+        # Manually set max-clock speeds on ROCm until equivalent nvmsi
+        # functionality in triton.testing or via pyamdsmi enablement. Required
+        # for test_snode_runtime unit tests.
+        gcn_arch = str(torch.cuda.get_device_properties(0).gcnArchName.split(":", 1)[0])
+        if "gfx94" in gcn_arch:
+            return 1700
+        elif "gfx90a" in gcn_arch:
+            return 1700
+        elif "gfx908" in gcn_arch:
+            return 1502
+        elif "gfx11" in gcn_arch:
+            return 1700
+        elif "gfx103" in gcn_arch:
+            return 1967
+        elif "gfx101" in gcn_arch:
+            return 1144
+        else:
+            return 1100
 
 
 TEST_MASTER_ADDR = "127.0.0.1"
@@ -169,3 +189,8 @@ USE_RTLD_GLOBAL_WITH_LIBTORCH = False
 # m.set_python_module("mylib.ops") call from C++ that associates
 # the C++ op with a python module.
 REQUIRES_SET_PYTHON_MODULE = False
+
+
+def maybe_upload_prof_stats_to_manifold(profile_path: str) -> None:
+    print("Uploading profile stats (fb-only otherwise no-op)")
+    pass

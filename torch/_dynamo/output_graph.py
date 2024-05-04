@@ -400,6 +400,8 @@ class OutputGraph:
             self.install_builtins_dict_in_fglobals()
         )
 
+        self.guard_on_key_order: Set[str] = set()
+
     def install_builtins_dict_in_fglobals(self):
         # f_globals["__builtins__"] can be a dict or a module. This is an
         # implemenation detail -
@@ -595,21 +597,30 @@ class OutputGraph:
             self.torch_function_enabled,
         )
         global_state["grad_enabled"] = (torch.set_grad_enabled, torch.is_grad_enabled())
+
+        def autocast_specific_backend(
+            device_type: str, func: Callable[[str, Any], None]
+        ):
+            def decorator(value):
+                return func(device_type, value)
+
+            return decorator
+
         global_state["autocast_enabled"] = (
-            torch.set_autocast_enabled,
-            torch.is_autocast_enabled(),
+            autocast_specific_backend("cuda", torch.set_autocast_enabled),
+            torch.is_autocast_enabled("cuda"),
         )
         global_state["autocast_cpu_enabled"] = (
-            torch.set_autocast_cpu_enabled,
-            torch.is_autocast_cpu_enabled(),
+            autocast_specific_backend("cpu", torch.set_autocast_enabled),
+            torch.is_autocast_enabled("cpu"),
         )
         global_state["autocast_gpu_dtype"] = (
-            torch.set_autocast_gpu_dtype,
-            torch.get_autocast_gpu_dtype(),
+            autocast_specific_backend("cuda", torch.set_autocast_dtype),
+            torch.get_autocast_dtype("cuda"),
         )
         global_state["autocast_cpu_dtype"] = (
-            torch.set_autocast_cpu_dtype,
-            torch.get_autocast_cpu_dtype(),
+            autocast_specific_backend("cpu", torch.set_autocast_dtype),
+            torch.get_autocast_dtype("cpu"),
         )
         global_state["autocast_cache_enabled"] = (
             torch.set_autocast_cache_enabled,
@@ -732,7 +743,7 @@ class OutputGraph:
         *names,
         **options,
     ):
-        if is_dynamic_nn_module(target):
+        if is_dynamic_nn_module(target, self.root_tx.export):
             return variables.UnspecializedNNModuleVariable(target, **options)
 
         options = dict(options)
@@ -756,21 +767,31 @@ class OutputGraph:
                 # are registered as get_attr nodes in the root graph.
                 tracer = self.root_tracer
 
-            if get_static_address_type(target) == "guarded":
-                install_guard(source.make_guard(GuardBuilder.ID_MATCH))
-            elif not is_constant_source(source):
-                install_guard(source.make_guard(GuardBuilder.TENSOR_MATCH))
-
             def wrap_name(module_key):
                 assert self.param_name_to_source is not None
                 self.param_name_to_source[module_key] = source
 
-                return wrap_fx_proxy(
+                # Check if the attr has already been registered. This can happen
+                # when two different sources point to the same tensor.
+                if target in self.root_tx.output.side_effects:
+                    return self.root_tx.output.side_effects[target]
+
+                if get_static_address_type(target) == "guarded":
+                    install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+                elif not is_constant_source(source):
+                    install_guard(source.make_guard(GuardBuilder.TENSOR_MATCH))
+
+                vt = wrap_fx_proxy(
                     self.root_tx,
                     tracer.create_proxy("get_attr", module_key, tuple(), {}),
                     example_value=target,
                     **options,
                 )
+
+                # Track the object so to avoid duplicate registration in case of
+                # different sources pointing to the same tensor object.
+                vt = self.root_tx.output.side_effects.track_object_existing(target, vt)
+                return vt
 
         elif isinstance(target, torch.nn.Module):
             assert isinstance(target, torch.nn.Module)
