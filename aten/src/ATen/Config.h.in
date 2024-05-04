@@ -1,0 +1,22 @@
+#pragma once
+
+// Test these using #if AT_MKL_ENABLED(), not #ifdef, so that it's
+// obvious if you forgot to include Config.h
+//    c.f. https://stackoverflow.com/questions/33759787/generating-an-error-if-checked-boolean-macro-is-not-defined
+//
+// DO NOT put the macros for CUDA libraries in this file; they belong in cuda/CUDAConfig.h
+
+#define AT_MKLDNN_ENABLED() @AT_MKLDNN_ENABLED@
+#define AT_MKLDNN_ACL_ENABLED() @AT_MKLDNN_ACL_ENABLED@
+#define AT_MKL_ENABLED() @AT_MKL_ENABLED@
+#define AT_MKL_SEQUENTIAL() @AT_MKL_SEQUENTIAL@
+#define AT_POCKETFFT_ENABLED() @AT_POCKETFFT_ENABLED@
+#define AT_NNPACK_ENABLED() @AT_NNPACK_ENABLED@
+#define CAFFE2_STATIC_LINK_CUDA() @CAFFE2_STATIC_LINK_CUDA_INT@
+#define AT_BUILD_WITH_BLAS() @AT_BUILD_WITH_BLAS@
+#define AT_BUILD_WITH_LAPACK() @AT_BUILD_WITH_LAPACK@
+#define AT_PARALLEL_OPENMP @AT_PARALLEL_OPENMP@
+#define AT_PARALLEL_NATIVE @AT_PARALLEL_NATIVE@
+#define AT_PARALLEL_NATIVE_TBB @AT_PARALLEL_NATIVE_TBB@
+#define AT_BLAS_F2C() @AT_BLAS_F2C@
+#define AT_BLAS_USE_CBLAS_DOT() @AT_BLAS_USE_CBLAS_DOT@
