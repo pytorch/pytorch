@@ -387,7 +387,8 @@ class Tracer(TracerBase):
             # Tensor was not found in the Module hierarchy, stow it away in a
             # special attribute and set the qualname to refer to that
             if not qualname:
-                self.tensor_attrs[a] = self.get_fresh_qualname("_tensor_constant")
+                qualname = self.get_fresh_qualname("_tensor_constant")
+                self.tensor_attrs[a] = qualname
                 setattr(self.root, qualname, a)
 
             return self.create_node("get_attr", qualname, (), {})
