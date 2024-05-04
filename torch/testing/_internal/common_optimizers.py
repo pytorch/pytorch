@@ -1480,6 +1480,11 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_defaults_changed_to_foreach",
             ),
+            DecorateInfo(
+                unittest.skip("ASGD internally changes the weights even with zero grad"),
+                "TestOptimRenewed",
+                "test_step_is_noop_for_zero_grads",
+            )
         ),
     ),
     OptimizerInfo(
