@@ -55,11 +55,17 @@ if triton is not None:
         from triton.compiler.compiler import ASTSource
     except ImportError:
         ASTSource = None
+
+    try:
+        from triton.backends.compiler import GPUTarget
+    except ImportError:
+        GPUTarget = None
 else:
     Config = object
     KernelInterface = object
     OutOfResources = object
     ASTSource = None
+    GPUTarget = None
 
 try:
     autograd_profiler = torch.autograd.profiler
@@ -334,11 +340,22 @@ class CachingAutotuner(KernelInterface):
             else:
                 rocm_warp_size = 64
 
-            target = (
-                (compile_meta["device_type"], compile_meta["cc"])
-                if not torch.version.hip
-                else [compile_meta["device_type"], compile_meta["cc"], rocm_warp_size]
-            )
+            if GPUTarget:
+                target = GPUTarget(
+                    compile_meta["device_type"],
+                    compile_meta["cc"],
+                    rocm_warp_size if torch.version.hip else 32,
+                )
+            else:
+                target = (
+                    (compile_meta["device_type"], compile_meta["cc"])
+                    if not torch.version.hip
+                    else [
+                        compile_meta["device_type"],
+                        compile_meta["cc"],
+                        rocm_warp_size,
+                    ]
+                )
 
             options = {
                 "num_warps": compile_meta["num_warps"],
@@ -794,14 +811,15 @@ class CachingAutotuner(KernelInterface):
         # manager is a nullcontext.
         if autograd_profiler._is_profiler_enabled:
             # grid can be a tuple of ints or a string.
-            grid_info = (
-                grid if isinstance(grid, tuple) else getattr(grid, "grid_fn_str", None)
-            )
+            if isinstance(grid, tuple):
+                grid_info = str(grid)
+            else:
+                grid_info = getattr(grid, "grid_fn_str", "")
             with torch._C._profiler._RecordFunctionFast(
                 self.inductor_meta.get("kernel_name", "triton kernel"),
                 args,
                 {
-                    "kernel_file": self.filename,
+                    "kernel_file": "" if self.filename is None else self.filename,
                     "kernel_backend": "triton",
                     "grid": grid_info,
                     "stream": stream,

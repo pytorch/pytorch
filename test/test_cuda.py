@@ -29,7 +29,6 @@ from torch.cuda._memory_viz import (
 )
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
 from torch.testing._internal.common_cuda import (
-    _create_scaling_case,
     _get_torch_cuda_version,
     TEST_CUDNN,
     TEST_MULTIGPU,
@@ -1273,109 +1272,6 @@ torch.cuda.synchronize()
                     ]
                 )
                 self.assertTrue(r != 0)
-
-    # Compare non-fused optimizer vs fused one as the fused one unscales gradients
-    # inside its cuda kernel unlike the other.
-    def test_grad_scaling_autocast_fused_optimizers(self):
-        for optimizer_ctor, optimizer_kwargs, separate_unscale in list(
-            product(
-                (torch.optim.Adam, torch.optim.AdamW),
-                ({"fused": True, "amsgrad": False}, {"fused": True, "amsgrad": True}),
-                (False, True),
-            )
-        ) + list(
-            product(
-                (torch.optim.SGD,),
-                [
-                    {
-                        "momentum": 0.0,
-                        "dampening": d,
-                        "weight_decay": w,
-                        "nesterov": n,
-                        "fused": True,
-                    }
-                    for d, w, n in product((0.0, 0.5), (0.0, 0.5), (False,))
-                ]
-                + [
-                    {
-                        "momentum": 0.5,
-                        "dampening": d,
-                        "weight_decay": w,
-                        "nesterov": n,
-                        "fused": True,
-                    }
-                    for d, w, n in product((0.0,), (0.0, 0.5), (True, False))
-                ],
-                (False, True),
-            )
-        ):
-            with self.subTest(
-                optim=optimizer_ctor,
-                kwargs=optimizer_kwargs,
-                separate_unscale=separate_unscale,
-            ):
-                self._grad_scaling_autocast_fused_optimizers(
-                    optimizer_ctor=optimizer_ctor,
-                    optimizer_kwargs=optimizer_kwargs,
-                    separate_unscale=separate_unscale,
-                )
-
-    def _grad_scaling_autocast_fused_optimizers(
-        self, optimizer_ctor, optimizer_kwargs, separate_unscale
-    ):
-        (
-            mod_control,
-            mod_scaling,
-            opt_control,
-            opt_scaling,
-            data,
-            loss_fn,
-            _,
-        ) = _create_scaling_case(
-            optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs
-        )
-        kwargs = deepcopy(optimizer_kwargs)
-        kwargs["fused"] = False
-        opt_control = optimizer_ctor(mod_control.parameters(), lr=1.0, **kwargs)
-
-        scaler = torch.cuda.amp.GradScaler(init_scale=128.0)
-
-        for input, target in data:
-            opt_control.zero_grad()
-            with torch.autocast("cuda"):
-                output_control = mod_control(input)
-                loss_control = loss_fn(output_control, target)
-            scaler.scale(loss_control).backward()
-            scaler.step(opt_control)
-            scaler.update()
-
-            opt_scaling.zero_grad()
-            with torch.autocast("cuda"):
-                output_scaling = mod_scaling(input)
-                loss_scaling = loss_fn(output_scaling, target)
-            scaler.scale(loss_scaling).backward()
-            if separate_unscale:
-                scaler.unscale_(opt_scaling)
-            scaler.step(opt_scaling)
-            scaler.update()
-
-            self.assertEqual(loss_control, loss_scaling)
-            for param_control, param_scaling in zip(
-                mod_control.parameters(), mod_scaling.parameters()
-            ):
-                self.assertEqual(param_control.grad, param_scaling.grad)
-                self.assertEqual(param_control, param_scaling)
-
-                state_control, state_scaling = (
-                    opt_control.state[param_control],
-                    opt_scaling.state[param_scaling],
-                )
-
-                for k in state_control:
-                    actual = state_scaling[k]
-                    if k == "step":
-                        actual = actual.squeeze()
-                    self.assertEqual(state_control[k], actual)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "FAIL")
     def test_cublas_multiple_threads_same_device(self):

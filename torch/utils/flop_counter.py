@@ -388,11 +388,19 @@ class FlopCounterMode(TorchDispatchMode):
                 else:
                     name = ".".join([prefix, name])
 
-                forward_pre_hook_handle = module.register_forward_pre_hook(self._enter_module(name))
-                forward_hook_handle = module.register_forward_hook(self._exit_module(name))
-                self._module_to_forward_hook_handles[module] = _ForwardHookHandles(
-                    forward_pre_hook_handle, forward_hook_handle
-                )
+                forward_pre_hook_handle, forward_hook_handle = (None, None)
+
+                try:
+                    forward_pre_hook_handle = module.register_forward_pre_hook(self._enter_module(name))
+                    forward_hook_handle = module.register_forward_hook(self._exit_module(name))
+                except RuntimeError:
+                    # ignore any module that doesn't support forward hook, e.g. script.
+                    if forward_pre_hook_handle is not None:
+                        forward_pre_hook_handle.remove()
+                else:
+                    self._module_to_forward_hook_handles[module] = _ForwardHookHandles(
+                        forward_pre_hook_handle, forward_hook_handle
+                    )
 
     def _deregister_forward_hooks(self):
         for forward_hook_handles in self._module_to_forward_hook_handles.values():

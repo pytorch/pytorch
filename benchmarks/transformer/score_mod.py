@@ -211,7 +211,7 @@ def generate_experiment_configs() -> List[ExperimentConfig]:
     batch_sizes = [1, 8, 16]
     num_heads = [16]
     q_kv_seq_lens = [(512, 512), (1024, 1024), (4096, 4096)]
-    head_dims = [64, 128]
+    head_dims = [64, 128, 256]
     dtypes = [
         torch.bfloat16,
     ]

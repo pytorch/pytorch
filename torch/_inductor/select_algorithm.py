@@ -976,6 +976,14 @@ class AlgorithmSelectorCache(PersistentCache):
             if num_workers <= 0:
                 return no_op
 
+            # https://github.com/python/cpython/issues/106905
+            if (
+                sys.version_info.major == 3
+                and sys.version_info.minor == 11
+                and sys.version_info.micro <= 8
+            ):
+                return no_op
+
             # TODO - debug issue
             if torch.version.hip:
                 return no_op
@@ -1176,11 +1184,8 @@ class AlgorithmSelectorCache(PersistentCache):
             )
             expected = None
             if VERIFY:
-                for i in range(len(choices)):
-                    if isinstance(choices[i], ExternKernelCaller):
-                        choices[i].benchmark(*example_inputs_extern, out=out_extern)
-                        expected = out_extern.clone()
-                        break
+                choices[0].benchmark(*example_inputs_extern, out=out_extern)
+                expected = out_extern.clone()
 
             return example_inputs, example_inputs_extern, out, out_extern, expected
 
