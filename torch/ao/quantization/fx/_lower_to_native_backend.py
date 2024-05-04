@@ -506,7 +506,7 @@ def _match_static_pattern(
         match_key = type(_get_module(ref_node, modules))
     else:
         expected_op = "call_function"
-        match_key = ref_node.target
+        match_key = ref_node.target  # type: ignore[assignment]
     if ref_node.op != expected_op or match_key not in matching_modules_or_ops:
         return SKIP_LOWERING_VALUE
 
@@ -525,7 +525,7 @@ def _match_static_pattern(
     if not matched_dequantize:
         return SKIP_LOWERING_VALUE
 
-    return (q_node, relu_node, ref_node)
+    return (q_node, relu_node, ref_node)  # type: ignore[return-value]
 
 def _match_static_pattern_with_two_inputs(
     node: Node,
@@ -822,7 +822,7 @@ def _lower_static_weighted_ref_functional(
                 prepack_args[5], prepack_args[6] = prepack_args[6], prepack_args[5]
         else:
             raise ValueError(f"Lowering is not supported for op '{func_node.target}'")
-        with model.graph.inserting_before(output_scale_node):
+        with model.graph.inserting_before(output_scale_node):  # type: ignore[arg-type]
             # kwargs of the func node are needed for prepack op (i.e., quantized::linear_prepack)
             # They are not needed for compute op (i.e., quantized::linear)
             kwargs = func_node.kwargs
@@ -977,7 +977,7 @@ def _lower_quantized_binary_op(
             dq_node = arg
             assert isinstance(dq_node, Node)
             dn_input = dq_node.args[0]
-            bop_node.replace_input_with(dq_node, dn_input)
+            bop_node.replace_input_with(dq_node, dn_input)  # type: ignore[arg-type]
             num_dq_nodes += 1
         assert num_dq_nodes > 0
 
