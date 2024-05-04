@@ -1327,6 +1327,7 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         loop_body_instructions: List["Instruction"],
         symbolic_locals: Dict[str, VariableTracker],
     ):
+        import dataclasses
         if (
             loop_items := len(value.items)
         ) < torch._dynamo.config.convert_for_loops_to_function_threshold:
@@ -1367,7 +1368,7 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         if not loop_body:
             raise CannotConvertRangeToHigherOrder("Empty loop body.")
         # We skip the first instruction as it's a STORE_FAST, while we skip the last as it's the JUMP_BACKWARD.
-        co_code.extend(loop_body)
+        co_code.extend([dataclasses.replace(inst) for inst in loop_body])
         # We need to replace the last `JUMP_BACKWARD` with a RETURN_VALUE of all
         # the locals.
         for i in range(host_code_object.co_nlocals):
@@ -1386,7 +1387,7 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
             options["co_posonlyargcount"] = 0
             options["co_kwonlyargouncount"] = 0
             options["co_nlocals"] = host_code_object.co_nlocals
-            options["co+flags"] = 1
+            options["co_flags"] = 1
             options["co_filename"] = "<dynamo memory>"
             options["co_name"] = "for_loop_body"
             options["co_freevars"] = ()
