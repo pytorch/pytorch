@@ -1152,6 +1152,21 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             self.assertEqual(send_tensor, recv_tensor)
 
     @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_send_recv_object_list(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        self._create_process_group_nccl(store, self.opts())
+        device = self.rank_to_GPU[self.rank][0]
+
+        val = 99 if self.rank == 0 else None
+        object_list = [val] * self.world_size
+        if self.rank == 0:
+            dist.send_object_list(object_list, 1, device=device)
+        if self.rank == 1:
+            dist.recv_object_list(object_list, 0, device=device)
+            self.assertEqual(object_list[0], 99)
+
+    @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 1 GPU")
     @skip_if_lt_x_gpu(1)
     def test_nccl_dist_backend_error(self):
@@ -4047,6 +4062,31 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
         else:
             x = torch.ones((10,), device=device) * self.rank
             c10d.broadcast(x, src=self.rank, group=subgroup)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(4)
+    @parametrize(
+        "set_device",
+        [SetDeviceMethod.TORCH_CUDA_SET, SetDeviceMethod.COLLECTIVE_ARGUMENT],
+    )
+    def test_send_recv_object_list_subgroup(self, set_device: SetDeviceMethod):
+        world_size = 4
+        if self.rank >= world_size:
+            return
+        subgroup = self._init_two_pg2_subgroups(world_size)
+        if set_device == SetDeviceMethod.TORCH_CUDA_SET:
+            torch.cuda.set_device(self.rank)
+            device = None
+        else:
+            device = torch.device("cuda:%d" % self.rank)
+        if self.rank == 0 or self.rank == 2:
+            x = [{}]
+            c10d.recv_object_list(x, src=self.rank + 1, group=subgroup, device=device)
+            expected = [{"rank": self.rank + 1}]
+            self.assertEqual(x, expected)
+        else:
+            x = [{"rank": self.rank}]
+            c10d.send_object_list(x, dst=self.rank - 1, group=subgroup, device=device)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)

@@ -26,6 +26,7 @@ import torch
 import torch.fx
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch.utils import _pytree as pytree
+from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from .. import config, metrics
@@ -229,12 +230,12 @@ class DataTypePropagation:
         if len(input_nodes) == 0:
             return None
 
-        all_input_nodes_propogated = all(
+        all_input_nodes_propagated = all(
             OptimizationContext.key in n.meta
             and n.meta[OptimizationContext.key].dtype is not None
             for n in input_nodes
         )
-        if not all_input_nodes_propogated:
+        if not all_input_nodes_propagated:
             return None
 
         return functools.reduce(
@@ -1296,6 +1297,28 @@ class CodeGen:
         self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
 
 
+class ScopedDict:
+    def __init__(self, original_dict):
+        self.original_dict = original_dict
+        self.new_items = {}
+
+    def __getitem__(self, key):
+        if key in self.new_items:
+            return self.new_items[key]
+        return self.original_dict[key]
+
+    def __setitem__(self, key, value):
+        self.new_items[key] = value
+
+    def __contains__(self, key):
+        return key in self.new_items or key in self.original_dict
+
+    def get(self, key, default=None):
+        if key in self.new_items:
+            return self.new_items[key]
+        return self.original_dict.get(key, default)
+
+
 class Kernel(CodeGen):
     newvar_prefix = ""
     suffix = ""
@@ -1349,6 +1372,13 @@ class Kernel(CodeGen):
 
     @contextlib.contextmanager
     def swap_buffers(self, lb, cb=None, sb=None):
+        def scope_cse(cse):
+            new_cse = cse.clone()
+            new_cse.cache = ScopedDict(cse.cache)
+            new_cse.reduction_cache = ScopedDict(cse.reduction_cache)
+            new_cse.store_cache = ScopedDict(cse.store_cache)
+            return new_cse
+
         if cb is None:
             cb = lb
         loads = self.loads
@@ -1358,7 +1388,7 @@ class Kernel(CodeGen):
         self.loads = lb
         self.compute = cb
         self.stores = sb
-        self.cse = cse.clone()
+        self.cse = scope_cse(cse)
         try:
             yield
         finally:
@@ -1456,8 +1486,9 @@ class Kernel(CodeGen):
                 def inner(*args, **kwargs):
                     # TritonTemplateKernel has no current_node
                     buf_bounds = ValueRanges.unknown()
-                    if hasattr(V.interpreter, "current_node"):
-                        fx_node = V.interpreter.current_node
+                    if (
+                        fx_node := getattr(V.interpreter, "current_node", None)
+                    ) and fx_node.target == name:
                         assert isinstance(self.node_to_bounds, dict)
                         buf_bounds = self.node_to_bounds.get(
                             fx_node, ValueRanges.unknown()
@@ -1652,8 +1683,8 @@ class Kernel(CodeGen):
         replacements = {
             x: self.args.size(x)
             for x in sorted_symbols
-            if x.name.startswith(("s", "u", "ps"))
-            or (x.name.startswith("i") and not x.name.startswith("idx"))
+            if symbol_is_type(x, (SymT.UNBACKED_INT, SymT.SIZE))
+            or x.name.startswith("ps")
         }
         return sympy_subs(index, replacements)
 

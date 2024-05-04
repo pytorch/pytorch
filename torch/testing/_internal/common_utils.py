@@ -1235,7 +1235,9 @@ TEST_MPS = torch.backends.mps.is_available()
 TEST_XPU = torch.xpu.is_available()
 TEST_CUDA = torch.cuda.is_available()
 custom_device_mod = getattr(torch, torch._C._get_privateuse1_backend_name(), None)
-TEST_PRIVATEUSE1 = True if (hasattr(custom_device_mod, "is_available") and custom_device_mod.is_available()) else False
+custom_device_is_available = hasattr(custom_device_mod, "is_available") and custom_device_mod.is_available()
+TEST_PRIVATEUSE1 = True if custom_device_is_available else False
+TEST_PRIVATEUSE1_DEVICE_TYPE = torch._C._get_privateuse1_backend_name()
 TEST_NUMBA = _check_module_exists('numba')
 TEST_TRANSFORMERS = _check_module_exists('transformers')
 TEST_DILL = _check_module_exists('dill')
@@ -1629,6 +1631,19 @@ def setLinalgBackendsToDefaultFinally(fn):
             fn(*args, **kwargs)
         finally:
             torch.backends.cuda.preferred_linalg_library(_preferred_backend)
+    return _fn
+
+
+# Reverts the blas backend back to default to make sure potential failures in one
+# test do not affect other tests
+def setBlasBackendsToDefaultFinally(fn):
+    @wraps(fn)
+    def _fn(*args, **kwargs):
+        _preferred_backend = torch.backends.cuda.preferred_blas_library()
+        try:
+            fn(*args, **kwargs)
+        finally:
+            torch.backends.cuda.preferred_blas_library(_preferred_backend)
     return _fn
 
 

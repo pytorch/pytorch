@@ -9217,6 +9217,8 @@ class foreach_inputs_sample_func:
             # unary
             if opinfo.ref in (torch.abs, torch.neg):
                 return False
+            if opinfo.ref_inplace in (torch.Tensor.zero_,):
+                return False
             return dtype in integral_types_and(torch.bool)
         if self.arity < 2 or rightmost_arg_type == ForeachRightmostArgType.Tensor:
             return None
@@ -9294,7 +9296,7 @@ class foreach_inputs_sample_func:
                         opinfo, ForeachRightmostArgType.TensorList, device, dtype, NUM_SIZE0_TENSORS,
                         **zero_size_foreach_inputs_kwargs)[0])
                 kwargs = self._sample_kwargs(
-                    opinfo, args[-1], ForeachRightmostArgType.TensorList, dtype, zero_size=True)
+                    opinfo, args[-1], ForeachRightmostArgType.TensorList, dtype)
             else:
                 args = []
                 kwargs = {}
@@ -9473,45 +9475,95 @@ class foreach_pointwise_sample_func(foreach_inputs_sample_func):
 foreach_unary_op_db: List[OpInfo] = [
     ForeachFuncInfo(
         'exp',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         backward_requires_result=True,
+        dtypes=floating_and_complex_types(),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
     ),
     ForeachFuncInfo(
         'acos',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        dtypes=floating_and_complex_types(),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
     ),
     ForeachFuncInfo(
         'asin',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        dtypes=floating_and_complex_types(),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
     ),
     ForeachFuncInfo(
         'atan',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        dtypes=floating_and_complex_types(),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
     ),
     ForeachFuncInfo(
         'cos',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        dtypes=floating_and_complex_types(),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
     ),
     ForeachFuncInfo(
         'cosh',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        dtypes=floating_and_complex_types(),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
     ),
     ForeachFuncInfo(
         'log',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        dtypes=floating_and_complex_types(),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
     ),
     ForeachFuncInfo(
         'log10',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        dtypes=floating_and_complex_types(),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
     ),
     ForeachFuncInfo(
         'log2',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        dtypes=floating_and_complex_types(),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
     ),
     ForeachFuncInfo(
         'tan',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         backward_requires_result=True,
+        dtypes=floating_and_complex_types(),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
         decorators=(
             # due to https://github.com/pytorch/pytorch/pull/102427 enabling jiterator for complex
             DecorateInfo(
@@ -9528,8 +9580,13 @@ foreach_unary_op_db: List[OpInfo] = [
     ),
     ForeachFuncInfo(
         'tanh',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         backward_requires_result=True,
+        dtypes=floating_and_complex_types(),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
         decorators=(
             DecorateInfo(
                 toleranceOverride(
@@ -9543,127 +9600,185 @@ foreach_unary_op_db: List[OpInfo] = [
     ),
     ForeachFuncInfo(
         'sin',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        dtypes=floating_and_complex_types(),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
     ),
     ForeachFuncInfo(
         'sinh',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        dtypes=floating_and_complex_types(),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
     ),
     ForeachFuncInfo(
         'neg',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=all_types_and_complex(),
-        dtypesIfCUDA=all_types_and_complex(),
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
     ),
     ForeachFuncInfo(
         'sqrt',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=floating_and_complex_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_and_complex_types_and(torch.half),
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
         backward_requires_result=True,
     ),
     ForeachFuncInfo(
         'ceil',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
     ),
     ForeachFuncInfo(
         'erf',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
     ),
     ForeachFuncInfo(
         'erfc',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
     ),
     ForeachFuncInfo(
         'expm1',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=floating_and_complex_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
         backward_requires_result=True,
     ),
     ForeachFuncInfo(
         'floor',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
     ),
     ForeachFuncInfo(
         'log1p',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=floating_and_complex_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_and_complex_types_and(torch.half),
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
     ),
     ForeachFuncInfo(
         'round',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
     ),
     ForeachFuncInfo(
         'frac',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
     ),
     ForeachFuncInfo(
         'reciprocal',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.half),
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
         backward_requires_result=True,
     ),
     ForeachFuncInfo(
         'sigmoid',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.half),
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
         backward_requires_result=True,
     ),
     ForeachFuncInfo(
         'trunc',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
     ),
     ForeachFuncInfo(
         'abs',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
         dtypesIfCUDA=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        skips=(
-            DecorateInfo(unittest.skip("In-place abs not supported for complex tensors"), "TestMeta",
-                         "test_dispatch_symbolic_meta_inplace", dtypes=complex_types()),
-            DecorateInfo(unittest.skip("In-place abs not supported for complex tensors"), "TestMeta",
-                         "test_dispatch_meta_inplace", dtypes=complex_types()),
-            DecorateInfo(unittest.skip("In-place abs not supported for complex tensors"), "TestMeta",
-                         "test_meta_inplace", dtypes=complex_types()),
+        decorators=(
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace", dtypes=complex_types()),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace", dtypes=complex_types()),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace", dtypes=complex_types()),
         ),
     ),
     ForeachFuncInfo(
         'zero',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
+        dtypesIfCUDA=all_types_and_complex_and(torch.bfloat16, torch.half),
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
         supports_out=False,
     ),
     ForeachFuncInfo(
         'sign',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=floating_types_and(torch.bool, torch.bfloat16, torch.half),
         dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
     ),
     ForeachFuncInfo(
         'lgamma',
-        foreach_inputs_sample_func(1, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.half),
         dtypesIfCUDA=all_types_and(torch.bool, torch.float16),
-        skips=(
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
+        decorators=(
             DecorateInfo(unittest.skip("In-place lgamma not supported for integral tensors"), "TestMeta",
                          "test_dispatch_symbolic_meta_inplace", dtypes=integral_types_and(torch.bool)),
             DecorateInfo(unittest.skip("In-place lgamma not supported for integral tensors"), "TestMeta",
@@ -9677,11 +9792,13 @@ foreach_unary_op_db: List[OpInfo] = [
 foreach_binary_op_db: List[OpInfo] = [
     ForeachFuncInfo(
         "add",
-        foreach_inputs_sample_func(2, True, True, True),
+        sample_inputs_func=foreach_inputs_sample_func(2, True, True, True),
         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
-        dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         supports_alpha_param=True,
-        skips=(
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
+        decorators=(
             # These tests fail with aten._local_scalar_dense not being implemented.
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
@@ -9696,11 +9813,13 @@ foreach_binary_op_db: List[OpInfo] = [
     ),
     ForeachFuncInfo(
         "sub",
-        foreach_inputs_sample_func(2, True, True),
+        sample_inputs_func=foreach_inputs_sample_func(2, True, True),
         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
-        dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         supports_alpha_param=True,
-        skips=(
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
+        decorators=(
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
@@ -9714,9 +9833,11 @@ foreach_binary_op_db: List[OpInfo] = [
     ForeachFuncInfo(
         "mul",
         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
-        dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         sample_inputs_func=foreach_inputs_sample_func(2, True, True, True),
-        skips=(
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
+        decorators=(
             # Samples have complex types and inplace only works if the dtype is complex.
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace",
                          dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
@@ -9731,9 +9852,11 @@ foreach_binary_op_db: List[OpInfo] = [
     ForeachFuncInfo(
         "div",
         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
-        dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         sample_inputs_func=foreach_inputs_sample_func(2, True, True, True),
-        skips=(
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
+        decorators=(
             # Samples have complex types and inplace only works if the dtype is complex.
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace",
                          dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
@@ -9756,10 +9879,13 @@ foreach_binary_op_db: List[OpInfo] = [
     ),
     ForeachFuncInfo(
         "clamp_min",
-        foreach_inputs_sample_func(2, True, True),
+        sample_inputs_func=foreach_inputs_sample_func(2, True, True),
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
-        skips=(
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
+        decorators=(
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
@@ -9772,10 +9898,13 @@ foreach_binary_op_db: List[OpInfo] = [
     ),
     ForeachFuncInfo(
         "clamp_max",
-        foreach_inputs_sample_func(2, True, True),
+        sample_inputs_func=foreach_inputs_sample_func(2, True, True),
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
-        skips=(
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
+        decorators=(
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
@@ -9789,12 +9918,13 @@ foreach_binary_op_db: List[OpInfo] = [
     # note(crcrpar): forward ad not implemented.
     ForeachFuncInfo(
         "minimum",
-        foreach_inputs_sample_func(2, True, True),
+        sample_inputs_func=foreach_inputs_sample_func(2, True, True),
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
-        supports_forward_ad=False,
+        supports_autograd=True,
         supports_inplace_autograd=False,
-        skips=(
+        supports_forward_ad=False,
+        decorators=(
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
@@ -9808,12 +9938,13 @@ foreach_binary_op_db: List[OpInfo] = [
     # note(crcrpar): forward ad not implemented.
     ForeachFuncInfo(
         "maximum",
-        foreach_inputs_sample_func(2, True, True),
+        sample_inputs_func=foreach_inputs_sample_func(2, True, True),
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
+        supports_autograd=True,
         supports_forward_ad=False,
         supports_inplace_autograd=False,
-        skips=(
+        decorators=(
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
@@ -9832,7 +9963,9 @@ foreach_binary_op_db: List[OpInfo] = [
         supports_scalar_self_arg=True,
         sample_inputs_func=foreach_inputs_sample_func(2, True, True),
         supports_autograd=True,
-        skips=(
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
+        decorators=(
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
@@ -9842,26 +9975,29 @@ foreach_binary_op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
         ),
-        supports_forward_ad=True,
         backward_requires_result=True,
     ),
     ForeachFuncInfo(
         "copy",
-        foreach_inputs_sample_func(2, False, False),
+        sample_inputs_func=foreach_inputs_sample_func(2, False, False),
         dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
         supports_out=False,
         supports_forward_ad=False,
         supports_autograd=False,
+        supports_inplace_autograd=False,
     )
 ]
 
 foreach_pointwise_op_db: List[ForeachFuncInfo] = [
     ForeachFuncInfo(
         "addcmul",
-        foreach_pointwise_sample_func(4, True, True),
+        sample_inputs_func=foreach_pointwise_sample_func(4, True, True),
         dtypes=all_types_and_complex(),
         dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
-        skips=(
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
+        decorators=(
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
@@ -9882,7 +10018,10 @@ foreach_pointwise_op_db: List[ForeachFuncInfo] = [
         sample_inputs_func=foreach_pointwise_sample_func(4, True, True),
         dtypes=all_types_and_complex(),
         dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
-        skips=(
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
+        decorators=(
             # Samples have complex types and inplace only works if the dtype is complex.
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace",
                          dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
@@ -9904,10 +10043,12 @@ foreach_pointwise_op_db: List[ForeachFuncInfo] = [
 foreach_reduce_op_db: List[ForeachFuncInfo] = [
     ForeachFuncInfo(
         "norm",
-        foreach_norm_sample_func(1, False, False),
+        sample_inputs_func=foreach_norm_sample_func(1, False, False),
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-        dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-        skips=(
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
+        decorators=(
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
@@ -9919,10 +10060,11 @@ foreach_reduce_op_db: List[ForeachFuncInfo] = [
 foreach_other_op_db: List[ForeachFuncInfo] = [
     ForeachFuncInfo(
         "lerp",
-        foreach_lerp_sample_func(3, True, False),
+        sample_inputs_func=foreach_lerp_sample_func(3, True, False),
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-        dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
-        dtypesIfROCM=floating_and_complex_types_and(torch.half, torch.bfloat16),
     ),
 ]
 
@@ -22116,16 +22258,15 @@ python_ref_db = [
         "_refs.roll",
         torch_opinfo_name="roll",
         validate_view_consistency=False,
-        skips=(
-            # RuntimeError: no _refs support for torch.Tensor.__getitem__
-            # Leaving it as a ref because fftshift uses it
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
-        ),
     ),
     PythonRefInfo(
         "_refs.rot90",
         torch_opinfo_name="rot90",
         validate_view_consistency=False,
+    ),
+    PythonRefInfo(
+        "_refs.select_scatter",
+        torch_opinfo_name="select_scatter",
     ),
     PythonRefInfo(
         "_refs.stack",

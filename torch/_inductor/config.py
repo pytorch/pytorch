@@ -9,6 +9,9 @@ def is_fbcode():
     return not hasattr(torch.version, "git_version")
 
 
+if is_fbcode():
+    from triton.fb import build_paths
+
 # add some debug printouts
 debug = False
 
@@ -246,6 +249,15 @@ save_args = os.environ.get("TORCHINDUCTOR_SAVE_ARGS") == "1"
 
 # We will disable creating subprocess for autotuning if this is False
 autotune_in_subproc = os.environ.get("TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC") == "1"
+
+# The following three timeouts are applicable if autotune_in_subproc is True:
+
+# Max time that a a valid benchmark result may take during autotuning
+max_autotune_subproc_result_timeout_seconds = 60.0
+# Additional time we allow subprocesses to terminate gracefully after the timeout until we send a SIGTERM
+max_autotune_subproc_graceful_timeout_seconds = 1.0
+# Additional time that we grant after a SIGTERM until we do a hard SIGKILL of subprocesses
+max_autotune_subproc_terminate_timeout_seconds = 2.0
 
 # If autotuning in subprocess, whether to use multiple devices
 autotune_multi_device = os.environ.get("TORCHINDUCTOR_AUTOTUNE_MULTI_DEVICE") == "1"
@@ -501,7 +513,7 @@ decompose_mem_bound_mm: bool = False
 # assume_aligned_inputs means that we assume that inputs will be aligned; we generate
 # code using this assumption, and clone tensors before use if they aren't aligned.
 # In the common case, most inputs will be aligned.
-assume_aligned_inputs: bool = True
+assume_aligned_inputs: bool = False
 
 
 # config specific to codegen/cpp.py
@@ -594,6 +606,9 @@ class triton:
     # TODO - need to debug why this prevents cleanup
     cudagraph_trees_history_recording = False
 
+    # Enable cudagraph support for mutated inputs from prior cudagraph pool
+    cudagraph_support_input_mutation = False
+
     # synchronize after cudagraph invocation
     force_cudagraph_sync = False
 
@@ -656,18 +671,6 @@ class triton:
 
     # hint to Triton when arguments are divisible by 16
     divisible_by_16 = True
-
-    # theses are not enforced, but they are used by asserts in triton_heuristics.py
-    # NOTE: mobilevit_s in timm_models required X to be set to the higher value 2048
-
-    # Max RBLOCK will be large for multi-kernel since we do more aggressive
-    # persistent reduction.
-    max_block = {
-        "X": 2048,
-        "Y": 1024,
-        "Z": 1024,
-        "R": 4096 * (16 if multi_kernel else 1),
-    }
 
     # Minimum RBLOCK to be used for a TritonSplitScanKernel
     # NOTE: This also indirectly controls the size of workspace buffer required
@@ -753,7 +756,9 @@ class cuda:
     # The default path only works under PyTorch local development environment.
     cutlass_dir = os.environ.get(
         "TORCHINDUCTOR_CUTLASS_DIR",
-        os.path.abspath(
+        build_paths.cutlass()
+        if is_fbcode() and not torch.version.hip
+        else os.path.abspath(
             os.path.join(os.path.dirname(torch.__file__), "../third_party/cutlass/")
         ),
     )
@@ -774,10 +779,26 @@ class cuda:
     # Minimum value of M*N*K to consider the CUTLASS backend for GEMM ops.
     cutlass_backend_min_gemm_size: int = 1
 
-    # If set to True, it will ensure that only GEMM ops capable of
-    # epilogue fusion via CUTLASS Epilogue Visitor Trees ( EVT )
-    # are enabled for the CUTLASS backend.
-    cutlass_only_evt_capable_ops: bool = False
+    # enable generation of inline standalone runner in CUDA CPP generated code
+    # which allows to compile the generated code into a standalone executable.
+    generate_test_runner: bool = (
+        os.environ.get("INDUCTOR_CUDA_BACKEND_GENERATE_TEST_RUNNER_CODE", "1") == "1"
+    )
+
+    # Keep only Cutlass op configs which contain this regular expression pattern
+    # Set this to "warpspecialized_cooperative_epi_tma" to enable only SM90 TMA Cutlass Kernels for large GEMMs
+    cutlass_op_allowlist_regex: Optional[str] = None
+
+    # Note: Names of Cutlass ops names can be obtained by calling
+    # op.configuration_name() on a Cutlass op instance, for example those
+    # returned from cutlass_utils.gen_ops() or the op argument passed to
+    # CUTLASSGemmTemplate.render(...)
+
+    # Filter Cutlass configs which contain this regular expression pattern
+    # Set this to "pingpong" to avoid numerical issues
+    # caused by the op ordering of the "pingpong" memory access
+    # pattern used by some Cutlass Kernels.
+    cutlass_op_denylist_regex: Optional[str] = "pingpong"
 
 
 # create a directory containing lots of debug information

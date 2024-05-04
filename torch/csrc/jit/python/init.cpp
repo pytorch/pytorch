@@ -1303,6 +1303,11 @@ void initJITBindings(PyObject* module) {
           "nested_int_coeff",
           [](const c10::SymNode& node) {
             return node->nested_int_coeff();
+          })
+      .def(
+          "__deepcopy__",
+          [](const c10::SymNode& node, py::handle memo) {
+            return node->clone();
           });
 
   // clang-format on
@@ -1389,9 +1394,21 @@ void initJITBindings(PyObject* module) {
           buffer.attr("write")(std::move(memory_view));
           return size;
         };
-        return std::make_unique<PyTorchStreamWriter>(std::move(writer_func));
+        auto seek_func = [=](size_t offset) {
+          auto current_pos = py::cast<size_t>(buffer.attr("tell")());
+          buffer.attr("seek")(
+              offset, py::module::import("os").attr("SEEK_CUR"));
+          return current_pos + offset;
+        };
+        return std::make_unique<PyTorchStreamWriter>(
+            std::move(writer_func), std::move(seek_func));
       }))
       .def(py::init<const std::function<size_t(const void*, size_t)>&>())
+      .def(
+          "write_record_metadata",
+          [](PyTorchStreamWriter& self, const std::string& name, size_t size) {
+            return self.writeRecord(name, nullptr, size);
+          })
       .def(
           "write_record",
           [](PyTorchStreamWriter& self,

@@ -4628,11 +4628,11 @@ Done""",
         self.assertEqual(avg.count, 4)
         self.assertEqual(avg.cpu_time_total, 30)
         self.assertEqual(avg.self_cpu_time_total, 30)
-        self.assertEqual(avg.cuda_time_total, 0)
+        self.assertEqual(avg.device_time_total, 0)
 
         # average stats
         self.assertEqual(avg.cpu_time, 7.5)
-        self.assertEqual(avg.cuda_time_total, 0)
+        self.assertEqual(avg.device_time_total, 0)
 
     def test_profiler_shapes(self):
         print("")
@@ -6916,7 +6916,7 @@ for shape in [(1,), ()]:
         a = torch.randn(2, 2, requires_grad=True)
 
         with self.assertRaisesRegex(
-            Exception, "Checkpointing is not compatible with .grad()"
+            Exception, "torch.utils.checkpoint is incompatible"
         ):
             b = checkpoint(torch.exp, a, use_reentrant=True).sum()
             torch.autograd.grad(b, (a,))
