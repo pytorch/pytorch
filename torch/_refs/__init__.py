@@ -3632,7 +3632,10 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         for length in shape:
             assert length == 1
             _a = unsqueeze(_a, -1)
-        return _a
+        if _a is a:
+            return prims.view_of(a)
+        else:
+            return _a
 
     # Special-cases reshaping to zero dim tensors
     if len(shape) == 0:
@@ -3640,7 +3643,10 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         for length in a.shape:
             assert length == 1
             _a = squeeze(_a, -1)
-        return _a
+        if _a is a:
+            return prims.view_of(a)
+        else:
+            return _a
 
     # Handles general case: a 1+D tensor reshaped into a distinct 1+D shape
 
@@ -3714,7 +3720,10 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         assert a_.shape[idx] == 1
         a_ = squeeze(a_, idx)
 
-    return a_
+    if a_ is a:
+        return prims.view_of(a)
+    else:
+        return a_
 
 
 # CompositeImplicitAutograd - don't register decomp
