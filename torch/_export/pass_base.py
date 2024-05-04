@@ -157,7 +157,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
 
         def placeholder(
             self,
-            target: str,
+            target: str,  # type: ignore[override]
             args: Tuple[Argument, ...],
             kwargs: Dict[str, Argument],
         ) -> ProxyValue:
