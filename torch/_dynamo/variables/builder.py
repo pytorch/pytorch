@@ -1322,7 +1322,7 @@ class VariableBuilder:
             # but the general idea is that we generate kernels that can
             # take unspecialized floats and use them in sizevar computation
             elif (
-                type(value) is int
+                isinstance(value, int)
                 and not is_constant_source(self.get_source())
                 and not isinstance(self.get_source(), RandomValueSource)
             ):

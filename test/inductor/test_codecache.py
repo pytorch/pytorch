@@ -21,7 +21,7 @@ from torch._inductor.codecache import (
 )
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import clear_inductor_caches, fresh_inductor_cache
+from torch._inductor.utils import fresh_inductor_cache
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
@@ -100,10 +100,6 @@ class TestFxGraphCache(TestCase):
         super().setUp()
         counters.clear()
 
-    def reset(self):
-        torch._dynamo.reset()
-        clear_inductor_caches()
-
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
     @parametrize("device", (GPU_TYPE, "cpu"))
@@ -134,9 +130,10 @@ class TestFxGraphCache(TestCase):
 
         # A second call should hit. (First reset so in-memory guards
         # don't prevent compilation).
+        torch._dynamo.reset()
         for m in torch._inductor.codecache.PyCodeCache.cache.values():
             os.remove(m.__file__)
-        self.reset()
+        torch._inductor.codecache.PyCodeCache.cache_clear()
         self.assertEqual(fn(a, b), compiled_fn(a, b))
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
@@ -173,7 +170,7 @@ class TestFxGraphCache(TestCase):
         # The second should see all hits. (First reset so in-memory guards
         # don't prevent compilation).
         counters.clear()
-        self.reset()
+        torch._dynamo.reset()
         grads2 = compiled_fn(mod, inp)
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
         self.assertGreater(counters["inductor"]["fxgraph_cache_hit"], 0)
@@ -223,7 +220,7 @@ class TestFxGraphCache(TestCase):
 
             # A second call should hit. (Reset here to force compilation).
             counters.clear()
-            self.reset()
+            torch._dynamo.reset()
             res2 = compiled_fn(a, b)
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
             self.assertGreater(counters["inductor"]["fxgraph_cache_hit"], 0)
@@ -266,7 +263,7 @@ class TestFxGraphCache(TestCase):
 
             # A second call should hit.
             counters.clear()
-            self.reset()
+            torch._dynamo.reset()
             res2 = compiled_fn(x)
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
             self.assertGreater(counters["inductor"]["fxgraph_cache_hit"], 0)
@@ -353,7 +350,7 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(metrics.generated_kernel_count, 1)
 
         # Verify the "hit" case
-        self.reset()
+        torch._dynamo.reset()
         self.assertEqual(fn(a, b), compiled_fn(a, b))
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
         self.assertEqual(metrics.generated_kernel_count, 2)
@@ -379,14 +376,14 @@ class TestFxGraphCache(TestCase):
 
         # A second call should hit.
         counters.clear()
-        self.reset()
+        torch._dynamo.reset()
         self.assertEqual(fn(a, b), compiled_fn(a, b))
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
         # Clear the cache; now we should miss.
         counters.clear()
-        self.reset()
+        torch._dynamo.reset()
         torch._inductor.codecache.FxGraphCache.clear()
         self.assertEqual(fn(a, b), compiled_fn(a, b))
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)

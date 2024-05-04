@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 import torch
 from torch import Tensor
@@ -13,7 +13,6 @@ from .optimizer import (
     _use_grad_for_differentiable,
     _view_as_real,
     Optimizer,
-    ParamsT,
 )
 
 __all__ = ["Adadelta", "adadelta"]
@@ -22,7 +21,7 @@ __all__ = ["Adadelta", "adadelta"]
 class Adadelta(Optimizer):
     def __init__(
         self,
-        params: ParamsT,
+        params,
         lr=1.0,
         rho=0.9,
         eps=1e-6,
@@ -74,16 +73,9 @@ class Adadelta(Optimizer):
                     )
 
     def _init_group(
-        self,
-        group: Dict[str, Any],
-        params_with_grad: List[Tensor],
-        grads: List[Tensor],
-        square_avgs: List[Tensor],
-        acc_deltas: List[Tensor],
-        state_steps: List[Tensor],
+        self, group, params_with_grad, grads, square_avgs, acc_deltas, state_steps
     ):
         has_complex = False
-        p: Tensor
         for p in group["params"]:
             if p.grad is None:
                 continue
@@ -132,11 +124,11 @@ class Adadelta(Optimizer):
                 loss = closure()
 
         for group in self.param_groups:
-            params_with_grad: List[Tensor] = []
-            grads: List[Tensor] = []
-            square_avgs: List[Tensor] = []
-            acc_deltas: List[Tensor] = []
-            state_steps: List[Tensor] = []
+            params_with_grad = []
+            grads = []
+            square_avgs = []
+            acc_deltas = []
+            state_steps = []
             (
                 lr,
                 rho,
@@ -356,9 +348,9 @@ def _multi_tensor_adadelta(
     state_steps: List[Tensor],
     *,
     lr: float,
+    weight_decay: float,
     rho: float,
     eps: float,
-    weight_decay: float,
     maximize: bool,
     differentiable: bool,
     capturable: bool,
@@ -402,14 +394,14 @@ def _multi_tensor_adadelta(
             torch._foreach_add_(device_state_steps, 1)
 
         if maximize:
-            device_grads = torch._foreach_neg(device_grads)  # type: ignore[assignment]
+            device_grads = torch._foreach_neg(device_grads)
 
         if weight_decay != 0:
             # Re-use the intermediate memory (device_grads) already allocated for maximize
             if maximize:
                 torch._foreach_add_(device_grads, device_params, alpha=weight_decay)
             else:
-                device_grads = torch._foreach_add(  # type: ignore[assignment]
+                device_grads = torch._foreach_add(
                     device_grads, device_params, alpha=weight_decay
                 )
 

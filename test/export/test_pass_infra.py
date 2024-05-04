@@ -50,14 +50,12 @@ class TestPassInfra(TestCase):
             def forward(self, pred, x, y):
                 def true_fn(x, y):
                     b = x.item()
-                    torch._check(b >= 2)
-                    torch._check(b <= 5)
+                    torch._constrain_as_value(b, min=2, max=5)
                     return x - y
 
                 def false_fn(x, y):
                     c = y.item()
-                    torch._check(c >= 2)
-                    torch._check(c <= 5)
+                    torch._constrain_as_value(c, min=2, max=5)
                     return x + y
 
                 ret = control_flow.cond(pred, true_fn, false_fn, [x, y])

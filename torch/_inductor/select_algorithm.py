@@ -40,7 +40,6 @@ from .runtime.runtime_utils import do_bench
 from .utils import (
     get_dtype_size,
     Placeholder,
-    restore_stdout_stderr,
     sympy_dot,
     sympy_index_symbol,
     sympy_product,
@@ -976,14 +975,6 @@ class AlgorithmSelectorCache(PersistentCache):
             if num_workers <= 0:
                 return no_op
 
-            # https://github.com/python/cpython/issues/106905
-            if (
-                sys.version_info.major == 3
-                and sys.version_info.minor == 11
-                and sys.version_info.micro <= 8
-            ):
-                return no_op
-
             # TODO - debug issue
             if torch.version.hip:
                 return no_op
@@ -1016,28 +1007,15 @@ class AlgorithmSelectorCache(PersistentCache):
                 num_workers,
             )
 
-            # In rare circumstances, because python threads inherit global state,
-            # thread pool executor can race and leave stdout/stderr in a state
-            # different than the original values. we explicitly restore the state
-            # here to avoid this issue.
-
-            initial_stdout = sys.stdout
-            initial_stderr = sys.stderr
-
-            def precompile_with_captured_stdout(choice):
-                with restore_stdout_stderr(initial_stdout, initial_stderr):
-                    return choice.precompile()
-
             executor = ThreadPoolExecutor(max_workers=num_workers)
             futures = executor.map(
-                lambda c: precompile_with_captured_stdout(c),
+                lambda c: c.precompile(),
                 [c for c in choices if hasattr(c, "precompile")],
                 timeout=precompilation_timeout_seconds,
             )
             from triton.runtime.autotuner import OutOfResources
 
             @functools.lru_cache(None)
-            @restore_stdout_stderr(initial_stdout, initial_stderr)
             def wait_on_futures():
                 counters["inductor"]["select_algorithm_precompile"] += 1
                 try:

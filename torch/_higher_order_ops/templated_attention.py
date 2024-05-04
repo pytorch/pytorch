@@ -41,9 +41,9 @@ class TransformGetItemToIndex(TorchFunctionMode):
         return func(*args, **(kwargs or {}))
 
 
-class FlexAttentionHOP(HigherOrderOperator):
+class TemplatedAttentionHOP(HigherOrderOperator):
     def __init__(self):
-        super().__init__("flex_attention")
+        super().__init__("templated_attention")
 
     def __call__(
         self,
@@ -58,13 +58,13 @@ class FlexAttentionHOP(HigherOrderOperator):
         return super().__call__(query, key, value, score_mod, *other_buffers)
 
 
-flex_attention = FlexAttentionHOP()
-flex_attention.__module__ = "torch.ops.higher_order"
+templated_attention = TemplatedAttentionHOP()
+templated_attention.__module__ = "torch.ops.higher_order"
 
 
-class FlexAttentionBackwardHOP(HigherOrderOperator):
+class TemplatedAttentionBackwardHOP(HigherOrderOperator):
     def __init__(self):
-        super().__init__("flex_attention_backward")
+        super().__init__("templated_attention_backward")
 
     def __call__(
         self,
@@ -93,8 +93,8 @@ class FlexAttentionBackwardHOP(HigherOrderOperator):
         )
 
 
-flex_attention_backward = FlexAttentionBackwardHOP()
-flex_attention_backward.__module__ = "torch.ops.higher_order"
+templated_attention_backward = TemplatedAttentionBackwardHOP()
+templated_attention_backward.__module__ = "torch.ops.higher_order"
 
 
 def math_attention(
@@ -146,7 +146,7 @@ def math_attention(
     return scores.to(query.dtype) @ value, logsumexp
 
 
-@flex_attention.py_impl(DispatchKey.CompositeExplicitAutograd)
+@templated_attention.py_impl(DispatchKey.CompositeExplicitAutograd)
 def sdpa_dense(
     query: torch.Tensor,
     key: torch.Tensor,
@@ -159,7 +159,7 @@ def sdpa_dense(
     return out, lse
 
 
-def trace_flex_attention(
+def trace_templated_attention(
     proxy_mode: ProxyTorchDispatchMode,
     query: torch.Tensor,
     key: torch.Tensor,
@@ -167,13 +167,13 @@ def trace_flex_attention(
     score_mod: Callable,
     *other_buffers: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Traces the flex_attention operator with the given score_mod function and other_buffers.
+    """Traces the templated_attention operator with the given score_mod function and other_buffers.
 
     Trace SDPA will call make_fx with "fake" example vals and then trace the score_mod function
     This will produce a GraphModule that will be stored on the root tracer as "sdpa_score". We
     access this graph module in inductor to inline the score_mod function to the triton template.
     """
-    example_out = flex_attention(query, key, value, score_mod, *other_buffers)
+    example_out = templated_attention(query, key, value, score_mod, *other_buffers)
     example_vals = [
         torch.zeros((), dtype=query.dtype, requires_grad=query.requires_grad)
     ] + [torch.zeros((), dtype=torch.int) for _ in range(4)]
@@ -183,15 +183,15 @@ def trace_flex_attention(
     node_args = (query, key, value, score_graph, *other_buffers)
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)
     out_proxy = proxy_mode.tracer.create_proxy(
-        "call_function", flex_attention, proxy_args, {}, name="flex_attention"
+        "call_function", templated_attention, proxy_args, {}, name="templated_attention"
     )
     return track_tensor_tree(
         example_out, out_proxy, constant=None, tracer=proxy_mode.tracer
     )
 
 
-@flex_attention.py_impl(ProxyTorchDispatchMode)
-def flex_attention_proxy_torch_dispatch_mode(
+@templated_attention.py_impl(ProxyTorchDispatchMode)
+def templated_attention_proxy_torch_dispatch_mode(
     mode: ProxyTorchDispatchMode,
     query: torch.Tensor,
     key: torch.Tensor,
@@ -201,13 +201,15 @@ def flex_attention_proxy_torch_dispatch_mode(
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     assert mode is not None, "Mode should always be enabled for python fallback key"
     if mode.enable_tracing:
-        return trace_flex_attention(mode, query, key, value, score_mod, *other_buffers)
+        return trace_templated_attention(
+            mode, query, key, value, score_mod, *other_buffers
+        )
     else:
-        return flex_attention(query, key, value, score_mod, *other_buffers)
+        return templated_attention(query, key, value, score_mod, *other_buffers)
 
 
-@flex_attention.py_functionalize_impl
-def flex_attention_functionalize(
+@templated_attention.py_functionalize_impl
+def templated_attention_functionalize(
     ctx: torch._subclasses.functional_tensor.BaseFunctionalizeAPI,
     query: torch.Tensor,
     key: torch.Tensor,
@@ -215,7 +217,7 @@ def flex_attention_functionalize(
     score_mod: Callable,
     *other_buffers: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Defines the functionalization rules for the flex_attention operator.
+    """Defines the functionalization rules for the templated_attention operator.
 
     Write now we are unwrapping each tensor and then redispatching to the next, however we want to
     guard against any mutations in the score_mod function, to the other_buffers since those
@@ -250,7 +252,7 @@ def flex_attention_functionalize(
         if mutates:
             raise UnsupportedAliasMutationException("Mutations detected in score_mod")
 
-        out = flex_attention(
+        out = templated_attention(
             query_unwrapped,
             key_unwrapped,
             value_unwrapped,
@@ -260,8 +262,8 @@ def flex_attention_functionalize(
     return ctx.wrap_tensors(out)  # type: ignore[return-value, arg-type]
 
 
-@flex_attention.py_impl(FakeTensorMode)
-def flex_attention_fake_tensor_mode(
+@templated_attention.py_impl(FakeTensorMode)
+def templated_attention_fake_tensor_mode(
     mode: FakeTensorMode,
     query: torch.Tensor,
     key: torch.Tensor,
@@ -357,7 +359,7 @@ def create_fw_bw_graph(score_mod, index_values, other_buffers):
         return score_mod, joint_graph
 
 
-class FlexAttentionAutogradOp(torch.autograd.Function):
+class TemplatedAttentionAutogradOp(torch.autograd.Function):
     @staticmethod
     def forward(
         ctx, query, key, value, fw_graph, joint_graph, *other_buffers
@@ -369,7 +371,9 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
         ctx._fw_graph = fw_graph
         ctx._joint_graph = joint_graph
         with torch._C._AutoDispatchBelowAutograd():
-            out, logsumexp = flex_attention(query, key, value, fw_graph, *other_buffers)
+            out, logsumexp = templated_attention(
+                query, key, value, fw_graph, *other_buffers
+            )
 
         ctx.save_for_backward(query, key, value, out, logsumexp, *other_buffers)
         return out, logsumexp
@@ -382,7 +386,7 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
         joint_graph = ctx._joint_graph
         # We have asserted that other_buffers do not require grad in the forward
         none_grads = [None] * (2 + len(other_buffers))
-        grad_query, grad_key, grad_value = flex_attention_backward(
+        grad_query, grad_key, grad_value = templated_attention_backward(
             query,
             key,
             value,
@@ -396,8 +400,8 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
         return grad_query, grad_key, grad_value, *none_grads
 
 
-@flex_attention.py_impl(DispatchKey.Autograd)
-def flex_attention_autograd(
+@templated_attention.py_impl(DispatchKey.Autograd)
+def templated_attention_autograd(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
@@ -412,7 +416,7 @@ def flex_attention_autograd(
         fw_graph, bw_graph = create_fw_bw_graph(score_mod, example_vals, other_buffers)
     else:
         fw_graph, bw_graph = score_mod, None
-    out, logsumexp = FlexAttentionAutogradOp.apply(
+    out, logsumexp = TemplatedAttentionAutogradOp.apply(
         query, key, value, fw_graph, bw_graph, *other_buffers
     )
     return out, logsumexp
@@ -421,7 +425,7 @@ def flex_attention_autograd(
 # ---------------------------- Backward HOP Implementation ----------------------------
 
 
-@flex_attention_backward.py_impl(DispatchKey.CompositeExplicitAutograd)
+@templated_attention_backward.py_impl(DispatchKey.CompositeExplicitAutograd)
 def sdpa_dense_backward(
     query: torch.Tensor,
     key: torch.Tensor,
@@ -493,7 +497,7 @@ def sdpa_dense_backward(
     return grad_query.contiguous(), grad_key.contiguous(), grad_value.contiguous()
 
 
-def trace_flex_attention_backward(
+def trace_templated_attention_backward(
     proxy_mode: ProxyTorchDispatchMode,
     query: torch.Tensor,
     key: torch.Tensor,
@@ -506,7 +510,7 @@ def trace_flex_attention_backward(
     *other_buffers: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """We already have the forward graph and joint graph from the forward pass, so we create a proxy attach both graphs"""
-    example_out = flex_attention_backward(
+    example_out = templated_attention_backward(
         query,
         key,
         value,
@@ -540,18 +544,18 @@ def trace_flex_attention_backward(
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)
     out_proxy = proxy_mode.tracer.create_proxy(
         "call_function",
-        flex_attention_backward,
+        templated_attention_backward,
         proxy_args,
         {},
-        name="flex_attention_backward",
+        name="templated_attention_backward",
     )
     return track_tensor_tree(
         example_out, out_proxy, constant=None, tracer=proxy_mode.tracer
     )
 
 
-@flex_attention_backward.py_impl(ProxyTorchDispatchMode)
-def flex_attention_backward_proxy_torch_dispatch_mode(
+@templated_attention_backward.py_impl(ProxyTorchDispatchMode)
+def templated_attention_backward_proxy_torch_dispatch_mode(
     mode: ProxyTorchDispatchMode,
     query: torch.Tensor,
     key: torch.Tensor,
@@ -565,7 +569,7 @@ def flex_attention_backward_proxy_torch_dispatch_mode(
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     assert mode is not None, "Mode should always be enabled for python fallback key"
     if mode.enable_tracing:
-        return trace_flex_attention_backward(
+        return trace_templated_attention_backward(
             mode,
             query,
             key,
@@ -578,7 +582,7 @@ def flex_attention_backward_proxy_torch_dispatch_mode(
             *other_buffers,
         )
     else:
-        return flex_attention_backward(
+        return templated_attention_backward(
             query,
             key,
             value,
@@ -591,8 +595,8 @@ def flex_attention_backward_proxy_torch_dispatch_mode(
         )
 
 
-@flex_attention_backward.py_functionalize_impl
-def flex_attention_backward_functionalize(
+@templated_attention_backward.py_functionalize_impl
+def templated_attention_backward_functionalize(
     ctx: torch._subclasses.functional_tensor.BaseFunctionalizeAPI,
     query: torch.Tensor,
     key: torch.Tensor,
@@ -604,7 +608,7 @@ def flex_attention_backward_functionalize(
     joint_graph: GraphModule,
     *other_buffers: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Defines the functionalization rules for the flex_attention operator.
+    """Defines the functionalization rules for the templated_attention operator.
 
     Write now we are unwrapping each tensor and then redispatching to the next,
     since we know that the forward score mod function is assured to be free of mutations
@@ -632,7 +636,7 @@ def flex_attention_backward_functionalize(
         functional_fw_graph = ctx.functionalize(fw_graph)
         functional_joint_graph = ctx.functionalize(joint_graph)
 
-        grad_query, grad_key, grad_value = flex_attention_backward(
+        grad_query, grad_key, grad_value = templated_attention_backward(
             query_unwrapped,
             key_unwrapped,
             value_unwrapped,
@@ -647,8 +651,8 @@ def flex_attention_backward_functionalize(
     return ctx.wrap_tensors((grad_query, grad_key, grad_value))  # type: ignore[return-value,arg-type]
 
 
-@flex_attention_backward.py_impl(FakeTensorMode)
-def flex_attention_backward_fake_tensor_mode(
+@templated_attention_backward.py_impl(FakeTensorMode)
+def templated_attention_backward_fake_tensor_mode(
     mode: FakeTensorMode,
     query: torch.Tensor,
     key: torch.Tensor,
@@ -667,6 +671,6 @@ def flex_attention_backward_fake_tensor_mode(
         return grad_query, grad_key, grad_value
 
 
-flex_attention_backward.py_impl(DispatchKey.Autograd)(
-    autograd_not_implemented(flex_attention_backward, deferred_error=True)
+templated_attention_backward.py_impl(DispatchKey.Autograd)(
+    autograd_not_implemented(templated_attention_backward, deferred_error=True)
 )

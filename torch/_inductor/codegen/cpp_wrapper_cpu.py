@@ -593,14 +593,9 @@ class CppWrapperCpu(WrapperCodeGen):
                 else:
                     # Append constants as inputs to the graph
                     constants_idx = inputs_len + idx
-                    if config.abi_compatible:
-                        self.prefix.writeline(
-                            f"auto {constants_key} = std::move(inputs[{constants_idx}]);"
-                        )
-                    else:
-                        self.prefix.writeline(
-                            f"auto {constants_key} = inputs[{constants_idx}];"
-                        )
+                    self.prefix.writeline(
+                        f"auto {constants_key} = inputs[{constants_idx}];"
+                    )
 
             self.codegen_inputs(self.prefix, V.graph.graph_inputs)
 

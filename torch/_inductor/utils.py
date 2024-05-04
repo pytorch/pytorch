@@ -660,14 +660,6 @@ def clear_on_fresh_inductor_cache(obj: Any):
     return obj
 
 
-def clear_inductor_caches():
-    """
-    Clear all registered caches.
-    """
-    for obj in _registered_caches:
-        obj.cache_clear()
-
-
 @contextlib.contextmanager
 def fresh_inductor_cache(cache_entries=None):
     """
@@ -676,7 +668,8 @@ def fresh_inductor_cache(cache_entries=None):
     Optionally, pass a dict as 'cache_entries' to get a list of filenames and sizes
     generated with this cache instance.
     """
-    clear_inductor_caches()
+    for obj in _registered_caches:
+        obj.cache_clear()
 
     inductor_cache_dir = tempfile.mkdtemp()
     try:
@@ -846,15 +839,6 @@ class IndentedBuffer:
         res.writelines(self._lines)
         res.writelines(other._lines)
         return res
-
-
-@contextlib.contextmanager
-def restore_stdout_stderr(initial_stdout, initial_stderr):
-    try:
-        yield
-    finally:
-        sys.stdout = initial_stdout
-        sys.stderr = initial_stderr
 
 
 class DeferredLineBase:

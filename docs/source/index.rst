@@ -78,7 +78,6 @@ Features described in this documentation are classified by release status:
    torch.distributed.elastic <distributed.elastic>
    torch.distributed.fsdp <fsdp>
    torch.distributed.optim <distributed.optim>
-   torch.distributed.pipelining <distributed.pipelining>
    torch.distributed.tensor.parallel <distributed.tensor.parallel>
    torch.distributed.checkpoint <distributed.checkpoint>
    torch.distributions <distributions>

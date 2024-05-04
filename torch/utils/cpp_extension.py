@@ -1691,10 +1691,10 @@ def _jit_compile(name,
                   file=sys.stderr)
         name = f'{name}_v{version}'
 
-    baton = FileBaton(os.path.join(build_directory, 'lock'))
-    if baton.try_acquire():
-        try:
-            if version != old_version:
+    if version != old_version:
+        baton = FileBaton(os.path.join(build_directory, 'lock'))
+        if baton.try_acquire():
+            try:
                 with GeneratedFileCleaner(keep_intermediates=keep_intermediates) as clean_ctx:
                     if IS_HIP_EXTENSION and (with_cuda or with_cudnn):
                         hipify_result = hipify_python.hipify(
@@ -1727,13 +1727,14 @@ def _jit_compile(name,
                         verbose=verbose,
                         with_cuda=with_cuda,
                         is_standalone=is_standalone)
-            elif verbose:
-                print('No modifications detected for re-loaded extension '
-                      f'module {name}, skipping build step...', file=sys.stderr)
-        finally:
-            baton.release()
-    else:
-        baton.wait()
+            finally:
+                baton.release()
+        else:
+            baton.wait()
+    elif verbose:
+        print('No modifications detected for re-loaded extension '
+              f'module {name}, skipping build step...',
+              file=sys.stderr)
 
     if verbose:
         print(f'Loading extension module {name}...', file=sys.stderr)

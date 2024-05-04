@@ -37,7 +37,6 @@ from torch._inductor.metrics import is_metric_table_enabled, log_kernel_metadata
 from torch._inductor.runtime.hints import AutotuneHint, DeviceProperties
 from torch._prims_common import is_integer_dtype
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
-from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import ValueRanges
 from torch.utils._triton import has_triton_package
 
@@ -1361,7 +1360,7 @@ class TritonKernel(Kernel):
         }.get(self.reduction_hint, 64)
 
         # If multi_kernel is enabled, we do more aggressive persistent reduction.
-        # This may result in some persistent reductions slower than the
+        # This may result in some persisent reductions slower than the
         # corresponding non-persistent reductions. MultiKernel will do benchmarking
         # to pick the faster one.
         if config.triton.multi_kernel:
@@ -1672,9 +1671,7 @@ class TritonKernel(Kernel):
                 # indirect indexing
                 cse_var = self.cse.varname_map[var.name]
                 mask_vars.update(cse_var.mask_vars)
-            elif var.name.startswith(("ps", "i")) or symbol_is_type(
-                var, (SymT.UNBACKED_INT, SymT.SIZE)
-            ):
+            elif var.name.startswith(("s", "ps", "i", "u")):
                 pass
             else:
                 # var is one of xN, yN or rN

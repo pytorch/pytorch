@@ -576,18 +576,13 @@ def _multi_tensor_nadam(
         else:
             step_size_grads = _stack_if_compiling(
                 [
-                    (_get_value(lr) * (1.0 - mu) / (1.0 - _get_value(mu_product))) * -1
+                    (lr * (1.0 - mu) / (1.0 - _get_value(mu_product))) * -1
                     for mu_product, mu in zip(grouped_mu_products, mus)
                 ]
             )
             step_size_expavg = _stack_if_compiling(
                 [
-                    (
-                        _get_value(lr)
-                        * mu_next
-                        / (1.0 - _get_value(mu_product) * mu_next)
-                    )
-                    * -1
+                    (lr * mu_next / (1.0 - _get_value(mu_product) * mu_next)) * -1
                     for mu_product, mu_next in zip(grouped_mu_products, mu_nexts)
                 ]
             )

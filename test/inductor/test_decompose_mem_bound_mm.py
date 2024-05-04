@@ -50,9 +50,7 @@ class MyModule3(torch.nn.Module):
 
 @requires_cuda
 @torch._inductor.config.patch(
-    post_grad_fusion_options={
-        "decompose_mm_pass": {},
-    }
+    decompose_mem_bound_mm=True,
 )
 @instantiate_parametrized_tests
 class TestDecomposeMemMM(TestCase):
