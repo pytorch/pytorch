@@ -873,6 +873,20 @@ class TestDeserialize(TestCase):
         with enable_torchbind_tracing():
             self.check_graph(m, inputs, strict=False)
 
+    def test_export_no_inputs(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p = torch.ones(3, 3)
+
+            def forward(self):
+                return self.p * self.p
+
+        ep = torch.export.export(M(), ())
+        ep._example_inputs = None
+        roundtrip_ep = deserialize(serialize(ep))
+        self.assertTrue(torch.allclose(ep.module()(), roundtrip_ep.module()()))
+
 
 instantiate_parametrized_tests(TestDeserialize)
 
