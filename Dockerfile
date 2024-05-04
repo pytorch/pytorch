@@ -1,12 +1,15 @@
-# syntax = docker/dockerfile:experimental
+# syntax=docker/dockerfile:1
+
+# NOTE: Building this image requires a minimum docker version of either:
+#  - > 18.06 with `experimental` enabled and ENV `DOCKER_BUILDKIT=1`
+#  - >= 23.0 releases (Feb 2023) use BuildKit by default
 #
-# NOTE: To build this you will need a docker version > 18.06 with
-#       experimental enabled and DOCKER_BUILDKIT=1
-#
-#       If you do not use buildkit you are not going to have a good time
-#
-#       For reference:
-#           https://docs.docker.com/develop/develop-images/build_enhancements/
+# For reference:
+# - https://docs.docker.com/build/buildkit/#getting-started
+# - https://docs.docker.com/build/dockerfile/frontend/#stable-channel
+# - https://docs.docker.com/engine/release-notes/23.0/
+# - https://hub.docker.com/layers/docker/dockerfile/1.0/images/sha256-92f5351b2fca8f7e2f452aa9aec1c34213cdd2702ca92414eee6466fab21814a?context=explore
+
 ARG BASE_IMAGE=ubuntu:22.04
 ARG PYTHON_VERSION=3.11
 
