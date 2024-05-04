@@ -1277,6 +1277,8 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         "MAKE_FUNCTION",
         # This could be supported in the future.
         "LOAD_DEREF",
+        "STORE_DEREF",
+        "DELETE_DEREF",
         # Exceptions
         "RAISE_VARARGS",
         "SETUP_FINALLY",
@@ -1327,7 +1329,7 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ):
         if (
             loop_items := len(value.items)
-        ) < torch._dynamo.config.for_loop_medium_size_boundary:
+        ) < torch._dynamo.config.convert_for_loops_to_function_threshold:
             raise CannotConvertRangeToHigherOrder(
                 f"Loop of length {loop_items} too small to consider optimizing"
             )
@@ -1407,6 +1409,11 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         from .builder import wrap_fx_proxy
 
         val_range = self.value.unpack_var_sequence(tx)
+        if (
+            len(val_range)
+            < torch._dynamo.config.convert_for_loops_to_function_threshold
+        ):
+            raise CannotConvertRangeToHigherOrder("Too few loop iterations left")
         # Assign the for loop value
         args = list(self.args)
         assert self.store_target >= 0
@@ -1425,7 +1432,7 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 {},
                 "torch.ops.higher_order.for_loop",
                 source_target=self.func,
-                allow_constant_outputs=True,
+                allow_constant_outputs=False,
                 log_error_on_graph_break=False,
                 set_subgraph_inputs="manual",
             )

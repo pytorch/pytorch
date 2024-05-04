@@ -1234,9 +1234,6 @@ class InstructionTranslatorBase(
                     )
 
                     new_locals = op.to_function(self)
-                    for loc in new_locals:
-                        if isinstance(loc, torch.fx.Proxy):
-                            del loc.node.meta["example_value"]
                     args = [
                         wrap_fx_proxy(self, loc)
                         if isinstance(loc, torch.fx.Proxy)

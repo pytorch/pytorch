@@ -6213,13 +6213,13 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
 
 class RangeHigherOrderTests(torch._dynamo.test_case.TestCase):
     @torch._dynamo.config.patch(
-        convert_for_loops_to_functions=True, for_loop_medium_size_boundary=10
+        convert_for_loops_to_functions=True, convert_for_loops_to_function_threshold=10
     )
     def test_loop_to_higher_order_simple(self):
         counters.clear()
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
-        loop_count = torch._dynamo.config.for_loop_medium_size_boundary
+        loop_count = torch._dynamo.config.convert_for_loops_to_function_threshold
 
         def f(x):
             res = x
@@ -6298,7 +6298,7 @@ class GraphModule(torch.nn.Module):
         self.assertLessEqual(cnt.op_count, 40)
 
     @torch._dynamo.config.patch(
-        convert_for_loops_to_functions=True, for_loop_medium_size_boundary=10
+        convert_for_loops_to_functions=True, convert_for_loops_to_function_threshold=10
     )
     def test_loop_to_higher_order_consistent_namespace(self):
         """This tests whether we respect CPython for loop semantics -- that is
@@ -6308,7 +6308,7 @@ class GraphModule(torch.nn.Module):
         counters.clear()
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
-        loop_count = torch._dynamo.config.for_loop_medium_size_boundary
+        loop_count = torch._dynamo.config.convert_for_loops_to_function_threshold
 
         def f(x):
             res = x
@@ -6386,13 +6386,13 @@ class GraphModule(torch.nn.Module):
         self.assertLessEqual(cnt.op_count, 40)
 
     @torch._dynamo.config.patch(
-        convert_for_loops_to_functions=True, for_loop_medium_size_boundary=10
+        convert_for_loops_to_functions=True, convert_for_loops_to_function_threshold=10
     )
     def test_loop_to_higher_order_step(self):
         counters.clear()
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
-        loop_count = torch._dynamo.config.for_loop_medium_size_boundary * 2
+        loop_count = torch._dynamo.config.convert_for_loops_to_function_threshold * 2
 
         def f(x):
             res = x
@@ -6471,7 +6471,7 @@ class GraphModule(torch.nn.Module):
         self.assertLessEqual(cnt.op_count, 40)
 
     @torch._dynamo.config.patch(
-        convert_for_loops_to_functions=True, for_loop_medium_size_boundary=2
+        convert_for_loops_to_functions=True, convert_for_loops_to_function_threshold=2
     )
     def test_loop_to_higher_order_reject_comprehensions(self):
         counters.clear()
@@ -6527,13 +6527,13 @@ class GraphModule(torch.nn.Module):
         )
 
     @torch._dynamo.config.patch(
-        convert_for_loops_to_functions=True, for_loop_medium_size_boundary=10
+        convert_for_loops_to_functions=True, convert_for_loops_to_function_threshold=10
     )
     def test_loop_to_higher_order_non_tensors(self):
         counters.clear()
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
-        loop_count = torch._dynamo.config.for_loop_medium_size_boundary
+        loop_count = torch._dynamo.config.convert_for_loops_to_function_threshold
 
         def f(x):
             res = x
