@@ -365,14 +365,16 @@ class IterGraph(fx.Graph):
             actual_target_node = self._lookup_node(target_node, graph)
             assert actual_target_node is not None
             for actual_node in actual_nodes:
+                assert actual_node is not None
                 actual_target_node.prepend(actual_node)
 
     def move_after(self, nodes: List[fx.Node], target_node: fx.Node) -> None:
         for graph in self._all_graphs:
             actual_nodes = [self._lookup_node(node, graph) for node in nodes]
             actual_target_node = self._lookup_node(target_node, graph)
+            assert actual_target_node is not None
             for actual_node in actual_nodes:
-                assert actual_target_node is not None
+                assert actual_node is not None
                 actual_target_node.append(actual_node)
                 actual_target_node = actual_node
 

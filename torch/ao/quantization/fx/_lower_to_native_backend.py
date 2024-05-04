@@ -616,8 +616,8 @@ def _lower_static_weighted_ref_module(
                 continue
         else:
             q_class = STATIC_LOWER_MODULE_MAP[ref_class]
-        output_scale = getattr(model, scale_node.target)
-        output_zero_point = getattr(model, zero_point_node.target)
+        output_scale = getattr(model, scale_node.target)  # type: ignore[arg-type]
+        output_zero_point = getattr(model, zero_point_node.target)  # type: ignore[arg-type]
         q_module = q_class.from_reference(ref_module, output_scale, output_zero_point)
         # replace reference module with quantized module
         parent_name, module_name = _parent_name(ref_node.target)
@@ -627,7 +627,7 @@ def _lower_static_weighted_ref_module(
         assert len(ref_node.args) == 1
         dq_node = ref_node.args[0]
         assert isinstance(dq_node, Node)
-        ref_node.replace_input_with(dq_node, dq_node.args[0])
+        ref_node.replace_input_with(dq_node, dq_node.args[0])  # type: ignore[arg-type]
         q_node.replace_all_uses_with(ref_node)
         model.graph.erase_node(q_node)
         model.graph.erase_node(scale_node)
@@ -672,8 +672,8 @@ def _lower_static_weighted_ref_module_with_two_inputs(
                 continue
         else:
             continue
-        output_scale = getattr(model, scale_node.target)
-        output_zero_point = getattr(model, zero_point_node.target)
+        output_scale = getattr(model, scale_node.target)  # type: ignore[arg-type]
+        output_zero_point = getattr(model, zero_point_node.target)  # type: ignore[arg-type]
         q_module = q_class.from_reference(ref_module, output_scale, output_zero_point)
         # replace reference module with quantized module
         parent_name, module_name = _parent_name(ref_node.target)
@@ -686,7 +686,7 @@ def _lower_static_weighted_ref_module_with_two_inputs(
                 continue
             dq_node = arg
             assert isinstance(dq_node, Node)
-            ref_node.replace_input_with(dq_node, dq_node.args[0])
+            ref_node.replace_input_with(dq_node, dq_node.args[0])  # type: ignore[arg-type]
 
         q_node.replace_all_uses_with(ref_node)
         model.graph.erase_node(q_node)
