@@ -1214,7 +1214,7 @@ elif [[ "$TEST_CONFIG" == deploy ]]; then
   test_torch_deploy
 elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
   test_inductor_distributed
-elif [[ "${TEST_CONFIG}" == *inductor_micro_benchmark* ]]; then
+elif [[ "${TEST_CONFIG}" == *inductor-micro-benchmark* ]]; then
   test_inductor_micro_benchmark
 elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
   install_torchvision
