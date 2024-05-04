@@ -2216,6 +2216,8 @@ class View(GenericView):
         Perform a reshape entirely by modifying indexing math
         """
         size_hint = V.graph.sizevars.size_hint
+        # TODO: These symbols may not escape, if they don't assert so and
+        # treat them as temporary
         vars = [
             sympy_index_symbol_with_prefix(SymT.VIEW, i) for i in range(len(new_size))
         ]
