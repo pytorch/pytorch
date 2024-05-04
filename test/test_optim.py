@@ -597,12 +597,6 @@ class TestOptimRenewed(TestCase):
             for input, model, optimizer in zip(inputs, models, optimizers):
                 optimizer.zero_grad()
 
-                # Test that step behaves as expected (a no-op) when grads are set to None
-                if i != 3:
-                    output = model(input)
-                    loss = output.sum()
-                    loss.backward()
-
                 if i == 4:
                     # Freeze a layer to test if the step of this layer in 'fused' or 'foreach'
                     # is same as the step in 'forloop'.
@@ -610,6 +604,12 @@ class TestOptimRenewed(TestCase):
                 if i == 5:
                     # Unfreeze the layer
                     model[2].requires_grad_(True)
+
+                # Test that step behaves as expected (a no-op) when grads are set to None
+                if i != 3:
+                    output = model(input)
+                    loss = output.sum()
+                    loss.backward()
 
                 optimizer.step()
                 state.append(optimizer.state)
