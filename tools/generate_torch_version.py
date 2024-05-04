@@ -60,9 +60,8 @@ def get_torch_version(sha: Optional[str] = None) -> str:
         if sha is None:
             sha = get_sha(pytorch_root)
         version += "+git" + sha[:7]
-    if os.getenv("NVIDIA_PYTORCH_VERSION"):
+    if str_nvidia_pytorch_version := os.getenv("NVIDIA_PYTORCH_VERSION"):
         # see if it matches YY.MM
-        str_nvidia_pytorch_version = os.getenv("NVIDIA_PYTORCH_VERSION")
         pattern = re.compile(r'^\d{2}\.\d{2}$')
         if bool(pattern.match(str_nvidia_pytorch_version)):
           version += ".nv" + str_nvidia_pytorch_version
