@@ -22,8 +22,8 @@ from torch import inf
 from torch.nn import Parameter
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_utils import \
-    (gradcheck, gradgradcheck, run_tests, TestCase, download_file, IS_CI, NoTest,
-     skipIfSlowGradcheckEnv, suppress_warnings)
+    (gradcheck, gradgradcheck, parametrize, run_tests, TestCase, download_file, IS_CI,
+     NoTest, skipIfSlowGradcheckEnv, suppress_warnings)
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes, integral_types
 import torch.backends.mps
@@ -40,6 +40,7 @@ from torch.testing._internal.common_methods_invocations import (
 )
 from torch.testing._internal.common_device_type import ops, dtypes, instantiate_device_type_tests, OpDTypes
 from torch.testing._internal.common_nn import NNTestCase
+from torch.testing._internal.common_quantization import _group_quantize_tensor
 import numpy as np
 import torch
 import torch.utils._pytree as pytree
@@ -156,11 +157,6 @@ def mps_ops_grad_modifier(ops):
         # On the backward pass for `sort` both are used (values and indices), thus resulting in a issmatch between CPU and MPS.
         # Running `msort` with stable `sort` passes.
         'msort': [torch.float16],
-
-        # See https://github.com/pytorch/pytorch/issues/106112 for more information
-        'cumprod': [torch.float32, torch.float16],
-        # See https://github.com/pytorch/pytorch/issues/109166 for more information
-        'masked.cumprod': [torch.float16],
     }
 
     SKIPLIST_GRAD = {
@@ -232,6 +228,7 @@ def mps_ops_modifier(ops):
         '__rmul__',
         '__getitem__',
         'add',
+        'argwhere',
         'atleast_1d',
         'atleast_2d',
         'atleast_3d',
@@ -292,6 +289,7 @@ def mps_ops_modifier(ops):
         'nn.functional.padcircular',
         'nn.functional.feature_alpha_dropoutwithout_train',
         'nn.functional.unfold',
+        'nonzero',
         'ones',
         'outer',
         'permute',
@@ -345,7 +343,6 @@ def mps_ops_modifier(ops):
         'any',
         'addcdiv',
         'addcmul',
-        'argwhere',
         'asin',
         'atan',
         'atanh',
@@ -413,7 +410,6 @@ def mps_ops_modifier(ops):
         'nn.functional.pixel_shuffle',
         'nn.functional.pixel_unshuffle',
         'nn.functional.tanhshrink',
-        'nonzero',
         'prod',
         'reciprocal',
         'roll',
@@ -4272,6 +4268,13 @@ class TestMPS(TestCaseMPS):
             e_string = str(e)
             self.assertEqual(e_string, "MPS does not support cumsum_out_mps op with int64 input." +
                              " Support has been added in macOS 13.3")
+
+    def test_cumsum_bool(self):
+        a = torch.ones(2**16, dtype=torch.bool)
+        t_cpu = a.cumsum(0)
+        t_mps = a.to("mps").cumsum(0)
+
+        self.assertEqual(t_cpu, t_mps)
 
     def test_cumsum_minus_one_axis(self):
         def helper(dtype):
@@ -9048,6 +9051,45 @@ class TestLinalgMPS(TestCaseMPS):
                         "The operator 'aten::_linalg_eigh.eigenvalues' is not currently implemented for the MPS device."):
                     raise e
 
+    @parametrize("m", [32, 64])
+    @parametrize("k", [32, 64])
+    @parametrize("n", [48, 64])
+    def test__int4_mm(self, m, k, n):
+        q_group = 32
+        inner_k_tiles = 2
+
+        torch.manual_seed(1)
+        a_f32 = torch.rand((m, k), device="mps")
+        b_f32 = torch.rand((k, n), device="mps")
+
+        def convert_weight_to_int4pack(b):
+            b_int32, b_scales_and_zeros = _group_quantize_tensor(
+                b, n_bit=4, q_group_size=q_group
+            )
+            b_int4pack = torch._convert_weight_to_int4pack(
+                b_int32.cpu(), inner_k_tiles
+            ).to(device="mps")
+
+            return b_int4pack, b_scales_and_zeros
+
+        def weight_int4pack_mm(a, b_int4pack, b_scales_and_zeros):
+            return torch._weight_int4pack_mm(
+                a, b_int4pack, q_group, b_scales_and_zeros
+            ).to(device="mps")
+
+        b_int4pack, b_scales_and_zeros_f32 = convert_weight_to_int4pack(b_f32)
+
+        for dtype in [torch.float16, torch.float32] + ([torch.bfloat16] if product_version > 14.0 else []):
+            a = a_f32.to(dtype=dtype)
+            b = b_f32.to(dtype=dtype)
+            b_scales_and_zeros = b_scales_and_zeros_f32.to(dtype=dtype)
+            ref = torch.mm(a, b)
+            res = weight_int4pack_mm(a, b_int4pack, b_scales_and_zeros)
+
+            mean_err = ((res - ref).abs() / ref).mean()
+            self.assertTrue(mean_err < 0.05)
+
+
 
 
 
@@ -11842,6 +11884,7 @@ class TestCommon(TestCase):
             cpu_tensor = ones("cpu")
             self.assertEqual(mps_tensor.cpu(), cpu_tensor)
 
+
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.
 # This requires mps to be properly registered in the device generic test framework which is not the
 # case right now. We can probably use `allow_mps` introduced in https://github.com/pytorch/pytorch/pull/87342
@@ -11849,6 +11892,7 @@ class TestCommon(TestCase):
 instantiate_device_type_tests(TestConsistency, globals(), only_for="cpu")
 instantiate_device_type_tests(TestErrorInputs, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestCommon, globals(), allow_mps=True, only_for="mps")
+instantiate_device_type_tests(TestLinalgMPS, globals(), allow_mps=True, only_for="mps")
 
 if __name__ == "__main__":
     run_tests()
