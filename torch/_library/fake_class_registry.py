@@ -1,5 +1,4 @@
 import logging
-import warnings
 from typing import Any, Dict, Optional, Protocol, Tuple
 
 import torch
@@ -10,8 +9,11 @@ log = logging.getLogger(__name__)
 
 
 class FakeScriptObject:
-    def __init__(self, wrapped_obj):
+    def __init__(self, wrapped_obj: Any, script_class_name: str):
         self.wrapped_obj = wrapped_obj
+
+        # The fully qualified name of the class of original script object
+        self.script_class_name = script_class_name
 
 
 class HasStaticMethodFromReal(Protocol):
@@ -33,19 +35,22 @@ class FakeClassRegistry:
 
     def register(self, full_qualname: str, fake_class=None) -> None:
         if self.has_impl(full_qualname):
-            warnings.warn(
-                f"{full_qualname} is already registered. Previous fake class is overrided with {fake_class}."
+            log.warning(
+                "%s is already registered. Previous fake class is overrided with  %s.",
+                full_qualname,
+                fake_class,
             )
         self._registered_class[full_qualname] = fake_class
 
     def deregister(self, full_qualname: str) -> Any:
         if not self.has_impl(full_qualname):
-            raise RuntimeError(
-                f"Cannot deregister {full_qualname}. Please use register_fake_class to register it first."
-                f" Or do you dereigster it twice?"
+            log.warning(
+                "Cannot deregister %s. Please use register_fake_class to register it first."
+                " Or do you dereigster it twice?",
+                full_qualname,
             )
-        self._check_registered(full_qualname)
-        return self._registered_class.pop(full_qualname)
+        else:
+            return self._registered_class.pop(full_qualname)
 
     def clear(self) -> None:
         self._registered_class.clear()
@@ -71,12 +76,13 @@ def to_fake_obj(fake_mode, x: torch.ScriptObject) -> FakeScriptObject:
 
         return wrapped
 
-    fake_x_wrapped = FakeScriptObject(fake_x)
+    fake_x_wrapped = FakeScriptObject(fake_x, x._type().qualified_name())  # type: ignore[attr-defined]
     for name in x._method_names():  # type: ignore[attr-defined]
         attr = getattr(fake_x, name, None)
         if attr:
             if not callable(attr):
                 raise RuntimeError(f"Expect {name} to be a callable but got {attr}.")
+
             setattr(
                 fake_x_wrapped,
                 name,
