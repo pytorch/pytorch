@@ -1961,6 +1961,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled_func(inp).item(), 16)
         self.assertRegex(failure_reason, r"^___check_obj_id\(L\['m'\]._forward_hooks")
 
+    @patch.object(torch._dynamo.config, "guard_nn_modules", False)
     @patch.object(torch._dynamo.config, "skip_nnmodule_hook_guards", True)
     def test_hooks_skip_guards(self):
         class TestModule(torch.nn.Module):

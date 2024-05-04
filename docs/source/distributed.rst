@@ -372,6 +372,10 @@ as they should never be created manually, but they are guaranteed to support two
 
 .. autofunction:: irecv
 
+.. autofunction:: send_object_list
+
+.. autofunction:: recv_object_list
+
 .. autofunction:: batch_isend_irecv
 
 .. autoclass:: P2POp
