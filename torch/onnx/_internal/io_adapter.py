@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import inspect
+
 from typing import (
     Any,
     Callable,
@@ -10,7 +12,6 @@ from typing import (
     runtime_checkable,
     Sequence,
     Tuple,
-    TYPE_CHECKING,
     Union,
 )
 
@@ -19,9 +20,6 @@ import torch.export as torch_export
 
 from torch.onnx._internal import _beartype
 from torch.utils import _pytree as pytree
-
-if TYPE_CHECKING:
-    import inspect
 
 # TODO(bowbao): Add diagnostics for IO adapters.
 

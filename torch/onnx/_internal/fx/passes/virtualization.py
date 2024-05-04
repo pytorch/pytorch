@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-from typing import List, Optional, Tuple, TYPE_CHECKING
+from typing import List, Optional, Tuple
 
 import torch
+import torch.fx
 
 from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import _pass
-
-if TYPE_CHECKING:
-    import torch.fx
 
 
 class MovePlaceholderToFront(_pass.Transform):
