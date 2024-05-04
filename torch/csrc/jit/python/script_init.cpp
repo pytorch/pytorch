@@ -75,6 +75,8 @@
 #include <utility>
 #include <vector>
 
+#include <fmt/format.h>
+
 namespace torch::jit {
 
 using ::c10::Argument;
@@ -972,10 +974,11 @@ void initJitScriptBindings(PyObject* module) {
           [mm_name](const Object& self, py::args args, py::kwargs kwargs) {
             auto method = self.find_method(mm_name);
             if (!method) {
-              throw c10::NotImplementedError(
-                  "'%s' is not implemented for %s",
+              std::string msg = fmt::format(
+                  "'{}' is not implemented for {}",
                   mm_name,
-                  self.type()->str().c_str());
+                  self.type()->str());
+              throw c10::NotImplementedError(msg);
             }
             return invokeScriptMethodFromPython(
                 *method,
