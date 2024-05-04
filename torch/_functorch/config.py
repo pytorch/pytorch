@@ -106,6 +106,9 @@ fake_tensor_allow_unsafe_data_ptr_access = True
 # tokens.
 unlift_effect_tokens = False
 
+# Turns on aot_autograd_cache (WIP)
+enable_aot_autograd_cache = os.environ.get("ENABLE_AOT_AUTOGRAD_CACHE", False)
+
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 

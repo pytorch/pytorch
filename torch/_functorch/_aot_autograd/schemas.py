@@ -716,6 +716,7 @@ class AOTConfig:
     enable_log: bool = True
     # this is always false outside of export.
     pre_dispatch: bool = False
+    cache_key: Optional[str] = None
 
     def __post_init__(self):
         if self.pre_dispatch:

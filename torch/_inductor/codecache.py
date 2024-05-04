@@ -740,6 +740,7 @@ class FxGraphCache:
     def _lookup_graph(
         key: str,
         example_inputs: List[torch.Tensor],
+        ignore_guards: bool = False,
     ) -> Optional[CompiledFxGraph]:
         """
         Lookup a compiled graph in the cache by key. On a hit, return the
@@ -764,7 +765,7 @@ class FxGraphCache:
             with open(os.path.join(subdir, path), "rb") as f:
                 candidate: CompiledFxGraph = pickle.load(f)
 
-            if not candidate.guards_expr:
+            if not candidate.guards_expr or ignore_guards:
                 # No guards to evaluate, so this is a hit.
                 graph = candidate
                 break
@@ -898,7 +899,6 @@ class FxGraphCache:
         Load a compiled graph from the cache. If a cached entry does not exist,
         compile the graph and save it to the cache.
         """
-
         compiled_graph = None
         try:
             FxGraphCache._check_can_cache(gm)
@@ -913,6 +913,8 @@ class FxGraphCache:
             else:
                 log.debug("fx graph cache hit for key %s", key)
                 counters["inductor"]["fxgraph_cache_hit"] += 1
+            # Save the cache key on the compiled graph so AOTAutogradCache can save it
+            compiled_graph._fx_cache_key = key
         except BypassFxGraphCache:
             counters["inductor"]["fxgraph_cache_bypass"] += 1
             if not compiled_graph:
@@ -957,7 +959,9 @@ class CompiledFxGraph:
     # ShapeEnv.produce_guards_expression()
     guards_expr: Optional[str]
 
+    # These fields are set after loading from the cache, so will be None
     _boxed_call: Optional[bool] = None
+    _fx_cache_key: Optional[str] = None
 
     def __init__(
         self,

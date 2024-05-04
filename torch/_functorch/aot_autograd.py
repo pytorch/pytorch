@@ -21,6 +21,8 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from . import config
+
+from ._aot_autograd.autograd_cache import AOTAutogradCache, BypassAOTAutogradCache
 from ._aot_autograd.collect_metadata_analysis import (  # noqa: F401
     run_functionalized_fw_and_collect_metadata,
 )
@@ -426,7 +428,9 @@ aot_autograd_decompositions = {}
 
 @dynamo_timed
 def create_aot_dispatcher_function(
-    flat_fn, flat_args: List[Any], aot_config: AOTConfig
+    flat_fn,
+    flat_args: List[Any],
+    aot_config: AOTConfig,
 ):
     """
     Traces the forward and backward graphs of the attr:`flat_fn` to generate a
@@ -952,14 +956,25 @@ def aot_module_simplified(
         aot_autograd_arg_pos_to_source=aot_autograd_arg_pos_to_source,
         is_export=False,
         no_tangents=False,
+        cache_key=None,
     )
+    compiled_fn = None
 
-    with compiled_autograd.disable():
-        compiled_fn = create_aot_dispatcher_function(
-            functional_call,
-            full_args,
-            aot_config,
-        )
+    if config.enable_aot_autograd_cache:
+        try:
+            compiled_fn = AOTAutogradCache.load(mod, args, aot_config)
+            assert aot_config.cache_key is not None
+        except BypassAOTAutogradCache as e:
+            # Log something here
+            aot_config.cache_key = None
+
+    if compiled_fn is None:
+        with compiled_autograd.disable():
+            compiled_fn = create_aot_dispatcher_function(
+                functional_call,
+                full_args,
+                aot_config,
+            )
 
     if isinstance(mod, torch._dynamo.utils.GmWrapper):
         # This function is called by the flatten_graph_inputs wrapper, which boxes

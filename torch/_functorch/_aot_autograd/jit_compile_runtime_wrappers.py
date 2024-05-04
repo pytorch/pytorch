@@ -32,6 +32,7 @@ from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import fx_placeholder_vals
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from .. import config
+from .autograd_cache import AOTAutogradCache, BypassAOTAutogradCache
 from .dispatch_and_compile_graph import (
     aot_dispatch_autograd_graph,
     aot_dispatch_base_graph,
@@ -159,6 +160,24 @@ def aot_dispatch_base(
         if tracing_context and tracing_context.fakify_first_call:
             fakified_out = _compute_output_meta_with_inductor_strides(
                 fw_module, fwd_output_strides
+            )
+
+    if (
+        config.enable_aot_autograd_cache
+        and aot_config.cache_key is not None
+        and compiled_fw._fx_cache_key is not None
+    ):
+        try:
+            AOTAutogradCache.save(
+                aot_config.cache_key,
+                compiled_fw,
+                fw_metadata,
+                maybe_subclass_meta,
+                None,
+            )
+        except BypassAOTAutogradCache as e:
+            log.warning(
+                "Bypassing autograd cache for %s due to: %s", aot_config.cache_key, e
             )
 
     # However, create_runtime_wrapper does not expect the rng offsets in the
