@@ -15,7 +15,7 @@ from torch._export.passes.add_runtime_assertions_for_constraints_pass import Inp
 from torch._guards import Source
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.export import Constraint
-from torch.export.dynamic_shapes import _Dim
+from torch.export.dynamic_shapes import _tree_map
 from torch.export.graph_signature import CustomObjArgument
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -30,7 +30,6 @@ from torch.utils._pytree import (
     KeyPath,
     MappingKey,
     SequenceKey,
-    tree_flatten,
     tree_map_with_path,
 )
 
@@ -180,25 +179,17 @@ def make_fake_inputs(nn_module, args, kwargs, dynamic_shapes):
 
 
 def _flatten_dynamic_shapes(
-    dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any]]
-):
-    def _is_dynamic_shape_leaf(x):
-        if isinstance(x, dict):
-            x = list(x.values())
-        return x is None or all(isinstance(y, (_Dim, int)) or y is None for y in x)
+    combined_args: Dict[str, Any],
+    dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any]],
+) -> List[Any]:
+    flat_shapes = []
 
-    if isinstance(dynamic_shapes, (list, tuple)):
-        flat_dynamic_shapes = []
-        for item in dynamic_shapes:
-            flat_shapes, _ = tree_flatten(
-                dynamic_shapes, is_leaf=_is_dynamic_shape_leaf
-            )
-            flat_dynamic_shapes += flat_shapes
-    else:
-        flat_dynamic_shapes, _ = tree_flatten(
-            dynamic_shapes, is_leaf=_is_dynamic_shape_leaf
-        )
-    return flat_dynamic_shapes
+    def _tree_map_helper(t, shape):
+        nonlocal flat_shapes
+        flat_shapes.append(shape)
+
+    _tree_map(_tree_map_helper, combined_args, dynamic_shapes)
+    return flat_shapes
 
 
 def produce_guards_and_solve_constraints(
@@ -260,6 +251,7 @@ def produce_guards_and_solve_constraints(
 def make_constraints(
     fake_mode: FakeTensorMode,
     gm: torch.fx.GraphModule,
+    combined_args: Dict[str, Any],
     dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any], None],
     num_lifted_inputs: int,
 ):
@@ -280,7 +272,16 @@ def make_constraints(
     if not dynamic_shapes:
         return range_constraints
 
-    flat_dynamic_shapes = _flatten_dynamic_shapes(dynamic_shapes)
+    # get individual dynamic shapes spec for each input
+    if not isinstance(dynamic_shapes, dict):
+        assert isinstance(dynamic_shapes, (tuple, list))
+        combined_args = type(dynamic_shapes)(combined_args.values())  # type: ignore[assignment, misc]
+    flat_dynamic_shapes = _flatten_dynamic_shapes(combined_args, dynamic_shapes)
+
+    # check number of shapes vs. number of inputs
+    num_placeholders = [node.op == "placeholder" for node in gm.graph.nodes].count(True)
+    assert len(flat_dynamic_shapes) == num_placeholders - num_lifted_inputs
+
     input_dims = defaultdict(list)
     free_symbols = set()
     for input_index, node in enumerate(gm.graph.nodes):

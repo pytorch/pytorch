@@ -43,6 +43,7 @@ from torch.export.dynamic_shapes import (
     Constraint,
     dims,
     dynamic_dim,
+    _combine_args,
 )
 from torch.export.exported_program import (
     _disable_prexisiting_fake_mode,
@@ -175,9 +176,11 @@ def capture_pre_autograd_graph(
                 _restore_state_dict(f, m)
 
             flat_args, _ = pytree.tree_flatten((args, kwargs or {}))
+            combined_args = _combine_args(f, args, kwargs)
             range_constraints = make_constraints(
                 fake_mode,
                 m,
+                combined_args,
                 dynamic_shapes,
                 0,
             )
