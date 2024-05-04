@@ -827,30 +827,6 @@ filegroup(
 )
 
 filegroup(
-    name = "caffe2_opt_srcs",
-    srcs = [
-        "caffe2/opt/annotations.cc",
-        "caffe2/opt/backend_cutting.cc",
-        "caffe2/opt/backend_transformer_base.cc",
-        "caffe2/opt/bound_shape_inferencer.cc",
-        "caffe2/opt/converter.cc",
-        "caffe2/opt/dead_code_elim.cc",
-        "caffe2/opt/device.cc",
-        "caffe2/opt/distributed.cc",
-        "caffe2/opt/distributed_converter.cc",
-        "caffe2/opt/fusion.cc",
-        "caffe2/opt/mobile.cc",
-        "caffe2/opt/onnxifi_op.cc",
-        "caffe2/opt/onnxifi_transformer.cc",
-        "caffe2/opt/optimize_ideep.cc",
-        "caffe2/opt/optimizer.cc",
-        "caffe2/opt/passes.cc",
-        "caffe2/opt/shape_info.cc",
-        "caffe2/opt/tvm_transformer.cc",
-    ],
-)
-
-filegroup(
     name = "caffe2_perfkernels_srcs",
     srcs = [
         "caffe2/perfkernels/adagrad.cc",
@@ -865,59 +841,6 @@ filegroup(
     ],
 )
 
-filegroup(
-    name = "caffe2_predictor_srcs",
-    srcs = [
-        "caffe2/predictor/emulator/data_filler.cc",
-        "caffe2/predictor/emulator/data_filler.h",
-        "caffe2/predictor/predictor.cc",
-        "caffe2/predictor/predictor_config.cc",
-        "caffe2/predictor/predictor_utils.cc",
-    ],
-)
-
-filegroup(
-    name = "caffe2_quantization_srcs",
-    srcs = [
-        "caffe2/quantization/server/activation_distribution_observer.cc",
-        "caffe2/quantization/server/batch_matmul_dnnlowp_op.cc",
-        "caffe2/quantization/server/caffe2_dnnlowp_utils.cc",
-        "caffe2/quantization/server/channel_shuffle_dnnlowp_op.cc",
-        "caffe2/quantization/server/concat_dnnlowp_op.cc",
-        "caffe2/quantization/server/conv_dnnlowp_acc16_op.cc",
-        "caffe2/quantization/server/conv_dnnlowp_op.cc",
-        "caffe2/quantization/server/conv_relu_op.cc",
-        "caffe2/quantization/server/dequantize_dnnlowp_op.cc",
-        "caffe2/quantization/server/dnnlowp.cc",
-        "caffe2/quantization/server/dnnlowp_partition.cc",
-        "caffe2/quantization/server/dynamic_histogram.cc",
-        "caffe2/quantization/server/elementwise_add_dnnlowp_op.cc",
-        "caffe2/quantization/server/elementwise_linear_dnnlowp_op.cc",
-        "caffe2/quantization/server/elementwise_mul_dnnlowp_op.cc",
-        "caffe2/quantization/server/elementwise_sum_dnnlowp_op.cc",
-        "caffe2/quantization/server/elementwise_sum_relu_op.cc",
-        "caffe2/quantization/server/fbgemm_pack_matrix_cache.cc",
-        "caffe2/quantization/server/fbgemm_pack_op.cc",
-        "caffe2/quantization/server/fully_connected_dnnlowp_acc16_op.cc",
-        "caffe2/quantization/server/fully_connected_dnnlowp_op.cc",
-        "caffe2/quantization/server/fully_connected_fake_lowp_op.cc",
-        "caffe2/quantization/server/group_norm_dnnlowp_op.cc",
-        "caffe2/quantization/server/int8_gen_quant_params.cc",
-        "caffe2/quantization/server/kl_minimization.cc",
-        "caffe2/quantization/server/lstm_unit_dnnlowp_op.cc",
-        "caffe2/quantization/server/norm_minimization.cc",
-        "caffe2/quantization/server/p99.cc",
-        "caffe2/quantization/server/pool_dnnlowp_op.cc",
-        "caffe2/quantization/server/quantize_dnnlowp_op.cc",
-        "caffe2/quantization/server/relu_dnnlowp_op.cc",
-        "caffe2/quantization/server/sigmoid.cc",
-        "caffe2/quantization/server/sigmoid_dnnlowp_op.cc",
-        "caffe2/quantization/server/spatial_batch_norm_dnnlowp_op.cc",
-        "caffe2/quantization/server/tanh.cc",
-        "caffe2/quantization/server/tanh_dnnlowp_op.cc",
-        "caffe2/quantization/server/utility_dnnlowp_ops.cc",
-    ],
-)
 
 filegroup(
     name = "caffe2_queue_srcs",
@@ -937,36 +860,6 @@ filegroup(
         "caffe2/serialize/inline_container.cc",
         "caffe2/serialize/istream_adapter.cc",
         "caffe2/serialize/read_adapter_interface.cc",
-    ],
-)
-
-filegroup(
-    name = "caffe2_sgd_srcs",
-    srcs = [
-        "caffe2/sgd/adadelta_op.cc",
-        "caffe2/sgd/adagrad_op.cc",
-        "caffe2/sgd/adam_op.cc",
-        "caffe2/sgd/clip_tensor_op.cc",
-        "caffe2/sgd/ftrl_op.cc",
-        "caffe2/sgd/gftrl_op.cc",
-        "caffe2/sgd/iter_op.cc",
-        "caffe2/sgd/lars_op.cc",
-        "caffe2/sgd/learning_rate_adaption_op.cc",
-        "caffe2/sgd/learning_rate_op.cc",
-        "caffe2/sgd/momentum_sgd_op.cc",
-        "caffe2/sgd/rmsprop_op.cc",
-        "caffe2/sgd/wngrad_op.cc",
-        "caffe2/sgd/yellowfin_op.cc",
-    ],
-)
-
-filegroup(
-    name = "caffe2_transforms_srcs",
-    srcs = [
-        "caffe2/transforms/common_subexpression_elimination.cc",
-        "caffe2/transforms/conv_to_nnpack_transform.cc",
-        "caffe2/transforms/pattern_net_transform.cc",
-        "caffe2/transforms/single_op_transform.cc",
     ],
 )
 
@@ -1261,7 +1154,6 @@ cc_library(
             "caffe2/perfkernels/*.h",
             "caffe2/predictor/*.h",
             "caffe2/predictor/emulator/*.h",
-            "caffe2/quantization/server/*.h",
             "caffe2/queue/*.h",
             "caffe2/serialize/*.h",
             "caffe2/sgd/*.h",
@@ -1293,32 +1185,6 @@ cc_library(
 )
 
 cc_library(
-    name = "caffe2_dnnlowp_avx2_ops",
-    srcs = [
-        "caffe2/quantization/server/elementwise_sum_dnnlowp_op_avx2.cc",
-        "caffe2/quantization/server/fully_connected_fake_lowp_op_avx2.cc",
-        "caffe2/quantization/server/group_norm_dnnlowp_op_avx2.cc",
-        "caffe2/quantization/server/norm_minimization_avx2.cc",
-        "caffe2/quantization/server/pool_dnnlowp_op_avx2.cc",
-        "caffe2/quantization/server/relu_dnnlowp_op_avx2.cc",
-        "caffe2/quantization/server/spatial_batch_norm_dnnlowp_op_avx2.cc",
-        "caffe2/quantization/server/transpose.cc",
-    ],
-    copts = CAFFE2_COPTS + [
-        "-mf16c",
-        "-mavx2",
-        "-mfma",
-        "-mxsave",
-    ],
-    visibility = ["//visibility:public"],
-    deps = [
-        ":caffe2_headers",
-        "@fbgemm",
-    ],
-    alwayslink = True,
-)
-
-cc_library(
     name = "caffe2",
     srcs = [
         "caffe2/share/contrib/depthwise/depthwise3x3_conv_op.cc",
@@ -1326,14 +1192,9 @@ cc_library(
         ":caffe2_ideep_srcs",
         ":caffe2_onnx_srcs",
         ":caffe2_operators_srcs",
-        ":caffe2_opt_srcs",
         ":caffe2_perfkernels_srcs",
-        ":caffe2_predictor_srcs",
-        ":caffe2_quantization_srcs",
         ":caffe2_queue_srcs",
         ":caffe2_serialize_srcs",
-        ":caffe2_sgd_srcs",
-        ":caffe2_transforms_srcs",
         ":caffe2_utils_srcs",
     ],
     copts = CAFFE2_COPTS + ["-mf16c"],
@@ -1341,7 +1202,6 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":caffe2_core_macros",
-        ":caffe2_dnnlowp_avx2_ops",
         ":caffe2_headers",
         ":caffe2_perfkernels_avx",
         ":caffe2_perfkernels_avx2",
