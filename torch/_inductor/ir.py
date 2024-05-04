@@ -1766,7 +1766,7 @@ class Scan(Loops):
         )
 
 
-# This signifies a scan op that should go through TritonSplitScanKernel codegen on CUDA.
+# This signifies a scan op that should go through TritonSplitScanKernel codgen on CUDA.
 @dataclasses.dataclass
 class SplitScan(Scan):
     pass
@@ -3587,7 +3587,7 @@ class TritonTemplateBuffer(TemplateBuffer):
         self.mutated_inputs = mutated_inputs
         if mutated_inputs is not None:
             # Ensure that the mutated inputs are only allowed for certain nodes
-            allowed_set = {"flex_attention"}
+            allowed_set = {"templated_attention"}
             current_node = str(V.graph.current_node)
             assert (
                 current_node in allowed_set
@@ -5522,15 +5522,6 @@ class FallbackKernel(ExternKernelAlloc):
         if kernel.namespace == "aten":  # type: ignore[union-attr]
             # Aten Fallback Ops
             assert isinstance(kernel, torch._ops.OpOverload)
-
-            if (
-                kernel == aten.mul.Tensor
-                and len(self.inputs) == 1
-                and len(self.constant_args) == 1
-            ):
-                # When aten.mul.Tensor's second arg is constant, cpp wrapper expects to call mul_Scalar
-                kernel = aten.mul.Scalar
-
             if V.graph.cpp_wrapper:
                 if (
                     config.is_fbcode()

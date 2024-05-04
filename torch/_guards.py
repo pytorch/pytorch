@@ -288,19 +288,10 @@ class Guard:
         else:
             self.code_list.extend(code_list)
 
-        # Some objects are ephemeral, e.g., list[slice(1, 2)]. If we have
-        # multiple guards on the same object, the weakref can die between the
-        # invocation of set_export_info calls. So a dead weakref is also
-        # acceptable.
-        assert (
-            self.obj_weakref
-            in (
-                obj_weakref,
-                None,
-            )
-            or callable(self.obj_weakref)
-            and self.obj_weakref() is None
-        ), "Guarded object must be identical, None or ephemeral (dead weakref)"
+        assert self.obj_weakref in (
+            obj_weakref,
+            None,
+        ), "Guarded object must be identical, or None"
         self.obj_weakref = obj_weakref
 
 

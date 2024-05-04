@@ -361,11 +361,6 @@ def optim_inputs_func_adagrad(device, dtype=None):
             kwargs={"lr": 0.1, "lr_decay": 0.5, "weight_decay": 0.1},
             desc="lr_decay",
         ),  # TODO: Move out to testing in param_group?
-        OptimizerInput(
-            params=None,
-            kwargs={"lr": torch.tensor(0.001)},
-            desc="Tensor lr",
-        ),
     ]
 
 
@@ -508,16 +503,6 @@ def optim_inputs_func_adamax(device, dtype=None):
             kwargs={"weight_decay": 0.9, "maximize": False, "capturable": True},
             desc="capturable, weight_decay",
         ),
-        OptimizerInput(
-            params=None,
-            kwargs={
-                "lr": torch.tensor(0.001),
-                "weight_decay": 0.9,
-                "maximize": False,
-                "capturable": True,
-            },
-            desc="capturable, weight_decay, tensor LR",
-        ),
     ]
 
     return [
@@ -576,16 +561,6 @@ def optim_inputs_func_asgd(device, dtype=None):
             params=None,
             kwargs={"weight_decay": 0.1, "maximize": True, "capturable": True},
             desc="maximize, weight_decay, capturable",
-        ),
-        OptimizerInput(
-            params=None,
-            kwargs={
-                "lr": torch.tensor(0.001),
-                "weight_decay": 0.1,
-                "maximize": True,
-                "capturable": True,
-            },
-            desc="maximize, weight_decay, capturable, tensor LR",
         ),
     ]
     return [
@@ -653,17 +628,6 @@ def optim_inputs_func_nadam(device, dtype=None):
         OptimizerInput(
             params=None,
             kwargs={
-                "weight_decay": 0.9,
-                "momentum_decay": 6e-3,
-                "decoupled_weight_decay": True,
-                "capturable": True,
-            },
-            desc="decoupled_weight_decay, capturable",
-        ),
-        OptimizerInput(
-            params=None,
-            kwargs={
-                "lr": torch.tensor(0.001),
                 "weight_decay": 0.9,
                 "momentum_decay": 6e-3,
                 "decoupled_weight_decay": True,
@@ -743,16 +707,6 @@ def optim_inputs_func_radam(device=None, dtype=None):
                 "decoupled_weight_decay": True,
             },
             desc="capturable, weight_decay, decoupled_weight_decay",
-        ),
-        OptimizerInput(
-            params=None,
-            kwargs={
-                "lr": torch.tensor(0.001),
-                "capturable": True,
-                "weight_decay": 0.1,
-                "decoupled_weight_decay": True,
-            },
-            desc="capturable, weight_decay, decoupled_weight_decay, tensor LR",
         ),
     ]
     return [
@@ -903,9 +857,6 @@ def optim_inputs_func_sgd(device, dtype=None):
     return [
         OptimizerInput(params=None, kwargs={}, desc="default"),
         OptimizerInput(params=None, kwargs={"lr": 1e-2}, desc="non-default lr"),
-        OptimizerInput(
-            params=None, kwargs={"lr": torch.tensor(0.001)}, desc="tensor lr"
-        ),
         OptimizerInput(params=None, kwargs={"momentum": 0.9}, desc="momentum"),
         OptimizerInput(
             params=None,

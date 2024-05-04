@@ -831,16 +831,12 @@ c10::Layout ConcretePyInterpreterVTable::layout(
       "torch.ops.prim");
 
   TORCH_CHECK(
-      THPLayout_Check(out.ptr()) || PyLong_Check(out.ptr()),
+      THPLayout_Check(out.ptr()),
       "layout returned invalid type ",
       py::detail::get_fully_qualified_tp_name(Py_TYPE(out.ptr())),
       ", expected Layout");
 
-  if (THPLayout_Check(out.ptr())) {
-    return toLayout(out.ptr());
-  } else {
-    return c10::Layout(py::cast<int64_t>(out));
-  }
+  return toLayout(out.ptr());
 }
 
 int64_t ConcretePyInterpreterVTable::numel(const c10::TensorImpl* self) const {

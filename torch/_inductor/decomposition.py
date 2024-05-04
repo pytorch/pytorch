@@ -86,7 +86,6 @@ decomps_to_exclude = [
     aten.clamp_max,
     aten.clamp_min,
     aten.glu,  # inductor lowers this directly
-    aten.select_scatter,  # need to be in the ATen graph in order for it to work with the re-inplacing pass
     aten.split.Tensor,  # inductor lowers this directly
     aten.squeeze,  # inductor lowers this directly
     aten.sum,  # inductor lowers this directly
@@ -104,7 +103,7 @@ def register_decomposition(ops):
 
 
 # TODO: for now, inductor doesn't handle asserts
-# because the condition is symbol -> tensor in the graph.
+# because the condition is symbool -> tensor in the graph.
 @register_decomposition([aten._assert_async.msg])
 def assert_async_msg_decomp(tensor, msg):
     return

@@ -81,7 +81,6 @@ __all__ = [
     "export_opnames",
     "fork",
     "freeze",
-    "interface",
     "ignore",
     "isinstance",
     "load",

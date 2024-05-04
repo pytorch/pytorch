@@ -9,9 +9,6 @@ def is_fbcode():
     return not hasattr(torch.version, "git_version")
 
 
-if is_fbcode():
-    from triton.fb import build_paths
-
 # add some debug printouts
 debug = False
 
@@ -513,7 +510,7 @@ decompose_mem_bound_mm: bool = False
 # assume_aligned_inputs means that we assume that inputs will be aligned; we generate
 # code using this assumption, and clone tensors before use if they aren't aligned.
 # In the common case, most inputs will be aligned.
-assume_aligned_inputs: bool = False
+assume_aligned_inputs: bool = True
 
 
 # config specific to codegen/cpp.py
@@ -756,9 +753,7 @@ class cuda:
     # The default path only works under PyTorch local development environment.
     cutlass_dir = os.environ.get(
         "TORCHINDUCTOR_CUTLASS_DIR",
-        build_paths.cutlass()
-        if is_fbcode() and not torch.version.hip
-        else os.path.abspath(
+        os.path.abspath(
             os.path.join(os.path.dirname(torch.__file__), "../third_party/cutlass/")
         ),
     )

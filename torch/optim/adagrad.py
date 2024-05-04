@@ -13,7 +13,6 @@ from .optimizer import (
     _use_grad_for_differentiable,
     _view_as_real,
     Optimizer,
-    ParamsT,
 )
 
 __all__ = ["Adagrad", "adagrad"]
@@ -22,7 +21,7 @@ __all__ = ["Adagrad", "adagrad"]
 class Adagrad(Optimizer):
     def __init__(
         self,
-        params: ParamsT,
+        params,
         lr=1e-2,
         lr_decay=0,
         weight_decay=0,
@@ -121,10 +120,10 @@ class Adagrad(Optimizer):
                 loss = closure()
 
         for group in self.param_groups:
-            params_with_grad: List[Tensor] = []
-            grads: List[Tensor] = []
-            state_sums: List[Tensor] = []
-            state_steps: List[Tensor] = []
+            params_with_grad = []
+            grads = []
+            state_sums = []
+            state_steps = []
 
             has_sparse_grad, has_complex = self._init_group(
                 group, params_with_grad, grads, state_sums, state_steps
@@ -203,7 +202,7 @@ def adagrad(
     state_steps: List[Tensor],
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting these as kwargs for now as functional API is compiled by torch/distributed/optim
-    has_sparse_grad: bool = False,
+    has_sparse_grad: bool = None,
     foreach: Optional[bool] = None,
     differentiable: bool = False,
     has_complex: bool = False,
@@ -373,7 +372,7 @@ def _multi_tensor_adagrad(
             _view_as_real(device_params, device_grads, device_state_sums)
 
         if maximize:
-            device_grads = torch._foreach_neg(device_grads)  # type: ignore[assignment]
+            device_grads = torch._foreach_neg(device_grads)
 
         # Update steps
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
@@ -391,7 +390,7 @@ def _multi_tensor_adagrad(
             if maximize:
                 torch._foreach_add_(device_grads, device_params, alpha=weight_decay)
             else:
-                device_grads = torch._foreach_add(  # type: ignore[assignment]
+                device_grads = torch._foreach_add(
                     device_grads, device_params, alpha=weight_decay
                 )
 
@@ -409,6 +408,6 @@ def _multi_tensor_adagrad(
             torch._foreach_mul_(device_grads, minus_clr)
             numerator = device_grads
         else:
-            numerator = torch._foreach_mul(device_grads, minus_clr)  # type: ignore[assignment]
+            numerator = torch._foreach_mul(device_grads, minus_clr)
 
         torch._foreach_addcdiv_(device_params, numerator, std)

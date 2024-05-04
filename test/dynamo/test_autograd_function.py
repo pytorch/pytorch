@@ -513,7 +513,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
             actual_graph,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_ : torch.Tensor, L_z_ : torch.Tensor, L_weird_b : torch.Tensor, L_weird_c : torch.Tensor):
+    def forward(self, L_x_: "f32[]", L_z_: "f32[]", L_weird_b: "f32[]", L_weird_c: "f32[]"):
         l_x_ = L_x_
         l_z_ = L_z_
         l_weird_b = L_weird_b
@@ -522,23 +522,23 @@ class GraphModule(torch.nn.Module):
         function_ctx = torch.autograd.function.FunctionCtx()
         fwd_body_0 = self.fwd_body_0
         bwd_body_0 = self.bwd_body_0
-        autograd_function_apply = torch._functorch.autograd_function.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, l_z_, l_weird_b, l_weird_c, args_tensor_mask = [True, False, True]);  fwd_body_0 = bwd_body_0 = l_x_ = l_z_ = l_weird_b = l_weird_c = None
+        autograd_function_apply: "f32[]" = torch._functorch.autograd_function.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, l_z_, l_weird_b, l_weird_c, args_tensor_mask = [True, False, True]);  fwd_body_0 = bwd_body_0 = l_x_ = l_z_ = l_weird_b = l_weird_c = None
         return (autograd_function_apply,)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, function_ctx, l_x_, l_z_, l_weird_b, l_weird_c):
-            mul = l_weird_b * l_weird_c
-            clone = l_x_.clone();  l_x_ = None
-            mul_1 = mul * clone;  mul = clone = None
+        def forward(self, function_ctx, l_x_: "f32[]", l_z_: "f32[]", l_weird_b: "f32[]", l_weird_c: "f32[]"):
+            mul: "f32[]" = l_weird_b * l_weird_c
+            clone: "f32[]" = l_x_.clone();  l_x_ = None
+            mul_1: "f32[]" = mul * clone;  mul = clone = None
             return (mul_1, [l_weird_b, l_weird_c])
 
     class GraphModule(torch.nn.Module):
-        def forward(self, function_ctx, mul_1, l_weird_b, l_weird_c):
+        def forward(self, function_ctx, mul_1: "f32[]", l_weird_b: "f32[]", l_weird_c: "f32[]"):
             _set_grad_enabled = torch._C._set_grad_enabled(False)
 
-            mul = mul_1 * l_weird_b;  l_weird_b = None
-            mul_2 = mul * l_weird_c;  mul = l_weird_c = None
-            mul_3 = mul_1 * 2;  mul_1 = None
+            mul: "f32[]" = mul_1 * l_weird_b;  l_weird_b = None
+            mul_2: "f32[]" = mul * l_weird_c;  mul = l_weird_c = None
+            mul_3: "f32[]" = mul_1 * 2;  mul_1 = None
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return (mul_2, mul_3)
