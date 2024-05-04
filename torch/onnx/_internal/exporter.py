@@ -6,7 +6,6 @@ import abc
 
 import contextlib
 import dataclasses
-import io
 import logging
 import os
 
@@ -38,7 +37,6 @@ import torch
 import torch._ops
 import torch.export as torch_export
 import torch.utils._pytree as pytree
-from torch._subclasses import fake_tensor
 
 from torch.onnx._internal import _beartype, io_adapter
 from torch.onnx._internal.diagnostics import infra
@@ -53,12 +51,16 @@ from torch.onnx._internal.fx import (
 # 'import torch.onnx' continues to work without having 'onnx' installed. We fully
 # 'import onnx' inside of dynamo_export (by way of _assert_dependencies).
 if TYPE_CHECKING:
+    import io
+
     import onnx
     import onnxruntime  # type: ignore[import]
     import onnxscript  # type: ignore[import]
     from onnxscript.function_libs.torch_lib import (  # type: ignore[import]
         registration as torchlib_registry,
     )
+
+    from torch._subclasses import fake_tensor
 
     from torch.onnx._internal.fx import diagnostics
 else:

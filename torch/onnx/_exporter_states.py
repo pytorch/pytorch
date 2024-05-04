@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from typing import Dict
+from typing import Dict, TYPE_CHECKING
 
-from torch import _C
+
+if TYPE_CHECKING:
+    from torch import _C
 
 
 class ExportTypes:

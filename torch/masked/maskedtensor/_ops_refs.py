@@ -1,11 +1,9 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 from functools import partial
-from typing import Callable, Any, Dict, TYPE_CHECKING
+from typing import Callable, Any, Dict
 import torch
 
-if TYPE_CHECKING:
-    import torch._ops
 
 from .binary import (
     _apply_native_binary,
@@ -28,6 +26,7 @@ from .unary import (
     NATIVE_UNARY_FNS,
     NATIVE_INPLACE_UNARY_FNS,
 )
+import torch._ops
 
 
 __all__ = []  # type: ignore[var-annotated]

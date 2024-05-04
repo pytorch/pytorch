@@ -12,20 +12,22 @@ from __future__ import annotations
 import builtins
 import itertools
 import operator
-from typing import Optional, Sequence
+from typing import Optional, Sequence, TYPE_CHECKING
 
 import torch
 
 from . import _dtypes_impl, _util
-from ._normalizations import (
-    ArrayLike,
-    ArrayLikeOrScalar,
-    CastingModes,
-    DTypeLike,
-    NDArray,
-    NotImplementedType,
-    OutArray,
-)
+
+if TYPE_CHECKING:
+    from ._normalizations import (
+        ArrayLike,
+        ArrayLikeOrScalar,
+        CastingModes,
+        DTypeLike,
+        NDArray,
+        NotImplementedType,
+        OutArray,
+    )
 
 
 def copy(

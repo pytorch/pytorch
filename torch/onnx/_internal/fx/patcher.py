@@ -1,9 +1,11 @@
 import copy
 import functools
-import io
-from typing import List, Union
+from typing import List, TYPE_CHECKING, Union
 
 import torch
+
+if TYPE_CHECKING:
+    import io
 
 
 # TODO: Remove after https://github.com/huggingface/safetensors/pull/318

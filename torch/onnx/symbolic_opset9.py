@@ -10,7 +10,7 @@ import functools
 import math
 import sys
 import warnings
-from typing import Callable, List, Optional, Sequence, Tuple, Union
+from typing import Callable, List, Optional, Sequence, Tuple, TYPE_CHECKING, Union
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -22,7 +22,9 @@ from torch import _C
 from torch.onnx import _constants, _deprecation, _type_utils, errors, symbolic_helper
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import _beartype, jit_utils, registration
-from torch.types import Number
+
+if TYPE_CHECKING:
+    from torch.types import Number
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in README.md

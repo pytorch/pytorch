@@ -14,6 +14,7 @@ from typing import (
     Sequence,
     Set,
     Tuple,
+    TYPE_CHECKING,
     Union,
 )
 
@@ -31,9 +32,11 @@ from torch.fx.passes.operator_support import OperatorSupport
 from torch.fx.passes.tools_common import CALLABLE_NODE_OPS
 from torch.utils import _pytree
 
+if TYPE_CHECKING:
+    import onnx
+
 try:
     # Use try-except to initialize package-dependent global variables.
-    import onnx
     import onnxruntime  # type: ignore[import]
     from onnxruntime.capi import _pybind_state as ORTC  # type: ignore[import]
 

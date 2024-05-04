@@ -8,7 +8,6 @@ from __future__ import annotations
 import contextlib
 import copy
 import inspect
-import io
 import re
 import textwrap
 import typing
@@ -49,6 +48,9 @@ from torch.onnx._internal import (
     onnx_proto_utils,
     registration,
 )
+
+if typing.TYPE_CHECKING:
+    import io
 
 __all__ = [
     "is_in_onnx_export",

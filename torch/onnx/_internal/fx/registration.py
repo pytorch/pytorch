@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 import dataclasses
-import types
 from typing import Optional, TYPE_CHECKING, Union
 
-import torch._ops
 from torch.onnx._internal import _beartype
 
 # We can only import onnx from this module in a type-checking context to ensure that
 # 'import torch.onnx' continues to work without having 'onnx' installed. We fully
 # 'import onnx' inside of dynamo_export (by way of _assert_dependencies).
 if TYPE_CHECKING:
+    import types
+
     import onnxscript  # type: ignore[import]
+
+    import torch._ops
 
 
 @dataclasses.dataclass(frozen=True, eq=True)

@@ -12,7 +12,6 @@ from .overrides import (
     has_torch_function, has_torch_function_unary, has_torch_function_variadic,
     handle_torch_function)
 from ._jit_internal import boolean_dispatch
-from ._jit_internal import _overload as overload
 
 Tensor = torch.Tensor
 from torch import _VF
@@ -1100,26 +1099,6 @@ unique_consecutive = boolean_dispatch(
     func_name='unique_consecutive')
 unique_consecutive.__doc__ = _unique_consecutive_impl.__doc__
 
-if TYPE_CHECKING:
-    pass
-    # There's no good way to use this type annotation without breaking JIT
-    # overloads. So leave untyped for mypy for now.
-else:
-    @overload
-    def tensordot(a, b, dims: int = 2, out: Optional[torch.Tensor] = None):
-        pass
-
-    @overload  # noqa: F811
-    def tensordot(a, b, dims: Tuple[List[int], List[int]], out: Optional[torch.Tensor] = None):  # noqa: F811
-        pass
-
-    @overload  # noqa: F811
-    def tensordot(a, b, dims: List[List[int]], out: Optional[torch.Tensor] = None):  # noqa: F811
-        pass
-
-    @overload  # noqa: F811
-    def tensordot(a, b, dims: torch.Tensor, out: Optional[torch.Tensor] = None):  # noqa: F811
-        pass
 
 
 def tensordot(a, b, dims=2, out: Optional[torch.Tensor] = None):  # noqa: F811
@@ -1461,40 +1440,6 @@ def atleast_3d(*tensors):
     return _VF.atleast_3d(tensors)  # type: ignore[attr-defined]
 
 
-if TYPE_CHECKING:
-    pass
-    # There's no good way to use this type annotation; cannot rename norm() to
-    # _norm_impl() in a way that doesn't break JIT overloads. So leave untyped
-    # for mypy for now.
-    #    def norm(input: Tensor,
-    #             p: Optional[Union[str, Number]] = "fro",
-    #             dim: Optional[Union[int, List[int]]] = None,
-    #             keepdim: bool = False,
-    #             out: Optional[Tensor] = None,
-    #             dtype: _dtype = None) -> Tensor:
-    #        return _norm_impl(input, p, dim, keepdim, out, dtype)
-else:
-    # TODO: type dim as BroadcastingList when
-    # https://github.com/pytorch/pytorch/issues/33782 is fixed
-    @overload
-    def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):
-        # type: (Tensor, str, Optional[List[int]], bool, Optional[Tensor], Optional[int]) -> Tensor
-        pass
-
-    @overload  # noqa: F811
-    def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: F811
-        # type: (Tensor, Optional[number], Optional[List[int]], bool, Optional[Tensor], Optional[int]) -> Tensor
-        pass
-
-    @overload  # noqa: F811
-    def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: F811
-        # type: (Tensor, Optional[number], Optional[int], bool, Optional[Tensor], Optional[int]) -> Tensor
-        pass
-
-    @overload  # noqa: F811
-    def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: F811
-        # type: (Tensor, str, Optional[int], bool, Optional[Tensor], Optional[int]) -> Tensor
-        pass
 
 
 def norm(input, p: Optional[Union[float, str]] = "fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: F811

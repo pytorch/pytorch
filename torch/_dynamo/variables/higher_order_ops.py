@@ -5,7 +5,7 @@ import functools
 import logging
 import types
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, TYPE_CHECKING
 
 import torch._C
 import torch.fx
@@ -30,6 +30,9 @@ from .dicts import ConstDictVariable
 from .lazy import LazyVariableTracker
 from .lists import ListVariable, TupleVariable
 from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
 log = logging.getLogger(__name__)
@@ -1474,7 +1477,6 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def create_wrapped_node(
         self, tx, query: "VariableTracker", score_function: "VariableTracker"
     ):
-        from torch._dynamo.symbolic_convert import InstructionTranslator
         from torch._higher_order_ops.flex_attention import TransformGetItemToIndex
         from .builder import SourcelessBuilder
 

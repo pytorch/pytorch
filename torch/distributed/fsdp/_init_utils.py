@@ -15,6 +15,7 @@ from typing import (
     Optional,
     Set,
     Tuple,
+    TYPE_CHECKING,
     Union,
 )
 
@@ -58,7 +59,9 @@ from torch.distributed.tensor.parallel.fsdp import DTensorExtensions
 from torch.distributed.utils import _sync_params_and_buffers
 
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
-from torch.utils.hooks import RemovableHandle
+
+if TYPE_CHECKING:
+    from torch.utils.hooks import RemovableHandle
 
 _TORCHDISTX_AVAIL = True
 try:

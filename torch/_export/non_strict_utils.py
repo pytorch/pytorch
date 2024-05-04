@@ -1,7 +1,7 @@
 import contextlib
 import inspect
 from collections import defaultdict
-from typing import Any, Callable, Dict, List, Tuple, Union
+from typing import Any, Callable, Dict, List, Tuple, TYPE_CHECKING, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -36,6 +36,9 @@ from torch.utils._pytree import (
     SequenceKey,
     tree_map_with_path,
 )
+
+if TYPE_CHECKING:
+    from sympy import Symbol
 
 
 def key_path_to_source(kp: KeyPath) -> Source:
@@ -158,8 +161,6 @@ def make_fake_inputs(nn_module, args, kwargs, dynamic_shapes):
             lambda kp, val: fakify(fake_mode, kp, val, t_constraints, sources),
             (args, kwargs),
         )
-
-        from sympy import Symbol
 
         source_pairs: List[Tuple[Source, Source]] = []
         derived_equalities: List[Tuple[Source, Union[Source, Symbol], Callable]] = []

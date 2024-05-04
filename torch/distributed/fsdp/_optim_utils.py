@@ -17,6 +17,7 @@ from typing import (
     Sequence,
     Set,
     Tuple,
+    TYPE_CHECKING,
     Union,
 )
 
@@ -24,7 +25,6 @@ import torch
 import torch.distributed as dist
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
-from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._state_dict_utils import _gather_state_dict
 from torch.distributed._tensor import DTensor, Replicate
 from torch.distributed.distributed_c10d import _get_pg_default_device
@@ -53,6 +53,9 @@ from torch.distributed.fsdp.api import (
     StateDictType,
 )
 from torch.utils._pytree import tree_map_only
+
+if TYPE_CHECKING:
+    from torch.distributed._shard.sharded_tensor import ShardedTensor
 
 
 logger = logging.getLogger(__name__)

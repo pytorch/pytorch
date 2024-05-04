@@ -30,14 +30,14 @@ from torch.onnx._internal.fx import (
 
 if TYPE_CHECKING:
     import onnxscript  # type: ignore[import]
+    from onnxscript.function_libs.torch_lib import (  # type: ignore[import]
+        graph_building as onnxscript_graph_building,
+    )
 
     from torch.onnx import OnnxRegistry
 
 
 # For beartype
-from onnxscript.function_libs.torch_lib import (  # type: ignore[import]
-    graph_building as onnxscript_graph_building,
-)
 
 
 @_beartype.beartype
