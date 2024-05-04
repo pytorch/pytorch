@@ -1141,10 +1141,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         selected_key = builtins.min(timings, key=timings.__getitem__)
         selected_time = timings[selected_key]
-        if (
-            (not isinstance(selected_time, float))
-            or (not math.isfinite(selected_time))
-        ):
+        if (not isinstance(selected_time, float)) or (not math.isfinite(selected_time)):
             raise NoValidChoicesError
         selected_choice = selected_key.output_node()
         log.debug("selected choice: %s", str(selected_choice))
