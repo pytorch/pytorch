@@ -971,7 +971,11 @@ class VariableBuilder:
             install_guard(*guards, skip=1)
 
             grapharg = GraphArg(
-                source, value, pass_arg_as_tensor=False, fake_tensor=None, is_tensor=False
+                source,
+                value,
+                pass_arg_as_tensor=False,
+                fake_tensor=None,
+                is_tensor=False,
             )
             tensor_list_proxy.node.meta["grapharg"] = grapharg
 
