@@ -80,13 +80,13 @@ class SGD(Optimizer):
             group.setdefault("differentiable", False)
             group.setdefault("fused", False)
 
-    def _init_group(self, group, params_with_grad, d_p_list, momentum_buffer_list):
+    def _init_group(self, group, params, grads, momentum_buffer_list):
         has_sparse_grad = False
 
         for p in group["params"]:
             if p.grad is not None:
-                params_with_grad.append(p)
-                d_p_list.append(p.grad)
+                params.append(p)
+                grads.append(p.grad)
                 if p.grad.is_sparse:
                     has_sparse_grad = True
 
@@ -110,17 +110,17 @@ class SGD(Optimizer):
                 loss = closure()
 
         for group in self.param_groups:
-            params_with_grad = []
-            d_p_list = []
+            params = []
+            grads = []
             momentum_buffer_list = []
 
             has_sparse_grad = self._init_group(
-                group, params_with_grad, d_p_list, momentum_buffer_list
+                group, params, grads, momentum_buffer_list
             )
 
             sgd(
-                params_with_grad,
-                d_p_list,
+                params,
+                grads,
                 momentum_buffer_list,
                 weight_decay=group["weight_decay"],
                 momentum=group["momentum"],
@@ -137,7 +137,7 @@ class SGD(Optimizer):
 
             if group["momentum"] != 0:
                 # update momentum_buffers in state
-                for p, momentum_buffer in zip(params_with_grad, momentum_buffer_list):
+                for p, momentum_buffer in zip(params, momentum_buffer_list):
                     state = self.state[p]
                     state["momentum_buffer"] = momentum_buffer
 
@@ -241,7 +241,7 @@ SGD.__doc__ = (
 
 def sgd(
     params: List[Tensor],
-    d_p_list: List[Tensor],
+    grads: List[Tensor],
     momentum_buffer_list: List[Optional[Tensor]],
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
@@ -296,7 +296,7 @@ def sgd(
 
     func(
         params,
-        d_p_list,
+        grads,
         momentum_buffer_list,
         weight_decay=weight_decay,
         momentum=momentum,
@@ -312,7 +312,7 @@ def sgd(
 
 def _single_tensor_sgd(
     params: List[Tensor],
-    d_p_list: List[Tensor],
+    grads: List[Tensor],
     momentum_buffer_list: List[Optional[Tensor]],
     grad_scale: Optional[Tensor],
     found_inf: Optional[Tensor],
@@ -328,26 +328,26 @@ def _single_tensor_sgd(
     assert grad_scale is None and found_inf is None
 
     for i, param in enumerate(params):
-        d_p = d_p_list[i] if not maximize else -d_p_list[i]
+        grad = grads[i] if not maximize else -grads[i]
 
         if weight_decay != 0:
-            d_p = d_p.add(param, alpha=weight_decay)
+            grad = grad.add(param, alpha=weight_decay)
 
         if momentum != 0:
             buf = momentum_buffer_list[i]
 
             if buf is None:
-                buf = torch.clone(d_p).detach()
+                buf = torch.clone(grad).detach()
                 momentum_buffer_list[i] = buf
             else:
-                buf.mul_(momentum).add_(d_p, alpha=1 - dampening)
+                buf.mul_(momentum).add_(grad, alpha=1 - dampening)
 
             if nesterov:
-                d_p = d_p.add(buf, alpha=momentum)
+                grad = grad.add(buf, alpha=momentum)
             else:
-                d_p = buf
+                grad = buf
 
-        param.add_(d_p, alpha=-lr)
+        param.add_(grad, alpha=-lr)
 
 
 def _multi_tensor_sgd(
