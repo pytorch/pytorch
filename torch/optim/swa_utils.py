@@ -2,7 +2,7 @@ import itertools
 import math
 import warnings
 from copy import deepcopy
-from typing import Any, Callable, cast, Dict, Iterable, List, Optional, Tuple, Union
+from typing import Any, Callable, Iterable, List, Literal, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
@@ -21,11 +21,6 @@ __all__ = [
     "get_swa_avg_fn",
 ]
 
-from torch.utils._foreach_utils import (
-    _group_tensors_by_device_and_dtype,
-    Indices,
-    TensorListList,
-)
 
 PARAM_LIST = Union[Tuple[Tensor, ...], List[Tensor]]
 
@@ -192,6 +187,7 @@ class AveragedModel(Module):
     .. _Polyak averaging:
         https://paperswithcode.com/method/polyak-averaging
     """
+    n_averaged: Tensor
 
     def __init__(
         self,
@@ -242,15 +238,8 @@ class AveragedModel(Module):
 
         if self.n_averaged > 0:
             if self.multi_avg_fn is not None or self.avg_fn is None:
-                grouped_tensors = _group_tensors_by_device_and_dtype(
-                    cast(TensorListList, [self_param_detached, model_param_detached])
-                )
-                grouped_tensors = cast(
-                    Dict[
-                        Tuple[torch.device, torch.dtype],
-                        Tuple[List[List[Tensor]], Indices],
-                    ],
-                    grouped_tensors,
+                grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
+                    [self_param_detached, model_param_detached]
                 )
                 for (device, _), (
                     [self_params, model_params],
@@ -260,7 +249,10 @@ class AveragedModel(Module):
                         self.multi_avg_fn(
                             self_params, model_params, self.n_averaged.to(device)
                         )
-                    elif device.type in _get_foreach_kernels_supported_devices():
+                    elif (
+                        device is not None
+                        and device.type in _get_foreach_kernels_supported_devices()
+                    ):
                         multi_avg_fn = get_swa_multi_avg_fn()
                         multi_avg_fn(
                             self_params, model_params, self.n_averaged.to(device)
@@ -394,7 +386,7 @@ class SWALR(LRScheduler):
         optimizer: Optimizer,
         swa_lr: float,
         anneal_epochs=10,
-        anneal_strategy="cos",
+        anneal_strategy: Literal["cos", "linear"] = "cos",
         last_epoch=-1,
     ):
         swa_lrs = self._format_param(optimizer, swa_lr)
@@ -417,7 +409,10 @@ class SWALR(LRScheduler):
         super().__init__(optimizer, last_epoch)
 
     @staticmethod
-    def _format_param(optimizer, swa_lrs):
+    def _format_param(
+        optimizer: Optimizer,
+        swa_lrs: Union[float, List[float], Tuple[float, ...]],
+    ) -> Union[List[float], Tuple[float, ...]]:
         if isinstance(swa_lrs, (list, tuple)):
             if len(swa_lrs) != len(optimizer.param_groups):
                 raise ValueError(
