@@ -20,39 +20,6 @@ from torch._functorch._aot_autograd.schemas import AOTConfig
 torch._inductor.config.fx_graph_cache = True
 
 
-def _get_dynamo_output(fn, inputs):
-    # Reset dynamo between runs
-    torch._dynamo.reset()
-    fx_graph = None
-
-    def compiler(gm, inputs):
-        nonlocal fx_graph
-        fx_graph = gm
-        return gm
-
-    g = torch.compile(fn, backend=compiler, fullgraph=True)
-    result = g(*inputs)
-    return (result, fx_graph)
-
-
-def default_config():
-    return AOTConfig(
-        fw_compiler=None,
-        bw_compiler=None,
-        inference_compiler=None,
-        partition_fn=None,
-        decompositions={},
-        num_params_buffers=0,
-        aot_id=0,
-        keep_inference_input_mutations=False,
-        dynamic_shapes=True,
-        aot_autograd_arg_pos_to_source=None,
-        is_export=False,
-        no_tangents=False,
-        enable_log=False,
-    )
-
-
 class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
     def setUp(self):
         """
@@ -133,6 +100,27 @@ class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
 
 
 class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
+    """
+    Tests for cache key generation
+    """
+
+    def default_config(self):
+        return AOTConfig(
+            fw_compiler=None,
+            bw_compiler=None,
+            inference_compiler=None,
+            partition_fn=None,
+            decompositions={},
+            num_params_buffers=0,
+            aot_id=0,
+            keep_inference_input_mutations=False,
+            dynamic_shapes=True,
+            aot_autograd_arg_pos_to_source=None,
+            is_export=False,
+            no_tangents=False,
+            enable_log=False,
+        )
+
     def _get_dynamo_output(self, fn, *args, **kwargs):
         # Reset dynamo between runs
         torch._dynamo.reset()
@@ -158,7 +146,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             return x.sin().cos()
 
-        config = default_config()
+        config = self.default_config()
         # Check hash is stable on multiple runs
         c1 = self.gen_cache_key(fn, config)
         c2 = self.gen_cache_key(fn, config)
@@ -174,8 +162,8 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             return z
 
         # Make the id different, but otherwise identical
-        config = default_config()
-        config2 = default_config()
+        config = self.default_config()
+        config2 = self.default_config()
         config2.aot_id = 1
 
         c1 = self.gen_cache_key(fn, config)
@@ -189,7 +177,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         def fn2(x):
             return x.sin().cos()
 
-        config = default_config()
+        config = self.default_config()
         c1 = self.gen_cache_key(fn, config)
         c2 = self.gen_cache_key(fn2, config)
         self.assertNotEqual(c1, c2)
@@ -198,8 +186,8 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             return x.cos().sin()
 
-        config = default_config()
-        config2 = default_config()
+        config = self.default_config()
+        config2 = self.default_config()
         config2.dynamic_shapes = False
         c1 = self.gen_cache_key(fn, config)
         c2 = self.gen_cache_key(fn, config2)
@@ -216,7 +204,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             return AllowInGraphFunc.apply(x)
 
-        config = default_config()
+        config = self.default_config()
         self.assertRaises(
             BypassAOTAutogradCache, lambda: self.gen_cache_key(fn, config)
         )
