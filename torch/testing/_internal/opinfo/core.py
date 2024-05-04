@@ -2750,6 +2750,9 @@ class ForeachFuncInfo(OpInfo):
             self.ref = torch.clamp_min
             self.ref_inplace = torch.Tensor.clamp_min_
 
+        # The following sets `dtypesIfCUDA` and `dtypesIfROCM` accordingly.
+        super().__post_init__()
+
     def sample_zero_size_inputs(self, device, dtype, requires_grad=False, **kwargs):
         if not hasattr(self.sample_inputs_func, "sample_zero_size_tensor_inputs"):
             return []
