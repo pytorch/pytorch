@@ -200,8 +200,10 @@ void serialize(serialize::InputArchive& archive, Optimizer& optimizer) {
       }
     }
 
-    auto &saved_options = reinterpret_cast<DerivedOptimizerParamOptions&>(*saved_param_groups[i].second);
-    auto &current_options = reinterpret_cast<DerivedOptimizerParamOptions&>(optimizer.param_groups()[i].options());
+    auto& saved_options = reinterpret_cast<DerivedOptimizerParamOptions&>(
+        *saved_param_groups[i].second);
+    auto& current_options = reinterpret_cast<DerivedOptimizerParamOptions&>(
+        optimizer.param_groups()[i].options());
     current_options = saved_options;
   }
 }
