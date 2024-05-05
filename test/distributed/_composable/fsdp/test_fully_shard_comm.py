@@ -18,6 +18,8 @@ from torch.distributed._composable.fsdp import (
     OffloadPolicy,
 )
 from torch.distributed._composable.fsdp._fsdp_collectives import (
+    _div_if_needed,
+    _get_gradient_divide_factors,
     foreach_all_gather,
     foreach_all_gather_copy_out,
     foreach_reduce,
@@ -207,6 +209,18 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
                 reduce_scatter_dtype=torch.float32,
             )
 
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_reduce_scatter_fp16(self):
+        param_sizes = self._get_param_sizes()
+        default_stream = torch.cuda.current_stream()
+        stream = torch.cuda.Stream()
+        for reduce_scatter_stream in (default_stream, stream):
+            self._test_reduce_scatter(
+                param_sizes,
+                reduce_scatter_stream=reduce_scatter_stream,
+                reduce_scatter_dtype=torch.float16,
+            )
+
     def _test_reduce_scatter(
         self,
         param_sizes: List[torch.Size],
@@ -238,17 +252,24 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             orig_dtype=orig_params[0].dtype,
             reduce_dtype=reduce_scatter_dtype,
             device=self.device,
-            divide_factors=fsdp_param_group._grad_divide_factors,
             all_reduce_group=None,
             all_reduce_stream=all_reduce_stream,
         )
         torch.cuda.current_stream().wait_event(view_out_event)
 
         # Check reduce-scatter correctness
+        predivide_factor, postdivide_factor = _get_gradient_divide_factors(
+            group, None, reduce_scatter_dtype
+        )
         reduced_grads = [grad.detach().clone() for grad in unsharded_grads]
         for grad in reduced_grads:
-            dist.all_reduce(grad, group=group)
-            grad /= self.world_size
+            _div_if_needed(grad, predivide_factor)
+            dist.all_reduce(
+                grad,
+                group=group,
+                op=dist.ReduceOp.AVG if predivide_factor is None else dist.ReduceOp.SUM,
+            )
+            _div_if_needed(grad, postdivide_factor)
         for fsdp_param, reduced_grad in zip(fsdp_params, reduced_grads):
             sharded_grad = fsdp_param.sharded_param.grad
             self.assertIsInstance(sharded_grad, DTensor)
