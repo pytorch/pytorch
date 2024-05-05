@@ -16,20 +16,12 @@ def optimize_memory_usage(
     name_to_fused_node: Dict[str, "scheduler.BaseSchedulerNode"], graph_inputs: Dict[str, "Buffer"], snodes: List["scheduler.BaseSchedulerNode"]
 ) -> List["scheduler.BaseSchedulerNode"]:
     """
-    TODO: update this to be accurate based on actual code.
-    Move consumer ops earlier if it satisfies the following conditions:
-        - Consumer op is the first use site of its out tensor
-            - If we don't reuse buffer, it should always be the first use site
-            - For now, we only target consumer ops with .writes containing only itself
-        - This consumer op is last use site for all its inputs args (by checking .last_usage)
-        - The out tensor is smaller than the sum memory of all its input args
-        - Ignore consumer ops that
-            - contain collective or wait
-            - or, is MultiOutput node
-            - or, has GroupedSchedulerNode as one of inputs
-    If all above conditions are satisfied, we can move the consumer op up to right after the last write site of all of its input args
-    (i.e. the point where all input args have finished being written into).
-    After moving these consumer ops up, we can release the memory of their input args much earlier in the graph.
+    Move consumer nodes earlier if it satisfies the following conditions:
+        - The consumer node's all input args have their write sites scheduled before this consumer node.
+        - The consumer node only writes to one output tensor.
+        - The out tensor is smaller than the sum memory of all its last-usage input args.
+    If we found a consumer node of current node that satisfies the above conditions, we can schedule it right after the current node.
+    After moving these consumer nodes up, we are able to immediately release the memory of their last-usage input args.
     """
     last_write_map = {}  # buf -> its last write site
     for snode in snodes:
