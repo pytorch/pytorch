@@ -1,29 +1,22 @@
-import abc
+# Copyright (c) Meta Platforms, Inc. and affiliates
+# This file is a copy of private utilities in pytorch/torch/export/unflatten.py
+# pylint: skip-file
+
 import copy
 import operator
-from collections import defaultdict
-from copy import deepcopy
 from enum import Enum
-from itertools import chain
-from typing import Any, cast, Dict, List, Optional, Tuple, Union
+from typing import cast, Dict, List, Optional, Union
 
 import torch
 import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
-from torch._library.fake_class_registry import FakeScriptObject
-from torch.export._tree_utils import reorder_kwargs
 from torch.export.exported_program import (
     ConstantArgument,
-    ExportedProgram,
-    InputKind,
     ModuleCallSignature,
     SymIntArgument,
     TensorArgument,
 )
-from torch.fx._symbolic_trace import is_fx_tracing
-from torch.utils._pytree import GetAttrKey, SequenceKey
-
-__all__ = ["InterpreterModule", "UnflattenedModule", "unflatten", "FlatArgsAdapter"]
+from torch.export.unflatten import InterpreterModule
 
 
 class _AttrKind(Enum):
@@ -57,384 +50,8 @@ def _assign_attr(
         assert isinstance(from_obj, torch.Tensor)
         to_module.register_buffer(field, from_obj, persistent=persistent)
     elif attr_kind == _AttrKind.CONSTANT:
-        assert not isinstance(
-            from_obj, FakeScriptObject
-        ), "FakeScriptObject should only exist during tracing."
-        assert isinstance(
-            from_obj,
-            (
-                torch.Tensor,
-                torch.ScriptObject,
-            ),
-        )
+        assert isinstance(from_obj, (torch.Tensor, torch.ScriptObject))
         setattr(to_module, field, from_obj)
-
-
-class InterpreterModule(torch.nn.Module):
-    """A module that uses torch.fx.Interpreter to execute instead of the usual
-    codegen that GraphModule uses. This provides better stack trace information
-    and makes it easier to debug execution.
-    """
-
-    def __init__(
-        self,
-        graph: torch.fx.Graph,
-    ):
-        super().__init__()
-        self.graph = graph
-        self.graph.owning_module = self
-
-    def forward(self, *args, **kwargs):
-        assert self.graph_module is not None, "Didn't finalize this InterpreterModule"
-        if torch.compiler.is_dynamo_compiling():
-            # Dynamo cannot trace through torch.fx.Interpreter, so fall back to
-            # GraphModule codegen in this instance.
-            return self.graph_module(*args, **kwargs)
-        else:
-            if kwargs:
-                # Handle **kwargs. FX only natively supports positional
-                # arguments (through placeholders). So in order to pass in
-                # kwargs, we must correspond the names of the placeholders with
-                # the keys in the kwarg dict.
-                arg_list = list(args)
-                kwarg_names = self.arg_names[len(arg_list) :]
-                for kwarg_name in kwarg_names:
-                    if kwarg_name in kwargs:
-                        arg_list.append(kwargs[kwarg_name])
-
-                # Assert that the kwargs passed in exactly match the positional
-                # arguments specified by the GraphModule. This should be
-                # guaranteed by the unflattening process.
-                assert len(kwarg_names) == len(kwargs)
-                assert len(arg_list) == len(self.arg_names)
-                args = tuple(arg_list)
-
-            return torch.fx.Interpreter(self, graph=self.graph).run(
-                *args, enable_io_processing=False
-            )
-
-    def finalize(self):
-        # We need to "finalize" because GraphModule populates its own state_dict
-        # based on the get_attrs observed in the graph. So we need to fully
-        # construct the graph and call _sink_params before generating this
-        # GraphModule.
-
-        # need to set `graph_module` directly on the dict to avoid it getting
-        # registered as a submodule.
-        self.__dict__["graph_module"] = torch.fx.GraphModule(self, self.graph)
-        self.graph.lint()
-
-        # Cache arg names for kwarg handling (see forward())
-        self.arg_names = []
-        for node in self.graph.nodes:
-            if node.op == "placeholder":
-                self.arg_names.append(node.target)
-
-
-class FlatArgsAdapter(abc.ABC):
-    """
-    Adapts input arguments with ``input_spec`` to align ``target_spec``.
-    """
-
-    @abc.abstractmethod
-    def adapt(
-        self,
-        target_spec: pytree.TreeSpec,
-        input_spec: pytree.TreeSpec,
-        input_args: List[Any],
-    ) -> List[Any]:
-        """NOTE: This adapter may mutate given ``input_args_with_path``."""
-        ...
-
-
-class UnflattenedModule(torch.nn.Module):
-    def __init__(
-        self,
-        export_module: ExportedProgram,
-        flat_args_adapter: Optional[FlatArgsAdapter] = None,
-    ):
-        super().__init__()
-        if export_module.graph_signature.backward_signature is not None:
-            raise ValueError("Unflattening on JointExportModule NYI")
-
-        fqn_list = [entry.fqn for entry in export_module.module_call_graph]
-        assert fqn_list[0] == ""
-        export_graph = deepcopy(export_module.graph)
-        self.graph_signature = deepcopy(export_module.graph_signature)
-        self.graph = torch.fx.Graph()
-        self.module_call_graph = deepcopy(export_module.module_call_graph)
-        self.flat_args_adapter = flat_args_adapter
-        # Flag to indicate whether args have been adapted.
-        self.adapted = False
-
-        _inplace_buffer_mutations(export_graph, self.graph_signature)
-        _outline_submodules(export_graph, self)
-
-        self.range_constraints = export_module.range_constraints
-        self.equality_constraints: List = []
-
-        state_dict = export_module.state_dict
-        for name in self.graph_signature.parameters:
-            cloned = torch.nn.Parameter(state_dict[name].clone())
-            _assign_attr(
-                cloned,
-                self,
-                name,
-                attr_kind=_AttrKind.PARAMETER,
-            )
-
-        non_persistent_buffers = set(self.graph_signature.non_persistent_buffers)
-        for name in self.graph_signature.buffers:
-            if name in non_persistent_buffers:
-                persistent = False
-                cloned = export_module.constants[name].clone()
-            else:
-                persistent = True
-                cloned = state_dict[name].clone()
-
-            _assign_attr(
-                cloned,
-                self,
-                name,
-                attr_kind=_AttrKind.BUFFER,
-                persistent=persistent,
-            )
-
-        for fqn in chain(
-            self.graph_signature.lifted_tensor_constants,
-            self.graph_signature.lifted_custom_objs,
-        ):
-            constant = export_module.constants[fqn]
-            if isinstance(constant, torch.Tensor):
-                constant = constant.clone()
-            _assign_attr(
-                constant,
-                self,
-                fqn,
-                attr_kind=_AttrKind.CONSTANT,
-            )
-
-        # This is to handle parameters/buffers that point to the same tensor
-        # object id -> list of (node_name, target_name)
-        consts_map: Dict[int, List[Tuple[str, str]]] = defaultdict(list)
-
-        def add_to_consts_map(obj_id, node_name, target_name):
-            name_list = consts_map[obj_id]
-            name_list.append((node_name, target_name))
-
-        for s in self.graph_signature.input_specs:
-            if s.kind == InputKind.PARAMETER or (
-                s.kind == InputKind.BUFFER and s.persistent
-            ):
-                assert hasattr(s.arg, "name")
-                assert isinstance(s.target, str)
-                add_to_consts_map(
-                    id(export_module.state_dict[s.target]), s.arg.name, s.target
-                )
-            elif (
-                (s.kind == InputKind.BUFFER and not s.persistent)
-                or s.kind == InputKind.CONSTANT_TENSOR
-                or s.kind == InputKind.CUSTOM_OBJ
-            ):
-                assert hasattr(s.arg, "name")
-                assert isinstance(s.target, str)
-                add_to_consts_map(
-                    id(export_module.constants[s.target]), s.arg.name, s.target
-                )
-
-        # node name -> list of possible targets
-        inputs_to_state: Dict[str, List[str]] = {}
-        for node_target in consts_map.values():
-            targets = [t[1] for t in node_target]
-            for n, _ in node_target:
-                inputs_to_state[n] = targets
-
-        _sink_params(self, inputs_to_state, [])
-        # Check all input nodes has been processed.
-        for name, module in self.named_modules():
-            if not hasattr(module, "graph"):
-                continue
-            for node in module.graph.nodes:
-                if node.op != "placeholder":
-                    continue
-                assert (
-                    node.name not in inputs_to_state
-                ), f"{node.name} was not sunk into the module {name} which has the graph: {module.graph}"
-
-        # Cache so we don't have to compute this every time.
-        # NOTE: this needs to be kept in sync with the placeholders in
-        # self.graph, but currently we have no way to guarantee that.
-        self.input_placeholders = [
-            node for node in self.graph.nodes if node.op == "placeholder"
-        ]
-        self.check_input_constraints = True
-        # TODO(zhxchen17) We can register modules ahead of time instead of reorder later.
-        fqn_order = {fqn: i for i, fqn in enumerate(fqn_list)}
-        # In the case of legacy IR, we might be missing some modules from metadata.
-        for name, _ in self.named_modules(remove_duplicate=False):
-            if name not in fqn_order:
-                fqn_order[name] = len(fqn_order)
-        _reorder_submodules(self, fqn_order)
-        assert [fqn for fqn, _ in self.named_modules(remove_duplicate=False)] == list(
-            fqn_order.keys()
-        )
-
-    def _print_graph(self):
-        for fqn, mod in self.named_modules():
-            print(fqn + ":")
-            if hasattr(mod, "graph") and isinstance(mod.graph, torch.fx.Graph):
-                print(mod.graph)
-
-    def forward(self, *args, **kwargs):
-        signature = self.module_call_graph[0].signature
-
-        reordered_kwargs = reorder_kwargs(kwargs, signature.in_spec)
-
-        flat_args_with_path, in_spec = pytree.tree_flatten_with_path(
-            (args, reordered_kwargs)
-        )
-        flat_args = [x[1] for x in flat_args_with_path]
-        if is_fx_tracing():
-            return_val = torch.fx.Interpreter(self, graph=self.graph).run(
-                *flat_args, enable_io_processing=False
-            )
-            # For scalar return value, fx.Graph wraps in a tuple
-            if isinstance(return_val, tuple) and len(return_val) == 1:
-                return return_val[0]
-            return return_val
-
-        if in_spec != signature.in_spec:
-            if not self.adapted:
-                print(
-                    "Input treespec does not match with exported module's: \n"
-                    f"Input treespec: {in_spec}. ",
-                    f"Exported module treespec: {signature.in_spec}",
-                )
-            if self.flat_args_adapter is None:
-                raise TypeError(
-                    "There is no flat args adapter sepcified. "
-                    "Are you sure you are calling this with the right arguments? "
-                )
-            else:
-                if not self.adapted:
-                    print("Adapting flat arg to match exported module's treespec")
-                flat_args = self.flat_args_adapter.adapt(
-                    target_spec=signature.in_spec,
-                    input_spec=in_spec,
-                    input_args=flat_args,
-                )
-                self.adapted = True
-                if len(flat_args) != signature.in_spec.num_leaves:
-                    raise TypeError(
-                        f"Flat args adaption failed, number of args mismatch "
-                        f"Adatped: {len(flat_args)} \n"
-                        f"Exported module: {signature.in_spec.num_leaves}"
-                    )
-
-        if self.check_input_constraints:
-            # Import here to avoid an unfortunate circular dependency.
-            # TODO(suo): untangle this.
-            from torch._export.utils import _check_input_constraints_for_graph
-
-            if self.adapted is True:
-                # TODO(suo): The FlatArgsAdapter returns a list of flat args,
-                # which we don't have keypaths for. For now, just create a dummy
-                # keypath to associate with the arg.
-                new_flat_args_with_path = [  # type: ignore[var-annotated]
-                    ((SequenceKey(idx=0), GetAttrKey(name="<unknown location>")), arg)
-                    for arg in flat_args
-                ]
-            else:
-                new_flat_args_with_path = flat_args_with_path  # type: ignore[assignment]
-
-            _check_input_constraints_for_graph(
-                self.input_placeholders, new_flat_args_with_path, self.range_constraints
-            )
-        tree_out = torch.fx.Interpreter(self, graph=self.graph).run(
-            *flat_args, enable_io_processing=False
-        )
-        return pytree.tree_unflatten(tree_out, signature.out_spec)
-
-
-def unflatten(
-    module: ExportedProgram, flat_args_adapter: Optional[FlatArgsAdapter] = None
-) -> UnflattenedModule:
-    """Unflatten an ExportedProgram, producing a module with the same module
-    hierarchy as the original eager module. This can be useful if you are trying
-    to use :mod:`torch.export` with another system that expects a module
-    hierachy instead of the flat graph that :mod:`torch.export` usually produces.
-
-    .. note:: The args/kwargs of unflattened modules will not necessarily match
-        the eager module, so doing a module swap (e.g. :code:`self.submod =
-        new_mod`) will not necessarily work. If you need to swap a module out, you
-        need to set the :code:`preserve_module_call_signature` parameter of
-        :func:`torch.export.export`.
-
-    Args:
-        module (ExportedProgram): The ExportedProgram to unflatten.
-        flat_args_adapter (Optional[FlatArgsAdapter]): Adapt flat args if input TreeSpec does not match with exported module's.
-
-    Returns:
-        An instance of :class:`UnflattenedModule`, which has the same module
-        hierarchy as the original eager module pre-export.
-    """
-    return UnflattenedModule(module, flat_args_adapter)
-
-
-def _inplace_buffer_mutations(graph: torch.fx.Graph, graph_signature) -> None:
-    """Transform buffer mutations from their functionalized form into a copy_
-    node in the graph.
-
-    Functionalization represents buffer mutation by passing the buffer as an input and output. So for example, the eager code:
-        def forward(self, x):
-            self.buffer += x
-            return x * x
-
-    Will become a graph that looks like:
-        def forward(self, buffer, x):
-            mutated_buffer = aten.add(buffer, x)
-            mul = aten.mul(x, x)
-            return (mutated_buffer, mul)
-
-    We want to inplace this into something that looks like the original eager code:
-        def forward(self, buffer, x):
-            mutated_buffer = aten.add(buffer, x)
-            buffer.copy_(mutated_buffer)
-            mul = aten.mul(x, x)
-            return (mul,)
-    """
-    output_node = next(iter(reversed(graph.nodes)))
-    assert output_node.op == "output" and len(output_node.args) == 1
-    return_args = output_node.args[0]
-
-    mutation_node_to_buffer = graph_signature.buffers_to_mutate
-    mutations = return_args[: len(mutation_node_to_buffer)]
-    buffers_to_inputs = {v: k for k, v in graph_signature.inputs_to_buffers.items()}
-    input_name_to_node = {
-        node.name: node for node in graph.nodes if node.op == "placeholder"
-    }
-
-    for mutation in mutations:
-        buffer_name = mutation_node_to_buffer[mutation.name]
-        input_name = buffers_to_inputs[buffer_name]
-        input_node = input_name_to_node[input_name]
-
-        with graph.inserting_after(mutation):
-            new_node = graph.create_node(
-                "call_function", torch.ops.aten.copy_, (input_node, mutation)
-            )
-            for k, v in mutation.meta.items():
-                new_node.meta[k] = v
-        # Replace all uses of the previously functional mutation with our copy_ output.
-        mutation.replace_all_uses_with(new_node, lambda x: x is not new_node)
-
-    # Remove the mutated buffer from the graph outputs, since we don't need to
-    # thread it through anymore. We don't need to handle the inputs, which will
-    # be handled by _sink_params.
-    user_outputs = tuple(
-        return_args[len(mutation_node_to_buffer) :],
-    )
-    output_node.args = ((user_outputs),)
 
 
 def _is_prefix(candidate, target):
@@ -501,23 +118,6 @@ def _generate_unflatten(gm: torch.nn.Module, nodes, spec) -> torch.fx.Node:
     return gm.graph.call_function(pytree.tree_unflatten, (nodes, spec_node))
 
 
-def _get_submodule(mod: torch.nn.Module, target: str):
-    *prefix, field = target.split(".")
-
-    for item in prefix:
-        submod = getattr(mod, item, None)
-
-        if submod is None:
-            return None
-
-        if not isinstance(submod, torch.nn.Module):
-            return None
-
-        mod = submod
-
-    return getattr(mod, field, None)
-
-
 def _add_submodule(mod: torch.nn.Module, target: str, module_to_add: torch.nn.Module):
     *prefix, field = target.split(".")
 
@@ -546,7 +146,7 @@ class _ModuleFrame:
         parent,
         module_stack,
         module_id,
-        module_call_graph: Dict[str, ModuleCallSignature],
+        module_call_graph: Optional[Dict[str, ModuleCallSignature]] = None,
         module: Optional[torch.nn.Module] = None,
     ):
         self.flat_graph = flat_graph
@@ -589,7 +189,8 @@ class _ModuleFrame:
             )
             self.parent_call_module = parent.graph.call_module(accessor)
 
-        signature = module_call_graph.get(self.fqn)
+        signature = self.get_signature()
+
         if signature is not None and self.parent is not None:
             assert signature.in_spec.num_children == 2
             args_spec = signature.in_spec.children_specs[0]
@@ -661,7 +262,6 @@ class _ModuleFrame:
             self.parent_call_module.kwargs = kwarg_nodes
 
     def add_placeholder(self, x):
-        assert self.fqn != "", f"Cannot add placeholder {x} to root module"
         assert x.graph is self.flat_graph
         # x is not in subgraph, create a new placeholder for subgraph
         with self.graph.inserting_before(None):
@@ -683,10 +283,15 @@ class _ModuleFrame:
                 self.parent_call_module.insert_arg(0, self.parent.remap_input(x))
         return self.node_to_placeholder[x]
 
+    def get_signature(self):
+        if self.module_call_graph is not None:
+            return self.module_call_graph.get(self.fqn)
+        return None
+
     def finalize_outputs(self):
         orig_outputs = []
+        signature = self.get_signature()
 
-        signature = self.module_call_graph.get(self.fqn)
         if signature is not None and self.parent is not None:
             for output in signature.outputs:
                 if isinstance(output, (TensorArgument, SymIntArgument)):
@@ -845,7 +450,9 @@ class _ModuleFrame:
             node_idx += 1
 
 
-def _outline_submodules(orig_graph: torch.fx.Graph, root_module: UnflattenedModule):
+def _outline_submodules(orig_graph: torch.fx.Graph):
+    # Create an empty GraphModule to hold the outlined modules
+    new_module = torch.fx.GraphModule(torch.nn.Module(), torch.fx.Graph())
     seen_nodes: Dict[str, torch.fx.Node] = {}
     seen_modules: Dict[int, torch.nn.Module] = {}
     _ModuleFrame(
@@ -856,40 +463,16 @@ def _outline_submodules(orig_graph: torch.fx.Graph, root_module: UnflattenedModu
         None,
         [""],
         "",
-        {
-            entry.fqn: entry.signature
-            for entry in root_module.module_call_graph
-            if entry.signature
-        },
-        module=root_module,
+        module=new_module,
     ).run_outer()
-
-
-def _reorder_submodules(
-    parent: torch.nn.Module, fqn_order: Dict[str, int], prefix: str = ""
-):
-    # TODO Can be optimized by adding submodules ahead of time.
-    if prefix == "":
-        for fqn in list(fqn_order.keys())[1:]:
-            if _get_submodule(parent, fqn) is None:
-                _add_submodule(parent, fqn, torch.nn.Module())
-
-    children = []
-    for name, child in list(parent._modules.items()):
-        if child is None:
-            continue
-        fqn = prefix + name
-        _reorder_submodules(child, fqn_order, prefix=fqn + ".")
-        delattr(parent, name)
-        children.append((fqn_order[fqn], name, child))
-    children.sort(key=operator.itemgetter(0))
-    for _, name, child in children:
-        parent.register_module(name, child)
+    new_module.graph.lint()
+    new_module.recompile()
+    return new_module
 
 
 def _sink_params(
     module: torch.nn.Module,
-    inputs_to_state: Dict[str, List[str]],
+    inputs_to_state: Dict[str, str],
     scope: List[str],
 ):
     """Sink params, buffers, and constants from graph inputs into get_attr nodes.
@@ -928,25 +511,16 @@ def _sink_params(
             continue
 
         if len(node.users) > 0:
-            state_name = None
-            for sn in inputs_to_state[node.name]:
-                sn_split = sn.split(".")
-                if sn_split[: len(scope)] == scope:
-                    state_name = sn_split
-                    break
-
-            # If there's a mismatch beteewn scope name and state name, then
-            # there must be multuple scopes pointing to the same state name,
-            # meaning some modules are shared. In such case, we can simply skip
-            # updating the current node because another later iteration will
-            # take care of this input node when the unique match between scope
-            # and state name occurs.  To make sure this always happen, we should
-            # enforce the invariant that no placeholder node in the unflattened
-            # graph appears in inputs_to_state dict, which means all the extra
-            # input nodes have been handled.
-            if state_name is None:
+            state_name = inputs_to_state[node.name].split(".")
+            # If there's a mismatch beteewn scope name and state name, then there must be multuple scopes
+            # pointing to the same state name, meaning some modules are shared. In such case, we can simply
+            # skip updating the current node because another later iteration will take care of this input
+            # node when the unique match between scope and state name occurs.
+            # To make sure this always happen, we should enforce the invariant that no placeholder node
+            # in the unflattened graph appears in inputs_to_state dict, which means all the extra input
+            # nodes have been handled.
+            if state_name[: len(scope)] != scope:
                 continue
-
             attr_path = state_name[len(scope) :]
             state_attr = _recursive_getattr(module, attr_path)
             assert isinstance(state_attr, (torch.Tensor, torch.ScriptObject))

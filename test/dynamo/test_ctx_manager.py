@@ -1320,6 +1320,25 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(fn(x).requires_grad, opt_fn(x).requires_grad)
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_inactive_context_graph_break_local_nullctx(self):
+        import contextlib
+
+        # test with context manager that results in None target_values
+        def fn(x):
+            x = x + 1
+            ctx = contextlib.nullcontext()
+            torch._dynamo.graph_break()
+            with ctx:
+                x = x + 1
+            return x
+
+        x = torch.zeros(10, requires_grad=False)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(fn(x).requires_grad, opt_fn(x).requires_grad)
+        self.assertEqual(cnts.frame_count, 2)
+
     def test_inactive_context_graph_break_stack(self):
         def gn(ctx):
             torch._dynamo.graph_break()
