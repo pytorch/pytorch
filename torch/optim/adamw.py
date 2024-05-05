@@ -30,7 +30,7 @@ class AdamW(Optimizer):
     def __init__(
         self,
         params: ParamsT,
-        lr=1e-3,
+        lr: Union[float, Tensor] = 1e-3,
         betas: Tuple[float, float] = (0.9, 0.999),
         eps=1e-8,
         weight_decay=1e-2,
