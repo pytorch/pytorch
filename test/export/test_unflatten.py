@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: export"]
 # flake8: noqa
+import copy
 import dataclasses
 import unittest
 from contextlib import contextmanager
@@ -675,6 +676,38 @@ class TestUnflatten(TestCase):
             [x for x, _ in mod.named_modules(remove_duplicate=False)],
             fqn_list,
         )
+
+    def test_duplicate_placeholder(self):
+        N, C, H, W = 1, 2, 2, 3
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                layer = torch.nn.LayerNorm([C, H, W])
+                self.norms = torch.nn.ModuleList(
+                    [
+                        layer,  # reuse layer norm
+                        layer,
+                        layer,
+                    ]
+                )
+
+            def forward(self, input_):
+                for i in range(len(self.norms)):
+                    output = self.norms[i](input_)
+                    input_ = output
+                return output
+
+        mod = MyModule()
+        input_ = torch.randn(N, C, H, W)
+
+        ep_strict = export(copy.deepcopy(mod), (input_,), strict=True)
+        umod = unflatten(ep_strict)
+        self.assertTrue(torch.allclose(umod(input_), mod(input_)))
+
+        ep_non_strict = export(copy.deepcopy(mod), (input_,), strict=False)
+        umod = unflatten(ep_non_strict)
+        self.assertTrue(torch.allclose(umod(input_), mod(input_)))
 
 
 if __name__ == "__main__":

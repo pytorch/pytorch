@@ -382,6 +382,7 @@ class RecordLoadStore(V.KernelFormatterHandler):  # type: ignore[name-defined]
         super().__init__(parent_handler=parent_handler)
 
 
+# TODO: check call sites
 def var_builder(prefix: str) -> Tuple[VarRanges, Callable[[sympy.Expr], sympy.Symbol]]:
     cnt = itertools.count()
     var_ranges: VarRanges = dict()

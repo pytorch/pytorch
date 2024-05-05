@@ -225,7 +225,9 @@ class TestPatternMatcherBase(TestCase):
 
 
 class TestPatternMatcher(TestPatternMatcherBase):
-    def test_conv2d_unary_cpu(self):
+    def _test_conv_unary_cpu_base(self, dim=4):
+        assert dim == 4 or dim == 5
+
         class M(torch.nn.Module):
             def __init__(
                 self,
@@ -233,7 +235,10 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 **kwargs,
             ):
                 super().__init__()
-                self.conv = torch.nn.Conv2d(3, 16, kernel_size=3, stride=1)
+                if dim == 4:
+                    self.conv = torch.nn.Conv2d(3, 16, kernel_size=3, stride=1)
+                else:
+                    self.conv = torch.nn.Conv3d(3, 16, kernel_size=3, stride=1)
                 self.unary_fn = unary_fn
 
             def forward(self, x):
@@ -247,9 +252,10 @@ class TestPatternMatcher(TestPatternMatcherBase):
             dtypes.append(torch.bfloat16)
         if torch.ops.mkldnn._is_mkldnn_fp16_supported():
             dtypes.append(torch.float16)
+        cl_format = torch.channels_last if dim == 4 else torch.channels_last_3d
         options = itertools.product(
             unary_list.keys(),
-            [torch.contiguous_format, torch.channels_last],
+            [torch.contiguous_format, cl_format],
             dtypes,
         )
 
@@ -258,7 +264,10 @@ class TestPatternMatcher(TestPatternMatcherBase):
             memory_format,
             dtype,
         ) in options:
-            x_shape = (1, 3, 56, 56)
+            if dim == 4:
+                x_shape = (1, 3, 56, 56)
+            else:
+                x_shape = (1, 3, 20, 56, 56)
             mod = M(unary_fn).to(memory_format=memory_format).eval()
 
             v = (
@@ -275,6 +284,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 # Has extra dtype conversion nodes for autocast.
                 match_nodes += 2
             self._test_common(mod, (v,), 2, match_nodes, check_autocast=dtype)
+
+    def test_conv2d_unary_cpu(self):
+        self._test_conv_unary_cpu_base(dim=4)
+
+    def test_conv3d_unary_cpu(self):
+        self._test_conv_unary_cpu_base(dim=5)
 
     def test_linear_unary(self):
         class M(torch.nn.Module):
@@ -387,7 +402,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 match_nodes += 2
             self._test_common(mod, (v,), 2, match_nodes, check_autocast=dtype)
 
-    def test_conv2d_binary(self):
+    def _test_conv_binary_base(self, dim=4):
+        assert dim == 4 or dim == 5
+
         class M(torch.nn.Module):
             def __init__(
                 self,
@@ -396,8 +413,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 **kwargs,
             ):
                 super().__init__()
-                self.conv1 = torch.nn.Conv2d(3, 16, kernel_size=3, stride=1)
-                self.conv2 = torch.nn.Conv2d(3, 16, kernel_size=3, stride=1)
+                if dim == 4:
+                    self.conv1 = torch.nn.Conv2d(3, 16, kernel_size=3, stride=1)
+                    self.conv2 = torch.nn.Conv2d(3, 16, kernel_size=3, stride=1)
+                else:
+                    self.conv1 = torch.nn.Conv3d(3, 16, kernel_size=3, stride=1)
+                    self.conv2 = torch.nn.Conv3d(3, 16, kernel_size=3, stride=1)
                 self.binary_fn = binary_fn
                 self.has_relu = has_relu
 
@@ -409,7 +430,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 else:
                     return self.binary_fn(x1, x2)
 
-        test_memory_format = [torch.contiguous_format, torch.channels_last]
+        cl_format = torch.channels_last if dim == 4 else torch.channels_last_3d
+        test_memory_format = [torch.contiguous_format, cl_format]
         options = itertools.product(
             binary_list,
             [True, False],
@@ -421,7 +443,10 @@ class TestPatternMatcher(TestPatternMatcherBase):
             has_relu,
             memory_format,
         ) in options:
-            x_shape = (1, 3, 56, 56)
+            if dim == 4:
+                x_shape = (1, 3, 56, 56)
+            else:
+                x_shape = (1, 3, 20, 56, 56)
             mod = M(binary_fn, has_relu).eval()
             v = (
                 torch.randn(x_shape, dtype=torch.float32, requires_grad=True)
@@ -433,6 +458,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
             if has_relu:
                 match_nodes += 1
             self._test_common(mod, (v,), match_count, match_nodes + 2)
+
+    def test_conv2d_binary(self):
+        self._test_conv_binary_base(dim=4)
+
+    def test_conv3d_binary(self):
+        self._test_conv_binary_base(dim=5)
 
     def test_linear_binary(self):
         class M(torch.nn.Module):
@@ -2290,8 +2321,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
 class TestDynamicPatternMatcher(TestPatternMatcherBase):
+    _test_conv_unary_cpu_base = TestPatternMatcher._test_conv_unary_cpu_base
     test_conv2d_unary_dynamic_shapes = TestPatternMatcher.test_conv2d_unary_cpu
+    test_conv3d_unary_dynamic_shapes = TestPatternMatcher.test_conv3d_unary_cpu
+    _test_conv_binary_base = TestPatternMatcher._test_conv_binary_base
     test_conv2d_binary_dynamic_shapes = TestPatternMatcher.test_conv2d_binary
+    test_conv3d_binary_dynamic_shapes = TestPatternMatcher.test_conv3d_binary
     test_linear_unary_dynamic_shapes = TestPatternMatcher.test_linear_unary
 
     def test_conv_transpose2d_dynamic_shapes(self):
