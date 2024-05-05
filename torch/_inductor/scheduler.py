@@ -30,7 +30,7 @@ from torch._dynamo.utils import dynamo_timed
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.utils._triton import has_triton
 
-from . import comms, config, dependencies, ir, metrics
+from . import comms, config, dependencies, ir, metrics, memory_opts
 from .codegen.common import get_scheduling_for_device, Kernel
 from .comm_analysis import estimate_nccl_collective_runtime
 from .dependencies import Dep, MemoryDep, StarDep, WeakDep
@@ -571,7 +571,6 @@ class BaseSchedulerNode:
         """
         if isinstance(self, GroupedSchedulerNode):
             ret = sum([node.get_estimated_runtime() for node in self.snodes])
-            torch_log.warning(f"get_estimated_runtime here123 returned {ret} for {self}")
             return ret
 
         layout = None
@@ -582,7 +581,6 @@ class BaseSchedulerNode:
             ), f"{type(self)=}"
             assert self.snodes
             if not self.snodes[0].node:
-                torch_log.warning(f"get_estimated_runtime here1 returned 0 for {self}")
                 return 0
             layout = self.snodes[0].node.get_layout()
             dtype = self.snodes[0].node.get_dtype()
@@ -592,7 +590,6 @@ class BaseSchedulerNode:
 
         if not is_gpu(layout.device.type):
             # default to no reordering based on runtime
-            torch_log.warning(f"get_estimated_runtime here2 returned 0 for {self}")
             return 0
 
         # Collective kernels
@@ -603,15 +600,12 @@ class BaseSchedulerNode:
             # The time needed for the collective op is already estimated and considered
             # when we are processing the collective op IR node, so ir.Wait takes 0 time
             # since it doesn't take extra time to get the result after the collective is completed.
-            torch_log.warning(f"get_estimated_runtime here3 returned 0 for {self}")
             return 0
 
         try:
             gpu_memory_bandwidth = get_gpu_dram_gbps()
             gpu_flops = get_device_tflops(dtype) * 10**12
         except Exception as e:
-            torch_log.warning(f"get_estimated_runtime here4 dtype: {dtype}")
-            torch_log.warning(f"get_estimated_runtime here4 returned 0 for {self}")
             return 0
 
         if isinstance(self, ExternKernelSchedulerNode):
@@ -653,7 +647,6 @@ class BaseSchedulerNode:
             # Return estimated runtime in nanoseconds (bytes / gbps)
             return self.get_read_write_buffers_sizes() / gpu_memory_bandwidth
 
-        torch_log.warning(f"get_estimated_runtime here5 returned 0 for {self}")
         return 0
 
 
@@ -844,6 +837,28 @@ class SchedulerNode(BaseSchedulerNode):
 
 
 class _BaseGroupedSchedulerNode(BaseSchedulerNode):
+    def __init__(self, scheduler: "Scheduler", snodes: List[BaseSchedulerNode]):
+        # NB: No need to call super().__init__() because we don't need to re-use any of its logic.
+        self.snodes = snodes
+        self.scheduler = scheduler
+        self.node: ir.Buffer = None  # type: ignore[assignment]
+        self.users: List[NodeUser] = []
+        self.inverse_users = []
+        self.node_users = []
+        self.ancestors = set.union(
+            *[x.ancestors for x in snodes if x.ancestors is not None]
+        )
+
+        self.set_read_writes(
+            dependencies.ReadWrites.merge_list([x.read_writes for x in snodes])
+        )
+
+        self.unmet_dependencies = {
+            dep
+            for dep in set.union(*[x.unmet_dependencies for x in snodes])
+            if dep.name not in self.get_names()
+        } - self.read_writes.writes
+
     @cache_on_self
     def get_name(self) -> str:
         return "_".join([x.get_name() for x in self.snodes])
@@ -978,27 +993,8 @@ class FusedSchedulerNode(_BaseGroupedSchedulerNode):
         return cls(node1.scheduler, list(node1.get_nodes()) + list(node2.get_nodes()))  # type: ignore[arg-type]
 
     def __init__(self, scheduler: "Scheduler", snodes: List[SchedulerNode]):
-        # NB: No need to call super().__init__() because we don't need to re-use any of its logic.
-        self.snodes = snodes
-        self.scheduler = scheduler
-        self.node: ir.Buffer = None  # type: ignore[assignment]
-        self.users: List[NodeUser] = []
-        self.inverse_users = []
-        self.node_users = []
+        super().__init__(scheduler, snodes)
         self.group = max(snodes, key=lambda x: int(x.is_reduction())).group
-        self.ancestors = set.union(
-            *[x.ancestors for x in snodes if x.ancestors is not None]
-        )
-
-        self.set_read_writes(
-            dependencies.ReadWrites.merge_list([x.read_writes for x in snodes])
-        )
-
-        self.unmet_dependencies = {
-            dep
-            for dep in set.union(*[x.unmet_dependencies for x in snodes])
-            if dep.name not in self.get_names()
-        } - self.read_writes.writes
         self.min_order = min([x.min_order for x in self.snodes])
         self.max_order = max([x.max_order for x in self.snodes])
 
@@ -1034,30 +1030,6 @@ class GroupedSchedulerNode(_BaseGroupedSchedulerNode):
         assert all(node.scheduler is scheduler for node in snodes)
         return cls(scheduler, snodes)  # type: ignore[arg-type]
 
-    def __init__(self, scheduler: "Scheduler", snodes: List[BaseSchedulerNode]):
-        # NB: No need to call super().__init__() because we don't need to re-use any of its logic.
-        self.snodes = snodes
-        self.scheduler = scheduler
-        self.node: ir.Buffer = None  # type: ignore[assignment]
-        self.users: List[NodeUser] = []
-        for snode in self.snodes:
-            for user in snode.users:
-                if user.node not in self.snodes and user not in self.users:
-                    self.users.append(user)
-        self.ancestors = set.union(
-            *[x.ancestors for x in snodes if x.ancestors is not None]
-        )
-
-        self.set_read_writes(
-            dependencies.ReadWrites.merge_list([x.read_writes for x in snodes])
-        )
-
-        self.unmet_dependencies = {
-            dep
-            for dep in set.union(*[x.unmet_dependencies for x in snodes])
-            if dep.name not in self.get_names()
-        } - self.read_writes.writes
-
     def get_device(self):
         return self.snodes[0].get_device()
 
@@ -1066,7 +1038,7 @@ class GroupedSchedulerNode(_BaseGroupedSchedulerNode):
         return False
 
     # None of these need to be implemented, as a GroupedSchedulerNode is always unpacked
-    # before its constituent nodes are scheduled.
+    # and its constituent nodes are used for last usage calculation purpose.
     @property
     def last_usage(self):
         raise NotImplementedError
@@ -1392,8 +1364,15 @@ class Scheduler:
         # if config.reorder_for_compute_comm_overlap:
         self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
         self.compute_last_usage()
-        for snode in self.nodes:
-            torch_log.warning(f"snode.debug_str(): {snode.debug_str()}")
+
+        # for snode in self.nodes:
+        #     torch_log.warning(f"snode: {snode}, snode.node: {snode.node}, snode.debug_str(): {snode.debug_str()}")
+
+        self.nodes = memory_opts.optimize_memory_usage(self.name_to_fused_node, V.graph.graph_inputs, self.nodes)
+        self.compute_last_usage()
+
+        # TODO(yf225): after memory-optimization, we might need to do compute_last_usage() again.
+        # We will see what error we get if we don't do it.
         V.debug.ir_post_fusion(self.nodes)
         V.debug.graph_diagram(self.nodes)
         self.debug_draw_graph()
@@ -2545,7 +2524,6 @@ class Scheduler:
                     self.current_device = device
 
             self.buffer_names_to_free.update(node.last_usage)
-            torch_log.warning(f"self.buffer_names_to_free: {self.buffer_names_to_free}")
 
             if node.is_template():
                 node, *epilogue = node.get_nodes()

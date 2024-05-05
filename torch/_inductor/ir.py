@@ -8422,7 +8422,7 @@ class _WaitKernel(_CollectiveKernel):
         super().codegen(wrapper)
         # TODO(yf225): this is a terrible thing to do, but without this we couldn't free up the all_gather output buffer memory.
         # We really need to figure out why.
-        wrapper.writeline("torch.cuda.synchronize()")
+        # wrapper.writeline("torch.cuda.synchronize()")
 
 
 # NB: recursive structure here reflects val_to_arg_str, avoid

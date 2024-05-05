@@ -832,6 +832,7 @@ class IndentedBuffer:
         if modify_code and "cuda:1" not in code:
             if "torch.ops._c10d_functional.reduce_scatter_tensor.default" in code:  # BWD graph
                 code = """
+
 """
 
         # END DEBUG yf225
@@ -1455,6 +1456,22 @@ def is_wait(node):
     from . import ir
 
     return isinstance(node, ir.Wait) or type(node) == ir._WaitKernel
+
+
+def contains_collective(snode):
+    from torch._inductor.scheduler import GroupedSchedulerNode
+    if isinstance(snode, GroupedSchedulerNode):
+        return any(contains_collective(subnode) for subnode in snode.snodes)
+    else:
+        return is_collective(snode.node)
+
+
+def contains_wait(snode):
+    from torch._inductor.scheduler import GroupedSchedulerNode
+    if isinstance(snode, GroupedSchedulerNode):
+        return any(contains_wait(subnode) for subnode in snode.snodes)
+    else:
+        return is_wait(snode.node)
 
 
 def num_fw_fixed_arguments(dynamo_gm_num_inputs: int, aot_fw_gm_num_inputs: int):

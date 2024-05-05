@@ -3,25 +3,25 @@ Adapted from fsdp.py in https://github.com/pytorch/pytorch/pull/110609.
 """
 
 """
-rm artifacts/* && CUDA_VISIBLE_DEVICES=4,5 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py >artifacts/run_output.txt 2>&1
+rm artifacts/* && TORCH_NCCL_AVOID_RECORD_STREAMS=1 CUDA_VISIBLE_DEVICES=4,5 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py >artifacts/run_output.txt 2>&1
 
 # 2-gpu
-rm artifacts/* && TORCH_LOGS="aot_graphs,output_code,compiled_autograd,recompiles,+dynamo,aot,inductor" TORCH_COMPILE_DEBUG=1 CUDA_VISIBLE_DEVICES=4,5 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py >artifacts/run_output.txt 2>&1
+rm artifacts/* && TORCH_NCCL_AVOID_RECORD_STREAMS=1 TORCH_LOGS="aot_graphs,output_code,compiled_autograd,recompiles,+dynamo,aot,inductor" TORCH_COMPILE_DEBUG=1 CUDA_VISIBLE_DEVICES=4,5 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py >artifacts/run_output.txt 2>&1
 
 # 8-gpu
-rm artifacts/* && TORCH_LOGS="aot_graphs,output_code,compiled_autograd,recompiles,+dynamo,aot,inductor" TORCH_COMPILE_DEBUG=1 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=8 test_dynamo_fsdp.py >artifacts/run_output.txt 2>&1
+rm artifacts/* && TORCH_NCCL_AVOID_RECORD_STREAMS=1 TORCH_LOGS="aot_graphs,output_code,compiled_autograd,recompiles,+dynamo,aot,inductor" TORCH_COMPILE_DEBUG=1 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=8 test_dynamo_fsdp.py >artifacts/run_output.txt 2>&1
 
-CUDA_LAUNCH_BLOCKING=1 CUDA_VISIBLE_DEVICES=6,7 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py >artifacts/run_output.txt 2>&1
+TORCH_NCCL_AVOID_RECORD_STREAMS=1 CUDA_LAUNCH_BLOCKING=1 CUDA_VISIBLE_DEVICES=6,7 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py >artifacts/run_output.txt 2>&1
 
-CUDA_LAUNCH_BLOCKING=1 CUDA_VISIBLE_DEVICES=6 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=1 test_dynamo_fsdp.py >artifacts/run_output.txt 2>&1
+TORCH_NCCL_AVOID_RECORD_STREAMS=1 CUDA_LAUNCH_BLOCKING=1 CUDA_VISIBLE_DEVICES=6 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=1 test_dynamo_fsdp.py >artifacts/run_output.txt 2>&1
 
-CUDA_VISIBLE_DEVICES=6,7 TORCH_LOGS_RANKS=0 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py >artifacts/run_output.txt 2>&1
+TORCH_NCCL_AVOID_RECORD_STREAMS=1 CUDA_VISIBLE_DEVICES=6,7 TORCH_LOGS_RANKS=0 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py >artifacts/run_output.txt 2>&1
 
-CUDA_LAUNCH_BLOCKING=1 CUDA_VISIBLE_DEVICES=6 TORCH_LOGS_RANKS=0 torchrun --standalone --nproc_per_node=1 test_dynamo_fsdp.py >artifacts/run_output.txt 2>&1
+TORCH_NCCL_AVOID_RECORD_STREAMS=1 CUDA_LAUNCH_BLOCKING=1 CUDA_VISIBLE_DEVICES=6 TORCH_LOGS_RANKS=0 torchrun --standalone --nproc_per_node=1 test_dynamo_fsdp.py >artifacts/run_output.txt 2>&1
 
-CUDA_LAUNCH_BLOCKING=1 CUDA_VISIBLE_DEVICES=6 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=1 test_dynamo_fsdp.py >artifacts/run_output.txt 2>&1
+TORCH_NCCL_AVOID_RECORD_STREAMS=1 CUDA_LAUNCH_BLOCKING=1 CUDA_VISIBLE_DEVICES=6 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=1 test_dynamo_fsdp.py >artifacts/run_output.txt 2>&1
 
-CUDA_LAUNCH_BLOCKING=1 CUDA_VISIBLE_DEVICES=6 TORCH_LOGS_RANKS=0 gdb --args python3 /data/users/willfeng/miniconda3/bin/torchrun --standalone --nproc_per_node=1 test_dynamo_fsdp.py
+TORCH_NCCL_AVOID_RECORD_STREAMS=1 CUDA_LAUNCH_BLOCKING=1 CUDA_VISIBLE_DEVICES=6 TORCH_LOGS_RANKS=0 gdb --args python3 /data/users/willfeng/miniconda3/bin/torchrun --standalone --nproc_per_node=1 test_dynamo_fsdp.py
 """
 import contextlib
 import logging
@@ -44,6 +44,7 @@ from torch.distributed._composable.fsdp._fsdp_init import (
 )
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.distributed._tensor import init_device_mesh
+# from llama_model_toy import ToyTransformer, ModelArgs
 from llama_model import Transformer, ModelArgs
 
 # from torchviz import make_dot
@@ -362,14 +363,18 @@ def init(activation_checkpoint):
         #         fully_shard(mod, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
         #     fully_shard(model, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
     elif test_case == "toy_transformer":
+        torch._functorch.config.aggressive_recomputation = False
         torch._inductor.config.allow_buffer_reuse = False
+        torch._inductor.config.inplace_buffers = False
         model_args = ModelArgs(
             dim=hidden_dim,
             n_layers=3,
             n_heads=1,
             vocab_size=1024,
         )
-        model = Transformer(model_args)
+        # transformer_class = ToyTransformer  # makes comm-induced peak memory issue more prominent
+        transformer_class = Transformer
+        model = transformer_class(model_args)
         for layer_id, mod in enumerate(model.layers):
             if activation_checkpoint:
                 mod = checkpoint_wrapper(mod, ac_config)
@@ -568,7 +573,7 @@ if __name__ == "__main__":
 
     if dist.get_rank() == 0:
         start_record_memory_history()
-    ac_test_order = [False]
+    ac_test_order = [True]
     backends = ["inductor"]
 
     def test_eager(activation_checkpoint):
@@ -596,7 +601,7 @@ if __name__ == "__main__":
     for activation_checkpoint in ac_test_order:
         for backend in backends:
             losses_compiled = test_compile(activation_checkpoint, backend)
-        losses_eager = test_eager(activation_checkpoint)
+        # losses_eager = test_eager(activation_checkpoint)
         # for loss_compiled, loss_eager in zip(losses_compiled, losses_eager):
         #     assert torch.allclose(torch.tensor(loss_compiled), torch.tensor(loss_eager), rtol=1e-3), f"{loss_compiled} vs {loss_eager}"
 

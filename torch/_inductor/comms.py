@@ -6,25 +6,11 @@ import torch
 
 from . import config, ir, scheduler
 from .dependencies import WeakDep
-from .utils import is_collective, is_wait, tuple_sorted
+from .utils import contains_collective, contains_wait, tuple_sorted
 import logging
 
 overlap_log = torch._logging.getArtifactLogger(__name__, "overlap")
 torch_log = logging.getLogger("torch")
-
-
-def _contains_collective(snode):
-    if isinstance(snode, scheduler.GroupedSchedulerNode):
-        return any(_contains_collective(subnode) for subnode in snode.snodes)
-    else:
-        return is_collective(snode.node)
-
-
-def _contains_wait(snode):
-    if isinstance(snode, scheduler.GroupedSchedulerNode):
-        return any(_contains_wait(subnode) for subnode in snode.snodes)
-    else:
-        return is_wait(snode.node)
 
 
 def sink_waits(
@@ -37,7 +23,7 @@ def sink_waits(
     new_order = []
     cur_waits = set()
     for snode in snodes:
-        if _contains_wait(snode):
+        if contains_wait(snode):
             cur_waits.add(snode)
         else:
             for wait in tuple_sorted(cur_waits):
@@ -64,7 +50,7 @@ def raise_comms(
     new_order_reversed: List["scheduler.BaseSchedulerNode"] = []
     cur_comms: List["scheduler.BaseSchedulerNode"] = []
     for snode in reversed(snodes):
-        if _contains_collective(snode):
+        if contains_collective(snode):
             cur_comms.append(snode)
         else:
             for comm in cur_comms:
@@ -114,14 +100,14 @@ def decide_global_ordering_of_comms(nodes: List["scheduler.BaseSchedulerNode"]):
     (might not be the same ordering as the eager mode program).
     TODO: Come up with a better approach
     """
-    comm_nodes = [n for n in nodes if _contains_collective(n)]
+    comm_nodes = [n for n in nodes if contains_collective(n)]
     for i in range(1, len(comm_nodes)):
         # Enforce ordering by making previous comm a `WeakDep` dependency of the next comm
         comm_nodes[i].add_fake_dep(WeakDep(comm_nodes[i - 1].get_name()))
 
 
 def assert_no_comm_nodes(snodes: List["scheduler.BaseSchedulerNode"]) -> None:
-    assert not any(_contains_collective(snode) for snode in snodes)
+    assert not any(contains_collective(snode) for snode in snodes)
 
 
 def estimate_op_runtime(snode: "scheduler.BaseSchedulerNode") -> float:
@@ -133,7 +119,6 @@ def estimate_op_runtime(snode: "scheduler.BaseSchedulerNode") -> float:
     else:
         assert callable(config.estimate_op_runtime)
         runtime = config.estimate_op_runtime(snode)
-    torch_log.warning(f"snode: {snode}, runtime: {runtime}")
     return runtime
 
 
@@ -158,7 +143,7 @@ def reorder_compute_for_overlap(
 
     comm_nodes = []
     for snode in snodes:
-        if _contains_collective(snode):
+        if contains_collective(snode):
             comm_nodes.append(snode)
     if len(comm_nodes) == 0:
         # if there is no comm nodes, return the current order
@@ -327,10 +312,10 @@ def visualize_overlap(order):
     cur_comm_node = None
     for snode in order:
         if cur_comm_node is None:
-            if _contains_collective(snode):
+            if contains_collective(snode):
                 total_est_runtime += estimate_op_runtime(snode)
                 cur_comm_node = snode.node
-            elif _contains_wait(snode):
+            elif contains_wait(snode):
                 raise Exception(
                     "Wait is not expected when there is no collective running"
                 )
@@ -338,12 +323,12 @@ def visualize_overlap(order):
                 total_est_runtime += estimate_op_runtime(snode)
             overlap_log.debug(f"{node_summary(snode)}")  # noqa: G004
         else:  # cur_comm_node is not None
-            if _contains_collective(snode):
+            if contains_collective(snode):
                 raise Exception(
                     "Found two collectives running at the same time. "
                     "`visualize_overlap` needs to be updated to handle this case"
                 )
-            elif _contains_wait(snode):  # end of this comm op
+            elif contains_wait(snode):  # end of this comm op
                 overlap_log.debug(f"{node_summary(snode)}")  # noqa: G004
                 cur_comm_node = None
             else:  # overlapped compute op
@@ -394,8 +379,8 @@ def enforce_comm_node_ordering_for_fsdp(
             for user in snode.users:
                 _find_all_recursive_users_of_node_down_to_the_copy_out_node(user.node, collected_node_set)
 
-    for snode in snodes:
-        torch_log.warning(f"snode: {snode}, snode.node: {snode.node}, snode.debug_str(): {snode.debug_str()}")
+    # for snode in snodes:
+    #     torch_log.warning(f"snode: {snode}, snode.node: {snode.node}, snode.debug_str(): {snode.debug_str()}")
 
     """
     TODO: group "copy_in + getitem + all_gather" into one GroupedSchedulerNode, write its codegen correctly
@@ -407,6 +392,15 @@ def enforce_comm_node_ordering_for_fsdp(
     scheduled = set()
     prev_all_gather_wait_tensor_then_copy_out_node = None
     prev_reduce_scatter_wait_tensor_node = None
+
+    def _create_group_node(nodes_to_group):
+        group_node = scheduler.GroupedSchedulerNode.create_group(nodes_to_group)
+        scheduled.update(nodes_to_group)
+        new_order.append(group_node)
+        for node in nodes_to_group:
+            name_to_node[node.get_name()] = group_node
+        return group_node
+
     for snode in snodes:
         if snode in scheduled:
             continue
@@ -414,7 +408,6 @@ def enforce_comm_node_ordering_for_fsdp(
             # Find the "copy_in + getitem + all_gather + all_gather_wait_tensor + copy_out" block
             collected_node_set = set()
             _find_all_recursive_users_of_node_down_to_the_copy_out_node(snode, collected_node_set)
-            torch_log.warning(f"collected_node_set: {collected_node_set}")
             # sort nodes by original buffer order
             collected_nodes = sorted(list(collected_node_set), key=lambda x: int(x.get_name()[3:]))
             copy_out_node = None
@@ -435,42 +428,31 @@ def enforce_comm_node_ordering_for_fsdp(
                 if isinstance(collected_nodes[i+1].node, ir._WaitKernel):
                     wait_node_idx = i+1
                     break
-            group_node = scheduler.GroupedSchedulerNode.create_group(nodes_to_group)
-            torch_log.warning(f"group_node.debug_str(): {group_node.debug_str()}")
-            scheduled.update(nodes_to_group)
-            new_order.append(group_node)
+            group_node = _create_group_node(nodes_to_group)
 
             # Enforce ordering: previous AllGather's "wait then copy_out" group node must run before next AllGather's "copy_in then AG" group node
             if prev_all_gather_wait_tensor_then_copy_out_node is not None:
-                torch_log.warning(f"add fake dep: {group_node.get_name()} will dependent on {prev_all_gather_wait_tensor_then_copy_out_node.get_name()}")
                 group_node.add_fake_dep(WeakDep(prev_all_gather_wait_tensor_then_copy_out_node.get_name()))
 
             # Group "all_gather_wait_tensor + copy_out" into one GroupedSchedulerNode
             nodes_to_group = collected_nodes[wait_node_idx:]
-            group_node = scheduler.GroupedSchedulerNode.create_group(nodes_to_group)
-            torch_log.warning(f"group_node.debug_str(): {group_node.debug_str()}")
-            scheduled.update(nodes_to_group)
+            group_node = _create_group_node(nodes_to_group)
             prev_all_gather_wait_tensor_then_copy_out_node = group_node
-            new_order.append(group_node)
         elif (
             isinstance(snode.node, ir._WaitKernel)
             and isinstance(snode.node.inputs[0], ir._CollectiveKernel)
             and snode.node.inputs[0].op_overload is torch.ops._c10d_functional.reduce_scatter_tensor.default
         ):
-            # assert isinstance(snode.users[0].node, ir.MutationOutput)
+            assert isinstance(snode.users[0].node.node, ir.MutationOutput)
             nodes_to_group = [snode, snode.users[0].node]  # _WaitKernel node and MutationOutput node
-            group_node = scheduler.GroupedSchedulerNode.create_group(nodes_to_group)
-            torch_log.warning(f"group_node.debug_str(): {group_node.debug_str()}")
-            scheduled.update(nodes_to_group)
+            group_node = _create_group_node(nodes_to_group)
             prev_reduce_scatter_wait_tensor_node = group_node
-            new_order.append(group_node)
         elif (
             isinstance(snode.node, ir._CollectiveKernel)
             and snode.node.op_overload is torch.ops._c10d_functional.reduce_scatter_tensor.default
             and prev_reduce_scatter_wait_tensor_node is not None
         ):
             # Enforce ordering: previous ReduceScatter's wait node must run before next ReduceScatter's comm node
-            torch_log.warning(f"add fake dep: {snode.get_name()} will dependent on {prev_reduce_scatter_wait_tensor_node.get_name()}")
             snode.add_fake_dep(WeakDep(prev_reduce_scatter_wait_tensor_node.get_name()))
             prev_reduce_scatter_wait_tensor_node = None
             scheduled.add(snode)
