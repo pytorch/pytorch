@@ -810,8 +810,6 @@ cc_library(
         exclude = [
             "torch/csrc/cuda/python_nccl.cpp",
             "torch/csrc/cuda/nccl.cpp",
-            "torch/csrc/distributed/c10d/intra_node_comm.cu",
-            "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
         ],
     )) + torch_sources,
     copts = TORCH_COPTS,
