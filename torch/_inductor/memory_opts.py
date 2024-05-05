@@ -19,7 +19,7 @@ def optimize_memory_usage(
     For each node, we move its consumer nodes earlier if it satisfies the following conditions:
         - The consumer node's all input args have their write sites scheduled before or at the current node.
         - The consumer node only writes to one output tensor.
-        - The out tensor is smaller than the sum memory of all its last-usage input args.
+        - The consumer node's out tensor is smaller than the sum memory of all its last-usage input args.
     If we found a consumer node of current node that satisfies the above conditions, we can schedule it right after the current node.
     After moving these consumer nodes up, we are able to immediately release the memory of their last-usage input args.
     """
