@@ -660,18 +660,20 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(len(backend.graphs), 1)
         self.assertEqual(len(backend.example_inputs), 1)
 
-        expected = """\
+        actual = normalize_gm(backend.graphs[0].print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_ : torch.Tensor):
+    def forward(self, L_x_: "f32[3, 4]"):
         l_x_ = L_x_
 
-        add_ = l_x_.add_(1.0)
-        relu_ = torch.relu_(l_x_);  l_x_ = None
-        add = add_ + relu_;  add_ = relu_ = None
+        add_: "f32[3, 4]" = l_x_.add_(1.0)
+        relu_: "f32[3, 4]" = torch.relu_(l_x_);  l_x_ = None
+        add: "f32[3, 4]" = add_ + relu_;  add_ = relu_ = None
         return (add,)
-"""
-        actual = normalize_gm(backend.graphs[0].print_readable(print_output=False))
-        self.assertEqual(actual, expected)
+""",
+        )
 
         ff = torch.func.functionalize(f)
         ff_out = ff(x_clone)
@@ -681,7 +683,19 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(backend.graphs), 2)
         self.assertEqual(len(backend.example_inputs), 2)
         actual = normalize_gm(backend.graphs[1].print_readable(print_output=False))
-        self.assertEqual(actual, expected)
+        self.assertExpectedInline(
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        l_x_ = L_x_
+
+        add_ = l_x_.add_(1.0)
+        relu_ = torch.relu_(l_x_);  l_x_ = None
+        add = add_ + relu_;  add_ = relu_ = None
+        return (add,)
+""",
+        )
         self.assertTrue(torch._is_functional_tensor(backend.example_inputs[1][0]))
 
         # Cannot re-use the version from AOTAutograd, since that uses python functional tensors.
@@ -711,7 +725,19 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(backend.graphs), 3)
         self.assertEqual(len(backend.example_inputs), 3)
         actual = normalize_gm(backend.graphs[2].print_readable(print_output=False))
-        self.assertEqual(actual, expected)
+        self.assertExpectedInline(
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        l_x_ = L_x_
+
+        add_ = l_x_.add_(1.0)
+        relu_ = torch.relu_(l_x_);  l_x_ = None
+        add = add_ + relu_;  add_ = relu_ = None
+        return (add,)
+""",
+        )
         self.assertTrue(torch._is_functional_tensor(backend.example_inputs[1][0]))
 
         self.assertEqual(f_out, ff_out)
@@ -750,7 +776,11 @@ class GraphModule(torch.nn.Module):
         t_clone2 = t.clone()
         f(t)
 
-        check_count_and_graph(1, 2, 1, """\
+        check_count_and_graph(
+            1,
+            2,
+            1,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[3, 4]"):
         l_x_ = L_x_
@@ -764,12 +794,17 @@ class GraphModule(torch.nn.Module):
         def forward(self, l_x_: "f32[3, 4]"):
             add_: "f32[3, 4]" = l_x_.add_(1.0);  l_x_ = None
             return (add_,)
-""")
+""",
+        )
 
         ff = torch.func.functionalize(f)
         ff_out = ff(t_clone)
         # frame count and op count are incremented due to re-compilation
-        check_count_and_graph(2, 4, 2, """\
+        check_count_and_graph(
+            2,
+            4,
+            2,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
         l_x_ = L_x_
@@ -783,7 +818,8 @@ class GraphModule(torch.nn.Module):
         def forward(self, l_x_):
             add_ = l_x_.add_(1.0);  l_x_ = None
             return (add_,)
-""")
+""",
+        )
 
         try:
             x = torch._to_functional_tensor(t_clone2)
@@ -794,7 +830,11 @@ class GraphModule(torch.nn.Module):
             torch._disable_functionalization()
 
         # frame count and op count are incremented due to re-compilation
-        check_count_and_graph(3, 6, 3, """\
+        check_count_and_graph(
+            3,
+            6,
+            3,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
         l_x_ = L_x_
@@ -808,7 +848,8 @@ class GraphModule(torch.nn.Module):
         def forward(self, l_x_):
             add_ = l_x_.add_(1.0);  l_x_ = None
             return (add_,)
-""")
+""",
+        )
 
     def test_has_torch_function(self):
         class MyTensor:
@@ -1115,13 +1156,13 @@ s1 > 3""",
         true_graph = """\
 class GraphModule(torch.nn.Module):
     def forward(self):
-        ones = torch.ones([3, 4])
+        ones: "f32[3, 4]" = torch.ones([3, 4])
         return (ones,)
 """
         false_graph = """\
 class GraphModule(torch.nn.Module):
     def forward(self):
-        ones = torch.ones([4, 3])
+        ones: "f32[4, 3]" = torch.ones([4, 3])
         return (ones,)
 """
         test_recompilation(

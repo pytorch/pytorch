@@ -4309,8 +4309,8 @@ def forward(self, x):
         gm_edit.recompile()
 
         expected = [
-            "x = torch.sin(l_x_)",
-            "cos = torch.cos(l_stack0_)",
+            """x: "f32[s0, s0]" = torch.sin(l_x_)""",
+            """cos: "f32[s0, s0]" = torch.cos(l_stack0_)""",
         ]
 
         def test_backend(gm: torch.fx.GraphModule, example_inputs):

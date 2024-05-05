@@ -1125,7 +1125,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         # cant inline torch.autograd.Function means graph break
         if torch._dynamo.config.assume_static_by_default:
             self.assertExpectedInline(cnt.frame_count, """1""")
-            self.assertExpectedInline(cnt.op_count, """11""")
+            self.assertExpectedInline(cnt.op_count, """5""")
         else:
             self.assertExpectedInline(cnt.frame_count, """1""")
             self.assertExpectedInline(cnt.op_count, """5""")
@@ -4415,8 +4415,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         try:
             from megablocks.layers import moe
             from megablocks.layers.arguments import Arguments
-        except ImportError:
-            raise unittest.SkipTest("requires megablocks")
+        except ImportError as e:
+            raise unittest.SkipTest("requires megablocks") from e
         bs, sl, hs, num_experts, top_k = (16, 1024, 512, 1, 1)
         args = Arguments(
             hidden_size=hs,
