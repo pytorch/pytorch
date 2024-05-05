@@ -170,6 +170,10 @@ class AOTAutogradCacheEntry:
 
 
 class AOTAutogradCache:
+    """
+    Cache for results of AOTAutograd. AOTAutogradCache is an extension of FXGraphCache that
+    caches extra metadata to reconstruct the autograd generated wrapper around the compiled FXGraph.
+    """
     @staticmethod
     def clear():
         """
@@ -232,7 +236,7 @@ class AOTAutogradCache:
         """
         Wrap cached entry when bw_module is None (i.e., result of aot_dispatch_base)
         """
-        # AOTAutograd handles the guards
+        # TODO: handle shape env guards in AOTAutogradCache
         compiled_fw = FxGraphCache._lookup_graph(
             entry.fw_cache_key, [], ignore_guards=True
         )
