@@ -408,25 +408,17 @@ static id<MTLLibrary> compileGammaOpsLibrary(id<MTLDevice> device, const std::st
   return rc;
 }
 
-static id<MTLComputePipelineState> getCPLState(id<MTLDevice> device,
-                                               const std::string& t1,
+static id<MTLComputePipelineState> getCPLState(const std::string& t1,
                                                const std::string& t2,
                                                const std::string& fname) {
-  auto key = t1 + t2 + fname;
-  static std::unordered_map<std::string, id<MTLComputePipelineState>> cplMap;
-  auto it = cplMap.find(key);
-  if (it != cplMap.end()) {
-    return it->second;
+  auto key = t1 + t2;
+  static std::unordered_map<std::string, MetalShaderLibrary> libMap;
+  auto it = libMap.find(key);
+  if (it != libMap.end()) {
+    bool rc = false;
+    std::tie(it, rc) = libMap.emplace(key, fmt::format(GAMMA_OPS_TEMPLATE, t1, t2));
   }
-  NSError* error = nil;
-  auto library = compileGammaOpsLibrary(device, t1, t2);
-  id<MTLFunction> func = [library newFunctionWithName:[NSString stringWithUTF8String:fname.c_str()]];
-  TORCH_CHECK(func != nil, "Can't get function ", fname);
-  auto rc = [device newComputePipelineStateWithFunction:func error:&error];
-  TORCH_CHECK(
-      rc != nil && error == nil, "Failed to construct pipeline state: ", [[error localizedDescription] UTF8String]);
-  cplMap[key] = rc;
-  return rc;
+  return it->second.getPipelineStateForFunc(fname);
 }
 
 } // namespace mps
@@ -453,7 +445,7 @@ TORCH_IMPL_FUNC(lgamma_out_mps)(const Tensor& self, const Tensor& output_) {
 
   @autoreleasepool {
     id<MTLDevice> device = MPSDevice::getInstance()->device();
-    id<MTLComputePipelineState> cplState = getCPLState(device, input_type, output_type, "lgamma");
+    id<MTLComputePipelineState> cplState = getCPLState(input_type, output_type, "lgamma");
 
     MPSStream* mpsStream = getCurrentMPSStream();
     dispatch_sync(mpsStream->queue(), ^() {
@@ -497,7 +489,7 @@ TORCH_IMPL_FUNC(digamma_out_mps)(const Tensor& self, const Tensor& output_) {
 
   @autoreleasepool {
     id<MTLDevice> device = MPSDevice::getInstance()->device();
-    id<MTLComputePipelineState> cplState = getCPLState(device, input_type, output_type, "digamma");
+    id<MTLComputePipelineState> cplState = getCPLState(input_type, output_type, "digamma");
 
     MPSStream* mpsStream = getCurrentMPSStream();
     dispatch_sync(mpsStream->queue(), ^() {
@@ -552,7 +544,7 @@ TORCH_IMPL_FUNC(polygamma_out_mps)(const int64_t order, const Tensor& self, cons
   @autoreleasepool {
     id<MTLDevice> device = MPSDevice::getInstance()->device();
 
-    id<MTLComputePipelineState> cplState = getCPLState(device, input_type, output_type, func_name);
+    id<MTLComputePipelineState> cplState = getCPLState(input_type, output_type, func_name);
 
     MPSStream* mpsStream = getCurrentMPSStream();
     dispatch_sync(mpsStream->queue(), ^() {

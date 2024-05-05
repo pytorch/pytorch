@@ -329,6 +329,19 @@ inline bool is_dense_in_storage(const at::Tensor& t) {
   return compute_storage_numel_distance(t) == static_cast<size_t>(t.numel());
 }
 
+
+class MetalShaderLibrary {
+public:
+  MetalShaderLibrary(const std::string& src): shaderSource(src) {}
+  MetalShaderLibrary(const MetalShaderLibrary&) = delete;
+  id<MTLComputePipelineState> getPipelineStateForFunc(const std::string& fname);
+private:
+  id<MTLLibrary> getLibrary();
+  std::string shaderSource;
+  id<MTLLibrary> library = nil;
+  std::unordered_map<std::string, id<MTLComputePipelineState>> cplMap;
+};
+
 static inline void mtl_setBuffer(id<MTLComputeCommandEncoder> encoder, const Tensor& t, unsigned idx) {
   [encoder setBuffer:getMTLBufferStorage(t)
               offset:t.storage_offset() * t.element_size()

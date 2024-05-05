@@ -616,4 +616,38 @@ id<MTLBuffer> generateKernelDataOffsets(id<MTLComputeCommandEncoder> commandEnco
   return kernelDataOffsets;
 }
 
+
+id<MTLLibrary>  MetalShaderLibrary::getLibrary() {
+  if (library) {
+    return library;
+  }
+  NSError* error = nil;
+  MTLCompileOptions* options = [[MTLCompileOptions new] autorelease];
+  [options setLanguageVersion:is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS) ? MTLLanguageVersion3_1
+                                                                                      : MTLLanguageVersion2_3];
+  auto str = [NSString stringWithCString:shaderSource.c_str() encoding:NSASCIIStringEncoding];
+  auto device = MPSDevice::getInstance()->device();
+  library = [device newLibraryWithSource:str
+                                 options:options
+                                   error:&error];
+  TORCH_CHECK(library, "Failed to create metal library, error: ", [[error description] UTF8String]);
+  return library;
+}
+
+id<MTLComputePipelineState> MetalShaderLibrary::getPipelineStateForFunc(const std::string& fname) {
+  auto cpl = cplMap[fname];
+  if (cpl) {
+    return cpl;
+  }
+
+  NSError* error = nil;
+  id<MTLLibrary> lib = getLibrary();
+  id<MTLFunction> func = [lib newFunctionWithName:[NSString stringWithUTF8String:fname.c_str()]];
+  TORCH_CHECK(func, "Failed to create function state object for: ", fname);
+  cpl = [[lib device] newComputePipelineStateWithFunction:func error:&error];
+  TORCH_CHECK(cpl, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
+
+  return cplMap[fname] = cpl;
+}
+
 } // namespace at::native::mps
