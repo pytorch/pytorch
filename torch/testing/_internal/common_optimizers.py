@@ -979,6 +979,42 @@ def optim_inputs_func_sgd(device, dtype=None):
             kwargs={"weight_decay": 0.1, "maximize": True},
             desc="maximize",
         ),
+        OptimizerInput(
+            params=None,
+            kwargs={"weight_decay": 0.5},
+            desc="weight_decay"
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"dampening": 0.5},
+            desc="dampening, no momentum"
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"dampening": 0.5, "weight_decay": 0.5},
+            desc="dampening, weight_decay"
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"momentum": 0.5, "nesterov": True},
+            desc="momentum, nesterov"
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"momentum": 0.5},
+            desc="momentum"
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"momentum": 0.5, "weight_decay": 0.5, "nesterov": True},
+            desc="momentum, weight_decay, nesterov"
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"momentum": 0.5, "weight_decay": 0.5},
+            desc="momentum, weight_decay"
+        ),
+
     ]
 
 
