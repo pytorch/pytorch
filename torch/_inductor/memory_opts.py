@@ -16,6 +16,7 @@ def optimize_memory_usage(
     name_to_fused_node: Dict[str, "scheduler.BaseSchedulerNode"], graph_inputs: Dict[str, "Buffer"], snodes: List["scheduler.BaseSchedulerNode"]
 ) -> List["scheduler.BaseSchedulerNode"]:
     """
+    TODO: update this to be accurate based on actual code.
     Move consumer ops earlier if it satisfies the following conditions:
         - Consumer op is the first use site of its out tensor
             - If we don't reuse buffer, it should always be the first use site
