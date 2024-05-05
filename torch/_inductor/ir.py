@@ -3822,12 +3822,6 @@ class ConcatKernel(NopKernel):
                     break
         any_input_is_storage_and_layout = any(is_storage_and_layout(x) for x in inputs)
         fx_node_args = V.graph.current_node.args[0]
-        target_func = (
-            V.graph.current_node.target.func
-            if isinstance(V.graph.current_node.target, functools.partial)
-            else V.graph.current_node.target
-        )
-        assert target_func in [aten.cat, aten.cat.default]
         assert isinstance(fx_node_args, list)
         # If any of the inputs has meta tensor and the meta tensor is in CL format, use CL format for the output
         if any_input_is_storage_and_layout is False and any(
@@ -7680,7 +7674,7 @@ class InterpreterShim(torch.fx.Interpreter):
         self.graph = graph
         self.submodules = submodules
         self.extra_traceback = False
-        self.fetch_attr = submodules.__getitem__
+        self.fetch_attr = submodules.__getitem__  # type: ignore[method-assign]
         self.current_node = None
 
     def run_node(self, n: torch.fx.Node) -> Any:
