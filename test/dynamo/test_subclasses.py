@@ -743,14 +743,33 @@ class GraphModule(torch.nn.Module):
             actual = normalize_gm(
                 backend.graphs[exp_n_graph - 1].print_readable(print_output=False)
             )
-            self.assertExpectedInline(actual, exp_graph)
+            self.assertExpectedInline(actual, exp_graph, skip=1)
 
         t = torch.randn([3, 4])
         t_clone = t.clone()
         t_clone2 = t.clone()
         f(t)
 
-        expected_graph = """\
+        check_count_and_graph(1, 2, 1, """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[3, 4]"):
+        l_x_ = L_x_
+
+        wrap_body_0 = self.wrap_body_0
+        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
+        getitem: "f32[3, 4]" = wrap[0];  wrap = None
+        return (getitem,)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, l_x_: "f32[3, 4]"):
+            add_: "f32[3, 4]" = l_x_.add_(1.0);  l_x_ = None
+            return (add_,)
+""")
+
+        ff = torch.func.functionalize(f)
+        ff_out = ff(t_clone)
+        # frame count and op count are incremented due to re-compilation
+        check_count_and_graph(2, 4, 2, """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
         l_x_ = L_x_
@@ -764,13 +783,7 @@ class GraphModule(torch.nn.Module):
         def forward(self, l_x_):
             add_ = l_x_.add_(1.0);  l_x_ = None
             return (add_,)
-"""
-        check_count_and_graph(1, 2, 1, expected_graph)
-
-        ff = torch.func.functionalize(f)
-        ff_out = ff(t_clone)
-        # frame count and op count are incremented due to re-compilation
-        check_count_and_graph(2, 4, 2, expected_graph)
+""")
 
         try:
             x = torch._to_functional_tensor(t_clone2)
@@ -781,7 +794,21 @@ class GraphModule(torch.nn.Module):
             torch._disable_functionalization()
 
         # frame count and op count are incremented due to re-compilation
-        check_count_and_graph(3, 6, 3, expected_graph)
+        check_count_and_graph(3, 6, 3, """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        l_x_ = L_x_
+
+        wrap_body_0 = self.wrap_body_0
+        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
+        getitem = wrap[0];  wrap = None
+        return (getitem,)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, l_x_):
+            add_ = l_x_.add_(1.0);  l_x_ = None
+            return (add_,)
+""")
 
     def test_has_torch_function(self):
         class MyTensor:

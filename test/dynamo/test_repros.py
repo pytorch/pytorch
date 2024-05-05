@@ -1125,7 +1125,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         # cant inline torch.autograd.Function means graph break
         if torch._dynamo.config.assume_static_by_default:
             self.assertExpectedInline(cnt.frame_count, """1""")
-            self.assertExpectedInline(cnt.op_count, """5""")
+            self.assertExpectedInline(cnt.op_count, """11""")
         else:
             self.assertExpectedInline(cnt.frame_count, """1""")
             self.assertExpectedInline(cnt.op_count, """5""")
