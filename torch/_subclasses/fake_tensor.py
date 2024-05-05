@@ -1797,7 +1797,7 @@ class FakeTensorMode(TorchDispatchMode):
         any_constant = any(e.constant is not None for e in flat_arg_fake_tensors)
         schema_info = get_schema_info(func)
         if any_constant and schema_info.is_mutable():
-            _, new_kwargs = normalize_function(
+            _, new_kwargs = normalize_function(  # type: ignore[misc]
                 func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
             )
             for k, v in new_kwargs.items():
