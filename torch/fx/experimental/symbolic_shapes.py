@@ -97,7 +97,7 @@ __all__ = [
     "StatefulSymbolicContext", "SubclassSymbolicContext", "statically_known_true",
     "guard_size_oblivious", "check_consistent",
     "compute_unbacked_bindings", "ConvertIntKey",
-    "rebind_unbacked",
+    "rebind_unbacked", "resolve_unbacked_bindings",
 ]
 
 # FX node metadata keys for symbolic shape FX graph.
@@ -266,6 +266,14 @@ def check_consistent(new, old) -> None:
         assert isinstance(old, scalar_types) and not isinstance(old, bool), f"{old} != {new}"
         torch._check(old == new, lambda: f"{old} != {new} (old != new)")
 
+def resolve_unbacked_bindings(shape_env, bindings):
+    if bindings is None:
+        return None
+    return {
+        shape_env.unbacked_renamings.get(k, k): v
+        for k, v in bindings.items()
+    }
+
 def rebind_unbacked(shape_env, n: torch.fx.Node, result):
     """
     Suppose we are retracing a pre-existing FX graph that previously had
@@ -282,7 +290,7 @@ def rebind_unbacked(shape_env, n: torch.fx.Node, result):
     if n.op == "placeholder":
         return
 
-    if bindings := n.meta.get("unbacked_bindings"):
+    if bindings := resolve_unbacked_bindings(shape_env, n.meta.get("unbacked_bindings")):
         for raw_u0, path in bindings.items():
             u1 = pytree.key_get(result, path)
             # tensor_version ops get specialized after AOTAutograd, it's OK,
@@ -313,7 +321,8 @@ def rebind_unbacked(shape_env, n: torch.fx.Node, result):
             # The old and new could be the same if you improperly hit the memo
             # while retracing.  Make sure you updated FakeTensorMode.epoch
             assert raw_u0 != raw_u1, f"{raw_u0} possible memo disaster"
-            shape_env._rename_unbacked_to(raw_u0, raw_u1)
+            # Reuse the OLD symbol name
+            shape_env._rename_unbacked_to(raw_u1, raw_u0)
 
 def canonicalize_bool_expr(expr: SympyBoolean) -> SympyBoolean:
     r""" Canonicalize a boolean expression by transforming it into a lt / le
@@ -2447,7 +2456,11 @@ class ShapeEnv:
 
     # Unlike set_replacement, this records a shapeenv event
     @record_shapeenv_event()
-    def _rename_unbacked_to(self, orig_s: sympy.Expr, new_s: sympy.Expr):
+    def _rename_unbacked_to(self, orig_s: sympy.Symbol, new_s: sympy.Symbol):
+        assert isinstance(orig_s, sympy.Symbol), orig_s
+        assert isinstance(new_s, sympy.Symbol), new_s
+        assert free_unbacked_symbols(new_s), new_s
+        assert free_unbacked_symbols(orig_s), orig_s
         if self._ignore_fresh_unbacked_symbols_tls():
             return
         dest = self.replacements.get(orig_s)
