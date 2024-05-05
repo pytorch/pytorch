@@ -520,17 +520,6 @@ filegroup(
 
 
 filegroup(
-    name = "caffe2_queue_srcs",
-    srcs = [
-        "caffe2/queue/blobs_queue.cc",
-        "caffe2/queue/blobs_queue_db.cc",
-        "caffe2/queue/queue_ops.cc",
-        "caffe2/queue/rebatching_queue.cc",
-        "caffe2/queue/rebatching_queue_ops.cc",
-    ],
-)
-
-filegroup(
     name = "caffe2_serialize_srcs",
     srcs = [
         "caffe2/serialize/file_adapter.cc",
@@ -605,7 +594,6 @@ cc_library(
             "caffe2/core/nomnigraph/include/nomnigraph/Transformations/*.h",
             "caffe2/core/nomnigraph/tests/*.h",
             "caffe2/perfkernels/*.h",
-            "caffe2/queue/*.h",
             "caffe2/serialize/*.h",
             "caffe2/share/contrib/depthwise/*.h",
             "caffe2/utils/*.h",
@@ -639,7 +627,6 @@ cc_library(
         "caffe2/share/contrib/depthwise/depthwise3x3_conv_op.cc",
         ":caffe2_core_srcs",
         ":caffe2_perfkernels_srcs",
-        ":caffe2_queue_srcs",
         ":caffe2_serialize_srcs",
         ":caffe2_utils_srcs",
     ],
