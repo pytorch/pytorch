@@ -504,16 +504,6 @@ filegroup(
 )
 
 filegroup(
-    name = "caffe2_distributed_srcs",
-    srcs = [
-        "caffe2/distributed/file_store_handler.cc",
-        "caffe2/distributed/file_store_handler_op.cc",
-        "caffe2/distributed/store_handler.cc",
-        "caffe2/distributed/store_ops.cc",
-    ],
-)
-
-filegroup(
     name = "caffe2_ideep_srcs",
     srcs = [
         "caffe2/ideep/operators/adam_op.cc",
@@ -1011,8 +1001,6 @@ filegroup(
         "caffe2/core/common_cudnn.cc",
         "caffe2/core/common_gpu.cc",
         "caffe2/core/event_gpu.cc",
-        "caffe2/db/create_db_op_gpu.cc",
-        "caffe2/distributed/file_store_handler_op_gpu.cc",
         "caffe2/operators/communicator_op_gpu.cc",
         "caffe2/operators/concat_split_op_gpu.cc",
         "caffe2/operators/conv_op_cache_cudnn.cc",
@@ -1262,8 +1250,6 @@ cc_library(
             "caffe2/core/nomnigraph/include/nomnigraph/Support/*.h",
             "caffe2/core/nomnigraph/include/nomnigraph/Transformations/*.h",
             "caffe2/core/nomnigraph/tests/*.h",
-            "caffe2/db/*.h",
-            "caffe2/distributed/*.h",
             "caffe2/ideep/*.h",
             "caffe2/ideep/operators/*.h",
             "caffe2/ideep/operators/quantization/*.h",
@@ -1335,11 +1321,8 @@ cc_library(
 cc_library(
     name = "caffe2",
     srcs = [
-        "caffe2/db/create_db_op.cc",
-        "caffe2/db/protodb.cc",
         "caffe2/share/contrib/depthwise/depthwise3x3_conv_op.cc",
         ":caffe2_core_srcs",
-        ":caffe2_distributed_srcs",
         ":caffe2_ideep_srcs",
         ":caffe2_onnx_srcs",
         ":caffe2_operators_srcs",
