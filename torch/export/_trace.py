@@ -40,6 +40,7 @@ from torch._guards import detect_fake_mode
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch._utils_internal import log_export_usage
+from torch.export.dynamic_shapes import _combine_args
 from torch.export.exported_program import OutputKind
 from torch.fx._utils import first_call_function_nn_module_stack
 from torch.fx.experimental.symbolic_shapes import (
@@ -444,7 +445,7 @@ def _export_to_torch_ir(
         except GuardOnDataDependentSymNode as e:
             raise UserError(  # noqa: TRY200
                 UserErrorType.ANTI_PATTERN,
-                f"Consider annotating your code using torch._constrain_as_*(). {str(e)}",
+                f"Consider annotating your code using torch._check*(). {str(e)}",
                 case_name="constrain_as_size_example",
             )
 
@@ -466,9 +467,6 @@ def _export_non_strict(
     transform=lambda x: x,  # TODO(zhxchen17) Revisit if this is needed later.
     pre_dispatch=False,
 ):
-    assert not any(
-        isinstance(obj, torch.ScriptObject) for obj in constant_attrs
-    ), "We expect all script objects have been replaced by FakeScriptObjects."
     # [NOTE] If the user is exporting under training mode, we want to detect if there is any
     # state change in the autograd global state and error. If the user is exporting under inference
     # mode, we don't care. At predispatch level, we don't care about the state change.
@@ -560,6 +558,8 @@ def _export_non_strict(
             return TensorArgument(name=node.name)
         elif isinstance(val, torch.SymInt):
             return SymIntArgument(name=node.name)
+        elif isinstance(val, torch.ScriptObject):
+            return CustomObjArgument(name=node.name, class_fqn=val._type().qualified_name())  # type: ignore[attr-defined]
         elif isinstance(val, FakeScriptObject):
             return CustomObjArgument(name=node.name, class_fqn=val.script_class_name)
         elif isinstance(val, (int, bool, str, float, type(None))):
@@ -599,14 +599,7 @@ def _export_non_strict(
     )
 
     constants = rewrite_script_object_meta(gm)
-    attr_constants = lift_constants_pass(gm, export_graph_signature, constant_attrs)
-    assert not any(
-        isinstance(obj, torch.ScriptObject) for obj in attr_constants.values()
-    ), "We expect all script objects have been replaced by FakeScriptObjects."
-    constants.update(attr_constants)  # type: ignore[arg-type]
-    assert not any(
-        isinstance(obj, torch.ScriptObject) for obj in constants.values()
-    ), "We expect all script objects have been replaced by FakeScriptObjects."
+    constants.update(lift_constants_pass(gm, export_graph_signature, constant_attrs))
 
     # prettify names for placeholder nodes
     placeholder_naming_pass(
@@ -628,6 +621,7 @@ def _export_non_strict(
             Union[
                 torch.Tensor,
                 FakeScriptObject,
+                torch.ScriptObject,
             ],
         ]
 
@@ -1061,9 +1055,11 @@ def _export(
         except (ConstraintViolationError, ValueRangeError) as e:
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: TRY200
 
+        combined_args = _combine_args(mod, args, kwargs)
         range_constraints = make_constraints(
             fake_mode,
             ep_non_strict.gm,
+            combined_args,
             dynamic_shapes,
             num_lifted,
         )
@@ -1270,9 +1266,11 @@ def _export(
         ),
         len(export_graph_signature.input_specs),
     )
+    combined_args = _combine_args(mod, args, kwargs)
     range_constraints = make_constraints(
         dynamo_fake_mode,
         gm,
+        combined_args,
         dynamic_shapes,
         num_lifted,
     )
