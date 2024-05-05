@@ -773,7 +773,7 @@ class TestDeserialize(TestCase):
         class Module(torch.nn.Module):
             def forward(self, x, y):
                 n = x.item()
-                torch._constrain_as_size(n, min=2)
+                torch._check_is_size(n)
                 return y.sum() + torch.ones(n, 5).sum()
 
         f = Module()

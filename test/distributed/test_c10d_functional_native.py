@@ -703,7 +703,7 @@ class CompileTest(TestCase):
         def _tolist_with_constrain_as_size(tensor):
             lst = tensor.tolist()
             for elem in lst:
-                torch._constrain_as_size(elem)
+                torch._check_is_size(elem)
             return lst
 
         def func(

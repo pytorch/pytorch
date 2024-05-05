@@ -309,18 +309,22 @@ class Tracer(TracerBase):
         # Mapping of node name to module scope
         self.node_name_to_scope: Dict[str, Tuple[str, type]] = {}
 
+    _qualname_counter = collections.defaultdict(int)
+
     @compatibility(is_backward_compatible=True)
     def get_fresh_qualname(self, prefix: str) -> str:
         """
         Gets a fresh name for a prefix and returns it. This function ensures
         that it will not clash with an existing attribute on the graph.
         """
-        i = 0
+        i = self._qualname_counter[prefix]
         while True:
             qualname = f"{prefix}_{i}"
+            i += 1
             if not hasattr(self.root, qualname):
                 break
-            i += 1
+        self._qualname_counter[prefix] = i
+
         return qualname
 
     @compatibility(is_backward_compatible=True)
@@ -387,9 +391,9 @@ class Tracer(TracerBase):
             # Tensor was not found in the Module hierarchy, stow it away in a
             # special attribute and set the qualname to refer to that
             if not qualname:
-                qualname = self.get_fresh_qualname("_tensor_constant")
-                self.tensor_attrs[a] = qualname
-                setattr(self.root, qualname, a)
+                fresh_qualname = self.get_fresh_qualname("_tensor_constant")
+                self.tensor_attrs[a] = fresh_qualname
+                setattr(self.root, fresh_qualname, a)
 
             return self.create_node("get_attr", qualname, (), {})
 

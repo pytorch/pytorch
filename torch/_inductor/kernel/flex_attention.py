@@ -3,7 +3,7 @@ import logging
 from typing import Any, List
 
 import torch
-from .. import config, utils
+from .. import config
 from ..lowering import empty_strided, lowerings, register_lowering
 from ..select_algorithm import autotune_select_algorithm, TritonTemplate
 
@@ -173,22 +173,45 @@ sdpa_template = TritonTemplate(
 )
 
 
+_h100_default_config = {
+    (torch.float32, 64): (128, 32, 4, 3),
+    (torch.float32, 128): (32, 64, 4, 3),
+    (torch.float32, 256): (32, 32, 4, 3),
+    (torch.bfloat16, 64): (128, 64, 4, 3),
+    (torch.bfloat16, 128): (64, 32, 4, 3),
+    (torch.bfloat16, 256): (64, 32, 4, 3),
+}
+
+_a100_default_config = {
+    (torch.float32, 64): (128, 32, 4, 3),
+    (torch.float32, 128): (128, 32, 4, 3),
+    (torch.float32, 256): (64, 16, 4, 3),
+    (torch.bfloat16, 64): (128, 64, 4, 3),
+    (torch.bfloat16, 128): (128, 32, 4, 3),
+    (torch.bfloat16, 256): (32, 64, 4, 3),
+}
+
+
 def _get_default_config(query):
+    dtype = query.get_dtype()
     head_dim = query.get_size()[-1]
     default_config = None
-    is_big_shared_mem = utils.get_gpu_shared_memory() > 128 * 1024
 
-    if is_big_shared_mem:
-        if query.get_dtype() == torch.float32:
-            default_config = (128, 32, 4, 3)
+    if head_dim <= 256 and torch.cuda.get_device_capability() >= (9, 0):  # H100
+        if dtype == torch.float32:
+            default_config = (64, 64, 4, 3)
         else:
-            if head_dim == 64:
-                default_config = (128, 64, 4, 3)
-            else:
-                default_config = (128, 32, 4, 3)
-    else:
-        if query.get_dtype() == torch.float32:
-            default_config = (32, 32, 4, 3)
+            default_config = (128, 64, 4, 3)
+        default_config = _h100_default_config.get((dtype, head_dim), default_config)
+    elif head_dim <= 256 and torch.cuda.get_device_capability() >= (8, 0):  # A100
+        if dtype == torch.float32:
+            default_config = (64, 64, 4, 3)
+        else:
+            default_config = (128, 64, 4, 3)
+        default_config = _a100_default_config.get((dtype, head_dim), default_config)
+    else:  # modest hardware or extremely large head_dim
+        if dtype == torch.float32:
+            default_config = (32, 16, 4, 3)
         else:
             default_config = (64, 32, 4, 3)
 
