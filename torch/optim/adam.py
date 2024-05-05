@@ -638,9 +638,9 @@ def _fused_adam(
 
     # We only shuffle around the lr when it is a Tensor and on CUDA, otherwise, we prefer
     # treating it as a scalar.
-    lr = torch.tensor(lr)
-    lr_dict: DeviceDict = {lr.device: lr} if str(lr.device) != "cpu" else {}
-
+    lr_dict: Optional[DeviceDict] = (
+        {lr.device: lr} if isinstance(lr, Tensor) and str(lr.device) != "cpu" else None
+    )
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps]
     )
@@ -664,8 +664,8 @@ def _fused_adam(
             if found_inf not in found_inf_dict:
                 found_inf_dict[device] = found_inf.to(device, non_blocking=True)
             device_found_inf = found_inf_dict[device]
-        if device not in lr_dict:
-            lr_dict[device] = lr.to(device=device, non_blocking=True)
+        if lr_dict is not None and device not in lr_dict:
+            lr_dict[device] = lr.to(device=device, non_blocking=True)  # type: ignore[union-attr]
             lr = lr_dict[device]
         torch._foreach_add_(device_state_steps, 1)
         torch._fused_adam_(
