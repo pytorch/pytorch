@@ -659,6 +659,25 @@ cc_library(
     alwayslink = True,
 )
 
+cu_library(
+    name = "torch_cuda",
+    srcs = [
+        "torch/csrc/distributed/c10d/intra_node_comm.cu",
+        "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
+    ],
+    copts = torch_cuda_half_options,
+    visibility = ["//visibility:public"],
+    deps = [
+        ":aten",
+        "@cuda//:cublas",
+        "@cuda//:curand",
+        "@cudnn",
+        "@eigen",
+        "@tensorpipe//:tensorpipe_cuda",
+    ],
+    alwayslink = True,
+)
+
 PERF_COPTS = [
     "-DHAVE_AVX_CPU_DEFINITION",
     "-DHAVE_AVX2_CPU_DEFINITION",
@@ -810,6 +829,8 @@ cc_library(
         exclude = [
             "torch/csrc/cuda/python_nccl.cpp",
             "torch/csrc/cuda/nccl.cpp",
+            "torch/csrc/distributed/c10d/intra_node_comm.cu",
+            "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
         ],
     )) + torch_sources,
     copts = TORCH_COPTS,
@@ -825,6 +846,7 @@ cc_library(
     ] + if_cuda([
         "@cuda//:nvToolsExt",
         "@cutlass",
+        ":torch_cuda",
     ]),
     alwayslink = True,
 )
