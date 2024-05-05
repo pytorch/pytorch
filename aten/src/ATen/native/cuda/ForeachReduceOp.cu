@@ -155,13 +155,50 @@ __global__ void lpnorm_cleanup(
   }
 }
 
+namespace {
+inline void check_foreach_norm_dtype(
+    optional<ScalarType> opt_dtype,
+    ScalarType self_dtype,
+    const char* const name) {
+  if (opt_dtype.has_value()) {
+    auto dtype = opt_dtype.value();
+    TORCH_CHECK(
+        isFloatingType(dtype) || isComplexType(dtype),
+        name,
+        ": dtype should"
+        " be floating point or complex, but got ",
+        dtype);
+    TORCH_CHECK(
+        isComplexType(self_dtype) == isComplexType(dtype),
+        name,
+        ": dtype should be ",
+        isComplexType(self_dtype) ? "complex" : "real",
+        " for ",
+        isComplexType(self_dtype) ? "complex" : "real",
+        " inputs, but got ",
+        dtype);
+    TORCH_CHECK(
+        promoteTypes(self_dtype, dtype) == dtype,
+        name,
+        ": the dtype of the input ",
+        "(",
+        self_dtype,
+        ") should be convertible ",
+        "without narrowing to the specified dtype (",
+        dtype,
+        ")");
+  }
+}
+} // anonymous namespace
+
 // note(mkozuki): Why excluding Int and Complex from fast path
 // - Int: at::norm does not support.
 // - Complex: __shfl_down_sync does not support complex and foreach does not
 // support functions whose inputs dtypes and output dtype are different.
 std::vector<Tensor> foreach_tensor_norm_cuda(
     TensorList tensors,
-    const Scalar& ord) {
+    const Scalar& ord,
+    c10::optional<ScalarType> dtype) {
   double p;
   if (ord.isIntegral(false)) {
     p = ord.to<int64_t>();
@@ -183,6 +220,8 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
         p == std::numeric_limits<double>::infinity())) {
     return foreach_tensor_norm_slow(tensors, ord);
   }
+  check_foreach_norm_dtype(
+      dtype, tensors[0].scalar_type(), "_foreach_tensor_norm_cuda");
 
   const size_t ntensors = tensors.size();
   int max_chunks_per_tensor = -1;
@@ -195,14 +234,16 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
     }
   }
   const auto options = tensors[0].options();
+  const auto output_dtype =
+      dtype.has_value() ? dtype.value() : tensors[0].scalar_type();
   auto output_per_tensor = at::zeros(
       {static_cast<int64_t>(ntensors) * max_chunks_per_tensor},
-      options.dtype(toOpMathType(tensors[0].scalar_type())));
+      options.dtype(toOpMathType(output_dtype)));
 
   std::vector<at::Tensor> vec_res;
   vec_res.reserve(ntensors);
   for (const auto i : c10::irange(ntensors)) {
-    vec_res.push_back(at::empty({}, options));
+    vec_res.push_back(at::empty({}, options.dtype(output_dtype)));
   }
 
   auto tensor_lists = std::vector<std::vector<Tensor>>{tensors.vec()};
