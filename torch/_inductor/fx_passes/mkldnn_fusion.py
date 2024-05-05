@@ -869,7 +869,7 @@ if torch._C._has_mkldnn:
             if (
                 meta_value is None
                 or meta_value.device.type != "cpu"
-                or meta_value.dim() != 4
+                or (meta_value.dim() != 4 and meta_value.dim() != 5)
             ):
                 return False
         if (
@@ -1188,6 +1188,7 @@ if torch._C._has_mkldnn:
 
         packed_weight_ops = [
             torch._C._nn.mkldnn_reorder_conv2d_weight,
+            torch._C._nn.mkldnn_reorder_conv3d_weight,
             mkldnn._reorder_convolution_transpose_weight,
             mkldnn._reorder_linear_weight,
             mkldnn._reorder_mkldnn_rnn_layer_weight,

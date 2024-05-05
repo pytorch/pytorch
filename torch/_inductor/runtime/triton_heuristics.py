@@ -718,7 +718,7 @@ class CachingAutotuner(KernelInterface):
         E.g., assuming regular autotune only get one config C1; while max-autotune get 4 configs C1, C2, C3, C4
         and max-autotune figure out C3 is the best.
 
-        Then if coordinate descnt tuning is run with max-autotune disabled, it will start from C1;
+        Then if coordinate desecnt tuning is run with max-autotune disabled, it will start from C1;
         while if coordinate descent tuning is run with max-autotune enabled, it will start from C3.
         """
         if (
@@ -794,14 +794,15 @@ class CachingAutotuner(KernelInterface):
         # manager is a nullcontext.
         if autograd_profiler._is_profiler_enabled:
             # grid can be a tuple of ints or a string.
-            grid_info = (
-                grid if isinstance(grid, tuple) else getattr(grid, "grid_fn_str", None)
-            )
+            if isinstance(grid, tuple):
+                grid_info = str(grid)
+            else:
+                grid_info = getattr(grid, "grid_fn_str", "")
             with torch._C._profiler._RecordFunctionFast(
                 self.inductor_meta.get("kernel_name", "triton kernel"),
                 args,
                 {
-                    "kernel_file": self.filename,
+                    "kernel_file": "" if self.filename is None else self.filename,
                     "kernel_backend": "triton",
                     "grid": grid_info,
                     "stream": stream,

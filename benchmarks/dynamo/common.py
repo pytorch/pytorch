@@ -75,6 +75,7 @@ except ImportError:
         graph_break_reasons,
         maybe_enable_compiled_autograd,
     )
+import torch._functorch.config
 from torch._functorch.aot_autograd import set_model_name
 from torch._inductor import config as inductor_config, metrics
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -2177,6 +2178,10 @@ class BenchmarkRunner:
     def skip_models_due_to_control_flow(self):
         return set()
 
+    @property
+    def guard_on_nn_module_models(self):
+        return set()
+
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         raise NotImplementedError
 
@@ -3156,6 +3161,11 @@ def parse_args(args=None):
         help="Runs a dynamic shapes version of the benchmark, if available.",
     )
     parser.add_argument(
+        "--propagate-real-tensors",
+        action="store_true",
+        help="Capture as much data dependent as you can by unsoundly propagating real tensors",
+    )
+    parser.add_argument(
         "--dynamic-batch-only",
         action="store_true",
         help="Only assume batch dimension is dynamic.  Implies --dynamic-shapes",
@@ -3603,6 +3613,11 @@ def run(runner, args, original_dir=None):
     if args.dynamic_shapes:
         if not args.dynamic_batch_only:
             torch._dynamo.config.assume_static_by_default = False
+    if args.propagate_real_tensors:
+        # TODO: Separate flag for data dependent
+        torch._dynamo.config.capture_scalar_outputs = True
+        torch._dynamo.config.capture_dynamic_output_shape_ops = True
+        torch._functorch.config.fake_tensor_propagate_real_tensors = True
     if args.specialize_int:
         torch._dynamo.config.specialize_int = True
     if args.ci:
@@ -4077,15 +4092,20 @@ def run(runner, args, original_dir=None):
             else:
                 model, example_inputs = runner.cast_based_on_args(model, example_inputs)
             runner.setup_amp(current_device)
-            runner.run_one_model(
-                name,
-                model,
-                example_inputs,
-                optimize_ctx,
-                experiment,
-                explain=args.explain,
-                tag=args.tag,
-            )
+            guard_ctx = contextlib.nullcontext()
+            if name in runner.guard_on_nn_module_models:
+                guard_ctx = torch._dynamo.config.patch(guard_nn_modules=True)
+
+            with guard_ctx:
+                runner.run_one_model(
+                    name,
+                    model,
+                    example_inputs,
+                    optimize_ctx,
+                    experiment,
+                    explain=args.explain,
+                    tag=args.tag,
+                )
         if args.generate_aot_autograd_stats:
             stats_file = output_filename.split(".csv")[0] + "_stats.csv"
             output_csv(
