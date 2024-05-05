@@ -12,7 +12,7 @@
 
 namespace at::native {
 namespace mps {
-static const char* BITWISE_OPS_TEMPLATE = R"METAL(
+static MetalShaderLibrary lib(R"METAL(
 
 kernel void bitwise_and_tensor(constant uint& length [[buffer(0)]],
                          device {0}  *out [[buffer(1)]],
@@ -90,7 +90,8 @@ kernel void bitwise_not(constant uint& length [[buffer(0)]],
   }}
   out[offset] = ~a[offset];
 }}
-)METAL";
+)METAL",
+                              3);
 
 static const std::string& getMetalType(const c10::ScalarType& t) {
   // Mapping from c10::ScalarType to integral type that can be used for bitwise ops
@@ -121,15 +122,7 @@ static id<MTLComputePipelineState> getCPLState(const std::string& t1,
                                                const std::string& t2,
                                                const std::string& t3,
                                                const std::string& fname) {
-  auto key = t1 + t2 + t3;
-  static std::unordered_map<std::string, MetalShaderLibrary> libMap;
-  auto it = libMap.find(key);
-  if (it == libMap.end()) {
-    std::string src = fmt::format(BITWISE_OPS_TEMPLATE, t1, t2, t3);
-    bool rc = false;
-    std::tie(it, rc) = libMap.emplace(key, src);
-  }
-  return it->second.getPipelineStateForFunc(fname);
+  return lib.getPipelineStateForFunc(fname, {t1, t2, t3});
 }
 
 static void handle_tensor_tensor_binary_op(const Tensor& self,

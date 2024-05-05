@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <initializer_list>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Tensor.h>
 #include <ATen/Utils.h>
@@ -332,13 +333,24 @@ inline bool is_dense_in_storage(const at::Tensor& t) {
 
 class MetalShaderLibrary {
 public:
-  MetalShaderLibrary(const std::string& src): shaderSource(src) {}
+  MetalShaderLibrary(const std::string& src, unsigned nparams_ = 0): shaderSource(src), nparams(nparams_) {}
   MetalShaderLibrary(const MetalShaderLibrary&) = delete;
-  id<MTLComputePipelineState> getPipelineStateForFunc(const std::string& fname);
+  inline id<MTLComputePipelineState> getPipelineStateForFunc(const std::string& fname) {
+    return getLibraryPipelineState(getLibrary(), fname);
+  }
+  id<MTLComputePipelineState> getPipelineStateForFunc(const std::string& fname, const std::initializer_list<std::string>& params) {
+    return getLibraryPipelineState(getLibrary(params), fname);
+  }
 private:
+  id<MTLComputePipelineState> getLibraryPipelineState(id<MTLLibrary> lib, const std::string& fname);
   id<MTLLibrary> getLibrary();
+  id<MTLLibrary> getLibrary(const std::initializer_list<std::string>& params);
+
+  id<MTLLibrary> compileLibrary(const std::string& src);
   std::string shaderSource;
+  unsigned nparams;
   id<MTLLibrary> library = nil;
+  std::unordered_map<std::string, id<MTLLibrary>> libMap;
   std::unordered_map<std::string, id<MTLComputePipelineState>> cplMap;
 };
 

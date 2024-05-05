@@ -24,7 +24,7 @@ namespace mps {
  * See note [3-Clause BSD License for the Cephes Math Library].
  */
 
-static const char* GAMMA_OPS_TEMPLATE = R"METAL(
+static MetalShaderLibrary lib(R"METAL(
 #include <metal_stdlib>
 using namespace metal;
 
@@ -388,35 +388,11 @@ kernel void polygamma(device {0} *input [[buffer(0)]],
   output[id] = sgn * Gamma(n + 1) * calc_zeta(n + 1, x);
 }}
 
-)METAL";
-
-static id<MTLLibrary> compileGammaOpsLibrary(id<MTLDevice> device, const std::string& t1, const std::string& t2) {
-  auto key = t1 + t2;
-  static std::unordered_map<std::string, id<MTLLibrary>> libMap;
-  auto it = libMap.find(key);
-  if (it != libMap.end()) {
-    return it->second;
-  }
-  NSError* error = nil;
-  MTLCompileOptions* options = [[MTLCompileOptions new] autorelease];
-  [options setLanguageVersion:MTLLanguageVersion2_3];
-  auto rc = [device newLibraryWithSource:[NSString stringWithUTF8String:fmt::format(GAMMA_OPS_TEMPLATE, t1, t2).c_str()]
-                                 options:options
-                                   error:&error];
-  TORCH_CHECK(rc != nil && error == nil, "Failed to compile library: ", [[error localizedDescription] UTF8String]);
-  libMap[key] = rc;
-  return rc;
-}
+)METAL",
+                              2);
 
 static id<MTLComputePipelineState> getCPLState(const std::string& t1, const std::string& t2, const std::string& fname) {
-  auto key = t1 + t2;
-  static std::unordered_map<std::string, MetalShaderLibrary> libMap;
-  auto it = libMap.find(key);
-  if (it == libMap.end()) {
-    bool rc = false;
-    std::tie(it, rc) = libMap.emplace(key, fmt::format(GAMMA_OPS_TEMPLATE, t1, t2));
-  }
-  return it->second.getPipelineStateForFunc(fname);
+  return lib.getPipelineStateForFunc(fname, {t1, t2});
 }
 
 } // namespace mps
