@@ -595,7 +595,6 @@ cc_library(
             "caffe2/core/nomnigraph/tests/*.h",
             "caffe2/perfkernels/*.h",
             "caffe2/serialize/*.h",
-            "caffe2/share/contrib/depthwise/*.h",
             "caffe2/utils/*.h",
             "caffe2/utils/math/*.h",
             "caffe2/utils/threadpool/*.h",
@@ -624,7 +623,6 @@ cc_library(
 cc_library(
     name = "caffe2",
     srcs = [
-        "caffe2/share/contrib/depthwise/depthwise3x3_conv_op.cc",
         ":caffe2_core_srcs",
         ":caffe2_perfkernels_srcs",
         ":caffe2_serialize_srcs",
