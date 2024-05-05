@@ -1,6 +1,6 @@
 import contextlib
 
-from typing import Any, cast, Dict, List, NamedTuple, Optional, Set, Tuple, Union
+from typing import Any, cast, Dict, List, NamedTuple, Optional, Set, Tuple
 
 import torch
 import torch.distributed as dist
@@ -164,32 +164,6 @@ class FSDPParamGroup:
             )
         self._reduce_dtype = next(iter(reduce_dtypes))
 
-    def _init_grad_divide_factors(self):
-        data_parallel_world_size = 1
-        data_parallel_world_size *= self.mesh_info.shard_mesh_size
-        if self._is_hsdp:
-            data_parallel_world_size *= self.mesh_info.replicate_mesh_size
-        if self._reduce_dtype in (torch.float32, torch.bfloat16):
-            # Use NCCL's AVG op to divide after reduction since it is more
-            # performant and fp32 has sufficient precision
-            self._grad_divide_factors: Union[Tuple[None, None], Tuple[float, float]] = (
-                None,
-                None,
-            )
-            return
-        # Since fp16 has smaller dynamic range than fp32/bf16, we want to avoid
-        # overflow/underflow. For N data parallel workers, each worker computes
-        # g_i, and they collectively reduce (g_1 + ... + g_N) / N. To avoid
-        # overflow/underflow, we divide by ~sqrt(N) before/after the reduction.
-        factor: int = 1
-        while (
-            data_parallel_world_size % factor == 0
-            and data_parallel_world_size / factor > factor
-        ):
-            factor *= 2
-        factor = float(factor)
-        self._grad_divide_factors = (factor, data_parallel_world_size / factor)
-
     def lazy_init(self):
         # Lazy init should be idempotent
         param_names_on_meta = [
@@ -207,7 +181,6 @@ class FSDPParamGroup:
         # Initialize mixed precision attributes lazily in case the user changes
         # the parameter dtypes after construction time but before forward
         self._init_mp_dtypes()
-        self._init_grad_divide_factors()
         self._register_state_dict_hooks()
 
     # Runtime #
@@ -346,7 +319,6 @@ class FSDPParamGroup:
                 self._orig_dtype,
                 self._reduce_dtype,
                 self.device,
-                self._grad_divide_factors,
                 self._all_reduce_process_group
                 if self._is_hsdp and self.all_reduce_grads
                 else None,

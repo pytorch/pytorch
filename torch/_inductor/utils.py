@@ -298,7 +298,7 @@ def gen_gm_and_inputs(target, args, kwargs):
         len(target._schema.returns) == 1
         and str(target._schema.returns[0].type) == "Tensor"
     ):
-        node = (node,)
+        node = (node,)  # type: ignore[assignment]
     g.output(node)
 
     gm = torch.fx.GraphModule({}, g)
