@@ -541,20 +541,6 @@ filegroup(
 )
 
 filegroup(
-    name = "caffe2_onnx_srcs",
-    srcs = [
-        "caffe2/onnx/backend.cc",
-        "caffe2/onnx/backend_rep.cc",
-        "caffe2/onnx/device.cc",
-        "caffe2/onnx/helper.cc",
-        "caffe2/onnx/offline_tensor.cc",
-        "caffe2/onnx/onnx_exporter.cc",
-        "caffe2/onnx/onnxifi_graph_info.cc",
-        "caffe2/onnx/onnxifi_init.cc",
-    ],
-)
-
-filegroup(
     name = "caffe2_operators_srcs",
     srcs = [
         "caffe2/operators/abs_op.cc",
@@ -1147,18 +1133,12 @@ cc_library(
             "caffe2/ideep/operators/*.h",
             "caffe2/ideep/operators/quantization/*.h",
             "caffe2/ideep/utils/*.h",
-            "caffe2/onnx/*.h",
             "caffe2/operators/*.h",
             "caffe2/operators/rnn/*.h",
-            "caffe2/opt/*.h",
             "caffe2/perfkernels/*.h",
-            "caffe2/predictor/*.h",
-            "caffe2/predictor/emulator/*.h",
             "caffe2/queue/*.h",
             "caffe2/serialize/*.h",
-            "caffe2/sgd/*.h",
             "caffe2/share/contrib/depthwise/*.h",
-            "caffe2/transforms/*.h",
             "caffe2/utils/*.h",
             "caffe2/utils/math/*.h",
             "caffe2/utils/threadpool/*.h",
@@ -1190,7 +1170,6 @@ cc_library(
         "caffe2/share/contrib/depthwise/depthwise3x3_conv_op.cc",
         ":caffe2_core_srcs",
         ":caffe2_ideep_srcs",
-        ":caffe2_onnx_srcs",
         ":caffe2_operators_srcs",
         ":caffe2_perfkernels_srcs",
         ":caffe2_queue_srcs",
