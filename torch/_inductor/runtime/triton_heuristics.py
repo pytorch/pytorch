@@ -55,17 +55,11 @@ if triton is not None:
         from triton.compiler.compiler import ASTSource
     except ImportError:
         ASTSource = None
-
-    try:
-        from triton.backends.compiler import GPUTarget
-    except ImportError:
-        GPUTarget = None
 else:
     Config = object
     KernelInterface = object
     OutOfResources = object
     ASTSource = None
-    GPUTarget = None
 
 try:
     autograd_profiler = torch.autograd.profiler
@@ -340,22 +334,11 @@ class CachingAutotuner(KernelInterface):
             else:
                 rocm_warp_size = 64
 
-            if GPUTarget:
-                target = GPUTarget(
-                    compile_meta["device_type"],
-                    compile_meta["cc"],
-                    rocm_warp_size if torch.version.hip else 32,
-                )
-            else:
-                target = (
-                    (compile_meta["device_type"], compile_meta["cc"])
-                    if not torch.version.hip
-                    else [
-                        compile_meta["device_type"],
-                        compile_meta["cc"],
-                        rocm_warp_size,
-                    ]
-                )
+            target = (
+                (compile_meta["device_type"], compile_meta["cc"])
+                if not torch.version.hip
+                else [compile_meta["device_type"], compile_meta["cc"], rocm_warp_size]
+            )
 
             options = {
                 "num_warps": compile_meta["num_warps"],
