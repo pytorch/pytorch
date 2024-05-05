@@ -616,8 +616,7 @@ id<MTLBuffer> generateKernelDataOffsets(id<MTLComputeCommandEncoder> commandEnco
   return kernelDataOffsets;
 }
 
-
-id<MTLLibrary>  MetalShaderLibrary::getLibrary() {
+id<MTLLibrary> MetalShaderLibrary::getLibrary() {
   if (library) {
     return library;
   }
@@ -627,9 +626,7 @@ id<MTLLibrary>  MetalShaderLibrary::getLibrary() {
                                                                                       : MTLLanguageVersion2_3];
   auto str = [NSString stringWithCString:shaderSource.c_str() encoding:NSASCIIStringEncoding];
   auto device = MPSDevice::getInstance()->device();
-  library = [device newLibraryWithSource:str
-                                 options:options
-                                   error:&error];
+  library = [device newLibraryWithSource:str options:options error:&error];
   TORCH_CHECK(library, "Failed to create metal library, error: ", [[error description] UTF8String]);
   return library;
 }

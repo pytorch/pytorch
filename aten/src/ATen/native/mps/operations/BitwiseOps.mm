@@ -138,8 +138,8 @@ static void handle_tensor_tensor_binary_op(const Tensor& self,
                                            const std::string& kernel_name) {
   using namespace at::mps;
   MPSStream* stream = getCurrentMPSStream();
-  id<MTLComputePipelineState> cplState = getCPLState(
-      getMetalType(output), getMetalType(self), getMetalType(other), kernel_name);
+  id<MTLComputePipelineState> cplState =
+      getCPLState(getMetalType(output), getMetalType(self), getMetalType(other), kernel_name);
   uint32_t length = output.numel();
   if (length == 0) {
     return;
@@ -169,8 +169,8 @@ static void handle_tensor_scalar_binary_op(const Tensor& self,
                                            const std::string& kernel_name) {
   using namespace at::mps;
   MPSStream* stream = getCurrentMPSStream();
-  id<MTLComputePipelineState> cplState = getCPLState(
-      getMetalType(output), getMetalType(self), getMetalType(other), kernel_name);
+  id<MTLComputePipelineState> cplState =
+      getCPLState(getMetalType(output), getMetalType(self), getMetalType(other), kernel_name);
   uint64_t sval = other.to<int64_t>();
   uint32_t length = output.numel();
   if (length == 0) {
@@ -267,8 +267,8 @@ static void _bitwise_not_out_mps(const Tensor& self, const Tensor& output_) {
   }
   using namespace at::mps;
   MPSStream* stream = getCurrentMPSStream();
-  id<MTLComputePipelineState> cplState = getCPLState(
-      getMetalType(output), getMetalType(self), getMetalType(self), "bitwise_not");
+  id<MTLComputePipelineState> cplState =
+      getCPLState(getMetalType(output), getMetalType(self), getMetalType(self), "bitwise_not");
   dispatch_sync(stream->queue(), ^() {
     getMPSProfiler().beginProfileKernel(cplState, "bitwise_not", {self});
 

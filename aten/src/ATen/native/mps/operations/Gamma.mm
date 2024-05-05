@@ -408,9 +408,7 @@ static id<MTLLibrary> compileGammaOpsLibrary(id<MTLDevice> device, const std::st
   return rc;
 }
 
-static id<MTLComputePipelineState> getCPLState(const std::string& t1,
-                                               const std::string& t2,
-                                               const std::string& fname) {
+static id<MTLComputePipelineState> getCPLState(const std::string& t1, const std::string& t2, const std::string& fname) {
   auto key = t1 + t2;
   static std::unordered_map<std::string, MetalShaderLibrary> libMap;
   auto it = libMap.find(key);
