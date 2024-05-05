@@ -58,7 +58,6 @@ def define_targets(rules):
             [
                 "*.cpp",
                 "impl/*.cpp",
-                "impl/cow/*.cpp",
             ],
             exclude = [
                 "CPUAllocator.cpp",
@@ -69,7 +68,6 @@ def define_targets(rules):
             [
                 "*.h",
                 "impl/*.h",
-                "impl/cow/*.h",
             ],
             exclude = [
                 "CPUAllocator.h",

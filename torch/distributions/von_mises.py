@@ -127,12 +127,6 @@ class VonMises(Distribution):
         self.loc, self.concentration = broadcast_all(loc, concentration)
         batch_shape = self.loc.shape
         event_shape = torch.Size()
-
-        # Parameters for sampling
-        tau = 1 + (1 + 4 * self.concentration**2).sqrt()
-        rho = (tau - (2 * tau).sqrt()) / (2 * self.concentration)
-        self._proposal_r = (1 + rho**2) / (2 * rho)
-
         super().__init__(batch_shape, event_shape, validate_args)
 
     def log_prob(self, value):
@@ -146,16 +140,40 @@ class VonMises(Distribution):
         )
         return log_prob
 
+    @lazy_property
+    def _loc(self):
+        return self.loc.to(torch.double)
+
+    @lazy_property
+    def _concentration(self):
+        return self.concentration.to(torch.double)
+
+    @lazy_property
+    def _proposal_r(self):
+        kappa = self._concentration
+        tau = 1 + (1 + 4 * kappa**2).sqrt()
+        rho = (tau - (2 * tau).sqrt()) / (2 * kappa)
+        _proposal_r = (1 + rho**2) / (2 * rho)
+        # second order Taylor expansion around 0 for small kappa
+        _proposal_r_taylor = 1 / kappa + kappa
+        return torch.where(kappa < 1e-5, _proposal_r_taylor, _proposal_r)
+
     @torch.no_grad()
     def sample(self, sample_shape=torch.Size()):
         """
-        The sampling algorithm for the von Mises distribution is based on the following paper:
-        Best, D. J., and Nicholas I. Fisher.
-        "Efficient simulation of the von Mises distribution." Applied Statistics (1979): 152-157.
+        The sampling algorithm for the von Mises distribution is based on the
+        following paper: D.J. Best and N.I. Fisher, "Efficient simulation of the
+        von Mises distribution." Applied Statistics (1979): 152-157.
+
+        Sampling is always done in double precision internally to avoid a hang
+        in _rejection_sample() for small values of the concentration, which
+        starts to happen for single precision around 1e-4 (see issue #88443).
         """
         shape = self._extended_shape(sample_shape)
-        x = torch.empty(shape, dtype=self.loc.dtype, device=self.loc.device)
-        return _rejection_sample(self.loc, self.concentration, self._proposal_r, x)
+        x = torch.empty(shape, dtype=self._loc.dtype, device=self.loc.device)
+        return _rejection_sample(
+            self._loc, self._concentration, self._proposal_r, x
+        ).to(self.loc.dtype)
 
     def expand(self, batch_shape):
         try:

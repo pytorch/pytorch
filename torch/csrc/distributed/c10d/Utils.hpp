@@ -21,17 +21,15 @@ typedef SSIZE_T ssize_t;
 
 #include <sys/types.h>
 
-#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <functional>
-#include <limits>
 #include <string>
-#include <system_error>
-#include <tuple>
 #include <vector>
 
 namespace c10d {
+
+TORCH_API size_t getTensorsNumel(const std::vector<at::Tensor>& tensors);
 
 // Retrieve tensor shapes from a given tensor.
 TORCH_API std::vector<at::Tensor> getTensorShapes(
@@ -137,7 +135,7 @@ inline int getCvarInt(const std::vector<std::string>& env, int def) {
 
     try {
       ret = std::stoi(val);
-    } catch (std::exception& e) {
+    } catch (std::exception&) {
       TORCH_CHECK(false, "Invalid value for environment variable: " + env[i]);
     }
   }
@@ -185,10 +183,6 @@ inline bool getCvarBool(const std::vector<std::string>& env, bool def) {
   }
 
   return ret;
-}
-
-inline bool parseEnvVarFlag(const char* envVarName) {
-  return getCvarBool({envVarName}, false);
 }
 
 inline void assertSameSizes(
@@ -286,7 +280,7 @@ inline void assertLayoutMatch(
 }
 
 inline void assertNonEmpty(
-    std::function<void(const std::string&)> fn,
+    const std::function<void(const std::string&)>& fn,
     const at::ArrayRef<at::Tensor> tensors) {
   if (tensors.empty()) {
     fn("requires non-empty tensor list");
@@ -294,7 +288,7 @@ inline void assertNonEmpty(
 }
 
 inline void assertSingleElement(
-    std::function<void(const std::string&)> fn,
+    const std::function<void(const std::string&)>& fn,
     const at::ArrayRef<at::Tensor> tensors) {
   if (tensors.size() != 1) {
     fn("requires a single-element tensor list");
@@ -302,7 +296,7 @@ inline void assertSingleElement(
 }
 
 inline void assertSingleElementInput(
-    std::function<void(const std::string&)> fn,
+    const std::function<void(const std::string&)>& fn,
     const at::ArrayRef<at::Tensor> tensors) {
   if (tensors.size() != 1) {
     fn("requires a single-element input tensor list");
@@ -310,7 +304,7 @@ inline void assertSingleElementInput(
 }
 
 inline void assertSingleElementOutput(
-    std::function<void(const std::string&)> fn,
+    const std::function<void(const std::string&)>& fn,
     const at::ArrayRef<at::Tensor> tensors) {
   if (tensors.size() != 1) {
     fn("requires a single-element output tensor list");
@@ -318,25 +312,25 @@ inline void assertSingleElementOutput(
 }
 
 inline void assertRootRank(
-    std::function<void(const std::string&)> fn,
-    int rank,
-    int size) {
+    const std::function<void(const std::string&)>& fn,
+    int64_t rank,
+    int64_t size) {
   if (rank < 0 || rank >= size) {
     fn("invalid root rank: " + std::to_string(rank));
   }
 }
 
 inline void assertRootTensor(
-    std::function<void(const std::string&)> fn,
-    int rank,
-    int size) {
+    const std::function<void(const std::string&)>& fn,
+    int64_t rank,
+    int64_t size) {
   if (rank < 0 || rank >= size) {
     fn("invalid root tensor: " + std::to_string(rank));
   }
 }
 
 inline void assertDense(
-    std::function<void(const std::string&)> fn,
+    const std::function<void(const std::string&)>& fn,
     const at::ArrayRef<at::Tensor> tensors) {
   const auto& layout = tensors[0].layout();
   if (layout != at::kStrided) {
@@ -345,7 +339,7 @@ inline void assertDense(
 }
 
 inline void assertCPU(
-    std::function<void(const std::string&)> fn,
+    const std::function<void(const std::string&)>& fn,
     const at::ArrayRef<at::Tensor> tensors) {
   const auto& device = tensors[0].device();
   if (device.type() != at::kCPU) {
@@ -354,7 +348,7 @@ inline void assertCPU(
 }
 
 inline void assertSameDevice(
-    std::function<void(const std::string&)> fn,
+    const std::function<void(const std::string&)>& fn,
     const at::ArrayRef<at::Tensor> tensors) {
   if (tensors.size() < 2) {
     return;

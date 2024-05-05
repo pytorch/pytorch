@@ -69,7 +69,7 @@ class HybridModel(torch.nn.Module):
         # Make sure combined PS dimension is always bigger or equal than the FC input
         assert NUM_PS * EMBEDDING_DIM >= 512
         dim_normalizer = int(NUM_PS * EMBEDDING_DIM / 512)
-        emb_lookups_reshaped = emb_lookups_cat.reshape(
+        emb_lookups_reshaped = emb_lookups_cat.reshape(  # type: ignore[possibly-undefined]
             [emb_lookups_cat.shape[0] * dim_normalizer, 512]
         )
 
@@ -195,7 +195,7 @@ def _run_trainer(emb_rref_list, rank):
 
     # Throw away warm-up measurements
     measurements = measurements[WARMUP_CYCLES:]
-    return rank, measurements, batch_size
+    return rank, measurements, batch_size  # type: ignore[possibly-undefined]
 
 
 def run_worker(rank, world_size):

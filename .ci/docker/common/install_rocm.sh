@@ -61,6 +61,10 @@ install_ubuntu() {
                    rocprofiler-dev \
                    roctracer-dev
 
+    if [[ $(ver $ROCM_VERSION) -ge $(ver 6.1) ]]; then
+        DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated rocm-llvm-dev
+    fi
+
     # precompiled miopen kernels added in ROCm 3.5, renamed in ROCm 5.5
     # search for all unversioned packages
     # if search fails it will abort this script; use true to avoid case where search fails
@@ -78,6 +82,14 @@ install_ubuntu() {
         else
           DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated ${MIOPENKERNELS}
         fi
+    fi
+
+    # ROCm 6.0 had a regression where journal_mode was enabled on the kdb files resulting in permission errors at runtime
+    if [[ $(ver $ROCM_VERSION) -ge $(ver 6.0) ]]; then
+        for kdb in /opt/rocm/share/miopen/db/*.kdb
+        do
+            sqlite3 $kdb "PRAGMA journal_mode=off; PRAGMA VACUUM;"
+        done
     fi
 
     # Cleanup
@@ -149,6 +161,14 @@ install_centos() {
       else
         yum install -y ${MIOPENKERNELS}
       fi
+  fi
+
+  # ROCm 6.0 had a regression where journal_mode was enabled on the kdb files resulting in permission errors at runtime
+  if [[ $(ver $ROCM_VERSION) -ge $(ver 6.0) ]]; then
+      for kdb in /opt/rocm/share/miopen/db/*.kdb
+      do
+          sqlite3 $kdb "PRAGMA journal_mode=off; PRAGMA VACUUM;"
+      done
   fi
 
   # Cleanup

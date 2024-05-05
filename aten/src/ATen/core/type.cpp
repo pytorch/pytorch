@@ -41,7 +41,7 @@ static_assert(
     sizeof(SingletonOrSharedTypePtr<void>) == sizeof(std::shared_ptr<void>) && sizeof(std::shared_ptr<void>) == 2 * sizeof(void*),
     "std::shared_ptr has an unexpected representation on this platform!");
 static_assert(
-    std::is_same<decltype(getTypePtr<std::tuple<int64_t, int64_t>>()), const TupleTypePtr&>::value,
+    std::is_same_v<decltype(getTypePtr<std::tuple<int64_t, int64_t>>()), const TupleTypePtr&>,
     "getTypePtr<std::tuple<int64_t, int64_t>> not returning const ref!");
 
 TypeVerbosity type_verbosity() {
@@ -314,9 +314,9 @@ TypePtr DictType::get(const std::string& identifier, TypePtr key, TypePtr value)
   return containerTypePtrs[map_key];
 }
 
-std::string DictType::annotation_str_impl(TypePrinter printer) const {
+std::string DictType::annotation_str_impl(const TypePrinter& printer) const {
   auto keyAnnotation = getKeyType()->annotation_str(printer);
-  auto valueAnnotation = getValueType()->annotation_str(std::move(printer));
+  auto valueAnnotation = getValueType()->annotation_str(printer);
 
   std::string result;
   result.reserve(5 /* "Dict[" */ + keyAnnotation.size() + 2 /* ", " */ + valueAnnotation.size() + 1 /* "]" */);
@@ -500,7 +500,7 @@ MatchTypeReturn matchTypeVariables(
     if (it == type_env.end()) {
       type_env[vt->name()] = actual;
       return MatchTypeReturn::Success();
-    } else if (auto unified = unifyTypes(it->second, actual)) {
+    } else if (unifyTypes(it->second, actual)) {
       // note: unifyTypes allows subtyping in either direction, so actual
       // may be a supertype of the current binding. we're not responsible
       // for reporting the error, only for keeping type_env stable
@@ -916,7 +916,7 @@ std::string TupleType::str() const {
   }
   return ss.str();
 }
-std::string TupleType::annotation_str_impl(TypePrinter printer) const {
+std::string TupleType::annotation_str_impl(const TypePrinter& printer) const {
   if (schema_ && name()) {
     return name()->qualifiedName();
   }

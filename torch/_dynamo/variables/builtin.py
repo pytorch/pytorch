@@ -1,3 +1,6 @@
+# mypy: ignore-errors
+
+import contextlib
 import functools
 import inspect
 import itertools
@@ -5,6 +8,7 @@ import logging
 import math
 import operator
 import types
+from collections import defaultdict, OrderedDict
 from typing import Dict, List
 
 import torch
@@ -22,23 +26,28 @@ from ..guards import GuardBuilder, install_guard
 from ..replay_record import DummyModule
 from ..source import AttrSource, GetItemSource, is_constant_source, TypeSource
 from ..utils import (
-    build_checkpoint_variable,
     check_constant_args,
     check_numpy_ndarray_args,
+    check_unspec_or_constant_args,
     check_unspec_python_args,
     extract_fake_example_value,
     get_fake_value,
     guard_if_dyn,
-    is_utils_checkpoint,
     istype,
     numpy_operator_wrapper,
     proxy_args_kwargs,
     tensortype_to_dtype,
 )
-from .base import MutableLocal, typestr, VariableTracker
+from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import EventVariable, StreamVariable
-from .dicts import ConstDictVariable, SetVariable
+from .dicts import (
+    ConstDictVariable,
+    DefaultDictVariable,
+    DictView,
+    is_hashable,
+    SetVariable,
+)
 from .lists import (
     BaseListVariable,
     ListIteratorVariable,
@@ -47,8 +56,14 @@ from .lists import (
     TupleIteratorVariable,
     TupleVariable,
 )
-from .tensor import FakeItemVariable, SymNodeVariable, UnspecializedPythonVariable
-from .user_defined import UserDefinedVariable
+from .tensor import (
+    FakeItemVariable,
+    supported_comparison_ops,
+    SymNodeVariable,
+    TensorVariable,
+    UnspecializedPythonVariable,
+)
+from .user_defined import UserDefinedObjectVariable, UserDefinedVariable
 
 log = logging.getLogger(__name__)
 
@@ -70,7 +85,31 @@ IN_PLACE_DESUGARING_MAP = {
 }
 
 
+def _polyfill_call_impl(name):
+    """Create a BuiltinVariable.call_{name} method that inlines through polyfill.{name}"""
+
+    def call_fn(self, tx, *args, **kwargs):
+        return tx.inline_user_function_return(
+            variables.UserFunctionVariable(fn), args, kwargs
+        )
+
+    fn = getattr(polyfill, name)
+    call_fn.__name__ = f"call_{name}"
+    return call_fn
+
+
 class BuiltinVariable(VariableTracker):
+    _SENTINEL = object()
+    _nonvar_fields = {
+        "fn",
+        *VariableTracker._nonvar_fields,
+    }
+
+    @classmethod
+    def create_with_source(cls, value, source):
+        install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
+        return BuiltinVariable(value, source=source)
+
     @staticmethod
     @functools.lru_cache(None)
     def _constant_fold_functions():
@@ -83,6 +122,7 @@ class BuiltinVariable(VariableTracker):
             chr,
             divmod,
             float,
+            getattr,
             int,
             len,
             max,
@@ -95,9 +135,11 @@ class BuiltinVariable(VariableTracker):
             str.format,
             sum,
             type,
+            operator.abs,
             operator.pos,
             operator.neg,
             operator.not_,
+            operator.truth,
             operator.invert,
             operator.pow,
             operator.mul,
@@ -108,6 +150,7 @@ class BuiltinVariable(VariableTracker):
             operator.add,
             operator.sub,
             operator.getitem,
+            operator.length_hint,
             operator.lshift,
             operator.rshift,
             operator.and_,
@@ -128,6 +171,9 @@ class BuiltinVariable(VariableTracker):
             operator.ior,
             operator.index,
         }
+        from .tensor import supported_comparison_ops
+
+        fns.update(supported_comparison_ops.values())
         fns.update(x for x in math.__dict__.values() if isinstance(x, type(math.sqrt)))
         return fns
 
@@ -138,6 +184,7 @@ class BuiltinVariable(VariableTracker):
     @functools.lru_cache(None)
     def _fx_graph_functions():
         fns = {
+            operator.abs,
             operator.pos,
             operator.neg,
             operator.not_,
@@ -157,6 +204,7 @@ class BuiltinVariable(VariableTracker):
             operator.eq,
             operator.sub,
             operator.getitem,
+            operator.length_hint,
             operator.lshift,
             operator.rshift,
             operator.and_,
@@ -221,7 +269,17 @@ class BuiltinVariable(VariableTracker):
         # Multiple dispatch mechanism defining custom binop behavior for certain type
         # combinations. Handlers are attempted in order, and will be used if the type checks
         # match. They are expected to have the signature:
-        # fn(tx, arg0: VariableTracker, arg1: VariableTracker, options) -> VariableTracker
+        # fn(tx, arg0: VariableTracker, arg1: VariableTracker) -> VariableTracker
+        from .dicts import DictKeys, SetVariable
+        from .functions import BaseUserFunctionVariable, UserFunctionVariable
+        from .nn_module import NNModuleVariable
+        from .tensor import supported_const_comparison_ops
+        from .torch import BaseTorchVariable
+        from .user_defined import (
+            UserDefinedClassVariable,
+            UserDefinedObjectVariable,
+            UserDefinedVariable,
+        )
 
         # Override table contains: op_fn -> [list of handlers]
         op_handlers = {}
@@ -239,7 +297,7 @@ class BuiltinVariable(VariableTracker):
                 tx,
                 a,
                 b,
-                options,
+                *,
                 forward_name=forward_name,
                 reverse_name=reverse_name,
             ):
@@ -269,9 +327,7 @@ class BuiltinVariable(VariableTracker):
                 ((VariableTracker, UserDefinedVariable), user_defined_handler)
             )
 
-            def user_defined_inplace_handler(
-                tx, a, b, options, forward_name=inplace_name
-            ):
+            def user_defined_inplace_handler(tx, a, b, *, forward_name=inplace_name):
                 return a.call_method(tx, forward_name, [b], {})
 
             op_handlers[in_place_op].append(
@@ -282,7 +338,7 @@ class BuiltinVariable(VariableTracker):
             )
 
             # Dynamic shape args
-            def dynamic_handler(tx, a, b, options, fn=op):
+            def dynamic_handler(tx, a, b, *, fn=op):
                 from .builder import wrap_fx_proxy
 
                 return wrap_fx_proxy(
@@ -290,7 +346,6 @@ class BuiltinVariable(VariableTracker):
                     tx.output.create_proxy(
                         "call_function", fn, *proxy_args_kwargs([a, b], {})
                     ),
-                    **options,
                 )
 
             op_handlers[op].append(
@@ -311,11 +366,11 @@ class BuiltinVariable(VariableTracker):
         # Special cases - lower precedence but still prefer these over constant folding
 
         # List-like addition (e.g. [1, 2] + [3, 4])
-        def tuple_add_handler(tx, a, b, options):
-            return TupleVariable(a.items + list(b.unpack_var_sequence(tx)), **options)
+        def tuple_add_handler(tx, a, b):
+            return TupleVariable([*a.items, *b.unpack_var_sequence(tx)])
 
-        def size_add_handler(tx, a, b, options):
-            return SizeVariable(a.items + list(b.unpack_var_sequence(tx)), **options)
+        def size_add_handler(tx, a, b):
+            return SizeVariable([*a.items, *b.unpack_var_sequence(tx)])
 
         list_like_addition_handlers = [
             # NB: Prefer the tuple-specific logic over base logic because of
@@ -335,29 +390,35 @@ class BuiltinVariable(VariableTracker):
             ),
             (
                 (ConstantVariable, TupleVariable),
-                lambda tx, a, b, options: TupleVariable(
-                    list(a.unpack_var_sequence(tx)) + b.items, **options
+                lambda tx, a, b: TupleVariable(
+                    [*a.unpack_var_sequence(tx), *b.items],
+                ),
+            ),
+            (
+                (
+                    ListVariable,
+                    (BaseListVariable, ConstantVariable, ListIteratorVariable),
+                ),
+                lambda tx, a, b: ListVariable(
+                    [*a.items, *b.unpack_var_sequence(tx)], mutable_local=MutableLocal()
                 ),
             ),
             (
                 (BaseListVariable, BaseListVariable),
-                lambda tx, a, b, options: type(a)(a.items + b.items, **options),
+                lambda tx, a, b: type(a)([*a.items, *b.items]),
             ),
         ]
         op_handlers[operator.add].extend(list_like_addition_handlers)
 
-        def list_iadd_handler(tx, a, b, options):
+        def list_iadd_handler(tx, a, b):
             if not a.mutable_local or not b.has_unpack_var_sequence(tx):
                 # Handler doesn't apply
                 return None
 
-            return tx.replace_all(
-                a,
-                ListVariable(
-                    list(a.items) + list(b.unpack_var_sequence(tx)),
-                    **options,
-                ),
-            )
+            seq = b.unpack_var_sequence(tx)
+            tx.output.side_effects.mutation(a)
+            a.items.extend(seq)
+            return a
 
         list_like_iadd_handlers = [
             (
@@ -376,41 +437,187 @@ class BuiltinVariable(VariableTracker):
         op_handlers[operator.iadd].extend(list_like_iadd_handlers)
 
         # List-like expansion (e.g. [1, 2, 3] * 3)
-        def expand_list_like(tx, lst, const, options):
+        def expand_list_like(tx, lst, const):
+            if isinstance(lst, ConstantVariable):
+                lst, const = const, lst
             return lst.__class__(
                 items=lst.items * const.as_python_constant(),
                 mutable_local=MutableLocal(),
-                **options,
             )
 
         list_like_expansion_handlers = [
             ((ListVariable, ConstantVariable), expand_list_like),
             ((TupleVariable, ConstantVariable), expand_list_like),
-            (
-                (ConstantVariable, ListVariable),
-                lambda tx, a, b, options: expand_list_like(tx, b, a, options),
-            ),
-            (
-                (ConstantVariable, TupleVariable),
-                lambda tx, a, b, options: expand_list_like(tx, b, a, options),
-            ),
+            ((ConstantVariable, ListVariable), expand_list_like),
+            ((ConstantVariable, TupleVariable), expand_list_like),
         ]
         op_handlers[operator.mul].extend(list_like_expansion_handlers)
+
+        size_or_tuple = (SizeVariable, TupleVariable)
+        has_set_items = (SetVariable, DictKeys)
+
+        def create_cmp_op_handlers(op):
+            def compare_by_value(tx, a, b):
+                return ConstantVariable(op(a.value, b.value))
+
+            result = [((ConstantVariable, ConstantVariable), compare_by_value)]
+
+            if op in supported_const_comparison_ops.values():
+                # Tensor is None, List is not None, etc
+                none_result = op(object(), None)
+                if op.__name__.startswith("is_"):
+
+                    def never(tx, a, b):
+                        return ConstantVariable(none_result)
+
+                    obj_op_none = never
+                    none_op_obj = never
+                else:
+
+                    def obj_op_none(tx, a, b: ConstantVariable):
+                        if b.value is None or b.value is True or b.value is False:
+                            return ConstantVariable(none_result)
+
+                    def none_op_obj(tx, a: ConstantVariable, b):
+                        if a.value is None or a.value is True or a.value is False:
+                            return ConstantVariable(none_result)
+
+                types_that_are_never_none = (
+                    TensorVariable,
+                    SymNodeVariable,
+                    NNModuleVariable,
+                    BaseListVariable,
+                    UserDefinedVariable,
+                    BaseUserFunctionVariable,
+                    ConstDictVariable,
+                    BaseTorchVariable,
+                )
+                result.extend(
+                    [
+                        (
+                            (types_that_are_never_none, ConstantVariable),
+                            obj_op_none,
+                        ),
+                        (
+                            (ConstantVariable, types_that_are_never_none),
+                            none_op_obj,
+                        ),
+                    ]
+                )
+
+            def list_compare_nocheck(tx, left, right):
+                return BaseListVariable.list_compare(tx, op, left, right)
+
+            def list_compare_check(tx, left, right):
+                if type(left) is not type(
+                    right
+                ):  # Mismatch in BaseListVariable subclasses
+                    unimplemented(f"{op.__name__}({left}, {right})")
+                return BaseListVariable.list_compare(tx, op, left, right)
+
+            def compare_set_items(tx, left, right):
+                return ConstantVariable(op(left.set_items, right.set_items))
+
+            def compare_via_method(tx, left, right):
+                return left.call_method(tx, f"__{op.__name__}__", [right], {})
+
+            if op.__name__.startswith("is_"):
+                compare_user_defined = compare_by_value
+            else:
+                compare_user_defined = compare_via_method
+
+            op_var = BuiltinVariable(op)
+            result.extend(
+                [
+                    (
+                        (
+                            (UserFunctionVariable, BuiltinVariable),
+                            (UserFunctionVariable, BuiltinVariable),
+                        ),
+                        lambda tx, a, b: ConstantVariable(op(a.fn, b.fn)),
+                    ),
+                    (
+                        (
+                            NNModuleVariable,
+                            NNModuleVariable,
+                        ),
+                        lambda tx, a, b: ConstantVariable(
+                            op(
+                                tx.output.get_submodule(a.module_key),
+                                tx.output.get_submodule(b.module_key),
+                            )
+                        ),
+                    ),
+                    ((size_or_tuple, size_or_tuple), list_compare_nocheck),
+                    (
+                        (variables.BaseListVariable, variables.BaseListVariable),
+                        list_compare_check,
+                    ),
+                    ((has_set_items, has_set_items), compare_set_items),
+                    (
+                        (UserDefinedObjectVariable, UserDefinedObjectVariable),
+                        compare_user_defined,
+                    ),
+                    (
+                        (UserDefinedClassVariable, UserDefinedClassVariable),
+                        compare_user_defined,
+                    ),
+                    (
+                        (
+                            (StreamVariable, EventVariable, ConstantVariable),
+                            (StreamVariable, EventVariable, ConstantVariable),
+                        ),
+                        compare_by_value,
+                    ),
+                    (
+                        (TensorVariable, VariableTracker),
+                        op_var._comparison_with_tensor,
+                    ),
+                    (
+                        (VariableTracker, TensorVariable),
+                        op_var._comparison_with_tensor,
+                    ),
+                    (
+                        (SymNodeVariable, VariableTracker),
+                        op_var._comparison_with_symnode,
+                    ),
+                    (
+                        (VariableTracker, SymNodeVariable),
+                        op_var._comparison_with_symnode,
+                    ),
+                ]
+            )
+
+            if op.__name__.startswith("is_"):
+
+                def handle_is(tx, left, right):
+                    # If the two objects are of different type, we can safely return False
+                    # and True for `is` and `is not`, respectively
+                    if type(left) is not type(right):
+                        return ConstantVariable.create(op.__name__ != "is_")
+
+                result.append(((VariableTracker, VariableTracker), handle_is))
+
+            return result
+
+        for op in supported_comparison_ops.values():
+            assert callable(op)
+            assert op not in op_handlers
+            op_handlers[op] = create_cmp_op_handlers(op)
 
         return op_handlers
 
     @staticmethod
-    def _find_binop_handler(op, a, b):
-        handlers = BuiltinVariable._binop_handlers()
-        if op not in handlers:
+    def _find_binop_handler(op, a_type, b_type):
+        handlers = BuiltinVariable._binop_handlers().get(op)
+        if handlers is None:
             return None
 
-        # Return first handler that matches the type checks
-        for (type1, type2), handler in handlers[op]:
-            if isinstance(a, type1) and isinstance(b, type2):
-                return handler
-
-        return None
+        matches = []
+        for (type1, type2), handler in handlers:
+            if issubclass(a_type, type1) and issubclass(b_type, type2):
+                matches.append(handler)
+        return matches
 
     def can_insert_in_graph(self):
         return self.fn in self._fx_graph_functions()
@@ -447,22 +654,39 @@ class BuiltinVariable(VariableTracker):
         name = self.fn.__name__
         assert self.fn.__module__ == "builtins"
         assert name not in codegen.tx.f_globals, "shadowed global"
-        return [codegen.create_load_global(name, False, add=True)]
+        codegen.append_output(codegen.create_load_global(name, False, add=True))
 
     def constant_args(self, *args, **kwargs):
         return check_constant_args(args, kwargs)
 
-    def tensor_args(self, *args, **kwargs):
-        return any(
-            isinstance(i, variables.TensorVariable)
-            for i in itertools.chain(args, kwargs.values())
-        ) and not any(
-            isinstance(i, variables.GetAttrVariable)
-            for i in itertools.chain(args, kwargs.values())
-        )
+    def tensor_args(self, *args):
+        any_tensor = False
+        for arg in args:
+            if isinstance(arg, variables.GetAttrVariable):
+                return False
+            any_tensor = any_tensor or isinstance(arg, variables.TensorVariable)
+        return any_tensor
 
-    def unspec_python_args(self, *args, **kwargs):
-        return check_unspec_python_args(args, kwargs)
+    def tensor_args_type(self, arg_types):
+        any_tensor = False
+        for arg_type in arg_types:
+            if issubclass(arg_type, variables.GetAttrVariable):
+                return False
+            any_tensor = any_tensor or issubclass(arg_type, variables.TensorVariable)
+        return any_tensor
+
+    def python_and_tensor_constant_only(self, *args, **kwargs):
+        tensor_args = []
+        non_tensor_args = []
+        for i in itertools.chain(args, kwargs.values()):
+            if isinstance(i, variables.TensorVariable):
+                tensor_args.append(i)
+            else:
+                non_tensor_args.append(i)
+        return all(
+            is_constant_source(t.source) if t.source is not None else False
+            for t in tensor_args
+        ) and self.constant_args(*non_tensor_args)
 
     @staticmethod
     def unwrap_unspec_args_kwargs(args, kwargs):
@@ -470,128 +694,300 @@ class BuiltinVariable(VariableTracker):
             k: v.as_python_constant() for k, v in kwargs.items()
         }
 
+    def has_constant_handler(self, args, kwargs):
+        return self.can_constant_fold_through() and check_unspec_or_constant_args(
+            args, kwargs
+        )
+
+    @staticmethod
+    def _make_handler(fn, arg_types: List[type], has_kwargs: bool):
+        from .builder import SourcelessBuilder
+        from .lazy import LazyVariableTracker
+
+        obj = BuiltinVariable(fn)
+        handlers = []
+
+        if any(issubclass(t, LazyVariableTracker) for t in arg_types):
+            return lambda tx, args, kwargs: obj.call_function(
+                tx, [v.realize() for v in args], kwargs
+            )
+
+        if obj.can_insert_in_graph() and not (
+            fn is operator.getitem
+            and not issubclass(arg_types[0], variables.TensorVariable)
+        ):
+            if obj.tensor_args_type(arg_types):
+                return obj._handle_insert_op_in_graph
+            elif has_kwargs:
+                # need runtime check for kwargs
+                handlers.append(obj._handle_insert_op_in_graph)
+
+        # Handle binary ops (e.g. __add__ / __radd__, __iadd__, etc.)
+        # NB: Tensor args are handled above and not here
+        if len(arg_types) == 2 and not has_kwargs:
+            # Try to find a handler for the arg types; otherwise, fall through to constant handler
+            binop_handlers = BuiltinVariable._find_binop_handler(fn, *arg_types)
+            if not binop_handlers:
+                pass
+            elif len(binop_handlers) == 1:
+                (binop_handler,) = binop_handlers
+                handlers.append(lambda tx, args, _: binop_handler(tx, *args))
+            else:
+
+                def call_binop_handlers(tx, args, _):
+                    for fn in binop_handlers:
+                        rv = fn(tx, *args)
+                        if rv:
+                            return rv
+
+                handlers.append(call_binop_handlers)
+
+        self_handler = getattr(obj, f"call_{fn.__name__}", None)
+        if self_handler:
+
+            def call_self_handler(tx, args, kwargs):
+                try:
+                    result = self_handler(tx, *args, **kwargs)
+                    if result is not None:
+                        return result
+                except TypeError:
+                    # Check if binding is bad. inspect signature bind is expensive.
+                    # So check only when handler call fails.
+                    try:
+                        inspect.signature(self_handler).bind(tx, *args, **kwargs)
+                    except TypeError as e:
+                        has_constant_handler = obj.has_constant_handler(args, kwargs)
+                        if not has_constant_handler:
+                            log.warning(
+                                "incorrect arg count %s %s and no constant handler",
+                                self_handler,
+                                e,
+                            )
+                            unimplemented(
+                                f"invalid handler args {self_handler} {args} {kwargs}"
+                            )
+                    else:
+                        raise
+                except Unsupported as exc:
+                    has_constant_handler = obj.has_constant_handler(args, kwargs)
+                    if not has_constant_handler:
+                        raise
+                    # Actually, we will handle this just fine
+                    exc.remove_from_stats()
+
+            handlers.append(call_self_handler)
+
+        if obj.can_constant_fold_through():
+            builder = SourcelessBuilder.create
+
+            if (
+                all(issubclass(x, ConstantVariable) for x in arg_types)
+                and not has_kwargs
+            ):
+
+                def constant_fold_handler(tx, args, kwargs):
+                    # fast path
+                    return builder(
+                        tx,
+                        fn(
+                            *[x.as_python_constant() for x in args],
+                        ),
+                    )
+
+            else:
+
+                def constant_fold_handler(tx, args, kwargs):
+                    # path with a runtime check
+                    if check_unspec_or_constant_args(args, kwargs):
+                        return builder(
+                            tx,
+                            fn(
+                                *[x.as_python_constant() for x in args],
+                                **{
+                                    k: v.as_python_constant() for k, v in kwargs.items()
+                                },
+                            ),
+                        )
+
+            handlers.append(constant_fold_handler)
+
+        error_msg = f"builtin: {fn.__name__} {arg_types} {has_kwargs}"
+        if len(handlers) == 0:
+            return lambda *args: unimplemented(error_msg)
+        elif len(handlers) == 1:
+            (handler,) = handlers
+
+            def builtin_dipatch(tx, args, kwargs):
+                rv = handler(tx, args, kwargs)
+                if rv:
+                    return rv
+                unimplemented(error_msg)
+
+        else:
+
+            def builtin_dipatch(tx, args, kwargs):
+                for fn in handlers:
+                    rv = fn(tx, args, kwargs)
+                    if rv:
+                        return rv
+                unimplemented(error_msg)
+
+        return builtin_dipatch
+
+    def _handle_insert_op_in_graph(self, tx, args, kwargs):
+        from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
+
+        if kwargs and not self.tensor_args(*args, *kwargs.values()):
+            return
+
+        fn = self.fn
+        try:
+            # Constant fold for constant tensor and python constants
+            if self.python_and_tensor_constant_only(*args, **kwargs):
+                from ..bytecode_transformation import unique_id
+                from .functions import invoke_and_store_as_constant
+
+                return invoke_and_store_as_constant(
+                    tx, fn, unique_id(fn.__name__), args, kwargs
+                )
+
+            if fn in IN_PLACE_DESUGARING_MAP and isinstance(
+                args[0], variables.ConstantVariable
+            ):
+                # In-place operators like += usually mustate tensor
+                # values, but in the edge case of immutable values they
+                # re-bind the variable.
+                #
+                # The easiest way to keep the graph consistent in this
+                # scenario is to de-sugar eagerly.
+                fn, args = IN_PLACE_DESUGARING_MAP[fn], [args[0], args[1]]
+
+            if fn is operator.getitem and isinstance(args[1], SymNodeVariable):
+                # Standard indexing will force specialization due to
+                # __index__.  Rewrite as a regular torch op which will
+                # trace fine
+                fn, args = torch.select, [
+                    args[0],
+                    variables.ConstantVariable.create(0),
+                    args[1],
+                ]
+
+            # Interaction between ndarray and tensors:
+            #   We prefer the tensor op whenever there are tensors involved
+            if check_numpy_ndarray_args(args, kwargs) and not any(
+                type(arg) == variables.TensorVariable for arg in args
+            ):
+                proxy = tx.output.create_proxy(
+                    "call_function",
+                    numpy_operator_wrapper(fn),
+                    *proxy_args_kwargs(args, kwargs),
+                )
+
+                return wrap_fx_proxy_cls(variables.NumpyNdarrayVariable, tx, proxy)
+
+            proxy = tx.output.create_proxy(
+                "call_function",
+                fn,
+                *proxy_args_kwargs(args, kwargs),
+            )
+            if any(isinstance(arg, FakeItemVariable) for arg in args):
+                return wrap_fx_proxy_cls(
+                    FakeItemVariable,
+                    tx,
+                    proxy,
+                )
+            elif check_unspec_python_args(args, kwargs):
+                _args, _kwargs = self.unwrap_unspec_args_kwargs(args, kwargs)
+                raw_value = fn(*_args, **_kwargs)
+
+                need_unwrap = any(
+                    x.need_unwrap
+                    for x in itertools.chain(args, kwargs.values())
+                    if isinstance(x, variables.UnspecializedPythonVariable)
+                )
+
+                return wrap_fx_proxy_cls(
+                    UnspecializedPythonVariable,
+                    tx,
+                    proxy,
+                    raw_value=raw_value,
+                    need_unwrap=need_unwrap,
+                )
+            elif all(isinstance(x, SymNodeVariable) for x in args):
+                return SymNodeVariable.create(tx, proxy, None)
+            else:
+                # Work around for vision_maskrcnn due to precision difference
+                # specialize the dividend when float divide by tensor
+                if fn is operator.truediv and isinstance(
+                    args[0], variables.UnspecializedPythonVariable
+                ):
+                    args[0] = args[0].convert_to_constant(tx)
+                return wrap_fx_proxy(tx, proxy)
+
+        except NotImplementedError:
+            unimplemented(f"partial tensor op: {self} {args} {kwargs}")
+
+    call_function_handler_cache = {}
+
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from . import UserFunctionVariable
-        from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
+        if kwargs:
+            kwargs = {k: v.realize() for k, v in kwargs.items()}
+            key = (self.fn, *(type(x) for x in args), True)
+        else:
+            key = (self.fn, *(type(x) for x in args))
 
-        args = [v.realize() for v in args]
-        kwargs = {k: v.realize() for k, v in kwargs.items()}
-        constant_args = check_constant_args(args, kwargs)
-        tensor_args = self.tensor_args(*args, **kwargs)
-        unspec_python_args = self.unspec_python_args(*args, **kwargs)
-        has_constant_handler = self.can_constant_fold_through() and (
-            constant_args or unspec_python_args
-        )
-        assert isinstance(args, (list, tuple))
-        assert isinstance(kwargs, dict)
-
-        # args[0] is list and args[1] is unspec
-        if self.fn is operator.getitem and not isinstance(
-            args[0], variables.TensorVariable
-        ):
-            tensor_args = False
-
-        if (
-            self.can_insert_in_graph()
-            and tensor_args
-            and not (
-                self.fn is operator.getitem
-                and isinstance(args[0], ConstDictVariable)
-                and isinstance(args[1], variables.TensorVariable)
+        handler = self.call_function_handler_cache.get(key)
+        if not handler:
+            self.call_function_handler_cache[key] = handler = self._make_handler(
+                self.fn, [type(x) for x in args], bool(kwargs)
             )
-        ):
-            try:
-                fn = self.fn
+        return handler(tx, args, kwargs)
 
-                if self.fn in IN_PLACE_DESUGARING_MAP and isinstance(
-                    args[0], variables.ConstantVariable
-                ):
-                    # In-place operators like += usually mustate tensor
-                    # values, but in the edge case of immutable values they
-                    # re-bind the variable.
-                    #
-                    # The easiest way to keep the graph consistent in this
-                    # scenario is to de-sugar eagerly.
-                    fn, args = IN_PLACE_DESUGARING_MAP[self.fn], [args[0], args[1]]
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if self.fn == object and name == "__setattr__":
+            assert len(args) == 3
+            assert len(kwargs) == 0
+            obj, name_var, val = args
+            obj = obj.realize()
+            if (
+                isinstance(obj, UserDefinedObjectVariable)
+                and tx.output.side_effects.is_attribute_mutation(obj)
+                and name_var.is_python_constant()
+            ):
+                return obj.method_setattr_standard(tx, name_var, val)
+        if self.fn == dict and name == "fromkeys":
+            return BuiltinVariable.call_custom_dict_fromkeys(tx, dict, *args, **kwargs)
+        if self.fn == itertools.chain and name == "from_iterable":
+            assert len(args) == 1
+            assert len(kwargs) == 0
+            obj = args[0]
+            items = []
+            for item in obj.unpack_var_sequence(tx):
+                items.extend(item.unpack_var_sequence(tx))
+            return variables.TupleVariable(items)
 
-                if self.fn is operator.getitem and isinstance(args[1], SymNodeVariable):
-                    # Standard indexing will force specialization due to
-                    # __index__.  Rewrite as a regular torch op which will
-                    # trace fine
-                    fn, args = torch.select, [
-                        args[0],
-                        variables.ConstantVariable.create(0),
-                        args[1],
-                    ]
+        return super().call_method(tx, name, args, kwargs)
 
-                # Interaction between ndarray and tensors:
-                #   We prefer the tensor op whenever there are tensors involved
-                if check_numpy_ndarray_args(args, kwargs) and not any(
-                    type(arg) == variables.TensorVariable for arg in args
-                ):
-                    proxy = tx.output.create_proxy(
-                        "call_function",
-                        numpy_operator_wrapper(self.fn),
-                        *proxy_args_kwargs(args, kwargs),
-                    )
-
-                    return wrap_fx_proxy_cls(variables.NumpyNdarrayVariable, tx, proxy)
-
-                proxy = tx.output.create_proxy(
-                    "call_function",
-                    fn,
-                    *proxy_args_kwargs(args, kwargs),
-                )
-                if any(isinstance(arg, FakeItemVariable) for arg in args):
-                    return wrap_fx_proxy_cls(
-                        FakeItemVariable,
-                        tx,
-                        proxy,
-                    )
-                elif self.unspec_python_args(*args, **kwargs):
-                    _args, _kwargs = self.unwrap_unspec_args_kwargs(args, kwargs)
-                    raw_value = self.fn(*_args, **_kwargs)
-
-                    need_unwrap = any(
-                        x.need_unwrap
-                        for x in itertools.chain(args, kwargs.values())
-                        if isinstance(x, variables.UnspecializedPythonVariable)
-                    )
-
-                    return wrap_fx_proxy_cls(
-                        UnspecializedPythonVariable,
-                        tx,
-                        proxy,
-                        raw_value=raw_value,
-                        need_unwrap=need_unwrap,
-                    )
-                elif all(isinstance(x, SymNodeVariable) for x in args):
-                    return SymNodeVariable.create(tx, proxy, None)
-                else:
-                    # Work around for vision_maskrcnn due to precision difference
-                    # specialize the dividend when float divide by tensor
-                    if self.fn is operator.truediv and isinstance(
-                        args[0], variables.UnspecializedPythonVariable
-                    ):
-                        args[0] = args[0].convert_to_constant(tx)
-                    return wrap_fx_proxy(tx, proxy)
-
-            except NotImplementedError:
-                unimplemented(f"partial tensor op: {self} {args} {kwargs}")
-
+    def _call_int_float(self, tx, arg):
         # Handle cases like int(torch.seed())
         # Also handle sym_float to sym_int cases
-        if self.fn in (int, float) and isinstance(
-            args[0], (SymNodeVariable, variables.TensorVariable)
-        ):
-            if isinstance(args[0], variables.TensorVariable):
-                item = args[0].call_method(tx, "item", [], {})
+        if isinstance(arg, (SymNodeVariable, variables.TensorVariable)):
+            if isinstance(arg, variables.TensorVariable):
+                item = arg.call_method(tx, "item", [], {})
             else:
-                item = args[0]
+                item = arg
             fn_ = sym_int if self.fn is int else sym_float
-            out = wrap_fx_proxy(
+            from torch._dynamo.variables.builder import wrap_fx_proxy
+
+            return wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_function",
@@ -600,66 +996,14 @@ class BuiltinVariable(VariableTracker):
                     {},
                 ),
             )
-            return out
 
+    call_int = _call_int_float
+    call_float = _call_int_float
+
+    def call_str(self, tx, arg):
         # Handle `str` on a user defined function
-        if self.fn == str and args and isinstance(args[0], (UserFunctionVariable)):
-            return variables.ConstantVariable.create(value=str(args[0].fn))
-
-        # Handle binary ops (e.g. __add__ / __radd__, __iadd__, etc.)
-        # NB: Tensor args are handled above and not here
-        if len(kwargs) == 0 and len(args) == 2:
-            # Try to find a handler for the arg types; otherwise, fall through to constant handler
-            binop_handler = BuiltinVariable._find_binop_handler(
-                self.fn, args[0], args[1]
-            )
-            if binop_handler:
-                res = binop_handler(tx, args[0], args[1], {})
-                if res is not None:
-                    return res
-
-        handler = getattr(self, f"call_{self.fn.__name__}", None)
-        if handler:
-            try:
-                inspect.signature(handler).bind(tx, *args, **kwargs)
-            except TypeError as exc:
-                if not has_constant_handler:
-                    log.warning(
-                        "incorrect arg count %s %s and no constant handler",
-                        handler,
-                        exc,
-                    )
-                handler = None
-
-        if handler:
-            try:
-                result = handler(tx, *args, **kwargs)
-                if result is not None:
-                    return result
-            except Unsupported as exc:
-                if not has_constant_handler:
-                    raise
-                # Actually, we will handle this just fine
-                exc.remove_from_stats()
-
-        if has_constant_handler:
-            # constant fold
-            return variables.ConstantVariable.create(
-                self.as_python_constant()(
-                    *[x.as_python_constant() for x in args],
-                    **{k: v.as_python_constant() for k, v in kwargs.items()},
-                ),
-            )
-
-        if self.fn is round:
-            if len(args) > 0 and isinstance(args[0], SymNodeVariable):
-                raise UserError(
-                    UserErrorType.STANDARD_LIBRARY,
-                    "Calling round() on symbolic value is not supported. "
-                    "You can use floor() to implement this functionality",
-                    case_name="dynamic_shape_round",
-                )
-        return super().call_function(tx, args, kwargs)
+        if isinstance(arg, (variables.UserFunctionVariable)):
+            return variables.ConstantVariable.create(value=str(arg.fn))
 
     def _call_min_max(self, tx, *args):
         if len(args) == 1 and args[0].has_unpack_var_sequence(tx):
@@ -686,7 +1030,9 @@ class BuiltinVariable(VariableTracker):
 
             # result of an item call is a scalar convert to a tensor
             if isinstance(a, FakeItemVariable):
-                a = variables.TorchVariable(torch.tensor).call_function(tx, [a], {})
+                a = variables.TorchInGraphFunctionVariable(torch.tensor).call_function(
+                    tx, [a], {}
+                )
 
             # Dynamic input does not get resolved, rather, gets stored as call_function
             if isinstance(a, SymNodeVariable) or isinstance(b, SymNodeVariable):
@@ -709,7 +1055,7 @@ class BuiltinVariable(VariableTracker):
 
                     fn = variables.NumpyVariable(np.clip)
                 else:
-                    fn = variables.TorchVariable(torch.clamp)
+                    fn = variables.TorchInGraphFunctionVariable(torch.clamp)
                 kwargs = {"min": b} if (self.fn is max) else {"max": b}
                 result = fn.call_function(tx, [a], kwargs)
             else:
@@ -720,7 +1066,7 @@ class BuiltinVariable(VariableTracker):
                     fn = variables.NumpyVariable(fn)
                 else:
                     fn = {max: torch.maximum, min: torch.minimum}[self.fn]
-                    fn = variables.TorchVariable(fn)
+                    fn = variables.TorchInGraphFunctionVariable(fn)
                 result = fn.call_function(tx, [a, b], {})
 
             # return unspec if both a, b are unspec or const
@@ -758,8 +1104,9 @@ class BuiltinVariable(VariableTracker):
             else:
                 return result
         elif isinstance(a, SymNodeVariable) or isinstance(b, SymNodeVariable):
+            fn = torch.sym_max if self.fn is max else torch.sym_min
             proxy = tx.output.create_proxy(
-                "call_function", self.fn, *proxy_args_kwargs([a, b], {})
+                "call_function", fn, *proxy_args_kwargs([a, b], {})
             )
             return SymNodeVariable.create(tx, proxy, None)
 
@@ -773,8 +1120,22 @@ class BuiltinVariable(VariableTracker):
         )
         return abs_method.call_function(tx, [], {})
 
+    def call_pos(self, tx, arg: "VariableTracker"):
+        # Call arg.__pos__()
+        pos_method = BuiltinVariable(getattr).call_function(
+            tx, [arg, ConstantVariable.create("__pos__")], {}
+        )
+        return pos_method.call_function(tx, [], {})
+
+    def call_round(self, tx, arg, *args, **kwargs):
+        # Call arg.__round__()
+        round_method = BuiltinVariable(getattr).call_function(
+            tx, [arg, ConstantVariable.create("__round__")], {}
+        )
+        return round_method.call_function(tx, args, kwargs)
+
     def call_range(self, tx, *args):
-        if self.unspec_python_args(*args) or self.constant_args(*args):
+        if check_unspec_or_constant_args(args, {}):
             return variables.RangeVariable(args)
         elif self._dynamic_args(*args):
             args = [
@@ -811,22 +1172,12 @@ class BuiltinVariable(VariableTracker):
             # determine the control flow
             return obj
 
-        # TODO This should probably be treated as a dict, or dicts should also be treated here
-        if self.fn == set:
-            cls = SetVariable
-        else:
-            cls = variables.BaseListVariable.cls_for(self.fn)
+        cls = variables.BaseListVariable.cls_for(self.fn)
         if obj is None:
-            if cls is SetVariable:
-                return cls(
-                    [],
-                    mutable_local=MutableLocal(),
-                )
-            else:
-                return cls(
-                    [],
-                    mutable_local=MutableLocal(),
-                )
+            return cls(
+                [],
+                mutable_local=MutableLocal(),
+            )
         elif obj.has_unpack_var_sequence(tx):
             if obj.source and not is_constant_source(obj.source):
                 if isinstance(obj, TupleIteratorVariable):
@@ -834,22 +1185,31 @@ class BuiltinVariable(VariableTracker):
                         obj.source.make_guard(GuardBuilder.TUPLE_ITERATOR_LEN)
                     )
                 else:
-                    install_guard(obj.source.make_guard(GuardBuilder.LIST_LENGTH))
-            if cls is SetVariable:
-                return cls(
-                    list(obj.unpack_var_sequence(tx)),
-                    mutable_local=MutableLocal(),
-                )
+                    if getattr(obj, "source", False) and isinstance(
+                        obj, ConstDictVariable
+                    ):
+                        tx.output.guard_on_key_order.add(obj.source.name())
+
+                    install_guard(obj.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
 
             return cls(
                 list(obj.unpack_var_sequence(tx)),
                 mutable_local=MutableLocal(),
             )
 
-    call_iter = _call_iter_tuple_list
+    def call_iter(self, tx, obj, *args, **kwargs):
+        # Handle the case where we are iterating over a tuple, list or iterator
+        ret = self._call_iter_tuple_list(tx, obj, *args, **kwargs)
+
+        if ret is None:
+            # If the object doesn't implement a __iter__ method, it will be an error in eager mode when calling iter on it anyway.
+            # If the object implements a __iter__ method, inlining effectively forwards the call to another iter call
+            # (e.g. when __iter__ just returns iter(self.list)) or return a user-defined iterator.
+            return obj.call_method(tx, "__iter__", args, kwargs)
+        return ret
+
     call_tuple = _call_iter_tuple_list
     call_list = _call_iter_tuple_list
-    call_set = _call_iter_tuple_list
 
     def call_callable(self, tx, arg):
         from .functions import BaseUserFunctionVariable
@@ -858,6 +1218,10 @@ class BuiltinVariable(VariableTracker):
             arg, (variables.UserDefinedClassVariable, BaseUserFunctionVariable)
         ):
             return variables.ConstantVariable.create(True)
+        elif isinstance(arg, UserDefinedVariable):
+            return variables.ConstantVariable.create(callable(arg.value))
+        elif isinstance(arg, (ConstantVariable, SymNodeVariable, TensorVariable)):
+            return variables.ConstantVariable.create(False)
 
     def call_cast(self, _, *args, **kwargs):
         if len(args) == 2:
@@ -887,24 +1251,76 @@ class BuiltinVariable(VariableTracker):
                     ListIteratorVariable,
                 ),
             ):
-                items = user_cls()
-                for x in arg.unpack_var_sequence(tx):
-                    k, v = x.unpack_var_sequence(tx)
-                    k = ConstDictVariable.get_key(k)
-                    items.update({k: v})
+                items = dict(
+                    x.unpack_var_sequence(tx) for x in arg.unpack_var_sequence(tx)
+                )
                 return ConstDictVariable(items, user_cls, mutable_local=MutableLocal())
         elif not args and kwargs:
+            items = {ConstantVariable.create(k): v for k, v in kwargs.items()}
             return variables.ConstDictVariable(
-                dict(kwargs), user_cls=user_cls, mutable_local=MutableLocal()
+                items, user_cls=user_cls, mutable_local=MutableLocal()
             )
-        unimplemented(f"dict(): {args} {kwargs}")
+        unimplemented(f"{user_cls.__name__}(): {args} {kwargs}")
 
-    def call_zip(self, tx, *args):
+    @staticmethod
+    def call_custom_dict_fromkeys(tx, user_cls, *args, **kwargs):
+        assert user_cls in {dict, OrderedDict, defaultdict}
+        if kwargs:
+            # Only `OrderedDict.fromkeys` accepts `value` passed by keyword
+            assert user_cls is OrderedDict
+            assert len(args) == 1 and len(kwargs) == 1 and "value" in kwargs
+            args = (*args, kwargs.pop("value"))
+        if len(args) == 0:
+            raise UserError(TypeError, "fromkeys expected at least 1 argument, got 0")
+        if len(args) == 1:
+            args = (*args, ConstantVariable.create(None))
+        assert len(args) == 2
+        arg, value = args
+        DictVariableType = (
+            ConstDictVariable if user_cls is not defaultdict else DefaultDictVariable
+        )
+
+        if isinstance(arg, dict):
+            arg = [ConstantVariable.create(k) for k in arg.keys()]
+            return DictVariableType(
+                dict.fromkeys(arg, value), user_cls, mutable_local=MutableLocal()
+            )
+        elif arg.has_unpack_var_sequence(tx) and all(
+            is_hashable(v) for v in arg.unpack_var_sequence(tx)
+        ):
+            keys = arg.unpack_var_sequence(tx)
+            return DictVariableType(
+                dict.fromkeys(keys, value), user_cls, mutable_local=MutableLocal()
+            )
+        unimplemented(f"{user_cls.__name__}.fromkeys(): {args} {kwargs}")
+
+    def call_set(self, tx, *args, **kwargs):
+        # Can we merge this implementation and call_dict's one?
+        assert not kwargs
+        if not args:
+            return SetVariable([], mutable_local=MutableLocal())
+        assert len(args) == 1
+        arg = args[0]
+        if isinstance(arg, variables.SetVariable):
+            return arg.clone(mutable_local=MutableLocal())
+        elif arg.has_unpack_var_sequence(tx):
+            items = arg.unpack_var_sequence(tx)
+            return SetVariable(items, mutable_local=MutableLocal())
+        else:
+            unimplemented(f"set(): {args} {kwargs}")
+
+    def call_zip(self, tx, *args, **kwargs):
+        if kwargs:
+            assert len(kwargs) == 1 and "strict" in kwargs
         if all(x.has_unpack_var_sequence(tx) for x in args):
-            items = [
-                variables.TupleVariable(list(item))
-                for item in zip(*[arg.unpack_var_sequence(tx) for arg in args])
-            ]
+            unpacked = [arg.unpack_var_sequence(tx) for arg in args]
+            if kwargs.pop("strict", False) and len(unpacked) > 0:
+                if not all(len(u) == len(unpacked[0]) for u in unpacked):
+                    raise UserError(
+                        ValueError,
+                        "zip() has one argument of len differing from others",
+                    )
+            items = [variables.TupleVariable(list(item)) for item in zip(*unpacked)]
             return variables.TupleVariable(items)
 
     def call_enumerate(self, tx, *args):
@@ -930,7 +1346,12 @@ class BuiltinVariable(VariableTracker):
         return args[0].call_method(tx, "__getitem__", args[1:], kwargs)
 
     def call_isinstance(self, tx, arg, isinstance_type):
-        arg_type = arg.python_type()
+        try:
+            arg_type = arg.python_type()
+        except NotImplementedError:
+            unimplemented(
+                f"isinstance({arg}, {isinstance_type}): can't determine type of {arg}"
+            )
 
         isinstance_type = isinstance_type.as_python_constant()
 
@@ -985,14 +1406,14 @@ class BuiltinVariable(VariableTracker):
     def call_super(self, tx, a, b):
         return variables.SuperVariable(a, b)
 
-    def call_next(self, tx, arg):
-        if isinstance(
-            arg, (variables.ListIteratorVariable, variables.IteratorVariable)
-        ):
-            val, next_iter = arg.next_variables(tx)
-            return val
-        elif isinstance(arg, variables.BaseListVariable):
-            return arg.items[0]
+    def call_next(self, tx, arg: VariableTracker):
+        try:
+            return arg.next_variable(tx)
+        except Unsupported as ex:
+            if isinstance(arg, variables.BaseListVariable):
+                ex.remove_from_stats()
+                return arg.items[0]
+            raise
 
     def call_hasattr(self, tx, obj, attr):
         if attr.is_python_constant():
@@ -1004,42 +1425,47 @@ class BuiltinVariable(VariableTracker):
             items = [fn.call_function(tx, [x], {}) for x in seq.unpack_var_sequence(tx)]
             return variables.TupleVariable(items)
 
-    def call_sum(self, tx, seq, **kwargs):
+    def call_sum(self, tx, seq, start=_SENTINEL):
         # Special case for sum on tuple of floats and ints
-        if (
-            isinstance(seq, (variables.ListVariable, variables.TupleVariable))
-            and all(
-                isinstance(x, variables.ConstantVariable)
-                and isinstance(x.value, (int, float))
-                for x in seq.items
-            )
-            and not kwargs
+        if isinstance(seq, (variables.ListVariable, variables.TupleVariable)) and all(
+            isinstance(x, variables.ConstantVariable)
+            and isinstance(x.value, (int, float))
+            for x in seq.items
         ):
-            new_list = [x.value for x in seq.items]
-            return variables.ConstantVariable.create(sum(new_list))
+            if start is self._SENTINEL:
+                return variables.ConstantVariable.create(
+                    sum(x.value for x in seq.items),
+                )
+            if isinstance(start, variables.ConstantVariable) and isinstance(
+                start.value, (int, float)
+            ):
+                return variables.ConstantVariable.create(
+                    sum((x.value for x in seq.items), start=start.value),
+                )
         if seq.has_unpack_var_sequence(tx):
-            start = kwargs.pop(
-                "start", variables.ConstantVariable.create(0)
-            ).as_python_constant()
-            assert not kwargs
-            items = seq.unpack_var_sequence(tx)[start:]
+            if start is self._SENTINEL:
+                start = variables.ConstantVariable.create(0)
+            items = seq.unpack_var_sequence(tx)
             return BuiltinVariable(functools.reduce).call_function(
                 tx,
                 [
                     BuiltinVariable(operator.add),
                     variables.TupleVariable(items),
-                    variables.ConstantVariable.create(0),
+                    start,
                 ],
                 {},
             )
 
-    def call_reduce(self, tx, function, iterable, initializer=None):
+    def call_StopIteration(self, tx, *args):
+        return variables.StopIterationVariable([*args])
+
+    def call_reduce(self, tx, function, iterable, initial=_SENTINEL):
         if iterable.has_unpack_var_sequence(tx):
             items = iterable.unpack_var_sequence(tx)
-            if initializer is None:
+            if initial is self._SENTINEL:
                 value, items = items[0], items[1:]
             else:
-                value = initializer
+                value = initial
             for element in items:
                 value = function.call_function(tx, [value, element], {})
             return value
@@ -1053,7 +1479,6 @@ class BuiltinVariable(VariableTracker):
             GetAttrVariable,
             PythonModuleVariable,
             TorchInGraphFunctionVariable,
-            TorchVariable,
             UserFunctionVariable,
         )
         from .builder import SourcelessBuilder, VariableBuilder
@@ -1064,6 +1489,24 @@ class BuiltinVariable(VariableTracker):
             unimplemented("non-const getattr() name")
 
         if tx.output.side_effects.is_attribute_mutation(obj):
+            if isinstance(obj, variables.UnspecializedNNModuleVariable):
+                if (
+                    name
+                    in (
+                        "named_parameters",
+                        "parameters",
+                        "named_buffers",
+                        "buffers",
+                        "named_modules",
+                        "modules",
+                    )
+                    and obj.is_state_mutated
+                    and tx.output.side_effects.has_pending_mutation(obj)
+                ):
+                    unimplemented(
+                        f"pending mutation on nn module, so graph breaking at {name!r} call"
+                    )
+
             try:
                 # re-read a pending side effect?
                 return tx.output.side_effects.load_attr(obj, name)
@@ -1094,7 +1537,7 @@ class BuiltinVariable(VariableTracker):
                             for i, b in enumerate(bases)
                         ]
                     else:
-                        tuple_args = [SourcelessBuilder()(tx, b) for b in bases]
+                        tuple_args = [SourcelessBuilder.create(tx, b) for b in bases]
 
                     return variables.TupleVariable(tuple_args, **options)
             except NotImplementedError:
@@ -1102,106 +1545,59 @@ class BuiltinVariable(VariableTracker):
 
         if isinstance(obj, variables.NNModuleVariable):
             return obj.var_getattr(tx, name)
-        elif isinstance(obj, variables.TensorVariable) and name == "grad":
-            if source:
-                # We are going to be raising this tensor as grapharg. So, ensure
-                # that we have real grad value instead of fake tensor value.
-                # Walk through the inputs of the subgraph and find if we already
-                # have the original tensor stored in the graphargs.
-                for grapharg in tx.output.graphargs:
-                    if grapharg.source == source.base:
-                        old_grad = grapharg.example.grad
-                        new_grad = obj.as_proxy().node.meta["example_value"].grad
-
-                        def _grad_changed(old, new):
-                            if old is None or new is None:
-                                return new is not old
-                            try:
-                                if old.shape != new.shape:
-                                    return True
-                                if old.stride() != new.stride():
-                                    return True
-                                return False
-                            except TypeError as te:
-                                # There is a rare edge case in which
-                                # we seem to get symbol mismatches
-                                # for jagged tensor comparison.
-                                # See PYTORCH_TEST_WITH_DYNAMO=1 python test/test_nestedtensor.py
-                                #   -k test_dropout_backward_layout_torch_jagged_cpu
-                                unimplemented(str(te))
-
-                        if _grad_changed(old_grad, new_grad):
-                            if new_grad is not None:
-                                grad_shape_specialized = [
-                                    int(x) for x in new_grad.shape
-                                ]
-                                # We lazily update the grad on the example to its real state as tracked by fake tensor.
-                                # This allocation is fine - it is just a hint. It will not make it to runtime, but it coerces
-                                # the underlying value to always be correct.
-                                grapharg.example.grad = torch.zeros(
-                                    grad_shape_specialized, device=new_grad.device
-                                )
-                            else:
-                                grapharg.example.grad = None
-                        return VariableBuilder(tx, source)(grapharg.example.grad)
-                unimplemented("tensor grad")
-            else:
-                unimplemented("tensor grad")
         elif isinstance(
             obj,
             (
                 variables.TensorVariable,
                 variables.NamedTupleVariable,
                 variables.ConstantVariable,
+                variables.DistributedVariable,
                 variables.UserDefinedClassVariable,
                 variables.UserDefinedObjectVariable,
             ),
         ):
             try:
-                return obj.var_getattr(tx, name).clone(source=source)
+                return obj.var_getattr(tx, name)
             except NotImplementedError:
                 return GetAttrVariable(obj, name, **options)
         elif isinstance(obj, TorchInGraphFunctionVariable):
+            # Get OpOverload from an OpOverloadPacket, e.g., torch.ops.aten.add.default.
             member = getattr(obj.value, name)
-            if trace_rules.lookup(member) is not None:
-                return trace_rules.lookup(member)(member, **options)
-        elif isinstance(obj, TorchVariable):
-            member = getattr(obj.value, name)
-            if is_utils_checkpoint(member):
-                options["source"] = source
-                return build_checkpoint_variable(**options)
-            elif trace_rules.lookup(member) is not None:
-                return trace_rules.lookup(member)(member, **options)
-            elif source is not None:
-                return VariableBuilder(tx, source)(member)
-            else:
-                return SourcelessBuilder()(tx, member)
+            if isinstance(
+                member, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
+            ) and trace_rules.is_aten_op_or_tensor_method(member):
+                return TorchInGraphFunctionVariable(member, **options)
         elif isinstance(obj, (PythonModuleVariable, DummyModule)):
-            member = obj.value.__dict__[name]
+            if obj.is_torch:
+                member = getattr(obj.value, name)
+            else:
+                member = obj.value.__dict__[name]
 
             if config.replay_record_enabled:
                 tx.exec_recorder.record_module_access(obj.value, name, member)
 
-            return VariableBuilder(tx, source)(member)
+            if source is not None:
+                return VariableBuilder(tx, source)(member)
+            else:
+                return SourcelessBuilder.create(tx, member)
         elif istype(obj, UserFunctionVariable) and name in ("__name__", "__module__"):
             return ConstantVariable.create(getattr(obj.fn, name))
         else:
             try:
-                return obj.var_getattr(tx, name).clone(source=source)
+                return obj.var_getattr(tx, name)
             except NotImplementedError:
                 return GetAttrVariable(obj, name, **options)
 
     def call_setattr(
         self, tx, obj: VariableTracker, name_var: VariableTracker, val: VariableTracker
     ):
-        from .distributed import PlacementVariable
-
         if isinstance(
             obj,
             (
                 variables.DataClassVariable,
                 variables.CustomizedDictVariable,
-                PlacementVariable,
+                variables.PlacementVariable,
+                variables.UserDefinedObjectVariable,
             ),
         ):
             return obj.call_method(tx, "__setattr__", [name_var, val], {})
@@ -1210,11 +1606,62 @@ class BuiltinVariable(VariableTracker):
             and name_var.is_python_constant()
         ):
             name = name_var.as_python_constant()
-            if name == "requires_grad" and isinstance(obj, variables.TensorVariable):
-                unimplemented(
-                    "mutating requires_grad can introduce a new leaf from non-leaf or vice versa in "
-                    "the middle of the graph, which aot_autograd does not currently know how to handle. "
-                )
+            if isinstance(obj, variables.TensorVariable):
+                from .builder import wrap_fx_proxy
+
+                if name == "requires_grad":
+                    # TODO(voz): Make it work properly
+                    unimplemented(
+                        "mutating requires_grad can introduce a new leaf from non-leaf or vice versa in "
+                        "the middle of the graph, which aot_autograd does not currently know how to handle. "
+                    )
+                if name == "data":
+                    # Remove the old reference in tracked fakes - if we don't do this
+                    # new .data value size and shape differences will cause
+                    # tracked fakes to produce incorrect guards. This is sound because the TensorVariable
+                    # coming out of set_() below will be a new one, and get
+                    # installed in tracked fakes.
+                    to_remove = []
+                    for tf in tx.output.tracked_fakes:
+                        if tf.source == obj.source:
+                            to_remove.append(tf)
+                    for tf in to_remove:
+                        tx.output.tracked_fakes.remove(tf)
+
+                    # Step 1 - disable grads
+                    with dynamo_disable_grad(tx), torch.no_grad():
+                        # Step 2 - call `set_`
+                        out = wrap_fx_proxy(
+                            tx,
+                            tx.output.create_proxy(
+                                "call_function",
+                                torch.Tensor.set_,
+                                *proxy_args_kwargs([obj, val], {}),
+                            ),
+                        )
+
+                    # Step 3 - drop the version counter - this is a step required to get
+                    # .data setting to play correctly with the autograd engine.
+                    # Essentially, dynamo is trying to faithfully preserve the (absurd)
+                    # behavior of .data= from eager mode
+                    def _lower_version_count_by_1(x):
+                        version = x._version
+                        if version > 0:
+                            version = version - 1
+                        torch._C._autograd._unsafe_set_version_counter(x, version)
+                        return x
+
+                    tx.output.create_proxy(
+                        "call_function",
+                        _lower_version_count_by_1,
+                        (out.as_proxy(),),
+                        {},
+                    )
+                    _lower_version_count_by_1(obj.as_proxy().node.meta["example_value"])
+                    # This handles options prop, guards and ends with a clone
+                    # Step 4 - replace all reference to the current object with the new one
+                    return out
+
             tx.output.side_effects.store_attr(obj, name, val)
             return val
         elif isinstance(obj, variables.UserDefinedObjectVariable):
@@ -1279,7 +1726,7 @@ class BuiltinVariable(VariableTracker):
             ) from None
 
         if obj.source is None:
-            return SourcelessBuilder()(tx, py_type)
+            return SourcelessBuilder.create(tx, py_type)
         else:
             return VariableBuilder(tx, TypeSource(obj.source))(py_type)
 
@@ -1342,6 +1789,10 @@ class BuiltinVariable(VariableTracker):
         # None no-ops this handler and lets the driving function proceed
         return None
 
+    def call_format(self, tx, _format_string, *args, **kwargs):
+        format_string = _format_string.as_python_constant()
+        return variables.StringFormatVariable.create(format_string, args, kwargs)
+
     def call_id(self, tx, *args):
         if len(args) > 0 and isinstance(args[0], variables.NNModuleVariable):
             nn_mod_variable = args[0]
@@ -1350,134 +1801,66 @@ class BuiltinVariable(VariableTracker):
         else:
             unimplemented(f"call_id with args {args}")
 
-    def _comparison(self, tx, left, right):
-        """
-        Used to implement comparison operators for different types.
-        For example, list1 < list2 is implemented differently from tensor1 < tensor2
-        """
-        from . import (
-            BaseListVariable,
-            ConstantVariable,
-            NNModuleVariable,
-            TensorVariable,
-            UserDefinedObjectVariable,
-            UserFunctionVariable,
-        )
-        from .lists import SizeVariable
-        from .tensor import (
-            supported_const_comparison_ops,
-            supported_tensor_comparison_ops,
-        )
+    def call_deepcopy(self, tx, x):
+        unimplemented(f"copy.deepcopy {repr(x)}")
+
+    def _comparison_with_tensor(self, tx, left, right):
+        from .builder import wrap_fx_proxy_cls
+        from .tensor import supported_tensor_comparison_op_values
 
         op = self.fn
 
-        def _unimplemented():
-            unimplemented(f"comparison {typestr(left)} {op} {typestr(right)}")
-
-        if (
-            all(
-                isinstance(x, (NNModuleVariable, ConstantVariable))
-                for x in [left, right]
-            )
-            and op in supported_const_comparison_ops.values()
-        ):
-            left = (
-                tx.output.get_submodule(left.module_key)
-                if isinstance(left, NNModuleVariable)
-                else left.as_python_constant()
-            )
-            right = (
-                tx.output.get_submodule(right.module_key)
-                if isinstance(right, NNModuleVariable)
-                else right.as_python_constant()
-            )
-            return ConstantVariable.create(op(left, right))
-
-        if isinstance(left, UserFunctionVariable):
-            if op not in supported_const_comparison_ops.values():
-                _unimplemented()
-            if not isinstance(right, UserFunctionVariable):
-                _unimplemented()
-            return ConstantVariable.create(op(left.fn, right.fn))
-
-        # Note, we have a rare BaseListVariable subtype mismatch with valid comparison
-        # x = torch.randn([3, 3])
-        # x.size() == (3, 3) # True
-        # (3, 3) == x.size() # True
-        if isinstance(left, (SizeVariable, TupleVariable)) and isinstance(
-            right, (TupleVariable, SizeVariable)
-        ):
-            return BaseListVariable.list_compare(tx, op, left, right)
-
-        if isinstance(left, BaseListVariable):
-            if not type(left) == type(right):  # Mismatch in BaseListVariable subclasses
-                _unimplemented()
-            return BaseListVariable.list_compare(tx, op, left, right)
-
-        if isinstance(left, SetVariable):
-            if not type(left) == type(right):  # Mismatch in BaseListVariable subclasses
-                _unimplemented()
-            return ConstantVariable.create(
-                op(left._underlying_items, right._underlying_items)
-            )
-
-        if isinstance(left, TensorVariable) or isinstance(right, TensorVariable):
-            from .builder import wrap_fx_proxy_cls
-
-            if op is operator.is_ and isinstance(right, TensorVariable):
-                return ConstantVariable.create(
-                    id(extract_fake_example_value(left.as_proxy().node))
-                    == id(extract_fake_example_value(right.as_proxy().node))
-                )
-
-            if op not in supported_tensor_comparison_ops.values():
-                _unimplemented()
-            if (
+        if op in [operator.is_, operator.is_not]:
+            is_result = (
                 isinstance(left, TensorVariable)
                 and isinstance(right, TensorVariable)
-                and (left.size and right.size) is not None
-                and left.size != right.size
-            ):
-                try:
-                    torch.broadcast_shapes(left.size, right.size)
-                except RuntimeError:
-                    # not broadcastable, can't be compared
-                    _unimplemented()
-            tensor_cls = left if isinstance(left, TensorVariable) else right
-            return wrap_fx_proxy_cls(
-                type(tensor_cls),  # handle Ndarrays and Tensors
-                tx,
-                proxy,
+                and id(extract_fake_example_value(left.as_proxy().node))
+                == id(extract_fake_example_value(right.as_proxy().node))
             )
+            if op is operator.is_:
+                return ConstantVariable.create(is_result)
+            else:
+                return ConstantVariable.create(not is_result)
 
-        if isinstance(left, SymNodeVariable) or isinstance(right, SymNodeVariable):
-            if op not in supported_tensor_comparison_ops.values():
-                _unimplemented()
-
-            proxy = tx.output.create_proxy(
-                "call_function", op, (left.as_proxy(), right.as_proxy()), {}
-            )
-            return SymNodeVariable.create(
-                tx,
-                proxy,
-                sym_num=None,
-            )
-
-        if isinstance(left, UserDefinedObjectVariable) and isinstance(
-            right, UserDefinedObjectVariable
-        ):
-            return ConstantVariable.create(op(left.value, right.value))
-
+        if op not in supported_tensor_comparison_op_values:
+            unimplemented(f"{op.__name__}({left}, {right})")
         if (
-            (isinstance(left, StreamVariable) and isinstance(right, StreamVariable))
-            or (isinstance(left, EventVariable) and isinstance(right, EventVariable))
-        ) and op is operator.eq:
-            return ConstantVariable(op(left.value, right.value))
+            isinstance(left, TensorVariable)
+            and isinstance(right, TensorVariable)
+            and (left.size and right.size) is not None
+            and left.size != right.size
+        ):
+            try:
+                torch.broadcast_shapes(left.size, right.size)
+            except RuntimeError:
+                # not broadcastable, can't be compared
+                unimplemented(f"{op.__name__}({left}, {right})")
+        tensor_cls = left if isinstance(left, TensorVariable) else right
+        proxy = tx.output.create_proxy(
+            "call_function", op, (left.as_proxy(), right.as_proxy()), {}
+        )
+        return wrap_fx_proxy_cls(
+            type(tensor_cls),  # handle Ndarrays and Tensors
+            tx,
+            proxy,
+        )
 
-        if op.__name__ == "is_":
-            # If the two objects are of different type, we can safely return False
-            if type(left) is not type(right):
-                return ConstantVariable.create(False)
+    def _comparison_with_symnode(self, tx, left, right):
+        from .tensor import supported_tensor_comparison_op_values
+
+        op = self.fn
+
+        if op not in supported_tensor_comparison_op_values:
+            unimplemented(f"{op.__name__}({left}, {right})")
+
+        proxy = tx.output.create_proxy(
+            "call_function", op, (left.as_proxy(), right.as_proxy()), {}
+        )
+        return SymNodeVariable.create(
+            tx,
+            proxy,
+            sym_num=None,
+        )
 
     def call_and_(self, tx, a, b):
         # Rely on constant_handler
@@ -1493,8 +1876,9 @@ class BuiltinVariable(VariableTracker):
                 ),
                 sym_num=None,
             )
+        if hasattr(a, "set_items") and hasattr(b, "set_items"):
+            return SetVariable(list(a.set_items & b.set_items))
         # None no-ops this handler and lets the driving function proceed
-        return None
 
     def call_or_(self, tx, a, b):
         # Rely on constant_handler
@@ -1510,6 +1894,8 @@ class BuiltinVariable(VariableTracker):
                 ),
                 sym_num=None,
             )
+        if hasattr(a, "set_items") and hasattr(b, "set_items"):
+            return SetVariable(list(a.set_items | b.set_items))
         # None no-ops this handler and lets the driving function proceed
         return None
 
@@ -1523,23 +1909,29 @@ class BuiltinVariable(VariableTracker):
                 sym_num=None,
             )
 
-        if isinstance(a, ListVariable):
+        # Unwrap the underlying ConstDictVariable
+        if isinstance(a, DictView):
+            a = a.dv_dict
+        if isinstance(a, (ListVariable, ConstDictVariable)):
             return ConstantVariable.create(len(a.items) == 0)
 
         return None
 
-    call_eq = _comparison
-    call_gt = _comparison
-    call_lt = _comparison
-    call_ge = _comparison
-    call_le = _comparison
-    call_ne = _comparison
-    call_is_ = _comparison
-    call_is_not = _comparison
+    def call_contains(self, tx, a: VariableTracker, b: VariableTracker):
+        return a.call_method(tx, "__contains__", [b], {})
 
-    def call_all(self, tx, *args, **kwargs):
-        from .builder import SourcelessBuilder
+    call_all = _polyfill_call_impl("all")
+    call_any = _polyfill_call_impl("any")
 
-        return tx.inline_user_function_return(
-            SourcelessBuilder()(tx, polyfill.all), args, kwargs
-        )
+
+@contextlib.contextmanager
+def dynamo_disable_grad(tx):
+    from . import GradModeVariable
+
+    org_value = torch.is_grad_enabled()
+    gmv = GradModeVariable.create(tx, False)
+    try:
+        gmv.enter(tx)
+        yield
+    finally:
+        gmv.exit(tx)

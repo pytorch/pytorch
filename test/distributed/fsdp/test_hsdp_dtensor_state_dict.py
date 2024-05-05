@@ -9,7 +9,7 @@ import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 
 from torch.distributed._tensor import DTensor, Replicate, Shard
-from torch.distributed._tensor.device_mesh import _mesh_resources, init_device_mesh
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.api import (
     ShardedOptimStateDictConfig,
@@ -50,24 +50,6 @@ class DenseModel(torch.nn.Module):
 
 # TODO: Consolidate DeviceMesh based FSDP and HSDP test cases.
 class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
-    @with_comms
-    @skip_if_lt_x_gpu(4)
-    def test_raises_tp_hsdp_not_supported_error(self):
-        mesh_2d = init_device_mesh(self.device_type, (2, self.world_size // 2))
-        # manually set a fake parent mesh to mesh_2d
-        fake_parent_mesh = init_device_mesh(self.device_type, (self.world_size,))
-        _mesh_resources.child_to_parent_mapping[mesh_2d] = fake_parent_mesh
-
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"Hybrid sharding \+ TP is not supported yet.",
-        ):
-            model = FSDP(
-                DenseModel().cuda(),
-                device_mesh=mesh_2d,
-                sharding_strategy=ShardingStrategy.HYBRID_SHARD,
-            )
-
     def _create_model(self, device_mesh=None):
         if device_mesh:
             model = FSDP(
@@ -77,8 +59,8 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
             )
         else:
             mesh_2d = init_device_mesh(self.device_type, (2, self.world_size // 2))
-            intra_node_pg = mesh_2d.get_dim_groups(mesh_dim=1)
-            inter_node_pg = mesh_2d.get_dim_groups(mesh_dim=0)
+            intra_node_pg = mesh_2d.get_group(mesh_dim=1)
+            inter_node_pg = mesh_2d.get_group(mesh_dim=0)
             model = FSDP(
                 DenseModel().cuda(),
                 process_group=(intra_node_pg, inter_node_pg),

@@ -3,7 +3,6 @@
 #include <ATen/core/Tensor.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pythoncapi_compat.h>
-#include <memory>
 
 #include <ATen/core/function_schema.h>
 #include <pybind11/pybind11.h>
@@ -32,7 +31,7 @@ TORCH_PYTHON_API void registerPythonTensorClass(
     const std::string& device,
     PyObject* python_tensor_class);
 
-TORCH_PYTHON_API void activateCUDATrace();
+TORCH_PYTHON_API void activateGPUTrace();
 
 TORCH_PYTHON_API extern PyObject* THPVariableClass;
 TORCH_PYTHON_API extern PyObject* ParameterClass;
@@ -89,7 +88,7 @@ void pushPyOutToStack(
 
 inline PyObject* THPVariable_WrapList(
     const torch::autograd::variable_list& inputs) {
-  PyObject* pyinput = PyList_New(inputs.size());
+  PyObject* pyinput = PyList_New(static_cast<Py_ssize_t>(inputs.size()));
   for (const auto i : c10::irange(inputs.size())) {
     PyList_SET_ITEM(pyinput, i, THPVariable_Wrap(inputs[i]));
   }

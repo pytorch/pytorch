@@ -1,6 +1,9 @@
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/EmptyTensor.h>
 #include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/detail/XPUHooksInterface.h>
+#include <ATen/Context.h>
+#include <ATen/detail/PrivateUse1HooksInterface.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/util/safe_numerics.h>
 
@@ -10,7 +13,18 @@ namespace at::detail {
 namespace {
 c10::Allocator* GetCPUAllocatorMaybePinned(bool pin_memory) {
   if (pin_memory) {
-    return at::detail::getCUDAHooks().getPinnedMemoryAllocator();
+    // NB: This is not quite right, if you somehow had both CUDA and PrivateUse1 initialized
+    // in the same PyTorch build, you would ONLY ever get the CUDA pinned memory allocator.
+    // To properly support this, see https://github.com/pytorch/pytorch/issues/14560
+    if (at::globalContext().hasCUDA()) {
+      return at::detail::getCUDAHooks().getPinnedMemoryAllocator();
+    } else if (at::globalContext().hasXPU()) {
+      return at::detail::getXPUHooks().getPinnedMemoryAllocator();
+    } else if(at::isPrivateUse1HooksRegistered()) {
+      return at::GetPrivateUse1HooksInterface()->getPinnedMemoryAllocator();
+    } else {
+      TORCH_CHECK(false, "Need to provide pin_memory allocator to use pin memory.")
+    }
   }
   return c10::GetCPUAllocator();
 }
@@ -80,7 +94,7 @@ size_t computeStorageNbytes(
       return 0;
     }
 
-    uint64_t strided_size;
+    uint64_t strided_size = 0;
     overflowed |= c10::mul_overflows(strides[i], sizes[i] - 1, &strided_size);
     overflowed |= c10::add_overflows(size, strided_size, &size);
   }
@@ -134,7 +148,7 @@ SymInt computeStorageNbytes(
   // of the last element according to stride
   SymInt size = 1;
   for (const auto i : c10::irange(sizes.size())) {
-    if (sizes[i] == 0) {
+    if (TORCH_GUARD_SIZE_OBLIVIOUS(sizes[i].sym_eq(0))) {
       return 0;
     }
 
@@ -180,6 +194,15 @@ TensorBase _empty_generic(
 
 TensorBase empty_generic(
     IntArrayRef size,
+    c10::Allocator* allocator,
+    c10::DispatchKeySet ks,
+    ScalarType scalar_type,
+    c10::optional<c10::MemoryFormat> memory_format_opt) {
+  return _empty_generic(size, allocator, ks, scalar_type, memory_format_opt);
+}
+
+TensorBase empty_generic_symint(
+    SymIntArrayRef size,
     c10::Allocator* allocator,
     c10::DispatchKeySet ks,
     ScalarType scalar_type,
@@ -305,7 +328,7 @@ struct MetaAllocator final : public at::Allocator {
   static void deleter(void* const pointer) {
     TORCH_INTERNAL_ASSERT(!pointer);
   }
-  DataPtr allocate(const size_t nbytes) const override {
+  DataPtr allocate(const size_t nbytes) override {
     return {nullptr, nullptr, &deleter, at::Device(DeviceType::Meta)};
   }
   DeleterFnPtr raw_deleter() const override {

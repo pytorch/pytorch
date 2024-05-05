@@ -303,7 +303,7 @@ class LSTM(torch.nn.Module):
         self.batch_first = batch_first
         self.dropout = float(dropout)
         self.bidirectional = bidirectional
-        self.training = False  # We don't want to train using this module
+        self.training = False  # Default to eval mode. If we want to train, we will explicitly set to training.
         num_directions = 2 if bidirectional else 1
 
         if not isinstance(dropout, numbers.Number) or not 0 <= dropout <= 1 or \
@@ -392,9 +392,14 @@ class LSTM(torch.nn.Module):
         for idx in range(other.num_layers):
             observed.layers[idx] = _LSTMLayer.from_float(other, idx, qconfig,
                                                          batch_first=False)
-        # TODO: Remove setting observed to eval to enable QAT.
-        observed.eval()
-        observed = torch.ao.quantization.prepare(observed, inplace=True)
+
+        # Prepare the model
+        if other.training:
+            observed.train()
+            observed = torch.ao.quantization.prepare_qat(observed, inplace=True)
+        else:
+            observed.eval()
+            observed = torch.ao.quantization.prepare(observed, inplace=True)
         return observed
 
     @classmethod

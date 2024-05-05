@@ -201,6 +201,17 @@ PyObject* THPCppFunction_sequence_nr(PyObject* self, PyObject* noargs) {
   auto& fn = *((THPCppFunction*)self)->cdata;
   return THPUtils_packUInt64(fn.sequence_nr());
 }
+
+PyObject* THPCppFunction_set_sequence_nr(
+    PyObject* self,
+    PyObject* sequence_nr) {
+  HANDLE_TH_ERRORS
+  auto& fn = *((THPCppFunction*)self)->cdata;
+  fn.set_sequence_nr(THPUtils_unpackUInt64(sequence_nr));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static struct PyMethodDef default_methods[] = {
     THP_FUNCTION_DEFAULT_METHODS,

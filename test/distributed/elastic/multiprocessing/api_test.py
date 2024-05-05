@@ -22,12 +22,13 @@ import torch
 import torch.multiprocessing as mp
 from torch.distributed.elastic.multiprocessing import ProcessFailure, start_processes
 from torch.distributed.elastic.multiprocessing.api import (
+    _validate_full_rank,
+    _wrap,
+    DefaultLogsSpecs,
     MultiprocessContext,
     RunProcsResult,
     SignalException,
     Std,
-    _validate_full_rank,
-    _wrap,
     to_map,
 )
 from torch.distributed.elastic.multiprocessing.errors import ErrorHandler
@@ -36,12 +37,13 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_WINDOWS,
     NO_MULTIPROCESSING_SPAWN,
+    run_tests,
+    skip_but_pass_in_sandcastle_if,
+    skip_if_pytest,
     TEST_WITH_ASAN,
     TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_TSAN,
     TestCase,
-    run_tests,
-    skip_but_pass_in_sandcastle_if,
 )
 
 
@@ -65,7 +67,6 @@ class RunProcResultsTest(TestCase):
         self.assertTrue(pr_fail.is_failed())
 
     def test_get_failures(self):
-
         error_file0 = os.path.join(self.test_dir, "error0.json")
         error_file1 = os.path.join(self.test_dir, "error1.json")
         eh = ErrorHandler()
@@ -212,8 +213,7 @@ def start_processes_zombie_test(
         entrypoint=entrypoint,
         args=args,
         envs=envs,
-        log_dir=log_dir,
-        redirects=Std.NONE,
+        logs_specs=DefaultLogsSpecs(log_dir=log_dir),
     )
     my_pid = os.getpid()
     mp_queue.put(my_pid)
@@ -272,22 +272,24 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
         def test_invalid_log_dir(self):
             with tempfile.NamedTemporaryFile(dir=self.test_dir) as not_a_dir:
                 cases = {
-                    "does_not_exist": FileNotFoundError,
                     not_a_dir.name: NotADirectoryError,
-                    # test_dir is not empty since we touched not_a_dir file
-                    self.test_dir: RuntimeError,
                 }
 
-                for (log_dir, expected_error) in cases.items():
+                for log_dir, expected_error in cases.items():
                     with self.subTest(log_dir=log_dir, expected_error=expected_error):
                         with self.assertRaises(expected_error):
-                            start_processes(
-                                name="echo",
-                                entrypoint=echo1,
-                                args={0: ("hello",)},
-                                envs={0: {"RANK": "0"}},
-                                log_dir=log_dir,
-                            )
+                            pc = None
+                            try:
+                                pc = start_processes(
+                                    name="echo",
+                                    entrypoint=echo1,
+                                    args={0: ("hello",)},
+                                    envs={0: {"RANK": "0"}},
+                                    logs_specs=DefaultLogsSpecs(log_dir=log_dir),
+                                )
+                            finally:
+                                if pc:
+                                    pc.close()
 
         def test_args_env_len_mismatch(self):
             cases = [
@@ -313,7 +315,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                             entrypoint=echo1,
                             args=args,
                             envs=envs,
-                            log_dir=self.log_dir(),
+                            logs_specs=DefaultLogsSpecs(log_dir=self.log_dir()),
                         )
 
         def test_pcontext_wait(self):
@@ -322,7 +324,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                 entrypoint=time.sleep,
                 args={0: (1,)},
                 envs={0: {}},
-                log_dir=self.log_dir(),
+                logs_specs=DefaultLogsSpecs(log_dir=self.log_dir()),
                 start_method="spawn",
             )
 
@@ -337,7 +339,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                 entrypoint=time.sleep,
                 args={0: (1,)},
                 envs={0: {}},
-                log_dir=self.log_dir(),
+                logs_specs=DefaultLogsSpecs(log_dir=self.log_dir()),
                 start_method="spawn",
             )
 
@@ -353,7 +355,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                 entrypoint=bin("zombie_test.py"),
                 args={0: (1,)},
                 envs={0: {}},
-                log_dir=self.log_dir(),
+                logs_specs=DefaultLogsSpecs(log_dir=self.log_dir()),
             )
 
             pids = pc.pids()
@@ -367,7 +369,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                     entrypoint=dummy_compute,
                     args={},
                     envs={},
-                    log_dir=self.log_dir(),
+                    logs_specs=DefaultLogsSpecs(log_dir=self.log_dir()),
                     start_method=start_method,
                 )
 
@@ -385,14 +387,16 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                         entrypoint=echo0,
                         args={0: ("hello",), 1: ("world",)},
                         envs={0: {}, 1: {}},
-                        log_dir=self.log_dir(),
+                        logs_specs=DefaultLogsSpecs(log_dir=self.log_dir()),
                         start_method=start_method,
                     )
 
                     results = pc.wait(period=0.1)
                     self.assertEqual({0: None, 1: None}, results.return_values)
 
-        @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "tests incompatible with asan")
+        @skip_but_pass_in_sandcastle_if(
+            TEST_WITH_DEV_DBG_ASAN, "tests incompatible with asan"
+        )
         def test_function_large_ret_val(self):
             # python multiprocessing.queue module uses pipes and actually PipedQueues
             # This means that if a single object is greater than a pipe size
@@ -404,11 +408,11 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
             for start_method in self._start_methods:
                 with self.subTest(start_method=start_method):
                     pc = start_processes(
+                        logs_specs=DefaultLogsSpecs(log_dir=self.log_dir()),
                         name="echo",
                         entrypoint=echo_large,
                         args={0: (size,), 1: (size,), 2: (size,), 3: (size,)},
                         envs={0: {}, 1: {}, 2: {}, 3: {}},
-                        log_dir=self.log_dir(),
                         start_method=start_method,
                     )
 
@@ -429,8 +433,11 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                         name="echo",
                         entrypoint=echo2,
                         args={0: ("hello", RAISE), 1: ("world",)},
-                        envs={0: {}, 1: {}},
-                        log_dir=log_dir,
+                        envs={
+                            0: {"TORCHELASTIC_RUN_ID": "run_id"},
+                            1: {"TORCHELASTIC_RUN_ID": "run_id"},
+                        },
+                        logs_specs=DefaultLogsSpecs(log_dir=log_dir),
                         start_method=start_method,
                     )
 
@@ -447,9 +454,10 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                     self.assertEqual(1, failure.exitcode)
                     self.assertEqual("<N/A>", failure.signal_name())
                     self.assertEqual(pc.pids()[0], failure.pid)
-                    self.assertEqual(
-                        os.path.join(log_dir, "0", "error.json"), error_file
+                    self.assertTrue(
+                        error_file.startswith(os.path.join(log_dir, "run_id_"))
                     )
+                    self.assertTrue(error_file.endswith("attempt_0/0/error.json"))
                     self.assertEqual(
                         int(error_file_data["message"]["extraInfo"]["timestamp"]),
                         int(failure.timestamp),
@@ -468,8 +476,10 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                 entrypoint=bin("echo1.py"),
                 args={0: ("--exitcode", FAIL, "foo"), 1: ("--exitcode", 0, "bar")},
                 envs={0: {"RANK": "0"}, 1: {"RANK": "1"}},
-                log_dir=self.log_dir(),
-                redirects={0: Std.ALL},
+                logs_specs=DefaultLogsSpecs(
+                    log_dir=self.log_dir(),
+                    redirects={0: Std.ALL},
+                ),
             )
 
             results = pc.wait(period=0.1)
@@ -494,7 +504,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                 entrypoint=bin("echo2.py"),
                 args={0: ("--raises", "true", "foo"), 1: ("bar",)},
                 envs={0: {"RANK": "0"}, 1: {"RANK": "1"}},
-                log_dir=self.log_dir(),
+                logs_specs=DefaultLogsSpecs(log_dir=self.log_dir()),
             )
 
             results = pc.wait(period=0.1)
@@ -515,7 +525,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                     entrypoint="does_not_exist.py",
                     args={0: ("foo"), 1: ("bar",)},
                     envs={0: {}, 1: {}},
-                    log_dir=self.log_dir(),
+                    logs_specs=DefaultLogsSpecs(log_dir=self.log_dir()),
                 )
 
         def test_validate_full_rank(self):
@@ -532,12 +542,10 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                 name="test_mp",
                 entrypoint=echo0,
                 args={0: (0, 1)},
-                envs={},
-                stdouts={0: {}},
-                stderrs={0: {}},
-                tee_stdouts={0: "tee_stdout"},
-                tee_stderrs={0: "tee_stderr"},
-                error_files={0: "test_file"},
+                envs={0: {}},
+                logs_specs=DefaultLogsSpecs(
+                    log_dir=self.log_dir(), redirects=Std.ALL, tee=Std.ALL
+                ),
                 start_method="spawn",
             )
             mp_context._pc = mock.Mock()
@@ -573,9 +581,11 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                         entrypoint=echo1,
                         args={0: ("hello",), 1: ("hello",)},
                         envs={0: {"RANK": "0"}, 1: {"RANK": "1"}},
-                        log_dir=self.log_dir(),
+                        logs_specs=DefaultLogsSpecs(
+                            log_dir=self.log_dir(),
+                            redirects=redirs,
+                        ),
                         start_method=start_method,
-                        redirects=redirs,
                     )
 
                     results = pc.wait(period=0.1)
@@ -608,9 +618,11 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                         entrypoint=bin("echo1.py"),
                         args={0: ("hello",), 1: ("hello",)},
                         envs={0: {"RANK": "0"}, 1: {"RANK": "1"}},
-                        log_dir=self.log_dir(),
+                        logs_specs=DefaultLogsSpecs(
+                            log_dir=self.log_dir(),
+                            redirects=redirs,
+                        ),
                         log_line_prefixes={0: "[rank0]:", 1: "[rank1]:"},
-                        redirects=redirs,
                     )
 
                     results = pc.wait(period=0.1)
@@ -641,11 +653,13 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                 entrypoint=bin("echo1.py"),
                 args={0: ("hello",), 1: ("world",)},
                 envs={0: {"RANK": "0"}, 1: {"RANK": "1"}},
-                log_dir=self.log_dir(),
+                logs_specs=DefaultLogsSpecs(
+                    log_dir=self.log_dir(),
+                    redirects={0: Std.ERR, 1: Std.NONE},
+                    tee={0: Std.OUT, 1: Std.ERR},
+                ),
                 log_line_prefixes={0: "[rank0]:", 1: "[rank1]:"},
                 start_method="spawn",
-                redirects={0: Std.ERR, 1: Std.NONE},
-                tee={0: Std.OUT, 1: Std.ERR},
             )
 
             result = pc.wait()
@@ -663,6 +677,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
 if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS or IS_CI):
 
     class StartProcessesNotCITest(StartProcessesTest):
+        @skip_if_pytest
         def test_wrap_bad(self):
             none = ""
             stdout_log = os.path.join(self.test_dir, "stdout.log")
@@ -700,7 +715,9 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS or IS_CI):
                 entrypoint=bin("echo3.py"),
                 args={0: ("--segfault", "true", "foo"), 1: ("bar",)},
                 envs={0: {"RANK": "0"}, 1: {"RANK": "1"}},
-                log_dir=self.log_dir(),
+                logs_specs=DefaultLogsSpecs(
+                    log_dir=self.log_dir(),
+                ),
             )
 
             results = pc.wait(period=0.1)
@@ -721,16 +738,17 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS or IS_CI):
         def test_function_redirect_and_tee(self):
             for start_method in self._start_methods:
                 with self.subTest(start_method=start_method):
-                    log_dir = self.log_dir()
                     pc = start_processes(
                         name="trainer",
                         entrypoint=echo1,
                         args={0: ("hello",), 1: ("world",)},
                         envs={0: {"RANK": "0"}, 1: {"RANK": "1"}},
-                        log_dir=log_dir,
+                        logs_specs=DefaultLogsSpecs(
+                            log_dir=self.log_dir(),
+                            redirects={0: Std.ERR, 1: Std.NONE},
+                            tee={0: Std.OUT, 1: Std.ERR},
+                        ),
                         start_method="spawn",
-                        redirects={0: Std.ERR, 1: Std.NONE},
-                        tee={0: Std.OUT, 1: Std.ERR},
                     )
 
                     result = pc.wait()
@@ -751,9 +769,11 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS or IS_CI):
                         entrypoint=echo1,
                         args={0: ("hello",), 1: ("hello",)},
                         envs={0: {"RANK": "0"}, 1: {"RANK": "1"}},
-                        log_dir=self.log_dir(),
                         start_method=start_method,
-                        redirects=redirs,
+                        logs_specs=DefaultLogsSpecs(
+                            log_dir=self.log_dir(),
+                            redirects=redirs,
+                        ),
                     )
 
                     results = pc.wait(period=0.1)
@@ -788,15 +808,16 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS or IS_CI):
             FAIL = 138
             for start_method in self._start_methods:
                 with self.subTest(start_method=start_method):
-                    log_dir = self.log_dir()
                     pc = start_processes(
                         name="echo",
                         entrypoint=echo1,
                         args={0: ("hello", FAIL), 1: ("hello",)},
                         envs={0: {"RANK": "0"}, 1: {"RANK": "1"}},
-                        log_dir=log_dir,
+                        logs_specs=DefaultLogsSpecs(
+                            log_dir=self.log_dir(),
+                            redirects={0: Std.ERR},
+                        ),
                         start_method=start_method,
-                        redirects={0: Std.ERR},
                     )
 
                     results = pc.wait(period=0.1)

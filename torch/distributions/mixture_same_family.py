@@ -195,8 +195,8 @@ class MixtureSameFamily(Distribution):
         return x.unsqueeze(-1 - self._event_ndims)
 
     def _pad_mixture_dimensions(self, x):
-        dist_batch_ndims = self.batch_shape.numel()
-        cat_batch_ndims = self.mixture_distribution.batch_shape.numel()
+        dist_batch_ndims = len(self.batch_shape)
+        cat_batch_ndims = len(self.mixture_distribution.batch_shape)
         pad_ndims = 0 if cat_batch_ndims == 1 else dist_batch_ndims - cat_batch_ndims
         xs = x.shape
         x = x.reshape(

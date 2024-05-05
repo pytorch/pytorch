@@ -47,6 +47,8 @@ class _StorageBase:
 
     def data_ptr(self) -> int: ...  # type: ignore[empty-body] # noqa: E704
 
+    def resizable(self) -> bool: ...  # type: ignore[empty-body] # noqa: E704
+
     # Defined in torch/csrc/generic/StorageSharing.cpp
     def _share_filename_cpu_(self, *args, **kwargs): ...  # noqa: E704
     def _share_fd_cpu_(self, *args, **kwargs): ...  # noqa: E704
@@ -207,6 +209,14 @@ class _StorageBase:
         """Casts this storage to float8_e4m3fn type"""
         return self._to(torch.float8_e4m3fn)
 
+    def float8_e5m2fnuz(self):
+        """Casts this storage to float8_e5m2fnuz type"""
+        return self._to(torch.float8_e5m2fnuz)
+
+    def float8_e4m3fnuz(self):
+        """Casts this storage to float8_e4m3fnuz type"""
+        return self._to(torch.float8_e4m3fnuz)
+
     def is_pinned(self, device: Union[str, torch.device] = 'cuda'):
         r"""Determine whether the CPU storage is already pinned on device.
 
@@ -251,7 +261,7 @@ class _StorageBase:
         """Create a new storage in shared memory with the same data type."""
         from torch.multiprocessing import get_sharing_strategy
         device = torch.device(device)
-        if device.type in ["cuda", torch._C._get_privateuse1_backend_name()]:
+        if device.type in ["cuda", torch._C._get_privateuse1_backend_name(), "hpu"]:
             return cls(size, device=device)
         elif get_sharing_strategy() == 'file_system':
             return cls._new_using_filename_cpu(size)
@@ -377,6 +387,23 @@ _StorageBase.hpu = _hpu  # type: ignore[assignment]
 
 
 @lru_cache(maxsize=None)
+def _new_dtypes():
+    # These are dtypes serialized as UntypedStorage unlike those in
+    # _dtype_to_storage_type_map
+    return {
+        torch.float8_e5m2,
+        torch.float8_e4m3fn,
+        torch.float8_e5m2fnuz,
+        torch.float8_e4m3fnuz,
+        torch.bits8,
+        torch.bits16,
+        torch.bits1x8,
+        torch.bits2x4,
+        torch.bits4x2,
+        torch.complex32,
+    }
+
+@lru_cache(maxsize=None)
 def _dtype_to_storage_type_map():
     # NOTE: We should no longer add dtypes to this map. This map
     # is only used for BC/FC with older PyTorch versions. Going forward,
@@ -470,8 +497,9 @@ def _reset_warn_typed_storage_removal():
     _warn_typed_storage_removal.__dict__['has_warned'] = False
 
 def _get_device_from_module(module: str):
-    if module.split(".")[-1] in ["cuda", torch._C._get_privateuse1_backend_name()]:
-        return module.split(".")[-1]
+    last_part = module.rsplit(".", 1)[-1]
+    if last_part in ["cuda", torch._C._get_privateuse1_backend_name(), "hpu"]:
+        return last_part
     else:
         return "cpu"
 
@@ -749,8 +777,11 @@ class TypedStorage:
                 _internal=True)._getitem(idx)
 
         idx_wrapped = self._maybe_wrap_index(idx)
-        tmp_tensor = torch.tensor([], dtype=self.dtype, device=self._untyped_storage.device).set_(self)
-        return tmp_tensor[idx_wrapped].item()
+        from torch._subclasses.fake_tensor import unset_fake_temporarily
+
+        with unset_fake_temporarily():
+            tmp_tensor = torch.tensor([], dtype=self.dtype, device=self._untyped_storage.device).set_(self)
+            return tmp_tensor[idx_wrapped].item()
 
     def copy_(self, source: T, non_blocking: _Optional[bool] = None):
         _warn_typed_storage_removal()
@@ -945,6 +976,10 @@ class TypedStorage:
     def _data_ptr(self):
         return self._untyped_storage.data_ptr()
 
+    def resizable(self):
+        _warn_typed_storage_removal()
+        return self._untyped_storage.resizable()
+
     def resize_(self, size):
         _warn_typed_storage_removal()
         self._resize_(size)
@@ -1070,6 +1105,16 @@ class TypedStorage:
         _warn_typed_storage_removal()
         return self._to(torch.float8_e4m3fn)
 
+    def float8_e5m2fnuz(self):
+        """Casts this storage to float8_e5m2fnuz type"""
+        _warn_typed_storage_removal()
+        return self._to(torch.float8_e5m2fnuz)
+
+    def float8_e4m3fnuz(self):
+        """Casts this storage to float8_e4m3fnuz type"""
+        _warn_typed_storage_removal()
+        return self._to(torch.float8_e4m3fnuz)
+
     @classmethod
     def from_file(cls, filename, shared, size):
         """from_file(filename, shared=False, size=0) -> Storage
@@ -1153,7 +1198,7 @@ class TypedStorage:
 
         storage_name = _dtype_to_storage_type_map()[self.dtype]
 
-        if self.device.type not in ['cpu', 'cuda', torch._C._get_privateuse1_backend_name()]:
+        if self.device.type not in ['cpu', 'cuda', "hpu", torch._C._get_privateuse1_backend_name()]:
             return None
 
         module = torch if self.device.type == 'cpu' else getattr(torch, self.device.type)

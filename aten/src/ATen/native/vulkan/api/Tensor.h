@@ -1,10 +1,11 @@
 #pragma once
 
+// @lint-ignore-every CLANGTIDY facebook-hte-BadMemberName
+
 #ifdef USE_VULKAN_API
 
 #include <ATen/native/vulkan/api/Context.h>
-#include <c10/core/MemoryFormat.h>
-#include <c10/util/accumulate.h>
+#include <ATen/native/vulkan/api/Types.h>
 
 namespace at {
 namespace native {
@@ -33,8 +34,9 @@ class vTensorStorage final {
       api::Context* context,
       const api::StorageType storage_type,
       const api::GPUMemoryLayout gpu_memory_layout,
-      const IntArrayRef sizes,
-      const at::ScalarType dtype);
+      const std::vector<int64_t>& sizes,
+      const api::ScalarType dtype,
+      const bool allocate_memory = true);
 
   vTensorStorage(const vTensorStorage&) = delete;
   vTensorStorage& operator=(const vTensorStorage&) = delete;
@@ -48,13 +50,13 @@ class vTensorStorage final {
 
  private:
   // Context
-  api::Context* context_;
+  api::Context* context_{};
 
   api::StorageType storage_type_;
 
   // Resource sizings
-  api::utils::uvec3 extents_;
-  int64_t buffer_length_;
+  api::utils::uvec3 extents_{};
+  int64_t buffer_length_{};
 
   // Image Texture
   mutable api::VulkanImage image_;
@@ -64,6 +66,9 @@ class vTensorStorage final {
   LastAccess last_access_;
 
  private:
+  // Registers underlying memory for cleanup
+  void flush();
+
   // Memory barrier insertion
   void transition(
       api::PipelineBarrier&,
@@ -77,6 +82,11 @@ class vTensorStorage final {
   inline VkFormat texture_format() {
     return image_.format();
   }
+
+  void discard_and_reallocate(
+      const std::vector<int64_t>& gpu_sizes,
+      const api::GPUMemoryLayout gpu_memory_layout,
+      const api::ScalarType dtype);
 };
 
 class vTensor final {
@@ -87,38 +97,23 @@ class vTensor final {
   // Default constructor
   vTensor(
       api::Context* context,
-      IntArrayRef sizes,
-      const c10::ScalarType dtype,
-      const api::StorageType storage_type,
-      const api::GPUMemoryLayout memory_layout);
+      const std::vector<int64_t>& sizes,
+      const api::ScalarType dtype,
+      const api::StorageType storage_type = api::StorageType::TEXTURE_3D,
+      const api::GPUMemoryLayout memory_layout =
+          api::GPUMemoryLayout::TENSOR_CHANNELS_PACKED,
+      const bool allocate_memory = true);
 
   // Default constructor for quantized vTensor
   vTensor(
       api::Context* const context,
-      const IntArrayRef sizes,
+      const std::vector<int64_t>& sizes,
       double q_scale,
       int64_t q_zero_point,
-      const c10::ScalarType dtype,
-      const api::StorageType storage_type,
-      const api::GPUMemoryLayout memory_layout);
-
-  // Allows construction of vTensor from aten Tensor params
-  vTensor(
-      api::Context* context,
-      IntArrayRef sizes,
-      const c10::ScalarType dtype = c10::kFloat,
+      const api::ScalarType dtype,
       const api::StorageType storage_type = api::StorageType::TEXTURE_3D,
-      const c10::MemoryFormat memory_format = c10::MemoryFormat::Contiguous);
-
-  // Allows construction of quantized vTensor from aten Tensor params
-  vTensor(
-      api::Context* const context,
-      const IntArrayRef sizes,
-      double q_scale,
-      int64_t q_zero_point,
-      const c10::ScalarType dtype = c10::kQUInt8,
-      const api::StorageType storage_type = api::StorageType::TEXTURE_3D,
-      const c10::MemoryFormat memory_format = c10::MemoryFormat::Contiguous);
+      const api::GPUMemoryLayout memory_layout =
+          api::GPUMemoryLayout::TENSOR_CHANNELS_PACKED);
 
   // Copy Constructor and Assignment; Ideally copying  would be disabled
   // (see the reasoning for move assignment below) but it is required for
@@ -140,23 +135,42 @@ class vTensor final {
 
  private:
   // Tensor Options
-  c10::ScalarType dtype_;
+  api::ScalarType dtype_;
 
   // GPU specific memory layout qualifier
   api::GPUMemoryLayout memory_layout_;
 
   // Sizes and Strides
-  c10::SmallVector<int64_t, 6u> sizes_;
-  c10::SmallVector<int64_t, 6u> strides_;
+  std::vector<int64_t> sizes_;
+  std::vector<int64_t> strides_;
 
   // Storage Dimensions. When stored on the GPU, one dimension will be aligned
   // to the next multiple of 4 in order to take advantage of vec4 data types.
-  c10::SmallVector<int64_t, 6u> gpu_sizes_;
-  c10::SmallVector<int64_t, 6u> gpu_strides_;
+  std::vector<int64_t> gpu_sizes_;
+  std::vector<int64_t> gpu_strides_;
+
+  // The extents that correspond to the tensor's size metadata. Note that this
+  // may not be the same as the extents of the underlying image texture because
+  // vTensor can be virtually resized via virtual_resize() which will cause it
+  // to be interpreted as a tensor with a different size.
+  api::utils::uvec3 virtual_extents_;
 
   // A Vulkan uniform buffer containing sizes and strides of the GPU buffer that
   // can be passed into a shader.
   api::UniformParamsBuffer metadata_uniform_;
+
+  // A Vulkan uniform buffer containing the tensor sizes that can be passed into
+  // a shader.
+  std::shared_ptr<api::UniformParamsBuffer> cpu_sizes_uniform_;
+
+  // A Vulkan uniform buffer containing the GPU tensor sizes that can be passed
+  // into a shader. GPU sizes refers to the sizes of the tensor after padding
+  // has been applied to one dimension to align it to the next multiple of 4.
+  std::shared_ptr<api::UniformParamsBuffer> gpu_sizes_uniform_;
+
+  // A Vulkan uniform buffer containing the image extents of the underlying
+  // image texture that can be passed into a shader.
+  std::shared_ptr<api::UniformParamsBuffer> extents_uniform_;
 
   // Quantization params
   bool is_quantized_{false};
@@ -165,7 +179,7 @@ class vTensor final {
 
   // Even at the cost of a heap allocation plus the resulting negative impact
   // on cache locality due to the subsequent pointer chasing, it is still
-  // critcal to share the view across vTensor implementations to minimize
+  // critical to share the view across vTensor implementations to minimize
   // programmer errors.  Ideally this class should have been only made movable,
   // and non-copyable - something we cannot do unfortunately due to the inner
   // workings of at::TensorImpl requiring copy semantics in
@@ -178,7 +192,7 @@ class vTensor final {
   // this trap and not pay the cost of indirection, but the resulting bugs of
   // missing memory barriers will be so frustrating to hunt down for those
   // unfamiliar with the internal mechanics of this class, that I decided to
-  // take the performance pentalty of this extra layer of indirection in favor
+  // take the performance penalty of this extra layer of indirection in favor
   // of making this class easier to use.
   std::shared_ptr<vTensorStorage> view_;
 
@@ -191,6 +205,10 @@ class vTensor final {
     return view_->storage_type_;
   }
 
+  inline api::VulkanImage& image() const& {
+    return view_->image_;
+  }
+
   api::VulkanImage& image(api::PipelineBarrier&, const api::PipelineStageFlags)
       const&;
 
@@ -198,6 +216,10 @@ class vTensor final {
       api::PipelineBarrier&,
       const api::PipelineStageFlags,
       const api::MemoryAccessFlags) &;
+
+  inline api::VulkanBuffer& buffer() const& {
+    return view_->buffer_;
+  }
 
   api::VulkanBuffer& buffer(
       api::PipelineBarrier&,
@@ -217,17 +239,18 @@ class vTensor final {
   }
 
   /*
-   * Extract a ScalarType from the TensorOptions member
+   * Extract an `api::ScalarType` from the TensorOptions member
    */
-  inline c10::ScalarType dtype() const {
+  inline api::ScalarType dtype() const {
     return dtype_;
   }
 
   /*
-   * Get a c10::ScalarType that corresponds to the image format of the texture
+   * Get an `api::ScalarType` that corresponds to the image format of the
+   * texture
    */
-  inline c10::ScalarType texture_dtype() const {
-    return api::c10_scalartype(view_->texture_format());
+  inline api::ScalarType texture_dtype() const {
+    return api::element_scalartype(view_->texture_format());
   }
 
   inline api::GPUMemoryLayout gpu_memory_layout() const {
@@ -238,29 +261,52 @@ class vTensor final {
     return static_cast<uint32_t>(memory_layout_);
   }
 
-  inline IntArrayRef sizes() const {
+  inline const std::vector<int64_t>& sizes() const {
     return sizes_;
   }
 
-  inline IntArrayRef strides() const {
+  inline const std::vector<int64_t>& strides() const {
     return strides_;
   }
 
-  inline IntArrayRef gpu_sizes() const {
+  inline const std::vector<int64_t>& gpu_sizes() const {
     return gpu_sizes_;
   }
 
-  inline IntArrayRef gpu_strides() const {
+  inline const std::vector<int64_t>& gpu_strides() const {
     return gpu_strides_;
+  }
+
+  inline const api::utils::uvec3& virtual_extents() const {
+    return virtual_extents_;
   }
 
   /*
    * Get a uniform buffer containing sizes and strides information of the GPU
    * buffer
    */
-  inline api::VulkanBuffer& buffer_metadata() {
-    return metadata_uniform_.buffer();
-  }
+  api::VulkanBuffer& buffer_metadata();
+
+  /*
+   * Get a uniform buffer object containing the tensor sizes to use in a compute
+   * shader. Note that the UBO will be created the first time this function is
+   * called.
+   */
+  std::shared_ptr<api::UniformParamsBuffer> cpu_sizes_ubo();
+
+  /*
+   * Get a uniform buffer object containing the tensor GPU sizes to use in a
+   * compute shader. Note that the UBO will be created the first time this
+   * function is called.
+   */
+  std::shared_ptr<api::UniformParamsBuffer> gpu_sizes_ubo();
+
+  /*
+   * Get a uniform buffer object containing the image extents to use in a
+   * compute shader. Note that the UBO will be created the first time this
+   * function is called.
+   */
+  std::shared_ptr<api::UniformParamsBuffer> extents_ubo();
 
   /*
    * Constructs a BufferMetdata struct based on the original sizes and strides
@@ -301,26 +347,62 @@ class vTensor final {
   }
 
   inline size_t numel() const {
-    return c10::multiply_integers(sizes());
+    return api::utils::multiply_integers(sizes());
   }
 
   inline size_t nbytes() const {
-    return c10::elementSize(dtype()) * numel();
+    return api::element_size(dtype()) * numel();
   }
 
   /*
    * Returns numel but based on gpu_sizes_ instead of sizes_
    */
   inline size_t gpu_numel() const {
-    return view_->buffer_length_;
+    return api::utils::multiply_integers(gpu_sizes_);
   }
 
   /*
    * Return nbytes but bnased on gpu_sizes_ instead of sizes_
    */
   inline VkDeviceSize gpu_nbytes() const {
-    return c10::elementSize(dtype()) * gpu_numel();
+    return api::element_size(dtype()) * gpu_numel();
   }
+
+  /*
+   * Return the VmaAllocationCreateInfo of the underlying resource
+   */
+  VmaAllocationCreateInfo get_allocation_create_info() const;
+
+  /*
+   * Return the VkMemoryRequirements of the underlying resource
+   */
+  VkMemoryRequirements get_memory_requirements() const;
+
+  /*
+   * Binds the underlying resource to the given memory allocation
+   */
+  void bind_allocation(const api::MemoryAllocation& allocation);
+
+ private:
+  /*
+   * Update the size metadata of the vTensor to be new sizes. Should not be used
+   * directly, reallocate() or virtual_resize() should be used instead.
+   */
+  void update_size_metadata(const std::vector<int64_t>& new_sizes);
+
+ public:
+  /*
+   * Discard the underlying VkImage or VkBuffer and re-allocate based on new
+   * tensor sizes
+   */
+  void reallocate(const std::vector<int64_t>& new_sizes);
+
+  /*
+   * Perform a virtual resize of the vTensor by modifying the size metadata that
+   * gets used in compute shaders. This allows the shader to treat the
+   * underlying resource as if it were a different size.
+   */
+  void virtual_resize(const std::vector<int64_t>& new_sizes);
 };
 
 void add_buffer_barrier(

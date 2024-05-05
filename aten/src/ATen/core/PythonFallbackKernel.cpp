@@ -31,6 +31,7 @@ constexpr c10::DispatchKeySet after_Python_keyset = c10::DispatchKeySet(c10::Dis
 // This guard assumes that tls_on_entry has a value.
 struct StashTLSOnEntryGuard {
 public:
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   StashTLSOnEntryGuard(): saved_(tls_on_entry.value()) {
     tls_on_entry = c10::nullopt;
   }
@@ -119,8 +120,8 @@ void preDispatchFallback(const c10::OperatorHandle& op, c10::DispatchKeySet disp
 
 } // anonymous namespace
 
-namespace at {
-namespace impl {
+
+namespace at::impl {
 
 RestorePythonTLSSnapshot::RestorePythonTLSSnapshot() : saved_(safe_get_tls_on_entry()), guard_(safe_get_tls_on_entry()) {
   tls_on_entry = c10::nullopt;
@@ -147,8 +148,7 @@ MaybeSetTLSOnEntryGuard::~MaybeSetTLSOnEntryGuard() {
 }
 
 
-} // namespace impl
-} // namespace at
+} // namespace at::impl
 
 TORCH_LIBRARY_IMPL(_, Python, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&pythonFallback>());

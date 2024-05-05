@@ -7,9 +7,6 @@
 #include <torch/csrc/python_headers.h>
 #include <structmember.h>
 
-#include <stack>
-#include <tuple>
-#include <vector>
 #include <torch/csrc/cuda/THCP.h>
 
 #include <torch/csrc/utils/tensor_numpy.h>

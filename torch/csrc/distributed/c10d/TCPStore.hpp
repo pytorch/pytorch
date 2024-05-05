@@ -135,10 +135,13 @@ class TORCH_API TCPStore : public Store {
     return usingLibUv_;
   }
 
+  // note(xilunwu): this function is only for internal testing
+  void _splitSet(const std::string& key, const std::vector<uint8_t>& data);
+
  private:
   int64_t incrementValueBy(const std::string& key, int64_t delta);
 
-  void validate(void);
+  void validate();
 
   std::vector<uint8_t> doGet(const std::string& key);
 

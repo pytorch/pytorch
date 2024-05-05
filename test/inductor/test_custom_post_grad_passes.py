@@ -1,15 +1,18 @@
 # Owner(s): ["module: inductor"]
 import contextlib
+import operator
+from collections import defaultdict
 
 import torch
 import torch._inductor.pattern_matcher as pattern_matcher
-
-from torch._dynamo.test_case import run_tests, TestCase
+import torch.fx as fx
 from torch._dynamo.utils import counters
 
 from torch._inductor import config
 from torch._inductor.lowering import lowerings as L
 from torch._inductor.pattern_matcher import Arg, CallFunction, PatternMatcherPass
+
+from torch._inductor.test_case import run_tests, TestCase
 
 from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CPU
@@ -52,6 +55,12 @@ class TestCustomPassBase(TestCase):
 
 aten = torch.ops.aten
 mkldnn = torch.ops.mkldnn
+
+
+def change_cos_pass(graph):
+    for node in graph.nodes:
+        if node.op == "call_function" and node.target == aten.cos.default:
+            node.target = aten.sin.default
 
 
 class TestPostGradCustomPrePostPass(TestCustomPassBase):
@@ -118,6 +127,30 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
             x1 = self.conv(x)
             return x1.relu()
 
+    def test_custom_joint_pass_pre(self):
+        with config.patch(joint_custom_pre_pass=change_cos_pass):
+
+            def g(x):
+                return x.sin().sin().sin()
+
+            def f(x):
+                return x.cos().cos().cos()
+
+            x = torch.randn(8, dtype=torch.float32)
+            torch.testing.assert_close(torch.compile(f)(x), g(x))
+
+    def test_custom_joint_pass_post(self):
+        with config.patch(joint_custom_post_pass=change_cos_pass):
+
+            def g(x):
+                return x.sin().sin().sin()
+
+            def f(x):
+                return x.cos().cos().cos()
+
+            x = torch.randn(8, dtype=torch.float32)
+            torch.testing.assert_close(torch.compile(f)(x), g(x))
+
     def test_custom_pre_pass(self):
         with config.patch(
             # leave custom pass only in post_grad_passes()
@@ -167,6 +200,70 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
                 match_count + other_match_count,
                 match_nodes + other_match_nodes,
             )
+
+    def test_custom_pre_grad_pass(self):
+        saved_graph = [None]
+
+        def merge_mm_shared_rhs(graph: fx.Graph):
+            """
+            Bad POC of merging mm with a shared RHS.
+            i.e. [mm(x, W), mm(x2, W)] => mm(cat(x, x2), W).split()
+
+            Isn't actually safe for a couple reasons. For example, it doesn't handle the
+            case where the LHS inputs depend on each other
+            """
+            saved_graph[0] = graph
+            matmuls = [n for n in graph.nodes if n.target == torch.mm]
+            rhs_vals = defaultdict(set)
+            for m in matmuls:
+                rhs_vals[m.args[1]].add(m)
+
+            order = {}
+            for idx, n in enumerate(graph.nodes):
+                order[n] = idx
+
+            for rhs, matmuls in rhs_vals.items():
+                if len(matmuls) == 1:
+                    continue
+                matmuls = sorted(matmuls, key=lambda x: order[x])
+                with graph.inserting_before(matmuls[0]):
+                    lhs_vals = [m.args[0] for m in matmuls]
+                    new_cat = graph.create_node(
+                        "call_function", torch.cat, args=(lhs_vals, 0)
+                    )
+                    new_mm = graph.create_node(
+                        "call_function", torch.mm, args=(new_cat, rhs)
+                    )
+                    split_vals = graph.create_node(
+                        "call_function",
+                        torch.split,
+                        args=(
+                            new_mm,
+                            [l.meta["example_value"].shape[0] for l in lhs_vals],
+                        ),
+                    )
+                for idx, m in enumerate(matmuls):
+                    m.target = operator.getitem
+                    m.args = (split_vals, idx)
+
+        @config.patch(pre_grad_custom_pass=merge_mm_shared_rhs)
+        def inner_test():
+            @torch.compile
+            def f(W, nested_seqs):
+                outs = [torch.mm(s, W) for s in nested_seqs]
+                return outs
+
+            W = torch.randn(16, 16, dtype=torch.bfloat16)
+            nested_seqs = [
+                torch.randn(l, 16, dtype=torch.bfloat16) for l in [4, 8, 5, 3]
+            ]
+
+            f(W, nested_seqs)
+            assert saved_graph[0] is not None
+            matmuls = [n for n in saved_graph[0].nodes if n.target == torch.mm]
+            assert len(matmuls) == 1
+
+        inner_test()
 
 
 if __name__ == "__main__":

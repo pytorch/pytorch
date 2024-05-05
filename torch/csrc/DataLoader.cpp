@@ -20,7 +20,6 @@
 #include <fmt/format.h>
 
 #include <sys/wait.h>
-#include <atomic>
 #include <csignal>
 #include <map>
 #include <set>
@@ -175,21 +174,19 @@ static PyObject* THPModule_errorIfAnyWorkerFails(
 // of pids we are interested in.
 static PyObject* THPModule_setWorkerPIDs(PyObject* module, PyObject* args) {
   HANDLE_TH_ERRORS
-  if (PyTuple_GET_SIZE(args) != 2) {
-    throw TypeError("_set_worker_pids expects exactly 2 arguments.");
-  }
+  TORCH_CHECK_TYPE(
+      PyTuple_GET_SIZE(args) == 2,
+      "_set_worker_pids expects exactly 2 arguments.");
   int64_t key = THPUtils_unpackLong(PyTuple_GET_ITEM(args, 0));
-  if (worker_pids.find(key) != worker_pids.end()) {
-    throw ValueError(
-        "_set_worker_pids should be called only once for each _BaseDataLoaderIter.");
-  }
+  TORCH_CHECK_VALUE(
+      worker_pids.find(key) == worker_pids.end(),
+      "_set_worker_pids should be called only once for each _BaseDataLoaderIter.");
   PyObject* child_pids = PyTuple_GET_ITEM(args, 1);
-  if (!PyTuple_Check(child_pids)) {
-    throw TypeError(
-        "_set_worker_pids expects a tuple for child_pids, but got %s.",
-        Py_TYPE(child_pids)->tp_name);
-  }
-
+  TORCH_CHECK_TYPE(
+      PyTuple_Check(child_pids),
+      "_set_worker_pids expects a tuple for child_pids, but got ",
+      Py_TYPE(child_pids)->tp_name,
+      ".");
   std::set<pid_t> pids_set = {};
   auto size = PyTuple_GET_SIZE(child_pids);
   for (const auto idx : c10::irange(size)) {
@@ -210,11 +207,10 @@ static PyObject* THPModule_removeWorkerPIDs(
 
   int64_t key = THPUtils_unpackLong(loader_id);
   auto it = worker_pids.find(key);
-  if (it == worker_pids.end()) {
-    throw ValueError(fmt::format(
-        "Cannot find worker information for _BaseDataLoaderIter with id {}",
-        key));
-  }
+  TORCH_CHECK_VALUE(
+      it != worker_pids.end(),
+      "Cannot find worker information for _BaseDataLoaderIter with id ",
+      key);
   worker_pids.erase(it);
 
   Py_RETURN_NONE;

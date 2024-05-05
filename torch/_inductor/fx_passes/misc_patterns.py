@@ -1,6 +1,6 @@
 import functools
 
-from typing import Callable, Dict, Set, Tuple
+from typing import Dict, Set, Tuple
 
 import torch
 from torch._dynamo.utils import counters
@@ -58,7 +58,7 @@ def _misc_patterns_init():
         index = torch.randperm(x.shape[0], device=x.device)[:slice_shape]
         return torch.ops.aten._unsafe_index(x, (index,)), index
 
-    pattern = register_replacement(
+    register_replacement(
         randperm_index_pattern,
         randperm_index_replacement,
         [torch.empty(4, 8, device=device)],
@@ -76,7 +76,7 @@ class NumpyCompatNormalization:
         "other": ("x2",),
     }
     inverse_mapping: Dict[str, str]
-    cache: Dict[Callable, Set[str]]  # type: ignore[type-arg]
+    cache: Dict["torch.fx.graph.Target", Set[str]]
 
     def __init__(self):
         self.cache = {}  # callable -> tuple of replaceable args e.g. ["axis"]

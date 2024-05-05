@@ -1148,7 +1148,6 @@ API Reference
 .. py:module:: torch.fx.experimental.refinement_types
 .. py:module:: torch.fx.experimental.rewriter
 .. py:module:: torch.fx.experimental.schema_type_annotation
-.. py:module:: torch.fx.experimental.symbolic_shapes
 .. py:module:: torch.fx.experimental.sym_node
 .. py:module:: torch.fx.experimental.unification.core
 .. py:module:: torch.fx.experimental.unification.dispatch
@@ -1184,6 +1183,7 @@ API Reference
 .. py:module:: torch.fx.passes.param_fetch
 .. py:module:: torch.fx.passes.pass_manager
 .. py:module:: torch.fx.passes.reinplace
+.. py:module:: torch.fx.passes.runtime_assert
 .. py:module:: torch.fx.passes.shape_prop
 .. py:module:: torch.fx.passes.split_module
 .. py:module:: torch.fx.passes.split_utils

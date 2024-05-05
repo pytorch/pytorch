@@ -119,6 +119,19 @@ def gh_fetch_json_dict(
     return cast(Dict[str, Any], _gh_fetch_json_any(url, params, data))
 
 
+def gh_graphql(query: str, **kwargs: Any) -> Dict[str, Any]:
+    rc = gh_fetch_url(
+        "https://api.github.com/graphql",
+        data={"query": query, "variables": kwargs},
+        reader=json.load,
+    )
+    if "errors" in rc:
+        raise RuntimeError(
+            f"GraphQL query {query}, args {kwargs} failed: {rc['errors']}"
+        )
+    return cast(Dict[str, Any], rc)
+
+
 def _gh_post_comment(
     url: str, comment: str, dry_run: bool = False
 ) -> List[Dict[str, Any]]:
@@ -178,4 +191,14 @@ def gh_fetch_merge_base(org: str, repo: str, base: str, head: str) -> str:
 
 def gh_update_pr_state(org: str, repo: str, pr_num: int, state: str = "open") -> None:
     url = f"{GITHUB_API_URL}/repos/{org}/{repo}/pulls/{pr_num}"
-    gh_fetch_url(url, method="PATCH", data={"state": state})
+    try:
+        gh_fetch_url(url, method="PATCH", data={"state": state})
+    except HTTPError as err:
+        # When trying to open the pull request, error 422 means that the branch
+        # has been deleted and the API couldn't re-open it
+        if err.code == 422 and state == "open":
+            warnings.warn(
+                f"Failed to open {pr_num} because its head branch has been deleted: {err}"
+            )
+        else:
+            raise

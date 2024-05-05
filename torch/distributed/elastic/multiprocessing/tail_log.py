@@ -16,7 +16,7 @@ from typing import Dict, List, Optional, TextIO
 
 __all__ = ["tail_logfile", "TailLog"]
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def tail_logfile(
@@ -28,7 +28,7 @@ def tail_logfile(
             return
         time.sleep(interval_sec)
 
-    with open(file) as fp:
+    with open(file, errors="replace") as fp:
         while True:
             line = fp.readline()
 
@@ -138,7 +138,7 @@ class TailLog:
             try:
                 f.result()
             except Exception as e:
-                log.error(
+                logger.error(
                     "error in log tailor for %s%s. %s: %s",
                     self._name, local_rank,
                     e.__class__.__qualname__, e,

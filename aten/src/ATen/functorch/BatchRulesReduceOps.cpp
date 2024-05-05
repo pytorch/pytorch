@@ -11,7 +11,7 @@
 
 #include <utility>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 static bool is_allowed_dim_on_scalar_tensor(int64_t dim) {
   return dim == 0 || dim == -1;
@@ -75,7 +75,7 @@ static Tensor any_decomp(const Tensor& self) {
   return at::any(self.flatten(), 0, false);
 }
 
-enum ReductionCase { DimArray, Dim };
+enum class ReductionCase:uint8_t { DimArray, Dim };
 
 // Macros and templates have a difficult time dealing with enums,
 // so we didn't turn this into an enum.
@@ -115,7 +115,7 @@ void boxed_reduction_batch_rule(const c10::OperatorHandle& op, torch::jit::Stack
 
   auto orig_arguments = torch::jit::last(*stack, num_arguments);
   if (std::none_of(orig_arguments.begin(), orig_arguments.end(), ivalueParticipatesInCurrentLevel)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
+    c10::impl::ExcludeDispatchKeyGuard guard_2(DispatchKey::FuncTorchBatched);
     op.callBoxed(stack);
     return;
   }
@@ -123,15 +123,13 @@ void boxed_reduction_batch_rule(const c10::OperatorHandle& op, torch::jit::Stack
   auto arguments = torch::jit::pop(*stack, num_arguments);
 
   TORCH_INTERNAL_ASSERT(arguments[0].isTensor());
-  Tensor self;
-  optional<int64_t> self_bdim;
-  std::tie(self, self_bdim) = unwrapTensorAtLevel(arguments[0].toTensor(), cur_level);
+  auto [self, self_bdim] = unwrapTensorAtLevel(arguments[0].toTensor(), cur_level);
 
   self = moveBatchDimToFront(self, self_bdim);
 
   auto logical_dim = rankWithoutBatchDim(self, self_bdim);
   std::vector<int64_t> dims;
-  ReductionCase reduction_case;
+  ReductionCase reduction_case{};
   if (arguments[dim_arg_pos].isIntList()) {
     reduction_case = ReductionCase::DimArray;
     dims = arguments[dim_arg_pos].toIntList().vec();
@@ -509,4 +507,5 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(_is_all_true, _is_all_true_batch_rule);
   VMAP_SUPPORT(_is_any_true, _is_any_true_batch_rule);
 }
-}}
+
+} // namespace at::functorch

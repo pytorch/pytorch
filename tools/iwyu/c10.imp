@@ -22,4 +22,6 @@
     { include: ["<c10/core/StorageImpl.h>", private, "<c10/core/Storage.h>", public ] },
     { symbol: [ "C10_API", private, "<c10/macros/Export.h>", public ] },
     { symbol: [ "c10::complex", private, "<c10/util/complex.h>", public ] },
+    { symbol: [ "fmt::format", private, "<fmt/format.h>", public ] },
+    { symbol: [ "fmt::vformat", private, "<fmt/format.h>", public ] },
 ]

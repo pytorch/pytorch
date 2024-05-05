@@ -10,7 +10,7 @@ import pytest
 import torch
 from torch import nn
 
-from torch.distributed.pipeline.sync import Pipe, is_checkpointing, is_recomputing
+from torch.distributed.pipeline.sync import is_checkpointing, is_recomputing, Pipe
 from torch.distributed.pipeline.sync.skip import pop, skippable, stash
 from torch.distributed.pipeline.sync.skip.tracker import current_skip_tracker
 from torch.testing._internal.common_utils import run_tests
@@ -48,7 +48,7 @@ def test_delete_portal_tensor(train, checkpoint, setup_rpc):
             skip_tracker = current_skip_tracker()
 
         # Get the current portal.
-        portal = list(skip_tracker.portals.values())[0]
+        portal = next(iter(skip_tracker.portals.values()))
 
         if tensor_life == 0:
             return portal.tensor_life == 0 and portal.tensor is None
@@ -113,7 +113,9 @@ def test_no_portal_without_pipe(train, monkeypatch, setup_rpc):
     def deny(*args, **kwargs):
         raise AssertionError("tried to create Portal without Pipe")
 
-    monkeypatch.setattr("torch.distributed.pipeline.sync.skip.portal.Portal.__init__", deny)
+    monkeypatch.setattr(
+        "torch.distributed.pipeline.sync.skip.portal.Portal.__init__", deny
+    )
 
     model = nn.Sequential(Stash(), Pop())
 

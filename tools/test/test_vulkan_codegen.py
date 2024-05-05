@@ -1,114 +1,133 @@
-import os
 import tempfile
 import unittest
 
-from tools.gen_vulkan_spv import VulkanShaderGenerator
-from yaml.constructor import ConstructorError
+from tools.gen_vulkan_spv import DEFAULT_ENV, SPVGenerator
 
+####################
+# Data for testing #
+####################
 
-class TestVulkanShaderCodegen(unittest.TestCase):
-    def test_assert_on_duplicate_key_yaml(self) -> None:
-        yaml_with_duplicate_keys = """
-conv2d_pw:
-  parameter_names_with_default_values:
-      NAME: conv2d_pw_1x1
-      TILE_SIZE_X: 1
-      TILE_SIZE_Y: 1
-  parameter_values:
-    - NAME: conv2d_pw_2x2
-      TILE_SIZE_X: 2
-      TILE_SIZE_Y: 2
-    - NAME: conv2d_pw_2x4
-      TILE_SIZE_X: 2
-      TILE_SIZE_Y: 4
-    - NAME: conv2d_pw_4x2
-      TILE_SIZE_X: 4
-      TILE_SIZE_Y: 2
-    - NAME: conv2d_pw_4x4
-      TILE_SIZE_X: 4
-      TILE_SIZE_Y: 4
-conv2d_pw:
-  parameter_names_with_default_values:
-      NAME: conv2d_pw_1x1
-      TILE_SIZE_X: 1
-      TILE_SIZE_Y: 1
-  parameter_values:
-    - NAME: conv2d_pw_2x2
-      TILE_SIZE_X: 2
-      TILE_SIZE_Y: 2
-    - NAME: conv2d_pw_2x4
-      TILE_SIZE_X: 2
-      TILE_SIZE_Y: 4
-    - NAME: conv2d_pw_4x2
-      TILE_SIZE_X: 4
-      TILE_SIZE_Y: 2
-    - NAME: conv2d_pw_4x4
-      TILE_SIZE_X: 4
-      TILE_SIZE_Y: 4
+test_shader = """
+#version 450 core
+
+#define FORMAT ${FORMAT}
+#define PRECISION ${PRECISION}
+#define OP(X) ${OPERATOR}
+
+$def is_int(dtype):
+$   return dtype in {"int", "int32", "int8"}
+
+$def is_uint(dtype):
+$   return dtype in {"uint", "uint32", "uint8"}
+
+$if is_int(DTYPE):
+  #define VEC4_T ivec4
+$elif is_uint(DTYPE):
+  #define VEC4_T uvec4
+$else:
+  #define VEC4_T vec4
+
+$if not INPLACE:
+  $if is_int(DTYPE):
+    layout(set = 0, binding = 0, FORMAT) uniform PRECISION restrict writeonly iimage3D uOutput;
+    layout(set = 0, binding = 1) uniform PRECISION isampler3D uInput;
+  $elif is_uint(DTYPE):
+    layout(set = 0, binding = 0, FORMAT) uniform PRECISION restrict writeonly uimage3D uOutput;
+    layout(set = 0, binding = 1) uniform PRECISION usampler3D uInput;
+  $else:
+    layout(set = 0, binding = 0, FORMAT) uniform PRECISION restrict writeonly image3D uOutput;
+    layout(set = 0, binding = 1) uniform PRECISION sampler3D uInput;
+$else:
+  $if is_int(DTYPE):
+    layout(set = 0, binding = 0, FORMAT) uniform PRECISION restrict iimage3D uOutput;
+  $elif is_uint(DTYPE):
+    layout(set = 0, binding = 0, FORMAT) uniform PRECISION restrict uimage3D uOutput;
+  $else:
+    layout(set = 0, binding = 0, FORMAT) uniform PRECISION restrict image3D uOutput;
+
+layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;
+
+void main() {
+  const ivec3 pos = ivec3(gl_GlobalInvocationID);
+  $if not INPLACE:
+    VEC4_T v = texelFetch(uInput, pos, 0);
+  $else:
+    VEC4_T v = imageLoad(uOutput, pos);
+  $for i in range(ITER[0]):
+    for (int i = 0; i < ${ITER[1]}; ++i) {
+        v = OP(v + i);
+    }
+  imageStore(uOutput, pos, OP(v));
+}
+
 """
 
-        generator = VulkanShaderGenerator()  # type: ignore[no-untyped-call]
-        with tempfile.NamedTemporaryFile(mode="w") as fp:
-            fp.write(yaml_with_duplicate_keys)
-            fp.flush()
-            with self.assertRaisesRegex(
-                ConstructorError, r"while constructing a mapping"
-            ):
-                generator.add_params_yaml(fp.name)  # type: ignore[no-untyped-call]
-
-    def test_assert_keys_mismatch(self) -> None:
-        yaml_with_key_mismatch = """
-conv2d_pw:
+test_params_yaml = """
+test_shader:
   parameter_names_with_default_values:
-      NAME: conv2d_pw_1x1
-      TILE_SIZE_X: 1
-      TILE_SIZE_Y: 1
-  parameter_values:
-    - NAME: conv2d_pw_2x2
-      TILE_SIZE_X: 2
-      TILE_SIZE_Z: 2
+    DTYPE: float
+    INPLACE: false
+    OPERATOR: X + 3
+    ITER: !!python/tuple [3, 5]
+  generate_variant_forall:
+    INPLACE:
+      - VALUE: false
+        SUFFIX: ""
+      - VALUE: true
+        SUFFIX: inplace
+    DTYPE:
+      - VALUE: int8
+      - VALUE: float
+  shader_variants:
+    - NAME: test_shader_1
+    - NAME: test_shader_3
+      OPERATOR: X - 1
+      ITER: !!python/tuple [3, 2]
+      generate_variant_forall:
+        DTYPE:
+        - VALUE: float
+        - VALUE: int
+
 """
 
-        generator = VulkanShaderGenerator()  # type: ignore[no-untyped-call]
-        with tempfile.NamedTemporaryFile(mode="w") as fp:
-            fp.write(yaml_with_key_mismatch)
-            fp.flush()
-            with self.assertRaisesRegex(KeyError, r"Invalid keys {'TILE_SIZE_Z'}"):
-                generator.add_params_yaml(fp.name)  # type: ignore[no-untyped-call]
+##############
+# Unit Tests #
+##############
 
-    def test_missing_key_default_val(self) -> None:
-        yaml_with_key_mismatch = """
-conv2d_pw:
-  parameter_names_with_default_values:
-      NAME: conv2d_pw_1x1
-      TILE_SIZE_X: 1
-      TILE_SIZE_Y: 1
-  parameter_values:
-    - NAME: conv2d_pw_1x2
-      TILE_SIZE_Y: 2
-"""
-        file_content = """
-x = $TILE_SIZE_X + $TILE_SIZE_Y
-"""
 
-        generator = VulkanShaderGenerator()  # type: ignore[no-untyped-call]
-        with tempfile.NamedTemporaryFile(mode="w") as fp:
-            fp.write(yaml_with_key_mismatch)
-            fp.flush()
-            generator.add_params_yaml(fp.name)  # type: ignore[no-untyped-call]
-            with tempfile.TemporaryDirectory() as tmp_dir:
-                template_file_name = os.path.join(tmp_dir, "conv2d_pw.glslt")
-                with open(template_file_name, "w") as template_file:
-                    template_file.write(file_content)
-                    template_file.flush()
-                    generator.generate(template_file.name, tmp_dir)  # type: ignore[no-untyped-call]
-                    file_name_1 = os.path.join(tmp_dir, "conv2d_pw_1x1.glsl")
-                    file_name_2 = os.path.join(tmp_dir, "conv2d_pw_1x2.glsl")
-                    self.assertTrue(os.path.exists(file_name_1))
-                    self.assertTrue(os.path.exists(file_name_2))
-                    with open(file_name_1) as f:
-                        contents = f.read()
-                        self.assertTrue("1 + 1" in contents)
-                    with open(file_name_2) as f:
-                        contents = f.read()
-                        self.assertTrue("1 + 2" in contents)
+class TestVulkanSPVCodegen(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.TemporaryDirectory()
+
+        with open(f"{self.tmpdir.name}/test_shader.glsl,", "w") as f:
+            f.write(test_shader)
+
+        with open(f"{self.tmpdir.name}/test_params.yaml", "w") as f:
+            f.write(test_params_yaml)
+
+        self.tmpoutdir = tempfile.TemporaryDirectory()
+
+        self.generator = SPVGenerator(
+            src_dir_paths=self.tmpdir.name, env=DEFAULT_ENV, glslc_path=None
+        )
+
+    def cleanUp(self) -> None:
+        self.tmpdir.cleanup()
+        self.tmpoutdir.cleanup()
+
+    def testOutputMap(self) -> None:
+        # Each shader variant will produce variants generated based on all possible combinations
+        # of the DTYPE and INPLACE parameters. test_shader_3 has fewer generated variants due to
+        # a custom specified generate_variant_forall field.
+        expected_output_shaders = {
+            "test_shader_1_float",
+            "test_shader_1_inplace_float",
+            "test_shader_1_inplace_int8",
+            "test_shader_1_int8",
+            "test_shader_3_float",
+            "test_shader_3_int",
+        }
+
+        actual_output_shaders = set(self.generator.output_shader_map.keys())
+
+        self.assertEqual(expected_output_shaders, actual_output_shaders)

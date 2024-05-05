@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 from __future__ import annotations
 
 import builtins
@@ -166,6 +168,14 @@ def _upcast_int_indices(index):
     return index
 
 
+# Used to indicate that a parameter is unspecified (as opposed to explicitly
+# `None`)
+class _Unspecified:
+    pass
+
+
+_Unspecified.unspecified = _Unspecified()
+
 ###############################################################
 #                      ndarray class                          #
 ###############################################################
@@ -283,7 +293,17 @@ class ndarray:
         self.tensor.imag = asarray(value).tensor
 
     # ctors
-    def astype(self, dtype):
+    def astype(self, dtype, order="K", casting="unsafe", subok=True, copy=True):
+        if order != "K":
+            raise NotImplementedError(f"astype(..., order={order} is not implemented.")
+        if casting != "unsafe":
+            raise NotImplementedError(
+                f"astype(..., casting={casting} is not implemented."
+            )
+        if not subok:
+            raise NotImplementedError(f"astype(..., subok={subok} is not implemented.")
+        if not copy:
+            raise NotImplementedError(f"astype(..., copy={copy} is not implemented.")
         torch_dtype = _dtypes.dtype(dtype).torch_dtype
         t = self.tensor.to(torch_dtype)
         return ndarray(t)
@@ -324,7 +344,11 @@ class ndarray:
             b = self.tensor.flatten()  # does not copy
             b[old_numel:].zero_()
 
-    def view(self, dtype):
+    def view(self, dtype=_Unspecified.unspecified, type=_Unspecified.unspecified):
+        if dtype is _Unspecified.unspecified:
+            dtype = self.dtype
+        if type is not _Unspecified.unspecified:
+            raise NotImplementedError(f"view(..., type={type} is not implemented.")
         torch_dtype = _dtypes.dtype(dtype).torch_dtype
         tview = self.tensor.view(torch_dtype)
         return ndarray(tview)
@@ -488,7 +512,7 @@ def array(obj, dtype=None, *, copy=True, order="K", subok=False, ndmin=0, like=N
     if like is not None:
         raise NotImplementedError("'like' parameter is not supported.")
     if order != "K":
-        raise NotImplementedError()
+        raise NotImplementedError
 
     # a happy path
     if (

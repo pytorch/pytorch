@@ -68,7 +68,7 @@ static_assert(is_function_type<int(MyClass)>::value, "");
 static_assert(is_function_type<int(const MyClass&)>::value, "");
 static_assert(is_function_type<int(MyClass&&)>::value, "");
 static_assert(is_function_type < MyClass && () > ::value, "");
-static_assert(is_function_type < MyClass && (MyClass &&) > ::value, "");
+static_assert(is_function_type < MyClass && (MyClass&&) > ::value, "");
 static_assert(is_function_type<const MyClass&(int, float, MyClass)>::value, "");
 
 static_assert(!is_function_type<void>::value, "");

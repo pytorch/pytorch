@@ -78,8 +78,8 @@ int64_t get_nnz(Tensor nestedtensor) {
    * use with the flash-attention and efficient_attention kernels without
    * needing to call contiguous on the nested tensor input.
    * It checks that the storage offsets' adjacent_differences are a constant
-   * mutiple of the previous tensor in the nested tensor and that the strides
-   * are monitonically decreasing. This check is done after calling transpose on
+   * multiple of the previous tensor in the nested tensor and that the strides
+   * are monotonically decreasing. This check is done after calling transpose on
    * the nested tensor. Resulting in a Nt of shape [bsz, {seq_len}, num_heads, dim]
    *
    * @return A boolean indicating of contiguous needs to be called for input
@@ -133,8 +133,8 @@ int64_t get_nnz(Tensor nestedtensor) {
     }
 
     // Check the offsets are a constant multiple from the previous numels
-    const int64_t* tensor_size_ptr = tensor_sizes.data_ptr<int64_t>();
-    const int64_t* tensor_stride_ptr = tensor_strides.data_ptr<int64_t>();
+    const int64_t* tensor_size_ptr = tensor_sizes.const_data_ptr<int64_t>();
+    const int64_t* tensor_stride_ptr = tensor_strides.const_data_ptr<int64_t>();
 
     int64_t numel_0 = (tensor_size_ptr[0] * tensor_stride_ptr[0]);
     TORCH_INTERNAL_ASSERT(numel_0 > 0, "numels must be positive!");

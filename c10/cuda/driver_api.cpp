@@ -3,9 +3,8 @@
 #include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
 #include <dlfcn.h>
-#include <iostream>
-namespace c10 {
-namespace cuda {
+
+namespace c10::cuda {
 
 namespace {
 
@@ -37,12 +36,11 @@ void* DriverAPI::get_nvml_handle() {
   return nvml_hanle;
 }
 
-DriverAPI* DriverAPI::get() {
+C10_EXPORT DriverAPI* DriverAPI::get() {
   static DriverAPI singleton = create_driver_api();
   return &singleton;
 }
 
-} // namespace cuda
-} // namespace c10
+} // namespace c10::cuda
 
 #endif

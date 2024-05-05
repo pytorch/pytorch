@@ -2,19 +2,18 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <cstddef>
 #include <functional>
 #include <mutex>
 #include <queue>
 #include <thread>
 #include <utility>
+#include <vector>
 
+#include <c10/macros/Export.h>
+#include <c10/util/Registry.h>
 #include <c10/util/numa.h>
 #include <c10/util/thread_name.h>
-
-C10_CLANG_DIAGNOSTIC_PUSH()
-#if C10_CLANG_HAS_WARNING("-Wshorten-64-to-32")
-C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
-#endif
 
 namespace c10 {
 
@@ -43,7 +42,9 @@ class C10_API ThreadPool : public c10::TaskThreadPoolBase {
  protected:
   struct task_element_t {
     bool run_with_id;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
     const std::function<void()> no_id;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
     const std::function<void(std::size_t)> with_id;
 
     explicit task_element_t(std::function<void()> f)
@@ -102,7 +103,7 @@ class C10_API ThreadPool : public c10::TaskThreadPoolBase {
 
 class C10_API TaskThreadPool : public c10::ThreadPool {
  public:
-  explicit TaskThreadPool(std::size_t pool_size, int numa_node_id = -1)
+  explicit TaskThreadPool(int pool_size, int numa_node_id = -1)
       : ThreadPool(pool_size, numa_node_id, [numa_node_id]() {
           setThreadName("CaffeTaskThread");
           NUMABind(numa_node_id);
@@ -117,5 +118,3 @@ C10_DECLARE_SHARED_REGISTRY(
     bool);
 
 } // namespace c10
-
-C10_CLANG_DIAGNOSTIC_POP()

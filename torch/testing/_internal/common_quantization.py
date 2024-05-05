@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 r"""Importing this file includes common utility methods and base clases for
 checking quantization api and properties of resulting modules.
 """
@@ -12,11 +14,25 @@ from torch.ao.nn.intrinsic import _FusedModule
 import torch.distributed as dist
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM
 
+from torch._export import capture_pre_autograd_graph
 from torch.ao.quantization import (
     QuantType,
     default_dynamic_qat_qconfig,
     default_embedding_qat_qconfig,
     default_symmetric_qnnpack_qat_qconfig,
+)
+from torch.ao.quantization.quantize_pt2e import (
+    _convert_to_reference_decomposed_fx,
+    convert_pt2e,
+    prepare_pt2e,
+    prepare_qat_pt2e,
+)
+from torch.ao.quantization.backend_config import (
+    get_executorch_backend_config,
+)
+from torch.ao.quantization.quantizer.xnnpack_quantizer import (
+    XNNPACKQuantizer,
+    get_symmetric_quantization_config,
 )
 from torch.ao.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     default_qconfig, default_dynamic_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
@@ -206,7 +222,7 @@ def run_ddp(rank, world_size, prepared):
     prepared.to(rank)
     model_with_ddp = prepared
     optimizer = torch.optim.SGD(model_with_ddp.parameters(), lr=0.0001)
-    train_one_epoch(model_with_ddp, criterion, optimizer, dataset, rank, 1)
+    train_one_epoch(model_with_ddp, criterion, optimizer, dataset, rank, 1)  # noqa: F821
     ddp_cleanup()
 
 
@@ -404,6 +420,22 @@ def skipIfNoDynamoSupport(fn):
             fn(*args, **kwargs)
     return wrapper
 
+def skipIfNoInductorSupport(fn):
+    reason = "inductor doesn't support."
+    if isinstance(fn, type):
+        if not torchdynamo.is_inductor_supported():
+            fn.__unittest_skip__ = True
+            fn.__unittest_skip_why__ = reason
+        return fn
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not torchdynamo.is_inductor_supported():
+            raise unittest.SkipTest(reason)
+        else:
+            fn(*args, **kwargs)
+    return wrapper
+
 try:
     import torchvision  # noqa: F401
     HAS_TORCHVISION = True
@@ -424,6 +456,48 @@ def lengths_to_offsets(t, offset_type=np.int64, use_begin_offset=True):
     if use_begin_offset:
         return tt[:-1]
     return tt[1:]
+
+
+def _group_quantize_tensor(w, n_bit=4, q_group_size=16):
+    assert w.dim() == 2
+    w = w.transpose(0, 1).contiguous()
+    assert q_group_size > 1
+    assert w.shape[-1] % q_group_size == 0
+
+    to_quant = w.reshape(-1, q_group_size)
+    assert torch.isnan(to_quant).sum() == 0
+
+    max_val = to_quant.amax(dim=1, keepdim=True)
+    min_val = to_quant.amin(dim=1, keepdim=True)
+    max_int = 2 ** n_bit - 1
+    min_int = 0
+    scales = (max_val - min_val).clamp(min=1e-6) / max_int
+    assert torch.isnan(scales).sum() == 0
+
+    zeros = min_val + scales * (2 ** (n_bit - 1))
+    assert torch.isnan(zeros).sum() == 0
+
+    out = to_quant.sub(min_val).div(scales).round().clamp_(min_int, max_int)
+    assert torch.isnan(out).sum() == 0
+
+    out = out.to(dtype=torch.int32).reshape(w.shape)
+
+    # Scales and zeros for the same q-group should be contiguous, so we can
+    # load as a 32-bit word
+    scales = scales.view(w.shape[0], -1)
+    zeros = zeros.view(w.shape[0], -1)
+    scales_and_zeros = (
+        torch.cat(
+            [
+                scales.reshape(scales.size(0), scales.size(1), 1),
+                zeros.reshape(zeros.size(0), zeros.size(1), 1),
+            ],
+            2,
+        ).transpose(0, 1).contiguous()
+    )
+
+    return out, scales_and_zeros
+
 
 # QuantizationTestCase used as a base class for testing quantization on modules
 class QuantizationTestCase(TestCase):
@@ -806,10 +880,8 @@ class QuantizationTestCase(TestCase):
                     (exp_type_end_b is act_type_end_b)
                 self.assertTrue(
                     types_match,
-                    'Type mismatch at {}: expected {}, got {}'.format(
-                        k,
-                        (exp_type_start_a, exp_type_end_a, exp_type_start_b, exp_type_end_b),
-                        (act_type_start_a, act_type_end_a, act_type_start_b, act_type_end_b))
+                    f'Type mismatch at {k}: expected {(exp_type_start_a, exp_type_end_a, exp_type_start_b, exp_type_end_b)}, '
+                    f'got {(act_type_start_a, act_type_end_a, act_type_start_b, act_type_end_b)}'
                 )
 
         def assert_ns_compare_dict_valid(
@@ -1118,6 +1190,125 @@ class QuantizationLiteTestCase(QuantizationTestCase):
                         continue
                 break
 
+
+class PT2EQuantizationTestCase(QuantizationTestCase):
+    """
+    Base QuantizationTestCase for PT2 with some helper methods.
+    """
+    _MAP_TO_FX_TRACED_OPS = {
+        torch.ops.quantized_decomposed.quantize_per_tensor: torch.ops.quantized_decomposed.quantize_per_tensor.default,
+        torch.ops.quantized_decomposed.dequantize_per_tensor: torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+        torch.ops.quantized_decomposed.quantize_per_channel: torch.ops.quantized_decomposed.quantize_per_channel.default,
+        torch.ops.quantized_decomposed.dequantize_per_channel: torch.ops.quantized_decomposed.dequantize_per_channel.default,
+        torch.ops.quantized_decomposed.quantize_per_tensor.tensor: torch.ops.quantized_decomposed.quantize_per_tensor.tensor,
+        torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
+    }
+
+    def _test_quantizer(
+        self,
+        model,
+        example_inputs,
+        quantizer,
+        expected_node_occurrence,
+        expected_node_list=None,
+        check_against_fx_quant=False,
+        fx_qconfig_mapping=None,
+        export_with_dynamic_shape=False,
+        is_qat=False,
+        is_debug_mode=False,
+    ):
+        # resetting dynamo cache
+        torch._dynamo.reset()
+        m_eager = model.eval()
+
+        # program capture
+        m = copy.deepcopy(m_eager)
+        dynamic_shapes = tuple(
+            {0: torch.export.Dim("dim")} if i == 0 else None
+            for i in range(len(example_inputs))
+        )
+        m = capture_pre_autograd_graph(
+            m,
+            example_inputs,
+            dynamic_shapes=dynamic_shapes if export_with_dynamic_shape else None,
+        )
+
+        if is_qat:
+            m = prepare_qat_pt2e(m, quantizer)
+        else:
+            m = prepare_pt2e(m, quantizer)
+        # Calibrate
+        m(*example_inputs)
+        m = convert_pt2e(m)
+        if is_debug_mode:
+            print("quantized model", m)
+
+        pt2_quant_output = m(*example_inputs)
+        ns = NodeSpec
+        node_occurrence = {
+            ns.call_function(k): v for k, v in expected_node_occurrence.items()
+        }
+        if expected_node_list is None:
+            expected_node_list = []
+        node_list = [ns.call_function(n) for n in expected_node_list]
+        self.checkGraphModuleNodes(
+            m, expected_node_occurrence=node_occurrence, expected_node_list=node_list
+        )
+        if check_against_fx_quant:
+            qconfig_mapping = fx_qconfig_mapping
+            backend_config = get_executorch_backend_config()
+            m_copy = copy.deepcopy(m_eager)
+            m_fx = prepare_fx(
+                m_copy, qconfig_mapping, example_inputs, backend_config=backend_config
+            )
+            m_fx(*example_inputs)
+            m_fx = _convert_to_reference_decomposed_fx(
+                m_fx, backend_config=backend_config
+            )
+            m_fx = capture_pre_autograd_graph(
+                m_fx,
+                example_inputs,
+                dynamic_shapes=dynamic_shapes if export_with_dynamic_shape else None,
+            )
+            node_occurrence = {}
+            for k, v in PT2EQuantizationTestCase._MAP_TO_FX_TRACED_OPS.items():
+                if k in expected_node_occurrence:
+                    node_occurrence[ns.call_function(v)] = expected_node_occurrence[k]
+            self.checkGraphModuleNodes(m_fx, expected_node_occurrence=node_occurrence)
+            fx_quant_output = m_fx(*example_inputs)
+            self.assertEqual(fx_quant_output, pt2_quant_output)
+
+    def _quantize(self, m, quantizer, example_inputs, is_qat: bool = False):
+        # resetting dynamo cache
+        torch._dynamo.reset()
+
+        m = capture_pre_autograd_graph(
+            m,
+            example_inputs,
+        )
+        if is_qat:
+            m = prepare_qat_pt2e(m, quantizer)
+        else:
+            m = prepare_pt2e(m, quantizer)
+        m(*example_inputs)
+        m = convert_pt2e(m)
+        return m
+
+    def _get_pt2e_quantized_linear(self, is_per_channel=False) -> torch.fx.GraphModule:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        quantizer = XNNPACKQuantizer()
+        operator_config = get_symmetric_quantization_config(is_per_channel=is_per_channel)
+        quantizer.set_global(operator_config)
+        example_inputs = (torch.randn(2, 2),)
+        m = M().eval()
+        return self._quantize(m, quantizer, example_inputs)
 
 # Below are a series of toy models to use in testing quantization
 
@@ -2563,7 +2754,28 @@ class TestHelperModules:
             x = self.bn(x)
             return self.relu(x)
 
-    class Conv1dWithConv2d(torch.nn.Module):
+    class ConvTWithBNRelu(torch.nn.Module):
+        def __init__(self, relu, dim=2, bn=True, bias=True):
+            super().__init__()
+            convts = {1: torch.nn.ConvTranspose1d, 2: torch.nn.ConvTranspose2d}
+            bns = {1: torch.nn.BatchNorm1d, 2: torch.nn.BatchNorm2d}
+            self.convt = convts[dim](3, 3, 3, bias=bias)
+
+            if bn:
+                self.bn = bns[dim](3)
+            else:
+                self.bn = torch.nn.Identity()
+            if relu:
+                self.relu = torch.nn.ReLU()
+            else:
+                self.relu = torch.nn.Identity()
+
+        def forward(self, x):
+            x = self.convt(x)
+            x = self.bn(x)
+            return self.relu(x)
+
+    class Conv2dThenConv1d(torch.nn.Module):
         def __init__(self):
             super().__init__()
             self.conv1d = torch.nn.Conv1d(3, 3, 3)
@@ -2574,6 +2786,9 @@ class TestHelperModules:
             x = x.squeeze(0)
             x = self.conv1d(x)
             return x
+
+        def example_inputs(self):
+            return (torch.randn(1, 3, 5, 5),)
 
     class Conv2dWithCat(torch.nn.Module):
         def __init__(self):
@@ -2664,3 +2879,24 @@ class TestHelperModules:
             permute_out = torch.permute(x, (0, 2, 3, 1))
             linear_out = self.linear(permute_out)
             return linear_out
+
+    class GroupwiseConv2d(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv = torch.nn.Conv2d(4, 4, 3, groups=2)
+
+        def forward(self, x):
+            return self.conv(x)
+
+        def example_inputs(self):
+            return (torch.randn(2, 4, 10, 10),)
+
+    class LinearReluModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.fc = torch.nn.Linear(5, 5).to(dtype=torch.float)
+            self.relu = torch.nn.ReLU()
+
+        def forward(self, x):
+            x = self.relu(self.fc(x))
+            return x

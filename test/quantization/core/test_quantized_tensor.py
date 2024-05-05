@@ -139,6 +139,13 @@ def _compress_uniform_simplified(X, bit_rate, xmin, xmax, fp16_scale_bias=True):
     return Xq, loss
 
 class TestQuantizedTensor(TestCase):
+    def test_qtensor_equal(self):
+        # ASAN regression test reported in https://github.com/pytorch/pytorch/issues/116087
+        x = torch.rand(5)
+        x_q = torch.quantize_per_tensor(x, 0.1, 10, torch.quint4x2)
+        y_q = torch.quantize_per_tensor(x, 0.1, 10, torch.quint4x2)
+        self.assertTrue(torch.equal(x_q, y_q))
+
     def test_per_tensor_qtensor_to_memory_format(self):
         n = np.random.randint(1, 10)
         c = np.random.randint(2, 10)
@@ -301,10 +308,11 @@ class TestQuantizedTensor(TestCase):
         # Test save/load
         with tempfile.NamedTemporaryFile() as f:
             torch.save(qr, f)
-            f.seek(0)
-            loaded_q = torch.load(f)
-            loaded_int_repr = loaded_q.int_repr()
-            self.assertEqual(int_repr, loaded_int_repr)
+            for weights_only in [True, False]:
+                f.seek(0)
+                loaded_q = torch.load(f, weights_only=weights_only)
+                loaded_int_repr = loaded_q.int_repr()
+                self.assertEqual(int_repr, loaded_int_repr)
 
     def test_qtensor_channel_float_assignment(self):
         t1 = torch.rand(2, 3, 5, 5)
@@ -824,11 +832,12 @@ class TestQuantizedTensor(TestCase):
             with tempfile.NamedTemporaryFile() as f:
                 # Serializing and Deserializing Tensor
                 torch.save((qr, qrv), f)
-                f.seek(0)
-                qr2, qrv2 = torch.load(f)
-                self.assertEqual(qr, qr2)
-                self.assertEqual(qrv, qrv2)
-                self.assertEqual(qr2.storage().data_ptr(), qrv2.storage().data_ptr())
+                for weights_only in [True, False]:
+                    f.seek(0)
+                    qr2, qrv2 = torch.load(f, weights_only=weights_only)
+                    self.assertEqual(qr, qr2)
+                    self.assertEqual(qrv, qrv2)
+                    self.assertEqual(qr2.storage().data_ptr(), qrv2.storage().data_ptr())
 
     def test_qtensor_per_channel_load_save(self):
         r = torch.rand(20, 10, dtype=torch.float) * 4 - 2
@@ -842,9 +851,10 @@ class TestQuantizedTensor(TestCase):
             with tempfile.NamedTemporaryFile() as f:
                 # Serializing and Deserializing Tensor
                 torch.save(qr, f)
-                f.seek(0)
-                qr2 = torch.load(f)
-                self.assertEqual(qr, qr2)
+                for weights_only in [True, False]:
+                    f.seek(0)
+                    qr2 = torch.load(f, weights_only=weights_only)
+                    self.assertEqual(qr, qr2)
 
     def test_qtensor_copy(self):
         scale = 0.5
@@ -1338,6 +1348,7 @@ class TestQuantizedTensor(TestCase):
         torch.save(f, buf)
 
         buf.seek(0)
+        # Don't test weights_only here as this is loading a Module (legacy)
         f2 = torch.load(buf)
 
         self.assertEqual(f2.qscheme, torch.per_tensor_symmetric)
@@ -1422,9 +1433,10 @@ class TestQuantizedTensor(TestCase):
             m = M()
             m(q, qc)
             with open(fname, "rb") as handle:
-                loaded_q, loaded_qc = torch.load(fname)
-                self.assertEqual(loaded_q, q)
-                self.assertEqual(loaded_qc, qc)
+                for weights_only in [True, False]:
+                    loaded_q, loaded_qc = torch.load(fname, weights_only=weights_only)
+                    self.assertEqual(loaded_q, q)
+                    self.assertEqual(loaded_qc, qc)
 
     def test_pickle_checkpoint_qtensor(self):
         self._test_pickle_checkpoint_qtensor('cpu')
@@ -1594,6 +1606,14 @@ class TestQuantizedTensor(TestCase):
 
         self.assertEqual(quantized_X.int_repr(), quantized_decomposed_X)
         self.assertEqual(dequantized_X, dequantized_decomposed_X)
+
+    def test_decomposed_choose_qparams_per_token_asymmetric_backward(self):
+        # register the ops
+        import torch.ao.quantization.fx._decomposed
+        x = torch.randn(2, 3).requires_grad_()
+        (s, zp) = torch.ops.quantized_decomposed._choose_qparams_per_token_asymmetric_impl(x, torch.int8)
+        out = x.div(s).add(zp).round()
+        out.sum().backward()
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"

@@ -206,4 +206,4 @@ def get_chunk_sharding_params(sharding_dim_size, world_size, spec, rank):
             start_pos = current_offsets
             break
         current_offsets += chunk_size
-    return start_pos, chunk_size
+    return start_pos, chunk_size  # type: ignore[possibly-undefined]

@@ -34,6 +34,7 @@ struct VulkanOpaqueTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
   }
 
   bool is_contiguous_custom(c10::MemoryFormat memory_format) const override {
+    (void)memory_format;
     return true;
   }
 

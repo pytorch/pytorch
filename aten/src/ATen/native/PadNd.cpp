@@ -24,7 +24,7 @@
 #include <ATen/ops/replication_pad3d.h>
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 
 Tensor constant_pad_nd(const Tensor& self, IntArrayRef pad, const Scalar& value) {
     TORCH_CHECK(pad.size() % 2 == 0, "Length of pad must be even but instead it equals ",
@@ -245,4 +245,4 @@ Tensor pad_symint(const Tensor &self, c10::SymIntArrayRef pad, c10::string_view 
   return at::native::_pad_enum_symint(self, pad, static_cast<int64_t>(mode_enum), value);
 }
 
-}}  // namespace at::native
+}  // namespace at::native

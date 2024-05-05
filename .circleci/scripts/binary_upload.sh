@@ -16,11 +16,6 @@ UPLOAD_BUCKET="s3://pytorch"
 BACKUP_BUCKET="s3://pytorch-backup"
 BUILD_NAME=${BUILD_NAME:-}
 
-# this is temporary change to upload pypi-cudnn builds to separate folder
-if [[ ${BUILD_NAME} == *with-pypi-cudnn* ]]; then
-  UPLOAD_SUBFOLDER="${UPLOAD_SUBFOLDER}_pypi_cudnn"
-fi
-
 DRY_RUN=${DRY_RUN:-enabled}
 # Don't actually do work unless explicit
 ANACONDA="true anaconda"

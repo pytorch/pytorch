@@ -1,3 +1,4 @@
+#include <c10/util/Flags.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/passes/inliner.h>
@@ -11,6 +12,11 @@
 #include <ATen/autocast_mode.h>
 #include <torch/csrc/jit/passes/autocast.h>
 #endif
+
+C10_DEFINE_bool(
+    torch_jit_do_not_store_optimized_graph,
+    false,
+    "Do not store the optimized graph.");
 
 namespace torch::jit {
 namespace {
@@ -86,6 +92,22 @@ const c10::FunctionSchema& GraphFunction::getSchema() const {
   return *schema_;
 }
 
+std::shared_ptr<Graph> GraphFunction::optimized_graph() const {
+  std::lock_guard<std::recursive_mutex> lock(compile_mutex);
+  decltype(optimized_graphs_)::value_type graph;
+  auto& graph_ref = !FLAGS_torch_jit_do_not_store_optimized_graph
+      ? optimized_graphs_[currentSpecialization()]
+      : graph;
+  if (graph_ref) {
+    return graph_ref;
+  }
+  graph_ref = graph_->copy();
+  if (getGraphExecutorOptimize()) {
+    preoptimizeGraph(graph_ref, force_no_amp_);
+  }
+  return graph_ref;
+}
+
 GraphFunction::SpecializationKey GraphFunction::currentSpecialization() const {
   if (force_no_amp_) {
     return SpecializationKey::AutocastOff;
@@ -94,8 +116,8 @@ GraphFunction::SpecializationKey GraphFunction::currentSpecialization() const {
   // disabling autodiff pass for mobile build since autocast APIs don't exist
   return SpecializationKey::AutocastOff;
 #else
-  bool cpu_enabled = at::autocast::is_cpu_enabled();
-  bool gpu_enabled = at::autocast::is_enabled();
+  bool cpu_enabled = at::autocast::is_autocast_enabled(at::kCPU);
+  bool gpu_enabled = at::autocast::is_autocast_enabled(at::kCUDA);
   if (cpu_enabled && gpu_enabled) {
     return SpecializationKey::CpuGpuAutocastOn;
   } else if (!cpu_enabled && !gpu_enabled) {

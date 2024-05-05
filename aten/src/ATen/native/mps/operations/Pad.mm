@@ -317,9 +317,7 @@ static Tensor& pad_out_template(Tensor& output,
     if (is_backward_pass) {
       feeds[gradOutputPlaceholder.getMPSGraphTensor()] = gradOutputPlaceholder.getMPSGraphTensorData();
     }
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, results);
+    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
   }
   return output;
 }
@@ -467,7 +465,7 @@ Tensor replication_pad3d_backward_mps(const Tensor& grad_output, const Tensor& i
   return mps::pad_out_template(grad_input, input, padding, grad_output, MPSGraphPaddingModeClampToEdge, 0.0, __func__);
 }
 
-// backward pass is exlicitly handled in autograd by negating the "pad" argument
+// backward pass is explicitly handled in autograd by negating the "pad" argument
 Tensor constant_pad_nd_mps(const Tensor& self, IntArrayRef pad, const Scalar& value) {
   if (pad.size() > 6) {
     TORCH_WARN_ONCE("MPS: The constant padding of more than 3 dimensions is not currently supported natively. ",

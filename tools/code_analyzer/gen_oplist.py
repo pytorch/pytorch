@@ -17,10 +17,7 @@ from torchgen.selective_build.selector import (
 
 
 def extract_all_operators(selective_builder: SelectiveBuilder) -> Set[str]:
-    ops = []
-    for op_name in selective_builder.operators.keys():
-        ops.append(op_name)
-    return set(ops)
+    return set(selective_builder.operators.keys())
 
 
 def extract_training_operators(selective_builder: SelectiveBuilder) -> Set[str]:
@@ -37,7 +34,7 @@ def throw_if_any_op_includes_overloads(selective_builder: SelectiveBuilder) -> N
         if op.include_all_overloads:
             ops.append(op_name)
     if ops:
-        raise Exception(
+        raise Exception(  # noqa: TRY002
             (
                 "Operators that include all overloads are "
                 + "not allowed since --allow-include-all-overloads "

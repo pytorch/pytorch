@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import torch
 from torch.utils._pytree import tree_map
 from typing import Iterator, List, Optional
@@ -47,8 +49,6 @@ class LoggingTensor(torch.Tensor):
     __slots__ = ['elem']
 
     context = contextlib.nullcontext
-
-    __torch_function__ = torch._C._disabled_torch_function_impl
 
     @staticmethod
     def __new__(cls, elem, *args, **kwargs):

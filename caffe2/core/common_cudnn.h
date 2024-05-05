@@ -16,17 +16,12 @@
 #include <cudnn.h>
 
 static_assert(
-    CUDNN_VERSION >= 5000,
-    "Caffe2 requires cudnn version 5.0 or above.");
-
-#if CUDNN_VERSION < 6000
-#pragma message "CUDNN version under 6.0 is supported at best effort."
-#pragma message "We strongly encourage you to move to 6.0 and above."
-#pragma message "This message is intended to annoy you enough to update."
-#endif // CUDNN_VERSION < 6000
+    CUDNN_VERSION >= 8200,
+    "Caffe2 requires cudnn version 8.2 or above.");
 
 #define CUDNN_VERSION_MIN(major, minor, patch) \
-  (CUDNN_VERSION >= ((major) * 1000 + (minor) * 100 + (patch)))
+    (major >= 9 ? CUDNN_VERSION >= ((major) * 10000 + (minor) * 100 + (patch)) : \
+                  CUDNN_VERSION >= ((major) * 1000 + (minor) * 100 + (patch)))
 
 namespace caffe2 {
 
@@ -135,7 +130,6 @@ class cudnnTypeWrapper<float> {
   }
 };
 
-#if CUDNN_VERSION_MIN(6, 0, 0)
 template <>
 class cudnnTypeWrapper<int> {
  public:
@@ -151,7 +145,6 @@ class cudnnTypeWrapper<int> {
     return &v;
   }
 };
-#endif // CUDNN_VERSION_MIN(6, 0, 0)
 
 template <>
 class cudnnTypeWrapper<double> {

@@ -91,7 +91,7 @@ class TORCH_API RNNImplBase : public torch::nn::Cloneable<Derived> {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ RNN ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// A multi-layer Elman RNN module with Tanh or ReLU activation.
-/// See https://pytorch.org/docs/master/generated/torch.nn.RNN.html to learn
+/// See https://pytorch.org/docs/main/generated/torch.nn.RNN.html to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::RNNOptions` class to learn what
@@ -140,7 +140,7 @@ TORCH_MODULE(RNN);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ LSTM ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// A multi-layer long-short-term-memory (LSTM) module.
-/// See https://pytorch.org/docs/master/generated/torch.nn.LSTM.html to learn
+/// See https://pytorch.org/docs/main/generated/torch.nn.LSTM.html to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::LSTMOptions` class to learn what
@@ -205,7 +205,7 @@ TORCH_MODULE(LSTM);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GRU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// A multi-layer gated recurrent unit (GRU) module.
-/// See https://pytorch.org/docs/master/generated/torch.nn.GRU.html to learn
+/// See https://pytorch.org/docs/main/generated/torch.nn.GRU.html to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::GRUOptions` class to learn what
@@ -286,7 +286,7 @@ class TORCH_API RNNCellImplBase : public torch::nn::Cloneable<Derived> {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// An Elman RNN cell with tanh or ReLU non-linearity.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.RNNCell to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.RNNCell to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::RNNCellOptions` class to learn what
@@ -326,7 +326,7 @@ TORCH_MODULE(RNNCell);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// A long short-term memory (LSTM) cell.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.LSTMCell to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.LSTMCell to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::LSTMCellOptions` class to learn what
@@ -365,7 +365,7 @@ TORCH_MODULE(LSTMCell);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// A gated recurrent unit (GRU) cell.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.GRUCell to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.GRUCell to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::GRUCellOptions` class to learn what

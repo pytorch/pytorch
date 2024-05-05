@@ -116,6 +116,13 @@ if(APPLE AND USE_MPS)
     ${CMAKE_CURRENT_SOURCE_DIR}/mps_test_objc_interface.mm)
 endif()
 
+list(APPEND ATen_XPU_TEST_SRCS
+  ${CMAKE_CURRENT_SOURCE_DIR}/xpu_caching_host_allocator_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/xpu_device_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/xpu_event_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/xpu_generator_test.cpp
+  )
+
 # Caffe2 specific tests
 if(BUILD_CAFFE2)
   list(APPEND ATen_CPU_TEST_SRCS
@@ -134,3 +141,4 @@ set(ATen_VULKAN_TEST_SRCS ${ATen_VULKAN_TEST_SRCS} PARENT_SCOPE)
 set(ATen_MOBILE_TEST_SRCS ${ATen_MOBILE_TEST_SRCS} PARENT_SCOPE)
 set(ATen_VEC_TEST_SRCS ${ATen_VEC_TEST_SRCS} PARENT_SCOPE)
 set(ATen_MPS_TEST_SRCS ${ATen_MPS_TEST_SRCS} PARENT_SCOPE)
+set(ATen_XPU_TEST_SRCS ${ATen_XPU_TEST_SRCS} PARENT_SCOPE)

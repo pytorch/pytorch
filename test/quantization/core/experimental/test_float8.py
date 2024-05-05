@@ -242,6 +242,23 @@ class TestFloat8Dtype(TestCase):
         for number in SPECIAL_NUMBERS[dtype]:
             compare_binary_with_decimal(*number, dtype, device)
 
+    @dtypes(*FLOAT8_DTYPES)
+    @dtypesIfCUDA(*CUDA_FLOAT8_DTYPES)
+    def test_type_promotion_fails(self, dtype, device):
+        """Test that float8 is not promoted to higher precision Float Type."""
+        for other_dtype in [
+            torch.float16,
+            torch.bfloat16,
+            torch.float32,
+            torch.float64,
+        ]:
+            x = torch.randn(8, device=device).to(dtype)
+            y = torch.randn(8, device=device).to(other_dtype)
+            with self.assertRaisesRegex(
+                RuntimeError, "Promotion for Float8 Types is not supported"
+            ):
+                x + y
+
 
 instantiate_device_type_tests(TestFloat8Dtype, globals())
 

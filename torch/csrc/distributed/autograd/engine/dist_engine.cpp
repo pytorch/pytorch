@@ -62,9 +62,9 @@ class DistAccumulateGradCaptureHook
       autogradContext_->accumulateGrad(
           accumulateGrad_->variable, inputGrads[0], 3 /* num_expected_refs */);
     }
-    const variable_list kEmptyOuput;
+    const variable_list kEmptyOutput;
     for (const auto& hook : accumulateGrad_->post_hooks()) {
-      (*hook)(kEmptyOuput, inputGrads);
+      (*hook)(kEmptyOutput, inputGrads);
     }
     return inputGrads[0];
   }
@@ -219,8 +219,7 @@ void DistEngine::computeDependencies(
     queue.push(mapEntry.second.get());
   }
 
-  bool might_use_cuda = at::globalContext().hasCUDA();
-  bool will_use_cuda = false;
+  bool will_use_accelerator = false;
 
   edge_list recvBackwardEdges;
   // Traverse the graph.
@@ -229,8 +228,8 @@ void DistEngine::computeDependencies(
     auto fn = queue.front();
     queue.pop();
 
-    if (might_use_cuda && !will_use_cuda) {
-      will_use_cuda = fn->stream(c10::DeviceType::CUDA).has_value();
+    if (!will_use_accelerator) {
+      will_use_accelerator = fn->stream().has_value();
     }
 
     for (const auto& edge : fn->next_edges()) {
@@ -269,9 +268,10 @@ void DistEngine::computeDependencies(
     }
   }
 
-  if (will_use_cuda) {
-    // Collects current streams for devices where this process has a context,
-    // so graphTask::exec_post_processing can sync them with leaf_streams.
+  if (will_use_accelerator) {
+    // Collects current streams for CUDA/ROCM devices where this process has a
+    // context, so graphTask::exec_post_processing can sync them with
+    // leaf_streams.
     graphTask->stash_current_streams();
   }
 
@@ -460,8 +460,7 @@ c10::intrusive_ptr<c10::ivalue::Future> DistEngine::executeSendFunctionAsync(
   // inputs might have been retrieved over the wire on a separate stream and the
   // sendFunction itself runs on a different stream. As a result, we need to
   // manually synchronize those two streams here.
-  const auto& send_backward_stream =
-      sendFunction->stream(c10::DeviceType::CUDA);
+  const auto& send_backward_stream = sendFunction->stream();
   if (send_backward_stream) {
     for (const auto& grad : sendFunction->getGrads()) {
       const auto guard = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};

@@ -55,7 +55,7 @@ C10_API c10::complex<float> sqrt(const c10::complex<float>& in);
 C10_API c10::complex<double> sqrt(const c10::complex<double>& in);
 C10_API c10::complex<float> acos(const c10::complex<float>& in);
 C10_API c10::complex<double> acos(const c10::complex<double>& in);
-}; // namespace _detail
+} // namespace _detail
 #endif
 
 template <typename T>

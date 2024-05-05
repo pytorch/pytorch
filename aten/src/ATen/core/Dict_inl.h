@@ -120,9 +120,9 @@ template<class Key_, class Value_>
 std::pair<typename Dict<Key, Value>::iterator, bool> Dict<Key, Value>::insert(Key_&& key, Value_&& value) const {
   static_assert(std::is_constructible<Key, Key_>::value, "Wrong type for the key argument of Dict::insert");
   static_assert(std::is_constructible<Value, Value_>::value, "Wrong type for the value argument of Dict::insert");
-  auto inserted = impl_->dict.insert(std::pair<IValue, IValue>{
-    Key(std::forward<Key_>(key)),
-    Value(std::forward<Value_>(value))});
+  auto inserted = impl_->dict.emplace(
+      Key(std::forward<Key_>(key)),
+      Value(std::forward<Value_>(value)));
   return {iterator{inserted.first}, inserted.second};
 }
 

@@ -1,10 +1,6 @@
 #pragma once
 
-#include <condition_variable>
 #include <memory>
-#include <mutex>
-#include <stdexcept>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -55,6 +51,10 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   // with its collectives.
   int64_t getID() const {
     return reinterpret_cast<std::intptr_t>(this);
+  }
+
+  virtual bool supportsSplitting() const {
+    return false;
   }
 
   virtual void startCoalescing() {
@@ -365,6 +365,33 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     return pg_name_;
   }
 
+  void setGroupDesc(const std::string& desc) {
+    pg_desc_ = desc;
+  }
+
+  const std::string& getGroupDesc() const {
+    return pg_desc_;
+  }
+
+  // See similar functions in ProcessGroup.hpp for context.
+  c10::optional<at::Device> getBoundDeviceId() const {
+    return bound_device_id_;
+  }
+
+  // Perform an eager connect to the specified device if the backend supports
+  // it.
+  virtual void eagerConnectSingleDevice(at::Device device) {
+    // no-op in the default case; this is an optimization some
+    // backends may perform
+  }
+
+  void setBoundDeviceId(c10::optional<at::Device> device) {
+    if (device) {
+      TORCH_CHECK(device->has_index(), "setBoundDeviceId must have an index");
+    }
+    bound_device_id_ = device;
+  }
+
  protected:
   // Implementations of this interface need to call this to setup
   // appropriate logging etc.
@@ -376,8 +403,11 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   // remains the same across use of this process group.
   DebugLevel dist_debug_level_;
   std::string pg_name_;
+  std::string pg_desc_;
 
   std::function<void(std::shared_ptr<WorkInfo>)> onCompletionHook_;
+
+  c10::optional<at::Device> bound_device_id_;
 };
 
 } // namespace c10d

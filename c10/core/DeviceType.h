@@ -7,8 +7,11 @@
 
 #include <c10/macros/Export.h>
 
+#include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <ostream>
+#include <string>
 
 namespace c10 {
 
@@ -39,7 +42,7 @@ enum class DeviceType : int8_t {
   IDEEP = 5, // IDEEP.
   HIP = 6, // AMD HIP
   FPGA = 7, // FPGA
-  ORT = 8, // ONNX Runtime / Microsoft
+  MAIA = 8, // ONNX Runtime / Microsoft
   XLA = 9, // XLA / TPU
   Vulkan = 10, // Vulkan
   Metal = 11, // Metal
@@ -63,7 +66,7 @@ constexpr DeviceType kCPU = DeviceType::CPU;
 constexpr DeviceType kCUDA = DeviceType::CUDA;
 constexpr DeviceType kHIP = DeviceType::HIP;
 constexpr DeviceType kFPGA = DeviceType::FPGA;
-constexpr DeviceType kORT = DeviceType::ORT;
+constexpr DeviceType kMAIA = DeviceType::MAIA;
 constexpr DeviceType kXLA = DeviceType::XLA;
 constexpr DeviceType kMPS = DeviceType::MPS;
 constexpr DeviceType kMeta = DeviceType::Meta;
@@ -101,6 +104,8 @@ C10_API std::ostream& operator<<(std::ostream& stream, DeviceType type);
 C10_API void register_privateuse1_backend(const std::string& backend_name);
 C10_API std::string get_privateuse1_backend(bool lower_case = true);
 
+C10_API bool is_privateuse1_backend_registered();
+
 } // namespace c10
 
 namespace std {
@@ -113,5 +118,6 @@ struct hash<c10::DeviceType> {
 } // namespace std
 
 namespace torch {
+// NOLINTNEXTLINE(misc-unused-using-decls)
 using c10::DeviceType;
-}
+} // namespace torch

@@ -22,7 +22,7 @@ MPSStream::MPSStream(Stream stream) : _stream(stream) {
   _compilationDescriptor = [MPSGraphCompilationDescriptor new];
 
   // disable commitAndContinue if Signpost tracing is enabled
-  if (getMPSProfiler().isSignpostTracingEnabled()) {
+  if (getMPSProfiler().isSignpostTracingEnabled() || getMPSProfiler().isCaptureEnabled()) {
     _enableCommitAndContinue = false;
   }
   _executionDescriptor.enableCommitAndContinue = _enableCommitAndContinue;
@@ -146,9 +146,9 @@ void MPSStream::addCompletedHandler(MTLCommandBufferHandler block) {
 }
 
 void MPSStream::fill(id<MTLBuffer> buffer, uint8_t value, size_t length, size_t offset, SyncType syncType) {
-  TORCH_INTERNAL_ASSERT(length >= offset);
-  if (length == 0)
+  if (length == 0) {
     return;
+  }
   dispatch_sync(_serialQueue, ^() {
     @autoreleasepool {
       endKernelCoalescing();
@@ -173,11 +173,22 @@ void MPSStream::copy(id<MTLBuffer> srcBuffer,
       endKernelCoalescing();
       id<MTLBlitCommandEncoder> blitEncoder = [commandBuffer() blitCommandEncoder];
 
-      [blitEncoder copyFromBuffer:srcBuffer
-                     sourceOffset:(NSUInteger)srcOffset
-                         toBuffer:dstBuffer
-                destinationOffset:(NSUInteger)dstOffset
-                             size:(NSUInteger)length];
+      // For some reason copyFromBuffer for 4Gb fails without returning an error
+      // See https://github.com/pytorch/pytorch/issues/124335
+      // Workaround by batching copy commands into 2Gb chunks
+      constexpr size_t max_copy_size = 0x80000000; // 2GB
+      size_t bytes_copied = 0;
+      size_t bytes_remains = length;
+      while (bytes_remains > 0) {
+        NSUInteger bytes_to_copy = std::min(max_copy_size, bytes_remains);
+        [blitEncoder copyFromBuffer:srcBuffer
+                       sourceOffset:(NSUInteger)srcOffset + bytes_copied
+                           toBuffer:dstBuffer
+                  destinationOffset:(NSUInteger)dstOffset + bytes_copied
+                               size:bytes_to_copy];
+        bytes_copied += bytes_to_copy;
+        bytes_remains -= bytes_to_copy;
+      }
       [blitEncoder endEncoding];
 
       // profilerId has a value only if copy profiling is enabled

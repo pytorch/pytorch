@@ -26,11 +26,12 @@
 #include <ATen/Parallel.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/core/Dict.h>
+#include <ATen/core/Generator.h>
 #include <ATen/core/ivalue.h>
+#include <c10/core/Device.h>
 #include <c10/core/thread_pool.h>
 #include <c10/util/SmallVector.h>
 #include <c10/util/irange.h>
-#include <c10/util/math_compat.h>
 #include <c10/util/string_utils.h>
 
 namespace torch::jit {
@@ -121,7 +122,7 @@ double radians(double x);
 
 // Equivalent to list.at(idx)
 template <typename T>
-T getItem(const c10::List<T>& list, int64_t idx) {
+decltype(auto) getItem(const c10::List<T>& list, int64_t idx) {
   const int64_t list_size = list.size();
   const int64_t normalized_idx = normalizeIndex(idx, list_size);
   if (normalized_idx < 0 || normalized_idx >= list_size) {
@@ -875,5 +876,9 @@ struct OperatorGeneratorArgs {
       DEFINE_SCALAR_BINARY_OP_WITH_COMPLEX_WITHOUT_INT_COMPLEX_PAIR(     \
           aten_op, op, op, op, bool),                                    \
       DEFINE_STR_CMP_OP(aten_op, op)
+
+TORCH_API at::Generator make_generator_for_device(
+    c10::Device device,
+    c10::optional<int64_t> seed = c10::nullopt);
 
 } // namespace torch::jit

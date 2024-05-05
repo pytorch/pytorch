@@ -1,31 +1,21 @@
-#version 450 core
-#define PRECISION $precision
-#define FORMAT $format
-
 /*
  * TILE_SIZE = (1, 1, 1)
  * WEIGHT_STORAGE = TEXTURE_2D
  * BIAS_STORAGE = TEXTURE_2D
  * Note that for DW kernel IC = 1 so the weight layout is really OC4, H, W, 4oc
  */
+#version 450 core
+#define PRECISION ${PRECISION}
+#define FORMAT ${FORMAT}
 
 layout(std430) buffer;
 
-/*
- * Output Image
- */
+// clang-format off
 layout(set = 0, binding = 0, FORMAT) uniform PRECISION restrict writeonly image3D uOut;
-
-/*
- * Input Textures
- */
+// clang-format on
 layout(set = 0, binding = 1) uniform PRECISION sampler3D uInput;
 layout(set = 0, binding = 2) uniform PRECISION sampler2D uKernel;
 layout(set = 0, binding = 3) uniform PRECISION sampler2D uBias;
-
-/*
- * Params Buffer
- */
 layout(set = 0, binding = 4) uniform PRECISION restrict Block {
   // extents of the output texture
   ivec4 out_extents;
@@ -43,9 +33,6 @@ layout(set = 0, binding = 4) uniform PRECISION restrict Block {
 }
 uBlock;
 
-/*
- * Local Work Group
- */
 layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;
 
 /*

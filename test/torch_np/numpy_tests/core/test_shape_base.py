@@ -198,15 +198,15 @@ class TestHstack(TestCase):
     def test_generator(self):
         # numpy 1.24 emits warnings but we don't
         # with assert_warns(FutureWarning):
-        hstack(np.arange(3) for _ in range(2))
+        hstack([np.arange(3) for _ in range(2)])
         # with assert_warns(FutureWarning):
-        hstack(x for x in np.ones((3, 2)))
+        hstack([x for x in np.ones((3, 2))])  # noqa: C416
 
     @skipif(numpy.__version__ < "1.24", reason="NP_VER: fails on NumPy 1.23.x")
     def test_casting_and_dtype(self):
         a = np.array([1, 2, 3])
         b = np.array([2.5, 3.5, 4.5])
-        res = np.hstack((a, b), casting="unsafe", dtype=np.int64)
+        res = np.hstack(np.append(a, b), casting="unsafe", dtype=np.int64)
         expected_res = np.array([1, 2, 3, 2, 3, 4])
         assert_array_equal(res, expected_res)
 

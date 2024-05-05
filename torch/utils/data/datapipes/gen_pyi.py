@@ -70,7 +70,7 @@ def parse_datapipe_file(file_path: str) -> Tuple[Dict[str, str], Dict[str, str],
         open_paren_count = 0
         method_name, class_name, signature = "", "", ""
         skip = False
-        for line in f.readlines():
+        for line in f:
             if line.count("\"\"\"") % 2 == 1:
                 skip = not skip
             if skip or "\"\"\"" in line:  # Saving docstrings

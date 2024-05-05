@@ -1,8 +1,7 @@
 #include <torch/csrc/itt_wrapper.h>
 #include <torch/csrc/utils/pybind.h>
 
-namespace torch {
-namespace profiler {
+namespace torch::profiler {
 void initIttBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
@@ -12,5 +11,4 @@ void initIttBindings(PyObject* module) {
   itt.def("rangePop", itt_range_pop);
   itt.def("mark", itt_mark);
 }
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler

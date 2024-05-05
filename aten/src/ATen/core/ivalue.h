@@ -10,11 +10,9 @@
 #include <c10/core/SymBool.h>
 #include <c10/core/SymFloat.h>
 #include <c10/macros/Export.h>
-#include <c10/util/C++17.h>
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/intrusive_ptr.h>
 #include <type_traits>
-#include <typeindex>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -492,9 +490,7 @@ struct TORCH_API IValue final {
   // Custom C++ classes
   template <
       typename T,
-      std::enable_if_t<
-          std::is_base_of<torch::CustomClassHolder, T>::value,
-          int> = 0>
+      std::enable_if_t<std::is_base_of_v<torch::CustomClassHolder, T>, int> = 0>
   IValue(intrusive_ptr<T> custom_class);
   bool isCustomClass() const;
   template <typename T>
@@ -508,17 +504,17 @@ struct TORCH_API IValue final {
   template <
       typename... Args,
       std::enable_if_t<
-          !std::disjunction<
+          !std::disjunction_v<
               std::is_lvalue_reference<Args>...,
-              std::negation<std::is_constructible<IValue, Args>>...>::value,
+              std::negation<std::is_constructible<IValue, Args>>...>,
           std::nullptr_t> = nullptr>
   IValue(const std::tuple<Args...>& t);
   template <
       typename... Args,
       std::enable_if_t<
-          !std::disjunction<
+          !std::disjunction_v<
               std::is_lvalue_reference<Args>...,
-              std::negation<std::is_constructible<IValue, Args>>...>::value,
+              std::negation<std::is_constructible<IValue, Args>>...>,
           std::nullptr_t> = nullptr>
   IValue(std::tuple<Args...>&& t);
   bool isTuple() const {
@@ -536,8 +532,13 @@ struct TORCH_API IValue final {
     return Tag::Double == tag;
   }
   double toDouble() const {
-    AT_ASSERT(isDouble());
-    return payload.u.as_double;
+    if (isDouble()) {
+      return payload.u.as_double;
+    } else if (isSymFloat()) {
+      return toSymFloat().guard_float(__FILE__, __LINE__);
+    } else {
+      TORCH_INTERNAL_ASSERT(0, "expected double");
+    }
   }
 
   // ComplexDouble
@@ -643,8 +644,13 @@ struct TORCH_API IValue final {
   }
 
   int64_t toInt() const {
-    AT_ASSERT(isInt());
-    return payload.u.as_int;
+    if (isInt()) {
+      return payload.u.as_int;
+    } else if (isSymInt()) {
+      return toSymInt().guard_int(__FILE__, __LINE__);
+    } else {
+      TORCH_INTERNAL_ASSERT(0, "expected int");
+    }
   }
 
   // Bool
@@ -662,8 +668,13 @@ struct TORCH_API IValue final {
     return Tag::Bool == tag;
   }
   bool toBool() const {
-    AT_ASSERT(isBool());
-    return payload.u.as_bool;
+    if (isBool()) {
+      return payload.u.as_bool;
+    } else if (isSymBool()) {
+      return toSymBool().guard_bool(__FILE__, __LINE__);
+    } else {
+      TORCH_INTERNAL_ASSERT(0, "expected bool");
+    }
   }
 
   // IntList
@@ -732,7 +743,7 @@ struct TORCH_API IValue final {
   // This SFINAEs the called constructor exists.
   template <class T>
   using enable_if_ivalue_constructible =
-      std::enable_if_t<std::is_constructible<IValue, T>::value, std::nullptr_t>;
+      std::enable_if_t<std::is_constructible_v<IValue, T>, std::nullptr_t>;
 
   // The rule for lists is more complicated; the generic constructor is only
   // acceptable if your element isn't SymInt.  If you do have a SymInt element,
@@ -744,8 +755,7 @@ struct TORCH_API IValue final {
   // they're not selectable.
   template <class T>
   using enable_if_list_is_ivalue_constructible = std::enable_if_t<
-      std::is_constructible<IValue, T>::value &&
-          !std::is_same<T, c10::SymInt>::value,
+      std::is_constructible_v<IValue, T> && !std::is_same_v<T, c10::SymInt>,
       std::nullptr_t>;
 
   template <class T, enable_if_list_is_ivalue_constructible<T> = nullptr>
@@ -756,6 +766,8 @@ struct TORCH_API IValue final {
   IValue(at::ArrayRef<T> v);
   template <class T, enable_if_list_is_ivalue_constructible<T> = nullptr>
   IValue(const std::vector<T>& v);
+  template <class T, enable_if_list_is_ivalue_constructible<T> = nullptr>
+  IValue(std::vector<T>&& v);
   template <class T, size_t N>
   IValue(std::array<T, N> v);
 
@@ -764,7 +776,7 @@ struct TORCH_API IValue final {
   // to prevent implicit conversions
   template <class T>
   using enable_if_symint =
-      std::enable_if_t<std::is_same<T, c10::SymInt>::value, std::nullptr_t>;
+      std::enable_if_t<std::is_same_v<T, c10::SymInt>, std::nullptr_t>;
 
   template <class T, enable_if_symint<T> = nullptr>
   IValue(at::ArrayRef<T> v);
@@ -772,13 +784,14 @@ struct TORCH_API IValue final {
   IValue(at::OptionalArrayRef<T> v);
   template <class T, enable_if_symint<T> = nullptr>
   IValue(const std::vector<T>& v);
+  template <class T, enable_if_symint<T> = nullptr>
+  IValue(std::vector<T>&& v);
 
   template <class T>
   using enable_if_ilist_is_ivalue_constructible = std::enable_if_t<
-      std::is_constructible<IValue, T>::value &&
-          std::is_constructible<IValue, typename IListRef<T>::boxed_type>::
-              value &&
-          !std::is_same<T, c10::SymInt>::value,
+      std::is_constructible_v<IValue, T> &&
+          std::is_constructible_v<IValue, typename IListRef<T>::boxed_type> &&
+          !std::is_same_v<T, c10::SymInt>,
       std::nullptr_t>;
 
   template <class T, enable_if_ilist_is_ivalue_constructible<T> = nullptr>
@@ -839,7 +852,7 @@ struct TORCH_API IValue final {
   c10::intrusive_ptr<ivalue::EnumHolder> toEnumHolder() const&;
 
   // None
-  IValue() : tag(Tag::None) {}
+  IValue() = default;
   bool isNone() const {
     return Tag::None == tag;
   }
@@ -932,21 +945,20 @@ struct TORCH_API IValue final {
 
   // ScalarType
   IValue(ScalarType t)
-      : IValue(static_cast<std::underlying_type<ScalarType>::type>(t)) {}
+      : IValue(static_cast<std::underlying_type_t<ScalarType>>(t)) {}
   at::ScalarType toScalarType() const {
     return static_cast<at::ScalarType>(toInt());
   }
 
   // Layout
-  IValue(Layout l)
-      : IValue(static_cast<std::underlying_type<Layout>::type>(l)) {}
+  IValue(Layout l) : IValue(static_cast<std::underlying_type_t<Layout>>(l)) {}
   at::Layout toLayout() const {
     return static_cast<at::Layout>(toInt());
   }
 
   // MemoryFormat
   IValue(MemoryFormat m)
-      : IValue(static_cast<std::underlying_type<MemoryFormat>::type>(m)) {}
+      : IValue(static_cast<std::underlying_type_t<MemoryFormat>>(m)) {}
   at::MemoryFormat toMemoryFormat() const {
     return static_cast<at::MemoryFormat>(toInt());
   }
@@ -1171,6 +1183,7 @@ struct TORCH_API IValue final {
     }
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
   C10_ALWAYS_INLINE void moveFrom(IValue&& rhs) noexcept {
     if (rhs.isTensor()) {
       new (&payload.as_tensor) at::Tensor(std::move(rhs.payload.as_tensor));

@@ -87,6 +87,7 @@ class UninitializedTensorMixin:
         torch.Tensor.__hash__,
         torch.Tensor.size,
         torch.Tensor.copy_,
+        torch.Tensor.is_complex,
         torch.Tensor.is_floating_point,
         torch.Tensor.half,
         torch.Tensor.float,

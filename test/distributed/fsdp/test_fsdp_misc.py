@@ -29,6 +29,7 @@ from torch.distributed.fsdp.wrap import (
 )
 from torch.distributed.optim import _apply_optimizer_in_backward
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
+from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     _assert_module_states,
@@ -505,7 +506,6 @@ class TestFSDPMiscMultiProcess(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_fsdp_cpu_training(self):
         """Tests FSDP training on CPU."""
-        torch.manual_seed(0)
         gloo_pg = dist.new_group(backend="gloo")
         for ss in [
             ShardingStrategy.NO_SHARD,
@@ -514,15 +514,28 @@ class TestFSDPMiscMultiProcess(FSDPTest):
             ShardingStrategy.HYBRID_SHARD,
             ShardingStrategy._HYBRID_SHARD_ZERO2,
         ]:
+            torch.manual_seed(42)
             model = MyModel()
-            fsdp = FSDP(
+            ref_model = DDP(deepcopy(model), process_group=gloo_pg)
+            model = FSDP(
                 model,
                 auto_wrap_policy=always_wrap_policy,
                 process_group=gloo_pg,
                 device_id=torch.device("cpu"),
             )
+            ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+            optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+            torch.manual_seed(42 + self.rank)
             inp = torch.randn(2, 2)
-            fsdp(inp, inp).sum().backward()
+            for _ in range(10):
+                losses = []
+                for _model, _optim in ((ref_model, ref_optim), (model, optim)):
+                    loss = _model(inp, inp).sum()
+                    losses.append(loss)
+                    loss.backward()
+                    _optim.step()
+                    _optim.zero_grad()
+                self.assertEqual(losses[0], losses[1])
 
     @skip_if_lt_x_gpu(2)
     def test_fsdp_cpu_init_stays_on_cpu(self):

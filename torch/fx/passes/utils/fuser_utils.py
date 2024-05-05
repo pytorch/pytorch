@@ -13,7 +13,7 @@ from torch.fx._compatibility import compatibility
 @compatibility(is_backward_compatible=False)
 def topo_sort(nodes: NodeList) -> NodeList:
     # sort nodes according to the topological order
-    indegree_map = {node : 0 for node in nodes}
+    indegree_map = dict.fromkeys(nodes, 0)
     candidates: SimpleQueue = SimpleQueue()
 
     for node in nodes:
@@ -205,6 +205,8 @@ def insert_subgm(gm: GraphModule, sub_gm: GraphModule, orig_inputs: Tuple[Node, 
             # Use Proxy to record getitem access.
             proxy_out = torch.fx.Proxy(module_node)[i].node  # type: ignore[index]
             orig_output.replace_all_uses_with(proxy_out, propagate_meta=True)
+
+        module_node.meta["val"] = tuple(orig_output.meta.get("val", None) for orig_output in orig_outputs)
     return gm
 
 @compatibility(is_backward_compatible=False)

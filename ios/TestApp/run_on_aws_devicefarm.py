@@ -79,15 +79,15 @@ def upload_file(
         print(f"Uploading {filename} to Device Farm as {upload_name}...")
         r = requests.put(upload_url, data=file_stream, headers={"content-type": mime})
         if not r.ok:
-            raise Exception(f"Couldn't upload {filename}: {r.reason}")
+            raise Exception(f"Couldn't upload {filename}: {r.reason}")  # noqa: TRY002
 
     start_time = datetime.datetime.now()
     # Polling AWS till the uploaded file is ready
     while True:
         waiting_time = datetime.datetime.now() - start_time
         if waiting_time > datetime.timedelta(seconds=MAX_UPLOAD_WAIT_IN_SECOND):
-            raise Exception(
-                f"Uploading {filename} is taking longer than {MAX_WAIT_IN_SECOND} seconds, terminating..."
+            raise Exception(  # noqa: TRY002
+                f"Uploading {filename} is taking longer than {MAX_UPLOAD_WAIT_IN_SECOND} seconds, terminating..."
             )
 
         r = client.get_upload(arn=upload_arn)
@@ -96,7 +96,7 @@ def upload_file(
         print(f"{filename} is in state {status} after {waiting_time}")
 
         if status == "FAILED":
-            raise Exception(f"Couldn't upload {filename}: {r}")
+            raise Exception(f"Couldn't upload {filename}: {r}")  # noqa: TRY002
         if status == "SUCCEEDED":
             break
 

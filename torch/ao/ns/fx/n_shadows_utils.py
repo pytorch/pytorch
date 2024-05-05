@@ -92,7 +92,7 @@ class OutputProp:
             elif node.op == 'call_module':
                 result = self.modules[node.target](*load_arg(node.args), **load_arg(node.kwargs))
 
-            if isinstance(result, torch.Tensor):
+            if isinstance(result, torch.Tensor):  # type: ignore[possibly-undefined]
                 node.traced_result = result
 
             env[node.name] = result
@@ -375,7 +375,7 @@ def create_submodule_from_subgraph(
             # TODO(future PR): this is ignoring kwargs, will need to support kwargs
             # for any fusion pattern which has them for a node that is not the
             # first node.
-            cur_args_copy = [cur_node_copy]  # type: ignore[has-type]
+            cur_args_copy = [cur_node_copy]  # type: ignore[has-type, possibly-undefined]  # noqa: F821
 
             if len(cur_node_orig.args) > 1:
                 for arg in cur_node_orig.args[1:]:
@@ -399,15 +399,15 @@ def create_submodule_from_subgraph(
             mod_name = f"mod_{cur_name_idx}"
             setattr(gm, mod_name, orig_mod_copy)
             cur_name_idx += 1
-            cur_node_copy = g.call_module(mod_name, cur_args_copy, cur_kwargs_copy)
+            cur_node_copy = g.call_module(mod_name, cur_args_copy, cur_kwargs_copy)  # type: ignore[possibly-undefined]
 
         elif cur_node_orig.op == 'call_function':
             cur_node_copy = g.call_function(
-                cur_node_orig.target, cur_args_copy, cur_kwargs_copy)
+                cur_node_orig.target, cur_args_copy, cur_kwargs_copy)  # type: ignore[possibly-undefined]
 
         elif cur_node_orig.op == 'call_method':
             cur_node_copy = g.call_method(
-                cur_node_orig.target, cur_args_copy, cur_kwargs_copy)
+                cur_node_orig.target, cur_args_copy, cur_kwargs_copy)  # type: ignore[possibly-undefined]
 
         else:
             raise AssertionError(f'{cur_node_orig.op} not supported yet')
@@ -544,9 +544,8 @@ def create_one_transformed_and_logged_copy_of_subgraph(
                 if isinstance(old_kwarg, Node):
                     new_kwargs[name] = old_kwarg
                 elif isinstance(old_kwarg, (list, tuple)) and len(old_kwarg):
-                    for inner_old_kwarg in old_kwarg:
-                        # TODO(future PR): clarify why we are adding kwargs to args
-                        new_args.append(inner_old_kwarg)
+                    # TODO(future PR): clarify why we are adding kwargs to args
+                    new_args.extend(old_kwarg)
 
             new_args = tuple(new_args)  # type: ignore[assignment]
 
@@ -743,8 +742,7 @@ def create_add_loggers_graph(
         insert_submodule_copy = False
         if maybe_subgraph is not None:
             first_node, last_node = maybe_subgraph[0], maybe_subgraph[-1]
-            for node_to_skip in maybe_subgraph:
-                nodes_to_skip.add(node_to_skip)
+            nodes_to_skip.update(maybe_subgraph)
             qconfig = node_name_to_qconfig[first_node.name]
             if qconfig is not None:
                 insert_submodule_copy = True
@@ -874,8 +872,7 @@ def create_add_loggers_graph(
         maybe_subgraph = _get_subgraph_containing_node(n, subgraphs_dedup)
         if maybe_subgraph is not None:
             first_node, last_node = maybe_subgraph[0], maybe_subgraph[-1]
-            for node_to_skip in maybe_subgraph:
-                nodes_to_skip.add(node_to_skip)
+            nodes_to_skip.update(maybe_subgraph)
         else:
             first_node, last_node = n, n
 

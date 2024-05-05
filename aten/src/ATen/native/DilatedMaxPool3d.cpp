@@ -3,7 +3,6 @@
 #include <ATen/Dispatch.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/Pool.h>
-#include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -14,8 +13,7 @@
 #include <ATen/ops/max_pool3d_with_indices_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -298,5 +296,4 @@ Tensor max_pool3d_with_indices_backward_cpu(
 
 DEFINE_DISPATCH(max_pool3d_kernel);
 DEFINE_DISPATCH(max_pool3d_backward_kernel);
-} // at::native
-} // at
+} // namespace at::native

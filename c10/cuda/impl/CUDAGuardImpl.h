@@ -1,6 +1,5 @@
 #pragma once
 
-#include <c10/core/DeviceGuard.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/core/impl/GPUTrace.h>
 #include <c10/macros/Macros.h>
@@ -11,11 +10,15 @@
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAStream.h>
 
+#include <c10/core/Device.h>
+#include <c10/core/DeviceType.h>
+#include <c10/core/Stream.h>
+#include <c10/core/impl/PyInterpreter.h>
+#include <c10/util/Optional.h>
 #include <cuda_runtime_api.h>
+#include <cstdint>
 
-namespace c10 {
-namespace cuda {
-namespace impl {
+namespace c10::cuda::impl {
 
 struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   static constexpr DeviceType static_type = DeviceType::CUDA;
@@ -29,16 +32,16 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   }
   Device exchangeDevice(Device d) const override {
     TORCH_INTERNAL_ASSERT(d.is_cuda());
-    int old_device_index = c10::cuda::ExchangeDevice(d.index());
+    auto old_device_index = c10::cuda::ExchangeDevice(d.index());
     return Device(DeviceType::CUDA, old_device_index);
   }
   Device getDevice() const override {
-    int device;
+    DeviceIndex device = 0;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     return Device(DeviceType::CUDA, device);
   }
   c10::optional<Device> uncheckedGetDevice() const noexcept {
-    int device;
+    DeviceIndex device{-1};
     const auto err = C10_CUDA_ERROR_HANDLED(c10::cuda::GetDevice(&device));
     C10_CUDA_CHECK_WARN(err);
     if (err != cudaSuccess) {
@@ -58,6 +61,9 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   }
   Stream getDefaultStream(Device d) const override {
     return getDefaultCUDAStream(d.index());
+  }
+  Stream getNewStream(Device d, int priority = 0) const override {
+    return getStreamFromPool(priority, d.index());
   }
   Stream getStreamFromGlobalPool(Device d, bool isHighPriority = false)
       const override {
@@ -80,11 +86,9 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     auto cuda_flag = cudaEventDefault;
     switch (flag) {
       case EventFlag::PYTORCH_DEFAULT:
-      case EventFlag::CUDA_EVENT_DISABLE_TIMING:
         cuda_flag = cudaEventDisableTiming;
         break;
       case EventFlag::BACKEND_DEFAULT:
-      case EventFlag::CUDA_EVENT_DEFAULT:
         cuda_flag = cudaEventDefault;
         break;
       default:
@@ -95,7 +99,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
       (*interp)->trace_gpu_event_creation(
-          reinterpret_cast<uintptr_t>(cuda_event));
+          c10::kCUDA, reinterpret_cast<uintptr_t>(cuda_event));
     }
   }
 
@@ -104,13 +108,13 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     if (!event)
       return;
     auto cuda_event = static_cast<cudaEvent_t>(event);
-    int orig_device;
+    DeviceIndex orig_device{-1};
     C10_CUDA_CHECK_WARN(c10::cuda::GetDevice(&orig_device));
     C10_CUDA_CHECK_WARN(c10::cuda::SetDevice(device_index));
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
       (*interp)->trace_gpu_event_deletion(
-          reinterpret_cast<uintptr_t>(cuda_event));
+          c10::kCUDA, reinterpret_cast<uintptr_t>(cuda_event));
     }
     C10_CUDA_CHECK_WARN(cudaEventDestroy(cuda_event));
     C10_CUDA_CHECK_WARN(c10::cuda::SetDevice(orig_device));
@@ -145,6 +149,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
       (*interp)->trace_gpu_event_record(
+          c10::kCUDA,
           reinterpret_cast<uintptr_t>(cuda_event),
           reinterpret_cast<uintptr_t>(cuda_stream.stream()));
     }
@@ -167,6 +172,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
       (*interp)->trace_gpu_event_wait(
+          c10::kCUDA,
           reinterpret_cast<uintptr_t>(cuda_event),
           reinterpret_cast<uintptr_t>(cuda_stream.stream()));
     }
@@ -206,6 +212,4 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   }
 };
 
-} // namespace impl
-} // namespace cuda
-} // namespace c10
+} // namespace c10::cuda::impl

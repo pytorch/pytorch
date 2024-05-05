@@ -3,10 +3,8 @@
 #include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
-#include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
@@ -393,7 +391,7 @@ static ReverseDetails addReverseInline(Gradient& grad_desc) {
     auto it = grad_map.find(v);
     if (it == grad_map.end()) {
       auto autograd_zero = graph.insertNode(graph.createAutogradZero());
-      std::tie(it, std::ignore) = grad_map.emplace(v, autograd_zero->output());
+      it = grad_map.emplace(v, autograd_zero->output()).first;
     }
     return it->second;
   };

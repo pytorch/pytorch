@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import builtins
 
 import torch

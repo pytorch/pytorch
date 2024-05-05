@@ -6,8 +6,11 @@ from ._compatibility import compatibility
 
 import copy
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Union
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Union, TYPE_CHECKING
 import torch
+
+if TYPE_CHECKING:
+    from .passes.utils.matcher_with_name_node_map_utils import InternalMatch
 
 __all__ = ['Match', 'replace_pattern', 'replace_pattern_with_filters', "ReplacedPatterns"]
 
@@ -36,7 +39,10 @@ def _replace_attributes(gm: GraphModule, replacement: torch.nn.Module) -> None:
 
     def try_get_attr(gm: torch.nn.Module, target: str) -> Optional[Any]:
         module_path, _, attr_name = target.rpartition(".")
-        mod: torch.nn.Module = gm.get_submodule(module_path)
+        try:
+            mod: torch.nn.Module = gm.get_submodule(module_path)
+        except AttributeError:
+            return None
         attr = getattr(mod, attr_name, None)
         return attr
 
@@ -202,7 +208,7 @@ def replace_pattern_with_filters(
     gm: GraphModule,
     pattern: Union[Callable, Graph, GraphModule],
     replacement: Union[Callable, Graph, GraphModule],
-    match_filters: Optional[List[Callable[["InternalMatch", Graph, Graph], bool]]] = None,  # type: ignore[name-defined]
+    match_filters: Optional[List[Callable[["InternalMatch", Graph, Graph], bool]]] = None,
     ignore_literals: bool = False,
 ) -> List[ReplacedPatterns]:
     """
@@ -222,7 +228,7 @@ def _replace_pattern(
     gm: GraphModule,
     pattern: Union[Callable, Graph, GraphModule],
     replacement: Union[Callable, Graph, GraphModule],
-    match_filters: Optional[List[Callable[["InternalMatch", Graph, Graph], bool]]] = None,  # type: ignore[name-defined]
+    match_filters: Optional[List[Callable[["InternalMatch", Graph, Graph], bool]]] = None,
     ignore_literals: bool = False,
 ) -> List[ReplacedPatterns]:
 
@@ -288,8 +294,7 @@ def _replace_pattern(
         # Copy the replacement graph over
         user_nodes: Set[Node] = set()
         for n in match.returning_nodes:
-            for user in n.users:
-                user_nodes.add(user)
+            user_nodes.update(n.users)
         assert user_nodes, "The returning_nodes should have at least one user node"
 
         if len(user_nodes) == 1:
@@ -302,7 +307,7 @@ def _replace_pattern(
                     first_user_node = n
                     break
 
-        with original_graph.inserting_before(first_user_node):
+        with original_graph.inserting_before(first_user_node):  # type: ignore[possibly-undefined]
             copied_returning_nodes = original_graph.graph_copy(replacement_graph, val_map)
 
         if isinstance(copied_returning_nodes, Node):

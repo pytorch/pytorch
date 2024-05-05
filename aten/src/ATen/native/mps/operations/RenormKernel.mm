@@ -111,19 +111,10 @@ void renorm_out_mps(const Tensor& self, const Scalar& p, int64_t dim, const Scal
       getMPSProfiler().beginProfileKernel(renormPSO, key, {norm});
 
       [computeEncoder setComputePipelineState:renormPSO];
-      [computeEncoder setBuffer:normBuffer offset:norm.storage_offset() * norm.element_size() atIndex:0];
-      [computeEncoder setBuffer:factorBuffer offset:factor.storage_offset() * factor.element_size() atIndex:1];
+      mtl_setBuffer(computeEncoder, norm, 0);
+      mtl_setBuffer(computeEncoder, factor, 1);
       [computeEncoder setBytes:&maxnorm_f length:sizeof(float) atIndex:2];
-
-      uint32_t numThreads = norm.numel();
-      MTLSize gridSize = MTLSizeMake(numThreads, 1, 1);
-      NSUInteger tgSize = renormPSO.maxTotalThreadsPerThreadgroup;
-      if (tgSize > numThreads) {
-        tgSize = numThreads;
-      }
-      MTLSize threadGroupSize = MTLSizeMake(tgSize, 1, 1);
-
-      [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadGroupSize];
+      mtl_dispatch1DJob(computeEncoder, renormPSO, norm.numel());
 
       getMPSProfiler().endProfileKernel(renormPSO);
     }
@@ -131,7 +122,7 @@ void renorm_out_mps(const Tensor& self, const Scalar& p, int64_t dim, const Scal
   at::mul_outf(self, factor, const_cast<Tensor&>(out));
 }
 
-} // namespace mps
+} // namespace
 
 TORCH_IMPL_FUNC(renorm_out_mps)
 (const Tensor& self, const Scalar& p, int64_t dim, const Scalar& maxnorm, const Tensor& out) {

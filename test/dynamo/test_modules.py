@@ -1,13 +1,14 @@
 # Owner(s): ["module: dynamo"]
 
 import collections
+import copy
 import itertools
 import traceback
 import types
 import unittest
 from copy import deepcopy
 from functools import partial
-from typing import Tuple
+from typing import Dict, NamedTuple, Tuple
 from unittest.mock import patch
 
 import torch
@@ -25,6 +26,16 @@ try:
     from . import test_functions
 except ImportError:
     import test_functions
+
+
+_variable = 0
+_variable1 = 0
+
+
+def update_global():
+    global _variable, _variable1
+    _variable += 1
+    _variable1 += 1
 
 
 class BasicModule(torch.nn.Module):
@@ -214,6 +225,26 @@ class ModuleProperty(torch.nn.Module):
 
     def forward(self, x):
         return x * self.scale_alias
+
+
+class NestedModuleList(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layers = torch.nn.ModuleList([])
+        for _ in range(3):
+            self.layers.append(
+                torch.nn.ModuleList(
+                    [
+                        torch.nn.Linear(10, 10),
+                        torch.nn.ReLU(),
+                    ]
+                )
+            )
+
+    def forward(self, x):
+        for layer, act in self.layers:
+            x = act(layer(x))
+        return x
 
 
 class ConstLoop(torch.nn.Module):
@@ -561,6 +592,38 @@ class LazyMLP(torch.nn.Module):
         return y
 
 
+class MyInput(NamedTuple):
+    x: Dict[str, Dict[str, torch.Tensor]]
+    y: torch.Tensor
+
+
+class LazyLayerWithNamedTupleInput(LazyModuleMixin, torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def initialize_parameters(self, input):
+        with torch.no_grad():
+            self._param = torch.nn.Parameter(
+                torch.empty(input.x["a"][0].shape).fill_(0.5)
+            )
+
+    def forward(self, input):
+        input = input.x["a"]
+        x = 0
+        for i in range(len(input)):
+            x = x + input[i]
+        return x
+
+
+class LazyModuleWithNamedTupleInput(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layer = LazyLayerWithNamedTupleInput()
+
+    def forward(self, input):
+        return self.layer(input)
+
+
 class LazyLayerWithListInput(LazyModuleMixin, torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -595,6 +658,37 @@ class LazyModuleWithLazySubmodule(LazyModuleMixin, torch.nn.Module):
 
     def forward(self, x):
         return self.layer(x)
+
+
+class LazyLayerWithInputs(LazyModuleMixin, torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def initialize_parameters(self, x, y):
+        with torch.no_grad():
+            self._param_x = torch.nn.Parameter(torch.empty(x[0].shape).fill_(0.5))
+            self._param_y = torch.nn.Parameter(torch.empty(y[0].shape).fill_(0.5))
+
+    def forward(self, x, y):
+        res_x = 0
+        for i in range(len(x)):
+            res_x = res_x + x[i]
+        res_y = 0
+        for i in range(len(y)):
+            res_y = res_y + y[i]
+        return res_x + res_y
+
+
+class LazyModuleKwArgs(LazyModuleMixin, torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def initialize_parameters(self, *args, **kwargs):
+        with torch.no_grad():
+            self.layer = LazyLayerWithInputs()
+
+    def forward(self, x, y):
+        return self.layer(x, y=y)
 
 
 class LazyParentModule(LazyModuleMixin, torch.nn.Module):
@@ -798,7 +892,7 @@ class ConvTransposeCallSuperForwardDirectly(torch.nn.ConvTranspose2d):
             )
         ]
         output_shape = [x.shape[0], self.bias.shape[0]] + output_shape
-        return _NewEmptyTensorOp.apply(x, output_shape)
+        return _NewEmptyTensorOp.apply(x, output_shape)  # noqa: F821
 
 
 class ModuleNameString(torch.nn.Module):
@@ -827,8 +921,10 @@ class SelfMutatingModule(torch.nn.Module):
 
 
 class ModuleAttributePrecedenceBase(torch.nn.Module):
-    def linear(self, x):
-        return x * 2.0
+    def linear(self, x, flag=None):
+        if flag:
+            return x * 2.0
+        return x * 3.0
 
 
 class ModuleAttributePrecedence(ModuleAttributePrecedenceBase):
@@ -1046,6 +1142,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_cfgmod = make_test(CfgModule())
     test_stringmember = make_test(StringMember())
     test_modulelist = make_test(ModuleList())
+    test_modulelist_nested = make_test(NestedModuleList())
     test_modulelist_custom = make_test(CustomGetItemModuleList())
     test_moduledict = make_test(ModuleDict())
     test_moduledict_custom = make_test(CustomGetItemModuleDict())
@@ -1403,6 +1500,20 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         ref = m(x)
         self.assertTrue(torch.allclose(ref, res))
 
+    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
+    @expectedFailureDynamic
+    def test_lazy_module7(self):
+        # Test lazy module works well with namedtuple/dict input
+        m = LazyModuleWithNamedTupleInput()
+        x = MyInput(
+            x={"a": [torch.rand([5, 5])] * 3, "b": torch.rand([5, 5])},
+            y=torch.rand([5, 5]),
+        )
+        opt_m = torch.compile(backend="eager", fullgraph=True)(m)
+        res = opt_m(x)
+        ref = m(x)
+        self.assertTrue(torch.allclose(ref, res))
+
     def test_lazy_module_no_cls_to_become(self):
         # make sure super() works in the case where cls_to_become is None
         m = LazyChildModuleNoClsToBecome()
@@ -1411,6 +1522,14 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         res = opt_m(x)
         ref = m(x)
         self.assertTrue(torch.allclose(ref, res))
+
+    def test_lazy_module_kwargs(self):
+        m = LazyModuleKwArgs()
+        x = [torch.rand([5, 5])] * 3
+        y = [torch.rand([5, 5])] * 2
+        opt_m = torch.compile(backend="eager", fullgraph=True)(m)
+        exp_res = m(x, y)
+        self.assertTrue(torch.allclose(exp_res, opt_m(x, y)))
 
     def test_call_fn_with_non_const_inputs_safe(self):
         class ModuleSpecialFwd(torch.nn.Module):
@@ -1487,6 +1606,50 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch._dynamo.testing.same(mod(x), opt_mod(x)))
         self.assertEqual(cnt.frame_count, 1)
 
+    @torch._dynamo.config.patch(guard_nn_modules=True)
+    def test_attr_precedence(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = 3
+
+            def forward(self, x, c=4):
+                return x * c
+
+            def linear(self, x):
+                return x
+
+            def b(self, x):
+                raise RuntimeError("Should not be called")
+
+        class MyMod(Mod):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(11, 11)
+                self.a = 2
+                self.b = 2
+                self.scale = 1
+
+            def scale(self, x):
+                # Should not be called because it is shadowed by the instance
+                # attribute
+                raise RuntimeError("Should not be called")
+
+            def forward(self, x, c=None):
+                return self.linear(x) * self.a * self.b * self.scale
+
+        mod = MyMod()
+        x = torch.ones(3, 3)
+        ref = mod(x)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_mod = torch.compile(mod, backend=cnts)
+        opt_mod(torch.ones(3, 3))
+        res = opt_mod(torch.ones(3, 3))
+
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(ref, res)
+
     def test_to(self):
         mod = MockModule()
         cnt = torch._dynamo.testing.CompileCounter()
@@ -1513,6 +1676,126 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         torch._dynamo.reset()
         opt_mod(x)
         self.assertEqual(cnt.frame_count, 3)
+
+    @torch._dynamo.config.patch(guard_nn_modules=True)
+    def test_param_order(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param1 = torch.nn.Parameter(torch.ones([1]))
+                self.param2 = torch.nn.Parameter(torch.ones([2]))
+
+            def forward(self, x):
+                return x
+
+        mod = MyModule()
+        coeffs = [2, 3]
+
+        def fn(x):
+            for idx, p in enumerate(mod.parameters()):
+                x += p.sum() * coeffs[idx]
+
+            for idx, p in enumerate(mod.named_parameters()):
+                x += p[1].sum() * coeffs[idx]
+
+            return x
+
+        ref = fn(torch.ones(1))
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        res = opt_fn(torch.ones(1))
+
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 1)
+
+        mod._parameters["param1"] = mod._parameters.pop("param1")
+        ref = fn(torch.ones(1))
+        res = opt_fn(torch.ones(1))
+
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 2)
+
+    @torch._dynamo.config.patch(guard_nn_modules=True)
+    def test_buffer_order(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("b1", torch.ones([1]))
+                self.register_buffer("b2", torch.ones([2]))
+
+            def forward(self, x):
+                return x
+
+        mod = MyModule()
+        coeffs = [2, 3]
+
+        def fn(x):
+            for idx, p in enumerate(mod.buffers()):
+                x += p.sum() * coeffs[idx]
+
+            for idx, p in enumerate(mod.named_buffers()):
+                x += p[1].sum() * coeffs[idx]
+
+            return x
+
+        ref = fn(torch.ones(1))
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        res = opt_fn(torch.ones(1))
+
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 1)
+
+        mod._buffers["b1"] = mod._buffers.pop("b1")
+        ref = fn(torch.ones(1))
+        res = opt_fn(torch.ones(1))
+
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 2)
+
+    @torch._dynamo.config.patch(guard_nn_modules=True)
+    def test_module_order(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(3, 3)
+                self.linear2 = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                return x
+
+        mod = MyModule()
+        coeffs = [2, 3, 4]
+
+        coeffs_for_mod = {mod: 10, mod.linear1: 20, mod.linear2: 30}
+
+        # Check order of _modules
+        def fn(x):
+            for idx, p in enumerate(mod.modules()):
+                # Something silly to force depedency on the order
+                x += coeffs_for_mod[p] * coeffs[idx]
+            for idx, p in enumerate(mod.named_modules()):
+                x += coeffs_for_mod[p[1]] * coeffs[idx]
+            for idx, p in enumerate(mod.children()):
+                x += coeffs_for_mod[p] * coeffs[idx]
+            for idx, p in enumerate(mod.named_children()):
+                x += coeffs_for_mod[p[1]] * coeffs[idx]
+            return x
+
+        ref = fn(torch.ones(1))
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        res = opt_fn(torch.ones(1))
+
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 1)
+
+        mod._modules["linear1"] = mod._modules.pop("linear1")
+        ref = fn(torch.ones(1))
+        res = opt_fn(torch.ones(1))
+
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 2)
 
     def test_attr(self):
         class MockModule(torch.nn.Module):
@@ -1822,7 +2105,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         handle.remove()
         self.assertEqual(compiled_func(inp), outer_func(inp))
         self.assertEqual(compiled_func(inp).item(), 7)
-        self.assertTrue("forward_hooks.keys" in failure_reason)
+        self.assertTrue("forward_hooks" in failure_reason)
         self.assertEqual(cc.frame_count, 1 + 1)
         self.assertEqual(cc.op_count, 6 + 4)
 
@@ -1842,10 +2125,9 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         m._forward_hooks[handle.id] = new_forward_hook
         self.assertEqual(compiled_func(inp), outer_func(inp))
         self.assertEqual(compiled_func(inp).item(), 16)
-        self.assertRegex(
-            failure_reason, r"^___check_obj_id\(.*\(L\['m'\]\._forward_hooks"
-        )
+        self.assertRegex(failure_reason, r"^___check_obj_id\(L\['m'\]._forward_hooks")
 
+    @patch.object(torch._dynamo.config, "guard_nn_modules", False)
     @patch.object(torch._dynamo.config, "skip_nnmodule_hook_guards", True)
     def test_hooks_skip_guards(self):
         class TestModule(torch.nn.Module):
@@ -2109,6 +2391,33 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertTrue(grad_sizes.keys() == backward_hook_handles.keys())
         self.assertTrue(pre_grad_sizes.keys() == pre_backward_hook_handles.keys())
 
+    def test_udo_instance_method_as_hook(self):
+        class CustomClass:
+            def __init__(self, module):
+                self.module = module
+                self.handle = self.module.register_forward_pre_hook(
+                    self.func1, prepend=True, with_kwargs=True
+                )
+
+            def func1(self, module, args, kwargs):
+                return (args[0] + 1,), kwargs
+
+            def __call__(self, x):
+                return self.module(x)
+
+        class ToyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x * x
+
+        model = ToyModel()
+        x = torch.zeros((3, 4))
+        obj = CustomClass(model)
+        out = torch.compile(obj, fullgraph=True)(x)
+        self.assertEqual(out, (x + 1) * (x + 1))
+
     def test_module_dict_iter_name(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -2272,6 +2581,52 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         mod.eval()
         generate(torch.randn(10, 10), 0)
         self.assertEqual(cnt.frame_count, 3)
+
+    def test_setattr_on_compiled_module(self):
+        # https://github.com/pytorch/pytorch/issues/114844
+
+        class ReplayMutation(torch.nn.Module):
+            def __init__(self, inp_size, out_size, inner_size):
+                super().__init__()
+                self.Linear1 = torch.nn.Linear(inp_size, inner_size)
+                self.Linear2 = torch.nn.Linear(inner_size, out_size)
+                self.x = None
+
+            def forward(self, inp):
+                res = self.Linear1(inp)
+                self.x = res
+                return self.Linear2(res)
+
+        N, D_in, H, D_out, inner = 2, 2, 2, 2, 4
+        model = ReplayMutation(D_in, H, inner)
+        model2 = copy.deepcopy(model)
+        input = torch.ones(N, D_in)
+
+        # Keep some intermediate value in model.x
+        model.x = torch.tensor([[100, 100, 100, 100], [200, 200, 200, 200]])
+        model(input)
+
+        compiled_model = torch.compile(model2, backend="eager")
+        compiled_model.x = torch.tensor([[100, 100, 100, 100], [200, 200, 200, 200]])
+        compiled_model(input)
+
+        self.assertEqual(model.x, compiled_model.x)
+
+    def test_globals_change_in_other_file(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            update_global()
+            a = test_functions.update_global(x)
+            # Ensure that the updated global values are read
+            return x * a * (_variable + _variable1 + test_functions._variable)
+
+        res = fn(torch.ones(10))
+        self.assertEqual(_variable, 1)
+        self.assertEqual(_variable1, 1)
+        # Ensure that the reconstructed bytecode updates the global value in the
+        # other file.
+        self.assertEqual(test_functions._variable, 1)
+        self.assertEqual(res, 3 * torch.ones(10))
 
 
 if __name__ == "__main__":

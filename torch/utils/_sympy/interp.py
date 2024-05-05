@@ -21,7 +21,10 @@ from .functions import (
     Mod,
     ModularIndexing,
     Pow,
+    Round,
+    RoundDecimal,
     TrueDiv,
+    Trunc,
     Where,
 )
 
@@ -49,6 +52,7 @@ def handlers():
         TrueDiv: "truediv",
         FloorDiv: "floordiv",
         CleanDiv: "div",
+        Trunc: "trunc",
         Where: "where",
         sympy.Add: "add",
         sympy.Mul: "mul",
@@ -67,7 +71,12 @@ def handlers():
         sympy.functions.elementary.piecewise.ExprCondPair: "expr_cond_pair",
         sympy.Piecewise: "piecewise",
         IsNonOverlappingAndDenseIndicator: "is_non_overlapping_and_dense_indicator",
+        Round: "round",
+        RoundDecimal: "round",
     }
+    for name in ["cos", "sin", "tan", "sinh", "cosh", "tanh", "asin", "acos", "atan"]:
+        HANDLERS[getattr(sympy, name)] = name
+
     return HANDLERS
 
 
@@ -99,7 +108,10 @@ def sympy_interp(
 
     # Recursive case
     args = [sympy_interp(analysis, env, arg) for arg in expr.args]  # type: ignore[arg-type]
-    handler_name = handlers()[expr.func]
+    if hasattr(expr.func, "_torch_handler_name"):
+        handler_name = expr.func._torch_handler_name
+    else:
+        handler_name = handlers()[expr.func]
     handler = getattr(analysis, handler_name)
     if handler_name in ASSOCIATIVE_OPS:
         assert len(args) > 1

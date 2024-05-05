@@ -4,8 +4,7 @@
 #include <ATen/TensorUtils.h>
 #include <tuple>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 TORCH_API std::tuple<Tensor, Tensor, int64_t> softmax_sparse_input_preprocessing(
     const Tensor& input_,
@@ -20,5 +19,4 @@ TORCH_API std::tuple<Tensor, Tensor, Tensor, int64_t> softmax_backward_sparse_in
     const Tensor& input_,
     CheckedFrom function_name);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

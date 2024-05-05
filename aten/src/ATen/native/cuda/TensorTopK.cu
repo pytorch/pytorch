@@ -37,7 +37,7 @@ struct AddOp {
 
 template <typename T, typename IndexType, int Dim, bool WithKthValues>
 C10_LAUNCH_BOUNDS_1(1024)
-__global__ void gatherTopK(at::cuda::detail::TensorInfo<T, IndexType> input,
+__global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> input,
                            IndexType inputSliceSize,
                            IndexType outputSliceSize, // aka `k`
                            bool largest,
@@ -65,13 +65,13 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<T, IndexType> input,
 
   // Find the start offset for our slice
   IndexType sliceStartIndex =
-    at::cuda::detail::IndexToOffset<T, IndexType, Dim>::get(slice, input);
+    at::cuda::detail::IndexToOffset<const T, IndexType, Dim>::get(slice, input);
   IndexType topKSliceStartIndex =
     at::cuda::detail::IndexToOffset<T, IndexType, Dim>::get(slice, topK);
   IndexType indicesSliceStartIndex =
     at::cuda::detail::IndexToOffset<int64_t, IndexType, Dim>::get(slice, indices);
 
-  T* inputSliceStart = &input.data[sliceStartIndex];
+  const T* inputSliceStart = &input.data[sliceStartIndex];
   T* topKSliceStart = &topK.data[topKSliceStartIndex];
   int64_t* indicesSliceStart = &indices.data[indicesSliceStartIndex];
 
@@ -179,7 +179,7 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<T, IndexType> input,
 
 template <typename T, typename IndexType, int Dim>
 void launch(
-    at::cuda::detail::TensorInfo<T, IndexType> input,
+    at::cuda::detail::TensorInfo<const T, IndexType> input,
     IndexType inputSliceSize,
     IndexType outputSliceSize, // aka `k`
     bool largest,
@@ -247,7 +247,7 @@ __global__ void fill(T* x, T value, IndexType size) {
 template <typename T, typename IndexType, typename Bitwise, int Dim>
 C10_LAUNCH_BOUNDS_1(BLOCK_THREADS)
 __global__ void radixFindKthValues(
-    at::cuda::detail::TensorInfo<T, IndexType> input,
+    at::cuda::detail::TensorInfo<const T, IndexType> input,
     uint32_t slice_size,
     uint32_t* ks_to_find,  // size: num_slices
 
@@ -277,8 +277,8 @@ __global__ void radixFindKthValues(
 
   Bitwise desired = desires[slice_idx];
   uint32_t k_to_find = ks_to_find[slice_idx];
-  IndexType slice_start_index = at::cuda::detail::IndexToOffset<T, IndexType, Dim>::get(slice_idx, input);
-  T* data = &input.data[slice_start_index];
+  IndexType slice_start_index = at::cuda::detail::IndexToOffset<const T, IndexType, Dim>::get(slice_idx, input);
+  const T* data = &input.data[slice_start_index];
 
   typedef cub::BlockScan<uint32_t, BLOCK_THREADS> BlockScan;
   static_assert(MAX_ITEMS_PER_THREAD * BLOCK_THREADS < std::numeric_limits<short>::max(),
@@ -300,7 +300,7 @@ __global__ void radixFindKthValues(
       ? items_per_thread
       : at::ceil_div((int64_t)(slice_size - blk_idx_in_slice * items_per_block), (int64_t)BLOCK_THREADS);
 
-  // collect digit counts and store in shared memorey
+  // collect digit counts and store in shared memory
   for (int i = 0; i < items_per_thread; ++i) {
     // Find the start offset for this slice
     IndexType idx = blk_idx_in_slice * items_per_block + i * BLOCK_THREADS + tidx;
@@ -493,7 +493,7 @@ __global__ void computeBlockwiseKthCounts(
 
 template <typename T, typename IndexType, int Dim>
 C10_LAUNCH_BOUNDS_1(BLOCK_THREADS)
-__global__ void gatherTopK(at::cuda::detail::TensorInfo<T, IndexType> input,
+__global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> input,
                            IndexType inputSliceSize,
                            IndexType outputSliceSize, // aka `k`
                            bool largest,
@@ -537,13 +537,13 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<T, IndexType> input,
 
   // Find the start offset for our slice
   IndexType sliceStartIndex =
-    at::cuda::detail::IndexToOffset<T, IndexType, Dim>::get(slice_idx, input);
+    at::cuda::detail::IndexToOffset<const T, IndexType, Dim>::get(slice_idx, input);
   IndexType topKSliceStartIndex =
     at::cuda::detail::IndexToOffset<T, IndexType, Dim>::get(slice_idx, topK);
   IndexType indicesSliceStartIndex =
     at::cuda::detail::IndexToOffset<int64_t, IndexType, Dim>::get(slice_idx, indices);
 
-  T* inputSliceStart = &input.data[sliceStartIndex];
+  const T* inputSliceStart = &input.data[sliceStartIndex];
   T* topKSliceStart = &topK.data[topKSliceStartIndex];
   int64_t* indicesSliceStart = &indices.data[indicesSliceStartIndex];
 
@@ -640,7 +640,7 @@ public:
 
 template <typename T, typename IndexType, int Dim>
 void launch(
-    at::cuda::detail::TensorInfo<T, IndexType> input,
+    at::cuda::detail::TensorInfo<const T, IndexType> input,
     IndexType inputSliceSize,
     IndexType outputSliceSize, // aka `k`
     bool largest,
@@ -836,8 +836,8 @@ void launch_gather_topk_kernel(
 
 #define RUN_T(INDEX_T)                                                    \
   AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, input.scalar_type(), "topk_out_cuda", [&] { \
-    at::cuda::detail::TensorInfo<scalar_t, INDEX_T> inputInfo =           \
-      at::cuda::detail::getTensorInfo<scalar_t, INDEX_T>(input);          \
+    at::cuda::detail::TensorInfo<const scalar_t, INDEX_T> inputInfo =     \
+      at::cuda::detail::getTensorInfo<const scalar_t, INDEX_T>(input);    \
     at::cuda::detail::TensorInfo<scalar_t, INDEX_T> topKInfo =            \
       at::cuda::detail::getTensorInfo<scalar_t, INDEX_T>(values);         \
     at::cuda::detail::TensorInfo<int64_t, INDEX_T> indicesInfo =          \

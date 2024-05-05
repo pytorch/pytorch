@@ -301,7 +301,7 @@ void slow_conv_transpose3d_out_cuda_template(
 
         // For each elt in batch, do:
         for (int elt = 0; elt < batch_size; elt++) {
-          // Matrix mulitply per output:
+          // Matrix multiply per output:
           input_n = input.select(0, elt);
           output_n = output.select(0, elt);
 
@@ -531,7 +531,7 @@ void slow_conv_transpose3d_backward_out_cuda_template(
 
         // For each elt in batch, do:
         for (int elt = 0; elt < batch_size; elt++) {
-          // Matrix mulitply per sample:
+          // Matrix multiply per sample:
           grad_input_n = grad_input.select(0, elt);
           grad_output_n = grad_output.select(0, elt);
 
@@ -756,12 +756,12 @@ void slow_conv_transpose3d_acc_grad_parameters_cuda(
 
         // For each elt in batch, do:
         for (int elt = 0; elt < batch_size; elt++) {
-          // Matrix mulitply per output:
+          // Matrix multiply per output:
           grad_output_n = grad_output.select(0, elt);
 
           // Do Weight:
           if (grad_weight.defined()) {
-            // Matrix mulitply per output:
+            // Matrix multiply per output:
             input_n = input.select(0, elt);
 
             if (need_columns) {

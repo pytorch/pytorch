@@ -57,7 +57,11 @@ def _create_chunk_sharded_tensor(
         else device.type
     )
     placements = [
-        _get_remote_device_str(r, device_type, num_devices_per_node)
+        _get_remote_device_str(
+            dist.get_global_rank(pg, r),
+            device_type,
+            num_devices_per_node,
+        )
         for r in range(len(chunk_sizes))
     ]
     assert len(chunk_sizes) == len(chunk_offsets) == len(placements)
@@ -99,8 +103,9 @@ def _create_chunk_dtensor(
     shard_placements = [Replicate() for _ in range(device_mesh.ndim)]
     shard_placements[-1] = DShard(0)  # type: ignore[call-overload]
 
-    return DTensor.from_local(tensor, device_mesh, replicate_placements).redistribute(
-        device_mesh=device_mesh,
+    return DTensor.from_local(
+        tensor, device_mesh, replicate_placements, run_check=False
+    ).redistribute(
         placements=shard_placements,
     )
 

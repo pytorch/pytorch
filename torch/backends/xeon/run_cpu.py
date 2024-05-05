@@ -133,7 +133,11 @@ from argparse import ArgumentParser, RawTextHelpFormatter, REMAINDER
 from os.path import expanduser
 from typing import Dict, List
 
-from torch.distributed.elastic.multiprocessing import start_processes, Std
+from torch.distributed.elastic.multiprocessing import (
+    DefaultLogsSpecs,
+    start_processes,
+    Std,
+)
 
 format_str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 logging.basicConfig(level=logging.INFO, format=format_str)
@@ -174,7 +178,7 @@ class _CPUinfo:
 
             # physical cores := core column in lscpu output
             #  logical cores :=  cPU column in lscpu output
-            self.node_nums = int(max([line[3] for line in self.cpuinfo])) + 1
+            self.node_nums = int(max(line[3] for line in self.cpuinfo)) + 1
             self.node_physical_cores: List[List[int]] = []  # node_id is index
             self.node_logical_cores: List[List[int]] = []  # node_id is index
             self.physical_core_node_map = {}  # physical core to numa node id
@@ -666,8 +670,7 @@ won't take effect even if it is set explicitly."
             entrypoint=entrypoint,
             args=launch_args,
             envs=launch_envs,
-            log_dir=args.log_path,
-            tee=launch_tee,
+            logs_specs=DefaultLogsSpecs(log_dir=args.log_path, tee=launch_tee),
         )
         ctx.wait()
 

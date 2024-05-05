@@ -1,22 +1,25 @@
-# Owner(s): ["module: dynamo"]
+# Owner(s): ["oncall: export"]
 
+import copy
 import unittest
 
 import torch._dynamo as torchdynamo
-from torch.export import export
 from torch._export.db.case import ExportCase, normalize_inputs, SupportLevel
 from torch._export.db.examples import (
     filter_examples_by_support_level,
     get_rewrite_cases,
 )
+from torch.export import export
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_WINDOWS,
     parametrize,
     run_tests,
     TestCase,
 )
 
 
+@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class ExampleTests(TestCase):
     # TODO Maybe we should make this tests actually show up in a file?
@@ -28,24 +31,25 @@ class ExampleTests(TestCase):
     def test_exportdb_supported(self, name: str, case: ExportCase) -> None:
         model = case.model
 
-        inputs = normalize_inputs(case.example_inputs)
+        inputs_export = normalize_inputs(case.example_inputs)
+        inputs_model = copy.deepcopy(inputs_export)
         exported_program = export(
             model,
-            inputs.args,
-            inputs.kwargs,
+            inputs_export.args,
+            inputs_export.kwargs,
             dynamic_shapes=case.dynamic_shapes,
         )
         exported_program.graph_module.print_readable()
 
         self.assertEqual(
-            exported_program(*inputs.args, **inputs.kwargs),
-            model(*inputs.args, **inputs.kwargs),
+            exported_program.module()(*inputs_export.args, **inputs_export.kwargs),
+            model(*inputs_model.args, **inputs_model.kwargs),
         )
 
         if case.extra_inputs is not None:
             inputs = normalize_inputs(case.extra_inputs)
             self.assertEqual(
-                exported_program(*inputs.args, **inputs.kwargs),
+                exported_program.module()(*inputs.args, **inputs.kwargs),
                 model(*inputs.args, **inputs.kwargs),
             )
 
@@ -57,7 +61,9 @@ class ExampleTests(TestCase):
     def test_exportdb_not_supported(self, name: str, case: ExportCase) -> None:
         model = case.model
         # pyre-ignore
-        with self.assertRaises((torchdynamo.exc.Unsupported, AssertionError, RuntimeError)):
+        with self.assertRaises(
+            (torchdynamo.exc.Unsupported, AssertionError, RuntimeError)
+        ):
             inputs = normalize_inputs(case.example_inputs)
             exported_model = export(
                 model,
@@ -74,6 +80,7 @@ class ExampleTests(TestCase):
         for rewrite_case in get_rewrite_cases(case)
     ]
     if exportdb_not_supported_rewrite_cases:
+
         @parametrize(
             "name,rewrite_case",
             exportdb_not_supported_rewrite_cases,

@@ -9,8 +9,6 @@
 
 #include <ATen/Tensor.h>
 
-#include <cstdint>
-#include <list>
 #include <memory>
 #include <sstream>
 
