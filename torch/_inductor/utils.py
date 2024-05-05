@@ -48,6 +48,7 @@ from torch.autograd import DeviceType
 from torch.autograd.profiler_util import EventList
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.utils._sympy.functions import CeilDiv, CleanDiv, FloorDiv, ModularIndexing
+from torch.utils._sympy.symbol import make_symbol, SymT
 from . import config
 from .runtime.runtime_utils import ceildiv as runtime_ceildiv
 
@@ -538,6 +539,18 @@ def sympy_str(expr: sympy.Expr) -> str:
     return str(expr)
 
 
+def sympy_index_symbol_with_prefix(prefix: SymT, idx: int) -> sympy.Symbol:
+    """
+    Used to generate an integer-nonnegative symbol.
+    """
+    # This should never be used for creating shape/stride symbols, as those
+    # should all be allocated before Inductor.
+    assert prefix != SymT.SIZE
+    # NOTE: shape symbols are positive (> 0), but index variables are only
+    # non-negative (>= 0).
+    return make_symbol(prefix, idx, integer=True, nonnegative=True)
+
+
 def sympy_index_symbol(name: str) -> sympy.Symbol:
     """
     Used to generate an integer-nonnegative symbol.
@@ -571,14 +584,6 @@ def sympy_subs(expr: sympy.Expr, replacements: Dict[sympy.Expr, Any]) -> sympy.E
     return sympy.sympify(expr).xreplace(
         {k: to_symbol(k, v) for k, v in replacements.items()}
     )
-
-
-def free_symbol_startswith(index: sympy.Expr, prefix: str):
-    return any(v.name.startswith(prefix) for v in index.free_symbols)  # type: ignore[attr-defined]
-
-
-def free_symbol_has(index: sympy.Expr, pattern: str):
-    return any(pattern in v.name for v in index.free_symbols)  # type: ignore[attr-defined]
 
 
 def is_symbolic(a: Any) -> bool:
@@ -660,6 +665,14 @@ def clear_on_fresh_inductor_cache(obj: Any):
     return obj
 
 
+def clear_inductor_caches():
+    """
+    Clear all registered caches.
+    """
+    for obj in _registered_caches:
+        obj.cache_clear()
+
+
 @contextlib.contextmanager
 def fresh_inductor_cache(cache_entries=None):
     """
@@ -668,8 +681,7 @@ def fresh_inductor_cache(cache_entries=None):
     Optionally, pass a dict as 'cache_entries' to get a list of filenames and sizes
     generated with this cache instance.
     """
-    for obj in _registered_caches:
-        obj.cache_clear()
+    clear_inductor_caches()
 
     inductor_cache_dir = tempfile.mkdtemp()
     try:
@@ -839,6 +851,15 @@ class IndentedBuffer:
         res.writelines(self._lines)
         res.writelines(other._lines)
         return res
+
+
+@contextlib.contextmanager
+def restore_stdout_stderr(initial_stdout, initial_stderr):
+    try:
+        yield
+    finally:
+        sys.stdout = initial_stdout
+        sys.stderr = initial_stderr
 
 
 class DeferredLineBase:
