@@ -504,43 +504,6 @@ filegroup(
 )
 
 filegroup(
-    name = "caffe2_ideep_srcs",
-    srcs = [
-        "caffe2/ideep/operators/adam_op.cc",
-        "caffe2/ideep/operators/channel_shuffle_op.cc",
-        "caffe2/ideep/operators/concat_split_op.cc",
-        "caffe2/ideep/operators/conv_op.cc",
-        "caffe2/ideep/operators/conv_transpose_op.cc",
-        "caffe2/ideep/operators/dropout_op.cc",
-        "caffe2/ideep/operators/elementwise_sum_op.cc",
-        "caffe2/ideep/operators/expand_squeeze_dims_op.cc",
-        "caffe2/ideep/operators/fully_connected_op.cc",
-        "caffe2/ideep/operators/local_response_normalization_op.cc",
-        "caffe2/ideep/operators/momentum_sgd_op.cc",
-        "caffe2/ideep/operators/operator_fallback_ideep.cc",
-        "caffe2/ideep/operators/order_switch_ops.cc",
-        "caffe2/ideep/operators/pool_op.cc",
-        "caffe2/ideep/operators/quantization/int8_add_op.cc",
-        "caffe2/ideep/operators/quantization/int8_conv_op.cc",
-        "caffe2/ideep/operators/quantization/int8_dequantize_op.cc",
-        "caffe2/ideep/operators/quantization/int8_fully_connected_op.cc",
-        "caffe2/ideep/operators/quantization/int8_given_tensor_fill_op.cc",
-        "caffe2/ideep/operators/quantization/int8_pool_op.cc",
-        "caffe2/ideep/operators/quantization/int8_quantize_op.cc",
-        "caffe2/ideep/operators/quantization/int8_relu_op.cc",
-        "caffe2/ideep/operators/queue_ops.cc",
-        "caffe2/ideep/operators/relu_op.cc",
-        "caffe2/ideep/operators/reshape_op.cc",
-        "caffe2/ideep/operators/shape_op.cc",
-        "caffe2/ideep/operators/sigmoid_op.cc",
-        "caffe2/ideep/operators/spatial_batch_norm_op.cc",
-        "caffe2/ideep/operators/transpose_op.cc",
-        "caffe2/ideep/operators/utility_ops.cc",
-        "caffe2/ideep/utils/ideep_register.cc",
-    ],
-)
-
-filegroup(
     name = "caffe2_operators_srcs",
     srcs = [
         "caffe2/operators/abs_op.cc",
@@ -1129,10 +1092,6 @@ cc_library(
             "caffe2/core/nomnigraph/include/nomnigraph/Support/*.h",
             "caffe2/core/nomnigraph/include/nomnigraph/Transformations/*.h",
             "caffe2/core/nomnigraph/tests/*.h",
-            "caffe2/ideep/*.h",
-            "caffe2/ideep/operators/*.h",
-            "caffe2/ideep/operators/quantization/*.h",
-            "caffe2/ideep/utils/*.h",
             "caffe2/operators/*.h",
             "caffe2/operators/rnn/*.h",
             "caffe2/perfkernels/*.h",
@@ -1169,7 +1128,6 @@ cc_library(
     srcs = [
         "caffe2/share/contrib/depthwise/depthwise3x3_conv_op.cc",
         ":caffe2_core_srcs",
-        ":caffe2_ideep_srcs",
         ":caffe2_operators_srcs",
         ":caffe2_perfkernels_srcs",
         ":caffe2_queue_srcs",
