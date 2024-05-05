@@ -669,7 +669,7 @@ class OutputGraph:
             proxy.node.meta["grapharg"] = GraphArg(
                 prop,
                 s,
-                is_unspecialized=False,
+                pass_arg_as_tensor=False,
                 fake_tensor=None,
                 is_tensor=False,
             )
