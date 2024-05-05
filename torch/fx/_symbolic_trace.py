@@ -309,7 +309,7 @@ class Tracer(TracerBase):
         # Mapping of node name to module scope
         self.node_name_to_scope: Dict[str, Tuple[str, type]] = {}
 
-    _qualname_counter = collections.defaultdict(int)
+    _qualname_counter: Dict[str, int] = collections.defaultdict(int)
 
     @compatibility(is_backward_compatible=True)
     def get_fresh_qualname(self, prefix: str) -> str:
@@ -391,9 +391,9 @@ class Tracer(TracerBase):
             # Tensor was not found in the Module hierarchy, stow it away in a
             # special attribute and set the qualname to refer to that
             if not qualname:
-                fresh_qualname = self.get_fresh_qualname("_tensor_constant")
-                self.tensor_attrs[a] = fresh_qualname
-                setattr(self.root, fresh_qualname, a)
+                qualname = self.get_fresh_qualname("_tensor_constant")
+                self.tensor_attrs[a] = qualname
+                setattr(self.root, qualname, a)
 
             return self.create_node("get_attr", qualname, (), {})
 
