@@ -29,9 +29,8 @@ def T(*shape, requires_grad=False):
 @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "torchdynamo doesn't work with __torch_dispatch__ right now")
 class TestFlopCounter(TestCase):
     def test_flop_counter_variety(self):
-        mode = FlopCounterMode()
         mod = torch.nn.Linear(9, 10)
-        with mode:
+        with FlopCounterMode() as mode:
             torch.mm(T(4, 5), T(5, 6))
             torch.addmm(T(4, 6), T(4, 5), T(5, 6), beta=0.5, alpha=0.5)
             torch.matmul(T(5, 6), T(6, 7))
@@ -41,8 +40,7 @@ class TestFlopCounter(TestCase):
         self.assertExpectedInline(get_total_flops(mode), """3012""")
 
     def test_op(self):
-        mode = FlopCounterMode()
-        with mode:
+        with FlopCounterMode() as mode:
             torch.mm(T(4, 5), T(5, 6))
         # 4 * 6 * 2 * 5 = 240
         self.assertExpectedInline(get_total_flops(mode), """240""")
@@ -91,8 +89,7 @@ class TestFlopCounter(TestCase):
         self.assertExpectedInline(get_total_flops(mode), """1440""")
 
     def test_backward(self):
-        mode = FlopCounterMode()
-        with mode:
+        with FlopCounterMode() as mode:
             a = T(4, 5, requires_grad=True)
             a = torch.mm(a, T(5, 6))
             a = a.unsqueeze(0).expand(7, 4, 6)
@@ -101,11 +98,18 @@ class TestFlopCounter(TestCase):
 
         self.assertExpectedInline(get_total_flops(mode), """5184""")
 
+    def test_backward_reset(self):
+        with FlopCounterMode() as mode:
+            a = T(4, 5, requires_grad=True)
+            a.mm(a.t()).sum().backward()
+            a.mm(a.t()).sum().backward()
+
+        self.assertExpectedInline(get_total_flops(mode), """960""")
+
     def test_torchscript(self):
         def foo(x):
             return torch.mm(x, x)
-        mode = FlopCounterMode()
-        with mode:
+        with FlopCounterMode() as mode:
             foo(T(5, 5))
         unscripted_flops = get_total_flops(mode)
         ts_foo = torch.jit.script(foo)
@@ -124,8 +128,7 @@ class TestFlopCounter(TestCase):
                 return torch.mm(grad_output, grad_output) + torch.mm(grad_output, grad_output)
 
         a = T(5, 5, requires_grad=True)
-        mode = FlopCounterMode()
-        with mode:
+        with FlopCounterMode() as mode:
             a = _CustomOp.apply(a)
             a.sum().backward()
 
@@ -182,8 +185,7 @@ class TestFlopCounter(TestCase):
 
     def test_convs(self):
         def assert_equivalence(f, expected_forward=None):
-            mode = FlopCounterMode()
-            with mode:
+            with FlopCounterMode() as mode:
                 f()
             conv_forward_flops = mode.get_flop_counts()['Global'][torch.ops.aten.convolution]
             conv_backward_flops = mode.get_flop_counts()['Global'][torch.ops.aten.convolution_backward]
@@ -217,8 +219,7 @@ class TestFlopCounter(TestCase):
     @skipIfNoTorchVision
     def test_module(self):
         resnet18 = torchvision_models.resnet18()
-        mode = FlopCounterMode(resnet18)
-        with mode:
+        with FlopCounterMode(resnet18) as mode:
             a = T(1, 3, 224, 224, requires_grad=True)
             resnet18(a).sum().backward()
 
@@ -233,8 +234,7 @@ class TestFlopCounter(TestCase):
         x = torch.rand(1, 4, 30, 2)
         model = torch.nn.ConvTranspose2d(4, 8, (2, 2), stride=2)
 
-        mode = FlopCounterMode(model)
-        with mode:
+        with FlopCounterMode() as mode:
             for i in range(50):
                 out = model(x)
                 out.sum().backward()
@@ -260,8 +260,7 @@ class TestFlopCounter(TestCase):
         self.assertExpectedInline(get_total_flops(mode), """20""")
 
     def test_noop(self):
-        mode = FlopCounterMode()
-        with mode:
+        with FlopCounterMode() as mode:
             T(4, 5).cos()
 
     @unittest.skipIf(not HAS_CUDA, "CUDA not available")
@@ -333,8 +332,7 @@ class TestFlopCounter(TestCase):
             y = torch.zeros(10, 10)
             return torch.mm(x, x, out=y)
 
-        mode = FlopCounterMode()
-        with mode:
+        with FlopCounterMode() as mode:
             f(torch.randn(10, 10))
 
         self.assertExpectedInline(get_total_flops(mode), """2000""")
@@ -343,14 +341,13 @@ class TestFlopCounter(TestCase):
         model = torch.nn.Linear(100, 100)
         x = torch.randn(3, 100)
 
-        flop_counter = FlopCounterMode(model)
-        with flop_counter:
-            self.assertEqual(len(model._forward_pre_hooks), 1)
-            self.assertEqual(len(model._forward_hooks), 1)
+        with FlopCounterMode() as mode:
+            self.assertEqual(len(torch.nn.modules.module._global_forward_pre_hooks), 1)
+            self.assertEqual(len(torch.nn.modules.module._global_forward_hooks), 1)
             model(x).sum().backward()
 
-        self.assertEqual(len(model._forward_pre_hooks), 0)
-        self.assertEqual(len(model._forward_hooks), 0)
+        self.assertEqual(len(torch.nn.modules.module._global_forward_pre_hooks), 0)
+        self.assertEqual(len(torch.nn.modules.module._global_forward_hooks), 0)
 
     def test_pytrees(self):
         class Foo(torch.nn.Module):
@@ -368,8 +365,7 @@ class TestFlopCounter(TestCase):
                 return self.b(self.a(x))
 
         mod = Mod()
-        mode = FlopCounterMode(mod)
-        with mode:
+        with FlopCounterMode() as mode:
             mod({'a': torch.randn(10, 10, requires_grad=True).clone()})['a'].sum().backward()
         self.assertExpectedInline((mode.flop_counts['Mod'][torch.ops.aten.mm]), """12000""")
 
@@ -378,13 +374,14 @@ class TestFlopCounter(TestCase):
                 return (torch.mm(x, x),)
 
         mod = Mod2()
-        mode = FlopCounterMode(mod)
-        with mode:
+        with FlopCounterMode() as mode:
             mod(torch.randn(10, 10, requires_grad=True))[0].sum().backward()
         self.assertExpectedInline((mode.flop_counts['Mod2'][torch.ops.aten.mm]), """6000""")
 
-
-
+    def test_warning(self):
+        mod = torch.nn.Linear(2, 2)
+        with self.assertWarnsRegex(UserWarning, "not needed"):
+            FlopCounterMode(mod)
 
 
 if __name__ == '__main__':
