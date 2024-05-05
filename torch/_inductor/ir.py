@@ -8418,12 +8418,6 @@ class _WaitKernel(_CollectiveKernel):
             read_writes.reads.add(dependencies.StarDep(vr.get_name()))
         return read_writes
 
-    def codegen(self, wrapper):
-        super().codegen(wrapper)
-        # TODO(yf225): this is a terrible thing to do, but without this we couldn't free up the all_gather output buffer memory.
-        # We really need to figure out why.
-        # wrapper.writeline("torch.cuda.synchronize()")
-
 
 # NB: recursive structure here reflects val_to_arg_str, avoid
 # calling free_unbacked_symbols on "exotic" types that don't get pexpr
