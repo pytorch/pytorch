@@ -5,7 +5,20 @@ import weakref
 from bisect import bisect_right
 from collections import Counter
 from functools import partial, wraps
-from typing import Optional, Sequence
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Dict,
+    Iterable,
+    List,
+    Literal,
+    Optional,
+    Sequence,
+    SupportsFloat,
+    TypedDict,
+    Union,
+)
 
 from torch import inf
 
@@ -53,7 +66,9 @@ def _check_verbose_deprecated_warning(verbose):
 
 
 class LRScheduler:
-    def __init__(self, optimizer, last_epoch=-1, verbose="deprecated"):
+    _get_lr_called_within_step: bool = False
+
+    def __init__(self, optimizer: Optimizer, last_epoch=-1, verbose="deprecated"):
         # Attach optimizer
         if not isinstance(optimizer, Optimizer):
             raise TypeError(f"{type(optimizer).__name__} is not an Optimizer")
@@ -70,7 +85,9 @@ class LRScheduler:
                         "param 'initial_lr' is not specified "
                         f"in param_groups[{i}] when resuming an optimizer"
                     )
-        self.base_lrs = [group["initial_lr"] for group in optimizer.param_groups]
+        self.base_lrs: List[float] = [
+            group["initial_lr"] for group in optimizer.param_groups
+        ]
         self.last_epoch = last_epoch
 
         # Following https://github.com/pytorch/pytorch/issues/20124
@@ -92,23 +109,23 @@ class LRScheduler:
             @wraps(func)
             def wrapper(*args, **kwargs):
                 instance = instance_ref()
-                instance._step_count += 1
+                instance._step_count += 1  # type: ignore[union-attr]
                 wrapped = func.__get__(instance, cls)
                 return wrapped(*args, **kwargs)
 
             # Note that the returned function here is no longer a bound method,
             # so attributes like `__func__` and `__self__` no longer exist.
-            wrapper._with_counter = True
+            wrapper._with_counter = True  # type: ignore[attr-defined]
             return wrapper
 
-        self.optimizer.step = with_counter(self.optimizer.step)
+        self.optimizer.step = with_counter(self.optimizer.step)  # type: ignore[method-assign]
         self.verbose = _check_verbose_deprecated_warning(verbose)
 
         self._initial_step()
 
     def _initial_step(self):
         """Initialize step counts and performs a step"""
-        self.optimizer._step_count = 0
+        self.optimizer._step_count = 0  # type: ignore[attr-defined]
         self._step_count = 0
         self.step()
 
@@ -122,7 +139,7 @@ class LRScheduler:
             key: value for key, value in self.__dict__.items() if key != "optimizer"
         }
 
-    def load_state_dict(self, state_dict):
+    def load_state_dict(self, state_dict: Dict[str, Any]):
         """Loads the schedulers state.
 
         Args:
@@ -131,15 +148,21 @@ class LRScheduler:
         """
         self.__dict__.update(state_dict)
 
-    def get_last_lr(self):
+    def get_last_lr(self) -> List[float]:
         """Return last computed learning rate by current scheduler."""
         return self._last_lr
 
-    def get_lr(self):
+    def get_lr(self) -> List[float]:
         # Compute learning rate using chainable form of the scheduler
         raise NotImplementedError
 
-    def print_lr(self, is_verbose, group, lr, epoch=None):
+    def print_lr(
+        self,
+        is_verbose: bool,
+        group: Dict[str, Any],
+        lr: float,
+        epoch: Optional[int] = None,
+    ):
         """Display the current learning rate."""
         if is_verbose:
             if epoch is None:
@@ -150,7 +173,7 @@ class LRScheduler:
                     f"Epoch {epoch_str}: adjusting learning rate of group {group} to {lr:.4e}."
                 )
 
-    def step(self, epoch=None):
+    def step(self, epoch: Optional[int] = None):
         # Raise a warning if old pattern is detected
         # https://github.com/pytorch/pytorch/issues/20124
         if self._step_count == 1:
@@ -164,7 +187,7 @@ class LRScheduler:
                 )
 
             # Just check if there were two first lr_scheduler.step() calls before optimizer.step()
-            elif self.optimizer._step_count < 1:
+            elif self.optimizer._step_count < 1:  # type: ignore[attr-defined]
                 warnings.warn(
                     "Detected call of `lr_scheduler.step()` before `optimizer.step()`. "
                     "In PyTorch 1.1.0 and later, you should call them in the opposite order: "
@@ -184,7 +207,7 @@ class LRScheduler:
                 warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning)
                 self.last_epoch = epoch
                 if hasattr(self, "_get_closed_form_lr"):
-                    values = self._get_closed_form_lr()
+                    values = cast(List[float], self._get_closed_form_lr())
                 else:
                     values = self.get_lr()
 
@@ -192,7 +215,9 @@ class LRScheduler:
             param_group, lr = data
             param_group["lr"] = lr
 
-        self._last_lr = [group["lr"] for group in self.optimizer.param_groups]
+        self._last_lr: List[float] = [
+            group["lr"] for group in self.optimizer.param_groups
+        ]
 
 
 # Including _LRScheduler for backwards compatibility
@@ -202,7 +227,7 @@ class _LRScheduler(LRScheduler):
 
 
 class _enable_get_lr_call:
-    def __init__(self, o):
+    def __init__(self, o: LRScheduler):
         self.o = o
 
     def __enter__(self):
@@ -242,9 +267,16 @@ class LambdaLR(LRScheduler):
         >>>     scheduler.step()
     """
 
-    def __init__(self, optimizer, lr_lambda, last_epoch=-1, verbose="deprecated"):
+    def __init__(
+        self,
+        optimizer: Optimizer,
+        lr_lambda: Union[Callable[[int], float], List[Callable[[int], float]]],
+        last_epoch=-1,
+        verbose="deprecated",
+    ):
         self.optimizer = optimizer
 
+        self.lr_lambdas: List[Callable[[int], float]]
         if not isinstance(lr_lambda, list) and not isinstance(lr_lambda, tuple):
             self.lr_lambdas = [lr_lambda] * len(optimizer.param_groups)
         else:
@@ -339,9 +371,16 @@ class MultiplicativeLR(LRScheduler):
         >>>     scheduler.step()
     """
 
-    def __init__(self, optimizer, lr_lambda, last_epoch=-1, verbose="deprecated"):
+    def __init__(
+        self,
+        optimizer: Optimizer,
+        lr_lambda: Union[Callable[[int], float], List[Callable[[int], float]]],
+        last_epoch=-1,
+        verbose="deprecated",
+    ):
         self.optimizer = optimizer
 
+        self.lr_lambdas: List[Callable[[int], float]]
         if not isinstance(lr_lambda, list) and not isinstance(lr_lambda, tuple):
             self.lr_lambdas = [lr_lambda] * len(optimizer.param_groups)
         else:
@@ -441,7 +480,12 @@ class StepLR(LRScheduler):
     """
 
     def __init__(
-        self, optimizer, step_size, gamma=0.1, last_epoch=-1, verbose="deprecated"
+        self,
+        optimizer: Optimizer,
+        step_size: int,
+        gamma=0.1,
+        last_epoch=-1,
+        verbose="deprecated",
     ):
         self.step_size = step_size
         self.gamma = gamma
@@ -499,7 +543,12 @@ class MultiStepLR(LRScheduler):
     """
 
     def __init__(
-        self, optimizer, milestones, gamma=0.1, last_epoch=-1, verbose="deprecated"
+        self,
+        optimizer: Optimizer,
+        milestones: Iterable[int],
+        gamma=0.1,
+        last_epoch=-1,
+        verbose="deprecated",
     ):
         self.milestones = Counter(milestones)
         self.gamma = gamma
@@ -565,7 +614,7 @@ class ConstantLR(LRScheduler):
 
     def __init__(
         self,
-        optimizer,
+        optimizer: Optimizer,
         factor=1.0 / 3,
         total_iters=5,
         last_epoch=-1,
@@ -646,7 +695,7 @@ class LinearLR(LRScheduler):
 
     def __init__(
         self,
-        optimizer,
+        optimizer: Optimizer,
         start_factor=1.0 / 3,
         end_factor=1.0,
         total_iters=5,
@@ -726,7 +775,9 @@ class ExponentialLR(LRScheduler):
                 learning rate.
     """
 
-    def __init__(self, optimizer, gamma, last_epoch=-1, verbose="deprecated"):
+    def __init__(
+        self, optimizer: Optimizer, gamma: float, last_epoch=-1, verbose="deprecated"
+    ):
         self.gamma = gamma
         super().__init__(optimizer, last_epoch, verbose)
 
@@ -780,7 +831,12 @@ class SequentialLR(LRScheduler):
     """
 
     def __init__(
-        self, optimizer, schedulers, milestones, last_epoch=-1, verbose="deprecated"
+        self,
+        optimizer: Optimizer,
+        schedulers: List[LRScheduler],
+        milestones: List[int],
+        last_epoch=-1,
+        verbose="deprecated",
     ):
         if len(schedulers) < 1:
             raise ValueError(
@@ -908,7 +964,12 @@ class PolynomialLR(LRScheduler):
     """
 
     def __init__(
-        self, optimizer, total_iters=5, power=1.0, last_epoch=-1, verbose="deprecated"
+        self,
+        optimizer: Optimizer,
+        total_iters=5,
+        power=1.0,
+        last_epoch=-1,
+        verbose="deprecated",
     ):
         self.total_iters = total_iters
         self.power = power
@@ -987,7 +1048,12 @@ class CosineAnnealingLR(LRScheduler):
     """
 
     def __init__(
-        self, optimizer, T_max, eta_min=0, last_epoch=-1, verbose="deprecated"
+        self,
+        optimizer: Optimizer,
+        T_max: int,
+        eta_min=0,
+        last_epoch=-1,
+        verbose="deprecated",
     ):
         self.T_max = T_max
         self.eta_min = eta_min
@@ -1198,14 +1264,14 @@ class ReduceLROnPlateau(LRScheduler):
 
     def __init__(
         self,
-        optimizer,
-        mode="min",
+        optimizer: Optimizer,
+        mode: Literal["min", "max"] = "min",
         factor=0.1,
         patience=10,
         threshold=1e-4,
-        threshold_mode="rel",
+        threshold_mode: Literal["rel", "abs"] = "rel",
         cooldown=0,
-        min_lr=0,
+        min_lr: Union[List[float], float] = 0,
         eps=1e-8,
         verbose="deprecated",
     ):
@@ -1235,9 +1301,9 @@ class ReduceLROnPlateau(LRScheduler):
         self.mode = mode
         self.threshold = threshold
         self.threshold_mode = threshold_mode
-        self.best = None
-        self.num_bad_epochs = None
-        self.mode_worse = None  # the worse value for the chosen mode
+        self.best: float
+        self.num_bad_epochs: int
+        self.mode_worse: float  # the worse value for the chosen mode
         self.eps = eps
         self.last_epoch = 0
         self._last_lr = [group["lr"] for group in self.optimizer.param_groups]
@@ -1252,7 +1318,7 @@ class ReduceLROnPlateau(LRScheduler):
         self.cooldown_counter = 0
         self.num_bad_epochs = 0
 
-    def step(self, metrics, epoch=None):
+    def step(self, metrics: SupportsFloat, epoch=None):  # type: ignore[override]
         # convert `metrics` to float, in case it's a zero-dim Tensor
         current = float(metrics)
         if epoch is None:
@@ -1432,15 +1498,15 @@ class CyclicLR(LRScheduler):
 
     def __init__(
         self,
-        optimizer,
-        base_lr,
-        max_lr,
+        optimizer: Optimizer,
+        base_lr: Union[float, List[float]],
+        max_lr: Union[float, List[float]],
         step_size_up=2000,
-        step_size_down=None,
-        mode="triangular",
+        step_size_down: Optional[int] = None,
+        mode: Literal["triangular", "triangular2", "exp_range"] = "triangular",
         gamma=1.0,
-        scale_fn=None,
-        scale_mode="cycle",
+        scale_fn: Optional[Callable[[float], float]] = None,
+        scale_mode: Literal["cycle", "iterations"] = "cycle",
         cycle_momentum=True,
         base_momentum=0.8,
         max_momentum=0.9,
@@ -1472,7 +1538,7 @@ class CyclicLR(LRScheduler):
         self.mode = mode
         self.gamma = gamma
 
-        self._scale_fn_ref = None
+        self._scale_fn_ref: Callable[[float], float]
         self._scale_fn_custom = scale_fn
         self.scale_mode = scale_mode
         self._init_scale_fn()
@@ -1532,22 +1598,22 @@ class CyclicLR(LRScheduler):
         else:
             return [param] * len(optimizer.param_groups)
 
-    def scale_fn(self, x):
+    def scale_fn(self, x) -> float:
         if self._scale_fn_custom is not None:
             return self._scale_fn_custom(x)
         else:
             return self._scale_fn_ref(x)  # static method
 
     @staticmethod
-    def _triangular_scale_fn(x):
+    def _triangular_scale_fn(x: float) -> float:
         return 1.0
 
     @staticmethod
-    def _triangular2_scale_fn(x):
+    def _triangular2_scale_fn(x: float) -> float:
         return 1 / (2.0 ** (x - 1))
 
     @staticmethod
-    def _exp_range_scale_fn(gamma, x):
+    def _exp_range_scale_fn(gamma: float, x: float) -> float:
         return gamma**x
 
     def get_lr(self):
@@ -1606,7 +1672,7 @@ class CyclicLR(LRScheduler):
         state = super().state_dict()
         # We are dropping the `_scale_fn_ref` attribute because it is a
         # `weakref.WeakMethod` and can't be pickled.
-        state.pop("_scale_fn_ref")
+        state.pop("_scale_fn_ref", None)
         fn = state.pop("_scale_fn_custom")
         state["_scale_fn_custom"] = None
         if fn is not None and not isinstance(fn, types.FunctionType):
@@ -1658,7 +1724,13 @@ class CosineAnnealingWarmRestarts(LRScheduler):
     """
 
     def __init__(
-        self, optimizer, T_0, T_mult=1, eta_min=0, last_epoch=-1, verbose="deprecated"
+        self,
+        optimizer: Optimizer,
+        T_0: int,
+        T_mult=1,
+        eta_min=0,
+        last_epoch=-1,
+        verbose="deprecated",
     ):
         if T_0 <= 0 or not isinstance(T_0, int):
             raise ValueError(f"Expected positive integer T_0, but got {T_0}")
@@ -1749,24 +1821,20 @@ class CosineAnnealingWarmRestarts(LRScheduler):
                 self.T_cur = epoch
         self.last_epoch = math.floor(epoch)
 
-        class _enable_get_lr_call:
-            def __init__(self, o):
-                self.o = o
-
-            def __enter__(self):
-                self.o._get_lr_called_within_step = True
-                return self
-
-            def __exit__(self, type, value, traceback):
-                self.o._get_lr_called_within_step = False
-                return self
-
         with _enable_get_lr_call(self):
             for i, data in enumerate(zip(self.optimizer.param_groups, self.get_lr())):
                 param_group, lr = data
                 param_group["lr"] = lr
 
         self._last_lr = [group["lr"] for group in self.optimizer.param_groups]
+
+
+class _SchedulePhase(TypedDict):
+    end_step: float
+    start_lr: str
+    end_lr: str
+    start_momentum: str
+    end_momentum: str
 
 
 class OneCycleLR(LRScheduler):
@@ -1878,16 +1946,16 @@ class OneCycleLR(LRScheduler):
 
     def __init__(
         self,
-        optimizer,
-        max_lr,
-        total_steps=None,
-        epochs=None,
-        steps_per_epoch=None,
+        optimizer: Optimizer,
+        max_lr: Union[float, List[float]],
+        total_steps: Optional[int] = None,
+        epochs: Optional[int] = None,
+        steps_per_epoch: Optional[int] = None,
         pct_start=0.3,
-        anneal_strategy="cos",
+        anneal_strategy: Literal["cos", "linear"] = "cos",
         cycle_momentum=True,
-        base_momentum=0.85,
-        max_momentum=0.95,
+        base_momentum: Union[float, List[float]] = 0.85,
+        max_momentum: Union[float, List[float]] = 0.95,
         div_factor=25.0,
         final_div_factor=1e4,
         three_phase=False,
@@ -1900,17 +1968,13 @@ class OneCycleLR(LRScheduler):
         self.optimizer = optimizer
 
         # Validate total_steps
-        if total_steps is None and epochs is None and steps_per_epoch is None:
-            raise ValueError(
-                "You must define either total_steps OR (epochs AND steps_per_epoch)"
-            )
-        elif total_steps is not None:
+        if total_steps is not None:
             if total_steps <= 0 or not isinstance(total_steps, int):
                 raise ValueError(
                     f"Expected positive integer total_steps, but got {total_steps}"
                 )
             self.total_steps = total_steps
-        else:
+        elif epochs is not None and steps_per_epoch is not None:
             if epochs <= 0 or not isinstance(epochs, int):
                 raise ValueError(f"Expected positive integer epochs, but got {epochs}")
             if steps_per_epoch <= 0 or not isinstance(steps_per_epoch, int):
@@ -1918,7 +1982,12 @@ class OneCycleLR(LRScheduler):
                     f"Expected positive integer steps_per_epoch, but got {steps_per_epoch}"
                 )
             self.total_steps = epochs * steps_per_epoch
+        else:
+            raise ValueError(
+                "You must define either total_steps OR (epochs AND steps_per_epoch)"
+            )
 
+        self._schedule_phases: List[_SchedulePhase]
         if three_phase:
             self._schedule_phases = [
                 {
@@ -2032,7 +2101,7 @@ class OneCycleLR(LRScheduler):
                 raise ValueError(f"Unknown _anneal_func_type: {self._anneal_func_type}")
         else:
             # For BC
-            return self.anneal_func(*args, **kwargs)
+            return self.anneal_func(*args, **kwargs)  # type: ignore[attr-defined]
 
     @staticmethod
     def _annealing_cos(start, end, pct):
@@ -2062,7 +2131,7 @@ class OneCycleLR(LRScheduler):
             )
 
         for group in self.optimizer.param_groups:
-            start_step = 0
+            start_step = 0.0
             for i, phase in enumerate(self._schedule_phases):
                 end_step = phase["end_step"]
                 if step_num <= end_step or i == len(self._schedule_phases) - 1:
@@ -2079,11 +2148,13 @@ class OneCycleLR(LRScheduler):
                     break
                 start_step = phase["end_step"]
 
-            lrs.append(computed_lr)
+            lrs.append(computed_lr)  # type: ignore[possibly-undefined]
             if self.cycle_momentum:
                 if self.use_beta1:
-                    group["betas"] = (computed_momentum, *group["betas"][1:])
+                    group["betas"] = (computed_momentum, *group["betas"][1:])  # type: ignore[possibly-undefined]
                 else:
-                    group["momentum"] = computed_momentum
+                    group[
+                        "momentum"
+                    ] = computed_momentum  # type: ignore[possibly-undefined]
 
         return lrs
