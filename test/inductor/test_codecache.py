@@ -178,12 +178,18 @@ class TestFxGraphCache(TestCase):
                     return None
                 ret = json.loads(cache[filename])
                 num_get += 1
-                return base64.b64decode(ret["data"]) if ret is not None else ret
+                if config.is_fbcode():
+                    return base64.b64decode(ret["data"]) if ret is not None else ret
+                else:
+                    return base64.b64decode(ret) if ret is not None else ret
 
             def put(self, filename, data):
                 nonlocal cache
                 nonlocal num_put
-                data["data"] = base64.b64encode(data["data"]).decode("ascii")
+                if config.is_fbcode():
+                    data["data"] = base64.b64encode(data["data"]).decode("ascii")
+                else:
+                    data = base64.b64encode(data).decode("ascii")
                 cache[filename] = json.dumps(data)
                 num_put += 1
 

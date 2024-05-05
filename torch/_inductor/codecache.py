@@ -808,7 +808,19 @@ class FxGraphCache:
         if not os.path.exists(artifact_path):
             counters["inductor"]["fxgraph_lookup_write_file"] += 1
             Path(os.path.dirname(artifact_path)).mkdir(parents=True, exist_ok=True)
-            write_atomic(artifact_path, graph.source_code, make_dirs=True)
+            code = graph.source_code
+            cpp_pp = cpp_prefix_path()
+            if os.path.basename(cpp_pp) in code:
+                if cpp_pp in code:
+                    # Great the name is correct
+                    pass
+                else:
+                    # Old dir name is included, replace it
+                    pattern = rf'#include\s*"[^"]+{os.path.basename(cpp_pp)}"'
+                    code = re.sub(pattern, f'#include "{cpp_pp}"', code)
+
+            write_atomic(artifact_path, code, make_dirs=True)
+
         try:
             graph.current_callable = PyCodeCache.load_by_key_path(
                 graph.cache_key,
