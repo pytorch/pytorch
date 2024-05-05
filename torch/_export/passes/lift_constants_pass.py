@@ -243,7 +243,7 @@ def lift_constants_pass(
 
 def rewrite_script_object_meta(
     gm: torch.fx.GraphModule,
-) -> Dict[str, Union[torch.Tensor, FakeScriptObject],]:
+) -> Dict[str, Union[torch.Tensor, torch.ScriptObject, FakeScriptObject],]:
     """When tracing, we produce a graph with FakeScriptObject in the
     meta["val"].
 
@@ -253,6 +253,7 @@ def rewrite_script_object_meta(
         str,
         Union[
             torch.Tensor,
+            torch.ScriptObject,
             FakeScriptObject,
         ],
     ] = {}
@@ -260,15 +261,15 @@ def rewrite_script_object_meta(
         if "val" not in node.meta:
             continue
 
-        assert not isinstance(
-            node.meta["val"], torch.ScriptObject
-        ), "ScriptObject should already be fakified in to FakeScriptObject."
-
-        if isinstance(
-            node.meta["val"],
-            FakeScriptObject,
-        ):
+        if isinstance(node.meta["val"], torch.ScriptObject):
             old_meta = node.meta["val"]
+            class_fqn = old_meta._type().qualified_name()  # type: ignore[attr-defined]
+            new_meta = CustomObjArgument(node.name, class_fqn)
+            constants[node.name] = old_meta
+            node.meta["val"] = new_meta
+
+        elif isinstance(node.meta["val"], FakeScriptObject):
+            old_meta = node.meta["val"]  # type: ignore[assignment]
             class_fqn = old_meta.script_class_name  # type: ignore[attr-defined]
             new_meta = CustomObjArgument(node.name, class_fqn)
             constants[node.name] = old_meta
