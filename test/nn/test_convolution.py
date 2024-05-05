@@ -3184,6 +3184,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(output.cpu().float(), output_cpu, atol=1e-3, rtol=1e-3)
 
     @onlyCUDA
+    @skipCUDAIfRocm
     @largeTensorTest("24GB", "cpu")
     @largeTensorTest("20GB", "cuda")
     def test_conv3d_large_batch_1(self, device):

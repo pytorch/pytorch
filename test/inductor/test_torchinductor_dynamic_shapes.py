@@ -60,11 +60,9 @@ test_failures = {
     "test_AllenaiLongformerBase_repro_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_conv_inference_heuristics_dynamic_shapes": TestFailure("cuda"),
     # Our logic is not strong enough to prove these bounds... yet!
+    # They are of the form s0 > x0 % s0 and s0 > x0 // s0 for 0 <= x0 < s0
     "test_index_propagation_floordiv_dynamic_shapes": TestFailure(("cpu", "cuda")),
-    # FIXME before landing. Skipping because the device assert is triggered on CUDA
-    "test_index_propagation_remainder_dynamic_shapes": TestFailure(
-        ("cpu", "cuda"), is_skip=True
-    ),
+    "test_index_propagation_remainder_dynamic_shapes": TestFailure(("cpu", "cuda")),
 }
 
 if TEST_WITH_ROCM:
@@ -406,6 +404,52 @@ class TestInductorDynamic(TestCase):
         cf = torch.compile(fullgraph=True)(f)
         arg = torch.tensor([4, 6], device="cuda")
         self.assertEqual(f(arg), cf(arg))
+
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    def test_unbacked_cat_backwards(self, device):
+        def f(x, w):
+            device = w.device
+            a, b = x.tolist()
+            ta = torch.ones(a, device=device)
+            tb = torch.ones(b, device=device)
+            pa = ta * w  # make it require gradients
+            pb = tb * w
+            r = torch.cat([pa, pb])
+            return r.sum()
+
+        x = torch.tensor([4, 9])
+        w = torch.randn(1, requires_grad=True)
+        f(x, w).backward()
+        orig_w = w.grad
+        w.grad = None
+
+        torch.compile(fullgraph=True)(f)(x, w).backward()
+        self.assertEqual(orig_w, w.grad)
+
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    def test_unbacked_cat_backwards_save_data_dependent(self, device):
+        def f(x, w):
+            device = w.device
+            a, b = x.tolist()
+            ta = torch.ones(a, device=device)
+            tb = torch.ones(b, device=device)
+            pa = ta * w  # make it require gradients
+            pb = tb * w
+            r = torch.cat([pa, pb])
+            return r
+
+        x = torch.tensor([4, 9])
+        w = torch.randn(1, requires_grad=True)
+        f(x, w).sum().backward()
+        orig_w = w.grad
+        w.grad = None
+
+        torch.compile(fullgraph=True)(f)(x, w).sum().backward()
+        self.assertEqual(orig_w, w.grad)
 
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True

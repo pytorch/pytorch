@@ -1525,7 +1525,11 @@ class Kernel(CodeGen):
                     # Mixed negative and non-negative
                     if var.bounds.upper >= 0:  # type: ignore[operator]
                         lt = ops.lt(var, 0)
-                        stm = ops.where(lt, stm, var)
+                        ret = ops.where(lt, stm, var)
+                        # Ugh. To fix properly, need to fix the handling of TritonCSEVariable.update_on_args of where
+                        if hasattr(ret.value, "mask_vars"):
+                            ret.value.mask_vars.update(stm.value.mask_vars)
+                        stm = ret
 
                     var = stm.value
                     # We should propagate automatically the bounds when calling ops we know how to
