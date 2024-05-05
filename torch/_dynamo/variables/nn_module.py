@@ -484,12 +484,16 @@ class NNModuleVariable(VariableTracker):
             return source
 
         if name == "named_children":
+            tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules").name())
             assert not (args or kwargs)
             result = []
             for name, submod in module.named_children():
                 result.append(named_embed(name, submod))
             return ListIteratorVariable(result, mutable_local=MutableLocal())
         elif name == "named_parameters":
+            tx.output.guard_on_key_order.add(
+                AttrSource(self.source, "_parameters").name()
+            )
             result = []
             for name, param in module.named_parameters(
                 **get_kwargs("prefix", "recurse")
@@ -497,6 +501,7 @@ class NNModuleVariable(VariableTracker):
                 result.append(named_embed(name, param))
             return ListIteratorVariable(result, mutable_local=MutableLocal())
         elif name == "named_buffers":
+            tx.output.guard_on_key_order.add(AttrSource(self.source, "_buffers").name())
             result = []
             for name, buffer in module.named_buffers(
                 **get_kwargs("prefix", "recurse", "remove_duplicate")
@@ -504,6 +509,7 @@ class NNModuleVariable(VariableTracker):
                 result.append(named_embed(name, buffer))
             return ListIteratorVariable(result, mutable_local=MutableLocal())
         elif name == "named_modules":
+            tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules").name())
             result = []
             for name, submod in module.named_modules(
                 **get_kwargs("memo", "prefix", "remove_duplicate")
@@ -511,13 +517,19 @@ class NNModuleVariable(VariableTracker):
                 result.append(named_embed(name, submod))
             return ListIteratorVariable(result, mutable_local=MutableLocal())
         elif name == "children":
+            tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules").name())
             assert not (args or kwargs)
             return wrap_values(module.named_children())
         elif name == "modules":
+            tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules").name())
             return wrap_values(module.named_modules())
         elif name == "parameters":
+            tx.output.guard_on_key_order.add(
+                AttrSource(self.source, "_parameters").name()
+            )
             return wrap_values(module.named_parameters(**get_kwargs("recurse")))
         elif name == "buffers":
+            tx.output.guard_on_key_order.add(AttrSource(self.source, "_buffers").name())
             return wrap_values(module.named_buffers(**get_kwargs("recurse")))
         elif name == "keys":
             assert not (args or kwargs)

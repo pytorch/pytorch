@@ -126,7 +126,15 @@ D = 64
 
 
 class TestTemplatedSDPA(InductorTestCase):
-    def run_test(self, score_mod: Callable, dtype: torch.dtype = torch.float16):
+    def run_test(
+        self,
+        score_mod: Callable,
+        dtype: torch.dtype = torch.float16,
+        B: int = B,
+        H: int = H,
+        S: int = S,
+        D: int = D,
+    ):
         sdpa_partial = create_attention(score_mod)
         compiled_sdpa = torch.compile(sdpa_partial)
         q = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
@@ -288,6 +296,60 @@ class TestTemplatedSDPA(InductorTestCase):
             return torch.nn.functional.silu(score)
 
         self.run_test(silu_score, dtype)
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    def test_padded_dense_causal(self, dtype):
+        seq_len = torch.arange(B, device="cuda", dtype=torch.int32) + 1
+
+        def create_padded_dense_wrapper(orig_score_mod):
+            def njt_score_mod(qk, b, h, q, kv):
+                return torch.where(
+                    qk <= seq_len[b], orig_score_mod(qk, b, h, q, kv), -float("inf")
+                )
+
+            return njt_score_mod
+
+        causal_njt = create_padded_dense_wrapper(_causal)
+
+        self.run_test(causal_njt, dtype)
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    def test_captured_scale(self, dtype):
+        scale = torch.ones((), device="cuda", dtype=torch.int32)
+
+        def score_mod_scale(qk, b, h, q, kv):
+            return qk + scale
+
+        self.run_test(score_mod_scale, dtype)
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    def test_recompile_changed_score_mod(self, dtype):
+        scale = torch.ones((), device="cuda", dtype=torch.int32)
+        ADD = True
+
+        def score_mod_scale(qk, b, h, q, kv):
+            if ADD:
+                return qk + scale
+            else:
+                return qk * scale
+
+        self.run_test(score_mod_scale, dtype)
+        ADD = False
+        self.run_test(score_mod_scale, dtype)
+
+    @supported_platform
+    @expectedFailure  # If we capture a tensor then we can perform a reduction on it.
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    def test_captured_reduction(self, dtype):
+        scale = torch.randn((B, 8), device="cuda")
+
+        def score_mod_scale(qk, b, h, q, kv):
+            return qk + scale[b].sum(dim=-1)
+
+        self.run_test(score_mod_scale, dtype)
 
     @supported_platform
     @skip("Triton bug ")  # https://github.com/pytorch/pytorch/issues/124571
