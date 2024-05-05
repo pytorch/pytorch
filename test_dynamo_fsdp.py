@@ -366,14 +366,20 @@ def init(activation_checkpoint):
         torch._functorch.config.aggressive_recomputation = False
         torch._inductor.config.allow_buffer_reuse = False
         torch._inductor.config.inplace_buffers = False
+        torch._inductor.config.reorder_for_compute_comm_overlap = True
+        torch._inductor.config.reorder_for_compute_comm_overlap_passes = [
+            "sink_waits",
+            "raise_comms",
+        ]
+        torch._inductor.config.optimize_memory_usage = True
         model_args = ModelArgs(
             dim=hidden_dim,
             n_layers=3,
             n_heads=1,
             vocab_size=1024,
         )
-        # transformer_class = ToyTransformer  # makes comm-induced peak memory issue more prominent
-        transformer_class = Transformer
+        transformer_class = ToyTransformer  # makes comm-induced peak memory issue more prominent
+        # transformer_class = Transformer
         model = transformer_class(model_args)
         for layer_id, mod in enumerate(model.layers):
             if activation_checkpoint:
