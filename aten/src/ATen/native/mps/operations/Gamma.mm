@@ -412,7 +412,7 @@ static id<MTLComputePipelineState> getCPLState(const std::string& t1, const std:
   auto key = t1 + t2;
   static std::unordered_map<std::string, MetalShaderLibrary> libMap;
   auto it = libMap.find(key);
-  if (it != libMap.end()) {
+  if (it == libMap.end()) {
     bool rc = false;
     std::tie(it, rc) = libMap.emplace(key, fmt::format(GAMMA_OPS_TEMPLATE, t1, t2));
   }
