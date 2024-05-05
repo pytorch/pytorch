@@ -21,7 +21,7 @@ def _match(modules: Dict[str, nn.ModuleDict], node: Node, current: Union[nn.Modu
     if isinstance(current, type) and issubclass(current, torch.nn.Module):
         return (
             node.op == "call_module"
-            and parametrize.type_before_parametrizations(modules[node.target])
+            and parametrize.type_before_parametrizations(modules[node.target])  # type: ignore[index]
             == current
         )
     elif callable(current):
