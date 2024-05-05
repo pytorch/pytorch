@@ -1345,8 +1345,8 @@ class Scheduler:
         self.compute_dependencies()
         self.topological_sort_schedule()
         self.dead_node_elimination()
-        # if config.reorder_for_compute_comm_overlap:
-        comms.decide_global_ordering_of_comms(self.nodes)
+        if config.reorder_for_compute_comm_overlap:
+            comms.decide_global_ordering_of_comms(self.nodes)
         self.compute_ancestors()
 
         metrics.ir_nodes_pre_fusion += len(self.nodes)
@@ -1361,15 +1361,16 @@ class Scheduler:
         self.nodes = comms.enforce_comm_node_ordering_for_fsdp(self.name_to_fused_node, self.nodes)
         # Refresh node_users and inverse_users to reflect fused nodes and grouped nodes
         self.compute_node_users()
-        # if config.reorder_for_compute_comm_overlap:
-        self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
+        if config.reorder_for_compute_comm_overlap:
+            self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
         self.compute_last_usage()
 
         # for snode in self.nodes:
         #     torch_log.warning(f"snode: {snode}, snode.node: {snode.node}, snode.debug_str(): {snode.debug_str()}")
 
-        self.nodes = memory_opts.optimize_memory_usage(self.name_to_fused_node, V.graph.graph_inputs, self.nodes)
-        self.compute_last_usage()
+        if config.optimize_memory_usage:
+            self.nodes = memory_opts.optimize_memory_usage(self.name_to_fused_node, V.graph.graph_inputs, self.nodes)
+            self.compute_last_usage()
 
         # TODO(yf225): after memory-optimization, we might need to do compute_last_usage() again.
         # We will see what error we get if we don't do it.

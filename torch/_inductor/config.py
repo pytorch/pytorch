@@ -184,10 +184,13 @@ reorder_for_compute_comm_overlap = False
 # passes (in execution order) for increasing overlap between compute and communication
 # for built-in passes, use string name; for user-defined passes, pass in the function handle
 reorder_for_compute_comm_overlap_passes = [
-    # "reorder_compute_for_overlap",
+    "reorder_compute_for_overlap",
     "sink_waits",
     "raise_comms",
 ]
+
+# TODO: add doc
+optimize_memory_usage = False
 
 # runtime estimation function for ops
 # for built-in estimation function, pass in "default"; for user-defined estimation function, pass in the function handle
