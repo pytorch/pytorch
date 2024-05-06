@@ -85,6 +85,18 @@ KERNEL_COUNT_OVERRIDES = {
     "test_adagrad_lr_decay_weight_decay_foreach_cuda": 3,
     "test_adagrad_weight_decay_foreach_cuda": 3,
     "test_adagrad_weight_decay_maximize_foreach_cuda": 3,
+    "test_adagrad_tensor_lr_cpu": 6,
+    "test_adagrad_tensor_lr_cuda": 6,
+    "test_adamax_tensor_lr_weight_decay_capturable_cuda": 6,
+    "test_asgd_tensor_lr_weight_decay_maximize_capturable_cuda": 8,
+    "test_asgd_tensor_lr_weight_decay_maximize_capturable_foreach_cuda": 4,
+    "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_cuda": 9,
+    "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_foreach_cuda": 3,
+    "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_cuda": 6,
+    "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_foreach_cuda": 3,
+    "test_sgd_tensor_lr_cpu": 2,
+    "test_sgd_tensor_lr_cuda": 2,
+    "test_sgd_tensor_lr_foreach_cuda": 2,
 }
 
 # also tracks currently supported optimizers

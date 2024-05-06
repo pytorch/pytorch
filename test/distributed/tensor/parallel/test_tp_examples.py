@@ -230,17 +230,16 @@ class DistTensorParallelExampleTest(DTensorTestBase):
             self.assertDictEqual(
                 comm_mode.get_comm_counts(),
                 {
-                    c10d_functional.all_reduce: 1,
-                    c10d_functional.reduce_scatter_tensor: 4,
-                    c10d_functional.all_gather_into_tensor: 7,
+                    c10d_functional.reduce_scatter_tensor: 6,
+                    c10d_functional.all_gather_into_tensor: 6,
                 },
             )
         else:
             self.assertDictEqual(
                 comm_mode.get_comm_counts(),
                 {
-                    c10d_functional.all_reduce: 5,
-                    c10d_functional.all_gather_into_tensor: 2,
+                    c10d_functional.all_reduce: 6,
+                    c10d_functional.all_gather_into_tensor: 1,
                 },
             )
 
@@ -253,16 +252,15 @@ class DistTensorParallelExampleTest(DTensorTestBase):
             self.assertDictEqual(
                 comm_mode.get_comm_counts(),
                 {
-                    c10d_functional.reduce_scatter_tensor: 4,
-                    c10d_functional.all_gather_into_tensor: 7,
+                    c10d_functional.reduce_scatter_tensor: 5,
+                    c10d_functional.all_gather_into_tensor: 6,
                 },
             )
         else:
             self.assertDictEqual(
                 comm_mode.get_comm_counts(),
                 {
-                    c10d_functional.all_reduce: 8,
-                    c10d_functional.all_gather_into_tensor: 1,
+                    c10d_functional.all_reduce: 9,
                 },
             )
 
