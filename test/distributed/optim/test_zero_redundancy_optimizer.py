@@ -47,6 +47,7 @@ try:
 except ImportError:
     HAS_TORCHVISION = False
 
+
 # Use GLOO on GPU when running CUDA + Windows
 def _get_backend_for_tests():
     return (
@@ -530,7 +531,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             params.append(torch.rand(size, 1))
         o = ZeroRedundancyOptimizer(params, optimizer_class=SGD, lr=LR)
         self.assertEqual(
-            sum([x.numel() for x in o.optim.param_groups[0]["params"]]),
+            sum(x.numel() for x in o.optim.param_groups[0]["params"]),
             sum(sizes),
         )
 
@@ -567,7 +568,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             # all partitions have the same elements
             self.assertEqual(len(o.param_groups), 2)
             self.assertEqual(
-                sum([x.numel() for g in o.optim.param_groups for x in g["params"]]),
+                sum(x.numel() for g in o.optim.param_groups for x in g["params"]),
                 sum(sizes),
             )
             self.assertEqual(len(o.optim.param_groups), 2)
@@ -725,7 +726,8 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             common_distributed.logger.info(
                 "Skipping `test_nondefault_process_group()` since world size "
                 "of %s is less than %s",
-                self.world_size, MIN_WORLD_SIZE
+                self.world_size,
+                MIN_WORLD_SIZE,
             )
             return
         BACKEND = dist.Backend.GLOO
@@ -1275,7 +1277,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                     [torch.randn(1, 3, 3, 1000).to(device) for _ in range(NUM_INPUTS)],
                 )
             )
-        for (model, inputs) in models_to_test:
+        for model, inputs in models_to_test:
             # Enable determinism in cudnn operators
             with torch.backends.cudnn.flags(
                 enabled=True, deterministic=True, benchmark=False

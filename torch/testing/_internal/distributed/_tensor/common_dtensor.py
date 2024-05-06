@@ -78,12 +78,23 @@ class MLPModule(nn.Module):
         self.net2.reset_parameters()
 
 
+class MLPStacked(nn.Module):
+    def __init__(self, device, n_layers: int = 2):
+        super().__init__()
+        self.layers = nn.ModuleList([MLPModule(device) for i in range(n_layers)])
+
+    def forward(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        return x
+
+
 @dataclass
 class ModelArgs:
     n_layers: int = 2
-    vocab_size: int = 16
-    max_seq_len: int = 16
-    dim: int = 32
+    vocab_size: int = 8
+    max_seq_len: int = 8
+    dim: int = 16
     n_heads: int = 4
     dropout_p: float = 0.1
     use_attn_mask: bool = True
@@ -203,14 +214,14 @@ class Transformer(nn.Module):
         # Parallelize the root submodules.
         if use_seq_parallel:
             root_plan = {
-                "tok_embeddings": ColwiseParallel(output_layouts=Shard(1)),
-                "pos_embeddings": ColwiseParallel(output_layouts=Shard(0)),
+                "tok_embeddings": RowwiseParallel(input_layouts=Replicate(), output_layouts=Shard(1)),
+                "pos_embeddings": RowwiseParallel(input_layouts=Replicate(), output_layouts=Shard(0)),
                 "norm": SequenceParallel(),
             }
         else:
             root_plan = {
-                "tok_embeddings": ColwiseParallel(output_layouts=Replicate()),
-                "pos_embeddings": ColwiseParallel(output_layouts=Replicate()),
+                "tok_embeddings": RowwiseParallel(input_layouts=Replicate(), output_layouts=Replicate()),
+                "pos_embeddings": RowwiseParallel(input_layouts=Replicate(), output_layouts=Replicate()),
             }
 
         module_tp = parallelize_module(module, device_mesh, root_plan)
@@ -250,25 +261,14 @@ class Transformer(nn.Module):
         # Parallelize the output submodule. If weight tying is enabled, we need to
         # make sure output.weight is sharded consistently as tok_embeddings.weight,
         # at the cost of the all_reduce operation using RowwiseParallel.
-        output_parallelize_plan = None
-        if not module_tp.model_args.weight_tying:
-            output_parallelize_plan = (
-                ColwiseParallel(
-                    input_layouts=Shard(1),
-                    output_layouts=Replicate(),
-                )
-                if use_seq_parallel
-                else ColwiseParallel(output_layouts=Replicate())
+        output_parallelize_plan = (
+            ColwiseParallel(
+                input_layouts=Shard(1),
+                output_layouts=Replicate(),
             )
-        else:
-            output_parallelize_plan = (
-                RowwiseParallel(
-                    input_layouts=Shard(1),
-                    output_layouts=Replicate(),
-                )
-                if use_seq_parallel
-                else RowwiseParallel(input_layouts=Replicate())
-            )
+            if use_seq_parallel
+            else ColwiseParallel(output_layouts=Replicate())
+        )
         parallelize_module(module_tp.output, device_mesh, output_parallelize_plan)
 
         # Manually set output.weight so that parameters and gradients are shared.

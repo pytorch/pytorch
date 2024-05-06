@@ -5,10 +5,12 @@
 # This source code is licensed under the BSD license found in the
 # LICENSE file in the root directory of this source tree.
 import tempfile
+
 import pytest
 
 import torch
 import torch.distributed as dist
+
 
 @pytest.fixture(autouse=True)
 def manual_seed_zero():
@@ -38,6 +40,7 @@ def cuda_sleep():
 def pytest_report_header():
     return f"torch: {torch.__version__}"
 
+
 @pytest.fixture
 def setup_rpc(scope="session"):
     file = tempfile.NamedTemporaryFile()
@@ -47,10 +50,11 @@ def setup_rpc(scope="session"):
         world_size=1,
         rpc_backend_options=dist.rpc.TensorPipeRpcBackendOptions(
             init_method=f"file://{file.name}",
-        )
+        ),
     )
     yield
     dist.rpc.shutdown()
+
 
 def pytest_ignore_collect(path, config):
     "Skip this directory if distributed modules are not enabled."

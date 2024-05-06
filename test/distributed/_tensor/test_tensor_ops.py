@@ -346,6 +346,47 @@ class DistTensorOpsTest(DTensorTestBase):
             self.assertEqual(new_full_same_expected, new_full_same_dt.full_tensor())
 
     @with_comms
+    def test_new_empty_strided(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        comm_mode = CommDebugMode()
+
+        shard_dim = 1
+        placement = (Shard(shard_dim),)
+
+        # output shape same as input shape, evenly sharded input -> output same sharding as input
+        global_tensor = torch.randn(12, 8)
+        input_dt = distribute_tensor(global_tensor, device_mesh, placement)
+        self.assertTrue(input_dt.shape[shard_dim] % self.world_size == 0)
+        with comm_mode:
+            new_empty_strided_dt = input_dt.new_empty_strided((12, 8), (8, 1))
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+        self.assertEqual(new_empty_strided_dt.placements, placement)
+        self.assertEqual(new_empty_strided_dt._local_tensor.size(), (12, 2))
+        self.assertEqual(new_empty_strided_dt._local_tensor.stride(), (2, 1))
+        self.assertTrue(new_empty_strided_dt.contiguous() is new_empty_strided_dt)
+
+        # output shape same as input shape, unevenly sharded input -> output replicated
+        global_tensor = torch.randn(12, 7)
+        input_dt = distribute_tensor(global_tensor, device_mesh, placement)
+        self.assertTrue(input_dt.shape[shard_dim] % self.world_size != 0)
+        with comm_mode:
+            new_empty_strided_dt = input_dt.new_empty_strided((12, 7), (7, 1))
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+        self.assertEqual(new_empty_strided_dt.placements, (Replicate(),))
+        self.assertEqual(new_empty_strided_dt._local_tensor.size(), (12, 7))
+        self.assertEqual(new_empty_strided_dt._local_tensor.stride(), (7, 1))
+
+        # output shape different from input shape -> output replicated
+        global_tensor = torch.randn(12, 8)
+        input_dt = distribute_tensor(global_tensor, device_mesh, placement)
+        with comm_mode:
+            new_empty_strided_dt = input_dt.new_empty_strided((12, 4), (4, 1))
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+        self.assertEqual(new_empty_strided_dt.placements, (Replicate(),))
+        self.assertEqual(new_empty_strided_dt._local_tensor.size(), (12, 4))
+        self.assertEqual(new_empty_strided_dt._local_tensor.stride(), (4, 1))
+
+    @with_comms
     def test_gather(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         comm_mode = CommDebugMode()

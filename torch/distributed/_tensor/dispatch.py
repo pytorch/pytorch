@@ -1,7 +1,8 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+import contextlib
 import functools
 import operator
-from typing import cast, Dict, List, Optional, Sequence, Tuple
+from typing import cast, Dict, List, Optional, Sequence, Tuple, TYPE_CHECKING
 
 import torch
 
@@ -24,7 +25,9 @@ from torch.distributed._tensor.tp_conv import (
     convolution_backward_handler,
     convolution_handler,
 )
-from torch.distributed.device_mesh import DeviceMesh
+
+if TYPE_CHECKING:
+    from torch.distributed.device_mesh import DeviceMesh
 
 try:
     from torch.utils import _cxx_pytree as pytree
@@ -164,9 +167,9 @@ class OpDispatcher:
         else:
             if output_sharding.needs_redistribute:
                 # compute locally with redistribute first if needed
-                assert output_sharding.schema_suggestions is not None
+                assert output_sharding.redistribute_schema is not None
                 self.redistribute_local_args(
-                    op_info, output_sharding.schema_suggestions[0]
+                    op_info, output_sharding.redistribute_schema
                 )
 
             local_tensor_args = (
@@ -179,38 +182,17 @@ class OpDispatcher:
 
             # run local op computation with potentially modified args/kwargs
             local_tensor_args = cast(Tuple[object, ...], local_tensor_args)
-            if op_call in self._random_ops and is_rng_supported_mesh(mesh):
-                if not random._rng_tracker:
+            if op_call in self._random_ops:
+                if not random._rng_tracker and is_rng_supported_mesh(mesh):
                     # Default to `OffsetBasedRNGTracker` if the parallelism API
                     # did not already construct one
                     random._rng_tracker = random.OffsetBasedRNGTracker(mesh.device_type)
                 # For DTensor random operator, run it within a distribute region
                 with random._rng_tracker._distribute_region(
                     cast(dtensor.DTensor, args[0])._spec
-                ):
+                ) if random._rng_tracker else contextlib.nullcontext():
                     local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
             else:
-                # local_tensor_args need to be modified for new factory ops, potentially
-                # TODO: adjust the stride (args[2]) for aten.new_empty_strided.default
-                if op_call in [
-                    aten.new_empty.default,
-                    aten.new_full.default,
-                    aten.new_ones.default,
-                    aten.new_zeros.default,
-                    aten.new_empty_strided.default,
-                ]:
-                    assert isinstance(output_sharding.output_spec, DTensorSpec)
-                    # This happens when the output has the same shape as the input
-                    # and the input placements are not all Replicate().
-                    if output_sharding.output_spec.placements != tuple(
-                        [Replicate()] * mesh.ndim
-                    ):
-                        _local_tensor_args = list(local_tensor_args)
-                        assert isinstance(local_tensor_args[0], torch.Tensor)
-                        # args[1] is the shape of the output tensor
-                        _local_tensor_args[1] = local_tensor_args[0].shape
-                        local_tensor_args = tuple(_local_tensor_args)
-
                 local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
 
         # communicate the result to all ranks for some operators that return scalar value

@@ -687,7 +687,7 @@ def register_prop_rule_map(
                 )
                 return OutputSharding(
                     output_spec=output_dtensor_spec,
-                    schema_suggestions=[suggested_schema],
+                    redistribute_schema=suggested_schema,
                     needs_redistribute=True,
                 )
 
@@ -706,20 +706,18 @@ def register_prop_rule_map(
             ]
             return OutputSharding(
                 output_spec=None,
-                schema_suggestions=[
-                    OpSchema(
-                        op=op_schema.op,
-                        args_schema=(
-                            DTensorSpec(
-                                placements=tuple(suggested_placements),
-                                mesh=input_dtensor_spec.mesh,
-                                tensor_meta=input_dtensor_spec.tensor_meta,
-                            ),
-                        )
-                        + op_schema.args_schema[1:],
-                        kwargs_schema=op_schema.kwargs_schema,
+                redistribute_schema=OpSchema(
+                    op=op_schema.op,
+                    args_schema=(
+                        DTensorSpec(
+                            placements=tuple(suggested_placements),
+                            mesh=input_dtensor_spec.mesh,
+                            tensor_meta=input_dtensor_spec.tensor_meta,
+                        ),
                     )
-                ],
+                    + op_schema.args_schema[1:],
+                    kwargs_schema=op_schema.kwargs_schema,
+                ),
             )
 
 

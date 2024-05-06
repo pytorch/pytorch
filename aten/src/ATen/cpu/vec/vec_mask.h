@@ -107,6 +107,9 @@ class VecMask {
     __at_align__ U b_buf[size()];
     if constexpr (size() >= VectorizedN<U, L>::size()) {
       b_vec.store(b_buf);
+      for (int i = VectorizedN<U, L>::size(); i < size(); i++) {
+        b_buf[i] = static_cast<U>(0);
+      }
     } else {
       b_vec.store(b_buf, size());
     }
@@ -116,7 +119,7 @@ class VecMask {
   template <typename U>
   static VecMask<T, N> from(U b) {
     using int_t = int_same_size_t<T>;
-    T mask = b ? c10::bit_cast<T>(~(int_t)0) : (T)0;
+    T mask = b ? c10::bit_cast<T>((int_t)(~(int_t)0)) : (T)0;
     return VectorizedN<T, N>(mask);
   }
 
@@ -129,6 +132,24 @@ class VecMask {
       *(int_t*)(mask + i) = b[i] ? ~(int_t)0 : (int_t)0;
     }
     return VectorizedN<T, N>(VectorizedN<T, N>::loadu(mask));
+  }
+
+  static VecMask<T, N> blendv(
+    const VecMask<T, N>& c,
+    const VecMask<T, N>& b,
+    const VecMask<T, N>& a) {
+    VectorizedN<T, N> result = VectorizedN<T, N>::blendv(
+      VectorizedN<T, N>(c),
+      VectorizedN<T, N>(b),
+      VectorizedN<T, N>(a));
+    return result;
+  }
+
+  void store(bool* b, int count = size()) {
+    constexpr int L = (VectorizedN<T, N>::size() + Vectorized<bool>::size() - 1)/ Vectorized<bool>::size();
+    auto res = this->to<bool, L>();
+    res.store(b, count);
+    return;
   }
 
   template <typename U, int L, std::enable_if_t<L >= 2, int> = 0>
