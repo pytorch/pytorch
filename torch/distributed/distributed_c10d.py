@@ -1284,7 +1284,8 @@ def init_process_group(
     #
     # Since this API must be called before all distributed code being compiled,
     # clearing the cache here should be safe.
-    torch._dynamo.trace_rules.clear_lru_cache()
+    if "torch._dynamo" in sys.modules:
+        torch._dynamo.trace_rules.clear_lru_cache()
 
     assert (store is None) or (
         init_method is None
