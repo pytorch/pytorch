@@ -65,11 +65,23 @@ struct TensorMetadata {
       std::vector<int64_t> strides,
       bool requires_grad = false);
 
+  // Build TensorCheck for the tensor by using the data fields in TensorMetadata
   void build_guard(const dynamo::LocalState& local_state);
 
+  // Compare two TensorMetadata objects
   bool operator==(const TensorMetadata& other) const;
 };
 
+// ParameterTag is to represent the type of the input parameters of a aten operation.
+// Currently, we support the following types:
+//   1. TENSOR: a single tensor
+//   2. TENSOR_OPTIONAL: a single optional tensor
+//   3. TENSOR_LIST: a list of tensors
+//   4. TENSOR_LIST_OPTIONAL: a list of optional tensors
+//   5. SCALAR: a scalar value
+// If we need to support more types in the future, we will add more types in the ParameterTag enum.
+// For example, we will extend the enum to support string, Dimname and so on to support more types
+// of input parameters of aten operations.
 enum ParameterTag {
   TENSOR,
   TENSOR_OPTIONAL,
@@ -79,12 +91,21 @@ enum ParameterTag {
   INVALID,
 };
 
+// ParameterMetadataValue is to represent the value of the input parameters of a aten operation.
 using ParameterMetadataValue =
     std::variant<TensorMetadata, std::vector<TensorMetadata>, c10::Scalar>;
 
+// ParameterMetadata is to represent the metadata of the input parameters of a aten operation.
+// It includes the tag of the parameter, the value of the parameter and the order of the parameter.
 struct ParameterMetadata {
+  // The tag of the parameter. It indicates the type of the parameter.
   ParameterTag tag_;
+  // The value of the parameter. It can be a tensor, a list of tensors or a scalar.
   ParameterMetadataValue value_;
+  // The order of the parameter is used to distinguish the parameters with the same tag.
+  // For example, an operation with two input tensors, the first tensor is a optional tensor
+  // and the second tensor is a tensor. The first tensor will have the order 0 and the second tensor
+  // will have the order 1.
   uint64_t order_;
 
   ParameterMetadata() : tag_(INVALID) {}
@@ -101,6 +122,7 @@ struct ParameterMetadata {
   bool operator==(const ParameterMetadata& other) const;
 
  private:
+  // Helper function to compare two ParameterMetadata objects with the same SCALAR tag.
   bool equal_to(const c10::Scalar& scalar) const;
 };
 

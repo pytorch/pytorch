@@ -33,29 +33,29 @@ TensorMetadata::TensorMetadata(
 }
 
 void TensorMetadata::build_guard(const torch::dynamo::LocalState& local_state) {
-  if (!is_symbolic_) {
-    std::vector<std::optional<c10::SymInt>> sym_sizes;
-    std::vector<std::optional<c10::SymInt>> sym_strides;
-    std::transform(
-        sizes_.begin(),
-        sizes_.end(),
-        std::back_inserter(sym_sizes),
-        [](int64_t size) { return std::optional<c10::SymInt>(size); });
-    std::transform(
-        strides_.begin(),
-        strides_.end(),
-        std::back_inserter(sym_strides),
-        [](int64_t stride) { return std::optional<c10::SymInt>(stride); });
-    tensor_check_ = torch::dynamo::TensorCheck(
-        local_state,
-        nullptr,
-        dispatch_key_set_,
-        dtype_,
-        device_.index(),
-        requires_grad_,
-        sym_sizes,
-        sym_strides);
-  }
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      !is_symbolic_, "Not support symbolic shape now");
+  std::vector<std::optional<c10::SymInt>> sym_sizes;
+  std::vector<std::optional<c10::SymInt>> sym_strides;
+  std::transform(
+      sizes_.begin(),
+      sizes_.end(),
+      std::back_inserter(sym_sizes),
+      [](int64_t size) { return std::optional<c10::SymInt>(size); });
+  std::transform(
+      strides_.begin(),
+      strides_.end(),
+      std::back_inserter(sym_strides),
+      [](int64_t stride) { return std::optional<c10::SymInt>(stride); });
+  tensor_check_ = torch::dynamo::TensorCheck(
+      local_state,
+      nullptr,
+      dispatch_key_set_,
+      dtype_,
+      device_.index(),
+      requires_grad_,
+      sym_sizes,
+      sym_strides);
 }
 
 bool TensorMetadata::operator==(const TensorMetadata& other) const {
@@ -185,20 +185,14 @@ bool ParameterMetadata::equal_to(const c10::Scalar& scalar) const {
     return false;
   }
 
-  auto this_scalar_ = std::get<c10::Scalar>(value_);
-  if (scalar.isFloatingPoint()) {
-    if (this_scalar_.isFloatingPoint()) {
-      return this_scalar_.toDouble() == scalar.toDouble();
-    } else {
-      return false;
-    }
-  } else {
-    if (this_scalar_.isIntegral(true)) {
-      return this_scalar_.toInt() == scalar.toInt();
-    } else {
-      return false;
-    }
+  auto self_scalar = std::get<c10::Scalar>(value_);
+  if (scalar.isFloatingPoint() && self_scalar.isFloatingPoint()) {
+    return self_scalar.toDouble() == scalar.toDouble();
+  } else if (scalar.isIntegral(true) && self_scalar.isIntegral(true)) {
+    return self_scalar.toInt() == scalar.toInt();
   }
+
+  return false;
 }
 
 } // namespace torch::inductor

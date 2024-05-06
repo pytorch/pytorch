@@ -29,7 +29,7 @@ from typing import (
     overload,
     runtime_checkable,
 )
-from typing_extensions import ParamSpec
+from typing_extensions import ParamSpec, Self
 
 import numpy
 
