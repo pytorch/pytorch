@@ -5,7 +5,7 @@ from typing import List, Dict
 import torch
 
 from . import config, ir, scheduler
-from .utils import contains_collective, contains_wait, tuple_sorted, sympy_product
+from .utils import is_collective, is_wait, tuple_sorted, sympy_product
 import logging
 from .virtualized import V
 
@@ -76,7 +76,7 @@ def raise_last_usage(
             # Can't early release `snode` if it's needed by OutputNode
             if isinstance(user.node, scheduler.OutputNode):
                 break
-            if contains_collective(user.node) or contains_wait(user.node):
+            if is_collective(user.node) or is_wait(user.node):
                 continue
             # For now, we don't move users that are MultiOutput
             if isinstance(user.node.node, ir.MultiOutput):
