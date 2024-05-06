@@ -78,7 +78,6 @@ from .utils import (
     graph_break_reasons,
     increment_op_count,
     lazy_format_graph_code,
-    lazy_format_graph_tabular,
     LazyString,
     nn_module_proxy,
     same,
@@ -1274,10 +1273,10 @@ class OutputGraph:
         torch._logging.trace_structured(
             "dynamo_output_graph",
             lambda: {"sizes": self.get_graph_sizes_structured()},
-            payload_fn=lambda: gm.print_readable(print_output=False),
+            payload_fn=lambda: gm.print_readable(
+                print_output=False, include_stride=True, include_device=True
+            ),
         )
-        graph_tabular_log.debug("%s", lazy_format_graph_tabular(name, gm))
-        graph_sizes_log.debug("%s", LazyString(lambda: self.get_graph_sizes(name)))
         self.call_cleanup_hooks()
         old_fake_mode = self.tracing_context.fake_mode
         if not self.export:
