@@ -1638,14 +1638,6 @@ class GraphModuleDeserializer(metaclass=Final):
             self.deserialize_outputs(serialized_node, fx_node)
             fx_node.meta.update(self.deserialize_metadata(serialized_node.metadata))
 
-            # assign nn_module_stack metadata to submodule/subgraph nodes for higher order ops
-            if serialized_node.target.startswith(('torch.ops.higher_order', 'torch._higher_order_ops')):
-                for node in fx_node._args:
-                    if not isinstance(node, torch.fx.Node):
-                        continue
-                    if node.op not in ["placeholder", "output"] and node.meta.get("nn_module_stack") is None:
-                        node.meta["nn_module_stack"] = copy.copy(fx_node.meta["nn_module_stack"])
-
         elif isinstance(target, torch._ops.OpOverload):
             # For convenience: if this node returns a single tensor, name the
             # newly-created node after it. This ensures that these tensor values
@@ -2265,13 +2257,11 @@ class ExportedProgramDeserializer(metaclass=Final):
             key for key in model_opset_version if key in self.expected_opset_version
         }
         for namespace in common_namespaces:
-            assert isinstance(
-                model_version := model_opset_version[namespace], int
-            ), f"model_opset_version value should be int, got {model_opset_version[namespace]}"
+            model_version = model_opset_version[namespace]
+            assert isinstance(model_version, int), f"model_opset_version value should be int, got {model_version}"
 
-            assert isinstance(
-                compiler_version := self.expected_opset_version[namespace], int
-            ), f"expected_opset_version value should be int, got {self.expected_opset_version[namespace]}"
+            compiler_version = self.expected_opset_version[namespace]
+            assert isinstance(compiler_version, int), f"expected_opset_version value should be int, got {compiler_version}"
 
             # TODO(larryliu0820): Add support for upgrader & downgrader
             if model_version != compiler_version:
