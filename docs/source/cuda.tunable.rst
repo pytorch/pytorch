@@ -19,16 +19,10 @@ API Reference
 .. autofunction:: is_enabled
 .. autofunction:: tuning_enable
 .. autofunction:: tuning_is_enabled
-.. autofunction:: numerics_check_enable
-.. autofunction:: numerics_check_is_enabled
 .. autofunction:: set_max_tuning_duration
 .. autofunction:: get_max_tuning_duration
 .. autofunction:: set_max_tuning_iterations
 .. autofunction:: get_max_tuning_iterations
-.. autofunction:: set_max_warmup_duration
-.. autofunction:: get_max_warmup_duration
-.. autofunction:: set_max_warmup_iterations
-.. autofunction:: get_max_warmup_iterations
 .. autofunction:: set_filename
 .. autofunction:: get_filename
 .. autofunction:: get_results
@@ -36,7 +30,3 @@ API Reference
 .. autofunction:: write_file_on_exit
 .. autofunction:: write_file
 .. autofunction:: read_file
-.. autofunction:: icache_flush_enable
-.. autofunction:: icache_flush_is_enabled
-.. autofunction:: set_rotating_buffer_size
-.. autofunction:: get_rotating_buffer_size

@@ -133,8 +133,6 @@ __all__ = [
     "write_file_on_exit",
     "write_file",
     "read_file",
-    "set_rotating_buffer_size",
-    "get_rotating_buffer_size",
 ]
 
 
