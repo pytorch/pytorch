@@ -47,6 +47,8 @@ def aot_autograd(**kwargs):
         kwargs["inference_compiler"] = (
             kwargs.get("inference_compiler") or kwargs["fw_compiler"]
         )
+        # input mutations are hardened enough that all of our debugging backends should use them
+        kwargs["keep_inference_input_mutations"] = True
 
         from functorch.compile import nop
 
