@@ -400,6 +400,13 @@ def write(
     return basename, path
 
 
+def write_text(text: str) -> str:
+    """
+    Write the `text` to a file and return the path computed based on the hash.
+    """
+    return write(text, "txt")[1]
+
+
 def write_atomic(
     path: str, content: Union[str, bytes], make_dirs: bool = False
 ) -> None:
