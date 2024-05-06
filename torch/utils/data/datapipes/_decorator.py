@@ -89,9 +89,9 @@ class non_deterministic:
         #  Decorate IterDataPipe
         if self.cls is not None:
             if _determinism:
-                raise TypeError("{} is non-deterministic, but you set 'guaranteed_datapipes_determinism'. "
+                raise TypeError(f"{self.cls.__name__} is non-deterministic, but you set 'guaranteed_datapipes_determinism'. "
                                 "You can turn off determinism for this DataPipe if that is acceptable "
-                                "for your application".format(self.cls.__name__))
+                                "for your application")
             return self.cls(*args, **kwargs)  # type: ignore[call-arg]
 
         # Decorate with a functional argument

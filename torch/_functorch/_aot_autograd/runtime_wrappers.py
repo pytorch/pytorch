@@ -107,10 +107,6 @@ def create_runtime_wrapper(
             args = [[None] * num_tokens, *args]
             old_args.clear()
 
-        # if dist.get_rank() == 0:
-        #     for i in range(len(args)):
-        #         torch_log.warning(f"runtime_wrapper: idx: {i}, sys.getrefcount(args[i]): {sys.getrefcount(args[i])}")
-
         # stash a ref to each input tensor we plan to use after the compiled function
         orig_inputs = {i: args[i] for i in epilogue_args_idx}
 
@@ -175,6 +171,7 @@ def create_runtime_wrapper(
                 original_inpt = orig_inputs[inpt_idx]
                 updated_inpt = updated_inputs[i]
                 if meta.mutates_storage_metadata:
+                    # See Note [set_() Input Mutations in AOTAutograd]
                     # mutates_storage_metadata means our input saw a x.set_(y) call.
                     # What if x **also** saw a data and/or a metadata mutation?
                     # (1) If the [meta]data mutation occurred after the set_(),
@@ -270,7 +267,7 @@ def create_runtime_wrapper(
                 if info.output_type == OutputType.alias_of_input:
                     aliased_base_tensor = orig_inputs[info.base_idx + num_tokens]  # type: ignore[index]
                     regenerated_out = gen_alias_from_base(
-                        aliased_base_tensor, o_, o_grad
+                        aliased_base_tensor, o_, o_grad, info.functional_tensor
                     )
                     fw_outs_including_aliases.append(regenerated_out)
                     continue
@@ -295,7 +292,9 @@ def create_runtime_wrapper(
                 # TODO: handle the custom autograd function case here.
                 # We need a way to check whether a tensor came from a custom autograd fn from python,
                 # AND a way to replay that custom view fn.
-                regenerated_out = gen_alias_from_base(aliased_base_tensor, o_, o_grad)
+                regenerated_out = gen_alias_from_base(
+                    aliased_base_tensor, o_, o_grad, info.functional_tensor
+                )
                 fw_outs_including_aliases.append(regenerated_out)
             ret_outs = fw_outs_including_aliases
         else:

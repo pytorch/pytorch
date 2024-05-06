@@ -231,10 +231,7 @@ void FunctionalTensorWrapper::replace_(const Tensor& other, bool from_lazy_regen
     value_ = at::_to_copy(value_, c10::TensorOptions().dtype(dtype()).layout(layout()));
     TORCH_INTERNAL_ASSERT(!value_.key_set().has(c10::DispatchKey::Functionalize));
   }
-  // if a mutation happens to a view under a no_grad,
-  // we won't call replace_() on the other alias until the alias is later used, which
-  // might not be until after the no_grad region is exited.
-  // Therefore, replace_() is not unconditionally safe to check the current no_grad state.
+
   if (!from_lazy_regenerate) {
     mark_mutation();
     if (!at::GradMode::is_enabled() || InferenceMode::is_enabled()) {
@@ -373,15 +370,22 @@ void FunctionalTensorWrapper::sync_() {
   regenerate_from_base();
 }
 
-void FunctionalTensorWrapper::regenerate_from_base() {
-  at::AutoDispatchSkipFunctionalize guard;
-  auto storage_impl = functional_storage_impl();
-  auto t = storage_impl->base();
-  TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(t));
+Tensor FunctionalTensorWrapper::apply_view_metas(const Tensor& base) {
+  auto t = base;
+
   // Reapply views to get the viewed tensor from the base in alias_
   for (auto& view_meta: view_metas_) {
     t = view_meta.forward_fn(t, view_meta.out_index);
   }
+
+  return t;
+}
+
+void FunctionalTensorWrapper::regenerate_from_base() {
+  at::AutoDispatchSkipFunctionalize guard;
+  auto storage_impl = functional_storage_impl();
+  auto t = storage_impl->base();
+
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(t));
   replace_(t, /*from_lazy_regenerate=*/true);
   generation_ = storage_impl->generation();

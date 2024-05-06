@@ -6,16 +6,17 @@ from typing import cast, Optional, Union
 import torch
 import torch.distributed as dist
 from torch.distributed._state_dict_utils import _offload_state_dict_to_cpu
+
+from torch.distributed.checkpoint._storage_utils import _storage_setup
+from torch.distributed.checkpoint.default_planner import DefaultSavePlanner
 from torch.distributed.checkpoint.logger import _dcp_method_logger
-from torch.distributed.checkpoint.planner import SavePlan
+from torch.distributed.checkpoint.metadata import Metadata, STATE_DICT_TYPE
+from torch.distributed.checkpoint.planner import SavePlan, SavePlanner
+from torch.distributed.checkpoint.staging import AsyncStager
 from torch.distributed.checkpoint.stateful import Stateful
+from torch.distributed.checkpoint.storage import StorageWriter
 from torch.distributed.distributed_c10d import _get_default_group
 
-from ._storage_utils import _storage_setup
-from .default_planner import DefaultSavePlanner
-from .metadata import Metadata, STATE_DICT_TYPE
-from .planner import SavePlanner
-from .storage import StorageWriter
 from .utils import _api_bc_check, _DistWrapper, _profile
 
 
@@ -163,7 +164,7 @@ def async_save(
     planner: Optional[SavePlanner] = None,
     process_group: Optional[dist.ProcessGroup] = None,
 ) -> Future:
-    """Asynchronous version of ``save_state_dict``. This code first de-stages the state_dict on CPU, and then calls
+    """Asynchronous version of ``save``. This code first de-stages the state_dict on CPU, and then calls
     `save` in a separate thread.
 
     .. warning::
@@ -216,18 +217,32 @@ def async_save(
             torch.device("cpu") in pg._device_types  # type: ignore[attr-defined]
         ), "A CPU backend must be enabled for async save; try initializing process group with 'cpu:gloo,cuda:nccl'"
 
-    cpu_state_dict = _offload_state_dict_to_cpu(_stateful_to_state_dict(state_dict))
+    storage_writer = cast(
+        StorageWriter, _storage_setup(storage_writer, checkpoint_id, reader=False)
+    )
+
+    state_dict = _stateful_to_state_dict(state_dict)
+    if isinstance(storage_writer, AsyncStager):
+        staged_state_dict = storage_writer.stage(state_dict)
+    else:  # provides bwc for storage_writers not implementing AsyncStager
+        staged_state_dict = _offload_state_dict_to_cpu(state_dict, type_check=False)
 
     executor = ThreadPoolExecutor(max_workers=1)
     f: Future = executor.submit(
         save,
-        cpu_state_dict,
+        staged_state_dict,
         checkpoint_id=checkpoint_id,
         storage_writer=storage_writer,
         planner=planner,
         process_group=process_group,
     )
     f.add_done_callback(lambda f: executor.shutdown(wait=False))
+
+    if (
+        isinstance(storage_writer, AsyncStager)
+        and storage_writer.should_synchronize_after_execute
+    ):
+        storage_writer.synchronize_staging()
 
     return f
 

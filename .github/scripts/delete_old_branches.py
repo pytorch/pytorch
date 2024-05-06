@@ -18,7 +18,7 @@ ESTIMATED_TOKENS = [0]
 
 TOKEN = os.environ["GITHUB_TOKEN"]
 if not TOKEN:
-    raise Exception("GITHUB_TOKEN is not set")
+    raise Exception("GITHUB_TOKEN is not set")  # noqa: TRY002
 
 REPO_ROOT = Path(__file__).parent.parent.parent
 

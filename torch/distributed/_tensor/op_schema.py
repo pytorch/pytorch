@@ -136,7 +136,7 @@ class OpStrategy(StrategyType):
         """
         Returns the max number of shards across all placement strategies
         """
-        return max([strategy.output_spec.num_shards for strategy in self.strategies])
+        return max(strategy.output_spec.num_shards for strategy in self.strategies)
 
     @property
     def output_mesh_shape(self):
@@ -246,9 +246,10 @@ class OpSchema:
         return tuple(item for item in self.args_schema if isinstance(item, DTensorSpec))
 
     def __repr__(self) -> str:
+        args_schema = ", ".join([str(arg_schema) for arg_schema in self.args_schema])
         return (
             f"OpSchema(op={self.op},"
-            f" args_schema={self.args_schema},"
+            f" args_schema=({args_schema}),"
             f" kwargs_schema={self.kwargs_schema})"
         )
 

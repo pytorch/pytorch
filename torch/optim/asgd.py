@@ -1,18 +1,30 @@
+from typing import List, Optional
+
 import torch
 from torch import Tensor
 
-from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _default_to_fused_or_foreach,
-                        _get_scalar_dtype, _view_as_real, _differentiable_doc, _foreach_doc, _maximize_doc,
-                        _capturable_doc)
-from typing import List, Optional
+from .optimizer import (
+    _capturable_doc,
+    _default_to_fused_or_foreach,
+    _differentiable_doc,
+    _foreach_doc,
+    _get_scalar_dtype,
+    _get_value,
+    _maximize_doc,
+    _use_grad_for_differentiable,
+    _view_as_real,
+    Optimizer,
+)
 
 __all__ = ["ASGD", "asgd"]
+
 
 def _to_tensor(x, device=None):
     if not isinstance(x, torch.Tensor):
         return torch.tensor(x, device=device)
 
     return x
+
 
 class ASGD(Optimizer):
     def __init__(
@@ -56,14 +68,19 @@ class ASGD(Optimizer):
             for p in group["params"]:
                 p_state = self.state.get(p, [])
                 if len(p_state) != 0:
-                    if not torch.is_tensor(p_state['step']):
+                    if not torch.is_tensor(p_state["step"]):
                         step_val = float(p_state["step"])
-                        p_state["step"] = torch.tensor(step_val, dtype=_get_scalar_dtype(), device=p.device)
+                        p_state["step"] = torch.tensor(
+                            step_val, dtype=_get_scalar_dtype(), device=p.device
+                        )
                     if not torch.is_tensor(p_state["eta"]):
-                        p_state["eta"] = torch.tensor(p_state["eta"], dtype=_get_scalar_dtype(), device=p.device)
+                        p_state["eta"] = torch.tensor(
+                            p_state["eta"], dtype=_get_scalar_dtype(), device=p.device
+                        )
                     if not torch.is_tensor(p_state["mu"]):
-                        p_state["mu"] = torch.tensor(p_state["mu"], dtype=_get_scalar_dtype(), device=p.device)
-
+                        p_state["mu"] = torch.tensor(
+                            p_state["mu"], dtype=_get_scalar_dtype(), device=p.device
+                        )
 
     def _init_group(self, group, params_with_grad, grads, mus, axs, etas, state_steps):
         has_complex = False
@@ -78,9 +95,15 @@ class ASGD(Optimizer):
                 state = self.state[p]
                 # State initialization
                 if len(state) == 0:
-                    state["step"] = torch.zeros((), device=p.device, dtype=_get_scalar_dtype())
-                    state["eta"] = torch.tensor(group["lr"], device=p.device, dtype=_get_scalar_dtype())
-                    state["mu"] = torch.ones((), device=p.device, dtype=_get_scalar_dtype())
+                    state["step"] = torch.zeros(
+                        (), device=p.device, dtype=_get_scalar_dtype()
+                    )
+                    state["eta"] = torch.tensor(
+                        group["lr"], device=p.device, dtype=_get_scalar_dtype()
+                    )
+                    state["mu"] = torch.ones(
+                        (), device=p.device, dtype=_get_scalar_dtype()
+                    )
                     state["ax"] = torch.zeros_like(
                         p, memory_format=torch.preserve_format
                     )
@@ -114,7 +137,9 @@ class ASGD(Optimizer):
             etas = []
             state_steps = []
 
-            has_complex = self._init_group(group, params_with_grad, grads, mus, axs, etas, state_steps)
+            has_complex = self._init_group(
+                group, params_with_grad, grads, mus, axs, etas, state_steps
+            )
 
             asgd(
                 params_with_grad,
@@ -138,7 +163,7 @@ class ASGD(Optimizer):
         return loss
 
 
-ASGD.__doc__ = fr"""Implements Averaged Stochastic Gradient Descent.
+ASGD.__doc__ = rf"""Implements Averaged Stochastic Gradient Descent.
 
     It has been proposed in `Acceleration of stochastic approximation by
     averaging`_.
@@ -188,7 +213,9 @@ def asgd(
     See :class:`~torch.optim.ASGD` for details.
     """
     if foreach is None:
-        _, foreach = _default_to_fused_or_foreach(params, differentiable, use_fused=False)
+        _, foreach = _default_to_fused_or_foreach(
+            params, differentiable, use_fused=False
+        )
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with foreach optimizers")
@@ -245,7 +272,9 @@ def _single_tensor_asgd(
 
         # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
         if not torch._utils.is_compiling() and capturable:
-            assert (param.is_cuda and mu.is_cuda and eta.is_cuda and step_t.is_cuda) or (
+            assert (
+                param.is_cuda and mu.is_cuda and eta.is_cuda and step_t.is_cuda
+            ) or (
                 param.is_xla and mu.is_xla and eta.is_xla and step_t.is_xla
             ), "If capturable=True, params, mus, etas, and state_steps must be CUDA or XLA tensors."
 
@@ -310,13 +339,25 @@ def _multi_tensor_asgd(
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
     if not torch._utils.is_compiling() and capturable:
-        assert all(p.is_cuda and mu.is_cuda and eta.is_cuda and step.is_cuda
-                   for p, mu, eta, step in zip(params, mus, etas, state_steps)), \
-            "If capturable=True, params, mus, etas, and state_steps must be CUDA tensors."
+        assert all(
+            p.is_cuda and mu.is_cuda and eta.is_cuda and step.is_cuda
+            for p, mu, eta, step in zip(params, mus, etas, state_steps)
+        ), "If capturable=True, params, mus, etas, and state_steps must be CUDA tensors."
 
-    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, axs, mus, etas, state_steps])
-    for ((device, _), ((grouped_params, grouped_grads, grouped_axs, grouped_mus,
-         grouped_etas, grouped_state_steps), _)) in grouped_tensors.items():
+    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
+        [params, grads, axs, mus, etas, state_steps]
+    )
+    for (device, _), (
+        (
+            grouped_params,
+            grouped_grads,
+            grouped_axs,
+            grouped_mus,
+            grouped_etas,
+            grouped_state_steps,
+        ),
+        _,
+    ) in grouped_tensors.items():
         if has_complex:
             _view_as_real(grouped_params, grouped_grads, grouped_axs)
 
@@ -328,7 +369,9 @@ def _multi_tensor_asgd(
         # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
         # wrapped it once now. The alpha is required to assure we go to the right overload.
         if grouped_state_steps[0].is_cpu:
-            torch._foreach_add_(grouped_state_steps, torch.tensor(1.0, device='cpu'), alpha=1.0)
+            torch._foreach_add_(
+                grouped_state_steps, torch.tensor(1.0, device="cpu"), alpha=1.0
+            )
         else:
             torch._foreach_add_(grouped_state_steps, 1)
 
@@ -338,11 +381,15 @@ def _multi_tensor_asgd(
                 torch._foreach_add_(grouped_grads, grouped_params, alpha=weight_decay)
                 intermediate = grouped_grads
             else:
-                intermediate = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
+                intermediate = torch._foreach_add(
+                    grouped_grads, grouped_params, alpha=weight_decay
+                )
 
             torch._foreach_add_(intermediate, grouped_params, alpha=lambd)
         else:
-            intermediate = torch._foreach_add(grouped_grads, grouped_params, alpha=lambd)
+            intermediate = torch._foreach_add(
+                grouped_grads, grouped_params, alpha=lambd
+            )
 
         # update param
         # param * (1 - lambd * eta) - eta * grad
@@ -386,7 +433,7 @@ def _multi_tensor_asgd(
 
             for i in range(len(grouped_mus)):
                 new_eta = _to_tensor(
-                    lr / (1 + lambd * lr * step ** alpha), device=device
+                    lr / (1 + lambd * lr * step**alpha), device=device
                 )
                 new_etas.append(new_eta)
                 new_mu = _to_tensor(1 / max(1, step - t0), device=device)
