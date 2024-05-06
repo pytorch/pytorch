@@ -30,7 +30,7 @@ from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.utils._triton import has_triton
 
-from . import comms, config, dependencies, ir, metrics
+from . import comms, config, dependencies, ir, metrics, memory_passes
 from .codegen.common import get_scheduling_for_device, Kernel
 from .comm_analysis import estimate_nccl_collective_runtime
 from .dependencies import Dep, MemoryDep, StarDep, WeakDep
@@ -1357,6 +1357,9 @@ class Scheduler:
             self.compute_node_users()
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
         self.compute_last_usage()
+        if config.raise_last_usage:
+            self.nodes = memory_passes.raise_last_usage(self.name_to_fused_node, V.graph.graph_inputs, self.nodes)
+            self.compute_last_usage()
         V.debug.ir_post_fusion(self.nodes)
         V.debug.graph_diagram(self.nodes)
         self.debug_draw_graph()

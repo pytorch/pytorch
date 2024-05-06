@@ -201,6 +201,9 @@ reorder_for_compute_comm_overlap_passes = [
     "raise_comms",
 ]
 
+# move consumer nodes of buffer to be earlier in the graph, if it can help reduce peak memory usage
+raise_last_usage = False
+
 # runtime estimation function for ops
 # for built-in estimation function, pass in "default"; for user-defined estimation function, pass in the function handle
 estimate_op_runtime = "default"
