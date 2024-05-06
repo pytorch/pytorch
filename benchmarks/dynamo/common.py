@@ -1943,6 +1943,17 @@ def cast_to_fp32(model, inputs):
     return cast_to(torch.float32, model, inputs)
 
 
+def cast_to_device(device, model, inputs):
+    model = model.to(device=device)
+    inputs = tree_map(
+        lambda x: x.to(device=device)
+        if isinstance(x, torch.Tensor) and x.is_floating_point()
+        else x,
+        inputs,
+    )
+    return model, inputs
+
+
 class DummyGradScaler:
     def scale(self, loss):
         return loss
@@ -2441,6 +2452,14 @@ class BenchmarkRunner:
                     self.deepcopy_and_maybe_parallelize(model),
                     clone_inputs(example_inputs),
                 )
+                # Currently, XPU GEMM FP64 support is WIP. Therefore, we explicitly fallback to
+                # CPU to execute FP64 and take the result as the gold reference.
+                if current_device == "xpu":
+                    model_fp64, inputs_fp64 = cast_to_device(
+                        "cpu", model_fp64, inputs_fp64
+                    )
+                # current_device of init_optimizer only impacts which optimizer will be applied. It does
+                # not change any tensor internally. Hence, we leave as it is rather than passing cpu.
                 self.init_optimizer(name, current_device, model_fp64.parameters())
                 fp64_outputs = self.run_n_iterations(model_fp64, inputs_fp64)
                 fp64_outputs = tree_map(
@@ -2449,6 +2468,13 @@ class BenchmarkRunner:
                     else x,
                     fp64_outputs,
                 )
+                if current_device == "xpu":
+                    fp64_outputs = tree_map(
+                        lambda x: x.to(device=current_device)
+                        if isinstance(x, torch.Tensor) and x.is_floating_point()
+                        else x,
+                        fp64_outputs,
+                    )
             except Exception:
                 log.warning(
                     "fp64 golden ref were not generated for %s. Setting accuracy check to cosine",
