@@ -34,7 +34,7 @@ def generate_docker_matrix() -> Dict[str, List[Dict[str, str]]]:
                     "platform": "linux/amd64",
                 }
             )
-     for image in DOCKER_IMAGE_TYPES:
+    for image in DOCKER_IMAGE_TYPES:
         ret.append(
             {
                 "cuda": "cpu",
