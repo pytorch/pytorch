@@ -30,9 +30,8 @@ Prepare model QAT for specified qconfig for torch.nn.Linear
 
 def prepare_qat_linear(qconfig):
     qconfig_dict = {"object_type": [(torch.nn.Linear, qconfig)]}  # noqa: F821
-    prepared_model = prepare_fx(
-        copy.deepcopy(float_model), qconfig_dict
-    )  # fuse modules and insert observers  # noqa: F821
+    # fuse modules and insert observers
+    prepared_model = prepare_fx(copy.deepcopy(float_model), qconfig_dict)  # noqa: F821
     training_loop(prepared_model, criterion, data_loader)
     prepared_model.eval()
     return prepared_model

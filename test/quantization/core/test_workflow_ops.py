@@ -1231,8 +1231,8 @@ class TestFakeQuantizeOps(TestCase):
                     torch.allclose(
                         dX_expected, dX_actual, rtol=tolerance, atol=tolerance
                     ),
-                    f"Expected dX={dX_expected} to match X.grad={dX_actual}, X={X_curr}, s={scale_curr}, z={zero_point_curr}, dout={dout}, n_bits={n_bits}",
-                )  # noqa: B950
+                    f"Expected dX={dX_expected} to match X.grad={dX_actual}, X={X_curr}, s={scale_curr}, z={zero_point_curr}, dout={dout}, n_bits={n_bits}",  # noqa: B950
+                )
                 self.assertTrue(
                     torch.allclose(
                         dScale_expected * grad_factor,
@@ -1240,8 +1240,8 @@ class TestFakeQuantizeOps(TestCase):
                         rtol=tolerance,
                         atol=tolerance,
                     ),
-                    f"Expected dScale={dScale_expected * grad_factor} to match scale.grad={dScale_actual}, X={X_curr}, s={scale_curr}, z={zero_point_curr}, dout={dout}, n_bits={n_bits}",
-                )  # noqa: B950
+                    f"Expected dScale={dScale_expected * grad_factor} to match scale.grad={dScale_actual}, X={X_curr}, s={scale_curr}, z={zero_point_curr}, dout={dout}, n_bits={n_bits}",  # noqa: B950
+                )
                 self.assertTrue(
                     torch.allclose(
                         dZeroPoint_expected * grad_factor,
@@ -1249,8 +1249,8 @@ class TestFakeQuantizeOps(TestCase):
                         rtol=tolerance,
                         atol=tolerance,
                     ),
-                    f"Expected dZeroPoint={dZeroPoint_expected * grad_factor} to match zero_point.grad={dZeroPoint_actual}, X={X_curr}, s={scale_curr}, z={zero_point_curr}, dout={dout}, n_bits={n_bits}",
-                )  # noqa: B950
+                    f"Expected dZeroPoint={dZeroPoint_expected * grad_factor} to match zero_point.grad={dZeroPoint_actual}, X={X_curr}, s={scale_curr}, z={zero_point_curr}, dout={dout}, n_bits={n_bits}",  # noqa: B950
+                )
                 X_curr.grad.data.zero_()
                 scale_curr.grad.data.zero_()
                 zero_point_curr.grad.data.zero_()

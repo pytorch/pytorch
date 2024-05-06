@@ -74,9 +74,8 @@ b=8, k=2
 """
 
 prepared_model = prepare_ptq_linear(uniform_qconfig_8bit)
-quantized_model = convert_fx(
-    prepared_model
-)  # convert the calibrated model to a quantized model  # noqa: F821
+# convert the calibrated model to a quantized model
+quantized_model = convert_fx(prepared_model)  # noqa: F821
 
 top1, top5 = evaluate(quantized_model, criterion, data_loader_test)
 print(
@@ -89,9 +88,8 @@ b=4, k=2
 """
 
 prepared_model = prepare_ptq_linear(uniform_qconfig_4bit)
-quantized_model = convert_fx(
-    prepared_model
-)  # convert the calibrated model to a quantized model  # noqa: F821
+# convert the calibrated model to a quantized model
+quantized_model = convert_fx(prepared_model)  # noqa: F821
 
 top1, top5 = evaluate(quantized_model1, criterion, data_loader_test)  # noqa: F821
 print(
