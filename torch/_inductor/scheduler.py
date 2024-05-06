@@ -30,7 +30,7 @@ from torch._dynamo.utils import dynamo_timed
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.utils._triton import has_triton
 
-from . import comms, config, dependencies, ir, metrics, memory_opts
+from . import comms, config, dependencies, ir, metrics, memory_passes
 from .codegen.common import get_scheduling_for_device, Kernel
 from .comm_analysis import estimate_nccl_collective_runtime
 from .dependencies import Dep, MemoryDep, StarDep, WeakDep
@@ -1369,7 +1369,7 @@ class Scheduler:
         #     torch_log.warning(f"snode: {snode}, snode.node: {snode.node}, snode.debug_str(): {snode.debug_str()}")
 
         if config.raise_last_usage:
-            self.nodes = memory_opts.raise_last_usage(self.name_to_fused_node, V.graph.graph_inputs, self.nodes)
+            self.nodes = memory_passes.raise_last_usage(self.name_to_fused_node, V.graph.graph_inputs, self.nodes)
             self.compute_last_usage()
 
         # TODO(yf225): after memory-optimization, we might need to do compute_last_usage() again.
