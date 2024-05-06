@@ -1,6 +1,6 @@
 import contextlib
 import functools
-from typing import List, Optional
+from typing import List, Optional, TYPE_CHECKING
 
 import torch
 from torch._dynamo.external_utils import call_backward, call_hook
@@ -21,9 +21,11 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
-from torch.fx.proxy import Proxy
 from torch.fx.traceback import preserve_node_meta, set_stack_trace
 from torch.utils._traceback import CapturedTraceback
+
+if TYPE_CHECKING:
+    from torch.fx.proxy import Proxy
 
 compiled_autograd_log = getArtifactLogger(__name__, "compiled_autograd")
 verbose_log = getArtifactLogger(__name__, "compiled_autograd_verbose")
@@ -247,7 +249,7 @@ class AutogradCompilerInstance:
 
     def bind_tensors_to_proxies(self, tensors, proxies):
         if isinstance(proxies, torch.fx.Proxy):
-            proxies = [proxies[i] for i in range(len(tensors))]
+            proxies = [proxies[i] for i in range(len(tensors))]  # type: ignore[index]
         assert len(tensors) == len(proxies)
         track_tensor_tree(tensors, proxies, constant=None, tracer=self.fx_tracer)
 
