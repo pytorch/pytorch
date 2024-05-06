@@ -21,7 +21,7 @@ This file contains TorchDynamo backends intended for debugging uses.
 
 @register_backend
 def eager(gm, fake_tensor_inputs):
-    return gm
+    return gm.forward
 
 
 @register_backend

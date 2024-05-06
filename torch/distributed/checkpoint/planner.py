@@ -1,5 +1,6 @@
 import abc
 import io
+import operator
 from dataclasses import dataclass
 from enum import auto, Enum
 from functools import reduce
@@ -67,7 +68,7 @@ class WriteItem:
         if self.tensor_data is None:
             return None
 
-        numels = reduce(lambda x, y: x * y, self.tensor_data.size, 1)
+        numels = reduce(operator.mul, self.tensor_data.size, 1)
         dtype_size = torch._utils._element_size(self.tensor_data.properties.dtype)
         return numels * dtype_size
 
