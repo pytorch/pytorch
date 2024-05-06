@@ -119,7 +119,9 @@ class CompilerWrapper:
             new_flat_args,
             new_aot_config,
             new_fw_metadata,
-        ) = cls.pre_compile(flat_fn, flat_args, aot_config, fw_metadata, **kwargs)
+        ) = cls.pre_compile(
+            flat_fn, flat_args, aot_config, fw_metadata=fw_metadata, **kwargs
+        )
         compiled_fn = compiler_fn(
             wrapped_flat_fn, new_flat_args, new_aot_config, fw_metadata=new_fw_metadata
         )
