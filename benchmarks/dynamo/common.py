@@ -2452,7 +2452,7 @@ class BenchmarkRunner:
                 # CPU to execute FP64 and take the result as the gold reference.
                 if current_device == "xpu":
                     model_fp64, inputs_fp64 = cast_to_fp64(
-                        cast_to_device(
+                        *cast_to_device(
                             "cpu",
                             self.deepcopy_and_maybe_parallelize(model),
                             clone_inputs(example_inputs),
