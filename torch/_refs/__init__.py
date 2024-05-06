@@ -3622,10 +3622,6 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
     # This indicates that the dimension's length should be inferred
     shape = utils.infer_size(shape, a.numel())
 
-    # Short-circuits if shape is the same
-    if guard_size_oblivious(sym_eq(tuple(a.shape), tuple(shape))):
-        return prims.view_of(a)
-
     # Special-cases tensors with no elements
     if guard_size_oblivious(a.numel() == 0):
         return as_strided(a, shape, utils.make_contiguous_strides_for(shape))
@@ -3636,7 +3632,10 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         for length in shape:
             assert length == 1
             _a = unsqueeze(_a, -1)
-        return _a
+        if _a is a:
+            return prims.view_of(a)
+        else:
+            return _a
 
     # Special-cases reshaping to zero dim tensors
     if len(shape) == 0:
@@ -3644,7 +3643,10 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         for length in a.shape:
             assert length == 1
             _a = squeeze(_a, -1)
-        return _a
+        if _a is a:
+            return prims.view_of(a)
+        else:
+            return _a
 
     # Handles general case: a 1+D tensor reshaped into a distinct 1+D shape
 
@@ -3721,7 +3723,10 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         )
         a_ = squeeze(a_, idx)
 
-    return a_
+    if a_ is a:
+        return prims.view_of(a)
+    else:
+        return a_
 
 
 # CompositeImplicitAutograd - don't register decomp

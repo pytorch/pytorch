@@ -18,6 +18,7 @@ from torch._inductor import dependencies
 from torch._prims_common import is_float_dtype
 from torch.utils import _pytree as pytree
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
+from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
 from .. import codecache, config, ir, metrics
@@ -33,12 +34,12 @@ from ..scheduler import (
 )
 from ..utils import (
     cache_on_self,
-    free_symbol_startswith,
     get_fused_kernel_name,
     is_welford_reduction,
     parallel_num_threads,
     Placeholder,
     sympy_index_symbol,
+    sympy_index_symbol_with_prefix,
     sympy_product,
     sympy_subs,
 )
@@ -1998,7 +1999,8 @@ class CppKernel(Kernel):
             self.call_ranges = tuple(lengths) + tuple(reduction_lengths)
             self.ranges = [self.rename_indexing(x) for x in self.call_ranges]
             self.itervars = [
-                sympy_index_symbol(f"x{n}") for n in range(len(self.ranges))
+                sympy_index_symbol_with_prefix(SymT.XBLOCK, n)
+                for n in range(len(self.ranges))
             ]
             self.reduction_depth = len(lengths)
         return (
@@ -2223,7 +2225,7 @@ class CppVecKernel(CppKernel):
         for indirect_var in (
             self.cse.varname_map[s.name]  # type: ignore[attr-defined]
             for s in index.free_symbols
-            if s.name.startswith("tmp")  # type: ignore[attr-defined]
+            if symbol_is_type(s, SymT.TMP)
         ):
             assert isinstance(indirect_var, CppCSEVariable)
             if indirect_var.is_vec:
@@ -2372,7 +2374,7 @@ class CppVecKernel(CppKernel):
             for indirect_var in (
                 self.cse.varname_map[s.name]  # type: ignore[attr-defined]
                 for s in index.free_symbols
-                if s.name.startswith("tmp")  # type: ignore[attr-defined]
+                if symbol_is_type(s, SymT.TMP)
             ):
                 assert isinstance(indirect_var, CppCSEVariable)
                 if indirect_var.is_vec:
@@ -2918,7 +2920,7 @@ class CppVecKernelChecker(CppVecKernel):
 
             if load_dtype not in self.supported_dtypes and (
                 index.has(self.itervars[self.tiling_idx])
-                or free_symbol_startswith(index, "tmp")
+                or free_symbol_is_type(index, SymT.TMP)
             ):
                 self.disable_vec(f"{load_dtype} not supported by load")
                 return var
@@ -3447,7 +3449,7 @@ class CppKernelProxy(CppKernel):
                     elif stride == 1:
                         contig_vars.add(int(var.name[1:]))
                         contig_vars_list.append(int(var.name[1:]))
-                    elif all(s.name.startswith("s") for s in stride.free_symbols):
+                    elif all(symbol_is_type(s, SymT.SIZE) for s in stride.free_symbols):
                         non_contig_stride_const.add(int(var.name[1:]))
                     else:
                         non_contig_stride_other.add(int(var.name[1:]))

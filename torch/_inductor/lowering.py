@@ -831,6 +831,8 @@ def trunc(x):
 
 @register_lowering(aten.expand, type_promotion_kind=None)
 def expand(x, sizes):
+    from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
     (x,) = promote_constants([x])
     if isinstance(x, ir.BaseConstant):
         return ExpandView.create(x, tuple(sizes))
@@ -839,15 +841,13 @@ def expand(x, sizes):
     if tuple(x.get_size()) == tuple(sizes):
         return x
 
-    if not any(V.graph.sizevars.shape_env.is_unbacked_symint(s) for s in x.get_size()):
+    if not free_unbacked_symbols(x.get_size()):
         x_size_product = V.graph.sizevars.size_hint(sympy_product(x.get_size()))
         # TODO: It would be better to realize the input if any of its sizes
         # are unbacked, because typically the size will be non-zero.  However,
         # this cannot be done directly as below as we'll choke on the size_hint
         # here
-        if x_size_product > 0 and not any(
-            V.graph.sizevars.shape_env.is_unbacked_symint(s) for s in sizes
-        ):
+        if x_size_product > 0 and not free_unbacked_symbols(sizes):
             # maybe realize input before broadcasting it
             x.mark_reuse(
                 V.graph.sizevars.size_hint(sympy_product(sizes)) // x_size_product
