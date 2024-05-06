@@ -1536,6 +1536,13 @@ class Kernel(CodeGen):
                 # Skip CSE since this doesn't return an expression
 
                 if var.bounds.lower < 0:  # type: ignore[operator]
+                    stm = ops.add(var, ops.index_expr(size, torch.long))
+                    # Mixed negative and non-negative
+                    if var.bounds.upper >= 0:  # type: ignore[operator]
+                        lt = ops.lt(var, 0)
+                        stm = ops.where(lt, stm, var)
+
+                    # Propagate bounds as we know how to compute them properly
                     new_bounds = ValueRanges.unknown()
                     if var.bounds != ValueRanges.unknown() and isinstance(
                         size, sympy.Number
@@ -1552,15 +1559,8 @@ class Kernel(CodeGen):
                             pos = var.bounds & ValueRanges(0, sympy.oo)
                             new_bounds = new_bounds | pos
 
-                    stm = ops.add(var, ops.index_expr(size, torch.long))
-                    # Mixed negative and non-negative
-                    if var.bounds.upper >= 0:  # type: ignore[operator]
-                        lt = ops.lt(var, 0)
-                        stm = ops.where(lt, stm, var)
-
-                    # Propagate bounds as we know how to compute them properly
-                    # Propagate the mask as mask propagation when using where is not correct
                     new_var = self.cse.generate(self.compute, stm, bounds=new_bounds)
+                    # Propagate the mask as mask propagation when using where is not correct
                     new_var.update_on_args("index_wrap", (var,), {})
                     var = new_var
 
