@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import patch
 
 import torch
+import torch._dynamo.config
 import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 import torch._inductor.select_algorithm as select_algorithm
@@ -43,7 +44,17 @@ def patches(fn):
 
 
 class TestSelectAlgorithm(TestCase):
-    def _test_linear(
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("batch_size", (1, 2, 1000))
+    @parametrize("in_features", (1, 2, 1000))
+    @parametrize("out_features", (1, 32, 1024))
+    @parametrize("bias", (True, False))
+    @parametrize("input_3d", (True, False))
+    @dtypes(torch.float)
+    def test_linear_static_shapes(
         self, batch_size, in_features, out_features, bias, input_3d, dtype
     ):
         class M(torch.nn.Module):
@@ -65,39 +76,20 @@ class TestSelectAlgorithm(TestCase):
             1 if out_features != 1 else 0,
         )
 
-    @inductor_config.patch({"freezing": True})
-    @patches
-    @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
-    @parametrize("batch_size", (1, 2, 1000))
-    @parametrize("in_features", (1, 2, 1000))
-    @parametrize("out_features", (1, 32, 1024))
-    @parametrize("bias", (True, False))
-    @parametrize("input_3d", (True, False))
-    @dtypes(torch.float)
-    def test_linear_static_shapes(
-        self, batch_size, in_features, out_features, bias, input_3d, dtype
-    ):
-        self._test_linear(batch_size, in_features, out_features, bias, input_3d, dtype)
 
-    @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
-    @inductor_config.patch({"freezing": True})
-    @patches
-    @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
-    @parametrize("batch_size", (1, 2, 1000))
-    @parametrize("in_features", (1, 2, 1000))
-    @parametrize("out_features", (1, 32, 1024))
-    @parametrize("bias", (True, False))
-    @parametrize("input_3d", (True, False))
-    @dtypes(torch.float)
-    def test_linear_dynamic_shapes(
-        self, batch_size, in_features, out_features, bias, input_3d, dtype
-    ):
-        self._test_linear(batch_size, in_features, out_features, bias, input_3d, dtype)
+@dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
+class _DynamicShapesTestBase(TestCase):
+    pass
+
+
+class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
+    test_linear_dynamic_shapes = TestSelectAlgorithm.test_linear_static_shapes
 
 
 instantiate_device_type_tests(TestSelectAlgorithm, globals(), only_for="cpu")
+instantiate_device_type_tests(
+    TestSelectAlgorithmDynamicShapes, globals(), only_for="cpu"
+)
 
 
 if __name__ == "__main__":
