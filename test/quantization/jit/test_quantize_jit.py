@@ -1,40 +1,73 @@
 # Owner(s): ["oncall: quantization"]
 
 # torch
+import io
+import itertools
+import unittest
+
+# Standard library
+from typing import List, Tuple
+
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import torch.jit
 import torch.jit.quantized
+import torch.nn as nn
+import torch.nn.functional as F
 
 # torch.ao.quantization
 from torch.ao.quantization import (
-    QConfig,
     default_dynamic_qconfig,
-    float16_dynamic_qconfig,
+    default_histogram_observer,
     default_observer,
-    per_channel_dynamic_qconfig,
     default_per_channel_weight_observer,
     default_qconfig,
+    default_weight_observer,
+    float16_dynamic_qconfig,
+    fuse_modules,
     get_default_qconfig,
+    per_channel_dynamic_qconfig,
+    PlaceholderObserver,
+    QConfig,
     quantize,
     quantize_dynamic,
-    default_weight_observer,
-    default_histogram_observer,
-    fuse_modules,
-    quantize_jit,
     quantize_dynamic_jit,
-    PlaceholderObserver,
+    quantize_jit,
 )
 
 # torch.ao.quantization.quantize_jit
 from torch.ao.quantization.quantize_jit import (
-    convert_jit,
     convert_dynamic_jit,
+    convert_jit,
     fuse_conv_bn_jit,
-    prepare_jit,
     prepare_dynamic_jit,
+    prepare_jit,
     script_qconfig,
+)
+
+from torch.jit._recursive import wrap_cpp_module
+
+from torch.testing import FileCheck
+
+# Annotated models
+
+from torch.testing._internal.common_quantization import (
+    AnnotatedConvBnModel,
+    AnnotatedConvModel,
+    AnnotatedConvTransposeModel,
+    AnnotatedNestedModel,
+    AnnotatedSingleLayerLinearModel,
+    AnnotatedSkipQuantModel,
+    ConvBnModel,
+    ConvModel,
+    ConvTransposeModel,
+    default_per_channel_qconfig,
+    get_script_module,
+    NestedModel,
+    QuantizationTestCase,
+    SingleLayerLinearModel,
+    skipIfNoFBGEMM,
+    SkipQuantModel,
+    test_only_eval_fn,
 )
 
 # Testing utils
@@ -44,44 +77,12 @@ from torch.testing._internal.common_quantized import (
     qengine_is_qnnpack,
 )
 
-from torch.testing._internal.common_quantization import (
-    QuantizationTestCase,
-    skipIfNoFBGEMM,
-    get_script_module,
-    SingleLayerLinearModel,
-    SkipQuantModel,
-    NestedModel,
-    ConvModel,
-    ConvTransposeModel,
-    default_per_channel_qconfig,
-    test_only_eval_fn,
-    ConvBnModel,
-)
-
-# Annotated models
-from torch.testing._internal.common_quantization import (
-    AnnotatedSingleLayerLinearModel,
-    AnnotatedSkipQuantModel,
-    AnnotatedNestedModel,
-    AnnotatedConvModel,
-    AnnotatedConvTransposeModel,
-    AnnotatedConvBnModel,
-)
-
-from torch.testing import FileCheck
-from torch.testing._internal.jit_utils import attrs_with_prefix
-from torch.testing._internal.jit_utils import get_forward
-from torch.testing._internal.jit_utils import get_forward_graph
-
 from torch.testing._internal.common_utils import set_default_dtype
-
-from torch.jit._recursive import wrap_cpp_module
-
-# Standard library
-from typing import List, Tuple
-import io
-import itertools
-import unittest
+from torch.testing._internal.jit_utils import (
+    attrs_with_prefix,
+    get_forward,
+    get_forward_graph,
+)
 
 
 class TestQuantizeJitPasses(QuantizationTestCase):
@@ -97,9 +98,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
                 return self.conv(x)
 
         m = torch.jit.script(M())
-        observer = (
-            default_per_channel_weight_observer.with_args(ch_axis=1)
-        )
+        observer = default_per_channel_weight_observer.with_args(ch_axis=1)
         qconfig_dict = {"": QConfig(activation=default_observer, weight=observer)}
         m = prepare_jit(m, qconfig_dict)
         data = torch.randn(1, 3, 10, 10, dtype=torch.float)
@@ -114,12 +113,18 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         # We have this pattern in the original graph: Constant f32_weight -> quant -> dequant
         # After skipping dequant during Constant Propagation, the resulting graph will be:
         # Constant int8_weight -> dequant
-        FileCheck().check_count("aten::quantize_per_tensor", 2, exactly=True).run(freezed.graph)
-        FileCheck().check_count("aten::quantize_per_channel", 0, exactly=True).run(freezed.graph)
+        FileCheck().check_count("aten::quantize_per_tensor", 2, exactly=True).run(
+            freezed.graph
+        )
+        FileCheck().check_count("aten::quantize_per_channel", 0, exactly=True).run(
+            freezed.graph
+        )
         FileCheck().check_count("aten::dequantize", 3, exactly=True).run(freezed.graph)
-        FileCheck().check("aten::quantize_per_tensor").check_next("aten::dequantize").check_not(
-            "aten::quantize_per_channel"
-        ).check("aten::dequantize").check_next("aten::conv2d").check_next(
+        FileCheck().check("aten::quantize_per_tensor").check_next(
+            "aten::dequantize"
+        ).check_not("aten::quantize_per_channel").check("aten::dequantize").check_next(
+            "aten::conv2d"
+        ).check_next(
             "aten::quantize_per_tensor"
         ).check_next(
             "aten::dequantize"
@@ -665,8 +670,8 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         }
         assert len(activation_dtypes) == 1, "Expected to have 1 activation dtype"
         assert len(weight_dtypes) == 1, "Expected to have 1 weight dtype"
-        assert (
-            next(iter(activation_dtypes)) != next(iter(weight_dtypes))
+        assert next(iter(activation_dtypes)) != next(
+            iter(weight_dtypes)
         ), "Expected activation dtype to "
         " be different from wegiht dtype"
 
@@ -1700,9 +1705,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
                 model.graph
             )
 
-            FileCheck().check_not(f"quantized::conv{dim}d_prepack").run(
-                model.graph
-            )
+            FileCheck().check_not(f"quantized::conv{dim}d_prepack").run(model.graph)
 
     @skipIfNoFBGEMM
     def test_quantized_conv_relu(self):
@@ -2282,16 +2285,19 @@ class TestQuantizeJitOps(QuantizationTestCase):
         options = itertools.product([True, False], [2, 3])
         for tracing, dim in options:
             for instance in [BNRelu(dim, True), BNRelu(dim, False)]:
-                model = self.checkGraphModeOp(instance, self.img_data_dict[dim],
-                                              "quantized::batch_norm_relu", tracing)
-                FileCheck().check_not("aten::batch_norm") \
-                           .check_not("aten::relu") \
-                           .check_not("aten::relu_") \
-                           .run(model.graph)
+                model = self.checkGraphModeOp(
+                    instance,
+                    self.img_data_dict[dim],
+                    "quantized::batch_norm_relu",
+                    tracing,
+                )
+                FileCheck().check_not("aten::batch_norm").check_not(
+                    "aten::relu"
+                ).check_not("aten::relu_").run(model.graph)
 
     @skipIfNoFBGEMM
     def test_qbatch_norm_relu_BNFuncRelu(self):
-        bn_module = {2 : torch.nn.BatchNorm2d, 3 : torch.nn.BatchNorm3d}
+        bn_module = {2: torch.nn.BatchNorm2d, 3: torch.nn.BatchNorm3d}
 
         class BNFuncRelu(torch.nn.Module):
             def __init__(self, dim):
@@ -2304,16 +2310,16 @@ class TestQuantizeJitOps(QuantizationTestCase):
         options = itertools.product([True, False], [2, 3])
         for tracing, dim in options:
             instance = BNFuncRelu(dim)
-            model = self.checkGraphModeOp(instance, self.img_data_dict[dim],
-                                          "quantized::batch_norm_relu", tracing)
-            FileCheck().check_not("aten::batch_norm") \
-                       .check_not("aten::relu") \
-                       .check_not("aten::relu_") \
-                       .run(model.graph)
+            model = self.checkGraphModeOp(
+                instance, self.img_data_dict[dim], "quantized::batch_norm_relu", tracing
+            )
+            FileCheck().check_not("aten::batch_norm").check_not("aten::relu").check_not(
+                "aten::relu_"
+            ).run(model.graph)
 
     @skipIfNoFBGEMM
     def test_qbatch_norm_relu_BNFuncInplaceRelu(self):
-        bn_module = {2 : torch.nn.BatchNorm2d, 3 : torch.nn.BatchNorm3d}
+        bn_module = {2: torch.nn.BatchNorm2d, 3: torch.nn.BatchNorm3d}
 
         class BNFuncInplaceRelu(torch.nn.Module):
             def __init__(self, dim):
@@ -2326,12 +2332,12 @@ class TestQuantizeJitOps(QuantizationTestCase):
         options = itertools.product([True, False], [2, 3])
         for tracing, dim in options:
             instance = BNFuncInplaceRelu(dim)
-            model = self.checkGraphModeOp(instance, self.img_data_dict[dim],
-                                          "quantized::batch_norm_relu", tracing)
-            FileCheck().check_not("aten::batch_norm") \
-                       .check_not("aten::relu") \
-                       .check_not("aten::relu_") \
-                       .run(model.graph)
+            model = self.checkGraphModeOp(
+                instance, self.img_data_dict[dim], "quantized::batch_norm_relu", tracing
+            )
+            FileCheck().check_not("aten::batch_norm").check_not("aten::relu").check_not(
+                "aten::relu_"
+            ).run(model.graph)
 
     @skipIfNoFBGEMM
     def test_quantized_mul(self):
@@ -3280,11 +3286,17 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
         for x, obs in m2._modules._c.items():
             if x == "res1":
                 graph_params.append(
-                    (obs.getattr("weight.2_scale_0"), obs.getattr("weight.2_zero_point_0"))
+                    (
+                        obs.getattr("weight.2_scale_0"),
+                        obs.getattr("weight.2_zero_point_0"),
+                    )
                 )
             elif x == "res2":
                 graph_params.append(
-                    (obs.getattr("weight.4_scale_0"), obs.getattr("weight.4_zero_point_0"))
+                    (
+                        obs.getattr("weight.4_scale_0"),
+                        obs.getattr("weight.4_zero_point_0"),
+                    )
                 )
         self.assertEqual(ref_qparams, graph_params)
 
@@ -3313,10 +3325,12 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
             model = quantize_dynamic_jit(model, qconfig_dict, debug=True)
             graph_qparams = []
             for x, obs in model._modules._c.items():
-                n = 2 if x == 'fc' and tracing else 1
+                n = 2 if x == "fc" and tracing else 1
                 graph_qparams.append(
-                    (obs.getattr(f"weight.{n}_scale_0"),
-                     obs.getattr(f"weight.{n}_zero_point_0"))
+                    (
+                        obs.getattr(f"weight.{n}_scale_0"),
+                        obs.getattr(f"weight.{n}_zero_point_0"),
+                    )
                 )
             self.assertEqual(ref_qparams, graph_qparams)
 
@@ -3519,21 +3533,19 @@ class TestQuantizeDynamicJitOps(QuantizationTestCase):
             activation=PlaceholderObserver.with_args(
                 dtype=torch.float, custom_op_name="embedding_bag_4bit"
             ),
-            weight=PlaceholderObserver.with_args(
-                custom_op_name="embedding_bag_4bit"
-            ),
+            weight=PlaceholderObserver.with_args(custom_op_name="embedding_bag_4bit"),
         )
         int8_qconfig = QConfig(
             activation=PlaceholderObserver.with_args(
                 dtype=torch.float, custom_op_name="embedding_bag_byte"
             ),
-            weight=PlaceholderObserver.with_args(
-                custom_op_name="embedding_bag_byte"
-            ),
+            weight=PlaceholderObserver.with_args(custom_op_name="embedding_bag_byte"),
         )
 
-        error_msg = r'Expected aten::embedding_bag padding_idx input to be None'
-        for trace, qconfig in itertools.product([True, False], [int4_qconfig, int8_qconfig]):
+        error_msg = r"Expected aten::embedding_bag padding_idx input to be None"
+        for trace, qconfig in itertools.product(
+            [True, False], [int4_qconfig, int8_qconfig]
+        ):
             if trace:
                 m = torch.jit.trace(module, dummy_inputs)
             else:

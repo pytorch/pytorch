@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import functools
 import logging
-from typing import cast, List, Optional, Sequence, Tuple, TypedDict
+from typing import cast, List, Optional, Sequence, Tuple, TYPE_CHECKING, TypedDict
 
 import torch
 from .. import config, ir
-from ..ir import TensorBox
 
 from ..lowering import (
     add_layout_constraint,
@@ -29,6 +28,9 @@ from ..utils import (
 )
 from ..virtualized import V
 from .mm_common import filtered_configs
+
+if TYPE_CHECKING:
+    from ..ir import TensorBox
 
 log = logging.getLogger(__name__)
 
@@ -360,6 +362,7 @@ def convolution(
         and not transposed
         and is_zeros(output_padding)
         and groups == 1
+        and sympy_product(x.get_size()) > 0
     ):
         return convert_1x1_conv_to_mm(x, weight, bias)
 

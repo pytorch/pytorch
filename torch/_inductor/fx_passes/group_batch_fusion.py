@@ -302,7 +302,6 @@ class GroupLinearFusion(GroupFusion):
 
         if all(bias is None for bias in group_biases):
             group_biases = None  # type: ignore[assignment]
-        group_biases: Optional[List[Any]]
 
         with graph.inserting_before(subset[0]):
             fused_mm = graph.call_function(
@@ -649,10 +648,8 @@ class BatchLayernormFusion(BatchFusion):
 
         if all(bias is None for bias in group_biases):
             group_biases = None  # type: ignore[assignment]
-        group_biases: Optional[List[Any]]
         if all(weight is None for weight in group_weights):
             group_weights = None  # type: ignore[assignment]
-        group_weights: Optional[List[Any]]
         assert all(
             eps == group_epss[0] for eps in group_epss
         ), "all epsilon values must be equal"
@@ -753,7 +750,7 @@ class BatchLayernormFusion(BatchFusion):
 
 class BatchPointwiseOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
     """
-    Batch poinwise ops (e.g., sigmoid, relu, tanh) fusion in pre grad pass.
+    Batch pointwise ops (e.g., sigmoid, relu, tanh) fusion in pre grad pass.
     We fuse it in random place, and the introduced stack node may be merged in split cat.
     """
 
@@ -858,7 +855,7 @@ class BatchMulPostGradFusion(BatchPointwiseOpsPostGradFusion):
 class _OrderedSet:
     def __init__(self, param=None):
         if param:
-            self.rep = OrderedDict({k: None for k in param})
+            self.rep = OrderedDict(dict.fromkeys(param))
         else:
             self.rep = OrderedDict()
 
@@ -1028,6 +1025,9 @@ def apply_group_batch_fusion(graph: torch.fx.GraphModule, rule: GroupBatchFusion
 def generate_fusion_from_config(config_options: Dict[str, Any], pre_grad=True):
     fusions: List[GroupBatchFusionBase] = []
     for name, options in config_options.items():
+        # we skip all patterns from pattern_matcher passes (e.g., split_cat)
+        if name not in PRE_GRAD_FUSIONS and name not in POST_GRAD_FUSIONS:
+            continue
         fusion_cls = PRE_GRAD_FUSIONS[name] if pre_grad else POST_GRAD_FUSIONS[name]
         _options = graph_search_options.copy()
         _options.update(options)
