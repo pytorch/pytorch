@@ -23,6 +23,7 @@ from typing import (
     Optional,
     Set,
     Tuple,
+    TYPE_CHECKING,
     Union,
 )
 
@@ -38,7 +39,6 @@ from torch._inductor.runtime.hints import AutotuneHint, DeviceProperties
 from torch._prims_common import is_integer_dtype
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
-from torch.utils._sympy.value_ranges import ValueRanges
 from torch.utils._triton import has_triton_package
 
 from ..._dynamo.utils import counters
@@ -85,6 +85,9 @@ from .common import (
 )
 from .multi_kernel import MultiKernel
 from .triton_utils import config_of, signature_of, signature_to_meta
+
+if TYPE_CHECKING:
+    from torch.utils._sympy.value_ranges import ValueRanges
 
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")

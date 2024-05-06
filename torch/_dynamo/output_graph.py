@@ -10,7 +10,7 @@ import sys
 import traceback
 import weakref
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
 
 import sympy
 
@@ -78,7 +78,6 @@ from .utils import (
     graph_break_reasons,
     increment_op_count,
     lazy_format_graph_code,
-    lazy_format_graph_tabular,
     LazyString,
     nn_module_proxy,
     same,
@@ -102,6 +101,9 @@ from .variables.tensor import (
 )
 
 from .variables.torch_function import TensorWithTFOverrideVariable
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
 log = logging.getLogger(__name__)
 graph_tabular_log = torch._logging.getArtifactLogger(__name__, "graph")
@@ -334,7 +336,6 @@ class OutputGraph:
         self.global_scope = global_scope
         self.local_scope = local_scope
         self.root_tx = root_tx
-        from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
         # Given a source, what are the user stacks of all locations that
         # accessed it?
@@ -1272,10 +1273,10 @@ class OutputGraph:
         torch._logging.trace_structured(
             "dynamo_output_graph",
             lambda: {"sizes": self.get_graph_sizes_structured()},
-            payload_fn=lambda: gm.print_readable(print_output=False),
+            payload_fn=lambda: gm.print_readable(
+                print_output=False, include_stride=True, include_device=True
+            ),
         )
-        graph_tabular_log.debug("%s", lazy_format_graph_tabular(name, gm))
-        graph_sizes_log.debug("%s", LazyString(lambda: self.get_graph_sizes(name)))
         self.call_cleanup_hooks()
         old_fake_mode = self.tracing_context.fake_mode
         if not self.export:

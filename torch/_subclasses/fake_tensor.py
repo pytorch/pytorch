@@ -40,7 +40,6 @@ from torch._utils import render_call
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.overrides import TorchFunctionMode
-from torch.types import _bool
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
@@ -52,6 +51,7 @@ from torch.utils._traceback import CapturedTraceback
 
 if TYPE_CHECKING:
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
+    from torch.types import _bool
 
 
 class _Unassigned:
