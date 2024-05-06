@@ -2397,7 +2397,6 @@ def gen_source_files(
                 extra_cuda_headers if is_cuda_dispatch_key(dispatch_key) else ""
             )
 
-            existing_c_shim_path = "torch/csrc/inductor/aoti_torch/generated"
             header_file_name = f"c_shim_{dispatch_key.lower()}.h"
             cpp_file_name = f"c_shim_{dispatch_key.lower()}.cpp"
             new_header = gen_aoti_c_shim(
@@ -2425,13 +2424,14 @@ def gen_source_files(
                     lambda: new_cpp,
                 )
             else:
-                with open(
-                    os.path.join(existing_c_shim_path, header_file_name)
-                ) as old_file:
-                    old_header = old_file.read()
-                    assert (
-                        old_header == new_header
-                    ), """
+                try:
+                    with open(
+                        os.path.join(aoti_fm.install_dir, header_file_name)
+                    ) as old_file:
+                        old_header = old_file.read()
+                        assert (
+                            old_header == new_header
+                        ), """
 
 WARNING: The generated AOTInductor C shim header files have unexpectedly changed. This
 indicates an AOTInductor fallback operator ABI backward compatibility breakage!!!
@@ -2447,7 +2447,11 @@ fallback op in a file, e.g. torch/csrc/inductor/aoti_torch/shim_common.cpp, bump
 number of that fallback op in the newly generated C shim files, and update the cpp wrapper
 codegen to generate the correct cpp call for this op. Contact AOTInductor team for assistance.
 
-                    """
+                        """
+                except FileNotFoundError:
+                    print(
+                        f"{os.path.join(aoti_fm.install_dir, header_file_name)} not found"
+                    )
 
         del fm
 
@@ -2757,6 +2761,12 @@ def main() -> None:
         default="build/aten/src/ATen",
     )
     parser.add_argument(
+        "--aoti-install-dir",
+        "--aoti_install_dir",
+        help="output directory for AOTInductor shim",
+        default="torch/csrc/inductor/aoti_torch/generated",
+    )
+    parser.add_argument(
         "--rocm",
         action="store_true",
         help="reinterpret CUDA as ROCm/HIP and adjust filepaths accordingly",
@@ -2882,15 +2892,15 @@ def main() -> None:
     pathlib.Path(core_install_dir).mkdir(parents=True, exist_ok=True)
     ops_install_dir = f"{options.install_dir}/ops"
     pathlib.Path(ops_install_dir).mkdir(parents=True, exist_ok=True)
+    aoti_install_dir = f"{options.aoti_install_dir}"
+    pathlib.Path(aoti_install_dir).mkdir(parents=True, exist_ok=True)
 
     core_fm = make_file_manager(options=options, install_dir=core_install_dir)
     cpu_fm = make_file_manager(options=options)
     cpu_vec_fm = make_file_manager(options=options)
     cuda_fm = make_file_manager(options=options)
     ops_fm = make_file_manager(options=options, install_dir=ops_install_dir)
-    aoti_fm = make_file_manager(
-        options=options, install_dir="torch/csrc/inductor/aoti_torch/generated"
-    )
+    aoti_fm = make_file_manager(options=options, install_dir=aoti_install_dir)
 
     # Only a limited set of dispatch keys get CPUFunctions.h headers generated
     # for them; this is the set
