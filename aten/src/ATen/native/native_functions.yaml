@@ -9128,6 +9128,11 @@
 - func: take_along_dim(Tensor self, Tensor indices, int? dim=None) -> Tensor
   variants: method, function
 
+- func: put_along_dim.out(Tensor self, Tensor indices, Tensor values, int? dim=None, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: put_along_dim(Tensor self, Tensor indices, Tensor values, int? dim=None) -> Tensor
+  variants: method, function
+
 - func: index_select.out(Tensor self, int dim, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, QuantizedCPU: index_select_out_cpu_
