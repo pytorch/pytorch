@@ -319,7 +319,7 @@ class Tracer(TracerBase):
         """
         i = self._qualname_counter[prefix]
         while True:
-            qualname = f"{prefix}_{i}"
+            qualname = f"{prefix}{i}"
             i += 1
             if not hasattr(self.root, qualname):
                 break
@@ -403,7 +403,7 @@ class Tracer(TracerBase):
             # witness its construction. Intern this as a constant attribute
 
             # TODO: binary search
-            qualname = self.get_fresh_qualname("_{a.__class__.__name__}_constant")
+            qualname = self.get_fresh_qualname("_{a.__class__.__name__}_constant_")
             assert isinstance(qualname, str)
             setattr(self.root, qualname, a)
 
