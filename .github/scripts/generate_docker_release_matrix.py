@@ -17,23 +17,36 @@ from typing import Dict, List
 import generate_binary_build_matrix
 
 DOCKER_IMAGE_TYPES = ["runtime", "devel"]
+PLATFORMS = ["linux/arm64", "linux/amd64"]
 
 
 def generate_docker_matrix() -> Dict[str, List[Dict[str, str]]]:
     ret: List[Dict[str, str]] = []
     for cuda, version in generate_binary_build_matrix.CUDA_ARCHES_FULL_VERSION.items():
         for image in DOCKER_IMAGE_TYPES:
-            ret.append(
-                {
-                    "cuda": cuda,
-                    "cuda_full_version": version,
-                    "cudnn_version": generate_binary_build_matrix.CUDA_ARCHES_CUDNN_VERSION[
-                        cuda
-                    ],
-                    "image_type": image,
-                    "platform": "linux/arm64,linux/amd64",
-                }
-            )
+            for platform in PLATFORMS:
+                if platform == "linux/arm64":
+                    ret.append(
+                        {
+                            "cuda": "cpu",
+                            "cuda_full_version": "",
+                            "cudnn_version": "",
+                            "image_type": image,
+                            "platform": platform,
+                        }
+                    )
+                else:
+                    ret.append(
+                        {
+                            "cuda": cuda,
+                            "cuda_full_version": version,
+                            "cudnn_version": generate_binary_build_matrix.CUDA_ARCHES_CUDNN_VERSION[
+                                cuda
+                            ],
+                            "image_type": image,
+                            "platform": platform,
+                        }
+                    )
     return {"include": ret}
 
 
