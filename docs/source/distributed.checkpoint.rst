@@ -36,6 +36,9 @@ The following module is also useful for additional customization of the staging 
 .. autoclass:: torch.distributed.checkpoint.staging.AsyncStager
   :members:
 
+.. autoclass:: torch.distributed.checkpoint.staging.BlockingAsyncStager
+  :members:
+
 In addition to the above entrypoints, `Stateful` objects, as described below, provide additional customization during saving/loading
 .. automodule:: torch.distributed.checkpoint.stateful
 
