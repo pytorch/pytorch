@@ -433,7 +433,8 @@ extern "C" {{
 
 #ifdef __cplusplus
 }} // extern "C"
-#endif"""
+#endif
+"""
 
     else:
         return f"""
@@ -452,4 +453,5 @@ extern "C" {{
 
 using namespace torch::aot_inductor;
 
-{body}"""
+{body}
+"""
