@@ -557,6 +557,8 @@ class FakeTensor(torch.Tensor):
         self.real_tensor = real_tensor  # type: ignore[attr-defined]
         self._nonzero_memo = None  # type: ignore[attr-defined]
         self._nonzero_memo_vc = None  # type: ignore[attr-defined]
+        self._item_memo = None  # type: ignore[attr-defined]
+        self._item_memo_vc = None  # type: ignore[attr-defined]
         self._unique_memo = None  # type: ignore[attr-defined]
         self._unique_memo_vc = None  # type: ignore[attr-defined]
 
