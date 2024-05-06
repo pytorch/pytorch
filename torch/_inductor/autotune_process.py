@@ -11,9 +11,6 @@ import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor
 from ctypes import byref, c_size_t, c_void_p, CDLL
-from multiprocessing.process import BaseProcess
-from multiprocessing.queues import Queue
-from types import ModuleType
 from typing import (
     Any,
     Callable,
@@ -40,6 +37,9 @@ from torch._inductor.codecache import (
 )
 
 if TYPE_CHECKING:
+    from multiprocessing.process import BaseProcess
+    from multiprocessing.queues import Queue
+
     from torch._inductor.select_algorithm import TritonTemplateCaller
 
 from . import config
@@ -58,6 +58,10 @@ class Ping:
 
 
 class Pong:
+    pass
+
+
+class NonzeroWorkspaceNotSupportedError(Exception):
     pass
 
 
@@ -412,6 +416,7 @@ class TensorMeta:
     sizes: torch._prims_common.ShapeType
     strides: torch._prims_common.StrideType
     offset: int
+    name: Optional[str] = None
 
     @classmethod
     def from_irnodes(
@@ -444,6 +449,7 @@ class TensorMeta:
                 node.get_layout().offset,
                 fallback=config.unbacked_symint_fallback,
             ),
+            name=node.get_name(),
         )
 
     def to_tensor(self) -> torch.Tensor:
@@ -521,8 +527,12 @@ class BenchmarkRequest:
         if debug:
             create_tensor_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
             start_ts = time.time()
-
-        fn = self.make_run_fn(*input_tensors, output_tensor=output_tensor)
+        try:
+            fn = self.make_run_fn(*input_tensors, output_tensor=output_tensor)
+        except NonzeroWorkspaceNotSupportedError:
+            # Skipping all ops with nonzero workspace requirements
+            log.info("Skipping op due to nonzero workspace requirement")
+            return float("inf")
 
         if debug:
             load_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
@@ -680,6 +690,7 @@ class CUDABenchmarkRequest(GPUDeviceBenchmarkRequest):
         self.workspace_size: int = 0
         self.workspace: Optional[torch.Tensor] = None
         self.DLL: Optional[DLLWrapper] = None
+        self._workspace_size_updated = False
         self.hash_key: str = ""
         self.source_file: str = ""
         self.hash_key, self.source_file = CUDACodeCache.write(self.source_code, "so")
@@ -688,15 +699,14 @@ class CUDABenchmarkRequest(GPUDeviceBenchmarkRequest):
         # Prepopulate CUDACodeCache
         # may happen in separate Threadpool
         log.debug("Precompiling %s", self)
-        CUDACodeCache.load(self.source_code, "so")
+        CUDACodeCache.compile(self.source_code, "so")
         log.debug("Done precompiling %s", self)
 
     def make_run_fn(
         self, *input_tensors: torch.Tensor, output_tensor: torch.Tensor
     ) -> Callable[[], None]:
-        self.DLL, self.hash_key, self.source_file = CUDACodeCache.load(
-            self.source_code, "so"
-        )
+        self.ensure_dll_loaded()
+        self.update_workspace_size()
         args = [
             c_void_p(tensor.data_ptr())
             for tensor in list(input_tensors) + [output_tensor]
@@ -710,9 +720,36 @@ class CUDABenchmarkRequest(GPUDeviceBenchmarkRequest):
             args,
             self.extra_args,
         )
+        stream_ptr = c_void_p(torch.cuda.current_stream().cuda_stream)
         run_method = getattr(self.DLL, self.kernel_name)
+        workspace_ptr = c_void_p(0)
+        if self.workspace_size > 0:
+            self.workspace = torch.zeros(
+                (self.workspace_size + 7) // 8,
+                dtype=torch.float64,
+                device=output_tensor.device,
+            )
+            workspace_ptr = c_void_p(self.workspace.data_ptr())
+
+        # Generate partial function.
+        return functools.partial(
+            run_method,
+            *args,
+            *self.extra_args,
+            None,  # null workspace size ptr
+            workspace_ptr,  # set workspace ptr,
+            stream_ptr,
+        )
+
+    def update_workspace_size(self) -> None:
+        if self._workspace_size_updated:
+            return
+        self.ensure_dll_loaded()
+        unique_input_count = len({meta.name for meta in self.input_tensor_meta})
+        args = [c_void_p(None) for _ in range(unique_input_count + 1)]
         stream_ptr = c_void_p(torch.cuda.current_stream().cuda_stream)
 
+        run_method = getattr(self.DLL, self.kernel_name)
         # Retrieve workspace_size and initialize workspace.
         c_workspace_size = c_size_t()
         run_method(
@@ -724,23 +761,25 @@ class CUDABenchmarkRequest(GPUDeviceBenchmarkRequest):
             None,  # null workspace ptr
             stream_ptr,
         )
+        torch.cuda.synchronize()  # shake out any CUDA errors
         self.workspace_size = c_workspace_size.value
-        # TODO: Support non-zero workspace_size.
-        assert self.workspace_size == 0, (
-            "Things need to be fixed to support non-zero workspace_size: "
-            "1) max autotune cache needs to store workspace size; "
-            "2) memory allocation needs to allocate / deallocate workspace correctly; "
+        log.debug(
+            "update_workspace_size called: new workspace size=%d, self.kernel_name=%s, self.source_file=%s, self.hash_key=%s, self.DLL=%s, args=%s, self.extra_args=%s",  # noqa: B950
+            self.workspace_size,
+            self.kernel_name,
+            self.source_file,
+            self.hash_key,
+            self.DLL,
+            args,
+            self.extra_args,
         )
+        self._workspace_size_updated = True
 
-        # Generate partial function.
-        return functools.partial(
-            run_method,
-            *args,
-            *self.extra_args,
-            None,  # null workspace size ptr
-            None,  # set workspace ptr, TODO: update it to a real ptr if workspace_size > 0
-            stream_ptr,
-        )
+    def ensure_dll_loaded(self):
+        if self.DLL is None:
+            self.DLL, self.hash_key, self.source_file = CUDACodeCache.load(
+                self.source_code, "so"
+            )
 
     def cleanup_run_fn(self) -> None:
         if self.DLL is not None:
