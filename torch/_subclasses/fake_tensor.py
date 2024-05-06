@@ -422,6 +422,10 @@ class FakeTensor(torch.Tensor):
     # fake tensors so you won't have a memo anyway
     _nonzero_memo_epoch: Optional[int]
 
+    _item_memo: Optional[Union[torch.SymInt, torch.SymFloat, torch.SymBool]]
+    _item_memo_vc: Optional[int]
+    _item_memo_epoch: Optional[int]
+
     # Indicates to our torch_dispatch dispatching infra that
     # this is an "infra" mode with lower dispatching precedence.
     _mode_key = torch._C._TorchDispatchModeKey.FAKE
@@ -439,6 +443,18 @@ class FakeTensor(torch.Tensor):
             self._nonzero_memo = None
             return None
         return self._nonzero_memo
+
+    @property
+    def item_memo(self):
+        if self._item_memo is None:
+            return None
+        if (
+            self._item_memo_vc != self._version
+            or self._item_memo_epoch != self.fake_mode.epoch
+        ):
+            self._item_memo = None
+            return None
+        return self._item_memo
 
     # This memorizes the unbacked SymInt representing the number of unique
     # elements in this tensor.  This is helpful if you do something like

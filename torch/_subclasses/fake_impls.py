@@ -341,14 +341,21 @@ def local_scalar_dense(fake_mode, func, arg):
     ):
         # Without symints/symfloats, cannot handle this
         raise DataDependentOutputException(func)
+    if arg.item_memo is not None:
+        return arg.item_memo
     if is_float_dtype(arg.dtype):
-        return fake_mode.shape_env.create_unbacked_symfloat()
+        r = fake_mode.shape_env.create_unbacked_symfloat()
     elif is_integer_dtype(arg.dtype):
-        return fake_mode.shape_env.create_unbacked_symint()
+        r = fake_mode.shape_env.create_unbacked_symint()
     elif is_boolean_dtype(arg.dtype):
-        return fake_mode.shape_env.create_unbacked_symbool()
+        r = fake_mode.shape_env.create_unbacked_symbool()
     else:
         raise NotImplementedError(f"local_scalar_dense/item NYI for {arg.dtype}")
+    if not torch.is_inference_mode_enabled():
+        arg._item_memo = r
+        arg._item_memo_vc = arg._version
+        arg._item_memo_epoch = fake_mode.epoch
+    return r
 
 
 @register_op_impl(torch.ops.aten.nonzero.default)
