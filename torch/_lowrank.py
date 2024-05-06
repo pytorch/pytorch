@@ -133,7 +133,11 @@ def _svd_lowrank(
     m, n = A.shape[-2:]
     matmul = _utils.matmul
     if M is not None:
-        A = A - M
+        # add(sparse, dense) is not implemented...
+        if M.is_sparse() and not A.is_sparse():
+            A = -M + A
+        else:
+            A = A - M
 
     # Assume that A is tall
     if m < n:
