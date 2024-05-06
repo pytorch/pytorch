@@ -53,6 +53,7 @@ import torch._export
 import torch.distributed
 import torch.multiprocessing as mp
 from scipy.stats import gmean, ttest_ind
+from torch._C import _has_cuda as HAS_CUDA, _has_xpu as HAS_XPU
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import (
     dummy_fx_compile,
@@ -74,6 +75,7 @@ except ImportError:
         graph_break_reasons,
         maybe_enable_compiled_autograd,
     )
+import torch._functorch.config
 from torch._functorch.aot_autograd import set_model_name
 from torch._inductor import config as inductor_config, metrics
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -333,10 +335,16 @@ def patch_torch_manual_seed():
         from torch._C import default_generator
 
         seed = 1337
-        import torch.cuda
+        if HAS_CUDA:
+            import torch.cuda
 
-        if not torch.cuda._is_in_bad_fork():
-            torch.cuda.manual_seed_all(seed)
+            if not torch.cuda._is_in_bad_fork():
+                torch.cuda.manual_seed_all(seed)
+        if HAS_XPU:
+            import torch.xpu
+
+            if not torch.xpu._is_in_bad_fork():
+                torch.xpu.manual_seed_all(seed)
         return default_generator.manual_seed(seed)
 
     torch.manual_seed = deterministic_torch_manual_seed
@@ -1956,6 +1964,9 @@ def get_dynamo_stats():
             "autograd_compiles": torch._dynamo.utils.counters["compiled_autograd"][
                 "compiles"
             ],
+            "cudagraph_skips": torch._dynamo.utils.counters["inductor"][
+                "cudagraph_skips"
+            ],
         }
     )
 
@@ -2165,6 +2176,10 @@ class BenchmarkRunner:
 
     @property
     def skip_models_due_to_control_flow(self):
+        return set()
+
+    @property
+    def guard_on_nn_module_models(self):
         return set()
 
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
@@ -2468,7 +2483,7 @@ class BenchmarkRunner:
                     if isinstance(e, torch.cuda.OutOfMemoryError)
                     else "eager_1st_run_fail"
                 )
-                log.exception(e)
+                log.exception("")
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
             finally:
                 del model_copy
@@ -2489,7 +2504,7 @@ class BenchmarkRunner:
                     if isinstance(e, torch.cuda.OutOfMemoryError)
                     else "eager_2nd_run_fail"
                 )
-                log.exception(e)
+                log.exception("")
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
             finally:
                 del model_copy
@@ -2541,7 +2556,7 @@ class BenchmarkRunner:
                     with maybe_enable_compiled_autograd(self.args.compiled_autograd):
                         new_result = optimized_model_iter_fn(model_copy, example_inputs)
             except Exception as e:
-                log.exception(e)
+                log.exception("")
                 print(
                     "TorchDynamo optimized model failed to run because of following error"
                 )
@@ -2643,7 +2658,7 @@ class BenchmarkRunner:
                 optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
                 new_result = optimized_model_iter_fn(model, example_inputs)
             except Exception as e:
-                log.exception(e)
+                log.exception("")
                 print(
                     "TorchDynamo optimized model failed to run because of following error"
                 )
@@ -3146,6 +3161,11 @@ def parse_args(args=None):
         help="Runs a dynamic shapes version of the benchmark, if available.",
     )
     parser.add_argument(
+        "--propagate-real-tensors",
+        action="store_true",
+        help="Capture as much data dependent as you can by unsoundly propagating real tensors",
+    )
+    parser.add_argument(
         "--dynamic-batch-only",
         action="store_true",
         help="Only assume batch dimension is dynamic.  Implies --dynamic-shapes",
@@ -3593,6 +3613,11 @@ def run(runner, args, original_dir=None):
     if args.dynamic_shapes:
         if not args.dynamic_batch_only:
             torch._dynamo.config.assume_static_by_default = False
+    if args.propagate_real_tensors:
+        # TODO: Separate flag for data dependent
+        torch._dynamo.config.capture_scalar_outputs = True
+        torch._dynamo.config.capture_dynamic_output_shape_ops = True
+        torch._functorch.config.fake_tensor_propagate_real_tensors = True
     if args.specialize_int:
         torch._dynamo.config.specialize_int = True
     if args.ci:
@@ -3687,9 +3712,9 @@ def run(runner, args, original_dir=None):
             log.warning("torch.cuda.is_available() == False, using CPU")
             args.devices = ["cpu"]
 
-    if args.devices != ["cpu"] and torch.cuda.is_available():
+    if args.devices != ["cpu"] and (HAS_CUDA or HAS_XPU):
         global synchronize
-        synchronize = torch.cuda.synchronize
+        synchronize = torch.cuda.synchronize if HAS_CUDA else torch.xpu.synchronize
 
     if (
         args.devices == ["cuda"]
@@ -4067,15 +4092,20 @@ def run(runner, args, original_dir=None):
             else:
                 model, example_inputs = runner.cast_based_on_args(model, example_inputs)
             runner.setup_amp(current_device)
-            runner.run_one_model(
-                name,
-                model,
-                example_inputs,
-                optimize_ctx,
-                experiment,
-                explain=args.explain,
-                tag=args.tag,
-            )
+            guard_ctx = contextlib.nullcontext()
+            if name in runner.guard_on_nn_module_models:
+                guard_ctx = torch._dynamo.config.patch(guard_nn_modules=True)
+
+            with guard_ctx:
+                runner.run_one_model(
+                    name,
+                    model,
+                    example_inputs,
+                    optimize_ctx,
+                    experiment,
+                    explain=args.explain,
+                    tag=args.tag,
+                )
         if args.generate_aot_autograd_stats:
             stats_file = output_filename.split(".csv")[0] + "_stats.csv"
             output_csv(

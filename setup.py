@@ -1393,9 +1393,15 @@ def main():
             ]
         )
     torchgen_package_data = [
-        "packaged/**/*.cpp",
-        "packaged/**/*.h",
-        "packaged/**/*.yaml",
+        # Recursive glob doesn't work in setup.py,
+        # https://github.com/pypa/setuptools/issues/1806
+        # To make this robust we should replace it with some code that
+        # returns a list of everything under packaged/
+        "packaged/ATen/*",
+        "packaged/ATen/native/*",
+        "packaged/ATen/templates/*",
+        "packaged/autograd/*",
+        "packaged/autograd/templates/*",
     ]
     setup(
         name=package_name,

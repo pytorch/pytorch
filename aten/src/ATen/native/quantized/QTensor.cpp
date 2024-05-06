@@ -344,7 +344,7 @@ std::tuple<Tensor, Tensor> choose_qparams_optimized(
 
   TORCH_CHECK(numel <= input_tensor.numel(), "numel ", numel,
       " greater than input_tensor.numel() ", input_tensor.numel());
-  const float* input_row = input_tensor.data_ptr<float>();
+  const float* input_row = input_tensor.const_data_ptr<float>();
   float xmin = *std::min_element(input_row, input_row + numel);
   float xmax = *std::max_element(input_row, input_row + numel);
 
@@ -352,7 +352,7 @@ std::tuple<Tensor, Tensor> choose_qparams_optimized(
   // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   int min_bins = n_bins * (1.0 - (float) ratio);
   Tensor input_tensor_contig = input_tensor.contiguous();
-  const float* input = input_tensor_contig.data_ptr<float>();
+  const float* input = input_tensor_contig.const_data_ptr<float>();
   std::vector<float> q_input(numel);
 
   float loss =
