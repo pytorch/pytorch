@@ -2374,7 +2374,7 @@ def gen_source_files(
 
             def get_header(
                 func: NativeFunction,
-                func_group: NativeFunctionsGroup,
+                func_group: Optional[NativeFunctionsGroup],
             ) -> Optional[str]:
                 backend_index = get_backend_index_for_aoti(
                     func, func_group, dispatch_key, backend_indices

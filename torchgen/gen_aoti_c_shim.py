@@ -302,7 +302,7 @@ def gen_static_dispatch_backend_call(
 
 def get_backend_index_for_aoti(
     func: NativeFunction,
-    func_group: NativeFunctionsGroup,
+    func_group: Optional[NativeFunctionsGroup],
     dispatch_key: DispatchKey,
     backend_indices: Dict[DispatchKey, BackendIndex],
 ) -> Optional[BackendIndex]:
@@ -392,7 +392,7 @@ class ShimGenerator:
 
 
 def gen_aoti_c_shim(
-    native_functions: Sequence[Tuple[NativeFunction, NativeFunctionsGroup]],
+    native_functions: Sequence[Tuple[NativeFunction, Optional[NativeFunctionsGroup]]],
     dispatch_key: DispatchKey,
     backend_indices: Dict[DispatchKey, BackendIndex],
     header: bool,
