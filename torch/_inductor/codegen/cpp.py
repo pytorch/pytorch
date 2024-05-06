@@ -2584,8 +2584,7 @@ class CppVecKernel(CppKernel):
         index = self.rename_indexing(index)
         var = self.args.output(name)
         out_dtype = V.graph.get_dtype(name)
-        # Only float reductions are vectorized currently
-        dtype = torch.float
+        dtype = torch.float if out_dtype.is_floating_point else torch.int64
         code = IndentedBuffer()
         if self.tiling_idx >= self.reduction_depth:
             # Horizontal reduction
@@ -2595,16 +2594,11 @@ class CppVecKernel(CppKernel):
         else:
             # Vertical reduction
             if out_dtype != dtype:
-                if out_dtype in DTYPE_LOWP_FP and dtype == torch.float:
-                    _lowp_fp_tmpvar_vec = f"{DTYPE_TO_CPP[out_dtype]}_{value}"
-                    code.writeline(
-                        f"auto {_lowp_fp_tmpvar_vec} = at::vec::convert<{DTYPE_TO_CPP[out_dtype]}>({value});"
-                    )
-                    value = _lowp_fp_tmpvar_vec
-                else:
-                    raise AssertionError(
-                        f"Unsupported reduction type from {dtype} to {out_dtype}"
-                    )
+                converted_value = f"{DTYPE_TO_CPP[out_dtype]}_{value}"
+                code.writeline(
+                    f"auto {converted_value} = at::vec::convert<{DTYPE_TO_CPP[out_dtype]}>({value});"
+                )
+                value = converted_value
             code.splice(self._get_store_line(value, var, index, out_dtype))
         self.reduction_suffix.splice(code.map(lambda x: DeferredLine(name, x)))
 
