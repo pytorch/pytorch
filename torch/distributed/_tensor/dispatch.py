@@ -1,7 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import functools
 import operator
-from typing import cast, Dict, List, Optional, Sequence, Tuple
+from typing import cast, Dict, List, Optional, Sequence, Tuple, TYPE_CHECKING
 
 import torch
 
@@ -24,7 +24,9 @@ from torch.distributed._tensor.tp_conv import (
     convolution_backward_handler,
     convolution_handler,
 )
-from torch.distributed.device_mesh import DeviceMesh
+
+if TYPE_CHECKING:
+    from torch.distributed.device_mesh import DeviceMesh
 
 try:
     from torch.utils import _cxx_pytree as pytree

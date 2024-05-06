@@ -303,7 +303,7 @@ class NCCLComm {
   }
 #endif
 
-#if defined(IS_NCCL_EXP) && defined(NCCL_COMM_DUMP)
+#if defined(IS_NCCLX) && defined(NCCL_COMM_DUMP)
   std::unordered_map<std::string, std::string> ncclCommDump() {
     std::unordered_map<std::string, std::string> dump;
     if (isAborted()) {
