@@ -68,6 +68,7 @@ from torch.utils._traceback import format_frame, CapturedTraceback
 from torch._utils_internal import signpost_event
 from torch._subclasses.meta_utils import is_sparse_any
 import torch.utils._pytree as pytree
+from torch.utils._sympy.symbol import SymT, make_symbol, symbol_is_type
 
 from torch._logging import LazyString
 
@@ -439,7 +440,7 @@ def has_free_symbols(val: Union[SymInt, torch.Tensor]) -> bool:
 # Like free_symbols, but filtered to only report unbacked symbols
 def free_unbacked_symbols(x):
     # NB: keep synced with is_unbacked_symint
-    return {s for s in free_symbols(x) if s.name.startswith(("u", "f"))}
+    return {s for s in free_symbols(x) if symbol_is_type(s, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT))}
 
 # WARNING: Don't use this on Dynamo produced graphs, they don't have meta
 # setup!
@@ -496,7 +497,7 @@ class DivideByKey:
         return o // self.divisor
 
 
-def compute_unbacked_bindings(shape_env, example_value, old_example_value=None):
+def compute_unbacked_bindings(shape_env, example_value, old_example_value=None, peek=False):
     """
     After having run fake tensor propagation and producing example_value
     result, traverse example_value looking for freshly bound unbacked
@@ -505,40 +506,51 @@ def compute_unbacked_bindings(shape_env, example_value, old_example_value=None):
     example_value.  (NB: this means if you have a multi-output
     function, you must call this on the tuple of tensor output, you
     cannot wait!)
+
+    The peek parameter lets you check out what the bindings are without
+    changing the affected list.  This is primarily useful for ensuring
+    unbacked_var_to_val is promptly populated when propagate_real_tensors is on.
     """
+    if shape_env is None:
+        return
     if shape_env._ignore_fresh_unbacked_symbols_tls():
         return
     fs = shape_env.pending_fresh_unbacked_symbols
     pending = set(fs)
     if pending:
-        log.info("compute_unbacked_bindings %s", fs)
-        fs.clear()
+        if not peek:
+            log.info("compute_unbacked_bindings %s", fs)
+            fs.clear()
 
         def free_unbacked_symbols_with_path(
-            a, path
+            a, path, real=None
         ) -> Dict[sympy.Symbol, pytree.KeyPath]:
             r = {}
             if isinstance(a, (tuple, list)):
                 for i in range(len(a)):
                     r.update(
                         free_unbacked_symbols_with_path(
-                            a[i], path + (pytree.SequenceKey(i),)
+                            a[i], path + (pytree.SequenceKey(i),),
+                            real=real[i] if real is not None else None
                         )
                     )
             elif isinstance(a, torch.Tensor):
                 r.update(
                     free_unbacked_symbols_with_path(
-                        a.size(), path + (CallMethodKey("size"),)
+                        a.size(), path + (CallMethodKey("size"),),
+                        real=a.real_tensor.size() if a.real_tensor is not None else None
                     )
                 )
                 r.update(
                     free_unbacked_symbols_with_path(
-                        a.stride(), path + (CallMethodKey("stride"),)
+                        a.stride(), path + (CallMethodKey("stride"),),
+                        real=a.real_tensor.stride() if a.real_tensor is not None else None
                     )
                 )
                 r.update(
                     free_unbacked_symbols_with_path(
-                        a.storage_offset(), path + (CallMethodKey("storage_offset"),)
+                        a.storage_offset(), path + (CallMethodKey("storage_offset"),),
+                        real=a.real_tensor.storage_offset() if a.real_tensor is not None else None
                     )
                 )
 
@@ -550,6 +562,8 @@ def compute_unbacked_bindings(shape_env, example_value, old_example_value=None):
                 and s in pending
             ):
                 r[s] = path
+                if real is not None:
+                    shape_env.set_unbacked_var_to_val(s, real)
                 pending.remove(s)
             # When an unbacked SymInt is perfectly divisible by an integer
             # constant, we replace it with the integer constant to improve
@@ -566,6 +580,8 @@ def compute_unbacked_bindings(shape_env, example_value, old_example_value=None):
             ):
                 # TODO: DivideByKey needs to test divisibility at runtime!
                 r[s] = path + (DivideByKey(int(lhs)),)
+                if real is not None:
+                    shape_env.set_unbacked_var_to_val(s, real // int(lhs))
                 pending.remove(rhs)
             # The annoyance here arises from the fact that SymBool is
             # allocated by allocating a SymInt and then testing if it's equal
@@ -579,6 +595,8 @@ def compute_unbacked_bindings(shape_env, example_value, old_example_value=None):
                 and s.lhs in pending
             ):
                 r[s.lhs] = path + (ConvertIntKey(),)
+                if real is not None:
+                    shape_env.set_unbacked_var_to_val(s, int(real))
                 pending.remove(s.lhs)
 
             return r
@@ -592,24 +610,35 @@ def compute_unbacked_bindings(shape_env, example_value, old_example_value=None):
                 else ""
             )
         )
-        # TODO: This is pretty fragile
-        # Normally, the equality test is supposed to be a no-op here, because
-        # you've already called rebind_unbacked first which takes all the old
-        # binding sites and discovers how they are newly bound.  But this does
-        # not always work.  For example, if the original FX node wasn't a
-        # binding site because you had a memo hit, but post translation you
-        # aren't a memo hit anymore, there's now a new binding site... but we
-        # know (because it's the same FX node) that the value is actually the
-        # same, they're just not obviously equal anymore.  So we just insert
-        # a runtime assert in this case.
+        # Why do we have to do some rebinding here?  If the original FX node
+        # wasn't a binding site because you had a memo hit, but post
+        # translation you aren't a memo hit anymore, there's now a new binding
+        # site... but we know (because it's the same FX node) that the value
+        # is actually the same, they're just not obviously equal anymore.
         #
-        # This is very fragile, because u0 == u1 assertion does not generate
-        # a replacement.  Here, I think it might be acceptable to do a
-        # replacement, so long as we replace the newer thing with the older
-        # thing.  Fix this if it becomes an issue.
+        # The logic here is written carefully, because unlike the
+        # bind_unbacked case, we are not guaranteed to have a symbol for
+        # old_sym.  If we have a symbol, do regular rename unbacked to; but if
+        # we don't, we need to specially eliminate the fresh unbacked symbol
+        # (NB: we are /trusting/ that the memoization is correct, and that we
+        # don't need to generate a new runtime assert.  This is load bearing,
+        # as repropagation can happen after we've frozen runtime asserts.)
         if old_example_value is not None:
             for keypath in symbol_to_path.values():
-                torch._check(pytree.key_get(old_example_value, keypath) == pytree.key_get(example_value, keypath))
+                old_sym = pytree.key_get(old_example_value, keypath)
+                new_sym = pytree.key_get(example_value, keypath)
+                if (
+                    isinstance(new_sym, SymTypes) and
+                    isinstance(new_s := new_sym.node.expr, sympy.Symbol)
+                ):
+                    if isinstance(old_sym, SymTypes) and (old_s := old_sym.node.expr) != new_s:
+                        if isinstance(old_s, sympy.Symbol):
+                            shape_env._rename_unbacked_to(new_s, old_s)
+                        else:
+                            shape_env._eliminate_unbacked(new_s, old_s)
+                    elif not isinstance(old_sym, SymTypes):
+                        shape_env._eliminate_unbacked(new_s, sympy.sympify(old_sym))
+
         return symbol_to_path
 
 def definitely_true(a):
@@ -1300,6 +1329,8 @@ def _sympy_cast_symbool_to_symint_guardless(x: sympy.Expr) -> sympy.Expr:
 
 
 def cast_symbool_to_symint_guardless(symbool: torch.SymBool) -> torch.SymInt:
+    if isinstance(symbool, bool):
+        return 1 if symbool else 0
     int_sym = _sympy_cast_symbool_to_symint_guardless(symbool.node.expr)
     return symbool.node.shape_env.create_symintnode(int_sym, hint=int(symbool.node.require_hint()) if has_hint(symbool) else None)
 
@@ -1631,7 +1662,7 @@ class DimConstraints:
                 # We are given a congruence of the form base % divisor == 0 with a free variable s. So:
                 # - we transform this into an equation of the form base = divisor * tmp;
                 # - we solve this equation for s to get a linear solution with free variable tmp.
-                tmp = sympy.Symbol("tmp", integer=True)
+                tmp = sympy.Symbol("reduce_congruences_tmp", integer=True)
                 symbol, solution = sympy.solve_linear(base - divisor * tmp, symbols=[s])
                 # See https://docs.sympy.org/latest/modules/solvers/solvers.html#sympy.solvers.solvers.solve_linear
                 # for how to interpret the results.
@@ -2173,6 +2204,9 @@ class ShapeEnv:
         # Maps symbolic ints to their original concrete values
         # Currently populated from tensors
         self.var_to_val: Dict[sympy.Symbol, sympy.Integer] = {}
+        # Like var_to_val, but only set when propagate_real_tensors is on.
+        # Used as last resort to avoid GuardOnDataDependent error
+        self.unbacked_var_to_val: Dict[sympy.Symbol, sympy.Integer] = {}
         # Maps symbolic ints to their min/max range.  These ranges
         # are conservative: the int MUST fall in the range, but the
         # range may contain ints which may not actually appear in
@@ -2233,6 +2267,7 @@ class ShapeEnv:
         self.log = log
         self.log.debug("create_env")
         self.frozen = False
+        self.runtime_asserts_frozen = False
         self.dim_constraints: Optional[DimConstraints] = None
         self.counter = collections.Counter()
         # Mapping from sympy.Symbol to the number of guards which mention this
@@ -2274,6 +2309,33 @@ class ShapeEnv:
         # duplicated nodes.
         self.fx_node_cache: Dict[Tuple[Callable, Tuple[Any, ...]], torch.fx.Node] = {}
         self.source_to_symbol: Dict[str, sympy.Symbol] = {}
+
+        # Suppose you want to replace an unbacked symbol with another
+        # unbacked symbol.  This is error prone because you can cause
+        # references to unbacked symbols to time travel backwards.  E.g.,
+        #
+        # u1 = x.item()
+        # ... use of u1 ...
+        # u2 = y.item()
+        # u3 = z.item()
+        # torch._check(u1 == u2 + u3)
+        #
+        # If you replace u1 with u2 + u3, then the use of u1 now
+        # references u2 and u3 prior to them actually being bound at
+        # runtime.
+        #
+        # To control for this, we track the order unbacked symbols
+        # were allocated, and only allow substitutions if they respect
+        # the dependency from this order; an unbacked symbol can only
+        # be substituted with unbacked symbols that come before it in the
+        # order.
+        #
+        # This also imposes an ordering on the unbacked symbol binding
+        # sites themselves: you are not allowed to reorder unbacked symbol
+        # bindings.  At the moment, this is not tracked, but we potentially
+        # could track this at the IR level using a higher order operator
+        # with something like effect token tracking.
+        self.unbacked_alloc_order: Dict[sympy.Symbol, int] = {}
 
         from torch.fx.experimental.validator import translation_validation_enabled
         self._translation_validation_enabled = translation_validation_enabled()
@@ -2344,6 +2406,7 @@ class ShapeEnv:
             "source_name_to_debug_name",
             "_prev_cache_key",
             "_version_counter",
+            "dim_constraints",
         )
 
         # Mapping of the value of each to-be-compared field into the values that
@@ -2405,6 +2468,16 @@ class ShapeEnv:
             yield
         finally:
             self.is_recording = False
+
+    @record_shapeenv_event()
+    def _eliminate_unbacked(self, orig_s: sympy.Symbol, new_s: sympy.Expr):
+        self._set_replacement(orig_s, new_s, "eliminate_unbacked")
+
+    @record_shapeenv_event()
+    def set_unbacked_var_to_val(self, k: sympy.Symbol, v: int) -> None:
+        """Used only when propagate_real_tensors; registers a value for an
+        unbacked symbol, which can be used last resort to resolve hints."""
+        self.unbacked_var_to_val[k] = v
 
     # Unlike set_replacement, this records a shapeenv event
     @record_shapeenv_event()
@@ -2526,6 +2599,17 @@ class ShapeEnv:
         """
         self.frozen = True
 
+    @record_shapeenv_event()
+    def freeze_runtime_asserts(self):
+        """Freeze this ShapeEnv to stop adding deferred runtime asserts.
+
+        We will error if you try to install a new runtime assert when it is
+        frozen.  This would indicate a lowering violation, or perhaps something
+        we know statically is already True but we are checking it again in a way
+        that is not clearly dischargeable.
+        """
+        self.runtime_asserts_frozen = True
+
     def _create_symbol_for_source(self, source: Source) -> Optional[sympy.Symbol]:
         if not self._translation_validation_enabled:
             return None
@@ -2643,7 +2727,7 @@ class ShapeEnv:
         Defines the current "state" of the guards we've accumulated in this ShapeEnv.
         Determines when we need to invalidate our cache
         """
-        return (len(self.replacements), len(self.divisible), self.num_deferred_runtime_asserts)
+        return (len(self.replacements), len(self.divisible), self.num_deferred_runtime_asserts, len(self.unbacked_var_to_val))
 
     def _update_version_counter(self):
         # The shape environment is queried orders of magnitude more often than
@@ -2942,7 +3026,7 @@ class ShapeEnv:
     def create_unbacked_symfloat(self):
         """Create a symbolic float without a hint value
         """
-        symbol: sympy.Symbol = sympy.Symbol(f"f{next(self.unbacked_symfloat_counter)}")
+        symbol: sympy.Symbol = make_symbol(SymT.UNBACKED_FLOAT, next(self.unbacked_symfloat_counter))
         self.counter["create_unbacked_symbol"] += 1
         if not self._ignore_fresh_unbacked_symbols_tls():
             self.pending_fresh_unbacked_symbols.append(symbol)
@@ -2960,7 +3044,7 @@ class ShapeEnv:
     def create_unbacked_symint(self):
         """Create a symbolic integer without a hint value
         """
-        symbol: sympy.Symbol = sympy.Symbol(f"u{next(self.unbacked_symint_counter)}", integer=True)
+        symbol: sympy.Symbol = make_symbol(SymT.UNBACKED_INT, next(self.unbacked_symint_counter), integer=True)
         if not self._ignore_fresh_unbacked_symbols_tls():
             self.pending_fresh_unbacked_symbols.append(symbol)
         self.counter["create_unbacked_symbol"] += 1
@@ -2977,14 +3061,13 @@ class ShapeEnv:
     def is_unbacked_symint(self, symbol: sympy.Symbol) -> bool:
         """Check if a sympy symbol matches the naming convention for unbacked symbols
         """
-        # NB: keep synced with free_unbacked_symbols
-        return str(symbol).startswith("u")
+        return symbol_is_type(symbol, SymT.UNBACKED_INT)
 
     @record_shapeenv_event()
     def create_unbacked_symbool(self):
         """Create a symbolic boolean without a hint value
         """
-        symbol: sympy.Symbol = sympy.Symbol(f"u{next(self.unbacked_symint_counter)}", integer=True)
+        symbol: sympy.Symbol = make_symbol(SymT.UNBACKED_INT, next(self.unbacked_symint_counter), integer=True)
         if not self._ignore_fresh_unbacked_symbols_tls():
             self.pending_fresh_unbacked_symbols.append(symbol)
         self.counter["create_unbacked_symbol"] += 1
@@ -3096,7 +3179,7 @@ class ShapeEnv:
             # If we're not duck shaping, we always create a new symbol
             # Even if we're duck shaping, if we haven't seen this particular
             # value before, we also create a new symbol
-            sympy_expr = sympy.Symbol(f"s{len(self.var_to_val)}", positive=positive, integer=True)
+            sympy_expr = make_symbol(SymT.SIZE, len(self.var_to_val), positive=positive, integer=True)
             # We always associate vars to vals
             if isinstance(val, int):
                 self.var_to_val[sympy_expr] = sympy.Integer(val)
@@ -3341,7 +3424,7 @@ class ShapeEnv:
         # TODO: Make this more efficient by binding all the size/stride/offsets
         # to locals before performing tests on them.
 
-        from torch._dynamo.source import TensorPropertySource, TensorProperty, NegateSource
+        from torch._dynamo.source import TensorPropertySource, TensorProperty
 
         # Actual codegen must be delayed as we don't necessarily know what
         # the symbol mapping is
@@ -3434,8 +3517,6 @@ class ShapeEnv:
                     symbol_to_source[s].append(source)
                     if constraint is not None:
                         symbol_to_constraints[s].add(constraint)
-                elif isinstance(-s, sympy.Symbol):
-                    symbol_to_source[-s].append(NegateSource(source))
                 else:
                     constraint_violated = False
                     if isinstance(constraint, StrictMinMaxConstraint):
@@ -3623,6 +3704,12 @@ class ShapeEnv:
 
             # Avoid re-issueing the same guard.
             if expr in issued:
+                return
+
+            # When propagate_real_tensors is on, we may end up with guards on
+            # data dependent variables.  These guards are unissuable, so just ignore them
+            if free_unbacked_symbols(expr):
+                log.warning("propagate_real_tensors: ignoring guard %s", expr)
                 return
 
             issued.add(expr)
@@ -4007,7 +4094,7 @@ class ShapeEnv:
             # we have to increase it by offset (and conversely, the new
             # variables have to have their value range bounds adjusted as
             # well)
-            s = sympy.Symbol(f"shape_{idx}", positive=True, integer=True)
+            s = sympy.Symbol(f"evaluate_static_shape_{idx}", positive=True, integer=True)
 
             # Note:
             #   Offset might be a fraction(e.g. aten.split.Tensor), but shapes are always integers.
@@ -4126,6 +4213,13 @@ class ShapeEnv:
                 return r
             if allow_none:
                 return None
+
+            if self.unbacked_var_to_val:
+                unsound_expr = result_expr.xreplace(self.unbacked_var_to_val)
+                if not unsound_expr.free_symbols:
+                    log.warning("propagate_real_tensors size_hint(%s) -> %s", expr, unsound_expr)
+                    return unsound_expr
+
             raise self._make_data_dependent_error(result_expr, expr)
         return result_expr
 
@@ -4627,6 +4721,7 @@ class ShapeEnv:
                     assert static_expr == hint, f"{static_expr} != {hint}"
                 return static_expr
 
+            concrete_val = None
             if not (expr.free_symbols <= self.var_to_val.keys()):
                 # TODO: dedupe this with _maybe_evaluate_static
                 # Attempt to eliminate the unbacked SymInt
@@ -4640,14 +4735,24 @@ class ShapeEnv:
                             size_oblivious=True
                         )
 
-                    raise self._make_data_dependent_error(
-                        expr.xreplace(self.var_to_val),
-                        expr,
-                        size_oblivious_result=size_oblivious_result
-                    )
-                expr = new_expr
+                    # Last ditch
+                    if (
+                        self.unbacked_var_to_val and
+                        not (unsound_result := orig_expr.xreplace(self.unbacked_var_to_val)).free_symbols
+                    ):
+                        log.warning("propagate_real_tensors evaluate_expr(%s) -> %s", orig_expr, unsound_result)
+                        concrete_val = unsound_result
+                    else:
+                        raise self._make_data_dependent_error(
+                            expr.xreplace(self.var_to_val),
+                            expr,
+                            size_oblivious_result=size_oblivious_result
+                        )
+                else:
+                    expr = new_expr
 
-            concrete_val = compute_concrete_val()
+            if concrete_val is None:
+                concrete_val = compute_concrete_val()
             self._check_frozen(expr, concrete_val)
 
             if (
@@ -4763,6 +4868,10 @@ class ShapeEnv:
         # NB: Don't use new_expr as expr; it could contain gunk like shape0
         # which we don't want to guard on
 
+        # If you're here because of this assert, read Note [Backwards runtime asserts]
+        # in torch/_inductor/graph.py
+        assert not self.runtime_asserts_frozen, expr
+
         # OK, we're definitely doing a runtime assert now
         if (
             self._translation_validation_enabled
@@ -4787,7 +4896,7 @@ class ShapeEnv:
             stack = CapturedTraceback.extract(skip=1)
             ra = RuntimeAssert(expr, msg, stack)
             # TODO: Do this in a way that is less janky than int(s.name[1:])
-            cands = sorted([s for s in expr.free_symbols if s.name.startswith("u")], key=lambda s: int(s.name[1:]))
+            cands = sorted((s for s in expr.free_symbols if symbol_is_type(s, SymT.UNBACKED_INT)), key=lambda s: int(s.name[1:]))
             # Is None when prefer_deferred_runtime_asserts_over_guards=True
             # and the guard in question has no unbacked SymInts in front
             ix = cands[-1] if cands else None
