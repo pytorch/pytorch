@@ -47,7 +47,9 @@ class ComputeNativeFunctionStub:
                     # Returns an empty tensor
                     ret_name = "at::Tensor()"
                 else:
-                    raise Exception(f"Can't handle this return type {f.func}")
+                    raise Exception(  # noqa: TRY002
+                        f"Can't handle this return type {f.func}"
+                    )  # noqa: TRY002
         elif len(f.func.arguments.out) == len(f.func.returns):
             # Returns a tuple of out arguments
             tensor_type = "at::Tensor &"

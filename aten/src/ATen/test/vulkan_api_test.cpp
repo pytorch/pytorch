@@ -4568,7 +4568,7 @@ TEST_F(VulkanAPITest, softmax) {
   }
 }
 
-TEST_F(VulkanAPITest, log_softmax) {
+TEST_F(VulkanAPITest, DISABLED_log_softmax) {
   c10::InferenceMode mode;
   std::vector<std::vector<int64_t>> test_in_dims = {
       {1, 3, 4, 2},

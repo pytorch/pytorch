@@ -306,6 +306,7 @@ class _SplitterBase:
         operator_support: OperatorSupportBase,
         settings: _SplitterSettingBase,
         non_acc_submodule_name: str = "_run_on_cpu_",
+        return_tuple: bool = False,
     ):
         """
         Preprocesses graph before splitting:
@@ -336,6 +337,7 @@ class _SplitterBase:
 
         self.non_acc_submodule_name = non_acc_submodule_name
         self._node_submodule_map: Dict[str, str] = {}
+        self._return_tuple = return_tuple
 
     # ===============================================================
     # Helpers for ctor and initial state
@@ -846,7 +848,7 @@ class _SplitterBase:
                 self._node_submodule_map[node.name] = tag
 
     def split(self, remove_tag: bool = False) -> torch.fx.GraphModule:
-        split_module = split_by_tags(self.module, self.tags)
+        split_module = split_by_tags(self.module, self.tags, return_tuple=self._return_tuple)
         if remove_tag:
             for node in self.module.graph.nodes:
                 if hasattr(node, "tag"):

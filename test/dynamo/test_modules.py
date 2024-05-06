@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import collections
+import copy
 import itertools
 import traceback
 import types
@@ -25,6 +26,16 @@ try:
     from . import test_functions
 except ImportError:
     import test_functions
+
+
+_variable = 0
+_variable1 = 0
+
+
+def update_global():
+    global _variable, _variable1
+    _variable += 1
+    _variable1 += 1
 
 
 class BasicModule(torch.nn.Module):
@@ -910,8 +921,10 @@ class SelfMutatingModule(torch.nn.Module):
 
 
 class ModuleAttributePrecedenceBase(torch.nn.Module):
-    def linear(self, x):
-        return x * 2.0
+    def linear(self, x, flag=None):
+        if flag:
+            return x * 2.0
+        return x * 3.0
 
 
 class ModuleAttributePrecedence(ModuleAttributePrecedenceBase):
@@ -1593,6 +1606,50 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch._dynamo.testing.same(mod(x), opt_mod(x)))
         self.assertEqual(cnt.frame_count, 1)
 
+    @torch._dynamo.config.patch(guard_nn_modules=True)
+    def test_attr_precedence(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = 3
+
+            def forward(self, x, c=4):
+                return x * c
+
+            def linear(self, x):
+                return x
+
+            def b(self, x):
+                raise RuntimeError("Should not be called")
+
+        class MyMod(Mod):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(11, 11)
+                self.a = 2
+                self.b = 2
+                self.scale = 1
+
+            def scale(self, x):
+                # Should not be called because it is shadowed by the instance
+                # attribute
+                raise RuntimeError("Should not be called")
+
+            def forward(self, x, c=None):
+                return self.linear(x) * self.a * self.b * self.scale
+
+        mod = MyMod()
+        x = torch.ones(3, 3)
+        ref = mod(x)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_mod = torch.compile(mod, backend=cnts)
+        opt_mod(torch.ones(3, 3))
+        res = opt_mod(torch.ones(3, 3))
+
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(ref, res)
+
     def test_to(self):
         mod = MockModule()
         cnt = torch._dynamo.testing.CompileCounter()
@@ -1619,6 +1676,126 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         torch._dynamo.reset()
         opt_mod(x)
         self.assertEqual(cnt.frame_count, 3)
+
+    @torch._dynamo.config.patch(guard_nn_modules=True)
+    def test_param_order(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param1 = torch.nn.Parameter(torch.ones([1]))
+                self.param2 = torch.nn.Parameter(torch.ones([2]))
+
+            def forward(self, x):
+                return x
+
+        mod = MyModule()
+        coeffs = [2, 3]
+
+        def fn(x):
+            for idx, p in enumerate(mod.parameters()):
+                x += p.sum() * coeffs[idx]
+
+            for idx, p in enumerate(mod.named_parameters()):
+                x += p[1].sum() * coeffs[idx]
+
+            return x
+
+        ref = fn(torch.ones(1))
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        res = opt_fn(torch.ones(1))
+
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 1)
+
+        mod._parameters["param1"] = mod._parameters.pop("param1")
+        ref = fn(torch.ones(1))
+        res = opt_fn(torch.ones(1))
+
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 2)
+
+    @torch._dynamo.config.patch(guard_nn_modules=True)
+    def test_buffer_order(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("b1", torch.ones([1]))
+                self.register_buffer("b2", torch.ones([2]))
+
+            def forward(self, x):
+                return x
+
+        mod = MyModule()
+        coeffs = [2, 3]
+
+        def fn(x):
+            for idx, p in enumerate(mod.buffers()):
+                x += p.sum() * coeffs[idx]
+
+            for idx, p in enumerate(mod.named_buffers()):
+                x += p[1].sum() * coeffs[idx]
+
+            return x
+
+        ref = fn(torch.ones(1))
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        res = opt_fn(torch.ones(1))
+
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 1)
+
+        mod._buffers["b1"] = mod._buffers.pop("b1")
+        ref = fn(torch.ones(1))
+        res = opt_fn(torch.ones(1))
+
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 2)
+
+    @torch._dynamo.config.patch(guard_nn_modules=True)
+    def test_module_order(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(3, 3)
+                self.linear2 = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                return x
+
+        mod = MyModule()
+        coeffs = [2, 3, 4]
+
+        coeffs_for_mod = {mod: 10, mod.linear1: 20, mod.linear2: 30}
+
+        # Check order of _modules
+        def fn(x):
+            for idx, p in enumerate(mod.modules()):
+                # Something silly to force depedency on the order
+                x += coeffs_for_mod[p] * coeffs[idx]
+            for idx, p in enumerate(mod.named_modules()):
+                x += coeffs_for_mod[p[1]] * coeffs[idx]
+            for idx, p in enumerate(mod.children()):
+                x += coeffs_for_mod[p] * coeffs[idx]
+            for idx, p in enumerate(mod.named_children()):
+                x += coeffs_for_mod[p[1]] * coeffs[idx]
+            return x
+
+        ref = fn(torch.ones(1))
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        res = opt_fn(torch.ones(1))
+
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 1)
+
+        mod._modules["linear1"] = mod._modules.pop("linear1")
+        ref = fn(torch.ones(1))
+        res = opt_fn(torch.ones(1))
+
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 2)
 
     def test_attr(self):
         class MockModule(torch.nn.Module):
@@ -1950,6 +2127,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled_func(inp).item(), 16)
         self.assertRegex(failure_reason, r"^___check_obj_id\(L\['m'\]._forward_hooks")
 
+    @patch.object(torch._dynamo.config, "guard_nn_modules", False)
     @patch.object(torch._dynamo.config, "skip_nnmodule_hook_guards", True)
     def test_hooks_skip_guards(self):
         class TestModule(torch.nn.Module):
@@ -2213,6 +2391,33 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertTrue(grad_sizes.keys() == backward_hook_handles.keys())
         self.assertTrue(pre_grad_sizes.keys() == pre_backward_hook_handles.keys())
 
+    def test_udo_instance_method_as_hook(self):
+        class CustomClass:
+            def __init__(self, module):
+                self.module = module
+                self.handle = self.module.register_forward_pre_hook(
+                    self.func1, prepend=True, with_kwargs=True
+                )
+
+            def func1(self, module, args, kwargs):
+                return (args[0] + 1,), kwargs
+
+            def __call__(self, x):
+                return self.module(x)
+
+        class ToyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x * x
+
+        model = ToyModel()
+        x = torch.zeros((3, 4))
+        obj = CustomClass(model)
+        out = torch.compile(obj, fullgraph=True)(x)
+        self.assertEqual(out, (x + 1) * (x + 1))
+
     def test_module_dict_iter_name(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -2376,6 +2581,52 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         mod.eval()
         generate(torch.randn(10, 10), 0)
         self.assertEqual(cnt.frame_count, 3)
+
+    def test_setattr_on_compiled_module(self):
+        # https://github.com/pytorch/pytorch/issues/114844
+
+        class ReplayMutation(torch.nn.Module):
+            def __init__(self, inp_size, out_size, inner_size):
+                super().__init__()
+                self.Linear1 = torch.nn.Linear(inp_size, inner_size)
+                self.Linear2 = torch.nn.Linear(inner_size, out_size)
+                self.x = None
+
+            def forward(self, inp):
+                res = self.Linear1(inp)
+                self.x = res
+                return self.Linear2(res)
+
+        N, D_in, H, D_out, inner = 2, 2, 2, 2, 4
+        model = ReplayMutation(D_in, H, inner)
+        model2 = copy.deepcopy(model)
+        input = torch.ones(N, D_in)
+
+        # Keep some intermediate value in model.x
+        model.x = torch.tensor([[100, 100, 100, 100], [200, 200, 200, 200]])
+        model(input)
+
+        compiled_model = torch.compile(model2, backend="eager")
+        compiled_model.x = torch.tensor([[100, 100, 100, 100], [200, 200, 200, 200]])
+        compiled_model(input)
+
+        self.assertEqual(model.x, compiled_model.x)
+
+    def test_globals_change_in_other_file(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            update_global()
+            a = test_functions.update_global(x)
+            # Ensure that the updated global values are read
+            return x * a * (_variable + _variable1 + test_functions._variable)
+
+        res = fn(torch.ones(10))
+        self.assertEqual(_variable, 1)
+        self.assertEqual(_variable1, 1)
+        # Ensure that the reconstructed bytecode updates the global value in the
+        # other file.
+        self.assertEqual(test_functions._variable, 1)
+        self.assertEqual(res, 3 * torch.ones(10))
 
 
 if __name__ == "__main__":
