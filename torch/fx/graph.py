@@ -306,6 +306,9 @@ class _ParsedStackTrace:
     name: str
     code: str
 
+    def get_summary_str(self):
+        return f'File: {self.file}:{self.lineno} in {self.name}, code: {self.code}'
+
 # get File:lineno code from stack_trace
 def _parse_stack_trace(stack_trace: str):
     if stack_trace is None:
@@ -521,13 +524,8 @@ class CodeGen:
                         prev_stacktrace = node.stack_trace
                         summary_str = ""
 
-                        parsed_stack_trace = _parse_stack_trace(node.stack_trace)
-
-                        if parsed_stack_trace is not None:
-                            lineno = parsed_stack_trace.lineno
-                            code = parsed_stack_trace.code
-                            name = parsed_stack_trace.name
-                            summary_str = f'File: {parsed_stack_trace.file}:{lineno} in {name}, code: {code}'
+                        if parsed_stack_trace := _parse_stack_trace(node.stack_trace):
+                            summary_str = parsed_stack_trace.get_summary_str()
 
                         body.append(f'\n# {summary_str}\n')
                 elif prev_stacktrace != "":
@@ -546,7 +544,7 @@ class CodeGen:
                 from torch.fx.experimental.proxy_tensor import py_sym_types
                 from torch.fx.passes.shape_prop import TensorMetadata
 
-                meta_val = node.meta.get('val', node.meta.get('tensor_meta', None))
+                meta_val = node.meta.get('val', node.meta.get('tensor_meta', node.meta.get('example_value', None)))
                 # use string as annotation, to make it valid python code
                 if isinstance(meta_val, FakeTensor):
                     stride_annotation = f"{stringify_shape(meta_val.stride())}" if include_stride else ""

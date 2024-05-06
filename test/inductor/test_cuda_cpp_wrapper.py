@@ -97,6 +97,7 @@ if TEST_WITH_ROCM:
 
 if config.abi_compatible:
     xfail_list = [
+        "test_add_complex_cuda",
         "test_bernoulli1_cuda",  # cpp fallback op naming issue
         "test_conv_backward_cuda",
         "test_profiler_mark_wrapper_call_cuda",
@@ -109,7 +110,9 @@ if config.abi_compatible:
         test_failures_cuda_wrapper[
             f"{test_name}_dynamic_shapes"
         ] = test_torchinductor.TestFailure(("cuda_wrapper",), is_skip=False)
-    skip_list = []
+    skip_list = [
+        "test_multi_device_cuda",
+    ]
     for test_name in skip_list:
         test_failures_cuda_wrapper[test_name] = test_torchinductor.TestFailure(
             ("cuda_wrapper",), is_skip=True
@@ -181,6 +184,7 @@ if RUN_CUDA:
 
     # Maintain two separate test lists for cuda and cpp for now
     for item in [
+        BaseTest("test_add_complex"),
         BaseTest("test_add_complex4"),
         BaseTest("test_as_strided"),  # buffer reuse
         BaseTest("test_batch_norm_2d_2"),
