@@ -4540,7 +4540,6 @@ class TestCudaOptims(TestCase):
                 kwargs["betas"] = (0.8, 0.7)
             with self.subTest(optimizer_ctor=optim_cls, kwargs=kwargs):
                 self._test_graphed_optims(3, 2, optim_cls, kwargs)
-            # print(optim_cls,kwargs)
 
     @onlyCUDA
     @unittest.skipIf(
