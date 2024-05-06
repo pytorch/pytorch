@@ -807,6 +807,7 @@ class TorchBindOpOverload(OpOverload):
             DispatchKey.AutogradCPU,
             DispatchKey.AutogradCUDA,
             DispatchKey.ADInplaceOrView,
+            DispatchKey.BackendSelect,
             DispatchKey.PythonTLSSnapshot,
             DispatchKey.PythonDispatcher,
         ]
@@ -889,8 +890,13 @@ class TorchBindOpOverload(OpOverload):
                 )
 
             raise RuntimeError(
-                f"Cannot handle FakeScriptObject with python dispatcher with dispatch key {handler}."
-                f"Please implement it by annotating a python callable with py_impl({handler})."
+                f"Torchbind op {self} received a FakeScriptObject input when dispatching {handler}."
+                f" but no python implementation is found."
+                f" Please file an issue on this when you encounter this error."
+                f" This error can happen when you export or compile the model."
+                f" It can still happpen even if a C++ implementation for {dispatch_key}. "
+                f" has been registered. That's because FakeScriptObject purely lives in python and cannot work "
+                f" with a C++ implementation."
             )
 
         assert isinstance(handler, Callable)  # type: ignore[arg-type]
