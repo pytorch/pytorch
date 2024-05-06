@@ -1339,7 +1339,7 @@ def draw_graph(
             node.meta = {}
     base, ext = os.path.splitext(fname)
     if not ext:
-        ext = ".svg"
+        ext = "." + os.environ.get("INDUCTOR_SCHEDULER_GRAPH_EXTENSION", "svg")
     print(f"Writing FX graph to file: {base}{ext}")
     g = graph_drawer.FxGraphDrawer(
         traced,
