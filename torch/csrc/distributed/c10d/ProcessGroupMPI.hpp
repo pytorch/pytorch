@@ -102,7 +102,7 @@ class TORCH_API ProcessGroupMPI : public Backend {
 
    private:
     void finishWorkMPI();
-    void finishWorkMPIError(std::exception_ptr eptr);
+    void finishWorkMPIError(const std::exception_ptr& eptr);
 
     std::vector<at::Tensor> outputTensors_;
     c10::intrusive_ptr<at::ivalue::Future> future_;
@@ -137,7 +137,7 @@ class TORCH_API ProcessGroupMPI : public Backend {
    private:
     const std::vector<at::Tensor> outputTensors_;
     MPI_Request request_;
-    MPI_Status status_;
+    MPI_Status status_{};
   };
 
   // Constructor will spawn up the worker thread loop

@@ -89,13 +89,7 @@ def check_codegen(
         _check_has_dynamic_shape(self, code)
     else:
         code = run_and_get_triton_code(run, *example_inputs, **kwargs)
-        triton_kernel_found = False
-        lines = code.split("\n")
-        for line in lines:
-            if "def triton" in line:
-                triton_kernel_found = True
-                continue
-        self.assertTrue(triton_kernel_found, f"Failed to find triton kernel\n{code}")
+        self.assertTrue("def triton" in code, f"Failed to find triton kernel\n{code}")
 
     assert called, "Ran graph without calling compile_fx"
 
@@ -333,6 +327,9 @@ test_failures = {
     "test_mutations_loop_fusion_dynamic_shapes": TestFailure(
         ("cpu", "cuda"), is_skip=True
     ),
+    # Refinement means we don't actually generate dynamic shapes (but only on
+    # cpu apparently?!)
+    "test_nonzero_unbacked_refinement_dynamic_shapes": TestFailure(("cpu",)),
 }
 
 if TEST_WITH_ROCM:

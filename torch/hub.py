@@ -307,7 +307,7 @@ def _check_repo_is_trusted(repo_owner, repo_name, owner_name_branch, trust_repo,
             if is_trusted:
                 print("The repository is already trusted.")
         elif response.lower() in ("n", "no", ""):
-            raise Exception("Untrusted repository.")
+            raise Exception("Untrusted repository.")  # noqa: TRY002
         else:
             raise ValueError(f"Unrecognized response {response}.")
 

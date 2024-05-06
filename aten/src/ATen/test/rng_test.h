@@ -12,49 +12,49 @@ namespace {
 constexpr auto int64_min_val = std::numeric_limits<int64_t>::lowest();
 constexpr auto int64_max_val = std::numeric_limits<int64_t>::max();
 template <typename T,
-          typename std::enable_if<std::is_floating_point<T>::value, int>::type = 0>
+          typename std::enable_if_t<std::is_floating_point_v<T>, int> = 0>
 constexpr int64_t _min_val() {
   return int64_min_val;
 }
 
 template <typename T,
-          typename std::enable_if<std::is_integral<T>::value, int>::type = 0>
+          typename std::enable_if_t<std::is_integral_v<T>, int> = 0>
 constexpr int64_t _min_val() {
   return static_cast<int64_t>(std::numeric_limits<T>::lowest());
 }
 
 template <typename T,
-          typename std::enable_if<std::is_floating_point<T>::value, int>::type = 0>
+          typename std::enable_if_t<std::is_floating_point_v<T>, int> = 0>
 constexpr int64_t _min_from() {
   return -(static_cast<int64_t>(1) << std::numeric_limits<T>::digits);
 }
 
 template <typename T,
-          typename std::enable_if<std::is_integral<T>::value, int>::type = 0>
+          typename std::enable_if_t<std::is_integral_v<T>, int> = 0>
 constexpr int64_t _min_from() {
   return _min_val<T>();
 }
 
 template <typename T,
-          typename std::enable_if<std::is_floating_point<T>::value, int>::type = 0>
+          typename std::enable_if_t<std::is_floating_point_v<T>, int> = 0>
 constexpr int64_t _max_val() {
   return int64_max_val;
 }
 
 template <typename T,
-          typename std::enable_if<std::is_integral<T>::value, int>::type = 0>
+          typename std::enable_if_t<std::is_integral_v<T>, int> = 0>
 constexpr int64_t _max_val() {
   return static_cast<int64_t>(std::numeric_limits<T>::max());
 }
 
 template <typename T,
-          typename std::enable_if<std::is_floating_point<T>::value, int>::type = 0>
+          typename std::enable_if_t<std::is_floating_point_v<T>, int> = 0>
 constexpr int64_t _max_to() {
   return static_cast<int64_t>(1) << std::numeric_limits<T>::digits;
 }
 
 template <typename T,
-          typename std::enable_if<std::is_integral<T>::value, int>::type = 0>
+          typename std::enable_if_t<std::is_integral_v<T>, int> = 0>
 constexpr int64_t _max_to() {
   return _max_val<T>();
 }
@@ -77,7 +77,7 @@ void test_random_from_to(const at::Device& device) {
       1L,
       static_cast<c10::optional<int64_t>>(c10::nullopt)
     };
-  } else if constexpr (::std::is_signed<T>::value) {
+  } else if constexpr (::std::is_signed_v<T>) {
     constexpr int64_t min_from = _min_from<T>();
     froms = {
       min_from,
@@ -186,7 +186,7 @@ void test_random(const at::Device& device) {
     actual.random_(gen);
 
     uint64_t range;
-    if constexpr (::std::is_floating_point<T>::value) {
+    if constexpr (::std::is_floating_point_v<T>) {
       range = static_cast<uint64_t>((1ULL << ::std::numeric_limits<T>::digits) + 1);
     } else if constexpr (::std::is_same_v<T, bool>) {
       range = 2;

@@ -7,8 +7,6 @@
 
 #include "nomnigraph/Representations/NeuralNet.h"
 
-using namespace nom::repr;
-
 namespace caffe2 {
 
 /* This file sets up the optimization pass registry.
@@ -23,18 +21,18 @@ namespace caffe2 {
 
 class TORCH_API OptimizationPass {
  public:
-  OptimizationPass(NNModule* nn) : nn_(nn) {}
+  OptimizationPass(nom::repr::NNModule* nn) : nn_(nn) {}
   virtual void run() = 0;
-  virtual ~OptimizationPass() {}
+  virtual ~OptimizationPass() = default;
 
  protected:
-  NNModule* nn_;
+  nom::repr::NNModule* nn_;
 };
 
 class TORCH_API WorkspaceOptimizationPass : public OptimizationPass {
  public:
-  WorkspaceOptimizationPass(NNModule* nn, Workspace* ws) : OptimizationPass(nn), ws_(ws) {}
-  virtual ~WorkspaceOptimizationPass() {}
+  WorkspaceOptimizationPass(nom::repr::NNModule* nn, Workspace* ws) : OptimizationPass(nn), ws_(ws) {}
+  virtual ~WorkspaceOptimizationPass() = default;
 
  protected:
   Workspace* ws_;
@@ -43,7 +41,7 @@ class TORCH_API WorkspaceOptimizationPass : public OptimizationPass {
 C10_DECLARE_REGISTRY(
     WorkspaceOptimizationPassRegistry,
     WorkspaceOptimizationPass,
-    NNModule*,
+    nom::repr::NNModule*,
     Workspace*);
 #define REGISTER_WS_OPT_PASS(clsname) \
   C10_REGISTER_CLASS(WorkspaceOptimizationPassRegistry, clsname, clsname)
@@ -57,7 +55,7 @@ C10_DECLARE_REGISTRY(
   };                                                            \
   REGISTER_WS_OPT_PASS(passname);
 
-C10_DECLARE_REGISTRY(OptimizationPassRegistry, OptimizationPass, NNModule*);
+C10_DECLARE_REGISTRY(OptimizationPassRegistry, OptimizationPass, nom::repr::NNModule*);
 #define REGISTER_OPT_PASS(clsname) \
   C10_REGISTER_CLASS(OptimizationPassRegistry, clsname, clsname)
 #define REGISTER_OPT_PASS_FROM_FUNC(passname, funcname) \

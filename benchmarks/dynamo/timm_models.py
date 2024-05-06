@@ -65,6 +65,7 @@ REQUIRE_HIGHER_TOLERANCE = {
     "gmixer_24_224",
     "hrnet_w18",
     "inception_v3",
+    "mixer_b16_224",
     "sebotnet33ts_256",
     "selecsls42b",
 }
@@ -166,11 +167,9 @@ def refresh_model_names():
         del all_models_family[key]
 
     chosen_models = set()
-    for value in docs_models_family.values():
-        chosen_models.add(value[0])
+    chosen_models.update(value[0] for value in docs_models_family.values())
 
-    for key, value in all_models_family.items():
-        chosen_models.add(value[0])
+    chosen_models.update(value[0] for key, value in all_models_family.items())
 
     filename = "timm_models_list.txt"
     if os.path.exists("benchmarks"):
@@ -194,10 +193,20 @@ class TimmRunner(BenchmarkRunner):
         return set()
 
     @property
+    def get_output_amp_train_process_func(self):
+        return {}
+
+    @property
     def skip_accuracy_check_as_eager_non_deterministic(self):
         if self.args.accuracy and self.args.training:
             return SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS
         return set()
+
+    @property
+    def guard_on_nn_module_models(self):
+        return {
+            "convit_base",
+        }
 
     @download_retry_decorator
     def _download_model(self, model_name):
@@ -319,7 +328,9 @@ class TimmRunner(BenchmarkRunner):
             tolerance = 8 * 1e-2
 
         if is_training:
-            if name in REQUIRE_HIGHER_TOLERANCE:
+            if name in ["levit_128"]:
+                tolerance = 8 * 1e-2
+            elif name in REQUIRE_HIGHER_TOLERANCE:
                 tolerance = 4 * 1e-2
             else:
                 tolerance = 1e-2

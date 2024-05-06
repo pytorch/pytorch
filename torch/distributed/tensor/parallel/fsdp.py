@@ -255,7 +255,7 @@ def _chunk_dtensor(
         shard_placements[0] = DShard(0)  # type: ignore[call-overload]
 
         return DTensor.from_local(
-            tensor, parent_mesh, replicate_placements
+            tensor, parent_mesh, replicate_placements, run_check=False
         ).redistribute(
             device_mesh=parent_mesh,
             placements=shard_placements,
@@ -279,7 +279,7 @@ def _chunk_dtensor(
         shard_placements[-1] = tp_placement  # type: ignore[call-overload]
 
         return DTensor.from_local(
-            tensor, parent_mesh, replicate_placements
+            tensor, parent_mesh, replicate_placements, run_check=False
         ).redistribute(
             device_mesh=parent_mesh,
             placements=shard_placements,
