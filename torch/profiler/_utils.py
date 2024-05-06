@@ -3,12 +3,14 @@ import operator
 import re
 from collections import deque
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict, List, TYPE_CHECKING
 
-from torch.autograd import _KinetoEvent
 from torch.autograd.profiler import profile
 
 from torch.profiler import DeviceType
+
+if TYPE_CHECKING:
+    from torch.autograd import _KinetoEvent
 
 
 def _traverse(tree, next_fn, children_fn=lambda x: x.children, reverse: bool = False):
