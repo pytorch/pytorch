@@ -1559,10 +1559,7 @@ class Kernel(CodeGen):
                             pos = var.bounds & ValueRanges(0, sympy.oo)
                             new_bounds = new_bounds | pos
 
-                    new_var = self.cse.generate(self.compute, stm, bounds=new_bounds)
-                    # Propagate the mask as mask propagation when using where is not correct
-                    new_var.update_on_args("index_wrap", (var,), {})
-                    var = new_var
+                    var = self.cse.generate(self.compute, stm, bounds=new_bounds)
 
                 if generate_assert(check):
                     mask = self.load_mask(var)

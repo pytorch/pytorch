@@ -471,10 +471,10 @@ class TritonCSEVariable(CSEVariable):
 
     def update_on_args(self, name, args, kwargs):
         # When making a variable that is going to be used in indirect indexing
-        # if a where clause is used it should mean that the result is always a
+        # if we are within a masked block, it means that the result is always a
         # valid index, so you shouldn't include any of the dependent variables
         # in the resulting load mask
-        if name == "where":
+        if V.interpreter.current_node.target.startswith("masked"):
             return
         for arg in args:
             if isinstance(arg, TritonCSEVariable):
