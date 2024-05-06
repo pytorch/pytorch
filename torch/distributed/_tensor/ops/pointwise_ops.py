@@ -408,20 +408,6 @@ pointwise_ops = [
 def pointwise_strategy(
     mesh: DeviceMesh, op_schema: OpSchema, linearity: bool = False
 ) -> OpStrategy:
-    """
-    Pointwise operators can follow the strategy of its first argument
-    For example, c = add(a, b). If a is sharded, we can follow the
-    sharding of a to generate the strategy for b.
-
-    Args:
-        mesh (DeviceMesh): device mesh for pointwise ops
-        op_schema (OpSchema): schema of the operator to generate strategy for
-        linearity (bool): whether this op supports broadcasting or not
-
-    Returns:
-        OpStrategy: generated strategy
-    """
-
     max_shards_strategy_index = -1
     max_shards = -1
 
@@ -590,6 +576,14 @@ def list_pointwise_strategy(
     strategy on each pair (l1[i], l2[i]). If the first argument is a list but
     the second (or later) one is a tensor, then we broadcast the tensor by
     replicating it into a list with the length of the first argument.
+
+    Args:
+        mesh (DeviceMesh): device mesh for pointwise ops
+        op_schema (OpSchema): schema of the operator to generate strategy for
+        linearity (bool): specify whether op(a) + op(b) = op(a + b)
+
+    Returns:
+        OpStrategy: generated strategy
     """
 
     def args_tuple_strategies(args_schema: Tuple[object, ...]) -> List[TupleStrategy]:
