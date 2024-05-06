@@ -79,7 +79,7 @@ def main() -> None:
     args = parse_args()
 
     if is_exception_branch(args.github_branch):
-        return WORKFLOW_TYPE_LABEL
+        print(WORKFLOW_TYPE_LABEL)
 
     try:
         gh = get_gh_client(args.github_token)
