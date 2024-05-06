@@ -320,7 +320,7 @@ def optim_inputs_func_adadelta(device, dtype=None):
             params=None, kwargs={"rho": 0.95, "weight_decay": 0.9}, desc="rho"
         ),
         OptimizerInput(
-            params=None,kwargs={'maximize':True},desc="maximize, no weight_decay"
+            params=None, kwargs={"maximize": True}, desc="maximize, no weight_decay"
         ),
     ] + (cuda_supported_configs if "cuda" in str(device) else [])
 
@@ -536,7 +536,7 @@ def optim_inputs_func_adamax(device, dtype=None):
         ),
         OptimizerInput(
             params=None,
-            kwargs={"maximize":True},
+            kwargs={"maximize": True},
             desc="maximize, no weight_decay",
         ),
     ] + (cuda_supported_configs if "cuda" in str(device) else [])
@@ -705,22 +705,22 @@ def optim_inputs_func_nadam(device, dtype=None):
         OptimizerInput(
             params=None,
             kwargs={
-                "weight_decay":0.1,
+                "weight_decay": 0.1,
             },
             desc="weight_decay, no momentum_decay",
         ),
         OptimizerInput(
             params=None,
             kwargs={
-                "decoupled_weight_decay":True,
+                "decoupled_weight_decay": True,
             },
             desc="decoupled_weight_decay, no weight_decay, no momentum_decay",
         ),
         OptimizerInput(
             params=None,
             kwargs={
-                "decoupled_weight_decay":True,
-                "weight_decay":0.1,
+                "decoupled_weight_decay": True,
+                "weight_decay": 0.1,
             },
             desc="decoupled_weight_decay, weight_decay",
         ),
@@ -800,7 +800,7 @@ def optim_inputs_func_radam(device=None, dtype=None):
         OptimizerInput(
             params=None,
             kwargs={
-                "decoupled_weight_decay":True,
+                "decoupled_weight_decay": True,
             },
             desc="decoupled_weight_decay, no weight_decay",
         ),
@@ -877,15 +877,15 @@ def optim_inputs_func_rmsprop(device, dtype=None):
         OptimizerInput(
             params=None,
             kwargs={
-                "maximize":True,
+                "maximize": True,
             },
             desc="maximize, no weight_decay",
         ),
         OptimizerInput(
             params=None,
             kwargs={
-                "maximize":True,
-                "weight_decay":0.1,
+                "maximize": True,
+                "weight_decay": 0.1,
             },
             desc="maximize, weight_decay",
         ),
@@ -979,42 +979,31 @@ def optim_inputs_func_sgd(device, dtype=None):
             kwargs={"weight_decay": 0.1, "maximize": True},
             desc="maximize",
         ),
+        OptimizerInput(params=None, kwargs={"weight_decay": 0.5}, desc="weight_decay"),
         OptimizerInput(
-            params=None,
-            kwargs={"weight_decay": 0.5},
-            desc="weight_decay"
-        ),
-        OptimizerInput(
-            params=None,
-            kwargs={"dampening": 0.5},
-            desc="dampening, no momentum"
+            params=None, kwargs={"dampening": 0.5}, desc="dampening, no momentum"
         ),
         OptimizerInput(
             params=None,
             kwargs={"dampening": 0.5, "weight_decay": 0.5},
-            desc="dampening, weight_decay"
+            desc="dampening, weight_decay",
         ),
         OptimizerInput(
             params=None,
             kwargs={"momentum": 0.5, "nesterov": True},
-            desc="momentum, nesterov"
+            desc="momentum, nesterov",
         ),
-        OptimizerInput(
-            params=None,
-            kwargs={"momentum": 0.5},
-            desc="momentum"
-        ),
+        OptimizerInput(params=None, kwargs={"momentum": 0.5}, desc="momentum"),
         OptimizerInput(
             params=None,
             kwargs={"momentum": 0.5, "weight_decay": 0.5, "nesterov": True},
-            desc="momentum, weight_decay, nesterov"
+            desc="momentum, weight_decay, nesterov",
         ),
         OptimizerInput(
             params=None,
             kwargs={"momentum": 0.5, "weight_decay": 0.5},
-            desc="momentum, weight_decay"
+            desc="momentum, weight_decay",
         ),
-
     ]
 
 

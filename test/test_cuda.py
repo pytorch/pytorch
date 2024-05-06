@@ -38,10 +38,10 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
 )
 from torch.testing._internal.common_optimizers import (
-    optim_db, 
-    optims,
     _get_optim_inputs_including_global_cliquey_kwargs,
-    OptimizerErrorEnum)
+    optim_db,
+    optims,
+)
 from torch.testing._internal.common_utils import (
     freeze_rng_state,
     gcIfJetson,
@@ -4522,21 +4522,25 @@ class TestCudaOptims(TestCase):
     )
     def test_graph_optims(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
-        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info,
-                         skip=("differentiable",))
-        has_betas = any("betas" in error_inp.optimizer_error_input.kwargs 
-                        for error_inp in optim_info.optim_error_inputs_func(device="cpu", dtype=dtype))
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
+            device, dtype, optim_info, skip=("differentiable",)
+        )
+        has_betas = any(
+            "betas" in error_inp.optimizer_error_input.kwargs
+            for error_inp in optim_info.optim_error_inputs_func(
+                device="cpu", dtype=dtype
+            )
+        )
         for optim_input in all_optim_inputs:
             kwargs = optim_input.kwargs
             if "lr" in kwargs:
                 del kwargs["lr"]
-            kwargs["lr"]=0.1
+            kwargs["lr"] = 0.1
             if has_betas and optim_cls != torch.optim.Adamax:
-                kwargs["betas"] = (0.8,0.7)
+                kwargs["betas"] = (0.8, 0.7)
             with self.subTest(optimizer_ctor=optim_cls, kwargs=kwargs):
                 self._test_graphed_optims(3, 2, optim_cls, kwargs)
-            #print(optim_cls,kwargs)
-
+            # print(optim_cls,kwargs)
 
     @onlyCUDA
     @unittest.skipIf(
@@ -4551,30 +4555,30 @@ class TestCudaOptims(TestCase):
     )
     def test_graph_scaling_fused_optimizers(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
-        
+
         steps_warmup = 3
         steps_train = 2
-        
+
         optim_inputs = optim_info.optim_inputs_func(device=device)
-        has_betas = any("betas" in error_inp.optimizer_error_input.kwargs 
-                        for error_inp in optim_info.optim_error_inputs_func(device="cpu", dtype=dtype))
-         
+        has_betas = any(
+            "betas" in error_inp.optimizer_error_input.kwargs
+            for error_inp in optim_info.optim_error_inputs_func(
+                device="cpu", dtype=dtype
+            )
+        )
+
         for optim_input in optim_inputs:
             kwargs = optim_input.kwargs
-            kwargs["fused"]=True
+            kwargs["fused"] = True
             if "lr" in kwargs:
                 del kwargs["lr"]
-            kwargs["lr"]=0.1
+            kwargs["lr"] = 0.1
             if has_betas:
                 kwargs["betas"] = (0.8, 0.7)
 
             has_capturable_arg = optim_cls in (torch.optim.Adam, torch.optim.AdamW)
-            for actually_do_graphs in (
-                (True, False) if has_capturable_arg else (True,)
-            ):
-                params = [
-                    torch.randn((i + 5, i + 5), device="cuda") for i in range(2)
-                ]
+            for actually_do_graphs in (True, False) if has_capturable_arg else (True,):
+                params = [torch.randn((i + 5, i + 5), device="cuda") for i in range(2)]
                 params_control = [p.clone().requires_grad_() for p in params]
                 params_graphed = [p.clone().requires_grad_() for p in params]
 
