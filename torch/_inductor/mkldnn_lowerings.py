@@ -3,7 +3,7 @@ from typing import List, Optional
 import torch
 import torch.utils._pytree as pytree
 from torch._inductor.kernel.mm_common import mm_args
-from . import config, ir
+from . import ir
 from .codegen.cpp_gemm_template import CppPackedGemmTemplate
 from .ir import TensorBox
 from .lowering import (
@@ -15,7 +15,7 @@ from .lowering import (
     to_dtype,
 )
 from .select_algorithm import autotune_select_algorithm, ExternKernelChoice
-from .utils import use_cpp_packed_gemm_template
+from .utils import use_aten_gemm_kernels, use_cpp_packed_gemm_template, use_max_autotune
 from .virtualized import V
 
 
@@ -369,12 +369,16 @@ def register_onednn_fusion_ops():
                 *,
                 layout=None,
             ):
-                choices = [
-                    aten_mkl_linear.bind(
-                        (x, packed_w, orig_w), layout, B=None, batch_size=batch_size
-                    )
-                ]
-                if config.max_autotune or config.max_autotune_gemm:
+                choices = (
+                    [
+                        aten_mkl_linear.bind(
+                            (x, packed_w, orig_w), layout, B=None, batch_size=batch_size
+                        )
+                    ]
+                    if use_aten_gemm_kernels()
+                    else []
+                )
+                if use_max_autotune():
                     transposed_w = permute(orig_w, [1, 0])
                     *_, layout, x, transposed_w = mm_args(
                         x, transposed_w, layout=layout

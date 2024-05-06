@@ -28,7 +28,12 @@ def patches(fn):
 
     for patcher in [
         dynamo_config.patch(verbose=True),
-        inductor_config.patch(debug=True, max_autotune=True, epilogue_fusion=True),
+        inductor_config.patch(
+            debug=True,
+            max_autotune=True,
+            epilogue_fusion=True,
+            max_autotune_gemm_backends="CPP,ATEN",
+        ),
         patch.object(select_algorithm, "VERIFY", dict(atol=1e-4, rtol=1e-4)),
         patch.object(select_algorithm.AlgorithmSelectorCache, "lookup", skip_cache),
     ]:

@@ -974,6 +974,9 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2):
     from .codegen.cpp_micro_gemm import create_micro_gemm
     from .kernel.mm_common import mm_args
 
+    if not _use_template_for_cpu(layout) or not _use_autotune_backend("CPP"):
+        return False
+
     layout_dtypes = [torch.float32]
     m, n, k, *_ = mm_args(mat1, mat2)
     # TODO(jgong5): support dynamic shapes for n or k
@@ -986,8 +989,7 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2):
     )
     # TODO(jgong5): support n % n_block_size != 0
     return (
-        _use_template_for_cpu(layout)
-        and layout.dtype in layout_dtypes
+        layout.dtype in layout_dtypes
         and micro_gemm is not None
         and n % micro_gemm.register_blocking[1] == 0
         and isinstance(mat2, ir.StorageBox)
