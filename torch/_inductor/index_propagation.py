@@ -320,4 +320,5 @@ class IndexPropagation:
                 self.statically_true(0 <= expr) or self.statically_true(-size <= expr)
             ) and self.statically_true(expr < size):
                 return wrap_expr(expr)
+        breakpoint()
         return self.fallback("indirect_indexing", (index, size, check), {}).value

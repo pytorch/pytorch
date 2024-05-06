@@ -1,7 +1,11 @@
 # flake8: noqa: B950
 from ._internal import register_artifact, register_log
 
-DYNAMIC = ["torch.fx.experimental.symbolic_shapes", "torch.fx.experimental.sym_node"]
+DYNAMIC = [
+    "torch.fx.experimental.symbolic_shapes",
+    "torch.fx.experimental.sym_node",
+    "torch.fx.experimental.recording",
+]
 DISTRIBUTED = [
     "torch.distributed",
     "torch._dynamo.backends.distributed",
@@ -57,6 +61,10 @@ register_artifact(
 register_artifact(
     "trace_call",
     "Like trace_source, but it will give you the per-expression blow-by-blow if your Python is recent enough.",
+)
+register_artifact(
+    "trace_bytecode",
+    "As we trace bytecode, prints the instruction and the current stack.",
 )
 register_artifact(
     "aot_graphs",
