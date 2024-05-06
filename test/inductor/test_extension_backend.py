@@ -23,7 +23,7 @@ except ImportError:
     )
 
 import torch._inductor.config as config
-from torch._inductor import metrics
+from torch._inductor import codecache, metrics
 from torch._inductor.codegen import cpp
 from torch._inductor.codegen.common import (
     get_scheduling_for_device,
@@ -146,9 +146,13 @@ class ExtensionBackendTests(TestCase):
                 metrics.reset()
                 opt_fn = torch.compile()(fn)
                 _, code = run_and_get_cpp_code(opt_fn, x, y, z)
-                FileCheck().check("void").check("loadu").check("extension_device").run(
-                    code
-                )
+                if codecache.valid_vec_isa_list():
+                    load_expr = "loadu"
+                else:
+                    load_expr = " = in_ptr0[static_cast<long>(i0)];"
+                FileCheck().check("void").check(load_expr).check(
+                    "extension_device"
+                ).run(code)
                 opt_fn(x, y, z)
                 res = opt_fn(x, y, z)
                 self.assertEqual(ref, res.to(device="cpu"))

@@ -10,6 +10,8 @@ from torch.distributed._tensor.experimental.attention import (
     _CausalBehavior,
     _is_causal_behavior,
     _scaled_dot_product_chunk_flash_attention,
+    _scaled_dot_product_ring_efficient_attention,
+    _scaled_dot_product_ring_flash_attention,
     attention_context_parallel,
     AttentionContextParallel,
 )
@@ -294,6 +296,86 @@ class RingAttentionTest(DTensorTestBase):
                 * args.n_layers,
             },
         )
+
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
+    )
+    @with_comms
+    @parametrize(
+        "attention_fn",
+        [
+            _scaled_dot_product_ring_flash_attention,
+            _scaled_dot_product_ring_efficient_attention,
+            # _scaled_dot_product_ring_cudnn_attention, # TODO: not built by default
+        ],
+    )
+    def test_ring_attention_compile(self, attention_fn: object) -> None:
+        device_mesh = DeviceMesh(
+            self.device_type,
+            torch.arange(0, self.world_size),
+        )
+        dtype = torch.bfloat16
+        bs = 8
+        query_tokens = 8
+        context_tokens = 24
+        dim = 32
+        nheads = 8
+        query = torch.rand(
+            (bs, nheads, self.world_size * query_tokens, dim),
+            device=self.device_type,
+            dtype=dtype,
+            requires_grad=True,
+        )
+        key = torch.rand(
+            (bs, nheads, self.world_size * context_tokens, dim),
+            device=self.device_type,
+            dtype=dtype,
+        )
+        value = torch.rand(
+            (bs, nheads, self.world_size * context_tokens, dim),
+            device=self.device_type,
+            dtype=dtype,
+        )
+
+        query_placement = [Shard(2)]
+        dquery = distribute_tensor(query, device_mesh, query_placement)
+        self.assertEqual(query.shape, (bs, nheads, self.world_size * query_tokens, dim))
+
+        context_placement = [Shard(2)]
+        dkey = distribute_tensor(key, device_mesh, context_placement)
+        dvalue = distribute_tensor(value, device_mesh, context_placement)
+
+        # compiled = attention_fn
+        compiled = torch.compile(attention_fn, fullgraph=True, backend="aot_eager")
+
+        out, lse, *args = compiled(
+            device_mesh.get_group(),
+            dquery.to_local(),
+            dkey.to_local(),
+            dvalue.to_local(),
+        )
+        self.assertEqual(out.shape, (bs, nheads, query_tokens, dim))
+        self.assertIsInstance(lse, torch.Tensor)
+
+        (
+            out_chunk,
+            *others,
+        ) = _scaled_dot_product_chunk_flash_attention(
+            query,
+            key,
+            value,
+            size=self.world_size,
+            is_causal=False,
+        )
+        self.assertEqual(
+            out,
+            out_chunk[
+                :, :, self.rank * query_tokens : (self.rank + 1) * query_tokens, :
+            ],
+        )
+
+        out.sum().backward()
 
 
 instantiate_parametrized_tests(RingAttentionTest)
