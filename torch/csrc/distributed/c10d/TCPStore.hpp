@@ -30,10 +30,10 @@ class Counter {
     return count_;
   }
   double variance() const noexcept {
-    return m2_ / static_cast<double>(count_);
+    return m2_ / count_;
   }
   double sample_variance() const noexcept {
-    return m2_ / static_cast<double>(count_ - 1);
+    return m2_ / (count_ - 1);
   }
 
  private:
