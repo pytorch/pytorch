@@ -1386,7 +1386,8 @@ def _register_pre_backward_hooks(
         if t.requires_grad:
             t.register_hook(
                 torch.utils.hooks.unserializable_hook(
-                    functools.partial(_pre_backward_hook, state, module, handle))
+                    functools.partial(_pre_backward_hook, state, module, handle)
+                )
             )
             if handle:
                 handle._needs_pre_backward_unshard = True
