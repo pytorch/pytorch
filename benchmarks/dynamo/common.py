@@ -2077,6 +2077,10 @@ class BenchmarkRunner:
                 self.autocast = torch.cuda.amp.autocast
             if devices == ["cpu"]:
                 self.autocast = torch.cpu.amp.autocast
+            if devices == ["xpu"]:
+                import functools
+                self.autocast = functools.partial(torch.amp.autocast, device_type="xpu")
+
             if self.args.amp_dtype:
                 amp_dtype = (
                     torch.float16
