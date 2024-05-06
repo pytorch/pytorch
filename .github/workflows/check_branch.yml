@@ -3,6 +3,7 @@ name: Check branch name
 on:
   schedule:
     - cron: '*/1 * * * *'
+  workflow_dispatch:
 
 jobs:
   test:
