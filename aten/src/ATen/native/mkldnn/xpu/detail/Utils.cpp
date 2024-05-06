@@ -114,10 +114,11 @@ dnnl::memory::dims get_onednn_strides(const at::Tensor& tensor) {
 }
 
 dnnl::memory::desc get_onednn_md(const at::Tensor& tensor) {
+  at::Tensor tensor_ = tensor.sizes().size() == 0 ? tensor.view({1}) : tensor;
   return {
-      get_onednn_dims(tensor),
-      get_onednn_dtype(tensor),
-      get_onednn_strides(tensor)};
+      get_onednn_dims(tensor_),
+      get_onednn_dtype(tensor_),
+      get_onednn_strides(tensor_)};
 }
 
 bool onednn_strides_check(const at::Tensor& src) {

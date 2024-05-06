@@ -5,15 +5,145 @@
 
 namespace at::native::xpu {
 
+void resize_out(const Tensor &out, IntArrayRef sizes, IntArrayRef strides, const TensorOptions &options) {
+  TORCH_CHECK(options.dtype() == out.dtype(),
+      "Expected out tensor to have dtype ", options.dtype(), ", but got ", out.dtype(), " instead");
+  TORCH_CHECK(options.device() == out.device(),
+      "Expected out tensor to have device ", options.device(), ", but got ", out.device(), " instead");
+  const bool resized = at::native::resize_output(out, sizes);
+  // Only restride if a resize occurred; otherwise we ignore the (advisory)
+  // strides from the meta function and directly use the output tensor's
+  // preexisting strides
+  if (resized) {
+    if (!strides.empty()) {
+      TORCH_INTERNAL_ASSERT(!options.memory_format_opt().has_value());
+      // TODO: avoid the redispatch here
+      out.as_strided_(sizes, strides);
+    } else if (options.memory_format_opt().has_value()) {
+      out.unsafeGetTensorImpl()->empty_tensor_restride(*options.memory_format_opt());
+    }
+  }
+}
+
+Tensor create_out(IntArrayRef sizes, IntArrayRef strides, const TensorOptions& options){
+  if(strides.empty()){
+    return at::empty(sizes, options);
+  }else{
+    return at::empty_strided(sizes, strides, options);
+  }
+}
+
+void check_inplace(const Tensor &self, IntArrayRef sizes, const TensorOptions &options) {
+  TORCH_CHECK(options.dtype() == self.dtype(),
+      "Bad in-place call: ",
+      "input tensor dtype ", self.dtype(), " and output tensor dtype ", options.dtype(), " should match");
+  TORCH_CHECK(options.device() == self.device(),
+      "Bad in-place call: ",
+      "input tensor device ", self.device(), " and output tensor device ", options.device(), " should match");
+  TORCH_CHECK(sizes == self.sizes(),
+      "Bad in-place call: ",
+      "input tensor size ", self.sizes(), " and output tensor size ", sizes, " should match");
+}
+
+
 // result = beta * self + alpha * (mat1 * mat2)
-Tensor& addmm_out(
+Tensor& addmm_out_impl(
     const Tensor& self,
     const Tensor& mat1,
     const Tensor& mat2,
     const Scalar& beta,
     const Scalar& alpha,
     at::Tensor& result) {
+  
+  Tensor self_ = self.sizes().size() == 0 ? self.view({1}) : self;
+  // corner cases
+  IntArrayRef result_sizes = result.sizes();
+  if ((result_sizes[0] == 0) || (result_sizes[1] == 0)) {
+      return result;
+  }
+
+  if (mat1.numel() == 0){
+    if(beta.to<float>() == 0.f){
+      return result.zero_();
+    }
+    return at::mul_out(
+      result,
+      self_.expand(result.sizes()),
+      at::native::scalar_tensor(
+        beta,
+        self.scalar_type(),
+        c10::nullopt,
+        at::kCPU,
+        c10::nullopt
+      )
+    );
+  }
+
+  std::vector<int64_t> result_shape = {mat1.size(0), mat2.size(1)};
+
+  TORCH_CHECK(
+      are_expandable(self_.sizes(), result_shape),
+      "addmm_out input must be expanable to:",
+      result_shape,
+      " but got:",
+      self_.sizes());
+
+  // complex/double case
+  if (mat1.is_complex() || mat1.scalar_type() == ScalarType::Double) {
+    AT_ERROR(
+        "Double and complex datatype matmul is not supported in oneDNN");
+  }
+
+  // proxy output
+  Tensor result_ = result;
+
+  // general case
+  Tensor bias = Tensor();
+  onednn::Attr attr;
+  float beta_ = beta.to<float>();
+  if (beta_ == 0.f) {
+    if (alpha.to<float>() != 1.f) {
+      attr.append_post_eltwise(
+          1.f, alpha.to<float>(), 0.f, attr.kind_with_linear);
+    }
+  } else {
+    if (alpha.to<float>() == 1.f && beta_ == 1.f) {
+      bias = self_;
+    } else {
+      Tensor binary = self_.dim() == 1 ? self_.unsqueeze(0) : self_;
+      // Tensor binary = self.expand_as(result);
+      // For post-binary-add, onednn needs binary scale=1.f
+      // Thus we need the following transformation
+      // alpha * matmul(mat1, mat2) + beta * binary
+      // beta * (alpha/beta * matmul(src, wei) + binary)
+      float alpha_ = alpha.to<float>() / beta_;
+      if (alpha_ != 1.f)
+        attr.append_post_eltwise(1.f, alpha_, 0.f, attr.kind_with_linear);
+      attr.append_post_binary(attr.kind_with_binary_add, binary);
+      if (beta_ != 1.f)
+        attr.append_post_eltwise(1.f, beta_, 0.f, attr.kind_with_linear);
+    }
+  }
+  onednn::matmul(result_, mat1, mat2, bias, true, attr);
+  if (!result.is_same(result_))
+    return result.copy_(result_);
+  else 
+    return result;
+}
+
+
+Tensor& addmm_out(
+  const Tensor& self,
+  const Tensor& mat1,
+  const Tensor& mat2,
+  const Scalar& beta,
+  const Scalar& alpha,
+  at::Tensor& result
+){
+  // set_output_raw_strided
   checkBackend("addmm_out", {result, self, mat1, mat2}, Backend::XPU);
+  TORCH_CHECK(self.scalar_type() == mat2.scalar_type(), "self and mat2 must have the same dtype, but got ", self.scalar_type(), " and ", mat2.scalar_type());
+  TORCH_CHECK(mat1.scalar_type() == mat2.scalar_type(), "mat1 and mat2 must have the same dtype, but got ", mat1.scalar_type(), " and ", mat2.scalar_type());
   TORCH_CHECK(
       mat1.dim() == 2, "mat1 must be a matrix, got ", mat1.dim(), "-D tensor");
   TORCH_CHECK(
@@ -29,74 +159,76 @@ Tensor& addmm_out(
       "x",
       mat2.sizes()[1],
       ")");
+  IntArrayRef res_size = {mat1.sizes()[0], mat2.sizes()[1]};
+  IntArrayRef res_strides = {};
+  resize_out(result, res_size, res_strides, mat1.options());
 
-  std::vector<int64_t> result_shape = {mat1.size(0), mat2.size(1)};
-  result.resize_(result_shape);
+  return at::native::xpu::addmm_out_impl(self, mat1, mat2, beta, alpha, result);
+}
 
-  IntArrayRef result_sizes = result.sizes();
-  if ((result_sizes[0] == 0) || (result_sizes[1] == 0)) {
-    return result;
-  }
 
-  if (mat1.numel() == 0){
-    if(beta.to<float>() == 0.f){
-      return result.zero_();
-    }
-    return at::mul_out(
-      result,
-      self.expand(result.sizes()),
-      at::native::scalar_tensor(
-        beta,
-        self.scalar_type(),
-        c10::nullopt,
-        at::kCPU,
-        c10::nullopt
-      )
-    );
-  }
-
+Tensor addmm(
+  const Tensor& self,
+  const Tensor& mat1,
+  const Tensor& mat2,
+  const Scalar& beta,
+  const Scalar& alpha
+){
+  // set_output_raw_strided
+  checkBackend("addmm_out", {self, mat1, mat2}, Backend::XPU);
+  TORCH_CHECK(self.scalar_type() == mat2.scalar_type(), "self and mat2 must have the same dtype, but got ", self.scalar_type(), " and ", mat2.scalar_type());
+  TORCH_CHECK(mat1.scalar_type() == mat2.scalar_type(), "mat1 and mat2 must have the same dtype, but got ", mat1.scalar_type(), " and ", mat2.scalar_type());
   TORCH_CHECK(
-      are_expandable(self.sizes(), result_shape),
-      "addmm_out input must be expanable to:",
-      result_shape,
-      " but got:",
-      self.sizes());
+      mat1.dim() == 2, "mat1 must be a matrix, got ", mat1.dim(), "-D tensor");
+  TORCH_CHECK(
+      mat2.dim() == 2, "mat2 must be a matrix, got ", mat2.dim(), "-D tensor");
+  TORCH_CHECK(
+      mat1.sizes()[1] == mat2.sizes()[0],
+      "mat1 and mat2 shapes cannot be multiplied (",
+      mat1.sizes()[0],
+      "x",
+      mat1.sizes()[1],
+      " and ",
+      mat2.sizes()[0],
+      "x",
+      mat2.sizes()[1],
+      ")");
+  IntArrayRef res_size = {mat1.sizes()[0], mat2.sizes()[1]};
+  IntArrayRef res_strides = {};
+  Tensor out = create_out(res_size, res_strides, mat1.options());
+  return at::native::xpu::addmm_out_impl(self, mat1, mat2, beta, alpha, out);
+}
 
-  // complex/double case
-  if (mat1.is_complex() || mat1.scalar_type() == ScalarType::Double) {
-    AT_ERROR(
-        "Double and complex datatype matmul is not supported in oneDNN");
-  }
+Tensor& addmm_(
+  Tensor& self,
+  const Tensor& mat1,
+  const Tensor& mat2,
+  const Scalar& beta,
+  const Scalar& alpha
+){
+  checkBackend("addmm_out", {self, mat1, mat2}, Backend::XPU);
+  TORCH_CHECK(self.scalar_type() == mat2.scalar_type(), "self and mat2 must have the same dtype, but got ", self.scalar_type(), " and ", mat2.scalar_type());
+  TORCH_CHECK(mat1.scalar_type() == mat2.scalar_type(), "mat1 and mat2 must have the same dtype, but got ", mat1.scalar_type(), " and ", mat2.scalar_type());
+  TORCH_CHECK(
+      mat1.dim() == 2, "mat1 must be a matrix, got ", mat1.dim(), "-D tensor");
+  TORCH_CHECK(
+      mat2.dim() == 2, "mat2 must be a matrix, got ", mat2.dim(), "-D tensor");
+  TORCH_CHECK(
+      mat1.sizes()[1] == mat2.sizes()[0],
+      "mat1 and mat2 shapes cannot be multiplied (",
+      mat1.sizes()[0],
+      "x",
+      mat1.sizes()[1],
+      " and ",
+      mat2.sizes()[0],
+      "x",
+      mat2.sizes()[1],
+      ")");
+  IntArrayRef res_size = {mat1.sizes()[0], mat2.sizes()[1]};
+  IntArrayRef res_strides = {};
+  check_inplace(self, res_size, mat1.options());
 
-  // general case
-  Tensor bias = Tensor();
-  onednn::Attr attr;
-  float beta_ = beta.to<float>();
-  if (beta_ == 0.f) {
-    if (alpha.to<float>() != 1.f) {
-      attr.append_post_eltwise(
-          1.f, alpha.to<float>(), 0.f, attr.kind_with_linear);
-    }
-  } else {
-    if (alpha.to<float>() == 1.f && beta_ == 1.f) {
-      bias = self;
-    } else {
-      Tensor binary = self.dim() == 1 ? self.unsqueeze(0) : self;
-      // Tensor binary = self.expand_as(result);
-      // For post-binary-add, onednn needs binary scale=1.f
-      // Thus we need the following transformation
-      // alpha * matmul(mat1, mat2) + beta * binary
-      // beta * (alpha/beta * matmul(src, wei) + binary)
-      float alpha_ = alpha.to<float>() / beta_;
-      if (alpha_ != 1.f)
-        attr.append_post_eltwise(1.f, alpha_, 0.f, attr.kind_with_linear);
-      attr.append_post_binary(attr.kind_with_binary_add, binary);
-      if (beta_ != 1.f)
-        attr.append_post_eltwise(1.f, beta_, 0.f, attr.kind_with_linear);
-    }
-  }
-  onednn::matmul(result, mat1, mat2, bias, true, attr);
-  return result;
+  return at::native::xpu::addmm_out_impl(self, mat1, mat2, beta, alpha, self);
 }
 
 Tensor& _addmm_activation_out(
@@ -107,7 +239,7 @@ Tensor& _addmm_activation_out(
     const Scalar& alpha,
     bool use_gelu,
     at::Tensor& result) {
-  addmm_out(self, mat1, mat2, beta, alpha, result);
+  addmm_out_impl(self, mat1, mat2, beta, alpha, result);
   if (use_gelu) {
     at::gelu_(result);
   } else {
@@ -131,6 +263,12 @@ Tensor& mm_out(const Tensor& self, const Tensor& mat2, Tensor& result) {
       "x",
       mat2.sizes()[1],
       ")");
+  TORCH_CHECK(
+        mat2.dtype() == result.dtype(),
+        "mm(): expected out tensor to have dtype ",
+        mat2.dtype(),
+        " but got ",
+        result.dtype());
 
   result.resize_({self.size(0), mat2.size(1)});
   if (self.numel() == 0 || mat2.numel() == 0) {
@@ -149,6 +287,7 @@ Tensor& mm_out(const Tensor& self, const Tensor& mat2, Tensor& result) {
 }
 
 Tensor mm(const Tensor& self, const Tensor& mat2) {
+  checkBackend("mm", {self, mat2}, Backend::XPU);
   auto result = at::empty({0}, self.options());
   xpu::mm_out(self, mat2, result);
   return result;
@@ -168,7 +307,7 @@ Tensor& baddbmm_out(
     const Scalar& beta,
     const Scalar& alpha,
     Tensor& result) {
-  checkBackend("baddbmm_out", {input, batch1, batch2}, Backend::XPU);
+  checkBackend("baddbmm_out", {input, batch1, batch2, result}, Backend::XPU);
   TORCH_CHECK(batch1.dim() == 3, "expected 3D tensor");
   TORCH_CHECK(batch2.dim() == 3, "expected 3D tensor");
 
@@ -209,6 +348,8 @@ Tensor& baddbmm_out(
           1.f, alpha.to<float>(), 0.f, attr.kind_with_linear);
     }
   } else {
+    if(input.sizes().size()==0)
+      binary = input.view({1});
     binary = input.dim() < 3 ? input.unsqueeze(0) : input;
     binary = binary.dim() < 3 ? binary.unsqueeze_(0) : binary;
     float alpha_ = alpha.to<float>() / beta_;
@@ -229,6 +370,8 @@ Tensor& baddbmm_(
     const Scalar& beta,
     const Scalar& alpha) {
   TORCH_CHECK(self.dtype() == batch1.dtype(), "Input dtypes must be the same, got: input ", self.dtype(), ", batch1: ", batch1.dtype(), ", batch2: ", batch2.dtype());
+  std::vector<int64_t> result_shape = {batch1.size(0), batch1.size(1), batch2.size(2)};
+  check_inplace(self, result_shape, batch1.options());
   return at::native::xpu::baddbmm_out(
       self, batch1, batch2, beta, alpha, self);
 }
@@ -282,7 +425,7 @@ Tensor& addbmm_out(
     b1 = batch1.contiguous().view({batch1.size(1), -1});
   }
   auto b2 = batch2.contiguous().view({-1, batch2.size(2)});
-  at::native::xpu::addmm_out(self, b1, b2, beta, alpha, out);
+  at::native::xpu::addmm_out_impl(self, b1, b2, beta, alpha, out);
 
   return out;
 }
@@ -375,9 +518,14 @@ Tensor& addmv_out(
   }
 
   Tensor vec_v = vec.view({vec.size(0), 1});
-  at::native::xpu::addmm_out(self_v, mat, vec_v, beta, alpha, out);
-  out.resize_({mat.size(0)});
+  at::native::xpu::addmm_out_impl(self_v, mat, vec_v, beta, alpha, out);
+
   return out;
+}
+
+Tensor addmv(const Tensor& self, const Tensor& mat, const Tensor& vec, const Scalar& beta, const Scalar& alpha){
+  Tensor out = at::empty({mat.size(0)}, mat.options());
+  return at::native::xpu::addmv_out(self, mat, vec, beta, alpha, out);
 }
 
 Tensor& tensordot_out(
@@ -417,6 +565,8 @@ Tensor& tensordot_out(
 }
 
 TORCH_LIBRARY_IMPL(aten, XPU, m){
+  m.impl("addmm", TORCH_FN(addmm));
+  m.impl("addmm_", TORCH_FN(addmm_));
   m.impl("addmm.out", TORCH_FN(addmm_out));
   m.impl("_addmm_activation.out", TORCH_FN(_addmm_activation_out));
   m.impl("mm.out", TORCH_FN(mm_out));
@@ -430,6 +580,7 @@ TORCH_LIBRARY_IMPL(aten, XPU, m){
   m.impl("bmm.out", TORCH_FN(bmm_out));
   m.impl("bmm", TORCH_FN(bmm));
   m.impl("addmv.out", TORCH_FN(addmv_out));
+  m.impl("addmv", TORCH_FN(addmv));
   m.impl("tensordot.out", TORCH_FN(tensordot_out));
 }
 
