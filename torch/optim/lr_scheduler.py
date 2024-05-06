@@ -183,6 +183,7 @@ class LRScheduler:
         for i, data in enumerate(zip(self.optimizer.param_groups, values)):
             param_group, lr = data
             if isinstance(param_group["lr"], Tensor):
+                lr_val = lr.item() if isinstance(lr, Tensor) else lr
                 param_group["lr"].fill_(lr)
             else:
                 param_group["lr"] = lr
@@ -1451,6 +1452,7 @@ class CyclicLR(LRScheduler):
         if last_epoch == -1:
             for lr, group in zip(base_lrs, optimizer.param_groups):
                 if isinstance(group["lr"], Tensor):
+                    lr_val = lr.item() if isinstance(lr, Tensor) else lr
                     group["lr"].fill_(lr)
                 else:
                     group["lr"] = lr
