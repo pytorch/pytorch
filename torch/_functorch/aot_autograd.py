@@ -704,7 +704,6 @@ def aot_function(
     keep_inference_input_mutations: bool = False,
     inference_compiler: Optional[Callable] = None,
     *,
-    # Whether or not to trace with dynamic shapes
     dynamic=False,
     enable_log=True,
 ) -> Callable:
@@ -724,7 +723,7 @@ def aot_function(
         This API is experimental and likely to change.
 
     Args:
-        fn (Callable): A Python function that takes one ore more arguments. Must
+        fn (Callable): A Python function that takes one or more arguments. Must
             return one or more Tensors.
         fw_compiler (Callable): A Python function that accepts an Fx graph with
             Aten ops and input args, and returns a Callable that semantically is
@@ -736,13 +735,18 @@ def aot_function(
         partition_fn (Callable): A Python function that takes a joint forward
             and backward graph, and partitions it into separate forward and
             backward graphs.
-        decompositions (Dict): A dictionary to define the decomposition of
+        decompositions (Optional[Dict]): A dictionary to define the decomposition of
             larger Aten ops into simpler or core Aten ops.
+        num_params_buffers (int): Number of params and buffers in the forward graph. Default: 0.
+        keep_inference_input_mutations (bool): Whether to keep mutations to the input
+            tensors in the inference graph. Default: ``False``.
         inference_compiler (Optional[Callable]): A Python function that accepts an
             Fx graph with Aten ops and input args, and returns a Callable that
             semantically is equivalent to the input Fx graph. inference_compiler is invoked
             if no autograd is needed. Default: None
             (when None, it defaults to the :attr:`fw_compiler`)
+        dynamic (bool): Whether to trace with dynamic shapes. Default: ``False``.
+        enable_log (bool): Wether to enable logging. Default: ``True``.
     Returns:
         Returns a ``Callable`` that retains the eager behavior of the original
         :attr:`fn`, but with forward and backward graph compiled via
