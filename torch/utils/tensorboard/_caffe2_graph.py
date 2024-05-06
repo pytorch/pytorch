@@ -320,7 +320,7 @@ def _tf_device(device_option):
         return "/cpu:*"
     if device_option.device_type == caffe2_pb2.CUDA:
         return f"/gpu:{device_option.device_id}"
-    raise Exception("Unhandled device", device_option)
+    raise Exception("Unhandled device", device_option)  # noqa: TRY002
 
 
 def _add_tf_shape(attr_dict, ints):
@@ -578,10 +578,8 @@ def _compute_in_out(ops):
     out_blobs = set()
 
     for op in ops:
-        for input_blob in op.input:
-            in_blobs.add(input_blob)
-        for output_blob in op.output:
-            out_blobs.add(output_blob)
+        in_blobs.update(op.input)
+        out_blobs.update(op.output)
 
     input_blobs = list(in_blobs.difference(out_blobs))
     output_blobs = list(out_blobs.difference(in_blobs))
@@ -700,8 +698,7 @@ def _operators_to_graph_def(
             else [_operator_to_node(shapes, op)]
         )  # .extend() expects an iterable
         current_graph.node.extend(nodes_from_op)
-        for input_blob in op.input:
-            blobs.add(input_blob)
+        blobs.update(op.input)
         for i, output_blob in enumerate(op.output):
             blobs.add(output_blob)
             producing_ops.setdefault(output_blob, []).append((op, i))

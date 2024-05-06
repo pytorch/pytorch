@@ -1,13 +1,13 @@
 #pragma once
 
+#ifdef USE_C10D_NCCL
+
 #if defined(__linux__)
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 #endif
-
-#ifdef USE_C10D_NCCL
 
 #include <atomic>
 #include <chrono>
@@ -1090,10 +1090,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 TORCH_API std::string dump_nccl_trace();
 
 // Gets a mutable reference to a global optional function.  Heartbeat Monitor
-// will query this function and if available, call it to dump traces. Inside
-// fbcode, we store a function here that uses an internal tool for process
-// tracing
-TORCH_API c10::optional<std::function<std::string()>>& get_cpp_trace_dumper();
+// will use this function to dump traces, if available. Inside fbcode, we store
+// a function here that uses an internal tool for process tracing
+TORCH_API c10::optional<
+    std::function<void(std::function<void(const std::string&)>)>>&
+get_cpp_trace_dumper();
 
 // Similar to get_cpp_trace_dumper, this stores a function defined in
 // torch-python layer that lets us check whether the GIL can be acquired,

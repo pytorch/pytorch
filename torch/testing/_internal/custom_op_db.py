@@ -10,6 +10,7 @@ import numpy as np
 from torch.testing._internal.autograd_function_db import (
     sample_inputs_numpy_cube,
     sample_inputs_numpy_mul,
+    sample_inputs_numpy_mul_scalar,
     sample_inputs_numpy_sort,
     sample_inputs_numpy_take,
 )
@@ -67,6 +68,23 @@ def numpy_mul_backward(ctx, grad_out):
     return grad_x, grad_y
 
 numpy_mul.register_autograd(numpy_mul_backward, setup_context=numpy_mul_setup_context)
+
+@torch.library.custom_op("_torch_testing::numpy_mul_scalar", mutates_args=())
+def numpy_mul_scalar(x: Tensor, *, scalar: float) -> Tensor:
+    return torch.tensor(to_numpy(x) * scalar, device=x.device)
+
+@numpy_mul_scalar.register_fake
+def _(x, *, scalar):
+    return (x * scalar).contiguous()
+
+def numpy_mul_scalar_setup_context(ctx, inputs, keyword_only_inputs, output):
+    ctx.scalar = keyword_only_inputs["scalar"]
+
+def numpy_mul_scalar_backward(ctx, grad_out):
+    grad_x = grad_out * ctx.scalar
+    return grad_x
+
+numpy_mul_scalar.register_autograd(numpy_mul_scalar_backward, setup_context=numpy_mul_scalar_setup_context)
 
 @torch.library.custom_op("_torch_testing::numpy_sort", mutates_args=())
 def numpy_sort(x: Tensor, dim: int) -> Tuple[Tensor, Tensor, Tensor]:
@@ -341,6 +359,13 @@ custom_op_db = [
         supports_out=False,
     ),
     OpInfo(
+        'NumpyMulScalarCustomOp',
+        op=numpy_mul_scalar._opoverload,
+        sample_inputs_func=sample_inputs_numpy_mul_scalar,
+        dtypes=all_types_and(torch.bool, torch.half),
+        supports_out=False,
+    ),
+    OpInfo(
         'NumpySortCustomOp',
         op=numpy_sort._opoverload,
         sample_inputs_func=sample_inputs_numpy_sort,
@@ -410,3 +435,54 @@ custom_op_db = [
         supports_out=False,
     ),
 ]
+
+
+# ==============================================================
+# some mechanical test cases
+# ==============================================================
+
+lib = torch.library.Library("_torch_testing", "FRAGMENT")  # noqa: TOR901
+
+lib.define("source0(Tensor x) -> Tensor")
+
+@torch.library.register_fake("_torch_testing::source0", lib=lib)
+def _(x):
+    return x.clone()
+
+lib.define("source1(Tensor x) -> Tensor")
+
+def source1_fake(x):
+    return x.clone()
+
+torch.library.register_fake("_torch_testing::source1", source1_fake, lib=lib)
+
+lib.define("source2(Tensor x) -> Tensor")
+
+@torch.library.impl_abstract("_torch_testing::source2", lib=lib)
+def _(x):
+    return x.clone()
+
+lib.define("source3(Tensor x) -> Tensor")
+
+def source3_fake(x):
+    return x.clone()
+
+torch.library.impl_abstract("_torch_testing::source3", source3_fake, lib=lib)
+
+
+@torch.library.custom_op("_torch_testing::source4", mutates_args=())
+def source4(x: Tensor) -> Tensor:
+    return x.clone()
+
+@source4.register_fake
+def _(x):
+    return x.clone()
+
+@torch.library.custom_op("_torch_testing::source5", mutates_args=())
+def source5(x: Tensor) -> Tensor:
+    return x.clone()
+
+def source5_fake(x):
+    return x.clone()
+
+source5.register_fake(source5_fake)

@@ -46,6 +46,7 @@ ALLOW_LIST = [
     ("prim::ModuleDictIndex", datetime.date(9999, 1, 1)),
     ("prim::MKLDNNRelu6", datetime.date(9999, 1, 1)),
     ("prim::MKLDNNRelu6_", datetime.date(9999, 1, 1)),
+    ("prim::is_ort", datetime.date(9999, 1, 1)),
     ("prim::Concat", datetime.date(9999, 1, 1)),
     ("aten::_NestedTensor_GeneralizedBMM", datetime.date(9999, 1, 1)),
     # Internal, profiler-specific ops
@@ -110,6 +111,7 @@ ALLOW_LIST = [
     ("prims::.*", datetime.date(9999, 1, 1)),
     ("aten::_flash_attention_forward", datetime.date(2023, 12, 30)),
     ("aten::_flash_attention_backward", datetime.date(2023, 12, 30)),
+    ("aten::_scaled_dot_product_cudnn_attention", datetime.date(9999, 1, 1)),
     ("aten::_sparse_mask_helper", datetime.date(2023, 3, 15)),
     # BetterTransformer 1.0 internal operators
     ("aten::_transformer_decoder_only_layer_fwd", datetime.date(9999, 1, 1)),
