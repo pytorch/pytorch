@@ -37,6 +37,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
+    TEST_WITH_SLOW,
     TEST_WITH_SLOW_GRADCHECK,
 )
 
@@ -491,12 +492,11 @@ def run_test(
         and not is_cpp_test
         and "-n" not in command
     )
-    is_slow = "slow" in TEST_CONFIG or "slow" in os.environ.get("BUILD_ENVRIONMENT", "")
     timeout = (
         None
         if not options.enable_timeout
         else THRESHOLD * 6
-        if is_slow
+        if TEST_WITH_SLOW
         else THRESHOLD * 3
         if should_retry
         and isinstance(test_module, ShardedTest)
@@ -1190,8 +1190,7 @@ def parse_args():
         )
         and get_pr_number() is not None
         and not strtobool(os.environ.get("NO_TD", "False"))
-        and "slow" not in TEST_CONFIG
-        and "slow" not in os.getenv("BUILD_ENVIRONMENT", ""),
+        and not TEST_WITH_SLOW,
     )
     parser.add_argument(
         "additional_unittest_args",
