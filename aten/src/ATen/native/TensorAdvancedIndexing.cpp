@@ -2147,6 +2147,29 @@ Tensor& take_along_dim_out(const Tensor& self, const Tensor& indices, std::optio
   return at::gather_out(result, self.view(-1), 0, indices.view(-1));
 }
 
+Tensor put_along_dim(const Tensor& self, const Tensor& indices, const Tensor& values, c10::optional<int64_t> opt_dim) {
+  checkDevice("torch.put_along_dim():", {self, indices, values}, self.device());
+  // TODO Broadcasting and checks
+  if (opt_dim.has_value()) {
+	auto result = at::scatter(self, opt_dim.value(), indices, values);
+    return result;
+  } else {
+	// TODO
+	return self;
+  }
+}
+
+Tensor& put_along_dim_out(const Tensor& self, const Tensor& indices, const Tensor& values, c10::optional<int64_t> opt_dim, Tensor& result) {
+  checkDevice("torch.put_along_dim():", {self, indices, values}, self.device());
+  // TODO Broadcasting and checks
+  if (opt_dim.has_value()) {
+	result = at::scatter(self, opt_dim.value(), indices, values);
+  } else {
+	// TODO // dim is None
+  }
+  return result;
+}
+
 Tensor _gather_sparse_backward(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& grad){
 // special case scalar input and/or index
     if (self.ndimension() == 0) return at::_sparse_coo_tensor_unsafe_symint(at::empty_symint({0,grad.sym_numel()}, index.options()), grad, self.sym_sizes());
