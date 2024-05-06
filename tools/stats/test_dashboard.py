@@ -75,7 +75,7 @@ def get_td_exclusions(
         for path in artifact_paths:
             unzip(path)
 
-        grouped: Dict[str, Any] = defaultdict(lambda: defaultdict(set))
+        grouped_tests: Dict[str, Any] = defaultdict(lambda: defaultdict(set))
         for td_exclusions in Path(".").glob("**/td_exclusions*.json"):
             with open(td_exclusions) as f:
                 exclusions = json.load(f)
@@ -84,17 +84,17 @@ def get_td_exclusions(
                     job_name = get_job_name(job_id)
                     build_name = get_build_name(job_name)
                     test_config = get_test_config(job_name)
-                    grouped[build_name][test_config].add(exclusion["test_file"])
+                    grouped_tests[build_name][test_config].add(exclusion["test_file"])
 
-        for build_name, build in grouped.items():
+        for build_name, build in grouped_tests.items():
             for test_config, test_files in build.items():
-                grouped[build_name][test_config] = sorted(test_files)
-        return grouped
+                grouped_tests[build_name][test_config] = sorted(test_files)
+        return grouped_tests
 
 
 def group_test_cases(test_cases: List[Dict[str, Any]]) -> Dict[str, Any]:
     start = time.time()
-    grouped: Dict[str, Any] = defaultdict(
+    grouped_tests: Dict[str, Any] = defaultdict(
         lambda: defaultdict(
             lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
         )
@@ -111,21 +111,21 @@ def group_test_cases(test_cases: List[Dict[str, Any]]) -> Dict[str, Any]:
         invoking_file = invoking_file.replace(".", "/")
         test_case.pop("workflow_id")
         test_case.pop("workflow_run_attempt")
-        grouped[build_name][test_config][invoking_file][class_name][name].append(
+        grouped_tests[build_name][test_config][invoking_file][class_name][name].append(
             test_case
         )
 
     print(f"Time taken to group tests: {time.time() - start}")
-    return grouped
+    return grouped_tests
 
 
-def get_reruns(grouped: Dict[str, Any]) -> Dict[str, Any]:
+def get_reruns(grouped_tests: Dict[str, Any]) -> Dict[str, Any]:
     reruns: Dict[str, Any] = defaultdict(
         lambda: defaultdict(
             lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
         )
     )
-    for build_name, build in grouped.items():
+    for build_name, build in grouped_tests.items():
         for test_config, test_config_data in build.items():
             for invoking_file, invoking_file_data in test_config_data.items():
                 for class_name, class_data in invoking_file_data.items():
@@ -143,12 +143,33 @@ def get_reruns(grouped: Dict[str, Any]) -> Dict[str, Any]:
     return reruns
 
 
+def get_invoking_file_summary(grouped_tests: Dict[str, Any]) -> Dict[str, Any]:
+    invoking_file_summary: Dict[str, Any] = defaultdict(
+        lambda: defaultdict(lambda: defaultdict(lambda: {"count": 0, "time": 0.0}))
+    )
+    for build_name, build in grouped_tests.items():
+        for test_config, test_config_data in build.items():
+            for invoking_file, invoking_file_data in test_config_data.items():
+                for class_data in invoking_file_data.values():
+                    for test_data in class_data.values():
+                        invoking_file_summary[build_name][test_config][invoking_file][
+                            "count"
+                        ] += 1
+                        for i in test_data:
+                            invoking_file_summary[build_name][test_config][
+                                invoking_file
+                            ]["time"] += i["time"]
+
+    return invoking_file_summary
+
+
 def upload_additional_info(
     workflow_run_id: int, workflow_run_attempt: int, test_cases: List[Dict[str, Any]]
 ) -> None:
-    grouped = group_test_cases(test_cases)
-    reruns = get_reruns(grouped)
+    grouped_tests = group_test_cases(test_cases)
+    reruns = get_reruns(grouped_tests)
     exclusions = get_td_exclusions(workflow_run_id, workflow_run_attempt)
+    invoking_file_summary = get_invoking_file_summary(grouped_tests)
 
     upload_workflow_stats_to_s3(
         workflow_run_id,
@@ -161,4 +182,10 @@ def upload_additional_info(
         workflow_run_attempt,
         "additional_info/td_exclusions",
         [exclusions],
+    )
+    upload_workflow_stats_to_s3(
+        workflow_run_id,
+        workflow_run_attempt,
+        "additional_info/invoking_file_summary",
+        [invoking_file_summary],
     )

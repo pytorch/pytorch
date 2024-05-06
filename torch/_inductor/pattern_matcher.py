@@ -36,7 +36,6 @@ import torch.utils._pytree as pytree
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import counters
 from torch._prims_common import is_integer_dtype
-from torch.fx import Node
 from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
 from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
 from torch.fx.immutable_collections import immutable_dict, immutable_list
@@ -49,6 +48,9 @@ from ..fx import Transformer
 from . import config
 from .decomposition import select_decomp_table
 from .lowering import fallback_node_due_to_unsupported_type
+
+if typing.TYPE_CHECKING:
+    from torch.fx import Node
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -464,7 +466,7 @@ class _TargetArgsExpr(_TargetExpr):
             from torch.fx.operator_schemas import normalize_function
 
             normalized_args_and_kwargs = normalize_function(
-                node.target, node.args, node.kwargs
+                node.target, node.args, node.kwargs  # type: ignore[arg-type]
             )
 
             if normalized_args_and_kwargs is None:
@@ -912,7 +914,7 @@ class ReplacementPatternEntry(PatternEntry):
                     queue.extend(arg.all_input_nodes)
 
         with graph.inserting_before(last_node):
-            replacement = Replacer(replacement_graph).run(*args)
+            replacement = Replacer(replacement_graph).run(*args)  # type: ignore[arg-type]
             if isinstance(replacement, torch.fx.Node):
                 replacement = [replacement]
 
@@ -930,7 +932,7 @@ class ReplacementPatternEntry(PatternEntry):
                     return
                 assert isinstance(old, torch.fx.Node)
                 if new is None:
-                    old.replace_all_uses_with(None)
+                    old.replace_all_uses_with(None)  # type: ignore[arg-type]
                     graph.erase_node(old)
                     return
                 if isinstance(new, torch.fx.Node):
@@ -1059,7 +1061,7 @@ def register_replacement(
                 )
 
         args = list(
-            torch.fx.map_arg(
+            torch.fx.map_arg(  # type: ignore[arg-type]
                 [match.kwargs[name] for name in argnames], lambda n: n.meta["val"]
             )
         )
@@ -1463,8 +1465,8 @@ class PatternMatcherPass:
     def apply(self, graph: torch.fx.GraphModule) -> int:
         if not self.patterns:
             return 0
-        if isinstance(graph, torch.fx.GraphModule):
-            graph = graph.graph
+        if isinstance(graph, torch.fx.GraphModule):  # type: ignore[assignment]
+            graph = graph.graph  # type: ignore[assignment]
         if self.prevent_match_across_mutations:
             if should_compute_mutation_region_ids(graph):
                 compute_mutation_region_ids(graph)
@@ -1647,7 +1649,7 @@ def joint_fwd_bwd(fn, args) -> torch.fx.GraphModule:
 
 
 def _args(n: torch.fx.Node) -> List[torch.fx.node.Argument]:
-    args: List[torch.fx.node.Argument] = list()
+    args: List[torch.fx.node.Argument] = []
     torch.fx.map_arg((n.args, n.kwargs), args.append)
     return args
 
