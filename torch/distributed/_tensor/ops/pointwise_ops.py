@@ -30,8 +30,6 @@ from torch.distributed._tensor.placement_types import (
 )
 from torch.distributed.device_mesh import DeviceMesh
 
-# TODO: Couple more places to rename foreach_list to list strategy
-
 
 aten = torch.ops.aten
 # leave the remaining pointwise_ops list here for convenience,
