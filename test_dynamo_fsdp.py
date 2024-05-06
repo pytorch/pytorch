@@ -273,15 +273,17 @@ def checkpoint_wrapper(module, config):
         )
 
 
-test_case = "toy_transformer"  # "simple_mlp" / "simple_seq_module" / "nested_fully_shard" / "toy_transformer"
+test_case = "simple_mlp"  # "simple_mlp" / "simple_seq_module" / "nested_fully_shard" / "toy_transformer"
 balanced = True
 mixed_precision = False  # TODO(yf225): when True, fails accuracy test, needs debugging
 apply_fsdp = True
 
 def create_input(hidden_dim):
     torch.manual_seed(0)
-    # inp = torch.randn((2, hidden_dim), device=device_type, requires_grad=False)
-    inp = torch.zeros((2, hidden_dim), device=device_type, requires_grad=False, dtype=torch.long)
+    if test_case == "toy_transformer":
+        inp = torch.zeros((2, hidden_dim), device=device_type, requires_grad=False, dtype=torch.long)
+    else:
+        inp = torch.randn((2, hidden_dim), device=device_type, requires_grad=False)
     return inp
 
 
@@ -483,13 +485,13 @@ def run(model, optim, n_iter, hidden_dim):
 
 def main_compiled(n_iter, activation_checkpoint, backend):
     model, optim, hidden_dim = init(activation_checkpoint=activation_checkpoint)
-    # # per-param FSDP does lazy init using 1st run, so run it once to init using eager mode
-    # run(model, optim, 1, hidden_dim)
-    # print("done eager 1st run for compiled!")
+    # per-param FSDP does lazy init using 1st run, so run it once to init using eager mode
+    run(model, optim, 1, hidden_dim)
+    print("done eager 1st run for compiled!")
 
     def compiler_fn(gm):
         torch_log.warning("Compiling autograd?")
-        return torch.compile(gm, backend=backend, fullgraph=False)
+        return torch.compile(gm, backend=backend, fullgraph=True)
 
     if apply_fsdp:
         torch._dynamo.config.trace_distributed = True
@@ -501,7 +503,7 @@ def main_compiled(n_iter, activation_checkpoint, backend):
     #     # HACK: delay rank 0 by X seconds, so that rank 1 will always fail first.
     #     import time
     #     time.sleep(600)
-    model_compiled = torch.compile(model, backend=backend, fullgraph=False)
+    model_compiled = torch.compile(model, backend=backend, fullgraph=True)
     with compiled_autograd.enable(compiler_fn):
         res = run(model_compiled, optim, n_iter, hidden_dim)
     print(f"res: {res}")
