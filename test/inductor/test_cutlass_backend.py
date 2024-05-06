@@ -160,10 +160,7 @@ class TestCutlassBackend(TestCase):
         def mm(a, b):
             return a @ b
 
-        tensor_options = {
-            'device': 'cuda',
-            'dtype': torch.half
-        }
+        tensor_options = {"device": "cuda", "dtype": torch.bfloat16}
 
         a = torch.randn(2240, 256, **tensor_options)
         b = torch.randn(256, 2048, **tensor_options)

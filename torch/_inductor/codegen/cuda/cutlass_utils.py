@@ -285,6 +285,10 @@ def get_alignments(torch_dtype: torch.dtype) -> List[int]:
         raise NotImplementedError(f"unsupported {torch_dtype=} for alignments")
 
 
+def is_static_int(number):
+    return isinstance(number, (int, sympy.Integer))
+
+
 def get_max_alignment(inductor_layout: Layout) -> int:
     """
     Returns the max alignment (in terms of number of elements) for a given Inductor Layout.
@@ -293,9 +297,6 @@ def get_max_alignment(inductor_layout: Layout) -> int:
     dtype = inductor_layout.dtype
     size = inductor_layout.size
     offset = inductor_layout.offset
-
-    def is_static_int(number):
-        return isinstance(number, (int, sympy.Integer))
 
     if is_static_int(size[-1]) and is_static_int(offset):
         alignments = get_alignments(dtype)

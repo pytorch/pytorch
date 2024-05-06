@@ -3,9 +3,10 @@ import logging
 from typing import Any, Dict, List, Optional
 
 import torch
+from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from torch._inductor.virtualized import V
 from .. import config as inductor_config
-from ..codegen.cuda.gemm_template import CKGemmTemplate, CUTLASSGemmTemplate
+from ..codegen.cuda.gemm_template import CUTLASSGemmTemplate
 from ..codegen.wrapper import WrapperCodeGen
 from ..ir import FlexibleLayout
 from ..lowering import register_lowering
