@@ -307,7 +307,7 @@ class DistMatrixOpsTest(DTensorTestBase):
         )
         if torch.backends.cuda.can_use_flash_attention(params, debug=False):
             available_backends.append(SDPBackend.FLASH_ATTENTION)
-        if torch.backends.cuda.can_use_efficient_attention(params, debug=True):
+        if torch.backends.cuda.can_use_efficient_attention(params, debug=False):
             available_backends.append(SDPBackend.EFFICIENT_ATTENTION)
 
         for backend in available_backends:
