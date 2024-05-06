@@ -474,7 +474,9 @@ class TritonCSEVariable(CSEVariable):
         # if we are within a masked block, it means that the result is always a
         # valid index, so you shouldn't include any of the dependent variables
         # in the resulting load mask
-        if V.interpreter.current_node.target.startswith("masked"):
+        if (
+            fx_node := getattr(V.interpreter, "current_node", None)
+        ) and fx_node.target.startswith("masked"):
             return
         for arg in args:
             if isinstance(arg, TritonCSEVariable):
