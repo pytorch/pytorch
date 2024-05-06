@@ -760,7 +760,7 @@ class FxGraphCache:
         assert all(has_hint(s) for s in symints)
         hints = [hint_int(s) for s in symints]
 
-        def iterate_over_candidates() -> Generator[CompiledFxGraph]:
+        def iterate_over_candidates() -> Generator[CompiledFxGraph, None, None]:
             if local:
                 subdir = FxGraphCache._get_tmp_dir_for_key(key)
                 if os.path.exists(subdir):
