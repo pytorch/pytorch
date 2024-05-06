@@ -2,8 +2,6 @@
 #include <stdint.h>
 #include <ostream>
 
-namespace torch::unwind {
-
 enum {
   A_UNDEFINED = 0x0,
   A_REG_PLUS_DATA = 0x1, // exp = REG[reg] + data0
@@ -55,5 +53,3 @@ struct Action {
     return out;
   }
 };
-
-} // namespace torch::unwind

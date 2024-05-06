@@ -204,7 +204,7 @@ class Conv1d(_ConvNd):
       amount of implicit padding applied on both sides.
 
     * :attr:`dilation` controls the spacing between the kernel points; also
-      known as the à trous algorithm. It is harder to describe, but this `link`_
+      known as the \uue0 trous algorithm. It is harder to describe, but this `link`_
       has a nice visualization of what :attr:`dilation` does.
 
     {groups_note}
@@ -341,7 +341,7 @@ class Conv2d(_ConvNd):
       amount of implicit padding applied on both sides.
 
     * :attr:`dilation` controls the spacing between the kernel points; also
-      known as the à trous algorithm. It is harder to describe, but this `link`_
+      known as the \u00e0 trous algorithm. It is harder to describe, but this `link`_
       has a nice visualization of what :attr:`dilation` does.
 
     {groups_note}
@@ -483,7 +483,7 @@ class Conv3d(_ConvNd):
       can be either a string {{'valid', 'same'}} or a tuple of ints giving the
       amount of implicit padding applied on both sides.
 
-    * :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
+    * :attr:`dilation` controls the spacing between the kernel points; also known as the \u00e0 trous algorithm.
       It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
 
     {groups_note}
@@ -690,7 +690,7 @@ class ConvTranspose1d(_ConvTransposeNd):
     * :attr:`output_padding` controls the additional size added to one side
       of the output shape. See note below for details.
 
-    * :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
+    * :attr:`dilation` controls the spacing between the kernel points; also known as the \u00e0 trous algorithm.
       It is harder to describe, but the link `here`_ has a nice visualization of what :attr:`dilation` does.
 
     {groups_note}
@@ -821,7 +821,7 @@ class ConvTranspose2d(_ConvTransposeNd):
     * :attr:`output_padding` controls the additional size added to one side
       of the output shape. See note below for details.
 
-    * :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
+    * :attr:`dilation` controls the spacing between the kernel points; also known as the \u00e0 trous algorithm.
       It is harder to describe, but the link `here`_ has a nice visualization of what :attr:`dilation` does.
 
     {groups_note}
@@ -978,7 +978,7 @@ class ConvTranspose3d(_ConvTransposeNd):
     * :attr:`output_padding` controls the additional size added to one side
       of the output shape. See note below for details.
 
-    * :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
+    * :attr:`dilation` controls the spacing between the kernel points; also known as the \u00e0 trous algorithm.
       It is harder to describe, but the link `here`_ has a nice visualization of what :attr:`dilation` does.
 
     {groups_note}
