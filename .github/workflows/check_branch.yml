@@ -1,0 +1,14 @@
+name: Test Workflow
+
+on:
+  schedule:
+    - cron: '*/1 * * * *'
+
+jobs:
+  test:
+    runs-on: linux.4xlarge
+    steps:
+      - name: Output branch information
+        run: |
+          echo "github.head_ref: ${{ github.head_ref }}"
+          echo "github.ref_name: ${{ github.ref_name }}"
