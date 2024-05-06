@@ -1,7 +1,8 @@
 from argparse import ArgumentParser
 from typing import Any
 
-from github import Auth, Github, Issue
+from github import Auth, Github
+from github.Issue import Issue
 
 
 WORKFLOW_TYPE_LABEL = "label"
