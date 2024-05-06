@@ -2587,7 +2587,7 @@ class CommonTemplate:
             with torch.no_grad():
                 torch.compile(fn)(t)
         # TODO: Autograd internal assertion
-        msg = "Failed running call_module .*"
+        msg = r".*isDifferentiableType\(variable.scalar_type\(\)\) INTERNAL ASSERT FAILED.*"
         with self.assertRaisesRegex(RuntimeError, msg):
             torch.compile(fn)(t)
 
