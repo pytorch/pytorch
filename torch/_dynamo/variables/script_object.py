@@ -77,4 +77,4 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         "Dynamo cannot safely trace script object due to graph break."
     )
     def call_method(self, tx, name, args, kwargs):
-        unimplemented("Setattr on script object is not safe.")
+        unimplemented(f"call method {name} on script object is not safe.")

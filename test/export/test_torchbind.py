@@ -1049,7 +1049,7 @@ def forward(self, L_tq_ : torch.ScriptObject, L_x_ : torch.Tensor):
             return tq
 
         with self.assertRaisesRegex(
-            RuntimeError, "Setattr on script object is not safe."
+            RuntimeError, "call method __setattr__ on script object is not safe"
         ):
             torch.compile(setattr_f, backend="eager")(_empty_tensor_queue())
 

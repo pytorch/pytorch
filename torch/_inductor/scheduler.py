@@ -28,6 +28,7 @@ import sympy
 import torch
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
+from torch.utils._sympy.symbol import free_symbol_is_type, SymT
 from torch.utils._triton import has_triton
 
 from . import comms, config, dependencies, ir, metrics
@@ -41,7 +42,6 @@ from .utils import (
     cache_on_self,
     cmp,
     device_need_guard,
-    free_symbol_has,
     get_device_tflops,
     get_dtype_size,
     get_gpu_dram_gbps,
@@ -332,14 +332,7 @@ class BaseSchedulerNode:
             return
 
         if (
-            (
-                isinstance(self, (SchedulerNode,))
-                # o what have i done.  lets make this an api
-                or (
-                    isinstance(self, ExternKernelSchedulerNode)
-                    and isinstance(self.node, (ir.AllReduce, ir.InPlaceHint))
-                )
-            )
+            isinstance(self, (SchedulerNode,))
             and config.inplace_buffers
             and (
                 not isinstance(V.kernel, torch._inductor.codegen.triton.TritonKernel)
@@ -663,27 +656,6 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
 
     def has_side_effects(self):
         return hasattr(self.node, "has_side_effects") and self.node.has_side_effects()
-
-    def can_inplace(self, read_dep: dependencies.MemoryDep):
-        if self.get_aliases() or self.is_template():
-            return False
-
-        if read_dep.name not in self.scheduler.name_to_node:
-            # don't allow reuse of an 'input' buffer, we don't own it
-            # (would this have been fixed if I tracked mutations properly above?)
-            return False
-        if not isinstance(
-            self.node, (torch._inductor.ir.AllReduce, torch._inductor.ir.InPlaceHint)
-        ):
-            # TODO make this a property of the IR
-            return False
-
-        if len(self.read_writes.writes) == 1:
-            write_dep = next(iter(self.read_writes.writes))
-            numel_diff = read_dep.get_numel() - write_dep.get_numel()
-            return V.graph.sizevars.simplify(numel_diff) == 0
-
-        return False
 
 
 class NopKernelSchedulerNode(BaseSchedulerNode):
@@ -2220,8 +2192,8 @@ class Scheduler:
             return (
                 self.mutation_renames.get(read.name, read.name) == write.name
                 and (isinstance(read, MemoryDep) and isinstance(write, MemoryDep))
-                and not free_symbol_has(read.index, "tmp")
-                and not free_symbol_has(write.index, "tmp")
+                and not free_symbol_is_type(read.index, SymT.TMP)
+                and not free_symbol_is_type(write.index, SymT.TMP)
                 and read.index == write.index
                 and len(read.size) >= len(write.size)
                 and read.size[: len(write.size)] == write.size
