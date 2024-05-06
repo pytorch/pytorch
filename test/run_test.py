@@ -59,6 +59,7 @@ from tools.testing.discover_tests import (
 )
 from tools.testing.do_target_determination_for_s3 import import_results
 from tools.testing.target_determination.gen_artifact import gen_ci_artifact
+from tools.testing.target_determination.heuristics.utils import get_pr_number
 
 from tools.testing.test_run import TestRun
 from tools.testing.test_selections import (
@@ -227,11 +228,9 @@ CI_SERIAL_LIST = [
     "nn/test_pooling",
     "nn/test_convolution",  # Doesn't respect set_per_process_memory_fraction, results in OOM for other tests in slow gradcheck
     "distributions/test_distributions",
-    "test_modules",  # failed test due to mismatched elements
     "functorch/test_vmap",  # OOM
     "test_fx",  # gets SIGKILL
     "test_dataloader",  # frequently hangs for ROCm
-    "test_schema_check",  # Cause CUDA illegal memory access https://github.com/pytorch/pytorch/issues/95749
     "functorch/test_memory_efficient_fusion",  # Cause CUDA OOM on ROCm
     "test_utils",  # OOM
     "test_sort_and_select",  # OOM
@@ -1189,7 +1188,7 @@ def parse_args():
             )
             or (IS_WINDOWS and not TEST_CUDA)
         )
-        and os.getenv("BRANCH", "") != "main"
+        and get_pr_number() is not None
         and not strtobool(os.environ.get("NO_TD", "False"))
         and "slow" not in os.getenv("TEST_CONFIG", "")
         and "slow" not in os.getenv("BUILD_ENVIRONMENT", ""),
