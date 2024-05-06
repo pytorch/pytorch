@@ -119,7 +119,7 @@ def _to_caller_flattened_graph_module(gm: torch.fx.GraphModule) -> torch.fx.Grap
             # pyre-ignore[6]
             in_spec=None,  # type: ignore[arg-type]
             # pyre-ignore[16]
-            out_spec=gm._graph._codegen.pytree_info.out_spec,
+            out_spec=gm._graph._codegen.pytree_info.out_spec,  # type: ignore[attr-defined]
         )
     )
     gm.recompile()
@@ -294,8 +294,8 @@ SPMD_DECOMP_TABLE = {
 
 
 DEDUP_TARGETS: Set[torch._ops.OpOverload] = {
-    torch.ops.c10d_functional.all_reduce.default,
-    torch.ops.c10d_functional.wait_tensor.default,
+    torch.ops._c10d_functional.all_reduce.default,
+    torch.ops._c10d_functional.wait_tensor.default,
 }
 
 

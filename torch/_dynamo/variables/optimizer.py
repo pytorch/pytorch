@@ -112,9 +112,8 @@ class OptimizerVariable(UserDefinedObjectVariable):
         for g in self.value.param_groups:
             for p in g["params"]:
                 side_effects = tx.output.side_effects
-                if side_effects.has_pending_mutation(
-                    side_effects.id_to_variable.get(id(p), None)
-                ):
+                variable = side_effects.id_to_variable.get(id(p), None)
+                if variable and side_effects.has_pending_mutation(variable):
                     from ..exc import Unsupported
 
                     raise Unsupported("Pending mutation on parameter")
