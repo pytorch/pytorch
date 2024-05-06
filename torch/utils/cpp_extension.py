@@ -1691,10 +1691,10 @@ def _jit_compile(name,
                   file=sys.stderr)
         name = f'{name}_v{version}'
 
-    if version != old_version:
-        baton = FileBaton(os.path.join(build_directory, 'lock'))
-        if baton.try_acquire():
-            try:
+    baton = FileBaton(os.path.join(build_directory, 'lock'))
+    if baton.try_acquire():
+        try:
+            if version != old_version:
                 with GeneratedFileCleaner(keep_intermediates=keep_intermediates) as clean_ctx:
                     if IS_HIP_EXTENSION and (with_cuda or with_cudnn):
                         hipify_result = hipify_python.hipify(
@@ -1727,14 +1727,13 @@ def _jit_compile(name,
                         verbose=verbose,
                         with_cuda=with_cuda,
                         is_standalone=is_standalone)
-            finally:
-                baton.release()
-        else:
-            baton.wait()
-    elif verbose:
-        print('No modifications detected for re-loaded extension '
-              f'module {name}, skipping build step...',
-              file=sys.stderr)
+            elif verbose:
+                print('No modifications detected for re-loaded extension '
+                      f'module {name}, skipping build step...', file=sys.stderr)
+        finally:
+            baton.release()
+    else:
+        baton.wait()
 
     if verbose:
         print(f'Loading extension module {name}...', file=sys.stderr)
@@ -2175,11 +2174,6 @@ def _write_ninja_file_to_build_library(path,
     if python_include_path is not None:
         system_includes.append(python_include_path)
 
-    # Windows does not understand `-isystem`.
-    if IS_WINDOWS:
-        user_includes += system_includes
-        system_includes.clear()
-
     common_cflags = []
     if not is_standalone:
         common_cflags.append(f'-DTORCH_EXTENSION_NAME={name}')
@@ -2187,8 +2181,12 @@ def _write_ninja_file_to_build_library(path,
 
     common_cflags += [f"{x}" for x in _get_pybind11_abi_build_flags()]
 
-    common_cflags += [f'-I{include}' for include in user_includes]
-    common_cflags += [f'-isystem {include}' for include in system_includes]
+    # Windows does not understand `-isystem` and quotes flags later.
+    if IS_WINDOWS:
+        common_cflags += [f'-I{include}' for include in user_includes + system_includes]
+    else:
+        common_cflags += [f'-I{shlex.quote(include)}' for include in user_includes]
+        common_cflags += [f'-isystem {shlex.quote(include)}' for include in system_includes]
 
     common_cflags += [f"{x}" for x in _get_glibcxx_abi_build_flags()]
 

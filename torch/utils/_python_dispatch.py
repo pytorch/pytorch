@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Set, Union
 
 import torch
 import torchgen
+import torchgen.model
 from torch._C import (
     _get_dispatch_stack_at,
     _len_torch_dispatch_stack,
@@ -67,7 +68,7 @@ class TorchDispatchMode:
         self.old_dispatch_mode_flag = False
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def __enter__(self):
         global _is_in_torch_dispatch_mode
@@ -158,7 +159,7 @@ def _get_current_dispatch_mode_stack():
     return [_get_dispatch_stack_at(i) for i in range(stack_len)]
 
 
-def _push_mode(mode):
+def _push_mode(mode: TorchDispatchMode):
     k = mode._dispatch_key if hasattr(mode, "_dispatch_key") else None
     assert k is None or k == torch._C.DispatchKey.PreDispatch
     if k is None:

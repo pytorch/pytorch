@@ -748,7 +748,7 @@ Computes the minimum 4-term Blackman-Harris window according to Nuttall.
 .. math::
     w_n = 1 - 0.36358 \cos{(z_n)} + 0.48917 \cos{(2z_n)} - 0.13659 \cos{(3z_n)} + 0.01064 \cos{(4z_n)}
 
-where ``z_n = 2 π n/ M``.
+where ``z_n = 2 \u03c0 n/ M``.
     """,
     """
 
@@ -766,12 +766,12 @@ Keyword args:
 
 References::
 
-    - A. Nuttall, “Some windows with very good sidelobe behavior,”
+    - A. Nuttall, "Some windows with very good sidelobe behavior,"
       IEEE Transactions on Acoustics, Speech, and Signal Processing, vol. 29, no. 1, pp. 84-91,
       Feb 1981. https://doi.org/10.1109/TASSP.1981.1163506
 
-    - Heinzel G. et al., “Spectrum and spectral density estimation by the Discrete Fourier transform (DFT),
-      including a comprehensive list of window functions and some new flat-top windows”,
+    - Heinzel G. et al., "Spectrum and spectral density estimation by the Discrete Fourier transform (DFT),
+      including a comprehensive list of window functions and some new flat-top windows",
       February 15, 2002 https://holometer.fnal.gov/GH_FFT.pdf
 
 Examples::

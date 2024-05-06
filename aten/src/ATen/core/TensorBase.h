@@ -507,10 +507,10 @@ class TORCH_API TensorBase {
     return impl_->is_mps();
   }
 
-  /// Returns if a `Tensor` is ort tensor.
-  bool is_ort() const {
+  /// Returns if a `Tensor` is maia tensor.
+  bool is_maia() const {
     // NB: this is not a native function to avoid dispatching overhead.
-    return impl_->is_ort();
+    return impl_->is_maia();
   }
 
   /// Returns if a `Tensor` is vulkan tensor.

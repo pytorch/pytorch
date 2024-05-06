@@ -1,14 +1,16 @@
 # Owner(s): ["oncall: jit"]
 # flake8: noqa
 
+import sys
+import unittest
 from dataclasses import dataclass, field, InitVar
+from enum import Enum
+from typing import List, Optional
+
+import torch
 from hypothesis import given, settings, strategies as st
 from torch.testing._internal.jit_utils import JitTestCase
-from typing import List, Optional
-import sys
-import torch
-import unittest
-from enum import Enum
+
 
 # Example jittable dataclass
 @dataclass(order=True)
@@ -20,8 +22,8 @@ class Point:
     def __post_init__(self):
         self.norm = (torch.tensor(self.x) ** 2 + torch.tensor(self.y) ** 2) ** 0.5
 
-class MixupScheme(Enum):
 
+class MixupScheme(Enum):
     INPUT = ["input"]
 
     MANIFOLD = [
@@ -38,6 +40,7 @@ class MixupParams:
         self.alpha = alpha
         self.scheme = scheme
 
+
 class MixupScheme2(Enum):
     A = 1
     B = 2
@@ -49,6 +52,7 @@ class MixupParams2:
         self.alpha = alpha
         self.scheme = scheme
 
+
 @dataclass
 class MixupParams3:
     def __init__(self, alpha: float = 0.125, scheme: MixupScheme2 = MixupScheme2.A):
@@ -59,11 +63,11 @@ class MixupParams3:
 # Make sure the Meta internal tooling doesn't raise an overflow error
 NonHugeFloats = st.floats(min_value=-1e4, max_value=1e4, allow_nan=False)
 
-class TestDataclasses(JitTestCase):
 
+class TestDataclasses(JitTestCase):
     @classmethod
     def tearDownClass(cls):
-         torch._C._jit_clear_class_registry()
+        torch._C._jit_clear_class_registry()
 
     def test_init_vars(self):
         @torch.jit.script
@@ -75,7 +79,9 @@ class TestDataclasses(JitTestCase):
             norm: Optional[torch.Tensor] = None
 
             def __post_init__(self, norm_p: int):
-                self.norm = (torch.tensor(self.x) ** norm_p + torch.tensor(self.y) ** norm_p) ** (1 / norm_p)
+                self.norm = (
+                    torch.tensor(self.x) ** norm_p + torch.tensor(self.y) ** norm_p
+                ) ** (1 / norm_p)
 
         def fn(x: float, y: float, p: int):
             pt = Point2(x, y, p)
@@ -88,6 +94,7 @@ class TestDataclasses(JitTestCase):
     @given(NonHugeFloats, NonHugeFloats)
     def test__post_init__(self, x, y):
         P = torch.jit.script(Point)
+
         def fn(x: float, y: float):
             pt = P(x, y)
             return pt.norm
@@ -95,7 +102,9 @@ class TestDataclasses(JitTestCase):
         self.checkScript(fn, [x, y])
 
     @settings(deadline=None)
-    @given(st.tuples(NonHugeFloats, NonHugeFloats), st.tuples(NonHugeFloats, NonHugeFloats))
+    @given(
+        st.tuples(NonHugeFloats, NonHugeFloats), st.tuples(NonHugeFloats, NonHugeFloats)
+    )
     def test_comparators(self, pt1, pt2):
         x1, y1 = pt1
         x2, y2 = pt2
@@ -122,6 +131,7 @@ class TestDataclasses(JitTestCase):
 
         with self.assertRaises(NotImplementedError):
             torch.jit.script(Foo)
+
             def fn():
                 foo = Foo()
                 return foo.x
@@ -137,7 +147,7 @@ class TestDataclasses(JitTestCase):
             a: int
             b: int
 
-            def __eq__(self, other: 'CustomEq') -> bool:
+            def __eq__(self, other: "CustomEq") -> bool:
                 return self.a == other.a  # ignore the b field
 
         def fn(a: int, b1: int, b2: int):
@@ -154,9 +164,7 @@ class TestDataclasses(JitTestCase):
 
         torch.jit.script(MixupParams2)  # don't throw
 
-
     def test_use_unregistered_dataclass_raises(self):
-
         def f(a: MixupParams3):
             return 0
 
