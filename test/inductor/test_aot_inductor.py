@@ -3083,9 +3083,6 @@ copy_tests(
         "test_duplicate_constant_folding": TestFailure(
             ("non_abi_compatible_cpu",), is_skip=True
         ),
-        "test_dynamic_smem_above_default_limit": TestFailure(
-            ("non_abi_compatible_cpu",)
-        ),
         # no runtime checks for non_abi_compatible mode
         "test_runtime_checks": TestFailure(("non_abi_compatible_cpu",), is_skip=True),
         "test_runtime_checks_dtype_failed": TestFailure(
