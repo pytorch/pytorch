@@ -191,6 +191,47 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
+    def test_dtensor_constructor_w_graph_break(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        # test passing in DTensor as inputs/outputs and run some tensor computation
+        def fn(x):
+            print("graph break!")
+            return DTensor(
+                x,
+                mesh,
+                (Replicate(), Shard(0)),
+                shape=[128, 32],
+                dtype=x.dtype,
+                requires_grad=x.requires_grad,
+                stride=[32, 1],
+            )
+
+        x = torch.randn(64, 32, requires_grad=True)
+        out = fn(x)
+        out2 = torch.compile(fn, backend="eager")(x)
+
+    def test_dtensor_constructor_w_dynamo_disable(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        @torch._dynamo.disable(recursive=False)
+        def fn(x):
+            print("foo")
+            return DTensor(
+                x,
+                mesh,
+                (Replicate(),),
+                shape=torch.Size([32]),
+                dtype=x.dtype,
+                requires_grad=x.requires_grad,
+                stride=(1,),
+            )
+
+        x = torch.randn(32, requires_grad=True)
+        out = fn(x)
+        out2 = torch.compile(fn, backend="eager")(x)
+        self.assertEqual(out, out2)
+
     def test_dtensor_noncontiguous_output(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -251,6 +292,78 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         res = opt_kwargs_fn(x)
         self.assertEqual(res, ref)
         self.assertEqual(cnt.frame_count, 2)
+
+    def test_dtensor_partial_placement_redistribute_unbalanced_correct_strides(self):
+        # Partial -> Shard on an unbalanced tensor results in:
+        # - A contiguous DTensor
+        # - where the inner _local_tensor is noncontiguous
+        placement = Shard(1)
+
+        def fn(x):
+            out = x.redistribute(mesh, [placement])
+            return out
+
+        # Temporarily ignore setUp(), and use rank3 graphs during tracing
+        dist.destroy_process_group()
+        fake_store = FakeStore()
+        dist.init_process_group("fake", store=fake_store, rank=3, world_size=2)
+        mesh = DeviceMesh(self.device_type, [1, 3])
+
+        x = torch.randn(10, 257, 160, requires_grad=True)
+        x_dt = DTensor.from_local(
+            x,
+            mesh,
+            [_Partial()],
+            run_check=False,
+            shape=(10, 257, 160),
+            stride=(41120, 160, 1),
+        )
+
+        # tmp_dt has an inner, non-contiguous tensor, and is an autograd non-leaf
+        tmp_dt = fn(x_dt)
+        fake_mode = torch._subclasses.FakeTensorMode()
+        tmp_dt_fake = fake_mode.from_tensor(tmp_dt)
+        self.assertEqual(tmp_dt.shape, tmp_dt_fake.shape)
+        self.assertEqual(tmp_dt.stride(), tmp_dt_fake.stride())
+        self.assertEqual(tmp_dt._local_tensor.shape, tmp_dt_fake._local_tensor.shape)
+        self.assertEqual(
+            tmp_dt._local_tensor.stride(), tmp_dt_fake._local_tensor.stride()
+        )
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    def test_dtensor_contiguous_dtensor_noncontiguous_local_as_tangent(self):
+        # Partial -> Shard on an unbalanced tensor results in:
+        # - A contiguous DTensor
+        # - where the inner _local_tensor is noncontiguous
+        # When this tensor is a fwd graph output,
+        # AOTAutograd needs to make sure we trace the backward
+        # with a contiguous tangent
+        placement = Shard(1)
+
+        def fn(x):
+            out = x.redistribute(mesh, [placement])
+            return out
+
+        # Temporarily ignore setUp(), and use rank3 graphs during tracing
+        dist.destroy_process_group()
+        fake_store = FakeStore()
+        dist.init_process_group("fake", store=fake_store, rank=3, world_size=2)
+        mesh = DeviceMesh(self.device_type, [1, 3])
+
+        x = torch.randn(10, 257, 160, requires_grad=True)
+        x_dt = DTensor.from_local(
+            x,
+            mesh,
+            [_Partial()],
+            run_check=False,
+            shape=(10, 257, 160),
+            stride=(41120, 160, 1),
+        )
+
+        out_dt = torch.compile(fn)(x_dt)
+        # If we don't properly contiguify our traced tangents,
+        # this fails with an inductor stride assert
+        out_dt.to_local().sum().backward()
 
     def test_dynamo_to_local_kwargs(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
