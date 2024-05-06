@@ -2328,17 +2328,14 @@ class CppVecKernel(CppKernel):
             f"{acc_type_vec} {acc_vec} = {self.reduction_init_vec(reduction_type, dtype)};"
         )
         # save the reciprocal of weights for welford reduce if using static shape
-        weight_num_range = functools.reduce(
+        reduction_size = functools.reduce(
             lambda x, y: x * y, self.ranges[self.reduction_depth :]
         )
-        if reduction_type == "welford_reduce" and weight_num_range.is_number:
-            weights_factor = (
+        if reduction_type == "welford_reduce":
+            reduction_factor = (
                 self.tiling_factor if self.tiling_idx >= self.reduction_depth else 1
             )
-            weight_num_range = weight_num_range - weight_num_range % weights_factor
-            self.weight_recp_vec_range = (
-                weight_num_range + weights_factor - 1
-            ) // weights_factor
+            self.weight_recp_vec_range = reduction_size / reduction_factor
             self.reduction_weight_recps.writeline(
                 self.welford_weight_reciprocal_vec(dtype, None)
             )
