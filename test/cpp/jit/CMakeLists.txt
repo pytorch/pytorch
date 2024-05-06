@@ -27,7 +27,7 @@ add_library(backend_with_compiler SHARED
         )
 if(USE_KINETO)
   set_target_properties(backend_with_compiler PROPERTIES COMPILE_FLAGS
-  "-DUSE_KINETO -DTMP_LIBKINETO_NANOSECOND")
+  "-DUSE_KINETO")
 endif()
 target_link_libraries(backend_with_compiler torch)
 

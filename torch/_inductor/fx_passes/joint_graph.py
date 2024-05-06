@@ -300,6 +300,9 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
     """
     lazy_init()
     count = 0
+    if config.joint_custom_pre_pass is not None:
+        config.joint_custom_pre_pass(graph.graph)
+        count += 1
 
     if config.joint_graph_constant_folding:
         constant_fold_uniform_value(graph)
@@ -309,6 +312,10 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
 
     if not config.fallback_random:
         count += replace_random_passes(graph)
+
+    if config.joint_custom_post_pass is not None:
+        config.joint_custom_post_pass(graph.graph)
+        count += 1
 
     if count:
         stable_topological_sort(graph.graph)
@@ -353,5 +360,5 @@ def pointless_view(match: Match, arg, size):
     node = match.output_node()
     arg_size = list(node.args[0].meta["val"].shape)  # type: ignore[union-attr]
     if size == arg_size:
-        node.replace_all_uses_with(node.args[0])
+        node.replace_all_uses_with(node.args[0])  # type: ignore[arg-type]
         match.erase_nodes(graph)

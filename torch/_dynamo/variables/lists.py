@@ -23,6 +23,7 @@ from ..utils import (
     iter_contains,
     namedtuple_fields,
     odict_values,
+    set_example_value,
 )
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
@@ -160,7 +161,7 @@ class RangeVariable(BaseListVariable):
         elif len(items_to_map) == 3:
             start, stop, step = items_to_map
         else:
-            raise AssertionError()
+            raise AssertionError
 
         assert stop is not None
         super().__init__([start, stop, step], **kwargs)
@@ -256,6 +257,12 @@ class CommonListMethodsVariable(BaseListVariable):
             assert not args
             items = list(self.items)
             return self.modified(items, mutable_local=MutableLocal())
+        elif name == "reverse" and self.mutable_local:
+            assert not kwargs
+            assert not args
+            self.items.reverse()
+            tx.output.side_effects.mutation(self)
+            return ConstantVariable.create(None)
         else:
             return super().call_method(tx, name, args, kwargs)
 
@@ -265,7 +272,7 @@ class ListVariable(CommonListMethodsVariable):
         return list
 
     def __repr__(self):
-        return f"{self.__class__.__name__}(length={len(self.items)}"
+        return f"{self.__class__.__name__}(length={len(self.items)})"
 
     def reconstruct(self, codegen):
         codegen.foreach(self.items)
@@ -442,11 +449,14 @@ class SizeVariable(TupleVariable):
             return torch.Size(proxies)
 
         proxy = tracer.create_proxy("call_function", torch.Size, (proxies,), {})
-        proxy.node.meta["example_value"] = torch.Size(
-            [
-                p.node.meta["example_value"] if not isinstance(p, int) else p
-                for p in proxies
-            ]
+        set_example_value(
+            proxy.node,
+            torch.Size(
+                [
+                    p.node.meta["example_value"] if not isinstance(p, int) else p
+                    for p in proxies
+                ]
+            ),
         )
         return proxy
 
@@ -576,8 +586,7 @@ class NamedTupleVariable(TupleVariable):
         return self.items[fields.index(name)]
 
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
-        fields = namedtuple_fields(self.tuple_cls)
-        return variables.ConstantVariable.create(name in fields)
+        return variables.ConstantVariable.create(hasattr(self.tuple_cls, name))
 
 
 class SliceVariable(BaseListVariable):
@@ -592,7 +601,7 @@ class SliceVariable(BaseListVariable):
         elif len(items_to_map) == 3:
             start, stop, step = items_to_map
         else:
-            raise AssertionError()
+            raise AssertionError
 
         if isinstance(start, variables.TensorVariable) or isinstance(
             stop, variables.TensorVariable
@@ -644,7 +653,7 @@ class ListIteratorVariable(VariableTracker):
         assert self.mutable_local
         old_index = self.index
         if old_index >= len(self.items):
-            raise StopIteration()
+            raise StopIteration
         tx.output.side_effects.mutation(self)
         self.index += 1
         return self.items[old_index]
@@ -665,7 +674,7 @@ class ListIteratorVariable(VariableTracker):
 
     def as_python_constant(self):
         if self.index > 0:
-            raise NotImplementedError()
+            raise NotImplementedError
         return iter([x.as_python_constant() for x in self.items])
 
     def unpack_var_sequence(self, tx):
@@ -748,7 +757,7 @@ class RestrictedListSubclassVariable(ListVariable):
         return [x.as_proxy() for x in self.items]
 
     def as_python_constant(self):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def is_python_constant(self):
         return False
