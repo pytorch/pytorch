@@ -9781,7 +9781,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
         # Subclassing it directly no OK
         with self.assertRaisesRegex(RuntimeError, "Cannot subclass"):
-            class T(torch._C.TensorBase):
+            class Tfail(torch._C.TensorBase):
                 pass
 
         # Doing so with Tensor is ok though

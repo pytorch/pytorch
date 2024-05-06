@@ -2267,7 +2267,8 @@ int THPVariableMetaType_init(PyObject* cls, PyObject* args, PyObject* kwargs) {
   }
 
   // Forbid subclassing _TensorBase directly
-  py::tuple mro = py::reinterpret_borrow<py::tuple>(((PyTypeObject*)cls)->tp_mro);
+  py::tuple mro =
+      py::reinterpret_borrow<py::tuple>(((PyTypeObject*)cls)->tp_mro);
   bool is_subclass_of_thpvariable = false;
   for (py::handle h : mro) {
     if (h.ptr() == THPVariableClass) {
