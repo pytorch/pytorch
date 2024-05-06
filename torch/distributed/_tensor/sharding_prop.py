@@ -289,10 +289,12 @@ class ShardingPropagator:
 
                 needs_redistribute = False
                 suggestion_args: List[object] = []
-                for arg_idx, arg in enumerate(op_schema.args_schema):
-                    if arg_idx == 5:
-                        print(arg)
-                        print(f"op schema: {op_schema.args_schema}")
+                tensor_or_list_tensor_arg_idx = 0
+
+                for arg in op_schema.args_schema:
+                    # if arg_idx == 5:
+                    #     print(arg)
+                    #     print(f"op schema: {op_schema.args_schema}")
 
                     ## Note: replacing arg[0] by arg makes this sense this test pass locally
                     # pytest test/distributed/_tensor/test_optimizers.py -s -k adam_1d_sharding
@@ -301,17 +303,17 @@ class ShardingPropagator:
                     if arg and isinstance(arg, (list, tuple)) and isinstance(arg[0], DTensorSpec):
                         expected_input_spec_list: List[DTensorSpec] = []
                         for idx, arg_spec in enumerate(arg):
-                            print(f"arg_idx: {arg_idx} idx: {idx}")
+                            # print(f"arg_idx: {arg_idx} idx: {idx}")
 
                             # TODO: This is the bug I need to fix
                             # TODO: Need to better understand what the op args schema is vs arg index
                             # Kinda annoying breakpoints dont work with this setup
                             # But hey local tests pass \_O_/
-                            if arg_idx == 5:
-                                continue
+                            # if arg_idx == 5:
+                            #     continue
 
                             expected_input_spec = selected_strategies[idx].input_spec(
-                                arg_idx
+                                tensor_or_list_tensor_arg_idx
                             )
                             expected_input_spec = (
                                 expected_input_spec.shallow_copy_with_tensor_meta(
@@ -326,8 +328,10 @@ class ShardingPropagator:
                             if isinstance(arg, tuple)
                             else expected_input_spec_list
                         )
+                        tensor_or_list_tensor_arg_idx += 1
+
                     elif isinstance(arg, DTensorSpec):
-                        expected_input_spec = selected_strategies[0].input_spec(arg_idx)
+                        expected_input_spec = selected_strategies[0].input_spec(tensor_or_list_tensor_arg_idx)
                         expected_input_spec = (
                             expected_input_spec.shallow_copy_with_tensor_meta(
                                 arg.tensor_meta
@@ -336,6 +340,7 @@ class ShardingPropagator:
                         if arg.placements != expected_input_spec.placements:
                             needs_redistribute = True
                         suggestion_args.append(expected_input_spec)
+                        tensor_or_list_tensor_arg_idx += 1
                     else:
                         suggestion_args.append(arg)
 
