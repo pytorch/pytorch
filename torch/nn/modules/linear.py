@@ -200,9 +200,8 @@ class Bilinear(Module):
         return F.bilinear(input1, input2, self.weight, self.bias)
 
     def extra_repr(self) -> str:
-        return 'in1_features={}, in2_features={}, out_features={}, bias={}'.format(
-            self.in1_features, self.in2_features, self.out_features, self.bias is not None
-        )
+        return (f'in1_features={self.in1_features}, in2_features={self.in2_features}, '
+                f'out_features={self.out_features}, bias={self.bias is not None}')
 
 
 class LazyLinear(LazyModuleMixin, Linear):

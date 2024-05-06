@@ -122,7 +122,7 @@ __global__ void upsample_nearest2d_backward_out_frame(
     scalar_t* grad_i,
     float height_scale,
     float width_scale) {
-  int dst_idx = blockIdx.x * blockDim.x + threadIdx.x;
+  int64_t dst_idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (dst_idx >= dim_c * dst_dim_h * dst_dim_w)
     return;
 
@@ -151,7 +151,7 @@ __global__ void upsample_nearest2d_backward_out_frame(
     accscalar_t grad = 0;
     for (int y = src_y; y < src_y_up; y++) {
       for (int x = src_x; x < src_x_up; x++) {
-        int src_idx =
+        int64_t src_idx =
             b * dim_c * src_c_stride + c * src_c_stride + y * src_dim_w + x;
         grad += grad_o[src_idx];
       }
@@ -408,9 +408,9 @@ static void upsample_nearest2d_backward_out_cuda_template(
     dim3 bdim{std::min<unsigned int>(
         at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS)};
     dim3 gdim{ceil_div(n, bdim.x)};
-    // safe check for int32 indexing; implicitly restrict launch config for kernel
-    TORCH_CHECK(grad_input.numel() <= std::numeric_limits<int32_t>::max());
-    TORCH_CHECK(grad_output.numel() <= std::numeric_limits<int32_t>::max());
+    // safe check for int64 indexing; implicitly restrict launch config for kernel
+    TORCH_CHECK(grad_input.numel() <= std::numeric_limits<int64_t>::max(), "upsample2d grad_input.numel() <= std::numeric_limits<int64_t>::max()");
+    TORCH_CHECK(grad_output.numel() <= std::numeric_limits<int64_t>::max(), "upsample2d grad_output.numel() <= std::numeric_limits<int64_t>::max()");
 
     cudaStream_t stream = at::cuda::getCurrentCUDAStream();
     AT_DISPATCH_FLOATING_TYPES_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Byte, grad_output.scalar_type(), "upsample_nearest2d_backward_out_frame", [&] {

@@ -10,10 +10,19 @@ import pytest
 import torch
 
 from torch.distributed.pipeline.sync.copy import Copy, Wait
-from torch.distributed.pipeline.sync.stream import CPUStream, current_stream, get_device, is_cuda, new_stream, use_stream
+from torch.distributed.pipeline.sync.stream import (
+    CPUStream,
+    current_stream,
+    get_device,
+    is_cuda,
+    new_stream,
+    use_stream,
+)
 from torch.testing._internal.common_utils import run_tests
 
-skip_if_no_cuda = pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda required")
+skip_if_no_cuda = pytest.mark.skipif(
+    not torch.cuda.is_available(), reason="cuda required"
+)
 
 
 def _test_copy_wait(prev_stream, next_stream, cuda_sleep=None):

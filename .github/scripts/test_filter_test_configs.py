@@ -9,6 +9,7 @@ from unittest import main, mock, TestCase
 import yaml
 from filter_test_configs import (
     filter,
+    filter_selected_test_configs,
     get_labels,
     mark_unstable_jobs,
     parse_reenabled_issues,
@@ -312,6 +313,51 @@ class TestConfigFilter(TestCase):
         for case in testcases:
             filtered_test_matrix = filter(
                 yaml.safe_load(case["test_matrix"]), mocked_labels
+            )
+            self.assertEqual(case["expected"], json.dumps(filtered_test_matrix))
+
+    def test_filter_selected_test_configs(self) -> None:
+        testcases = [
+            {
+                "test_matrix": '{include: [{config: "default"}]}',
+                "selected_test_configs": "",
+                "expected": '{"include": [{"config": "default"}]}',
+                "description": "No selected test configs",
+            },
+            {
+                "test_matrix": '{include: [{config: "default"}]}',
+                "selected_test_configs": "foo",
+                "expected": '{"include": []}',
+                "description": "A different test config is selected",
+            },
+            {
+                "test_matrix": '{include: [{config: "default"}]}',
+                "selected_test_configs": "foo, bar",
+                "expected": '{"include": []}',
+                "description": "A different set of test configs is selected",
+            },
+            {
+                "test_matrix": '{include: [{config: "default"}]}',
+                "selected_test_configs": "foo, bar,default",
+                "expected": '{"include": [{"config": "default"}]}',
+                "description": "One of the test config is selected",
+            },
+            {
+                "test_matrix": '{include: [{config: "default"}, {config: "bar"}]}',
+                "selected_test_configs": "foo, bar,Default",
+                "expected": '{"include": [{"config": "default"}, {"config": "bar"}]}',
+                "description": "Several test configs are selected",
+            },
+        ]
+
+        for case in testcases:
+            selected_test_configs = {
+                v.strip().lower()
+                for v in case["selected_test_configs"].split(",")
+                if v.strip()
+            }
+            filtered_test_matrix = filter_selected_test_configs(
+                yaml.safe_load(case["test_matrix"]), selected_test_configs
             )
             self.assertEqual(case["expected"], json.dumps(filtered_test_matrix))
 
@@ -639,6 +685,7 @@ class TestConfigFilter(TestCase):
             ci_verbose_test_logs: bool = False,
             ci_no_test_timeout: bool = False,
             ci_no_td: bool = False,
+            ci_td_distributed: bool = False,
             is_unstable: bool = False,
             reenabled_issues: str = "",
         ) -> str:
@@ -647,6 +694,7 @@ class TestConfigFilter(TestCase):
                 f"ci-verbose-test-logs={ci_verbose_test_logs}\n"
                 f"ci-no-test-timeout={ci_no_test_timeout}\n"
                 f"ci-no-td={ci_no_td}\n"
+                f"ci-td-distributed={ci_td_distributed}\n"
                 f"is-unstable={is_unstable}\n"
                 f"reenabled-issues={reenabled_issues}\n"
             )

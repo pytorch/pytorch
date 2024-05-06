@@ -18,7 +18,7 @@ from torch.distributed._tensor.op_schema import (
     StrategyType,
     TupleStrategy,
 )
-from torch.distributed._tensor.placement_types import TensorMeta
+from torch.distributed._tensor.placement_types import Replicate, Shard, TensorMeta
 from torch.distributed.device_mesh import DeviceMesh
 
 aten = torch.ops.aten
@@ -172,7 +172,7 @@ class ShardingPropagator:
         # special case op, we don't need to propagate for local
         # scalar. TODO: figure out a better way to handle this
         if op_schema.op is aten._local_scalar_dense.default:
-            return OutputSharding(None, [op_schema])
+            return OutputSharding(None, op_schema)
 
         out_tensor_meta = self._propagate_tensor_meta(op_schema)
 
@@ -232,17 +232,39 @@ class ShardingPropagator:
                         if output_strategy.input_specs is None
                         else output_strategy.input_specs[idx]
                     )
-                    expected_input_specs.append(desired_spec)
+                    expected_input_specs.append(
+                        desired_spec.shallow_copy_with_tensor_meta(
+                            input_spec.tensor_meta
+                        )
+                    )
                     if input_spec.placements != desired_spec.placements:
                         needs_redistribute = True
 
                 suggestion_schema = None
                 if needs_redistribute:
-                    reshard_schema = OpSchema(
+                    suggestion_schema = OpSchema(
                         op_schema.op, tuple(expected_input_specs), {}
                     )
-                    reshard_schema._inplace_rewrap_schema_suggestion(op_schema)
-                    suggestion_schema = [reshard_schema]
+                    suggestion_schema._inplace_rewrap_schema_suggestion(op_schema)
+
+                # size and stride args need to be modified for new factory ops, potentially
+                if op_schema.op in (
+                    aten.new_empty.default,
+                    aten.new_full.default,
+                    aten.new_ones.default,
+                    aten.new_zeros.default,
+                    aten.new_empty_strided.default,
+                ):
+                    assert isinstance(output_strategy.output_spec, DTensorSpec)
+                    # It happens when the output has the same shape as the input
+                    # and the input placements are not all Replicate().
+                    if output_strategy.output_spec.placements != tuple(
+                        [Replicate()] * mesh.ndim
+                    ):
+                        needs_redistribute = True
+                        suggestion_schema = self._adjust_size_and_stride_args(
+                            op_schema, output_strategy.output_spec, mesh
+                        )
 
                 # construct output spec for the op
                 if op_schema.return_type_tuple_tensor_like():
@@ -323,10 +345,9 @@ class ShardingPropagator:
 
                 suggestion_schema = None
                 if needs_redistribute:
-                    reshard_schema = OpSchema(
+                    suggestion_schema = OpSchema(
                         op_schema.op, tuple(suggestion_args), op_schema.kwargs_schema
                     )
-                    suggestion_schema = [reshard_schema]
 
                 output_sharding = OutputSharding(
                     tuple(out_spec_list) if out_tensor_meta is not None else None,
@@ -362,7 +383,7 @@ class ShardingPropagator:
             # with schema suggestions, which can be used to
             # decide how to do redistribute on inputs
             if output_sharding.output_spec is None:
-                if output_sharding.schema_suggestions is None:
+                if output_sharding.redistribute_schema is None:
                     if output_sharding.failed_reason is not None:
                         raise RuntimeError(
                             f"Sharding propagation failed on op {op_schema}!"
@@ -370,14 +391,12 @@ class ShardingPropagator:
                         )
                 else:
                     # we do auto redistribute on inputs if necessary
-                    # to get an eligible input, which we will pick a
-                    # schema suggestion base on the redistribute cost.
-                    # For now we simply pick the first suggestion.
-                    suggested_input_schema = output_sharding.schema_suggestions[0]
                     # run sharding propagation again with suggested schema
-                    propagation_res = sharding_prop_func(suggested_input_schema)
+                    propagation_res = sharding_prop_func(
+                        output_sharding.redistribute_schema
+                    )
                     # we set the output sharding with the new propagation result
-                    # so that dispatching know both output_spec and schema_suggestions
+                    # so that dispatching know both output_spec and redistribute_schema
                     # exist, which indicates a reshard is needed
                     output_sharding.output_spec = propagation_res.output_spec
                     output_sharding.needs_redistribute = True
@@ -408,3 +427,42 @@ class ShardingPropagator:
 
         # for eager execution, we just select the one with the minimal redistribute cost
         return strategy.strategies[strategy_costs.index(min(strategy_costs))]
+
+    def _adjust_size_and_stride_args(
+        self, op_schema: OpSchema, spec: DTensorSpec, mesh: DeviceMesh
+    ) -> OpSchema:
+        expected_input_schema = list(op_schema.args_schema)
+        # hard code size_idx until we need to support different cases
+        size_idx = 1
+        size = expected_input_schema[size_idx]
+        assert isinstance(size, list)
+        size = list(size)
+        # adjust size to be the same as that of the _local_tensor
+        # of the DTensor input arg at index 0, which can only be inferred
+        for i, p in enumerate(spec.placements):
+            if p.is_shard():
+                assert isinstance(p, Shard)
+                size[p.dim] //= mesh.size(i)
+        expected_input_schema[size_idx] = torch.Size(size)
+
+        # adjust the stride arg for aten.new_empty_strided.default
+        if op_schema.op == aten.new_empty_strided.default:
+            # hard code stride_idx until we need to support different cases
+            stride_idx = 2
+            stride = expected_input_schema[stride_idx]
+            assert isinstance(stride, list)
+
+            stride_divisors = [1] * len(stride)
+            for i, mesh_idx in enumerate(spec.dim_map):
+                if mesh_idx != -1:
+                    # tensor dimension i is sharded on mesh dimension mesh_idx,
+                    # so we need to divide all the strides larger than stride[i]
+                    # (by the submesh size)
+                    for j in range(len(stride)):
+                        if stride[j] > stride[i]:
+                            stride_divisors[j] *= mesh.size(mesh_idx)
+            expected_input_schema[stride_idx] = tuple(
+                stride[i] // stride_divisors[i] for i in range(len(stride))
+            )
+
+        return OpSchema(op_schema.op, tuple(expected_input_schema), {})
