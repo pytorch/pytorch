@@ -84,9 +84,6 @@ def raise_last_usage(
             # For now, we don't move users that are FusedSchedulerNode
             if isinstance(name_to_fused_node[user.node.get_name()], scheduler.FusedSchedulerNode):
                 continue
-            # For now, we don't move users that have FusedSchedulerNode as input
-            if any((not x.name in graph_inputs and isinstance(name_to_fused_node[x.name], scheduler.FusedSchedulerNode)) for x in user.node.read_writes.reads):
-                continue
             # For now, we don't move users that are run_and_save_rng_state ops
             if isinstance(user.node.node, ir.ExternKernel) and user.node.node.op_overload is torch.ops.higher_order.run_and_save_rng_state:
                 continue
