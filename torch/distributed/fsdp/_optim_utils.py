@@ -1290,7 +1290,7 @@ def _is_named_optimizer(optim_state_dict: Dict[str, Any]) -> bool:
     try:
         key = next(iter(state.keys()))
     except Exception as e:
-        raise Exception(optim_state_dict) from e
+        raise Exception(optim_state_dict) from e  # noqa: TRY002
     return isinstance(key, str)
 
 

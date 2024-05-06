@@ -60,13 +60,11 @@ def _prop__foreach_binop_list(op_schema: OpSchema) -> OutputSharding:
         # and self is replicated.
         return OutputSharding(
             output_spec=None,
-            schema_suggestions=[
-                OpSchema(
-                    op=op_schema.op,
-                    args_schema=(self, self, scalar) if scalar else (self, self),
-                    kwargs_schema=op_schema.kwargs_schema,
-                )
-            ],
+            redistribute_schema=OpSchema(
+                op=op_schema.op,
+                args_schema=(self, self, scalar) if scalar else (self, self),
+                kwargs_schema=op_schema.kwargs_schema,
+            ),
         )
     else:
         return OutputSharding(output_spec=self)
@@ -105,15 +103,13 @@ def _prop__foreach_addcop_scalar(op_schema: OpSchema):
         # and self is replicated.
         return OutputSharding(
             output_spec=None,
-            schema_suggestions=[
-                OpSchema(
-                    op=op_schema.op,
-                    args_schema=(self, self, self, scalar)
-                    if scalar
-                    else (self, self, self),
-                    kwargs_schema=op_schema.kwargs_schema,
-                )
-            ],
+            redistribute_schema=OpSchema(
+                op=op_schema.op,
+                args_schema=(self, self, self, scalar)
+                if scalar
+                else (self, self, self),
+                kwargs_schema=op_schema.kwargs_schema,
+            ),
         )
     else:
         return OutputSharding(output_spec=self)
@@ -153,13 +149,11 @@ def _prop__fused_adam(op_schema: OpSchema):
         )
         return OutputSharding(
             output_spec=None,
-            schema_suggestions=[
-                OpSchema(
-                    op=op_schema.op,
-                    args_schema=new_schemas + op_schema.args_schema[NT:],
-                    kwargs_schema=op_schema.kwargs_schema,
-                )
-            ],
+            redistribute_schema=OpSchema(
+                op=op_schema.op,
+                args_schema=new_schemas + op_schema.args_schema[NT:],
+                kwargs_schema=op_schema.kwargs_schema,
+            ),
         )
     else:
         return OutputSharding(output_spec=(op_schema.args_schema[0],) * NT)  # type: ignore[arg-type]
@@ -183,13 +177,11 @@ def _prop_nll_loss_forward(op_schema: OpSchema) -> OutputSharding:
         )
         return OutputSharding(
             output_spec=None,
-            schema_suggestions=[
-                OpSchema(
-                    op=op_schema.op,
-                    args_schema=(new_self, target) + op_schema.args_schema[2:],
-                    kwargs_schema=op_schema.kwargs_schema,
-                )
-            ],
+            redistribute_schema=OpSchema(
+                op=op_schema.op,
+                args_schema=(new_self, target) + op_schema.args_schema[2:],
+                kwargs_schema=op_schema.kwargs_schema,
+            ),
         )
     else:
         return OutputSharding(
@@ -224,7 +216,7 @@ def _prop_stack(op_schema: OpSchema) -> OutputSharding:
     assert all(
         t.shape == tensors[0].shape for t in tensors
     ), f"expect all tensors to have the same shape, but got {tensors}."
-    # TODO: provide schema_suggestions when placements do not match
+    # TODO: provide redistribute_schema when placements do not match
     assert all(
         t.placements == tensors[0].placements for t in tensors
     ), f"expect all tensors to have the same placements, but got {tensors}."
@@ -376,8 +368,8 @@ def _refine_sharding(
         assert isinstance(output_sharding.output_spec, DTensorSpec)
         return output_sharding.output_spec.placements
     else:
-        assert output_sharding.schema_suggestions is not None
-        out_schema = output_sharding.schema_suggestions[0].args_schema[0]
+        assert output_sharding.redistribute_schema is not None
+        out_schema = output_sharding.redistribute_schema.args_schema[0]
         assert isinstance(out_schema, DTensorSpec)
         return tuple(out_schema.placements)
 
@@ -433,23 +425,21 @@ def prop_slice_scatter(op_schema: OpSchema) -> OutputSharding:
         # otherwise, return the suggestion.
         return OutputSharding(
             output_spec=None,
-            schema_suggestions=[
-                OpSchema(
-                    op=op_schema.op,
-                    args_schema=(
-                        DTensorSpec(
-                            mesh=input.mesh,
-                            placements=input_suggestion,
-                            tensor_meta=input.tensor_meta,
-                        ),
-                        DTensorSpec(
-                            mesh=src.mesh,
-                            placements=input_suggestion,
-                            tensor_meta=src.tensor_meta,
-                        ),
-                    )
-                    + op_schema.args_schema[2:],
-                    kwargs_schema=op_schema.kwargs_schema,
+            redistribute_schema=OpSchema(
+                op=op_schema.op,
+                args_schema=(
+                    DTensorSpec(
+                        mesh=input.mesh,
+                        placements=input_suggestion,
+                        tensor_meta=input.tensor_meta,
+                    ),
+                    DTensorSpec(
+                        mesh=src.mesh,
+                        placements=input_suggestion,
+                        tensor_meta=src.tensor_meta,
+                    ),
                 )
-            ],
+                + op_schema.args_schema[2:],
+                kwargs_schema=op_schema.kwargs_schema,
+            ),
         )

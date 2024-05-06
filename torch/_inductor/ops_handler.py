@@ -1,5 +1,15 @@
 import itertools
-from typing import Any, Callable, Generic, Literal, Optional, Tuple, TypeVar, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Generic,
+    Literal,
+    Optional,
+    Tuple,
+    TypeVar,
+    Union,
+)
 from unittest.mock import patch
 
 import sympy
@@ -214,7 +224,6 @@ class OpsHandler(Protocol[T]):
         dtypes: Tuple[torch.dtype, ...],
         combine_fn: Callable[[Tuple[T, ...], Tuple[T, ...]], Tuple[T, ...]],
         values: Tuple[T, ...],
-        inits: Tuple[int, ...],
     ) -> Tuple[T, ...]:
         """
         Perform an associative scan on 'value'.
@@ -316,6 +325,9 @@ class OpsHandler(Protocol[T]):
         ...
 
     def log10(self, x0: T) -> T:
+        ...
+
+    def log2(self, x0: T) -> T:
         ...
 
     def nextafter(self, x0: T, x1: T) -> T:
@@ -494,6 +506,38 @@ class OpsHandler(Protocol[T]):
         ...
 
 
+class NoopHandler:
+    def __getattr__(self, name):
+        if name == "name":
+            return "NoopHandler"
+
+        def inner(*args, **kwargs):
+            return None
+
+        return inner
+
+    @staticmethod
+    def masked(mask, body, other) -> None:
+        return None
+
+    @staticmethod
+    def frexp(x) -> Tuple[None, None]:
+        return (None, None)
+
+    @staticmethod
+    def scan(dtypes, combine_fn, values) -> Tuple[None, ...]:
+        return tuple(None for i in range(len(values)))
+
+    @staticmethod
+    def indirect_indexing(index_var, size, check=True) -> sympy.Symbol:
+        return sympy.Integer(0)
+
+
+# Use mypy to check protocol implemented correctly
+def _typecheck_NoopHandler(h: NoopHandler) -> OpsHandler[None]:
+    return h
+
+
 class MockHandler:
     def __getattr__(self, name):
         if name == "name":
@@ -515,9 +559,9 @@ class MockHandler:
         return (f"ops.frexp({x})[0]", f"ops.frexp({x})[1]")
 
     @staticmethod
-    def scan(dtypes, combine_fn, values, inits):
+    def scan(dtypes, combine_fn, values):
         return tuple(
-            f"ops.scan({dtypes}, {combine_fn}, {values}, {inits})[{i}]"
+            f"ops.scan({dtypes}, {combine_fn}, {values})[{i}]"
             for i in range(len(values))
         )
 
@@ -663,4 +707,57 @@ class OpCounterCSE:
 
 
 def _typecheck_OpCounterCSE(h: OpCounterCSE) -> OpsHandler[str]:
+    return h
+
+
+class ExtractConstantsHandler(NoopHandler):
+    def __init__(self, device):
+        self.device = device
+
+    def constant(self, value: Any, dtype: torch.dtype) -> "torch._inductor.ir.Constant":
+        from torch._inductor import ir
+
+        return ir.Constant(value=value, dtype=dtype, device=self.device)
+
+
+def _typecheck_ExtractConstantsHandler(h: ExtractConstantsHandler) -> OpsHandler[Any]:
+    return h
+
+
+class SimpleCSEHandler(WrapperHandler[T]):
+    """Wraps the underlying handler with a CSE pass
+
+    NOTE: Compared to codegen level CSE this is simplified as it
+    doesn't support stores which require load cache invalidation.
+    """
+
+    def __init__(self, inner: OpsHandler[T]):
+        super().__init__(inner)
+        self.cse_cache: Dict[str, Union[T, Tuple[T, ...]]] = {}
+        self.mock = MockHandler()
+
+    def indirect_indexing(self, *args, **kwargs) -> sympy.Expr:
+        return super().indirect_indexing(*args, **kwargs)  # type: ignore[misc]
+
+    def store(self, *args, **kwargs) -> T:
+        raise NotImplementedError("store not implemented")
+
+    def store_reduction(self, *args, **kwargs) -> T:
+        raise NotImplementedError("store not implemented")
+
+    def __getattr__(self, name) -> Callable[..., Any]:
+        def inner(*args, **kwargs):
+            key = getattr(self.mock, name)(*args, **kwargs)
+            val = self.cse_cache.get(key)
+            if val is not None:
+                return val
+
+            val = getattr(self._inner, name)(*args, **kwargs)
+            self.cse_cache[key] = val
+            return val
+
+        return inner
+
+
+def _typecheck_SimpleCSEHandler(h: SimpleCSEHandler[Any]) -> OpsHandler[Any]:
     return h

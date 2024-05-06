@@ -1,26 +1,19 @@
-
 # Owner(s): ["oncall: distributed"]
 import sys
 
 import torch
-import torch.nn as nn
 import torch.distributed as dist
-from torch.testing._internal.common_distributed import (
-    requires_nccl,
-    skip_if_lt_x_gpu,
-)
+import torch.nn as nn
 from torch.distributed._shard import shard_module
+from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._shard.sharding_plan import ShardingPlan, ShardingPlanner
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
-from torch.distributed._shard.sharded_tensor import ShardedTensor
+from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
 
-from torch.testing._internal.common_utils import (
-    TEST_WITH_DEV_DBG_ASAN,
-    run_tests,
-)
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 from torch.testing._internal.distributed._shard.sharded_tensor import (
-    TEST_GPU_NUM,
     ShardedTensorTestBase,
+    TEST_GPU_NUM,
     with_comms,
 )
 from torch.testing._internal.distributed._shard.sharded_tensor._test_ops_common import (
@@ -65,9 +58,7 @@ class TestShardingPlan(ShardedTensorTestBase):
             plan={
                 "fc1.weight": torch.randn(3, 4),
             },
-            output_plan={
-                "": rowwise_sharding_spec
-            },
+            output_plan={"": rowwise_sharding_spec},
         )
 
         megatron_lm = SimpleMegatronLM([[17, 12], [12, 29]]).cuda(self.rank)
@@ -82,9 +73,7 @@ class TestShardingPlan(ShardedTensorTestBase):
             plan={
                 "fc1.weight": rowwise_sharding_spec,
             },
-            output_plan={
-                "": torch.randn(3, 4)
-            },
+            output_plan={"": torch.randn(3, 4)},
         )
 
         with self.assertRaisesRegex(
@@ -98,9 +87,7 @@ class TestShardingPlan(ShardedTensorTestBase):
                 "fc3.weight": rowwise_sharding_spec,
             },
         )
-        with self.assertRaisesRegex(
-            AttributeError, "has no attribute"
-        ):
+        with self.assertRaisesRegex(AttributeError, "has no attribute"):
             # shard the module with the provided sharding plan
             shard_module(megatron_lm, sharding_plan_wrong_module_path)
 
@@ -109,9 +96,7 @@ class TestShardingPlan(ShardedTensorTestBase):
                 "fc1.biass": rowwise_sharding_spec,
             },
         )
-        with self.assertRaisesRegex(
-            AttributeError, "has no attribute"
-        ):
+        with self.assertRaisesRegex(AttributeError, "has no attribute"):
             # shard the module with the provided sharding plan
             shard_module(megatron_lm, sharding_plan_wrong_param_path)
 
@@ -141,21 +126,21 @@ class TestShardingPlan(ShardedTensorTestBase):
         colwise_sharding_spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                "rank:0/cuda:2",
-                "rank:1/cuda:3",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
             ],
         )
         rowwise_sharding_spec = ChunkShardingSpec(
             dim=1,
             placements=[
-                "rank:0/cuda:2",
-                "rank:1/cuda:3",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
             ],
         )
         sharding_plan = ShardingPlan(
             plan={
                 "fc1.weight": colwise_sharding_spec,
-                "fc2.weight": rowwise_sharding_spec
+                "fc2.weight": rowwise_sharding_spec,
             }
         )
 
@@ -163,6 +148,7 @@ class TestShardingPlan(ShardedTensorTestBase):
 
         if self.rank >= 2:
             shard_module(megatron_lm, sharding_plan, process_group=pg)
+
 
 if __name__ == "__main__":
     run_tests()

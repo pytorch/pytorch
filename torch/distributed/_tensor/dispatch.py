@@ -164,9 +164,9 @@ class OpDispatcher:
         else:
             if output_sharding.needs_redistribute:
                 # compute locally with redistribute first if needed
-                assert output_sharding.schema_suggestions is not None
+                assert output_sharding.redistribute_schema is not None
                 self.redistribute_local_args(
-                    op_info, output_sharding.schema_suggestions[0]
+                    op_info, output_sharding.redistribute_schema
                 )
 
             local_tensor_args = (

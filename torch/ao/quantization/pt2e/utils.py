@@ -7,6 +7,7 @@ from torch.fx import (
     GraphModule,
     Node,
 )
+import torch.nn.functional as F
 from torch.nn.utils.fusion import fuse_conv_bn_weights
 from typing import Any, Callable, Dict, Optional, Tuple, List, Union
 from torch.utils._pytree import LeafSpec
@@ -98,7 +99,7 @@ def _find_q_dq_node_for_user(
         return (None, None)
 
     q_node = None
-    if dq_node.args[0].op == "call_function" and dq_node.args[0].target in _QUANTIZE_OPS:
+    if dq_node.args[0].op == "call_function" and dq_node.args[0].target in _QUANTIZE_OPS:  # type: ignore[union-attr]
         q_node = dq_node.args[0]
     return (q_node, dq_node)
 
@@ -169,7 +170,7 @@ def _is_supported_batch_norm_for_training(node: Node):
 # TODO: move this to torch/ao/quantization/utils.py
 def _is_conv_node(n: Node):
     """
-    Return whether the node refers to an aten conv or conv transpose op.
+    Return whether the node refers to an aten conv op.
     """
     return n.op == "call_function" and n.target in [
         torch.ops.aten.conv1d.default,
@@ -182,9 +183,19 @@ def _is_conv_transpose_node(n: Node):
     """
     return n.op == "call_function" and n.target in [
         torch.ops.aten.conv_transpose1d,
+        torch.ops.aten.conv_transpose1d.default,
         torch.ops.aten.conv_transpose2d,
         torch.ops.aten.conv_transpose2d.input,
     ]
+
+def _is_conv_or_conv_transpose_node(n: Node):
+    """
+    Return whether the node refers to an aten conv or conv transpose op.
+    """
+    return _is_conv_node(n) or _is_conv_transpose_node(n)
+
+def _is_conv_transpose_fn(conv_fn: Callable):
+    return conv_fn in [F.conv_transpose1d, F.conv_transpose2d]
 
 def _is_bn_node(n: Node):
     return _is_supported_batch_norm_for_training(n) or n.target == torch.ops.aten._native_batch_norm_legit_no_training.default
@@ -270,7 +281,7 @@ def _fuse_conv_bn_(m: GraphModule) -> None:
             continue
         bn_node = n
         n = bn_node.args[0]
-        if not (_is_conv_node(n) or _is_conv_transpose_node(n)):
+        if not _is_conv_or_conv_transpose_node(n):
             continue
         conv_node = n
         conv_weight_node = conv_node.args[1]
@@ -304,7 +315,7 @@ def _get_aten_graph_module_for_pattern(
     if is_cuda:
         example_inputs = tuple([x.cuda() if isinstance(x, torch.Tensor) else x for x in example_inputs])
     aten_pattern = capture_pre_autograd_graph(
-        pattern,
+        pattern,  # type: ignore[arg-type]
         example_inputs,
         kwargs,
     )
@@ -320,7 +331,7 @@ def _get_aten_graph_module_for_pattern(
     aten_pattern.graph.eliminate_dead_code()
     aten_pattern.recompile()
 
-    return aten_pattern
+    return aten_pattern  # type: ignore[return-value]
 
 def remove_tensor_overload_for_qdq_ops(match_pattern: GraphModule) -> None:
     """ Remove .tensor overload for quantize/dequantize ops so that we can

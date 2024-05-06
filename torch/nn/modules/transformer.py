@@ -662,7 +662,6 @@ class TransformerEncoderLayer(Module):
 
         is_fastpath_enabled = torch.backends.mha.get_fastpath_enabled()
 
-        # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
         why_not_sparsity_fast_path = ''
         if not is_fastpath_enabled:
             why_not_sparsity_fast_path = "torch.backends.mha.get_fastpath_enabled() was not True"
@@ -740,7 +739,7 @@ class TransformerEncoderLayer(Module):
                     mask_type,
                 )
 
-
+        # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
         x = src
         if self.norm_first:
             x = x + self._sa_block(self.norm1(x), src_mask, src_key_padding_mask, is_causal=is_causal)
