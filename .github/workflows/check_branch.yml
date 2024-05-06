@@ -1,4 +1,4 @@
-name: Test Workflow
+name: Check branch name
 
 on:
   schedule:
