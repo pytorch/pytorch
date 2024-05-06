@@ -1,6 +1,7 @@
 import gzip
 import json
 import os
+import shutil
 import tempfile
 from abc import ABC, abstractmethod
 from enum import Enum
@@ -12,6 +13,7 @@ from typing_extensions import Self
 
 import torch
 import torch.autograd.profiler as prof
+from torch._C import _get_privateuse1_backend_name
 from torch._C._profiler import (
     _add_execution_trace_observer,
     _disable_execution_trace_observer,
@@ -130,8 +132,8 @@ class _KinetoProfile:
             self.use_device = "cuda"
         elif ProfilerActivity.XPU in self.activities:
             self.use_device = "xpu"
-        else:
-            self.use_device = "privateuseone"
+        elif ProfilerActivity.PrivateUse1 in self.activities:
+            self.use_device = _get_privateuse1_backend_name()
 
         # user-defined metadata to be amended to the trace
         self.preset_metadata: Dict[str, str] = dict()
@@ -791,8 +793,36 @@ class ExecutionTraceObserver(_ITraceObserver):
         """
         Removes ET observer from record function callbacks.
         """
+
+        def _save_triton_kernels():
+            # Save the kernel paths for the generated kernels
+            from torch._inductor.codecache import PyCodeCache as PyCodeCache
+
+            kernel_files = [
+                v.__file__
+                for v in PyCodeCache.cache.values()
+                if getattr(v, "__file__", None) is not None
+            ]
+            work_dir, file_name = os.path.split(self._output_file_path)
+            resource_dir = os.path.join(
+                work_dir, os.path.splitext(file_name)[0] + "_resources"
+            )
+            if not os.path.exists(resource_dir):
+                os.mkdir(resource_dir)
+
+            for kernel_file in kernel_files:
+                if kernel_file is None:
+                    continue
+                path, name = os.path.split(kernel_file)
+                dst = os.path.join(resource_dir, name)
+                shutil.copyfile(kernel_file, dst)
+
         if self._registered:
             self.stop()
+            try:
+                _save_triton_kernels()
+            except Exception as e:
+                warn(f"Execution trace failed to save kernels: {e}")
             _remove_execution_trace_observer()
             self._registered = False
 
