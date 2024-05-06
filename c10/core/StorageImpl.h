@@ -280,14 +280,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     return *extra_meta_;
   }
 
-  [[noreturn]] void throw_data_ptr_access_error() const {
-    if (extra_meta_ && extra_meta_->custom_data_ptr_error_msg_) {
-      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-      TORCH_CHECK(false, *extra_meta_->custom_data_ptr_error_msg_);
-    }
-    TORCH_CHECK(
-        false, "Cannot access data pointer of Storage that is invalid.");
-  }
+  [[noreturn]] void throw_data_ptr_access_error() const;
 
   void release_data_and_set_meta_custom_data_ptr_error_msg_(
       c10::optional<std::string> s) {
