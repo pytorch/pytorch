@@ -282,7 +282,7 @@ def helper_for_dump_minify(contents):
             fd.write(contents)
 
     except OSError as e:
-        log.exception(e)
+        log.exception("")
         raise NotImplementedError("Could not write to {minified_repro_path}") from e
 
 

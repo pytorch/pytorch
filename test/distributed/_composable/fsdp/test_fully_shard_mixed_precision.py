@@ -3,10 +3,11 @@
 import copy
 import functools
 
-from typing import Dict, Optional, Union
+from typing import Dict, List, Optional, Union
 
 import torch
 import torch.distributed as dist
+import torch.distributed._functional_collectives as funcol
 import torch.nn as nn
 from torch.distributed._composable.fsdp import fully_shard, MixedPrecisionPolicy
 from torch.testing._internal.common_distributed import (
@@ -117,6 +118,10 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             {"reshard_after_forward": [False, True, 2]},
             self._test_reduce_dtype_fp32_reduce,
         )
+        self.run_subtests(
+            {"reshard_after_forward": [False, True, 2]},
+            self._test_reduce_dtype_bf16_reduce,
+        )
 
     def _test_reduce_dtype_fp32_reduce(self, reshard_after_forward: Union[bool, int]):
         param_dtype, reduce_dtype = torch.bfloat16, torch.float32
@@ -167,6 +172,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
         ref_model, ref_optim, model, optim = self._init_models_and_optims(
             reshard_after_forward, param_dtype=param_dtype, reduce_dtype=reduce_dtype
         )
+        group = dist.distributed_c10d._get_default_group()
         orig_reduce_scatter = dist.reduce_scatter_tensor
 
         def assert_fn(output: torch.Tensor):
@@ -188,14 +194,116 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             ref_loss = ref_model(inp).sum()
             ref_loss.backward()
             for param in ref_model.parameters():
-                param.grad.data = param.grad.to(reduce_dtype)
-                dist.all_reduce(param.grad)  # bf16 reduction
-                param.grad.div_(self.world_size)
-                param.grad = param.grad.to(param.dtype)  # upcast to fp32
+                param_grad = param.grad.to(reduce_dtype)
+                # Use reduce-scatter -> all-gather to implement all-reduce
+                # since for world size >2, bf16 all-reduce and reduce-scatter
+                # have numeric differences
+                sharded_grad = funcol.reduce_scatter_tensor(
+                    param_grad, scatter_dim=0, reduceOp="avg", group=group
+                )  # bf16 reduction
+                param.grad = funcol.all_gather_tensor(
+                    sharded_grad, gather_dim=0, group=group
+                ).to(
+                    param.dtype
+                )  # upcast to fp32
             ref_optim.step()  # fp32 optimizer step
 
             self.assertEqual(fsdp_loss, ref_loss)
             check_sharded_parity(self, ref_model, model)
+
+    @skip_if_lt_x_gpu(2)
+    def test_grad_acc_with_reduce_dtype(self):
+        """
+        Tests that gradient accumulation without reduce-scatter when using
+        bf16 compute and fp32 reduction accumulates the unsharded gradients in
+        fp32.
+        """
+        self.run_subtests(
+            {"reshard_after_forward": [True, False]},
+            self._test_grad_acc_with_reduce_dtype,
+        )
+
+    def _test_grad_acc_with_reduce_dtype(self, reshard_after_forward: bool):
+        torch.manual_seed(42)
+        param_dtype, reduce_dtype = (torch.bfloat16, torch.float32)
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=param_dtype, reduce_dtype=reduce_dtype
+        )
+        model = nn.Sequential(*[MLP(16, torch.device("cpu")) for _ in range(3)])
+        # To emulate the mixed precision implementation where forward/backward
+        # compute use bf16 and optimizer uses fp32, we maintain both an fp32
+        # and a bf16 copy of the reference model
+        ref_model = copy.deepcopy(model).cuda()
+        ref_model_compute = copy.deepcopy(ref_model).to(param_dtype)
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+        for mlp in model:
+            fully_shard(
+                mlp, reshard_after_forward=reshard_after_forward, mp_policy=mp_policy
+            )
+        fully_shard(
+            model, reshard_after_forward=reshard_after_forward, mp_policy=mp_policy
+        )
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+        orig_reduce_scatter = dist.reduce_scatter_tensor
+
+        def assert_fn(output: torch.Tensor):
+            self.assertEqual(output.dtype, reduce_dtype)
+
+        reduce_scatter = functools.partial(
+            reduce_scatter_with_assert, self, orig_reduce_scatter, assert_fn
+        )
+        torch.manual_seed(42 + self.rank + 1)
+        device = torch.device("cuda")
+        # Train on the same input to avoid loss explosion
+        num_microbatches = 4
+        inp = torch.randn((2 * num_microbatches, 16), device=device, dtype=param_dtype)
+        for iter_idx in range(10):
+            microbatch_inps = torch.chunk(inp, 4)
+            for microbatch_idx in range(num_microbatches):
+                is_last_microbatch = microbatch_idx == num_microbatches - 1
+                model.set_requires_gradient_sync(is_last_microbatch)
+                model.set_reshard_after_backward(
+                    is_last_microbatch or reshard_after_forward
+                )
+                losses: List[torch.Tensor] = []
+                for _model in (ref_model_compute, model):
+                    losses.append(
+                        _model(microbatch_inps[microbatch_idx].detach()).sum()
+                    )
+                    self.assertEqual(losses[-1].dtype, param_dtype)
+                    with patch_reduce_scatter(reduce_scatter):
+                        losses[-1].backward()
+                self.assertEqual(losses[0], losses[1])
+                # Manually accumulate gradients into the base reference model
+                # from the compute reference model in fp32
+                for ref_param, ref_param_compute in zip(
+                    ref_model.parameters(), ref_model_compute.parameters()
+                ):
+                    self.assertTrue(ref_param_compute.grad is not None)
+                    self.assertEqual(ref_param.dtype, torch.float32)
+                    if ref_param.grad is not None:
+                        ref_param.grad += ref_param_compute.grad
+                    else:
+                        ref_param.grad = ref_param_compute.grad.to(ref_param.dtype)
+                    ref_param_compute.grad = None
+                # Manually reduce gradients for the reference model on the last
+                # microbatch to implement data parallelism
+                if is_last_microbatch:
+                    for ref_param in ref_model.parameters():
+                        self.assertTrue(ref_param.grad is not None)
+                        dist.all_reduce(ref_param.grad)
+                        ref_param.grad /= self.world_size
+            check_sharded_parity(self, ref_model, model)
+            ref_optim.step()
+            optim.step()
+            ref_optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
+            optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
+            # Manually copy parameters from the base reference model to the
+            # compute reference model to run the optimizer step for the latter
+            for ref_param, ref_param_compute in zip(
+                ref_model.parameters(), ref_model_compute.parameters()
+            ):
+                ref_param_compute.detach().copy_(ref_param)
 
 
 class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
