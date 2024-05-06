@@ -416,7 +416,12 @@ def _pre_forward_unshard(
     handle._needs_pre_forward_unshard = False
     # Don't wait during trace
     if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
-        state._device_handle.current_stream().wait_stream(state._unshard_stream)
+        current_stream = state._device_handle.current_stream()
+        if state._unshard_event is not None:
+            current_stream.wait_event(state._unshard_event)
+            state._unshard_event = None
+        else:
+            current_stream.wait_stream(state._unshard_stream)
     with torch.profiler.record_function(
         "FullyShardedDataParallel._pre_forward_prefetch"
     ):
