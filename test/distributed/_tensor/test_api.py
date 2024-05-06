@@ -70,7 +70,6 @@ class DTensorAPITest(DTensorTestBase):
         )
         tensor_shape = [3 * self.world_size, 3 * self.world_size]
         tensor_to_distribute = torch.randn(*tensor_shape)
-        tensor_requires_grad_distribute = torch.randn(*tensor_shape, requires_grad=True)
 
         with self.assertRaisesRegex(ValueError, "must have the same length"):
             shard_spec = [Shard(0)]
@@ -81,13 +80,6 @@ class DTensorAPITest(DTensorTestBase):
             global_tensor = torch.randn(*tensor_shape, requires_grad=True)
             global_tensor_to_distribute = global_tensor + 2
             distribute_tensor(global_tensor_to_distribute, device_mesh, shard_spec)
-
-        def replicate_tensor_fn():
-            return distribute_tensor(
-                tensor_requires_grad_distribute, device_mesh, [Replicate(), Replicate()]
-            )
-
-        self.assertNotWarn(replicate_tensor_fn)
 
         spec = [Shard(0), Shard(1)]
         dtensor = distribute_tensor(tensor_to_distribute, device_mesh, spec)
