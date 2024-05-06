@@ -202,6 +202,12 @@ class TimmRunner(BenchmarkRunner):
             return SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS
         return set()
 
+    @property
+    def guard_on_nn_module_models(self):
+        return {
+            "convit_base",
+        }
+
     @download_retry_decorator
     def _download_model(self, model_name):
         model = create_model(
