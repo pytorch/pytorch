@@ -415,6 +415,7 @@ class FunctionalizedRngRuntimeWrapper(CompilerWrapper):
         aot_config: AOTConfig,
         *,
         fw_metadata: ViewAndMutationMeta,
+        **kwargs,
     ):
         @wraps(compiled_fn)
         def wrapper(runtime_args: List[Any]):
@@ -455,7 +456,8 @@ class FakifiedOutWrapper(CompilerWrapper):
         _aot_config: AOTConfig,
         *,
         fw_metadata: ViewAndMutationMeta,
-        fakified_out_opt,
+        fakified_out_opt=None,
+        **kwargs,
     ):
         fakified_out = fakified_out_opt
 
