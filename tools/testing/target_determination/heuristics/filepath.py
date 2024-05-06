@@ -62,7 +62,7 @@ def sanitize_folder_name(folder_name: str) -> str:
     return folder_name
 
 
-class FilePath(HeuristicInterface):
+class Filepath(HeuristicInterface):
     # Heuristic based on folders in the file path.  Takes each folder of each
     # changed file and attempts to find matches based on those folders
     def __init__(self, **kwargs: Dict[str, Any]) -> None:
@@ -89,4 +89,6 @@ class FilePath(HeuristicInterface):
                 if keyword in test_keywords or custom_matchers.get(keyword, lambda x: keyword in x)(str(test)):  # type: ignore[no-untyped-call]
                     test_ratings[test] += frequency
         test_ratings = {TestRun(k): v for (k, v) in test_ratings.items() if k in tests}
-        return TestPrioritizations(tests, normalize_ratings(test_ratings, 0.25))
+        return TestPrioritizations(
+            tests, normalize_ratings(test_ratings, 0.25, min_value=0.125)
+        )
