@@ -12,7 +12,7 @@ from .virtualized import V
 torch_log = logging.getLogger("torch")
 
 
-def optimize_memory_usage(
+def raise_last_usage(
     name_to_fused_node: Dict[str, "scheduler.BaseSchedulerNode"], graph_inputs: Dict[str, "Buffer"], snodes: List["scheduler.BaseSchedulerNode"]
 ) -> List["scheduler.BaseSchedulerNode"]:
     """

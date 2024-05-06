@@ -1368,8 +1368,8 @@ class Scheduler:
         # for snode in self.nodes:
         #     torch_log.warning(f"snode: {snode}, snode.node: {snode.node}, snode.debug_str(): {snode.debug_str()}")
 
-        if config.optimize_memory_usage:
-            self.nodes = memory_opts.optimize_memory_usage(self.name_to_fused_node, V.graph.graph_inputs, self.nodes)
+        if config.raise_last_usage:
+            self.nodes = memory_opts.raise_last_usage(self.name_to_fused_node, V.graph.graph_inputs, self.nodes)
             self.compute_last_usage()
 
         # TODO(yf225): after memory-optimization, we might need to do compute_last_usage() again.
