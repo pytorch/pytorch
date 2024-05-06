@@ -317,6 +317,16 @@ class Tracer(TracerBase):
         Gets a fresh name for a prefix and returns it. This function ensures
         that it will not clash with an existing attribute on the graph.
         """
+        # The idea here is that if the module doesn't have this prefix at all we
+        # should reset the counter to start from the beginning
+        # It's a ... little bit hacky (doesn't cover all cases) but the precise
+        # naming of the prefixes isn't a correctness issue, just a niceness
+        # issue
+        qualname = f"{prefix}0"
+        if not hasattr(self.root, qualname):
+            self._qualname_counter[prefix] = 0
+            return qualname
+
         i = self._qualname_counter[prefix]
         while True:
             qualname = f"{prefix}{i}"
