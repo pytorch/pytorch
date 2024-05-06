@@ -90,19 +90,18 @@ class TestDTensorOptimizer(DTensorTestBase):
 
         # TODO: add fused_adam support
         adam_configs = [
-            # {"lr": 0.1},
-            # {"lr": 0.1, "weight_decay": 0.05},
-            # {"lr": 0.1, "foreach": True},
-
-            # {"lr": 0.1, "weight_decay": 0.05, "foreach": True},
-            # {"lr": 0.1, "weight_decay": 0.05, "amsgrad": True, "foreach": True},
-            # {
-            #     "lr": 0.1,
-            #     "weight_decay": 0.05,
-            #     "maximize": True,
-            #     "amsgrad": True,
-            #     "foreach": True,
-            # },
+            {"lr": 0.1},
+            {"lr": 0.1, "weight_decay": 0.05},
+            {"lr": 0.1, "foreach": True},
+            {"lr": 0.1, "weight_decay": 0.05, "foreach": True},
+            {"lr": 0.1, "weight_decay": 0.05, "amsgrad": True, "foreach": True},
+            {
+                "lr": 0.1,
+                "weight_decay": 0.05,
+                "maximize": True,
+                "amsgrad": True,
+                "foreach": True,
+            },
             {"lr": 0.1, "fused": True},
             {"lr": 0.1, "weight_decay": 0.05, "amsgrad": True, "fused": True},
             {
@@ -112,7 +111,6 @@ class TestDTensorOptimizer(DTensorTestBase):
                 "amsgrad": True,
                 "fused": True,
             },
-
         ]
 
         for config in adam_configs:
@@ -133,7 +131,6 @@ class TestDTensorOptimizer(DTensorTestBase):
     def test_adamw_1d_sharding(self):
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
 
-        # TODO: add fused_adamw support
         adamw_configs = [
             {"lr": 0.1},
             {"lr": 0.1, "weight_decay": 0.05},
@@ -154,6 +151,24 @@ class TestDTensorOptimizer(DTensorTestBase):
                 "maximize": True,
                 "amsgrad": True,
                 "foreach": True,
+            },
+            {"lr": 0.1, "weight_decay": 0.05, "fused": True},
+            {
+                "lr": 0.1,
+                "betas": (0.6, 0.66),
+                "eps": 1e-6,
+                "weight_decay": 0.05,
+                "amsgrad": True,
+                "fused": True,
+            },
+            {
+                "lr": 0.1,
+                "betas": (0.6, 0.66),
+                "eps": 1e-6,
+                "weight_decay": 0.05,
+                "maximize": True,
+                "amsgrad": True,
+                "fused": True,
             },
         ]
 

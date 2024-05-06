@@ -461,12 +461,6 @@ def common_pointwise_strategy(
     followed_strategy: OpStrategy,
     linearity: bool,
 ) -> OpStrategy:
-    """
-    TODO: This seems very similar to the pointwise_strategy,
-    Write some docs so I can understand this better
-    """
-
-
     # handle broadcasting
     common_shape = torch.broadcast_shapes(
         *[arg.output_shape for arg in args_schema if isinstance(arg, OpStrategy)]
@@ -617,13 +611,13 @@ def list_pointwise_strategy(
                     )
                 else:
                     raise RuntimeError(
-                        f"foreach list op only supports tuple strategy! {op_schema}"
+                        f"list op only supports tuple strategy! {op_schema}"
                     )
         return tuple_strategies
 
     args_strategies = args_tuple_strategies(op_schema.args_schema)
     follow_strategy: TupleStrategy = args_strategies[0]
-    foreach_strategy_list: List[OpStrategy] = []
+    list_strategy: List[OpStrategy] = []
     for child_idx, child_strtgy in enumerate(follow_strategy.childs):
         assert isinstance(child_strtgy, OpStrategy)
         args_schema: List[StrategyType] = [
@@ -632,8 +626,8 @@ def list_pointwise_strategy(
         pointwise_strategy: OpStrategy = common_pointwise_strategy(
             mesh, args_schema, child_strtgy, linearity
         )
-        foreach_strategy_list.append(pointwise_strategy)
-    return TupleStrategy(foreach_strategy_list)
+        list_strategy.append(pointwise_strategy)
+    return TupleStrategy(list_strategy)
 
 
 def list_linear_pointwise_strategy(
@@ -655,21 +649,14 @@ for op in for_each_linearity_ops:
         list_linear_pointwise_strategy
     )
 
-# TODO: What's a linearity op exactly? Maybe write a docsrting somewhere
 fused_ops = [
-    # This is only op I'm enabling right now
     aten._fused_adam_.default,
-
-    # These are all the ops with fused in their name
-    # fused_ops = [op for op in dir(torch.ops.aten) if 'fused' in op]
-
-    # _fused_dropout
-    # _fused_moving_avg_obs_fq_helper
-    # _thnn_fused_lstm_cell
-    # _thnn_fused_lstm_cell_backward_impl
+    aten._fused_adam.default,
+    aten._fused_adamw_.default,
+    aten._fused_adamw.default,
 ]
 
 for op in fused_ops:
-    register_op_strategy(
-        op, schema_info=RuntimeSchemaInfo(needs_pytree=True)
-    )(list_pointwise_strategy)
+    register_op_strategy(op, schema_info=RuntimeSchemaInfo(needs_pytree=True))(
+        list_pointwise_strategy
+    )
