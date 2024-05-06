@@ -4643,6 +4643,19 @@ def fn():
         res2 = opt_fn(x)
         self.assertEqual(res, res2)
 
+    @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
+    def test_tensor_ctor_list_of_tensor(self):
+        def fn(x):
+            return torch.tensor([x], dtype=torch.int64)
+
+        x = torch.tensor(20)
+        res = fn(x)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        res2 = opt_fn(x)
+        self.assertEqual(res, res2)
+        self.assertEqual(cnts.frame_count, 1)
+
     def test_tensor_types(self):
         def fn(dtype, tensor_type):
             x = torch.empty(4, dtype=dtype)
