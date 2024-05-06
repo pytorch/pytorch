@@ -51,6 +51,7 @@ from .utils import (
 
 zip = strict_zip
 
+
 class CompilerWrapper:
     """
     A wrapper around the inputs and outputs to the compiler_fn. We separate these into two parts:
@@ -63,13 +64,15 @@ class CompilerWrapper:
     """
 
     @classmethod
-    def pre_compile(cls,
+    def pre_compile(
+        cls,
         flat_fn,
-        flat_args : List[Tensor],
-        aot_config : AOTConfig,
+        flat_args: List[Tensor],
+        aot_config: AOTConfig,
         *,
-        fw_metadata : ViewAndMutationMeta,
-        **kwargs):
+        fw_metadata: ViewAndMutationMeta,
+        **kwargs,
+    ):
         """
         Process the inputs to the compiler_fn. You can pass in extra metadata via kwargs.
         Args:
@@ -100,7 +103,6 @@ class CompilerWrapper:
         """
         return compiled_fn
 
-
     @classmethod
     def create(
         cls,
@@ -110,11 +112,20 @@ class CompilerWrapper:
         *,
         fw_metadata: ViewAndMutationMeta,
         compiler_fn,
-        **kwargs
+        **kwargs,
     ):
-        wrapped_flat_fn, new_flat_args, new_aot_config, new_fw_metadata = cls.pre_compile(flat_fn, flat_args, aot_config, fw_metadata, **kwargs)
-        compiled_fn = compiler_fn(wrapped_flat_fn, new_flat_args, new_aot_config, fw_metadata=new_fw_metadata)
-        return cls.post_compile(compiled_fn, new_aot_config, fw_metadata=new_fw_metadata, **kwargs)
+        (
+            wrapped_flat_fn,
+            new_flat_args,
+            new_aot_config,
+            new_fw_metadata,
+        ) = cls.pre_compile(flat_fn, flat_args, aot_config, fw_metadata, **kwargs)
+        compiled_fn = compiler_fn(
+            wrapped_flat_fn, new_flat_args, new_aot_config, fw_metadata=new_fw_metadata
+        )
+        return cls.post_compile(
+            compiled_fn, new_aot_config, fw_metadata=new_fw_metadata, **kwargs
+        )
 
 
 # The wrapper created by this function handles all of the runtime aliasing and mutation "epilogue" logic
@@ -127,7 +138,8 @@ class CompilerWrapper:
 # - the autograd cases inserts TensorAlias wrapper objects for outputs that alias inputs
 class RuntimeWrapper(CompilerWrapper):
     @classmethod
-    def post_compile(cls,
+    def post_compile(
+        cls,
         compiled_fn,
         aot_config: AOTConfig,
         *,
@@ -159,8 +171,8 @@ class RuntimeWrapper(CompilerWrapper):
             compiled_fn = make_boxed_func(compiled_fn)
 
         # Note [Inputs needed in runtime epilogue after list clearing]
-        # In Python functions, you can't free the input arguments of a function within the scope of that function. A workaround is to
-        # wrap the input arguments in a list, and clear the list from within the function.
+        # In Python functions, you can't free the input arguments of a function within the scope of that function.
+        # A workaround is to the input arguments in a list, and clear the list from within the function.
         # Here, this is implemented as `call_func_at_runtime_with_args(..., steal_args=True)`.
         #
         # This is needed for Compiled Autograd since some of the inputs (activations) should be freed early.
@@ -246,7 +258,9 @@ class RuntimeWrapper(CompilerWrapper):
                 updated_inputs = all_outs[:num_mutations_to_apply]
                 fw_outs = all_outs[num_mutations_to_apply:]
 
-                for i, inpt_idx in enumerate(runtime_metadata.mutated_inp_runtime_indices):
+                for i, inpt_idx in enumerate(
+                    runtime_metadata.mutated_inp_runtime_indices
+                ):
                     meta = runtime_metadata.input_info[inpt_idx]
                     if not meta.mutates_data and not meta.mutates_metadata:
                         continue
@@ -317,7 +331,9 @@ class RuntimeWrapper(CompilerWrapper):
                     fw_outs_no_intermediate_bases = fw_outs[
                         : -runtime_metadata.num_intermediate_bases
                     ]
-                    intermediate_bases = fw_outs[-runtime_metadata.num_intermediate_bases :]
+                    intermediate_bases = fw_outs[
+                        -runtime_metadata.num_intermediate_bases :
+                    ]
                 else:
                     fw_outs_no_intermediate_bases = fw_outs
                     intermediate_bases = []
@@ -358,7 +374,8 @@ class RuntimeWrapper(CompilerWrapper):
                     elif info.output_type == OutputType.alias_of_intermediate:
                         base_tensor_list = intermediate_bases
                     elif (
-                        info.output_type == OutputType.alias_of_intermediate_save_as_output
+                        info.output_type
+                        == OutputType.alias_of_intermediate_save_as_output
                     ):
                         base_tensor_list = intermediate_bases
                     else:
@@ -393,21 +410,69 @@ class RuntimeWrapper(CompilerWrapper):
 
         return runtime_wrapper
 
-# Calling convention: If we are running functionalized RNG, then outs consists
-# of (user_outs, rng_offset)
-def functionalized_rng_runtime_epilogue(
-    metadata: ViewAndMutationMeta, outs, return_new_outs=True
-):
-    if metadata.is_rng_op_functionalized:
-        assert metadata.num_outputs_rng_offset == 1
-        new_rng_offset = outs[-1]
-        CUDARngStateHelper.set_new_offset(new_rng_offset)
-        if return_new_outs:
-            user_outs = outs[:-1]
-            return user_outs
-        else:
-            return None
-    return outs
+
+class FunctionalizedRngRuntimeWrapper(CompilerWrapper):
+    @classmethod
+    def post_compile(
+        cls,
+        compiled_fn,
+        aot_config: AOTConfig,
+        *,
+        fw_metadata: ViewAndMutationMeta,
+    ):
+        @wraps(compiled_fn)
+        def wrapper(runtime_args: List[Any]):
+            if fw_metadata.is_rng_op_functionalized:
+                # Add the seed and offset to args
+                seed, offset = CUDARngStateHelper.get_torch_state_as_tuple()
+                runtime_args.extend([seed, offset])
+                out = compiled_fn(runtime_args)
+                out = cls.functionalized_rng_runtime_epilogue(fw_metadata, out)
+                return out
+            return compiled_fn(runtime_args)
+
+        return wrapper
+
+        # Calling convention: If we are running functionalized RNG, then outs consists
+        # of (user_outs, rng_offset)
+        @classmethod
+        def functionalized_rng_runtime_epilogue(
+            cls, metadata: ViewAndMutationMeta, outs, return_new_outs=True
+        ):
+            if metadata.is_rng_op_functionalized:
+                assert metadata.num_outputs_rng_offset == 1
+                new_rng_offset = outs[-1]
+                CUDARngStateHelper.set_new_offset(new_rng_offset)
+                if return_new_outs:
+                    user_outs = outs[:-1]
+                    return user_outs
+                else:
+                    return None
+            return outs
+
+
+class FakifiedOutWrapper(CompilerWrapper):
+    @classmethod
+    def post_compile(
+        cls,
+        compiled_fn,
+        _aot_config: AOTConfig,
+        *,
+        fw_metadata: ViewAndMutationMeta,
+        fakified_out_opt,
+    ):
+        fakified_out = fakified_out_opt
+
+        @wraps(compiled_fn)
+        def wrapper(runtime_args):
+            nonlocal fakified_out
+            if fakified_out is not None:
+                out = fakified_out
+                fakified_out = None
+                return out
+            return compiled_fn(runtime_args)
+
+        return wrapper
 
 
 # This wrapper handles the AOTDispatch runtime logic for tensor subclasses.

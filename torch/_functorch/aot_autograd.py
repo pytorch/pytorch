@@ -70,7 +70,6 @@ from ._aot_autograd.runtime_wrappers import (  # noqa: F401
     aot_dispatch_subclass_wrapper,
     aot_wrapper_dedupe,
     aot_wrapper_synthetic_base,
-    functionalized_rng_runtime_epilogue,
 )
 from ._aot_autograd.schemas import (  # noqa: F401
     AOTConfig,

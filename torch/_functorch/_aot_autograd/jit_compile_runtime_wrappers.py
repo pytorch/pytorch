@@ -40,8 +40,9 @@ from .logging_utils import describe_input, format_guard_bug_msg, track_graph_com
 
 from .runtime_wrappers import (
     aot_dispatch_subclass_wrapper,
+    FakifiedOutWrapper,
+    FunctionalizedRngRuntimeWrapper,
     RuntimeWrapper,
-    functionalized_rng_runtime_epilogue,
 )
 from .schemas import (
     AOTConfig,
@@ -180,34 +181,22 @@ def aot_dispatch_base(
     if not hasattr(compiled_fw, "_boxed_call"):
         compiled_fw = make_boxed_func(compiled_fw)
 
-    # Create a wrapper to set up the rng functionalize bits
-    @wraps(compiled_fw)
-    def rng_functionalization_wrapper(args: List[Any]):
-        # see note: [Returning Fake Tensors on First AOT Autograd Call]
-        nonlocal fakified_out
-        if fakified_out is not None:
-            out = fakified_out
-            fakified_out = None
-            return out
-
-        if fw_metadata.is_rng_op_functionalized:
-            # Add the seed and offset to args
-            seed, offset = CUDARngStateHelper.get_torch_state_as_tuple()
-            args.extend([seed, offset])
-            out = compiled_fw(args)
-            out = functionalized_rng_runtime_epilogue(fw_metadata, out)
-            return out
-        else:
-            return compiled_fw(args)
+    # Create a wrapper to set up the rng functionalize and fakified out bits
+    compiled_fw = FunctionalizedRngRuntimeWrapper.post_compile(
+        compiled_fw, aot_config, fw_metadata=fw_metadata
+    )
+    compiled_fw = FakifiedOutWrapper.post_compile(
+        compiled_fw, aot_config, fw_metadata=fw_metadata, fakified_out_opt=fakified_out
+    )
 
     if maybe_subclass_meta is not None:
         compiled_fw_func = aot_dispatch_subclass_wrapper(
-            rng_functionalization_wrapper,
+            compiled_fw,
             subclass_metas=fw_metadata.subclass_fw_graph_out_meta,
             num_fw_outs_saved_for_bw=None,
         )
     else:
-        compiled_fw_func = rng_functionalization_wrapper
+        compiled_fw_func = compiled_fw
 
     if not hasattr(compiled_fw_func, "_boxed_call"):
         compiled_fw_func = make_boxed_func(compiled_fw_func)
@@ -559,6 +548,17 @@ def aot_dispatch_autograd(
     ]
     assert len(backward_state_indices) <= 1
 
+    compiled_fw_func = FunctionalizedRngRuntimeWrapper.post_compile(
+        compiled_fw_func, aot_config, fw_metadata=fw_metadata
+    )
+
+    compiled_fw_func = FakifiedOutWrapper.post_compile(
+        compiled_fw_func,
+        aot_config,
+        fw_metadata=fw_metadata,
+        fakified_out_opt=fakified_out,
+    )
+
     class CompiledFunction(torch.autograd.Function):
         compiled_fw = compiled_fw_func
         compiled_bw = compiled_bw_func
@@ -587,28 +587,11 @@ def aot_dispatch_autograd(
                     ctx.mark_dirty(arg)
                 marked_dirty_inps.append(arg)
 
-            if not CompiledFunction._fakify_first_call:
-                if CompiledFunction.metadata.is_rng_op_functionalized:
-                    # Add the seed and offset to args
-                    seed, offset = CUDARngStateHelper.get_torch_state_as_tuple()
-                    args = (*args, seed, offset)
-                # There is a pretty complicated calling convention around what the compiled fw returns.
-                # The full list of outputs and their relative order is:
-                # (*tokens, *mutated_inputs, *fw_outs, *fw_intermediate_bases, *saved_tensors, *saved_symints)
-                # - Note that in the synthetic bases case, mutated_inputs will correspond to an updated version
-                #   of the original view, and not the synthetic base
-
-                fw_outs = call_func_at_runtime_with_args(
-                    CompiledFunction.compiled_fw,
-                    args,
-                    disable_amp=disable_amp,
-                )
-            else:
-                nonlocal fakified_out
-                assert fakified_out is not None
-                CompiledFunction._fakify_first_call = False
-                fw_outs = fakified_out
-                fakified_out = None
+            fw_outs = call_func_at_runtime_with_args(
+                CompiledFunction.compiled_fw,
+                args,
+                disable_amp=disable_amp,
+            )
 
             num_outputs = CompiledFunction.metadata.num_outputs
             num_outputs_aliased = CompiledFunction.metadata.num_outputs_aliased
@@ -709,12 +692,6 @@ def aot_dispatch_autograd(
             ]
             ctx.mark_non_differentiable(*fw_outs_not_requiring_grad)
             ctx._materialize_non_diff_grads = False
-
-            functionalized_rng_runtime_epilogue(
-                CompiledFunction.metadata,
-                fw_outs[num_forward_returns:num_forward],
-                return_new_outs=False,
-            )
             return tuple(raw_returns) + tuple(marked_dirty_inps)
 
         @staticmethod
@@ -816,7 +793,7 @@ def aot_dispatch_autograd(
             #     x for x, info in zip(out_tangents, out_info) if info.output_type != OutputType.non_alias]
             # assert all(x is None for x in metadata_only_inps)
             # assert all(x is None for x in aliased_outputs)
-
+            # TODO: replace this with FunctionalizedRngRuntimeWrapper
             rng_args = []
             if CompiledFunction.metadata.is_rng_op_functionalized:
                 # Add the seed and offset to args
@@ -926,7 +903,8 @@ Got grad_output types: {str(grad_output_types)}"""
                     context = torch._C._DisableAutocast if disable_amp else nullcontext
                     with context():
                         out = normalize_as_list(bw_module(*all_args))
-                    out = functionalized_rng_runtime_epilogue(
+                    # TODO: replace with post_compile wrapper
+                    out = FunctionalizedRngRuntimeWrapper._functionalized_rng_runtime_epilogue(
                         CompiledFunction.metadata, out
                     )
                     return tuple(out)
@@ -981,8 +959,8 @@ Got grad_output types: {str(grad_output_types)}"""
                     steal_args=True,
                     disable_amp=disable_amp,
                 )
-
-                out = functionalized_rng_runtime_epilogue(
+                # TODO: replace this with FunctionalizedRngRuntimeWrapper.post_compile
+                out = FunctionalizedRngRuntimeWrapper._functionalized_rng_runtime_epilogue(
                     CompiledFunction.metadata, out
                 )
                 return tuple(out)
