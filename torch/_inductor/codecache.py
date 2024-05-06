@@ -1294,7 +1294,18 @@ def valid_vec_isa_list() -> List[VecISA]:
         return []
 
     if platform.machine() == "s390x":
-        return [VecZVECTOR()]
+        with open("/proc/cpuinfo") as _cpu_info:
+            while True:
+                line = _cpu_info.readline()
+                if not line:
+                    break
+                # process line
+                featuresmatch = re.match(r"^features\s*:\s*(.*)$", line)
+                if featuresmatch:
+                    for group in featuresmatch.groups():
+                        if re.search(r"[\^ ]+vxe[\$ ]+", group):
+                            return [VecZVECTOR()]
+        return []
 
     isa_list = []
     with open("/proc/cpuinfo") as _cpu_info:
