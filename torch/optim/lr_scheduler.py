@@ -1975,9 +1975,9 @@ class OneCycleLR(LRScheduler):
                 )
             self.total_steps = total_steps
         elif epochs is not None and steps_per_epoch is not None:
-            if epochs <= 0 or not isinstance(epochs, int):
+            if not isinstance(epochs, int) or epochs <= 0:
                 raise ValueError(f"Expected positive integer epochs, but got {epochs}")
-            if steps_per_epoch <= 0 or not isinstance(steps_per_epoch, int):
+            if not isinstance(steps_per_epoch, int) or steps_per_epoch <= 0:
                 raise ValueError(
                     f"Expected positive integer steps_per_epoch, but got {steps_per_epoch}"
                 )
