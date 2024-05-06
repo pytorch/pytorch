@@ -10,7 +10,7 @@ import sys
 import traceback
 import weakref
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
 
 import sympy
 
@@ -102,6 +102,9 @@ from .variables.tensor import (
 )
 
 from .variables.torch_function import TensorWithTFOverrideVariable
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
 log = logging.getLogger(__name__)
 graph_tabular_log = torch._logging.getArtifactLogger(__name__, "graph")
@@ -334,7 +337,6 @@ class OutputGraph:
         self.global_scope = global_scope
         self.local_scope = local_scope
         self.root_tx = root_tx
-        from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
         # Given a source, what are the user stacks of all locations that
         # accessed it?
@@ -669,7 +671,7 @@ class OutputGraph:
             proxy.node.meta["grapharg"] = GraphArg(
                 prop,
                 s,
-                is_unspecialized=False,
+                pass_arg_as_tensor=False,
                 fake_tensor=None,
                 is_tensor=False,
             )

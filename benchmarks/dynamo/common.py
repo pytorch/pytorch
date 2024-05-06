@@ -2178,6 +2178,10 @@ class BenchmarkRunner:
     def skip_models_due_to_control_flow(self):
         return set()
 
+    @property
+    def guard_on_nn_module_models(self):
+        return set()
+
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         raise NotImplementedError
 
@@ -4088,15 +4092,20 @@ def run(runner, args, original_dir=None):
             else:
                 model, example_inputs = runner.cast_based_on_args(model, example_inputs)
             runner.setup_amp(current_device)
-            runner.run_one_model(
-                name,
-                model,
-                example_inputs,
-                optimize_ctx,
-                experiment,
-                explain=args.explain,
-                tag=args.tag,
-            )
+            guard_ctx = contextlib.nullcontext()
+            if name in runner.guard_on_nn_module_models:
+                guard_ctx = torch._dynamo.config.patch(guard_nn_modules=True)
+
+            with guard_ctx:
+                runner.run_one_model(
+                    name,
+                    model,
+                    example_inputs,
+                    optimize_ctx,
+                    experiment,
+                    explain=args.explain,
+                    tag=args.tag,
+                )
         if args.generate_aot_autograd_stats:
             stats_file = output_filename.split(".csv")[0] + "_stats.csv"
             output_csv(
