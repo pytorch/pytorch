@@ -22,7 +22,18 @@ import warnings
 import weakref
 from enum import Enum
 from os.path import dirname, join
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    NamedTuple,
+    Optional,
+    Set,
+    Tuple,
+    TYPE_CHECKING,
+    Union,
+)
 from unittest.mock import patch
 
 import torch
@@ -30,7 +41,6 @@ import torch.fx
 import torch.utils._pytree as pytree
 import torch.utils.checkpoint
 from torch import _guards
-from torch._subclasses import fake_tensor
 from torch._utils_internal import log_export_usage
 from torch.export.dynamic_shapes import _process_dynamic_shapes
 from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
@@ -57,7 +67,6 @@ from . import config, convert_frame, external_utils, trace_rules, utils
 from .code_context import code_context
 from .exc import CondOpArgsMismatchError, UserError, UserErrorType
 from .mutation_guard import install_generation_tagging_init
-from .types import CacheEntry, DynamoCallback
 from .utils import common_constant_types, compile_times
 
 log = logging.getLogger(__name__)
@@ -69,6 +78,10 @@ null_context = contextlib.nullcontext
 
 
 import sympy
+
+if TYPE_CHECKING:
+    from torch._subclasses import fake_tensor
+    from .types import CacheEntry, DynamoCallback
 
 
 # See https://github.com/python/typing/pull/240
@@ -1316,7 +1329,7 @@ def export(
             # Running graph with interpreter is needed for propagating the stack_trace
             def graph_with_interpreter(*args):
                 with torch.fx.traceback.preserve_node_meta():
-                    return torch.fx.Interpreter(graph).run(*args)
+                    return torch.fx.Interpreter(graph).run(*args)  # type: ignore[arg-type]
 
             with maybe_disable_fake_tensor_mode(), enable_python_dispatcher(), (
                 fake_mode
