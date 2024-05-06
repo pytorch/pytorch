@@ -40,7 +40,7 @@ from .logging_utils import describe_input, format_guard_bug_msg, track_graph_com
 
 from .runtime_wrappers import (
     aot_dispatch_subclass_wrapper,
-    create_runtime_wrapper,
+    RuntimeWrapper,
     functionalized_rng_runtime_epilogue,
 )
 from .schemas import (
@@ -174,7 +174,7 @@ def aot_dispatch_base(
                 fw_module, fwd_output_strides
             )
 
-    # However, create_runtime_wrapper does not expect the rng offsets in the
+    # However, RuntimeWrapper does not expect the rng offsets in the
     # output. So, we have to create another wrapper and take out the offset. As
     # a result, we have to account for not boxed_call compilers as well.
     if not hasattr(compiled_fw, "_boxed_call"):
@@ -212,12 +212,12 @@ def aot_dispatch_base(
     if not hasattr(compiled_fw_func, "_boxed_call"):
         compiled_fw_func = make_boxed_func(compiled_fw_func)
 
-    compiled_fn = create_runtime_wrapper(
+    compiled_fn = RuntimeWrapper.post_compile(
         compiled_fw_func,
-        runtime_metadata=fw_metadata,
+        aot_config,
+        fw_metadata=fw_metadata,
         indices_of_inps_to_detach=[],
         trace_joint=False,
-        keep_input_mutations=aot_config.keep_inference_input_mutations,
         disable_amp=disable_amp,
     )
 
@@ -1041,12 +1041,12 @@ Got grad_output types: {str(grad_output_types)}"""
                 return (*[None] * num_tokens, *outs_wrapped)
             return (*[None] * num_tokens, *out)
 
-    compiled_function = create_runtime_wrapper(
+    compiled_function = RuntimeWrapper.post_compile(
         CompiledFunction.apply,
-        runtime_metadata=fw_metadata,
+        aot_config,
+        fw_metadata=fw_metadata,
         indices_of_inps_to_detach=_indices_of_inps_to_detach,
         trace_joint=True,
-        keep_input_mutations=aot_config.keep_inference_input_mutations,
         disable_amp=disable_amp,
     )
 
