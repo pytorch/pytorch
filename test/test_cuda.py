@@ -4551,50 +4551,14 @@ class TestCudaOptims(TestCase):
     )
     def test_graph_scaling_fused_optimizers(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
-        optKwargs = {
-            torch.optim.Adam: [
-                (
-                    {"lr": 0.1, "betas": (0.8, 0.7), "fused": True, "amsgrad": amsgrad}
-                    for amsgrad in (False, True)
-                )
-            ],
-            torch.optim.AdamW: [
-                (
-                    {"lr": 0.1, "betas": (0.8, 0.7), "fused": True, "amsgrad": amsgrad}
-                    for amsgrad in (False, True)
-                )
-            ],
-            torch.optim.SGD: [
-                (
-                    {
-                        "lr": 0.1,
-                        "momentum": 0.0,
-                        "dampening": d,
-                        "weight_decay": w,
-                        "nesterov": n,
-                        "fused": True,
-                    }
-                    for d, w, n in product((0.0, 0.5), (0.0, 0.5), (False,))
-                ),
-                (
-                    {
-                        "lr": 0.1,
-                        "momentum": 0.5,
-                        "dampening": d,
-                        "weight_decay": w,
-                        "nesterov": n,
-                        "fused": True,
-                    }
-                    for d, w, n in product((0.0,), (0.0, 0.5), (True, False))
-                ),
-            ],
-        }
+        
         steps_warmup = 3
         steps_train = 2
+        
         optim_inputs = optim_info.optim_inputs_func(device=device)
         has_betas = any("betas" in error_inp.optimizer_error_input.kwargs 
                         for error_inp in optim_info.optim_error_inputs_func(device="cpu", dtype=dtype))
-        #print(optim_cls,has_betas) 
+         
         for optim_input in optim_inputs:
             kwargs = optim_input.kwargs
             kwargs["fused"]=True
@@ -4603,7 +4567,6 @@ class TestCudaOptims(TestCase):
             kwargs["lr"]=0.1
             if has_betas:
                 kwargs["betas"] = (0.8, 0.7)
-            #print(optim_cls, kwargs)
 
             has_capturable_arg = optim_cls in (torch.optim.Adam, torch.optim.AdamW)
             for actually_do_graphs in (
