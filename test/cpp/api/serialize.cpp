@@ -106,7 +106,7 @@ void test_serialize_optimizer(
     const double lr = param_group.options().get_lr();
     // change the learning rate, which will be overwritten by the loading
     // otherwise, test cannot check if options are saved and loaded correctly
-    param_group.options().set_lr(lr + 1);
+    param_group.options().set_lr(lr + 0.01);
   }
 
   auto x = torch::ones({10, 5});
