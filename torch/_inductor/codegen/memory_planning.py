@@ -62,8 +62,8 @@ class LiveRange:
     Invariant: begin <= end
     """
 
-    begin: float  # int | ±inf
-    end: float  # int | ±inf
+    begin: float  # int | +/-inf
+    end: float  # int | +/-inf
 
     def contains(self, other: LiveRange):
         """Is other entirely within self"""

@@ -325,7 +325,8 @@ void initPythonBindings(PyObject* module) {
       .value("CPU", ActivityType::CPU)
       .value("XPU", ActivityType::XPU)
       .value("MTIA", ActivityType::MTIA)
-      .value("CUDA", ActivityType::CUDA);
+      .value("CUDA", ActivityType::CUDA)
+      .value("PrivateUse1", ActivityType::PrivateUse1);
 
   py::class_<ExperimentalConfig>(m, "_ExperimentalConfig")
       .def(
@@ -439,8 +440,7 @@ void initPythonBindings(PyObject* module) {
           "dtype",
           [](const TensorMetadata& metadata) {
             return py::reinterpret_borrow<py::object>(
-                torch::autograd::utils::wrap(
-                    torch::getTHPDtype(metadata.dtype_)));
+                torch::autograd::utils::wrap(metadata.dtype_));
           })
       .def_readonly("dim", &TensorMetadata::dim_)
       .def_readonly("sizes", &TensorMetadata::sizes_)
