@@ -274,6 +274,9 @@ C2_FBOBJC_EXTRA_TARGET_CONFIG = {
     "MTL_LANGUAGE_REVISION": "Metal12",
 }
 
+def get_c2_torch_vulkan_compiler_flags():
+    return ["-Wno-missing-prototypes"]
+
 def get_c2_default_cxx_args():
     return dict(
         header_namespace = "",

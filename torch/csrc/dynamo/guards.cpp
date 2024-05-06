@@ -1273,13 +1273,11 @@ class TENSOR_ALIASING : public RelationalGuard {
 class NO_TENSOR_ALIASING : public RelationalGuard {
  public:
   NO_TENSOR_ALIASING(
-      long unsigned int num_tensors,
-      py::object tensor_names,
+      const py::list& tensor_names,
       py::object verbose_code_parts)
       : RelationalGuard(std::move(verbose_code_parts)),
-        _num_tensors(num_tensors),
-        _tensor_names(std::move(tensor_names)) {
-    _unique_tensors.reserve(num_tensors);
+        _tensor_names(tensor_names) {
+    _unique_tensors.reserve(tensor_names.size());
   }
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
@@ -1303,19 +1301,13 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
     bool result = check_nopybind(value);
 
     if (!result) {
-      std::stringstream fail_reason;
-      fail_reason << "Duplicate tensor found where not expected! ";
-      fail_reason << py::cast<std::string>(_tensor_names[_counter])
-                  << " should not alias to anything, but is aliased."
-                  << " Total number of tensors are " << _num_tensors;
-      return GuardDebugInfo(false, fail_reason.str(), 0);
+      return GuardDebugInfo(
+          false, "Duplicate tensor found where not expected!", 0);
     }
-    _counter += 1;
     return GuardDebugInfo(true, 1);
   }
 
   void reset_state() final {
-    _counter = 0;
     for (auto item : _unique_tensors) {
       Py_DECREF(item.first);
     }
@@ -1323,10 +1315,8 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
   }
 
  private:
-  long unsigned int _num_tensors;
   py::list _tensor_names;
   ska::flat_hash_map<PyObject*, std::nullptr_t> _unique_tensors;
-  long unsigned int _counter = 0;
 };
 
 class DYNAMIC_INDICES : public LeafGuard {
@@ -2506,6 +2496,58 @@ class GetAttrGuardAccessor : public GuardAccessor {
 };
 
 /**
+ * Represents x.__dict__ acccessor.
+ */
+class GetGenericDictGuardAccessor : public GuardAccessor {
+ public:
+  GetGenericDictGuardAccessor(
+      RootGuardManager* root,
+      py::str name,
+      std::string source,
+      py::handle example_value,
+      py::handle guard_manager_enum)
+      : GuardAccessor(
+            root,
+            std::move(name),
+            std::move(source),
+            example_value,
+            guard_manager_enum) {}
+
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj) override { // borrowed ref
+    PyObject* x = PyObject_GenericGetDict(obj, nullptr); // new ref
+    if (x == nullptr) {
+      // Attribute absent, clear the exception and return false.
+      PyErr_Clear();
+      return false;
+    }
+    bool result = _guard_manager->check_nopybind(x);
+    Py_DECREF(x);
+    return result;
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    PyObject* x = PyObject_GenericGetDict(obj, nullptr); // new ref
+    if (x == nullptr) {
+      // Attribute absent, clear the exception and return false.
+      PyErr_Clear();
+      return GuardDebugInfo(
+          false, "getattr failed on source " + get_source(), 0);
+    }
+    GuardDebugInfo result = _guard_manager->check_verbose_nopybind(x);
+    Py_DECREF(x);
+    return result;
+  }
+
+  std::string repr() const override {
+    // Helpful when priting GuardManager tree structure.
+    return "GetGenericDictGuardAccessor";
+  }
+};
+
+/**
  * Represents __getitem__ acccessor.
  */
 class GetItemGuardAccessor : public GuardAccessor {
@@ -3186,9 +3228,7 @@ void install_no_tensor_aliasing_guard(
   // relational guard. There is one guard object that is shared between multiple
   // guard managers.
   std::shared_ptr<RelationalGuard> guard = std::make_shared<NO_TENSOR_ALIASING>(
-      guard_managers.size(),
-      std::move(tensor_names),
-      std::move(verbose_code_parts));
+      std::move(tensor_names), std::move(verbose_code_parts));
 
   // Register the resetter on the toor gaurd mananger, so that it can reset
   // the newly added relational guard when the guard eval fails.
@@ -3383,6 +3423,12 @@ PyObject* torch_c_dynamo_guards_init() {
       GetAttrGuardAccessor,
       GuardAccessor,
       std::unique_ptr<GetAttrGuardAccessor>>(py_m, "GetAttrGuardAccessor");
+  // NOLINTNEXTLINE(bugprone-unused-raii)
+  py::class_<
+      GetGenericDictGuardAccessor,
+      GuardAccessor,
+      std::unique_ptr<GetGenericDictGuardAccessor>>(
+      py_m, "GetGenericDictGuardAccessor");
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<
       GetItemGuardAccessor,
@@ -3758,6 +3804,26 @@ PyObject* torch_c_dynamo_guards_init() {
             // A unique key is used to save as the accessor key.
             py::str unique_key("__grad_accessor__");
             return self.get_child_manager<GradGuardAccessor>(
+                std::move(unique_key),
+                std::move(source),
+                example_value,
+                guard_manager_enum);
+          },
+          py::arg("source"),
+          py::arg("example_value"),
+          py::arg("guard_manager_enum"),
+          py::return_value_policy::reference)
+      // return by reference because GuardManager has the ownership of accessors
+      // and guard managers
+      .def(
+          "get_generic_dict_manager",
+          [](GuardManager& self,
+             std::string source,
+             py::handle example_value,
+             py::handle guard_manager_enum) -> GuardManager* {
+            // A unique key is used to save as the accessor key.
+            py::str unique_key("__generic_dict_accessor__");
+            return self.get_child_manager<GetGenericDictGuardAccessor>(
                 std::move(unique_key),
                 std::move(source),
                 example_value,

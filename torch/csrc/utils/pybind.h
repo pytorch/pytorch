@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/python_headers.h>
+#include <torch/csrc/utils/pythoncapi_compat.h>
 
 #include <ATen/core/Tensor.h>
 #include <ATen/core/jit_type_base.h>
@@ -155,7 +156,7 @@ struct type_caster<at::MemoryFormat> {
       at::MemoryFormat src,
       return_value_policy /* policy */,
       handle /* parent */) {
-    return handle(torch::utils::getTHPMemoryFormat(src));
+    return handle(Py_NewRef(torch::utils::getTHPMemoryFormat(src)));
   }
 };
 
