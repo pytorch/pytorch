@@ -24,14 +24,21 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     run_tests,
     TEST_WITH_TSAN,
-    TestCase
+    TestCase,
 )
 
 
 def _create_c10d_store_mp(is_server, server_addr, port, world_size, wait_for_workers):
-    store = create_c10d_store(is_server, server_addr, port, world_size, wait_for_workers=wait_for_workers, timeout=2)
+    store = create_c10d_store(
+        is_server,
+        server_addr,
+        port,
+        world_size,
+        wait_for_workers=wait_for_workers,
+        timeout=2,
+    )
     if store is None:
-        raise AssertionError()
+        raise AssertionError
 
     store.set(f"test_key/{os.getpid()}", b"test_value")
 
@@ -118,6 +125,33 @@ class DistributedUtilTest(TestCase):
                 world_size=2,
                 timeout=1,
             )
+
+    def test_create_store_with_libuv_support(self):
+        world_size = 1
+        wait_for_workers = False
+        localhost = socket.gethostname()
+
+        store = create_c10d_store(
+            is_server=True,
+            server_addr=localhost,
+            server_port=0,
+            timeout=2,
+            world_size=world_size,
+            wait_for_workers=wait_for_workers,
+            use_libuv=False,
+        )
+        self.assertFalse(store.libuvBackend)
+
+        store = create_c10d_store(
+            is_server=True,
+            server_addr=localhost,
+            server_port=0,
+            timeout=2,
+            world_size=world_size,
+            wait_for_workers=wait_for_workers,
+            use_libuv=True,
+        )
+        self.assertTrue(store.libuvBackend)
 
     def test_port_already_in_use_on_server(self):
         # try to create the TCPStore server twice on the same port

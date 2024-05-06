@@ -1,28 +1,21 @@
 # Owner(s): ["oncall: mobile"]
 
 import torch
-import torch.nn as nn
 import torch.ao.nn.quantized as nnq
+import torch.nn as nn
 import torch.utils.bundled_inputs
-from torch.ao.quantization import (
-    default_qconfig,
-    float_qparams_weight_only_qconfig,
-)
+from torch.ao.quantization import default_qconfig, float_qparams_weight_only_qconfig
 
 # graph mode quantization based on fx
-from torch.ao.quantization.quantize_fx import (
-    prepare_fx,
-    convert_fx,
-)
-from torch.testing._internal.common_quantization import NodeSpec as ns
+from torch.ao.quantization.quantize_fx import convert_fx, prepare_fx
 from torch.testing._internal.common_quantization import (
-    QuantizationLiteTestCase,
     LinearModelWithSubmodule,
+    NodeSpec as ns,
+    QuantizationLiteTestCase,
 )
 
 
 class TestLiteFuseFx(QuantizationLiteTestCase):
-
     # Tests from:
     # ./caffe2/test/quantization/fx/test_quantize_fx.py
 

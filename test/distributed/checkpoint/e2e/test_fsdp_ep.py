@@ -21,7 +21,7 @@ class Dummymodel(nn.Module):
         super().__init__()
 
     def forward(self, x):
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 class EPModel(nn.Module):
@@ -31,7 +31,7 @@ class EPModel(nn.Module):
         self.net2 = nn.Sequential(nn.Linear(16, 16), nn.ReLU())
 
     def forward(self, x):
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 class SecondTier(nn.Module):
@@ -43,7 +43,7 @@ class SecondTier(nn.Module):
         self.net = nn.Sequential(nn.Linear(16, 16), nn.ReLU())
 
     def forward(self, x):
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 class TopModel(nn.Module):
@@ -55,7 +55,7 @@ class TopModel(nn.Module):
         self.net = nn.Sequential(nn.Linear(16, 16), nn.ReLU())
 
     def forward(self, x):
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 class TestFSDPWithEP(DTensorTestBase, VerifyStateDictMixin):
