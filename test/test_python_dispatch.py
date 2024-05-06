@@ -44,6 +44,11 @@ from torch.utils._python_dispatch import (
 from torch.utils._pytree import tree_map, tree_map_only
 
 
+# used as DataLoader collate_fn below; named here to avoid trying to pickle a lambda
+def _identity(x):
+    return x
+
+
 class TestDispatcherPythonBindings(TestCase):
     def test_call_boxed(self) -> None:
         sin = torch._C._dispatch_find_schema_or_throw("aten::sin", "")
@@ -1193,7 +1198,7 @@ def forward(self, x_a_1, x_b_1, y_1):
             [data, data],
             batch_size=2,
             num_workers=2,
-            collate_fn=lambda x: x,
+            collate_fn=_identity,
         )
         for batch in loader:
             self.assertEqual(batch[0].dtype, expected_dtype)
