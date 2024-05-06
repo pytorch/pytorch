@@ -11,13 +11,9 @@ from . import _linalg_utils as _utils
 from .overrides import handle_torch_function, has_torch_function
 
 
-def get_approximate_basis(
-    A: Tensor, q: int, niter: Optional[int] = 2, M: Optional[Tensor] = None
-) -> Tensor:
+def get_approximate_basis(A: Tensor, q: int, niter: Optional[int] = 2) -> Tensor:
     """Return tensor :math:`Q` with :math:`q` orthonormal columns such
-    that :math:`Q Q^H A` approximates :math:`A`. If :math:`M` is
-    specified, then :math:`Q` is such that :math:`Q Q^H (A - M)`
-    approximates :math:`A - M`.
+    that :math:`Q Q^H A` approximates :math:`A`.
 
     .. note:: The implementation is based on the Algorithm 4.4 from
               Halko et al, 2009.
@@ -45,9 +41,6 @@ def get_approximate_basis(
                                nonnegative integer. In most cases, the
                                default value 2 is more than enough.
 
-        M (Tensor, optional): the input tensor's mean of size
-                              :math:`(*, 1, n)`.
-
     References::
         - Nathan Halko, Per-Gunnar Martinsson, and Joel Tropp, Finding
           structure with randomness: probabilistic algorithms for
@@ -57,27 +50,17 @@ def get_approximate_basis(
     """
 
     niter = 2 if niter is None else niter
-    m, n = A.shape[-2:]
-    dtype = _utils.get_floating_dtype(A)
+    dtype = _utils.get_floating_dtype(A) if not A.is_complex() else A.dtype
     matmul = _utils.matmul
 
-    R = torch.randn(n, q, dtype=dtype, device=A.device)
+    R = torch.randn(A.shape[-1], q, dtype=dtype, device=A.device)
 
     # The following code could be made faster using torch.geqrf + torch.ormqr
     # but geqrf is not differentiable
-    A_H = _utils.transjugate(A)
-    if M is None:
-        Q = torch.linalg.qr(matmul(A, R)).Q
-        for i in range(niter):
-            Q = torch.linalg.qr(matmul(A_H, Q)).Q
-            Q = torch.linalg.qr(matmul(A, Q)).Q
-    else:
-        M_H = _utils.transjugate(M)
-        Q = torch.linalg.qr(matmul(A, R) - matmul(M, R)).Q
-        for i in range(niter):
-            Q = torch.linalg.qr(matmul(A_H, Q) - matmul(M_H, Q)).Q
-            Q = torch.linalg.qr(matmul(A, Q) - matmul(M, Q)).Q
-
+    Q = torch.linalg.qr(matmul(A, R)).Q
+    for i in range(niter):
+        Q = torch.linalg.qr(matmul(A.mH, Q)).Q
+        Q = torch.linalg.qr(matmul(A, Q)).Q
     return Q
 
 
@@ -144,48 +127,26 @@ def _svd_lowrank(
     niter: Optional[int] = 2,
     M: Optional[Tensor] = None,
 ) -> Tuple[Tensor, Tensor, Tensor]:
+    # Algorithm 5.1 in Halko et al 2009
+
     q = 6 if q is None else q
     m, n = A.shape[-2:]
     matmul = _utils.matmul
-    if M is None:
-        M_t = None
-    else:
-        M = M.broadcast_to(A.size())
-        M_t = _utils.transpose(M)
-    A_t = _utils.transpose(A)
+    if M is not None:
+        A = A - M
 
-    # Algorithm 5.1 in Halko et al 2009, slightly modified to reduce
-    # the number conjugate and transpose operations
-    if m < n or n > q:
-        # computing the SVD approximation of a transpose in
-        # order to keep B shape minimal (the m < n case) or the V
-        # shape small (the n > q case)
-        Q = get_approximate_basis(A_t, q, niter=niter, M=M_t)
-        Q_c = _utils.conjugate(Q)
-        if M is None:
-            B_t = matmul(A, Q_c)
-        else:
-            B_t = matmul(A, Q_c) - matmul(M, Q_c)
-        assert B_t.shape[-2] == m, (B_t.shape, m)
-        assert B_t.shape[-1] == q, (B_t.shape, q)
-        assert B_t.shape[-1] <= B_t.shape[-2], B_t.shape
-        U, S, Vh = torch.linalg.svd(B_t, full_matrices=False)
-        V = Vh.mH
-        V = Q.matmul(V)
-    else:
-        Q = get_approximate_basis(A, q, niter=niter, M=M)
-        Q_c = _utils.conjugate(Q)
-        if M is None:
-            B = matmul(A_t, Q_c)
-        else:
-            B = matmul(A_t, Q_c) - matmul(M_t, Q_c)
-        B_t = _utils.transpose(B)
-        assert B_t.shape[-2] == q, (B_t.shape, q)
-        assert B_t.shape[-1] == n, (B_t.shape, n)
-        assert B_t.shape[-1] <= B_t.shape[-2], B_t.shape
-        U, S, Vh = torch.linalg.svd(B_t, full_matrices=False)
-        V = Vh.mH
-        U = Q.matmul(U)
+    # Assume that A is tall
+    if m < n:
+        A = A.mH
+
+    Q = get_approximate_basis(A, q, niter=niter)
+    B = matmul(Q.mH, A)
+    U, S, Vh = torch.linalg.svd(B, full_matrices=False)
+    V = Vh.mH
+    U = Q.matmul(U)
+
+    if m < n:
+        U, V = V, U
 
     return U, S, V
 
@@ -293,7 +254,7 @@ def pca_lowrank(
         )
 
         ones_m1_t = torch.ones(A.shape[:-2] + (1, m), dtype=dtype, device=A.device)
-        M = _utils.transpose(torch.sparse.mm(C_t, ones_m1_t))
+        M = torch.sparse.mm(C_t, ones_m1_t).mT
         return _svd_lowrank(A, q, niter=niter, M=M)
     else:
         C = A.mean(dim=(-2,), keepdim=True)
