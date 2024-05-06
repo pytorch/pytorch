@@ -1,10 +1,12 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import dataclasses
 from collections import defaultdict
-from typing import Dict, List, Set
+from typing import Dict, List, Set, TYPE_CHECKING
 
-from torch.distributed.checkpoint.metadata import MetadataIndex
 from torch.distributed.checkpoint.planner import SavePlan, WriteItem
+
+if TYPE_CHECKING:
+    from torch.distributed.checkpoint.metadata import MetadataIndex
 
 __all__ = ["dedup_save_plans"]
 
