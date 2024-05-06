@@ -109,8 +109,9 @@ Welford<T> welford_combine(const Welford<T> &acc, T data, const WeightRecp<T>* w
     new_mean = acc.mean + delta / new_weight;
   } else {
     new_mean = acc.mean +
-        ((w == nullptr) ? delta / new_weight
-                        : delta * w->weight_recps[acc.index]);
+        ((w == nullptr || acc.index >= w->weight_recps.size())
+             ? delta / new_weight
+             : delta * w->weight_recps[acc.index]);
   }
   auto new_delta = data - new_mean;
   auto result = Welford<T>{

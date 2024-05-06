@@ -125,7 +125,6 @@ def foreach_reduce(
     orig_dtype: torch.dtype,
     reduce_dtype: Optional[torch.dtype],
     device: torch.device,
-    divide_factors: Union[Tuple[None, None], Tuple[float, float]],
     all_reduce_group: Optional[dist.ProcessGroup],
     all_reduce_stream: torch.cuda.Stream,
 ) -> torch.cuda.Event:
@@ -142,7 +141,9 @@ def foreach_reduce(
         )
     grad_dtype = unsharded_grads[0].dtype
     reduce_dtype = reduce_dtype or grad_dtype
-    predivide_factor, postdivide_factor = divide_factors
+    predivide_factor, postdivide_factor = _get_gradient_divide_factors(
+        reduce_scatter_group, all_reduce_group, reduce_dtype
+    )
     world_size = reduce_scatter_group.size()
     padded_unsharded_sizes = tuple(
         _get_dim0_padded_size(grad.size(), world_size) for grad in unsharded_grads
@@ -166,18 +167,22 @@ def foreach_reduce(
             (reduce_scatter_output_numel,)
         )
         _div_if_needed(reduce_scatter_input, predivide_factor)
-        _reduce_scatter(
-            post_reduce_output,
-            reduce_scatter_input,
-            reduce_scatter_group,
-            divide_factors,
+        dist.reduce_scatter_tensor(
+            output=post_reduce_output,
+            input=reduce_scatter_input,
+            group=reduce_scatter_group,
+            op=ReduceOp.AVG if predivide_factor is None else ReduceOp.SUM,
         )
     view_out_stream = reduce_scatter_stream
     if all_reduce_group is not None:
         view_out_stream = all_reduce_stream
         all_reduce_stream.wait_stream(reduce_scatter_stream)
         with torch.cuda.stream(all_reduce_stream):
-            _all_reduce(post_reduce_output, all_reduce_group, divide_factors)
+            dist.all_reduce(
+                post_reduce_output,
+                group=all_reduce_group,
+                op=ReduceOp.AVG if predivide_factor is None else ReduceOp.SUM,
+            )
     with torch.cuda.stream(view_out_stream):
         _div_if_needed(post_reduce_output, postdivide_factor)
         post_reduce_output = _to_dtype_if_needed(post_reduce_output, orig_dtype)
@@ -257,30 +262,27 @@ def _get_all_gather_input_metadatas(
     )
 
 
-def _reduce_scatter(
-    output: torch.Tensor,
-    input: torch.Tensor,
-    group: dist.ProcessGroup,
-    divide_factors: Union[Tuple[None, None], Tuple[float, float]],
-) -> None:
-    if divide_factors[0]:
-        dist.reduce_scatter_tensor(output, input, group=group)
-    else:
-        # Using NCCL's reduce-scatter to do the division by world size saves
-        # extra memory read/write from a separate division kernel
-        dist.reduce_scatter_tensor(output, input, op=ReduceOp.AVG, group=group)
-
-
-def _all_reduce(
-    tensor: torch.Tensor,
-    group: dist.ProcessGroup,
-    divide_factors: Union[Tuple[None, None], Tuple[float, float]],
-) -> None:
-    if divide_factors[0]:
-        dist.all_reduce(tensor, group=group)
-    else:
-        # saves extra memory read/write from a separate division kernel
-        dist.all_reduce(tensor, op=ReduceOp.AVG, group=group)
+def _get_gradient_divide_factors(
+    reduce_scatter_group: dist.ProcessGroup,
+    all_reduce_group: Optional[dist.ProcessGroup],
+    reduce_dtype: torch.dtype,
+) -> Union[Tuple[None, None], Tuple[float, float]]:
+    # For fp32/bf16, we do not need to worry about overflow/underflow, so we
+    # use NCCL's built-in division to avoid separate div kernels
+    if reduce_dtype in (torch.float32, torch.bfloat16):
+        return None, None
+    data_parallel_size = reduce_scatter_group.size()
+    if all_reduce_group is not None:
+        data_parallel_size *= all_reduce_group.size()
+    # Since fp16 has smaller dynamic range than fp32/bf16, we want to avoid
+    # overflow/underflow. For N data parallel workers, each worker computes
+    # g_i, and they collectively reduce (g_1 + ... + g_N) / N. To avoid
+    # overflow/underflow, we divide by ~sqrt(N) before/after the reduction.
+    factor: int = 1
+    while data_parallel_size % factor == 0 and data_parallel_size / factor > factor:
+        factor *= 2
+    factor = float(factor)
+    return (factor, data_parallel_size / factor)
 
 
 def _div_if_needed(tensor: torch.Tensor, div_factor: Optional[float]) -> None:
