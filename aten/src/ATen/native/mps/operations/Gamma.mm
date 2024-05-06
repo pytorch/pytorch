@@ -391,8 +391,8 @@ kernel void polygamma(device {0} *input [[buffer(0)]],
 )METAL",
                               2);
 
-static id<MTLComputePipelineState> getCPLState(const std::string& t1, const std::string& t2, const std::string& fname) {
-  return lib.getPipelineStateForFunc(fname, {t1, t2});
+static id<MTLComputePipelineState> getCPLState(const Tensor& t1, const Tensor& t2, const std::string& fname) {
+  return lib.getPipelineStateForFunc(fname, {scalarToMetalTypeString(t1), scalarToMetalTypeString(t2)});
 }
 
 } // namespace mps
@@ -414,12 +414,8 @@ TORCH_IMPL_FUNC(lgamma_out_mps)(const Tensor& self, const Tensor& output_) {
 
   using namespace mps;
 
-  std::string input_type = scalarToMetalTypeString(self.scalar_type());
-  std::string output_type = scalarToMetalTypeString(output.scalar_type());
-
   @autoreleasepool {
-    id<MTLDevice> device = MPSDevice::getInstance()->device();
-    id<MTLComputePipelineState> cplState = getCPLState(input_type, output_type, "lgamma");
+    id<MTLComputePipelineState> cplState = getCPLState(self, output, "lgamma");
 
     MPSStream* mpsStream = getCurrentMPSStream();
     dispatch_sync(mpsStream->queue(), ^() {
@@ -458,12 +454,8 @@ TORCH_IMPL_FUNC(digamma_out_mps)(const Tensor& self, const Tensor& output_) {
 
   using namespace mps;
 
-  std::string input_type = scalarToMetalTypeString(self.scalar_type());
-  std::string output_type = scalarToMetalTypeString(output.scalar_type());
-
   @autoreleasepool {
-    id<MTLDevice> device = MPSDevice::getInstance()->device();
-    id<MTLComputePipelineState> cplState = getCPLState(input_type, output_type, "digamma");
+    id<MTLComputePipelineState> cplState = getCPLState(self, output, "digamma");
 
     MPSStream* mpsStream = getCurrentMPSStream();
     dispatch_sync(mpsStream->queue(), ^() {
@@ -503,8 +495,6 @@ TORCH_IMPL_FUNC(polygamma_out_mps)(const int64_t order, const Tensor& self, cons
 
   using namespace mps;
 
-  std::string input_type = scalarToMetalTypeString(self.scalar_type());
-  std::string output_type = scalarToMetalTypeString(output.scalar_type());
   std::string func_name;
 
   if (order == 0) {
@@ -516,9 +506,7 @@ TORCH_IMPL_FUNC(polygamma_out_mps)(const int64_t order, const Tensor& self, cons
   }
 
   @autoreleasepool {
-    id<MTLDevice> device = MPSDevice::getInstance()->device();
-
-    id<MTLComputePipelineState> cplState = getCPLState(input_type, output_type, func_name);
+    id<MTLComputePipelineState> cplState = getCPLState(self, output, func_name);
 
     MPSStream* mpsStream = getCurrentMPSStream();
     dispatch_sync(mpsStream->queue(), ^() {

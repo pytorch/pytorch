@@ -128,7 +128,7 @@ Tensor _weight_int4pack_mm_mps(const Tensor& A, const Tensor& B, int64_t qGroupS
       }
 #endif
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      const std::string kernel = fmt::format("int4pack_mm_{}_{}", qGroupSize, scalarToMetalTypeString(A.scalar_type()));
+      const std::string kernel = fmt::format("int4pack_mm_{}_{}", qGroupSize, scalarToMetalTypeString(A));
       id<MTLComputePipelineState> quantizedPSO = lib.getPipelineStateForFunc(kernel);
       [computeEncoder setComputePipelineState:quantizedPSO];
       mtl_setBuffer(computeEncoder, A, 0);

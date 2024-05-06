@@ -45,7 +45,6 @@ REGISTER_RENORM_OP(half);
 
 )RENORM_METAL");
 
-
 void renorm_out_mps(const Tensor& self, const Scalar& p, int64_t dim, const Scalar& maxnorm, const Tensor& out) {
   auto self_sizes = self.sizes();
   dim = c10::maybe_wrap_dim(dim, self_sizes.size());
@@ -62,7 +61,7 @@ void renorm_out_mps(const Tensor& self, const Scalar& p, int64_t dim, const Scal
   id<MTLBuffer> normBuffer = getMTLBufferStorage(norm);
   id<MTLBuffer> factorBuffer = getMTLBufferStorage(factor);
 
-  string key = "renorm_" + scalarToMetalTypeString(self.scalar_type());
+  string key = "renorm_" + scalarToMetalTypeString(self);
   MPSStream* mpsStream = getCurrentMPSStream();
   id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
   id<MTLComputePipelineState> renormPSO = lib.getPipelineStateForFunc(key);

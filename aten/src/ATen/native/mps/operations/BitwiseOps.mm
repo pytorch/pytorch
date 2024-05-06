@@ -118,11 +118,12 @@ static const std::string& getMetalType(const c10::Scalar& s) {
   return getMetalType(s.type());
 }
 
-static id<MTLComputePipelineState> getCPLState(const std::string& t1,
-                                               const std::string& t2,
-                                               const std::string& t3,
+template <typename ScalarOrTensor>
+static id<MTLComputePipelineState> getCPLState(const Tensor& t1,
+                                               const Tensor& t2,
+                                               const ScalarOrTensor& t3,
                                                const std::string& fname) {
-  return lib.getPipelineStateForFunc(fname, {t1, t2, t3});
+  return lib.getPipelineStateForFunc(fname, {getMetalType(t1), getMetalType(t2), getMetalType(t3)});
 }
 
 static void handle_tensor_tensor_binary_op(const Tensor& self,
@@ -131,8 +132,7 @@ static void handle_tensor_tensor_binary_op(const Tensor& self,
                                            const std::string& kernel_name) {
   using namespace at::mps;
   MPSStream* stream = getCurrentMPSStream();
-  id<MTLComputePipelineState> cplState =
-      getCPLState(getMetalType(output), getMetalType(self), getMetalType(other), kernel_name);
+  auto cplState = getCPLState(output, self, other, kernel_name);
   uint32_t length = output.numel();
   if (length == 0) {
     return;
@@ -162,8 +162,7 @@ static void handle_tensor_scalar_binary_op(const Tensor& self,
                                            const std::string& kernel_name) {
   using namespace at::mps;
   MPSStream* stream = getCurrentMPSStream();
-  id<MTLComputePipelineState> cplState =
-      getCPLState(getMetalType(output), getMetalType(self), getMetalType(other), kernel_name);
+  auto cplState = getCPLState(output, self, other, kernel_name);
   uint64_t sval = other.to<int64_t>();
   uint32_t length = output.numel();
   if (length == 0) {
@@ -260,8 +259,7 @@ static void _bitwise_not_out_mps(const Tensor& self, const Tensor& output_) {
   }
   using namespace at::mps;
   MPSStream* stream = getCurrentMPSStream();
-  id<MTLComputePipelineState> cplState =
-      getCPLState(getMetalType(output), getMetalType(self), getMetalType(self), "bitwise_not");
+  auto cplState = getCPLState(output, self, self, "bitwise_not");
   dispatch_sync(stream->queue(), ^() {
     getMPSProfiler().beginProfileKernel(cplState, "bitwise_not", {self});
 

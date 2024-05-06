@@ -269,7 +269,7 @@ static void binary_mps_impl(TensorIteratorBase& iter, const std::string func_nam
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      const std::string kernel = func_name + "_" + scalarToMetalTypeString(input.scalar_type());
+      const std::string kernel = func_name + "_" + scalarToMetalTypeString(input);
       auto kernelDataOffsets = generateKernelDataOffsets(computeEncoder, iter);
 
       id<MTLComputePipelineState> binaryPSO = lib.getPipelineStateForFunc(kernel);

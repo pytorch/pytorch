@@ -10,10 +10,6 @@
 #include <ATen/ops/repeat_native.h>
 #include <fmt/format.h>
 
-#ifdef __OBJC__
-#include <MetalPerformanceShaders/MetalPerformanceShaders.h>
-#endif
-
 namespace at::native {
 
 Tensor permute_mps(const Tensor& self, IntArrayRef dims) {
@@ -110,7 +106,8 @@ kernel void repeat_interleave(constant {0}     * repeat_ptr                [[buf
     result_ptr[j] = tid;
   }}
 }}
-)METAL_REPEAT", 1);
+)METAL_REPEAT",
+                                   1);
 
 template <typename index_t>
 void computeRepeatIndices(const index_t* repeat_ptr,

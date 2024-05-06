@@ -72,6 +72,9 @@ static inline std::string getMPSTypeString(const Tensor& t, bool short_name = fa
   return getMPSTypeString(t.scalar_type(), short_name);
 }
 std::string scalarToMetalTypeString(const c10::ScalarType& scalar_type);
+static inline std::string scalarToMetalTypeString(const Tensor& t) {
+  return scalarToMetalTypeString(t.scalar_type());
+}
 NSArray<NSNumber*>* getTensorAxes(const Tensor& t);
 NSArray<NSNumber*>* getTensorAxes(const IntArrayRef& sizes, at::OptionalIntArrayRef dim);
 std::string getMPSShapeString(MPSShape* shape);

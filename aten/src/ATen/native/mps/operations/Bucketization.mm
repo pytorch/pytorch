@@ -218,8 +218,8 @@ static void searchsorted_mps_contiguous(Tensor& result,
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
 
-      const std::string kernel = "searchsorted_" + scalarToMetalTypeString(input.scalar_type()) + "_" +
-          scalarToMetalTypeString(result.scalar_type()) + (sorter.defined() ? "_sorter" : "");
+      const std::string kernel = "searchsorted_" + scalarToMetalTypeString(input) + "_" +
+          scalarToMetalTypeString(result) + (sorter.defined() ? "_sorter" : "");
       id<MTLComputePipelineState> bucketizationPSO = lib.getPipelineStateForFunc(kernel);
 
       // this function call is a no-op if MPS Profiler is not enabled
