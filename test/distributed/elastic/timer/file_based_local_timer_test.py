@@ -264,7 +264,9 @@ if not (IS_WINDOWS or IS_MACOS):
             )
 
         @mock.patch("os.kill")
-        @mock.patch("torch.distributed.elastic.timer.log_debug_info_for_expired_timers")
+        @mock.patch(
+            "torch.distributed.elastic.timer.file_based_local_timer.log_debug_info_for_expired_timers"
+        )
         def test_expired_timers(self, mock_debug_info, mock_os_kill):
             """
             tests that a single expired timer on a process should terminate
