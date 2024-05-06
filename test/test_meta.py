@@ -286,6 +286,14 @@ class TestMetaConverter(TestCase):
         m = MetaConverter()(y)
         self.assertMetadataMatches(m, y)
 
+    def test_inplace_set_storage(self):
+        x = torch.tensor([0, 1], dtype=torch.int64)
+        storage = x.untyped_storage()
+        ssize = storage.size()
+        meta = torch.empty((), dtype=torch.int64)
+        meta.set_(storage, 0, (), ())
+        self.assertEqual(storage.size(), ssize)
+
     @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
     def test_weakref(self):
         x = torch.randn(4, 4, 4)

@@ -52,6 +52,10 @@ class DummyModule:
     def current_device():
         return 0
 
+    @staticmethod
+    def is_initialized():
+        return True
+
 
 @unittest.skipIf(IS_ARM64, "Does not work on arm")
 @torch.testing._internal.common_utils.markDynamoStrictTest
@@ -96,6 +100,9 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             self.assertFalse(self.module.custom_add_called())
             # create a tensor using our custom device object
             device = self.module.custom_device()
+            # register foo module, torch.foo. This is for lazy
+            # init check.
+            torch._register_device_module("foo", DummyModule)
             x = torch.empty(4, 4, device=device)
             y = torch.empty(4, 4, device=device)
             # Check that our device is correct.
@@ -113,6 +120,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             self.assertTrue(z.device == device)
             self.assertEqual(z, z_cpu)
             z2 = z_cpu + z_cpu
+            del torch.foo
 
         # check whether the error can be reported correctly
         def test_before_common_registration():
@@ -132,6 +140,8 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             self.assertFalse(hasattr(torch.UntypedStorage, "is_foo"))
             self.assertFalse(hasattr(torch.UntypedStorage, "foo"))
             self.assertFalse(hasattr(torch.nn.Module, "foo"))
+            self.assertFalse(hasattr(torch.nn.utils.rnn.PackedSequence, "is_foo"))
+            self.assertFalse(hasattr(torch.nn.utils.rnn.PackedSequence, "foo"))
 
         def test_after_common_registration():
             # check attributes after registered
@@ -142,6 +152,8 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             self.assertTrue(hasattr(torch.UntypedStorage, "is_foo"))
             self.assertTrue(hasattr(torch.UntypedStorage, "foo"))
             self.assertTrue(hasattr(torch.nn.Module, "foo"))
+            self.assertTrue(hasattr(torch.nn.utils.rnn.PackedSequence, "is_foo"))
+            self.assertTrue(hasattr(torch.nn.utils.rnn.PackedSequence, "foo"))
 
         def test_common_registration():
             # first rename custom backend
@@ -265,6 +277,15 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             z = z.foo(0)
             self.assertFalse(self.module.custom_add_called())
             self.assertTrue(z.is_foo)
+
+        def test_open_device_packed_sequence():
+            device = self.module.custom_device()
+            a = torch.rand(5, 3)
+            b = torch.tensor([1, 1, 1, 1, 1])
+            input = torch.nn.utils.rnn.PackedSequence(a, b)
+            self.assertFalse(input.is_foo)
+            input_foo = input.foo()
+            self.assertTrue(input_foo.is_foo)
 
         def test_open_device_storage():
             # check whether the attributes and methods for storage of the corresponding custom backend are generated correctly
@@ -556,6 +577,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         test_open_device_dispatchstub()
         test_open_device_random()
         test_open_device_tensor()
+        test_open_device_packed_sequence()
         test_open_device_storage()
         test_open_device_storage_pin_memory()
         test_open_device_serialization()

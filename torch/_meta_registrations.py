@@ -2273,6 +2273,8 @@ if torch._C._has_mkldnn:
         )
         out = input_tensor.new_empty(shape_out)
         out_memory_format = torch.channels_last
+        if input_tensor.dim() == 5:
+            out_memory_format = torch.channels_last_3d
         out = out.to(memory_format=out_memory_format)  # type: ignore[call-overload]
         return out
 

@@ -512,6 +512,12 @@ def forward(self, x_1):
         s0 = shape_env.create_unbacked_symint()
         self.assertRaises(GuardOnDataDependentSymNode, lambda: bool(s0 == 0))
 
+    def test_data_dependent_guard_propagate_real_tensors(self):
+        shape_env = ShapeEnv()
+        s0 = shape_env.create_unbacked_symint()
+        shape_env.set_unbacked_var_to_val(s0.node.expr, 0)
+        self.assertEqual(bool(s0 == 0), True)
+
     def test_expect_true_basic(self):
         shape_env = ShapeEnv()
         i0 = shape_env.create_unbacked_symint()
@@ -1054,6 +1060,13 @@ class TestSymNumberMagicMethods(TestCase):
 
         hash(n)
         hash(m)
+
+    def test_symint_deepcopy(self):
+        shape_env = ShapeEnv()
+
+        symnodes = (torch._C._get_nested_int(1, 1),)
+        deepcopied_symnodes = copy.deepcopy(symnodes)
+        self.assertEqual(symnodes, deepcopied_symnodes)
 
     def test_non_symbolic_symnode(self):
         j1 = torch._C._get_nested_int(1, 1)
