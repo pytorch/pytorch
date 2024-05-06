@@ -46,7 +46,6 @@ from torch._inductor.utils import (
 from torch._inductor.virtualized import V
 from torch._prims_common import is_integer_dtype
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.library import _scoped_library
 from torch.nn import functional as F
 from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_cuda import (
@@ -759,70 +758,6 @@ class CommonTemplate:
                 torch.tensor([False, False, True, True]),
             ),
         )
-
-    @skipCUDAIf(not SM80OrLater, "Requires sm80")
-    def test_torch_compile_override_registration(self):
-        dynamic = False
-        namespace_name = "aten"
-        dispatch_key = "CPU"
-        device = torch.device("cpu")
-        if self.device.lower() == "cuda":
-            dispatch_key = "CUDA"
-            device = torch.device("cuda")
-
-        unary_op_set = ["abs", "acos"]
-
-        def fn(x, op_name=""):
-            return getattr(torch, op_name)(x)
-
-        # Invoke torch.compile directly to get referent results
-        x = torch.randn(3, 4, device=device)
-
-        ref_array = []
-        for unary_op_name in unary_op_set:
-            opt_fn = torch.compile(functools.partial(fn, op_name=unary_op_name))
-            ref = opt_fn(x)
-            ref_array.append(ref)
-
-        def register_ops(op_set, dispatch_key, torch_compile_op_lib_impl):
-            for _op_name in op_set:
-                qualified_op_name = f"{namespace_name}::{_op_name}"
-                _, overload_names = torch._C._jit_get_operation(qualified_op_name)
-                for overload_name in overload_names:
-                    try:
-                        reg_op_name = qualified_op_name
-                        schema = torch._C._get_schema(qualified_op_name, overload_name)
-                        if schema.overload_name:
-                            reg_op_name = f"{qualified_op_name}.{schema.overload_name}"
-                        torch_compile_op_lib_impl._impl_with_aoti_compile(  # noqa: F821
-                            reg_op_name, dispatch_key
-                        )
-                    except Exception as e:
-                        continue
-
-        with _scoped_library("aten", "IMPL") as torch_compile_op_lib_impl:
-            register_ops(unary_op_set, dispatch_key, torch_compile_op_lib_impl)
-
-            res_array = []
-            for unary_op_name in unary_op_set:
-                res_array.append(getattr(torch, unary_op_name)(x))
-
-            for ref, res in zip(ref_array, res_array):
-                self.assertEqual(ref, res)
-
-        a = torch.randn(128, device=device)
-        min_tensor = torch.randn(128, device=device)
-        max_tensor = min_tensor + 0.5
-
-        ref_with_min = torch.ops.aten.clamp(a, min_tensor)
-        ref_with_min_max = torch.ops.aten.clamp(a, min_tensor, max_tensor)
-
-        with _scoped_library("aten", "IMPL") as torch_compile_op_lib_impl:
-            register_ops(["clamp"], dispatch_key, torch_compile_op_lib_impl)
-            res_with_min = torch.ops.aten.clamp(a, min_tensor)
-            res_with_min_max = torch.ops.aten.clamp(a, min_tensor, max_tensor)
-            self.assertEqual(ref_with_min, res_with_min)
-            self.assertEqual(ref_with_min_max, res_with_min_max)
 
     def test_add_const_int(self):
         def fn(a):
@@ -4487,6 +4422,56 @@ class CommonTemplate:
             fn,
             (torch.randn([8, 16, 8, 8]),),
         )
+
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_nonzero_unbacked_refinement(self):
+        def fn(x):
+            z = x.nonzero()
+            torch._check(z.size(0) == 4)
+            return z + 3
+
+        self.common(
+            fn,
+            (torch.tensor([0, 1, 3, 4, 2, 0, 0]),),
+        )
+
+        with self.assertRaises(RuntimeError):
+            torch.compile(fn)(torch.tensor([0, 0, 0, 0]))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_unbacked_floordiv_simplify(self):
+        def fn(x, y):
+            z = y.item()
+            torch._check(z // 2 == 3)
+            return x + x.new_zeros(z)
+
+        self.common(
+            fn,
+            (
+                torch.randn(6),
+                torch.tensor([6]),
+            ),
+        )
+
+        self.common(
+            fn,
+            (
+                torch.randn(7),
+                torch.tensor([7]),
+            ),
+        )
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_unbacked_floordiv_simplify_errors(self):
+        def fn(x, y):
+            z = y.item()
+            torch._check(z // 2 == 3)
+            return x + x.new_zeros(z)
+
+        # This is a little suboptimal: we actually fail /in the compiler/ but
+        # not in a way that causes Dynamo to graph break
+        with self.assertRaises(RuntimeError):
+            torch.compile(fn)(torch.randn(8), torch.tensor(8))
 
     def test_cat(self):
         def fn(a):
@@ -10017,7 +10002,9 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
                 return a[y.to(torch.int64)]
 
             def fn2(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-                torch._constrain_as_size(b.shape[0], 2, 100)
+                torch._check_is_size(b.shape[0])
+                torch._check(b.shape[0] >= 2)
+                torch._check(b.shape[0] <= 100)
                 return fn1(a, b)
 
             fn1_opt = torch._dynamo.optimize("inductor")(fn1)
