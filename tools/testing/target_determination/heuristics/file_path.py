@@ -84,8 +84,9 @@ class FilePath(HeuristicInterface):
         test_ratings: Dict[str, float] = defaultdict(float)
 
         for test in tests:
+            test_keywords = get_keywords(test)
             for keyword, frequency in keyword_frequency.items():
-                if custom_matchers.get(keyword, lambda x: keyword in x)(str(test)):  # type: ignore[no-untyped-call]
+                if keyword in test_keywords or custom_matchers.get(keyword, lambda x: keyword in x)(str(test)):  # type: ignore[no-untyped-call]
                     test_ratings[test] += frequency
         test_ratings = {TestRun(k): v for (k, v) in test_ratings.items() if k in tests}
         return TestPrioritizations(tests, normalize_ratings(test_ratings, 0.25))
