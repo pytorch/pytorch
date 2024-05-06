@@ -1494,7 +1494,6 @@ class CppKernel(Kernel):
         self.local_reduction_stores = IndentedBuffer()
         self.is_reduction = False
         self.reduction_weight_recps = IndentedBuffer()
-        self.parallel_reduction_weight_recps = IndentedBuffer()
         self.reduction_cse = CSE(self.newvar_prefix, self.suffix, name_prefix="tmp_acc")
         self.preloads = IndentedBuffer()
         self.poststores = IndentedBuffer()
@@ -1552,7 +1551,7 @@ class CppKernel(Kernel):
             and hasattr(self, "weight_recp_vec_range")
             and "vec" in f"{acc_type}"
         ):
-            self.parallel_reduction_weight_recps.writeline(
+            self.local_reduction_init.writeline(
                 welford_weight_reciprocal_vec_fn(dtype, num_threads)
             )
 
@@ -1872,7 +1871,6 @@ class CppKernel(Kernel):
                         if buffer == "local":
                             return (
                                 kernel.local_reduction_init,
-                                kernel.parallel_reduction_weight_recps,
                                 kernel.local_reduction_stores,
                             )
                         elif buffer == "suffix":
@@ -1901,15 +1899,12 @@ class CppKernel(Kernel):
                         if loop_nest.is_reduction_only() and loop.parallel:
                             (
                                 local_reduction_init,
-                                parallel_reduction_weight_recps,
                                 local_reduction_stores,
                             ) = get_reduction_code_buffer(loops, "local")
                             worksharing.parallel(threads)
                             if local_reduction_init:
                                 assert local_reduction_stores
                                 code.splice(local_reduction_init)
-                            if parallel_reduction_weight_recps:
-                                code.splice(parallel_reduction_weight_recps)
 
                     for loop in loops:
                         gen_loop(loop)
