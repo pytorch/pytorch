@@ -181,7 +181,7 @@ vTensor pack_biases_quantized_weights(
   if (bias_arg) {
     const Tensor bias = bias_arg->contiguous();
     const IntArrayRef b_sizes = bias.sizes();
-    const float* const src_bias_ptr = bias.data_ptr<float>();
+    const float* const src_bias_ptr = bias.const_data_ptr<float>();
 
     /* Source */
     int64_t src_kb_sz = 0;

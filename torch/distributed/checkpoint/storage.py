@@ -3,10 +3,15 @@ import os
 from dataclasses import dataclass
 from typing import Any, List, Union
 
-from torch.futures import Future
+from torch.distributed.checkpoint.metadata import Metadata, MetadataIndex
+from torch.distributed.checkpoint.planner import (
+    LoadPlan,
+    LoadPlanner,
+    SavePlan,
+    SavePlanner,
+)
 
-from .metadata import Metadata, MetadataIndex
-from .planner import LoadPlan, LoadPlanner, SavePlan, SavePlanner
+from torch.futures import Future
 
 __all__ = ["WriteResult", "StorageWriter", "StorageReader"]
 
