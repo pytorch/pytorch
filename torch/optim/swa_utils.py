@@ -21,6 +21,7 @@ __all__ = [
     "get_swa_avg_fn",
 ]
 
+from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
 PARAM_LIST = Union[Tuple[Tensor, ...], List[Tensor]]
 
@@ -227,8 +228,8 @@ class AveragedModel(Module):
             if self.use_buffers
             else model.parameters()
         )
-        self_param_detached = []
-        model_param_detached = []
+        self_param_detached: List[Optional[Tensor]] = []
+        model_param_detached: List[Optional[Tensor]] = []
         for p_averaged, p_model in zip(self_param, model_param):
             p_model_ = p_model.detach().to(p_averaged.device)
             self_param_detached.append(p_averaged.detach())
@@ -238,7 +239,7 @@ class AveragedModel(Module):
 
         if self.n_averaged > 0:
             if self.multi_avg_fn is not None or self.avg_fn is None:
-                grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
+                grouped_tensors = _group_tensors_by_device_and_dtype(
                     [self_param_detached, model_param_detached]
                 )
                 for (device, _), (
@@ -247,7 +248,7 @@ class AveragedModel(Module):
                 ) in grouped_tensors.items():
                     if self.multi_avg_fn:
                         self.multi_avg_fn(
-                            self_params, model_params, self.n_averaged.to(device)
+                            self_params, model_params, self.n_averaged.to(device)  # type: ignore[arg-type]
                         )
                     elif (
                         device is not None
@@ -260,10 +261,10 @@ class AveragedModel(Module):
                     else:
                         avg_fn = get_swa_avg_fn()
                         n_averaged = self.n_averaged.to(device)
-                        for p_averaged, p_model in zip(self_params, model_params):
+                        for p_averaged, p_model in zip(self_params, model_params):  # type: ignore[assignment]
                             p_averaged.copy_(avg_fn(p_averaged, p_model, n_averaged))
             else:
-                for p_averaged, p_model in zip(
+                for p_averaged, p_model in zip(  # type: ignore[assignment]
                     self_param_detached, model_param_detached
                 ):
                     n_averaged = self.n_averaged.to(p_averaged.device)
