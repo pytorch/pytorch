@@ -11,7 +11,7 @@ from torch.testing._internal.opinfo.core import (
 )
 from torch.testing._internal.common_dtype import all_types_and, custom_types
 from torch.testing._internal.opinfo.core import DecorateInfo
-from torch.nn.attention._templated_attention import _templated_attention
+from torch.nn.attention._flex_attention import _flex_attention
 
 def sample_inputs_map(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = functools.partial(
@@ -108,7 +108,7 @@ def simple_auto_functionalize(x, z):
     return torch.ops.testlib.mutating_custom_op(x, z)
 
 
-def sample_inputs_templated_attention(opinfo, device, dtype, requires_grad, **kwargs):
+def sample_inputs_flex_attention(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = functools.partial(
         make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
     )
@@ -219,10 +219,10 @@ hop_db = [
         supports_autograd=False,
     ),
     OpInfo(
-        name="templated_attention",
+        name="flex_attention",
         variant_test_name="simple",
-        op=_templated_attention,
-        sample_inputs_func=sample_inputs_templated_attention,
+        op=_flex_attention,
+        sample_inputs_func=sample_inputs_flex_attention,
         dtypes=custom_types(torch.float16, torch.float32),
         supports_out=False,
         check_batched_grad=False,
@@ -237,10 +237,10 @@ hop_db = [
         )
     ),
     OpInfo(
-        name="templated_attention_backward",
+        name="flex_attention_backward",
         variant_test_name="simple",
-        op=_templated_attention,
-        sample_inputs_func=sample_inputs_templated_attention,
+        op=_flex_attention,
+        sample_inputs_func=sample_inputs_flex_attention,
         dtypes=custom_types(torch.float16, torch.float32),
         supports_out=False,
         check_batched_grad=False,
