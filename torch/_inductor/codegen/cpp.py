@@ -3144,7 +3144,7 @@ class CppKernelDispatcher(CppKernel):
                 return
 
             if self.tiling_ranges[1] == 0:
-                self.loops[0].steps = 1
+                self.loops[1].steps = 1
                 self.vec_condition.writeline(
                     f"if ({self.itervars[0]} < {cexpr_index(self.tiling_ranges[0])} && "
                     + f"{self.itervars[1]} >= {cexpr_index(self.tiling_ranges[1])})"
@@ -3243,7 +3243,7 @@ class CppKernelDispatcher(CppKernel):
         if self.scalar_kernel:
             if not self.split or self.tiling_ranges[0] == 0:
                 self.gen_kernel(self.scalar_kernel, code)
-            elif self.split and self.tiling_ranges[0] == self.sizes[0] and len(self.sizes) == 1:
+            elif self.split and self.tiling_ranges[0] == self.sizes[0]:
                 return
             else:
                 code.splice(self.scalar_condition)
@@ -3272,7 +3272,7 @@ class CppKernelDispatcher(CppKernel):
                 self.gen_kernel(self.vec_kernel, code)
 
     def codegen_tile2d_kernel(self, code):
-        if self.tile2d_kernel:
+        if self.tile2d_kernel and self.tiling_ranges[0] != 0 and self.tiling_ranges[1] != 0:
             code.splice(self.tile2d_condition)
             with contextlib.ExitStack() as stack:
                 stack.enter_context(code.indent())
