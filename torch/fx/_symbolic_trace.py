@@ -403,7 +403,7 @@ class Tracer(TracerBase):
             # witness its construction. Intern this as a constant attribute
 
             # TODO: binary search
-            qualname = self.get_fresh_qualname("_{a.__class__.__name__}_constant_")
+            qualname = self.get_fresh_qualname(f"_{a.__class__.__name__}_constant_")
             assert isinstance(qualname, str)
             setattr(self.root, qualname, a)
 

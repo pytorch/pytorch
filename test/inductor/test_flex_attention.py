@@ -378,6 +378,7 @@ class TestTemplatedSDPA(InductorTestCase):
         tolerance = Tolerances(atol=2e-1, rtol=2e-1)
         torch.testing.assert_close(out, out2, atol=tolerance.atol, rtol=tolerance.rtol)
 
+    @supported_platform
     def test_multiple_score_mod_calls2(self):
         query = torch.randn((1, 8, 1024, 64), dtype=torch.float32, device="cuda")
         keys = [
