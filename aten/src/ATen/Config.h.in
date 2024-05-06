@@ -6,6 +6,7 @@
 //
 // DO NOT put the macros for CUDA libraries in this file; they belong in cuda/CUDAConfig.h
 
+#define AT_ONEDNN_GRAPH_ENABLED() @BUILD_ONEDNN_GRAPH@
 #define AT_MKLDNN_ENABLED() @AT_MKLDNN_ENABLED@
 #define AT_MKLDNN_ACL_ENABLED() @AT_MKLDNN_ACL_ENABLED@
 #define AT_MKL_ENABLED() @AT_MKL_ENABLED@

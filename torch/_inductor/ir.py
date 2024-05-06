@@ -68,6 +68,11 @@ from .dependencies import (
     extract_read_writes,
     var_builder,
 )
+
+from .utils import is_onednn_graph_supported
+
+if is_onednn_graph_supported():
+    from .fx_passes.onednn_graph import OnednnGraphPartitionModule
 from .ops_handler import OpCounterCSE
 from .runtime.hints import ReductionHint
 from .runtime.runtime_utils import do_bench
@@ -3933,9 +3938,16 @@ class ExternKernel(InputsKernel):
     ordered_kwargs_for_cpp_kernel: Iterable[str] = dataclasses.field(
         default_factory=list
     )
-    op_overload: Optional[
-        Union[torch._ops.OpOverload, torch._ops.HigherOrderOperator]
-    ] = None
+    allowed_classes = (
+        (
+            torch._ops.OpOverload,
+            torch._ops.HigherOrderOperator,
+            OnednnGraphPartitionModule,
+        )
+        if is_onednn_graph_supported() and config.onednn_graph
+        else (torch._ops.OpOverload, torch._ops.HigherOrderOperator)
+    )
+    op_overload: Optional[Union[allowed_classes]] = None
     arg_properties: Optional[List[Dict[str, Any]]] = None
     kwarg_properties: Optional[Dict[str, Dict[str, Any]]] = None
     unbacked_bindings: Dict[sympy.Symbol, pytree.KeyPath] = dataclasses.field(
@@ -5157,13 +5169,19 @@ class FallbackKernel(ExternKernelAlloc):
         self.outputs: Sequence[Any] = []
         self.use_runtime_dispatch = False
         self.unbacked_bindings = unbacked_bindings
-
-        assert isinstance(
-            kernel,
+        allowed_classes = (
             (
                 torch._ops.OpOverload,
                 torch._ops.HigherOrderOperator,
-            ),
+                OnednnGraphPartitionModule,
+            )
+            if is_onednn_graph_supported() and config.onednn_graph
+            else (torch._ops.OpOverload, torch._ops.HigherOrderOperator)
+        )
+
+        assert isinstance(
+            kernel,
+            allowed_classes,
         ), f"Fails to create FallbackKernel for {kernel}: {type(kernel)} not supported"
         self.op_overload = kernel
 
@@ -5175,8 +5193,17 @@ class FallbackKernel(ExternKernelAlloc):
         self.alias_names: List[str] = []
         # args that are mutated AND returned from the op
         self.mutation_names: List[str] = []
+        allowed_classes = (
+            (
+                torch._ops.OpOverload,
+                torch._ops.HigherOrderOperator,
+                OnednnGraphPartitionModule,
+            )
+            if is_onednn_graph_supported() and config.onednn_graph
+            else (torch._ops.OpOverload, torch._ops.HigherOrderOperator)
+        )
 
-        if isinstance(self.op_overload, torch._ops.HigherOrderOperator):
+        if isinstance(self.op_overload, allowed_classes):
             # We assume here that HOPs with FallbackKernel are functional.
             # This may not always be true! HOPs must individually opt-in to
             # FallbackKernel, so please check this if you opt-in.
@@ -5416,7 +5443,13 @@ class FallbackKernel(ExternKernelAlloc):
         return None
 
     def has_side_effects(self):
-        if isinstance(self.op_overload, torch._ops.HigherOrderOperator):
+        allowed_classes = (
+            (torch._ops.HigherOrderOperator, OnednnGraphPartitionModule)
+            if is_onednn_graph_supported() and config.onednn_graph
+            else (torch._ops.HigherOrderOperator)
+        )
+
+        if isinstance(self.op_overload, allowed_classes):
             return False
         return get_schema_info(self.op_overload).is_mutable()
 
@@ -5565,6 +5598,12 @@ class FallbackKernel(ExternKernelAlloc):
                 self.python_kernel_name = str(kernel)
         elif isinstance(kernel, torch._ops.HigherOrderOperator):
             self.python_kernel_name = f"torch.ops.higher_order.{kernel.__name__}"
+        elif (
+            is_onednn_graph_supported()
+            and config.onednn_graph
+            and isinstance(kernel, OnednnGraphPartitionModule)
+        ):
+            self.python_kernel_name = kernel.__name__
         else:
             # For non-aten OpOverload, i.e. custom ops
             self.python_kernel_name = f"{kernel.__module__.replace('._ops.', '.ops.')}.{kernel.__name__}"  # type: ignore[union-attr]
@@ -5597,7 +5636,12 @@ class FallbackKernel(ExternKernelAlloc):
         else:
             self.codegen_comment(wrapper)
             args = [*self.codegen_args(), *self.codegen_kwargs()]
-            V.graph.wrapper_code.generate_fallback_kernel(self, args)
+            if getattr(self.op_overload, "is_opaque", False):
+                V.graph.wrapper_code.generate_opaque_kernel_alloc(
+                    self.get_name(), kernel.name(), args
+                )
+            else:
+                V.graph.wrapper_code.generate_fallback_kernel(self, args)
             if isinstance(self.layout, Layout):
                 self.codegen_size_asserts(wrapper)
 

@@ -40,6 +40,10 @@ from .._dynamo.utils import import_submodule
 
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
 from .decomposition import decompositions, get_decompositions
+from .utils import is_onednn_graph_supported
+
+if is_onednn_graph_supported():
+    from .fx_passes.onednn_graph import OnednnGraphPartitionModule
 from .ir import (
     ExpandView,
     IndexingConstant,
@@ -1543,10 +1547,23 @@ def make_fallback(op, layout_constraint=None, warn=True):
         for ol in op.overloads():
             op_overload = getattr(op, ol)
             register_fallback(op_overload)
-    elif isinstance(op, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)):
-        register_fallback(op)
     else:
-        raise RuntimeError(f"Unsupported fallback {op} with type {type(op)}")
+        allowed_classes = (
+            (
+                torch._ops.OpOverload,
+                torch._ops.HigherOrderOperator,
+                OnednnGraphPartitionModule,
+            )
+            if is_onednn_graph_supported() and config.onednn_graph
+            else (torch._ops.OpOverload, torch._ops.HigherOrderOperator)
+        )
+        if isinstance(
+            op,
+            allowed_classes,
+        ):
+            register_fallback(op)
+        else:
+            raise RuntimeError(f"Unsupported fallback {op} with type {type(op)}")
 
 
 def philox_rand_offset(shape):

@@ -7,7 +7,7 @@ import torch
 
 from torch.fx.experimental.symbolic_shapes import has_free_symbols
 
-from .. import ir
+from .. import config, ir
 
 from ..lowering import lowerings as L
 from ..pattern_matcher import (
@@ -18,10 +18,12 @@ from ..pattern_matcher import (
     KeywordArg,
     MULTIPLE,
 )
+from ..utils import is_onednn_graph_supported
 from ..virtualized import ops
 from .freezing_patterns import register_freezing_graph_pattern
 from .post_grad import register_lowering_pattern
 from .quantization import (
+    _register_bert_large_mha_int8_pass,
     _register_quantization_lowerings,
     _register_quantization_weight_pack_pass,
     _register_woq_lowerings,
@@ -1222,6 +1224,11 @@ if torch._C._has_mkldnn:
             _register_binary_fusion()
             _register_quantization_lowerings()
             _register_woq_lowerings()
+
+    @functools.lru_cache(None)
+    def _int8_mha_fusions_init():
+        if config.onednn_graph and is_onednn_graph_supported():
+            _register_bert_large_mha_int8_pass()
 
     @functools.lru_cache(None)
     def _mkldnn_weight_pack_init():

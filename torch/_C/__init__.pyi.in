@@ -1276,6 +1276,7 @@ _has_cuda: _bool
 _has_magma: _bool
 _has_xpu: _bool
 _has_mkldnn: _bool
+_has_onednn_graph: _bool
 _has_cudnn: _bool
 has_spectral: _bool
 _GLIBCXX_USE_CXX11_ABI: _bool

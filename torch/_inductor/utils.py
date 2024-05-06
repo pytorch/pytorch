@@ -60,6 +60,24 @@ VarRanges = Dict[sympy.Expr, sympy.Expr]
 ALIGNMENT = 16
 
 
+# Some fusions would only work on Xeon SP processors gen 2 & above
+@functools.lru_cache(None)
+def is_avx512_vnni_supported() -> bool:
+    return torch.cpu._does_cpu_support_vnni()
+
+
+# Some BF16 fusions would only work on Xeon SP processors gen 3 (Cooper Lake) & above
+@functools.lru_cache(None)
+def is_avx512_bf16_supported() -> bool:
+    return torch.cpu._does_cpu_support_avx512bf16()
+
+
+# oneDNN Graph is supported
+@functools.lru_cache(None)
+def is_onednn_graph_supported() -> bool:
+    return torch._C._has_onednn_graph and is_avx512_vnni_supported()
+
+
 def do_bench_using_profiling(fn: Callable[[], Any], warmup=25, rep=100) -> float:
     """
     Returns benchmark results by examining torch profiler events.

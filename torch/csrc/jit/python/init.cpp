@@ -11,6 +11,7 @@
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
 #if (!defined(FBCODE_CAFFE2) && defined(BUILD_ONEDNN_GRAPH))
+#include <ideep/python/binding.hpp>
 #include <torch/csrc/jit/codegen/onednn/interface.h>
 #endif
 #include <c10/core/SymNodeImpl.h>
@@ -2238,6 +2239,9 @@ void initJITBindings(PyObject* module) {
   initStaticModuleBindings(module);
   initTensorExprBindings(module);
   // initNvFuserPythonBindings(module);
+#if (!defined(FBCODE_CAFFE2) && defined(BUILD_ONEDNN_GRAPH))
+  ideep::initOnednnGraphPythonBindings(module);
+#endif
 
   setPrintHandler([](const std::string& str) {
     py::gil_scoped_acquire acquire;

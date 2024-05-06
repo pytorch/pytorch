@@ -49,6 +49,10 @@ from .exc import (
     MissingOperatorWithDecomp,
     MissingOperatorWithoutDecomp,
 )
+from .utils import is_onednn_graph_supported
+
+if is_onednn_graph_supported():
+    from .fx_passes.onednn_graph import OnednnGraphPartitionModule
 from .ir import (
     Constant,
     FixedLayout,
@@ -385,6 +389,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.user_visible_outputs = (
             user_visible_outputs if user_visible_outputs is not None else {}
         )
+        self.opaque_ops: Dict[str, Callable[..., Any]] = {}
         self.cache_key: str = ""  # This is the cache key for the compiled artifact
         self.cache_path: str = ""  # This is the path in the filesystem where the compiled artifact is stored
         self.cache_linemap: List[
@@ -655,6 +660,8 @@ class GraphLowering(torch.fx.Interpreter):
 
     def warn_fallback(self, name):
         if name not in self._warned_fallback:
+            if getattr(name, "name", False):
+                name = name.name()
             self._warned_fallback.add(name)
             perf_hint_log.info("Using FallbackKernel: %s", name)
 
@@ -925,9 +932,14 @@ class GraphLowering(torch.fx.Interpreter):
             return layout_constraint, args, kwargs
 
         if target not in lowerings:
+            allowed_classes = (
+                (torch._ops.OpOverload, OnednnGraphPartitionModule)
+                if is_onednn_graph_supported() and config.onednn_graph
+                else (torch._ops.OpOverload)
+            )
             assert isinstance(
-                target, torch._ops.OpOverload
-            ), f"{target} is not an OpOverload"
+                target, allowed_classes
+            ), f"{target} is not an OpOverload or a OnednnGraphPartitionModule"
             base_name = target.name().split(".")[0]
             if base_name in FALLBACK_ALLOW_LIST:
                 make_fallback(target)
@@ -945,7 +957,9 @@ class GraphLowering(torch.fx.Interpreter):
                     error.operator_str(target, args, kwargs),
                 )
                 make_fallback(target, layout_constraint)
-
+                if getattr(target, "is_opaque", False):
+                    name = target.name()
+                    self.opaque_ops[name] = target
             elif get_decompositions([target]):
                 # There isn't a good way to dynamically patch this in
                 # since AOT Autograd already ran.  The error message tells
@@ -1649,6 +1663,8 @@ class GraphLowering(torch.fx.Interpreter):
 
         log_module_code(mod.__file__)
         log.debug("Output code written to: %s", mod.__file__)
+        for name, value in self.opaque_ops.items():
+            setattr(mod, name, value)
         output_code_log.debug("Output code: \n%s", code)
         trace_structured(
             "inductor_output_code",
