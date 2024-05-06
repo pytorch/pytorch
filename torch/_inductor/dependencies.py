@@ -108,9 +108,7 @@ class MemoryDep(Dep):
         )
         new_index = sympy_subs(sympy.expand(self.index), replacement)
 
-        out = MemoryDep(
-            self.name, new_index, list(var_ranges.keys()), list(var_ranges.values())
-        )
+        out = MemoryDep(self.name, new_index, tuple(var_ranges.keys()), tuple(var_ranges.values()))  # type: ignore[arg-type]
         return out
 
     @property

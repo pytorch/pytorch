@@ -1,7 +1,18 @@
 import functools
 import itertools
 import logging
-from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Union,
+)
 
 import sympy
 from sympy import Expr
@@ -456,8 +467,8 @@ class SizeVarAllocator:
 
         def stride_vars(
             index: Expr,
-            vars: List[sympy.Symbol],
-            support_vars: Optional[List[sympy.Symbol]] = None,
+            vars: Sequence[sympy.Symbol],
+            support_vars: Optional[Sequence[sympy.Symbol]] = None,
         ) -> List[Expr]:
             if not support_vars:
                 support_vars = vars
@@ -466,7 +477,10 @@ class SizeVarAllocator:
         return stride_vars
 
     def _stride_vars(
-        self, index: Expr, vars: List[sympy.Symbol], support_vars: List[sympy.Symbol]
+        self,
+        index: Expr,
+        vars: Sequence[sympy.Symbol],
+        support_vars: Sequence[sympy.Symbol],
     ) -> List[Expr]:
         """Convert an indexing expression back into strides
 
@@ -510,8 +524,8 @@ class SizeVarAllocator:
     def stride_hints(
         self,
         index: Expr,
-        vars: List[sympy.Symbol],
-        support_vars: Optional[List[sympy.Symbol]] = None,
+        vars: Sequence[sympy.Symbol],
+        support_vars: Optional[Sequence[sympy.Symbol]] = None,
     ) -> List[int]:
         for v in index.free_symbols:
             if symbol_is_type(v, SymT.INDIRECT):  # type: ignore[attr-defined]
