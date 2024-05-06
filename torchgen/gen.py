@@ -3,7 +3,6 @@ import functools
 import json
 import os
 import pathlib
-import shutil
 
 from collections import defaultdict, namedtuple, OrderedDict
 from dataclasses import dataclass, field
@@ -2401,43 +2400,35 @@ def gen_source_files(
             existing_c_shim_path = "torch/csrc/inductor/aoti_torch/generated"
             header_file_name = f"c_shim_{dispatch_key.lower()}.h"
             cpp_file_name = f"c_shim_{dispatch_key.lower()}.cpp"
-            aoti_fm.write(
-                header_file_name,
-                lambda: gen_aoti_c_shim(
-                    fallback_native_functions,
-                    dispatch_key,
-                    backend_indices,
-                    header=True,
-                    includes="",
-                ),
+            new_header = gen_aoti_c_shim(
+                fallback_native_functions,
+                dispatch_key,
+                backend_indices,
+                header=True,
+                includes="",
             )
-            aoti_fm.write(
-                cpp_file_name,
-                lambda: gen_aoti_c_shim(
-                    fallback_native_functions,
-                    dispatch_key,
-                    backend_indices,
-                    header=False,
-                    includes=headers_for_aoti() + "\n" + extra_headers,
-                ),
+            new_cpp = gen_aoti_c_shim(
+                fallback_native_functions,
+                dispatch_key,
+                backend_indices,
+                header=False,
+                includes=headers_for_aoti() + "\n" + extra_headers,
             )
+
             if update_aoti_c_shim:
-                shutil.copy2(
-                    os.path.join(aoti_fm.install_dir, header_file_name),
-                    os.path.join(existing_c_shim_path, header_file_name),
+                aoti_fm.write(
+                    header_file_name,
+                    lambda: new_header,
                 )
-                shutil.copy2(
-                    os.path.join(aoti_fm.install_dir, cpp_file_name),
-                    os.path.join(existing_c_shim_path, cpp_file_name),
+                aoti_fm.write(
+                    cpp_file_name,
+                    lambda: new_cpp,
                 )
             else:
                 with open(
                     os.path.join(existing_c_shim_path, header_file_name)
-                ) as old_file, open(
-                    os.path.join(aoti_fm.install_dir, header_file_name)
-                ) as new_file:
+                ) as old_file:
                     old_header = old_file.read()
-                    new_header = new_file.read()
                     assert (
                         old_header == new_header
                     ), """
@@ -2766,18 +2757,6 @@ def main() -> None:
         default="build/aten/src/ATen",
     )
     parser.add_argument(
-        "--aoti-install-dir",
-        "--aoti_install_dir",
-        help="output directory for AOTInductor shim",
-        default="build/aoti/generated",
-    )
-    parser.add_argument(
-        "--update-aoti-c-shim",
-        action="store_true",
-        help="Update AOTInductor C shim after changing torchgen/aoti/fallback_ops.py. "
-        "WARNING: Do not use this unless you are sure what you are doing!!!",
-    )
-    parser.add_argument(
         "--rocm",
         action="store_true",
         help="reinterpret CUDA as ROCm/HIP and adjust filepaths accordingly",
@@ -2841,6 +2820,12 @@ def main() -> None:
         default=["headers", "sources", "declarations_yaml"],
         help="Generate only a subset of files",
     )
+    parser.add_argument(
+        "--update-aoti-c-shim",
+        action="store_true",
+        help="Update AOTInductor C shim after changing torchgen/aoti/fallback_ops.py. "
+        "WARNING: Do not use this unless you are sure what you are doing!!!",
+    )
 
     options = parser.parse_args()
 
@@ -2897,15 +2882,15 @@ def main() -> None:
     pathlib.Path(core_install_dir).mkdir(parents=True, exist_ok=True)
     ops_install_dir = f"{options.install_dir}/ops"
     pathlib.Path(ops_install_dir).mkdir(parents=True, exist_ok=True)
-    aoti_install_dir = f"{options.aoti_install_dir}"
-    pathlib.Path(aoti_install_dir).mkdir(parents=True, exist_ok=True)
 
     core_fm = make_file_manager(options=options, install_dir=core_install_dir)
     cpu_fm = make_file_manager(options=options)
     cpu_vec_fm = make_file_manager(options=options)
     cuda_fm = make_file_manager(options=options)
     ops_fm = make_file_manager(options=options, install_dir=ops_install_dir)
-    aoti_fm = make_file_manager(options=options, install_dir=aoti_install_dir)
+    aoti_fm = make_file_manager(
+        options=options, install_dir="torch/csrc/inductor/aoti_torch/generated"
+    )
 
     # Only a limited set of dispatch keys get CPUFunctions.h headers generated
     # for them; this is the set
