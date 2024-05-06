@@ -399,7 +399,7 @@ static PyObject* THPVariable__mirror_autograd_meta_to(
   auto inner_autograd_meta = impl::get_autograd_meta(src_);
   if (inner_autograd_meta) {
     dst_.set_requires_grad(src_.requires_grad());
-    if (inner_autograd_meta->grad_fn_) {
+    if (dst_.requires_grad()) {
       auto new_grad_fn = std::shared_ptr<torch::autograd::Error>(
           new torch::autograd::Error(
               "Cannot backprop through mirrored meta, file a bug in PyTorch"),
@@ -724,29 +724,6 @@ THPVariable__functionalize_are_all_mutations_hidden_from_autograd(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPVariable__functionalize_was_inductor_storage_resized(
-    PyObject* self,
-    PyObject* args,
-    PyObject* kwargs) {
-  HANDLE_TH_ERRORS
-  static PythonArgParser parser(
-      {"_functionalize_was_inductor_storage_resized(Tensor t)"},
-      /*traceable=*/true);
-
-  ParsedArgs<1> parsed_args;
-  auto r = parser.parse(args, kwargs, parsed_args);
-  auto self_ = r.tensor(0);
-  TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(self_));
-  auto functional_impl =
-      at::functionalization::impl::unsafeGetFunctionalWrapper(self_);
-  if (functional_impl->was_inductor_storage_resized()) {
-    Py_RETURN_TRUE;
-  } else {
-    Py_RETURN_FALSE;
-  }
-  END_HANDLE_TH_ERRORS
-}
-
 static PyObject*
 THPVariable__functionalize_are_all_mutations_under_no_grad_or_inference_mode(
     PyObject* self,
@@ -844,11 +821,6 @@ static PyMethodDef torch_functions_manual[] = {
     {"_functionalize_are_all_mutations_hidden_from_autograd",
      castPyCFunctionWithKeywords(
          THPVariable__functionalize_are_all_mutations_hidden_from_autograd),
-     METH_VARARGS | METH_KEYWORDS | METH_STATIC,
-     nullptr},
-    {"_functionalize_was_inductor_storage_resized",
-     castPyCFunctionWithKeywords(
-         THPVariable__functionalize_was_inductor_storage_resized),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
     {"_functionalize_are_all_mutations_under_no_grad_or_inference_mode",

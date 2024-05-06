@@ -231,7 +231,13 @@ void FunctionalTensorWrapper::replace_(const Tensor& other, bool from_lazy_regen
     value_ = at::_to_copy(value_, c10::TensorOptions().dtype(dtype()).layout(layout()));
     TORCH_INTERNAL_ASSERT(!value_.key_set().has(c10::DispatchKey::Functionalize));
   }
-
+  // might not be until after the no_grad region is exited.
+  // Therefore, replace_() is not unconditionally safe to check the current no_grad state.
+  // If this is a lazy regeneration, then it is guaranteed that we have already
+  // done the mutation for the storage alias (when we originally performed the mutation),
+  // so no counter update may be needed.
+  // Example: if a mutation happens to a view under a no_grad,
+  // we won't call replace_() on the other alias until the alias is later used, which
   if (!from_lazy_regenerate) {
     mark_mutation();
     if (!at::GradMode::is_enabled() || InferenceMode::is_enabled()) {
@@ -268,45 +274,6 @@ void FunctionalTensorWrapper::set__impl(const FunctionalTensorWrapper* other) {
   auto strides_ = value_.sym_strides();
   auto storage_offset_ = value_.sym_storage_offset();
   set_sizes_and_strides(sizes_, strides_, storage_offset_);
-}
-
-void FunctionalTensorWrapper::storage_resize_(c10::SymInt new_size) {
-  auto curr_storage_size = value_.unsafeGetTensorImpl()->unsafe_storage().unsafeGetStorageImpl()->sym_nbytes();
-  // storage resizing is severely limited: we only support resizing either to zero, or from zero bytes.
-  TORCH_CHECK(new_size == 0 || curr_storage_size == 0, "new_size: ", new_size, ". curr_storage_size: ", curr_storage_size);
-  // For simplicity, only allow storage resizing on a base tensor
-  TORCH_CHECK(view_metas_.size() == 0, "view chain length: ", view_metas_.size());
-
-  // Handle the two cases separately
-  if (new_size == 0) {
-    // Resizing down
-    // Assumption (for now - will need to lift later in partial graph world)
-    // In full graph FSDP, we are guaranteed that the resize up and resize down happen in the same graph.
-    // Therefore, our "original" input to the graph should have already had a zero-size storage.
-    // We can just re-use the original tensor in this situation.
-    auto orig_value = functional_storage_impl()->original_base();
-    auto orig_value_bytes = orig_value.unsafeGetTensorImpl()->unsafe_storage().unsafeGetStorageImpl()->sym_nbytes();
-    TORCH_CHECK(orig_value_bytes == 0, "We only support the x.storage().resize_(0) case today when x is a graph input and it entered the graph with zero storage");
-
-    // Reset the base to be our original, zero-storage-size tensor.
-    // Then let vanilla functionalization view regeneration run.
-    // Why do we do this? Two reasons:
-    // (1) After the resize, we want our tensor to properly advertise as having zero storage
-    // (2) In theory we could do this by creating a fresh tensor. This will actually not do what we want though.
-    //     Why? In eager fsdp, a common pattern is that a param starts out with zero storage, gets resized and used in the forward,
-    //     and is saved for backward by autograd.
-    //     We need to carefully make sure that autograd continues to save the **original**, zero-sized param for backward during tracing,
-    //     because fsdp's backward hooks rely on resizing the original parameter again the backward back to the full size.
-    value_ = orig_value;
-    // Flush the update to the FunctionalStorageImpl, so outstanding aliases can regenerate themselves
-    // off of the zero-storage-size tensor.
-    commit_update();
-  } else {
-    // Nothing to do: we expect the next op to show up on this tensor to be a self.copy_(src),
-    // updating value_ to be the src tensor.
-    // We could in theory work harder to assert this invariant, although breaking this invariant
-    // will also cause problems in eager mode.
-  }
 }
 
 void FunctionalTensorWrapper::maybe_replace_storage(const Tensor& other) {
@@ -387,6 +354,9 @@ void FunctionalTensorWrapper::regenerate_from_base() {
   auto t = storage_impl->base();
 
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(t));
+  t = apply_view_metas(t);
+  TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(t));
+
   replace_(t, /*from_lazy_regenerate=*/true);
   generation_ = storage_impl->generation();
 }
@@ -679,10 +649,6 @@ void mark_mutation_hidden_from_autograd(const Tensor& functional_tensor) {
 bool are_all_mutations_hidden_from_autograd(const Tensor& functional_tensor) {
   TORCH_CHECK(isFunctionalTensor(functional_tensor));
   return unsafeGetFunctionalWrapper(functional_tensor)->are_all_mutations_hidden_from_autograd();
-  // // MEGA HACK to allow keeping resize_storage_bytes_ and no-grad foreach_copy_ in graph.
-  // // Relatively "safer" is to check if tensor storage is size 0 before returning true.
-  // // Best thing to do is to handle functionalization for those ops correctly.
-  // return true;
 }
 
 bool are_all_mutations_under_no_grad_or_inference_mode(const Tensor& functional_tensor) {

@@ -2661,18 +2661,6 @@ def nn_module_proxy(mod):
     return proxy
 
 
-
-class GmWrapper(torch.nn.Module):
-    def __init__(self, gm, spec):
-        super().__init__()
-        self.gm = gm
-        self.spec = spec
-
-    def forward(self, *args):
-        args: List[Any] = list(args)
-        return self.gm(*pytree.tree_unflatten(args, self.spec))
-
-
 class GmWrapper(torch.nn.Module):
     def __init__(self, gm, spec):
         super().__init__()

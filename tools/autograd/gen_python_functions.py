@@ -135,7 +135,6 @@ _SKIP_PYTHON_BINDINGS = [
     "_reshape_copy_out",
     "copy_sparse_to_sparse_",
     "copy_",
-    "_foreach_copy",
     "numpy_T",
     "matrix_H",
     "mT",
