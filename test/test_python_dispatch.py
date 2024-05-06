@@ -1058,18 +1058,22 @@ def forward(self, x_a_1, x_b_1, y_1):
 
     def test_wrapper_subclass_serializes(self) -> None:
         with tempfile.TemporaryFile() as f:
-            x = LoggingTensor(torch.randn(3))
+            # purposefully use int64 to test non-default dtype
+            x = LoggingTensor(torch.randperm(3))
             torch.save(x, f)
             f.seek(0)
             x_loaded = torch.load(f)
             self.assertTrue(type(x_loaded) is type(x))
+            self.assertEqual(x, x_loaded)
             self.assertEqual(x.elem, x_loaded.elem)
             self.assertFalse(x is x_loaded)
 
     def test_deepcopy_wrapper_subclass(self) -> None:
-        x = LoggingTensor(torch.randn(3))
+        # purposefully use int64 to test non-default dtype
+        x = LoggingTensor(torch.randperm(3))
         x_copy = deepcopy(x)
         self.assertTrue(type(x_copy) is type(x))
+        self.assertEqual(x, x_copy)
         self.assertEqual(x.elem, x_copy.elem)
         self.assertFalse(x is x_copy)
 
