@@ -2,7 +2,10 @@ name: Check branch name
 
 on:
   schedule:
-    - cron: '*/1 * * * *'
+    - cron: '*/2 * * * *'
+  pull_request:
+    paths:
+      - '.github/workflows/check_branch.yml'
   workflow_dispatch:
 
 jobs:
