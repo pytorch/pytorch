@@ -259,7 +259,6 @@ AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_CppTypeToScalarType)
              ::c10::ScalarType::SCALARTYPE3>::t),                             \
     SCALARTYPE3)
 
-
 #define AT_FORALL_SCALAR_TYPES_AND7(              \
     SCALARTYPE1,                                  \
     SCALARTYPE2,                                  \
