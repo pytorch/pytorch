@@ -58,6 +58,7 @@
 - third_party/mkl-dnn.BUILD
 - torch/csrc/jit/codegen/onednn/**
 - test/test_jit_llga_fuser.py
+- test/test_mkldnn.py
 
 "ciflow/linux-aarch64":
 - third_party/ideep
@@ -67,6 +68,7 @@
 - third_party/mkl-dnn.BUILD
 - torch/csrc/jit/codegen/onednn/**
 - test/test_jit_llga_fuser.py
+- test/test_mkldnn.py
 
 "module: amp (automated mixed precision)":
 - torch/amp/**
