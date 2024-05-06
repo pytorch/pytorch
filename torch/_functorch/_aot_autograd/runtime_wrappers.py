@@ -138,7 +138,7 @@ class CompilerWrapper:
 # - the autograd cases inserts TensorAlias wrapper objects for outputs that alias inputs
 class RuntimeWrapper(CompilerWrapper):
     @classmethod
-    def post_compile(
+    def post_compile(  # type: ignore[override]
         cls,
         compiled_fn,
         aot_config: AOTConfig,
@@ -147,6 +147,7 @@ class RuntimeWrapper(CompilerWrapper):
         indices_of_inps_to_detach: List[int],
         trace_joint: bool,
         disable_amp: bool,
+        **kwargs,
     ):
         return _create_runtime_wrapper(
             compiled_fn,
