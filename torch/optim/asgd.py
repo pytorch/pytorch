@@ -411,17 +411,17 @@ def _multi_tensor_asgd(
             torch._foreach_copy_(grouped_mus, new_mus)
             del new_mus
 
-            # update eta = lr / (1 + lambd * lr * step^alpha)
-            new_etas = torch._foreach_pow(grouped_state_steps, alpha)
-            torch._foreach_mul_(new_etas, lambd)
+            # update eta = lr / ((1 + lambd * lr * step)^alpha)
+            new_etas = torch._foreach_mul(grouped_state_steps, lambd)
             torch._foreach_mul_(new_etas, lr)
             torch._foreach_add_(new_etas, 1)
+            torch._foreach_pow_(new_etas, alpha)
             torch._foreach_reciprocal_(new_etas)
             torch._foreach_mul_(new_etas, lr)
             torch._foreach_copy_(grouped_etas, new_etas)
         else:
             new_etas = [
-                torch.as_tensor(lr / (1 + lambd * lr * step**alpha), device=device)
+                torch.as_tensor(lr / ((1 + lambd * lr * step) ** alpha), device=device)
                 for step in grouped_state_steps
             ]
             new_mus = [
