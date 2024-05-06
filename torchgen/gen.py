@@ -2361,9 +2361,9 @@ def gen_source_files(
         if dispatch_key in (DispatchKey.CPU, DispatchKey.CUDA):
             fallbacks = dict()
             for func in native_functions:
-                func_name = get_fallback_op_name(func)
-                if func_name in inductor_fallback_ops:
-                    fallbacks[func_name] = (
+                op_name = get_fallback_op_name(func)
+                if op_name in inductor_fallback_ops:
+                    fallbacks[op_name] = (
                         func,
                         structured_func_group_dict.get(
                             f"{func.namespace}.{func.func.name.name}", None
@@ -2450,12 +2450,11 @@ Only in a limited number of situations, this is allowed:
 If that's the case, run `python torchgen/gen.py --update-aoti-c-shim` to update the existing
 C shim files.
 
-2. You are adding a new default argument to an existing fallback op. This is clearly a
-BC breaking change in the AOTInductor land. In this case, you need to keep a manual copy
-of that existing fallback op in a file, e.g. torch/csrc/inductor/aoti_torch/shim_common.cpp,
-bump up the version number of that fallback op in the newly generated C shim files, and
-update the cpp wrapper codegen to generate the correct cpp call for this op. Contact
-the AOTInductor team for assistance.
+2. You added a new default argument to an existing fallback op. This is clearly a BC breaking
+change in the AOTInductor land. In this case, you need to keep a manual copy of that existing
+fallback op in a file, e.g. torch/csrc/inductor/aoti_torch/shim_common.cpp, bump up the version
+number of that fallback op in the newly generated C shim files, and update the cpp wrapper
+codegen to generate the correct cpp call for this op. Contact AOTInductor team for assistance.
 
                     """
 
