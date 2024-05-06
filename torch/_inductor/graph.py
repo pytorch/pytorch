@@ -858,7 +858,7 @@ class GraphLowering(torch.fx.Interpreter):
             self.constants[alt_name] = self.constants[name].to(device_override)
         return alt_name
 
-    def placeholder(self, target: str, args, kwargs):  # type: ignore[override]
+    def placeholder(self, target: str, args, kwargs):
         example = super().placeholder(target, args, kwargs)
         self.graph_input_names.append(target)
         if isinstance(example, SymTypes):
