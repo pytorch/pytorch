@@ -1556,15 +1556,13 @@ class Kernel(CodeGen):
                     # Mixed negative and non-negative
                     if var.bounds.upper >= 0:  # type: ignore[operator]
                         lt = ops.lt(var, 0)
-                        ret = ops.where(lt, stm, var)
-                        # Ugh. To fix properly, need to fix the handling of TritonCSEVariable.update_on_args of where
-                        if hasattr(ret.value, "mask_vars"):
-                            ret.value.mask_vars.update(stm.value.mask_vars)
-                        stm = ret
+                        stm = ops.where(lt, stm, var)
 
-                    var = stm.value
-                    # We should propagate automatically the bounds when calling ops we know how to
-                    var.bounds = new_bounds
+                    # Propagate bounds as we know how to compute them properly
+                    # Propagate the mask as mask propagation when using where is not correct
+                    new_var = self.cse.generate(self.compute, stm, bounds=new_bounds)
+                    new_var.update_on_args("index_wrap", (var,), {})
+                    var = new_var
 
                 if generate_assert(check):
                     mask = self.load_mask(var)
