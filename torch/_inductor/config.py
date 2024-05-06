@@ -757,7 +757,7 @@ class cuda:
     cutlass_dir = os.environ.get(
         "TORCHINDUCTOR_CUTLASS_DIR",
         build_paths.cutlass()
-        if is_fbcode()
+        if is_fbcode() and not torch.version.hip
         else os.path.abspath(
             os.path.join(os.path.dirname(torch.__file__), "../third_party/cutlass/")
         ),
