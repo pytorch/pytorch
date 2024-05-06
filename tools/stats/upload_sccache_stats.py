@@ -6,9 +6,7 @@ from tempfile import TemporaryDirectory
 from typing import Any, Dict, List
 
 from tools.stats.upload_stats_lib import (
-    download_gha_artifacts,
     download_s3_artifacts,
-    unzip,
     upload_to_rockset,
 )
 
@@ -22,12 +20,6 @@ def get_sccache_stats(
 
         # Download and extract all the reports (both GHA and S3)
         download_s3_artifacts("sccache-stats", workflow_run_id, workflow_run_attempt)
-
-        artifact_paths = download_gha_artifacts(
-            "sccache-stats", workflow_run_id, workflow_run_attempt
-        )
-        for path in artifact_paths:
-            unzip(path)
 
         stats_jsons = []
         for json_file in Path(".").glob("**/*.json"):
