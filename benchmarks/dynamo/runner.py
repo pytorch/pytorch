@@ -1452,7 +1452,7 @@ class DashboardUpdater:
             try:
                 RegressionTracker(self.args).diff()
             except Exception as e:
-                logging.exception(e)
+                logging.exception("")
                 with open(f"{self.args.output_dir}/gh_regression.txt", "w") as gh_fh:
                     gh_fh.write("")
 

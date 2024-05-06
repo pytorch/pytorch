@@ -36,10 +36,12 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.fx.node import _get_qualified_name
 from torch.utils._sympy.singleton_int import SingletonInt
+from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import codecache, config, ir
 from ..ir import ReinterpretView
 from ..runtime import triton_heuristics
+from ..runtime.hints import DeviceProperties
 from ..utils import (
     cache_on_self,
     get_benchmark_name,
@@ -906,7 +908,7 @@ class WrapperCodeGen(CodeGen):
                     )
 
     def ensure_size_computed(self, sym: sympy.Symbol):
-        if isinstance(sym, sympy.Symbol) and sym.name.startswith("ps"):
+        if isinstance(sym, sympy.Symbol) and symbol_is_type(sym, SymT.PRECOMPUTED_SIZE):
             if sym in self.computed_sizes:
                 return
             self.computed_sizes.add(sym)
@@ -918,8 +920,11 @@ class WrapperCodeGen(CodeGen):
     def finalize_prefix(self):
         pass
 
-    def codegen_python_sizevar(self, x: Expr) -> str:
-        return pexpr(V.graph.sizevars.simplify(x))
+    def codegen_python_sizevar(self, x: Expr, *, simplify: bool = True) -> str:
+        if simplify:
+            return pexpr(V.graph.sizevars.simplify(x))
+        else:
+            return pexpr(x)
 
     def codegen_sizevar(self, x: Expr) -> str:
         return self.codegen_python_sizevar(x)
@@ -1127,8 +1132,7 @@ class WrapperCodeGen(CodeGen):
                 size_dtype=index_dtype,
                 indices=non_constant_indices,
             ),
-            "device": V.graph.scheduler.current_device.index,
-            "device_type": V.graph.scheduler.current_device.type,
+            "device": DeviceProperties.create(V.graph.scheduler.current_device),
             # Triton compiler includes equal_to_1 args into constants even
             # when they are not constexpr. otherwise there may be a segfault
             # during launching the Inductor-compiled Triton kernel.
@@ -1138,7 +1142,7 @@ class WrapperCodeGen(CodeGen):
             # https://github.com/openai/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
             "constants": {
                 **constants,
-                **{idx: 1 for idx in equal_to_1_arg_idx},
+                **dict.fromkeys(equal_to_1_arg_idx, 1),
             },
             "configs": [
                 config_of(
@@ -1490,10 +1494,6 @@ class WrapperCodeGen(CodeGen):
         )
 
     def codegen_allocation(self, buffer):
-        assert (
-            buffer.get_workspace_size() == 0
-        ), "Only support zero workspace size for now!"
-
         name = buffer.get_name()
 
         if name in V.graph.removed_buffers or name in self.allocated:
