@@ -126,6 +126,7 @@ class FSDPParam:
     _sharded_post_forward_param_data: Optional[torch.Tensor]  # 1D
     _sharded_post_forward_param: Optional[nn.Parameter]  # ND
     _unsharded_param: nn.Parameter  # ND
+    unsharded_accumulated_grad: Optional[torch.Tensor]  # ND
     _global_placements: Tuple[Placement, ...]
     _global_size: torch.Size
     _global_stride: Tuple[int, ...]
@@ -160,6 +161,7 @@ class FSDPParam:
             self._init_sharded_post_forward_param_metadata(param)
         self._init_extensions()
         self.all_gather_outputs: List[torch.Tensor] = []
+        self.unsharded_accumulated_grad = None
         self._param_fqn: Optional[str] = None  # prefixed from root module
         # TODO: Remove this padding logic once DTensor pads the local tensor:
         # https://github.com/pytorch/pytorch/issues/113045
@@ -455,6 +457,27 @@ class FSDPParam:
             self._global_stride,
         )
 
+    def to_accumulated_grad_if_needed(self) -> None:
+        # Access `_unsharded_param` to bypass the sharded state check since we
+        # prefer to reshard before upcasting the gradient to save memory
+        if (
+            self.reduce_dtype is None
+            or self._unsharded_param.grad is None
+            or self._unsharded_param.grad.dtype == self.reduce_dtype
+        ):
+            return
+        unsharded_grad = self._unsharded_param.grad
+        self._unsharded_param.grad = None
+        self.unsharded_accumulated_grad = unsharded_grad.to(self.reduce_dtype)
+
+    def accumulate_unsharded_grad_if_needed(self) -> None:
+        if (
+            self.unsharded_accumulated_grad is not None
+            and self.unsharded_param.grad is not None
+        ):
+            self.unsharded_accumulated_grad += self.unsharded_param.grad
+            self.unsharded_param.grad = None
+
     def alloc_all_gather_outputs(self) -> None:
         for tensor in self.all_gather_outputs:
             alloc_storage(tensor)
@@ -508,6 +531,12 @@ class FSDPParam:
     def unsharded_grad_data(self) -> torch.Tensor:
         grad = self.unsharded_param.grad
         assert grad is not None, "Expects unsharded_param.grad to not be None"
+        return self._get_grad_inner_tensor(grad)
+
+    @property
+    def unsharded_accumulated_grad_data(self) -> torch.Tensor:
+        grad = self.unsharded_accumulated_grad
+        assert grad is not None, "Expects unsharded_accumulated_grad to not be None"
         return self._get_grad_inner_tensor(grad)
 
     def _get_grad_inner_tensor(self, grad: torch.Tensor) -> torch.Tensor:
