@@ -1,7 +1,9 @@
 # Owner(s): ["module: dynamo"]
-
+# flake8: noqa: B950
 import copy
 import math
+
+from dataclasses import dataclass
 
 import torch
 
@@ -251,11 +253,11 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
     def test_linear_setup_context(self):
         model = ModuleLinear()
-        opt_model = torch._dynamo.optimize("eager")(model)
+        opt_model = torch._dynamo.optimize("eager", nopython=True)(model)
         input = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
         weight = torch.randn(3, 2, dtype=torch.double, requires_grad=True)
-        optim_result = opt_model(input, weight)
         eager_result = model(input, weight)
+        optim_result = opt_model(input, weight)
         self.assertEqual(optim_result, eager_result)
 
     def test_materialize_grad(self):
@@ -467,32 +469,182 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(res, MyMM.apply(a, a))
         self.assertEqual(cnt.frame_count, 1)
 
-    def test_graph_break_if_lifted_free_variable(self):
-        torch._dynamo.utils.counters.clear()
-        cnt = torch._dynamo.testing.CompileCounter()
-        delta = torch.randn(3)
+    def test_user_defined_object_as_input(self):
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+
+        @dataclass
+        class Weird:
+            x: int
+            b: torch.Tensor
+            c: torch.Tensor
 
         class Foo(torch.autograd.Function):
             @staticmethod
-            def forward(ctx, x):
-                return x.clone(), (x + delta).clone()
+            def forward(ctx, x: torch.Tensor, weird: Weird, z: torch.Tensor):
+                ctx.save_for_backward(weird.b, weird.c)
+                return weird.b * weird.c * x.clone()
 
             @staticmethod
-            def backward(ctx, grad1, grad2):
-                return grad1 + grad2
+            def backward(ctx, grad):
+                b, c = ctx.saved_tensors
+                return grad * b * c, None, grad * 2
 
-        @torch.compile(backend=cnt)
-        def f(x):
-            return Foo.apply(x)
+        @torch.compile(backend=cnt, fullgraph=True)
+        def f(x, weird, z):
+            return Foo.apply(x, weird, z)
 
-        x = torch.randn(3, requires_grad=True)
-        result = f(x)
+        x = torch.tensor(2.0, requires_grad=True)
+        weird = Weird(1.2, torch.tensor(2.5, requires_grad=True), torch.tensor(3.5))
+        z = torch.tensor(3.0, requires_grad=True)
 
-        self.assertEqual(result, Foo.apply(x))
-        self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(
-            list(torch._dynamo.utils.counters["graph_break"].values()), [1]
+        result = f(x, weird, z)
+        result.sum().backward()
+
+        self.assertEqual(result, Foo.apply(x, weird, z))
+        self.assertEqual(x.grad, 2.5 * 3.5)
+        self.assertEqual(z.grad, 2.0)
+        self.assertEqual(weird.b.grad, None)
+
+        # check Dynamo captured graph is correct!
+        actual_graph = torch._dynamo.testing.normalize_gm(
+            cnt.graphs[0].print_readable(print_output=False)
         )
+        self.assertExpectedInline(
+            actual_graph,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[]", L_z_: "f32[]", L_weird_b: "f32[]", L_weird_c: "f32[]"):
+        l_x_ = L_x_
+        l_z_ = L_z_
+        l_weird_b = L_weird_b
+        l_weird_c = L_weird_c
+
+        function_ctx = torch.autograd.function.FunctionCtx()
+        fwd_body_0 = self.fwd_body_0
+        bwd_body_0 = self.bwd_body_0
+        autograd_function_apply: "f32[]" = torch._functorch.autograd_function.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, l_z_, l_weird_b, l_weird_c, args_tensor_mask = [True, False, True]);  fwd_body_0 = bwd_body_0 = l_x_ = l_z_ = l_weird_b = l_weird_c = None
+        return (autograd_function_apply,)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, function_ctx, l_x_: "f32[]", l_z_: "f32[]", l_weird_b: "f32[]", l_weird_c: "f32[]"):
+            mul: "f32[]" = l_weird_b * l_weird_c
+            clone: "f32[]" = l_x_.clone();  l_x_ = None
+            mul_1: "f32[]" = mul * clone;  mul = clone = None
+            return (mul_1, [l_weird_b, l_weird_c])
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, function_ctx, mul_1: "f32[]", l_weird_b: "f32[]", l_weird_c: "f32[]"):
+            _set_grad_enabled = torch._C._set_grad_enabled(False)
+
+            mul: "f32[]" = mul_1 * l_weird_b;  l_weird_b = None
+            mul_2: "f32[]" = mul * l_weird_c;  mul = l_weird_c = None
+            mul_3: "f32[]" = mul_1 * 2;  mul_1 = None
+
+            _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
+            return (mul_2, mul_3)
+""",
+        )
+
+    def test_tensor_list_as_input(self):
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, tl):
+                ctx.save_for_backward(tl[0], tl[1])
+                return x.clone() * (tl[0] + tl[1])
+
+            @staticmethod
+            def backward(ctx, grad):
+                tl0, tl1 = ctx.saved_tensors
+                return grad * (tl0 + tl1), None
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def f(x, tl):
+            return Foo.apply(x, tl)
+
+        x = torch.tensor(2.0, requires_grad=True)
+        tl = [
+            torch.tensor(3.0, requires_grad=True),
+            torch.tensor(4.0, requires_grad=True),
+        ]
+
+        result = f(x, tl)
+        result.sum().backward()
+
+        self.assertEqual(result, Foo.apply(x, tl))
+        self.assertEqual(x.grad, 7.0)
+        self.assertEqual(tl[0].grad, None)
+        self.assertEqual(tl[1].grad, None)
+
+    def test_multiple_different_non_tensor_inputs(self):
+        @dataclass
+        class Weird:
+            x: int
+            b: torch.Tensor
+            c: torch.Tensor
+
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, weird, z, tl):
+                ctx.save_for_backward(weird.b, weird.c, tl[0], tl[1])
+                return x.clone() * weird.b * weird.c * tl[0]
+
+            @staticmethod
+            def backward(ctx, grad):
+                b, c, tl0, _ = ctx.saved_tensors
+                return grad * b * c * tl0, None, grad * 2, None
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def f(x, weird, z, tl):
+            return Foo.apply(x, weird, z, tl)
+
+        x = torch.tensor(2.0, requires_grad=True)
+        weird = Weird(
+            1.2,
+            torch.tensor(2.5, requires_grad=True),
+            torch.tensor(3.5, requires_grad=True),
+        )
+        z = torch.tensor(3.0, requires_grad=True)
+        tl = [
+            torch.tensor(0.5, requires_grad=True),
+            torch.tensor(0.6, requires_grad=True),
+        ]
+
+        result = f(x, weird, z, tl)
+        result.sum().backward()
+
+        self.assertEqual(result, Foo.apply(x, weird, z, tl))
+        self.assertEqual(x.grad, 2.5 * 3.5 * 0.5)
+        self.assertEqual(z.grad, 2.0)
+        self.assertEqual(weird.b.grad, None)
+        self.assertEqual(weird.c.grad, None)
+        self.assertEqual(tl[0].grad, None)
+        self.assertEqual(tl[1].grad, None)
+
+    def test_backward_returns_none_for_tensor_input(self):
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                ctx.save_for_backward(y)
+                return x.clone() * y
+
+            @staticmethod
+            def backward(ctx, grad):
+                (y,) = ctx.saved_tensors
+                return grad * y, None
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def f(x, y):
+            return Foo.apply(x, y)
+
+        x = torch.tensor(2.0, requires_grad=True)
+        y = torch.tensor(3.0, requires_grad=True)
+
+        result = f(x, y)
+        result.sum().backward()
+
+        self.assertEqual(result, Foo.apply(x, y))
+        self.assertEqual(x.grad, 3.0)
+        self.assertEqual(y.grad, None)
 
     def test_function_with_bound_free_variable(self):
         class LowerBound(torch.autograd.Function):
@@ -752,7 +904,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
                     new_data = args[0]._data.view(*args[1:])
                     return FooTensor(new_data, args[0]._config, args[0]._scale)
 
-                raise NotImplementedError()
+                raise NotImplementedError
 
         class foo_autograd_fn(torch.autograd.Function):
             @staticmethod

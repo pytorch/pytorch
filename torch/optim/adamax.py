@@ -240,7 +240,9 @@ def adamax(
     See :class:`~torch.optim.Adamax` for details.
     """
 
-    if not all(isinstance(t, torch.Tensor) for t in state_steps):
+    if not torch._utils.is_compiling() and not all(
+        isinstance(t, torch.Tensor) for t in state_steps
+    ):
         raise RuntimeError(
             "API has changed, `state_steps` argument must contain a list of singleton tensors"
         )
@@ -446,7 +448,7 @@ def _multi_tensor_adamax(
             bias_corrections = [
                 1 - beta1 ** _get_value(step) for step in grouped_state_steps
             ]
-            step_size = [(lr / bc) * -1 for bc in bias_corrections]
+            step_size = [(_get_value(lr) / bc) * -1 for bc in bias_corrections]
             torch._foreach_addcdiv_(
                 grouped_params, grouped_exp_avgs, grouped_exp_infs, step_size
             )

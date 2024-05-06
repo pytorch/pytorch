@@ -462,7 +462,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             # this triggers cudaFree
             torch.cuda.empty_cache()
             work.wait()
-        torch.cuda.synchronize(local_device)
+        torch.cuda.synchronize(device=local_device)
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
@@ -1152,6 +1152,21 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             self.assertEqual(send_tensor, recv_tensor)
 
     @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_send_recv_object_list(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        self._create_process_group_nccl(store, self.opts())
+        device = self.rank_to_GPU[self.rank][0]
+
+        val = 99 if self.rank == 0 else None
+        object_list = [val] * self.world_size
+        if self.rank == 0:
+            dist.send_object_list(object_list, 1, device=device)
+        if self.rank == 1:
+            dist.recv_object_list(object_list, 0, device=device)
+            self.assertEqual(object_list[0], 99)
+
+    @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 1 GPU")
     @skip_if_lt_x_gpu(1)
     def test_nccl_dist_backend_error(self):
@@ -1221,39 +1236,11 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         # First allreduce to initialize state.
         pg.allreduce(t)
 
-        # Destroy pg and validate pg is still in working condition since we hold a
-        # reference above.
+        # Destroy pg and validate pg is no longer valid
         dist.destroy_process_group()
-        pg.allreduce([t])
-
-        # Now close pg and validate it no longer works.
-        pg._get_backend(torch.device(device))._shutdown()
-
-        # Try another collective.
         with self.assertRaises(dist.DistBackendError):
             pg.allreduce([t])
 
-    @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_terminate_before_destruct_pg(self):
-        # Disable ASYNC_ERROR_HANDLING for this test to ensure we can programmatically
-        # abort the process group.
-        os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
-        store = c10d.FileStore(self.file_name, self.world_size)
-        pg = self._create_process_group_nccl(store, self.opts())
-        device = self.rank_to_GPU[self.rank][0]
-
-        t = torch.rand(10, 10, device=device)
-        # First allreduce to initialize state.
-        pg.allreduce(t)
-
-        # Destroy pg and validate pg is still in working condition since we hold a
-        # reference above.
-        dist.destroy_process_group()
-        pg.allreduce([t])
-
-        # Now close pg and validate it no longer works.
-        pg._get_backend(torch.device(device))._shutdown()
         del pg
 
     @requires_nccl()
@@ -1262,7 +1249,6 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         # Disable ASYNC_ERROR_HANDLING for this test to ensure we can programmatically
         # abort the process group.
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
-        os.environ["TORCH_NCCL_ABORT_IN_DESTROY_PG"] = "1"
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_nccl(store, self.opts())
         device = self.rank_to_GPU[self.rank][0]
@@ -1279,7 +1265,6 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         # Disable ASYNC_ERROR_HANDLING for this test to ensure we can programmatically
         # abort the process group.
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
-        os.environ["TORCH_NCCL_ABORT_IN_DESTROY_PG"] = "1"
 
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_nccl(store, self.opts())
@@ -1332,7 +1317,6 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs"
     )
     def test_abort_in_destroy_multi_pgs(self):
-        os.environ["TORCH_NCCL_ABORT_IN_DESTROY_PG"] = "1"
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_nccl(store, self.opts())
         device = self.rank_to_GPU[self.rank][0]
@@ -1356,7 +1340,6 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs"
     )
     def test_abort_in_destroy_mixed_empty_pgs(self):
-        os.environ["TORCH_NCCL_ABORT_IN_DESTROY_PG"] = "1"
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_nccl(store, self.opts())
         device = self.rank_to_GPU[self.rank][0]
@@ -2979,7 +2962,7 @@ class DistributedDataParallelTest(
         loss.backward()
         optimizer.step()
 
-        torch.cuda.synchronize()
+        torch.cuda.synchronize(device=device_id)
 
 
 class WorkHookTest(MultiProcessTestCase):
@@ -4086,6 +4069,31 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
         "set_device",
         [SetDeviceMethod.TORCH_CUDA_SET, SetDeviceMethod.COLLECTIVE_ARGUMENT],
     )
+    def test_send_recv_object_list_subgroup(self, set_device: SetDeviceMethod):
+        world_size = 4
+        if self.rank >= world_size:
+            return
+        subgroup = self._init_two_pg2_subgroups(world_size)
+        if set_device == SetDeviceMethod.TORCH_CUDA_SET:
+            torch.cuda.set_device(self.rank)
+            device = None
+        else:
+            device = torch.device("cuda:%d" % self.rank)
+        if self.rank == 0 or self.rank == 2:
+            x = [{}]
+            c10d.recv_object_list(x, src=self.rank + 1, group=subgroup, device=device)
+            expected = [{"rank": self.rank + 1}]
+            self.assertEqual(x, expected)
+        else:
+            x = [{"rank": self.rank}]
+            c10d.send_object_list(x, dst=self.rank - 1, group=subgroup, device=device)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(4)
+    @parametrize(
+        "set_device",
+        [SetDeviceMethod.TORCH_CUDA_SET, SetDeviceMethod.COLLECTIVE_ARGUMENT],
+    )
     def test_broadcast_object_list_subgroup(self, set_device: SetDeviceMethod):
         world_size = 4
         if self.rank >= world_size:
@@ -4582,7 +4590,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
             dist.batch_isend_irecv(ops).pop().wait()
 
-        torch.cuda.synchronize()
+        torch.cuda.synchronize(device=self.local_device)
 
         if timing_enabled:
             # wait for watchdog thread to process the queue of works
@@ -4675,7 +4683,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
                     tensor *= 2
                     dist.send(tensor, 0)
 
-        torch.cuda.synchronize()
+        torch.cuda.synchronize(device=self.local_device)
         if timing_enabled:
             # wait for watchdog thread to process the queue of works
             time.sleep(1)
@@ -4734,7 +4742,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
                 dist.reduce_scatter_tensor(output_tensors[i], input_tensors[i])
         self.assertEqual(output_tensors, input_tensors[self.rank] * self.world_size)
 
-        torch.cuda.synchronize()
+        torch.cuda.synchronize(device=self.rank)
 
         if timing_enabled:
             # wait for watchdog thread to process the queue of works
@@ -4841,7 +4849,7 @@ class NCCLTraceTestDumpOnTimeout(NCCLTraceTestDumpOnTimeoutBase):
                 pg.allreduce(a).wait()
 
             # rank 0 will crash before it passes the sync, but rank1 will exit quickly and cleanly
-            torch.cuda.synchronize()
+            torch.cuda.synchronize(device=device)
 
 
 instantiate_parametrized_tests(ProcessGroupNCCLTest)
@@ -4893,7 +4901,7 @@ class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
                 pg.allreduce(a).wait()
 
             # rank 0 will get stuck, timeout and then signal a timeout to all ranks.
-            torch.cuda.synchronize()
+            torch.cuda.synchronize(device=device)
 
             if self.rank == 1:
                 # Force rank 1 to idle so that it will eventually timeout as well after

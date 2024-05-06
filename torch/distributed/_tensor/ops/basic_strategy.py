@@ -1,7 +1,7 @@
 import itertools
 from dataclasses import dataclass
 
-from typing import List, Tuple
+from typing import List, Set, Tuple
 
 from torch.distributed._tensor.op_schema import OpStrategy, PlacementStrategy
 from torch.distributed._tensor.placement_types import (
@@ -44,10 +44,9 @@ class EinsumDims:
         Parse the dims and extract the contracting, batch, and free dimensions
         for the left and right hand sides.
         """
-        dim_char_set = set()
+        dim_char_set: Set[str] = set()
         for input_dim in input_dims:
-            for input_char in list(input_dim):
-                dim_char_set.add(input_char)
+            dim_char_set.update(input_dim)
 
         # get a determinisitc order of all dim chars
         all_dim_chars = sorted(dim_char_set)

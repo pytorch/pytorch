@@ -146,7 +146,7 @@ def _iterate_state_dict(
             not isinstance(companion_obj, (list, tuple))
             or len(companion_obj) != len(iter_object)
         ):
-            raise CompanionMismatch()
+            raise CompanionMismatch
 
         ret = [
             _iterate_state_dict(
@@ -437,7 +437,7 @@ def _check_state_dict_similarity(
         companion_obj: Any,
     ) -> torch.Tensor:
         if companion_obj.dtype != obj.dtype or companion_obj.size() != obj.size():
-            raise CompanionMismatch()
+            raise CompanionMismatch
         return obj
 
     try:
