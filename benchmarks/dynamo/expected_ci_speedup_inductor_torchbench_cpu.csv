@@ -1,0 +1,12 @@
+#name,data_type,shape,wrapper,perf_speedup_target_c5_12xlarge
+#timm_vision_transformer,float32,static,default,1.1585628
+phlippe_densenet,float32,static,default,1.99590617
+basic_gnn_gcn,float32,dynamic,default,1.24639561
+llama_v2_7b_16h,float32,dynamic,default,1.27455818
+resnet50,float32,dynamic,default,2.28794694
+timm_efficientnet,float32,static,cpp,2.72195686
+mobilenet_v3_large,float32,static,cpp,3.02274304
+timm_resnest,float32,dynamic,cpp,2.10118744
+shufflenet_v2_x1_0,float32,dynamic,cpp,1.8976929
+#hf_GPT2,float32,dynamic,cpp,1.6702305
+hf_GPT2,float32,dynamic,cpp,1.1183002
