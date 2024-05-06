@@ -304,8 +304,12 @@ void nll_loss_forward_out_cpu_template(
     const Tensor& weight,
     int64_t reduction,
     int64_t ignore_index) {
-  AT_DISPATCH_FLOATING_TYPES_AND(
-      ScalarType::BFloat16, input.scalar_type(), "nll_loss_out_frame", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::BFloat16,
+      ScalarType::Half,
+      input.scalar_type(),
+      "nll_loss_out_frame",
+      [&] {
         if (target.scalar_type() == kByte) {
           nll_loss_out_frame<scalar_t, uint8_t>(
               output,
@@ -415,8 +419,9 @@ void nll_loss_backward_out_cpu_template(
     const Tensor& total_weight) {
   grad_input.zero_();
 
-  AT_DISPATCH_FLOATING_TYPES_AND(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::BFloat16,
+      ScalarType::Half,
       input.scalar_type(),
       "nll_loss_backward_out_frame",
       [&] {

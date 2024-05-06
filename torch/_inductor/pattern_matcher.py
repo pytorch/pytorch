@@ -36,7 +36,6 @@ import torch.utils._pytree as pytree
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import counters
 from torch._prims_common import is_integer_dtype
-from torch.fx import Node
 from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
 from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
 from torch.fx.immutable_collections import immutable_dict, immutable_list
@@ -49,6 +48,9 @@ from ..fx import Transformer
 from . import config
 from .decomposition import select_decomp_table
 from .lowering import fallback_node_due_to_unsupported_type
+
+if typing.TYPE_CHECKING:
+    from torch.fx import Node
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -218,7 +220,7 @@ class PatternExpr:
     def _match(
         self, node: torch.fx.Node, ctx: MatchContext
     ) -> Union[Match, FailedMatch]:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def match(self, node: torch.fx.Node) -> Union[Match, FailedMatch]:
         try:
@@ -361,7 +363,7 @@ class _TargetExpr(PatternExpr):
         return isinstance(self.users, Multiple) or self.users > 1
 
     def find_anchor_nodes(self, ctx: MatchContext, searched):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def _match_fns(self, node: torch.fx.Node):
         return (
@@ -464,7 +466,7 @@ class _TargetArgsExpr(_TargetExpr):
             from torch.fx.operator_schemas import normalize_function
 
             normalized_args_and_kwargs = normalize_function(
-                node.target, node.args, node.kwargs
+                node.target, node.args, node.kwargs  # type: ignore[arg-type]
             )
 
             if normalized_args_and_kwargs is None:
@@ -803,7 +805,7 @@ class PatternEntry:
     extra_check: Callable[[Match], bool]
 
     def apply(self, match: Match, graph: torch.fx.Graph, node: torch.fx.Node):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def register(self, pass_dicts, target=None, prepend=False):
         if target is None:
@@ -894,7 +896,7 @@ class ReplacementPatternEntry(PatternEntry):
                 for n in output_nodes
                 if isinstance(n, torch.fx.Node)
             ]
-            last_node = min(indices, key=lambda tup: tup[0])[1]
+            last_node = min(indices, key=operator.itemgetter(0))[1]
 
         def percolate_tags(node, recompute_tag, input_stops):
             queue = [node]
@@ -912,7 +914,7 @@ class ReplacementPatternEntry(PatternEntry):
                     queue.extend(arg.all_input_nodes)
 
         with graph.inserting_before(last_node):
-            replacement = Replacer(replacement_graph).run(*args)
+            replacement = Replacer(replacement_graph).run(*args)  # type: ignore[arg-type]
             if isinstance(replacement, torch.fx.Node):
                 replacement = [replacement]
 
@@ -930,7 +932,7 @@ class ReplacementPatternEntry(PatternEntry):
                     return
                 assert isinstance(old, torch.fx.Node)
                 if new is None:
-                    old.replace_all_uses_with(None)
+                    old.replace_all_uses_with(None)  # type: ignore[arg-type]
                     graph.erase_node(old)
                     return
                 if isinstance(new, torch.fx.Node):
@@ -1059,7 +1061,7 @@ def register_replacement(
                 )
 
         args = list(
-            torch.fx.map_arg(
+            torch.fx.map_arg(  # type: ignore[arg-type]
                 [match.kwargs[name] for name in argnames], lambda n: n.meta["val"]
             )
         )
@@ -1237,7 +1239,7 @@ def _serialize_pattern(
         return f"{file_template}{formatted_imports}"
 
     if not SERIALIZED_PATTERN_PATH.is_dir():
-        raise Exception(
+        raise Exception(  # noqa: TRY002
             f"Could not find serialized patterns directory at {SERIALIZED_PATTERN_PATH}"
         )
 
@@ -1293,6 +1295,9 @@ def gen_register_replacement(
     scalar_workaround=(),
     exclusive_arg_names=(),
 ):
+    # Make sure the example_inputs is materialized.
+    example_inputs = tuple(example_inputs)
+
     if "PYTORCH_GEN_PATTERNS" in os.environ:
         pat = _serialize_pattern(
             unique_name, search_fn, example_inputs, trace_fn, scalar_workaround
@@ -1308,6 +1313,14 @@ def gen_register_replacement(
                 unique_name,
             )
         pat = getattr(m, unique_name)
+
+    for arg in pytree.tree_iter(example_inputs):
+        if torch._subclasses.fake_tensor.is_fake(arg) and arg.constant is not None:
+            # This can be a problem - small fake tensors (e.g. `tensor(2)`) will
+            # hold onto their original constant value - and by stashing it here
+            # will cause a memory leak if the constant value is on GPU.
+            # Since this is just an optimization we can clear it out.
+            arg.constant = None
 
     _known_precompiled_patterns.append(
         (search_fn, example_inputs, trace_fn, scalar_workaround, pat)
@@ -1452,8 +1465,8 @@ class PatternMatcherPass:
     def apply(self, graph: torch.fx.GraphModule) -> int:
         if not self.patterns:
             return 0
-        if isinstance(graph, torch.fx.GraphModule):
-            graph = graph.graph
+        if isinstance(graph, torch.fx.GraphModule):  # type: ignore[assignment]
+            graph = graph.graph  # type: ignore[assignment]
         if self.prevent_match_across_mutations:
             if should_compute_mutation_region_ids(graph):
                 compute_mutation_region_ids(graph)
@@ -1507,7 +1520,7 @@ class PatternMatcherPass:
 
 
 def _not_implemented(*args, **kwargs) -> NoReturn:
-    raise NotImplementedError()
+    raise NotImplementedError
 
 
 def fx_to_pattern(
@@ -1636,7 +1649,7 @@ def joint_fwd_bwd(fn, args) -> torch.fx.GraphModule:
 
 
 def _args(n: torch.fx.Node) -> List[torch.fx.node.Argument]:
-    args: List[torch.fx.node.Argument] = list()
+    args: List[torch.fx.node.Argument] = []
     torch.fx.map_arg((n.args, n.kwargs), args.append)
     return args
 

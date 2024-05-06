@@ -287,7 +287,7 @@ class TestNNAPI(TestCase):
                             return torch.nn.functional.relu(arg)
                         if op == "sigmoid":
                             return torch.sigmoid(arg)
-                        raise Exception("Bad op")
+                        raise Exception("Bad op")  # noqa: TRY002
                 self.check(UnaryModule(), torch.tensor([-1.0, 1.0]))
                 self.check(
                     UnaryModule(),
@@ -307,7 +307,7 @@ class TestNNAPI(TestCase):
                             return lhs * rhs
                         if op == "div":
                             return lhs / rhs
-                        raise Exception("Bad op")
+                        raise Exception("Bad op")  # noqa: TRY002
 
                 self.check(
                     BinaryModule(),

@@ -14,7 +14,7 @@ import socket
 from string import Template
 import time
 import uuid
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, TYPE_CHECKING
 
 import torch.distributed.elastic.timer as timer
 from torch.distributed.elastic import events
@@ -30,11 +30,13 @@ from torch.distributed.elastic.agent.server.health_check_server import (
     create_healthcheck_server,
     HealthCheckServer,
 )
-from torch.distributed.elastic.events.api import EventMetadataValue
 from torch.distributed.elastic.metrics.api import prof
 from torch.distributed.elastic.multiprocessing import PContext, start_processes, LogsSpecs
 from torch.distributed.elastic.utils import macros
 from torch.distributed.elastic.utils.logging import get_logger
+
+if TYPE_CHECKING:
+    from torch.distributed.elastic.events.api import EventMetadataValue
 
 logger = get_logger(__name__)
 
@@ -165,8 +167,14 @@ class LocalElasticAgent(SimpleElasticAgent):
             if watchdog_file_path is None:
                 watchdog_file_path = "/tmp/watchdog_timer_" + str(uuid.uuid4())
             logger.info("Starting a FileTimerServer with %s ...", watchdog_file_path)
+            if not envs:
+                logger.warning("Empty envs variables, using empty run_id for FileTimerServer")
+                run_id = ''
+            else:
+                run_id = envs[0]["TORCHELASTIC_RUN_ID"]
             self._worker_watchdog = timer.FileTimerServer(
                 file_path=watchdog_file_path,
+                run_id=run_id,
                 max_interval=0.1,
                 daemon=True,
                 log_event=self._log_watchdog_event)
