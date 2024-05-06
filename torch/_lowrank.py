@@ -134,7 +134,7 @@ def _svd_lowrank(
     matmul = _utils.matmul
     if M is not None:
         # add(sparse, dense) is not implemented...
-        if not A.is_sparse and M.is_sparse :
+        if A.is_sparse and not M.is_sparse :
             A = -M + A
         else:
             A = A - M
