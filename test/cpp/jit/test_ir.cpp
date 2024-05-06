@@ -34,6 +34,19 @@ TEST(IRTest, Attributes) {
   ASSERT_EQ(attr2.f(one), 5);
 }
 
+TEST(IRTest, BoolMatchNumber) {
+  Graph g;
+  std::vector<Value*> inputs;
+  auto t = g.addInput("self");
+  t->setType(TensorType::get());
+  inputs.push_back(t);
+  auto b = g.addInput("max");
+  b->setType(BoolType::get());
+  inputs.push_back(b);
+  Node* n = g.create(Symbol::fromQualString("aten::clamp_max_"), inputs, 1);
+  ASSERT_EQ(n->schema().operator_name().name, "aten::clamp_max_");
+}
+
 TEST(IRTest, Blocks) {
   auto g = std::make_shared<Graph>();
   const auto graph_string = R"IR(

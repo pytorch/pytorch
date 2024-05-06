@@ -416,6 +416,24 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::Float.bool(bool a) -> float"),
+        [](Stack& stack) {
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+          bool b;
+          pop(stack, b);
+          push(stack, (float)b);
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::Float.int(int a) -> float"),
+        [](Stack& stack) {
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+          int64_t i;
+          pop(stack, i);
+          push(stack, static_cast<double>(i));
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::Float.Scalar(Scalar a) -> float"),
         [](Stack& stack) {
           IValue scalar;
@@ -427,24 +445,6 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
           } else {
             push(stack, static_cast<double>(scalar.toInt()));
           }
-        },
-        aliasAnalysisFromSchema()),
-    OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA("aten::Float.int(int a) -> float"),
-        [](Stack& stack) {
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          int64_t i;
-          pop(stack, i);
-          push(stack, (float)i);
-        },
-        aliasAnalysisFromSchema()),
-    OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA("aten::Float.bool(bool a) -> float"),
-        [](Stack& stack) {
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          bool b;
-          pop(stack, b);
-          push(stack, (float)b);
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(

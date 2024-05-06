@@ -124,6 +124,24 @@ TEST_F(TypeCheckTest, DeviceMismatch_CUDA) {
 //       vmap));
 // }
 
+TEST(InterpreterTest, IntConstantToFloat) {
+  auto graph = std::make_shared<Graph>();
+  parseIR(
+      R"IR(
+graph():
+  %1 : int = prim::Constant[value=2147483640]()
+  %2 : float = aten::Float(%1)
+  return (%2)
+)IR",
+      &*graph);
+  Code function(graph, "");
+  InterpreterState interp = InterpreterState(function);
+  std::vector<IValue> stack{};
+  interp.run(stack);
+  auto output = stack[0].toDouble();
+  AT_ASSERT(output == 2147483640);
+}
+
 TEST(InterpreterTest, Basic_CUDA) {
   constexpr int batch_size = 4;
   constexpr int input_size = 256;
