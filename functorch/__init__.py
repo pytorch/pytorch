@@ -5,19 +5,25 @@
 # LICENSE file in the root directory of this source tree.
 import torch
 
-from torch._functorch.deprecated import (
-    combine_state_for_ensemble,
-    functionalize,
+from torch._functorch.apis import (
     grad,
     grad_and_value,
+    vmap
+)
+
+from torch._functorch.eager_transforms import (
+    functionalize,
     hessian,
     jacfwd,
     jacrev,
     jvp,
+    vjp
+)
+
+from torch._functorch.make_functional import (
+    combine_state_for_ensemble,
     make_functional,
-    make_functional_with_buffers,
-    vjp,
-    vmap,
+    make_functional_with_buffers
 )
 
 # utilities. Maybe these should go in their own namespace in the future?
