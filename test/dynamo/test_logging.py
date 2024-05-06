@@ -3,7 +3,6 @@ import contextlib
 import functools
 import logging
 import os
-import re
 import unittest.mock
 
 import torch
@@ -687,6 +686,8 @@ exclusions = {
     "recompiles",
     "recompiles_verbose",
     "graph_breaks",
+    "graph",
+    "graph_sizes",
     "ddp_graphs",
     "perf_hints",
     "not_implemented",
