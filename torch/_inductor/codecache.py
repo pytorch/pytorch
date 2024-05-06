@@ -952,7 +952,7 @@ class FxGraphCache:
 
             remote_cache = None
             if remote:
-                cache_id = "fx-graph-v1-testing2"
+                cache_id = "fx-graph-v1"
                 try:
                     import triton
 

@@ -490,7 +490,6 @@ def compile_fx_inner(
 
     start = time.time()
 
-    compiled_graph = None
     fx_graph_remote_cache = should_use_remote_fx_graph_cache()
     if (config.fx_graph_cache or fx_graph_remote_cache) and not aot_mode:
         compiled_graph = FxGraphCache.load(
@@ -501,8 +500,7 @@ def compile_fx_inner(
             local=config.fx_graph_cache,
             remote=fx_graph_remote_cache,
         )
-
-    if compiled_graph is None:
+    else:
         compiled_graph = fx_codegen_and_compile(
             gm, example_inputs, **graph_kwargs  # type: ignore[arg-type]
         )
