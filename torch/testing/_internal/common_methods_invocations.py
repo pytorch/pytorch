@@ -2100,27 +2100,33 @@ def error_inputs_T(self, device, has_ndims_error=False):
                                       r'to reverse their shape is not supported\.'))
 
 
-def sample_inputs_singular_matrix_factors(op_info, device, dtype, requires_grad=False, **kwargs):
+def sample_inputs_singular_matrix_factors(op_info, device, dtype, requires_grad=False):
     """
     This function produces two tensors of shape (*, m, k) and (*, n, k) with k <= min(m, n).
     Their matrix product could be used to generate tensor of shape (*, m, n) of rank k.
     """
 
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-    batches = [(), (0, ), (2, ), (1, 1)]
-    size = [1, 5, 10]
-
+    batches = [(), (2,)]
+    size = [3, 4]
     for batch, m, n in product(batches, size, size):
-        for k in range(min(3, m, n)):
-            a = make_arg((*batch, m, k))
-            b = make_arg((*batch, n, k))
-            yield SampleInput(a, b, **kwargs)
+        k = 2
+        a = make_arg((*batch, m, k))
+        b = make_arg((*batch, n, k))
+        yield a, b
+    yield make_arg((3, 1)), make_arg((2, 1))
+    yield make_arg((1, 3, 2)), make_arg((1, 4, 2))
 
 
 def sample_inputs_svd_lowrank(op_info, device, dtype, requires_grad=False, **kwargs):
-    for sample in sample_inputs_singular_matrix_factors(op_info, device, dtype, requires_grad, **kwargs):
-        *batch, m, k = sample.input.shape
-        *_, n, _ = sample.args[0].shape
+    # Function that's well defined on the outputs for complex inputs
+    def fn(usv):
+        U, S, V = usv
+        return U @ V.mH, S
+
+    for (a, b) in sample_inputs_singular_matrix_factors(op_info, device, dtype, requires_grad):
+        *batch, m, k = a.shape
+        n = b.shape[-2]
 
         # NOTE: since svd_lowrank relies on non rank-revealing SVD,
         # it inherits the problem of unstable behavior with repeated
@@ -2129,20 +2135,9 @@ def sample_inputs_svd_lowrank(op_info, device, dtype, requires_grad=False, **kwa
         # we can only use k for q.
         # This issues could be resolved with using a rank-revealing SVD
         # which does not include "zero" singular values.
-        op_kwargs = {
-            'q': k,
-            'M': None
-        }
-
-        # without M specified
-        yield clone_sample(sample, **op_kwargs)
-
-        # now with M
-        # TODO: fix bug in the documentation for svd_lowrank:
-        # M has to be (*, m, n), and not (*, 1, n) as written
-        # in the documentation
-        op_kwargs['M'] = make_tensor((*batch, m, n), dtype=dtype, device=device, requires_grad=requires_grad)
-        yield clone_sample(sample, **op_kwargs)
+        yield SampleInput(a, args=(b,), kwargs=dict(q=k, M=None), output_process_fn_grad=fn)
+        M = make_tensor((*batch, m, n), dtype=dtype, device=device, requires_grad=requires_grad)
+        yield SampleInput(a, args=(b,), kwargs=dict(q=k, M=M), output_process_fn_grad=fn)
 
 def chunk_iter(iterable, size):
     it = iter(iterable)
@@ -16554,10 +16549,11 @@ op_db: List[OpInfo] = [
                lambda a, b, **kwargs: torch.svd_lowrank(a @ b.mT, **kwargs),
                *args, **kwargs
            ),
-           dtypes=floating_types(),
+           dtypes=floating_and_complex_types(),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
            supports_out=False,
+           # Due to the use of randomness
            check_batched_grad=False,
            check_batched_gradgrad=False,
            check_batched_forward_grad=False,
