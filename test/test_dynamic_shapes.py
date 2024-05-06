@@ -838,8 +838,8 @@ class f(torch.nn.Module):
         native_dropout = torch.ops.aten.native_dropout.default(new_empty, 0.5, True);  new_empty = None
         getitem: "f32[s0 + s2, 2*s1]" = native_dropout[0]
         getitem_1: "b8[s0 + s2, 2*s1]" = native_dropout[1];  native_dropout = None
-        return (getitem, getitem_1)""",
-        )  # noqa: B950
+        return (getitem, getitem_1)""",  # noqa: B950
+        )
 
     def test_statically_known_true(self):
         shape_env = ShapeEnv()
