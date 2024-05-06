@@ -39,7 +39,7 @@ from .dispatch_and_compile_graph import (
 from .logging_utils import describe_input, format_guard_bug_msg, track_graph_compiling
 
 from .runtime_wrappers import (
-    aot_dispatch_subclass_wrapper,
+    AOTDispatchSubclassWrapper,
     FakifiedOutWrapper,
     FunctionalizedRngRuntimeWrapper,
     RuntimeWrapper,
@@ -189,14 +189,13 @@ def aot_dispatch_base(
         compiled_fw, aot_config, fw_metadata=fw_metadata, fakified_out_opt=fakified_out
     )
 
-    if maybe_subclass_meta is not None:
-        compiled_fw_func = aot_dispatch_subclass_wrapper(
-            compiled_fw,
-            subclass_metas=fw_metadata.subclass_fw_graph_out_meta,
-            num_fw_outs_saved_for_bw=None,
-        )
-    else:
-        compiled_fw_func = compiled_fw
+    compiled_fw_func = AOTDispatchSubclassWrapper.post_compile(
+        compiled_fw,
+        aot_config,  # not used
+        fw_metadata=fw_metadata,
+        subclass_meta=maybe_subclass_meta,
+        num_fw_outs_saved_for_bw=None,
+    )
 
     if not hasattr(compiled_fw_func, "_boxed_call"):
         compiled_fw_func = make_boxed_func(compiled_fw_func)
@@ -434,6 +433,7 @@ def aot_dispatch_autograd(
 
             with TracingContext.report_output_strides() as fwd_output_strides:
                 compiled_fw_func = aot_config.fw_compiler(fw_module, adjusted_flat_args)
+
             if not hasattr(compiled_fw_func, "_boxed_call"):
                 compiled_fw_func = make_boxed_func(compiled_fw_func)
 
@@ -442,18 +442,25 @@ def aot_dispatch_autograd(
                 fakified_out = _compute_output_meta_with_inductor_strides(
                     fw_module, fwd_output_strides
                 )
-                fakify_first_call = True
 
-            if maybe_subclass_meta is not None:
-                # Why do we need to pass in num_fw_outs_saved_for_bw?
-                # See Note: [Partitioner handling for Subclasses, Part 2]
-                compiled_fw_func = aot_dispatch_subclass_wrapper(
-                    compiled_fw_func,
-                    subclass_metas=fw_metadata.subclass_fw_graph_out_meta,
-                    num_fw_outs_saved_for_bw=num_fw_outs_saved_for_bw,
-                )
-                if not hasattr(compiled_fw_func, "_boxed_call"):
-                    compiled_fw_func = make_boxed_func(compiled_fw_func)
+            compiled_fw_func = AOTDispatchSubclassWrapper.post_compile(
+                compiled_fw_func,
+                aot_config,  # not used
+                fw_metadata=fw_metadata,
+                maybe_subclass_meta=maybe_subclass_meta,
+                num_fw_outs_saved_for_bw=num_fw_outs_saved_for_bw,
+            )
+
+            compiled_fw_func = FunctionalizedRngRuntimeWrapper.post_compile(
+                compiled_fw_func, aot_config, fw_metadata=fw_metadata
+            )
+
+            compiled_fw_func = FakifiedOutWrapper.post_compile(
+                compiled_fw_func,
+                aot_config,
+                fw_metadata=fw_metadata,
+                fakified_out_opt=fakified_out,
+            )
 
         # NB: It's important to compile backwards ahead of time, as this may
         # add extra guards which we need to apply to the Dynamo cache at
@@ -548,17 +555,6 @@ def aot_dispatch_autograd(
     ]
     assert len(backward_state_indices) <= 1
 
-    compiled_fw_func = FunctionalizedRngRuntimeWrapper.post_compile(
-        compiled_fw_func, aot_config, fw_metadata=fw_metadata
-    )
-
-    compiled_fw_func = FakifiedOutWrapper.post_compile(
-        compiled_fw_func,
-        aot_config,
-        fw_metadata=fw_metadata,
-        fakified_out_opt=fakified_out,
-    )
-
     class CompiledFunction(torch.autograd.Function):
         compiled_fw = compiled_fw_func
         compiled_bw = compiled_bw_func
@@ -566,7 +562,6 @@ def aot_dispatch_autograd(
         maybe_subclass_metadata: Optional[SubclassMeta] = maybe_subclass_meta
         num_symints_saved_for_bw = _num_symints_saved_for_bw
         _compiled_autograd_should_lift = False
-        _fakify_first_call = fakify_first_call
 
         @staticmethod
         def _compiled_autograd_key(ctx):

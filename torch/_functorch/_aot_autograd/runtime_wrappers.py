@@ -9,7 +9,7 @@ This module defines runtime wrappers, which, based on previous analysis attempts
 import collections
 import pprint
 from functools import wraps
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.utils.dlpack
@@ -31,7 +31,6 @@ from .schemas import (
     AOTConfig,
     InputAliasInfo,
     OutputType,
-    SubclassCreationMeta,
     TensorAlias,
     ViewAndMutationMeta,
 )
@@ -477,28 +476,40 @@ class FakifiedOutWrapper(CompilerWrapper):
 # At runtime, we have a compiled function that knows how to operate on the domain of DenseTensor -> DenseTensor,
 # But the user might have passed us some tensor subclass inputs (or expect some subclass tensor outputs).
 # This function handles the wrapping and unwrapping of tensor subclasses at runtime.
-def aot_dispatch_subclass_wrapper(
-    runtime_fn: Callable,
-    *,
-    subclass_metas: List[Union[int, SubclassCreationMeta]],
-    num_fw_outs_saved_for_bw: Optional[int],
-) -> Callable:
-    def inner_fn(args: List[Any]):
-        unwrapped_args = unwrap_tensor_subclasses(args, is_joint_structure=False)
-        args.clear()
-        # expectation: runtime_fn is a boxed fn
-        unwrapped_outs = runtime_fn(unwrapped_args)
-        wrapped_outs = wrap_tensor_subclasses(
-            unwrapped_outs,
-            subclass_metas=subclass_metas,
-            num_fw_outs_saved_for_bw=num_fw_outs_saved_for_bw,
-            is_runtime=True,
-        )
-        return wrapped_outs
+class AOTDispatchSubclassWrapper(CompilerWrapper):
+    @classmethod
+    def post_compile(  # type: ignore[override]
+        cls,
+        compiled_fn,
+        _aot_config: AOTConfig,
+        *,
+        fw_metadata: ViewAndMutationMeta,
+        maybe_subclass_meta,
+        num_fw_outs_saved_for_bw: Optional[int],
+        **kwargs,
+    ):
+        if maybe_subclass_meta is None:
+            return compiled_fn
 
-    # box it
-    inner_fn._boxed_call = True  # type: ignore[attr-defined]
-    return inner_fn
+        subclass_metas = fw_metadata.subclass_fw_graph_out_meta
+
+        @wraps(compiled_fn)
+        def inner_fn(args: List[Any]):
+            unwrapped_args = unwrap_tensor_subclasses(args, is_joint_structure=False)
+            args.clear()
+            # expectation: runtime_fn is a boxed fn
+            unwrapped_outs = compiled_fn(unwrapped_args)
+            wrapped_outs = wrap_tensor_subclasses(
+                unwrapped_outs,
+                subclass_metas=subclass_metas,
+                num_fw_outs_saved_for_bw=num_fw_outs_saved_for_bw,
+                is_runtime=True,
+            )
+            return wrapped_outs
+
+        # box it
+        inner_fn._boxed_call = True  # type: ignore[attr-defined]
+        return inner_fn
 
 
 # MOTIVATION:

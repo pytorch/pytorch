@@ -67,7 +67,6 @@ from ._aot_autograd.logging_utils import (  # noqa: F401
     track_graph_compiling,
 )
 from ._aot_autograd.runtime_wrappers import (  # noqa: F401
-    aot_dispatch_subclass_wrapper,
     aot_wrapper_dedupe,
     aot_wrapper_synthetic_base,
 )
