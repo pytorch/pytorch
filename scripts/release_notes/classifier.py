@@ -11,7 +11,6 @@ import common
 import pandas as pd
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torchtext
 from torchtext.functional import to_tensor
 from tqdm import tqdm
