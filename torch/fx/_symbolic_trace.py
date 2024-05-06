@@ -392,6 +392,7 @@ class Tracer(TracerBase):
             # special attribute and set the qualname to refer to that
             if not qualname:
                 qualname = self.get_fresh_qualname("_tensor_constant")
+                assert isinstance(qualname, str)
                 self.tensor_attrs[a] = qualname
                 setattr(self.root, qualname, a)
 
@@ -403,6 +404,7 @@ class Tracer(TracerBase):
 
             # TODO: binary search
             qualname = self.get_fresh_qualname("_{a.__class__.__name__}_constant")
+            assert isinstance(qualname, str)
             setattr(self.root, qualname, a)
 
             return self.create_node("get_attr", qualname, (), {})
