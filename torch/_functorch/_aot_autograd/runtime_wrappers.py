@@ -172,7 +172,7 @@ class RuntimeWrapper(CompilerWrapper):
 
         # Note [Inputs needed in runtime epilogue after list clearing]
         # In Python functions, you can't free the input arguments of a function within the scope of that function.
-        # A workaround is to the input arguments in a list, and clear the list from within the function.
+        # A workaround is to wrap the input arguments in a list, and clear the list from within the function.
         # Here, this is implemented as `call_func_at_runtime_with_args(..., steal_args=True)`.
         #
         # This is needed for Compiled Autograd since some of the inputs (activations) should be freed early.
@@ -411,6 +411,23 @@ class RuntimeWrapper(CompilerWrapper):
         return runtime_wrapper
 
 
+<<<<<<< HEAD
+# Calling convention: If we are running functionalized RNG, then outs consists
+# of (user_outs, rng_offset)
+def functionalized_rng_runtime_epilogue(
+    metadata: ViewAndMutationMeta, outs, return_new_outs=True
+):
+    if metadata.is_rng_op_functionalized:
+        assert metadata.num_outputs_rng_offset == 1
+        new_rng_offset = outs[-1]
+        CUDARngStateHelper.set_new_offset(new_rng_offset)
+        if return_new_outs:
+            user_outs = outs[:-1]
+            return user_outs
+        else:
+            return None
+    return outs
+=======
 class FunctionalizedRngRuntimeWrapper(CompilerWrapper):
     @classmethod
     def post_compile(
@@ -473,6 +490,7 @@ class FakifiedOutWrapper(CompilerWrapper):
             return compiled_fn(runtime_args)
 
         return wrapper
+>>>>>>> 634df065153 (Refactor fakified_out and rng wrappers)
 
 
 # This wrapper handles the AOTDispatch runtime logic for tensor subclasses.
