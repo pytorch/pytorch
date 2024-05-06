@@ -223,7 +223,7 @@ def foreach_all_gather_copy_out(
             unsharded_params.append(unsharded_param)
             orig_sizes.append(fsdp_param._orig_size)
             contiguous_orig_strides.append(fsdp_param._contiguous_orig_stride)
-        out = torch.ops.fsdp.split_contiguous_view_as_strided(all_gather_output, all_gather_input_numels, orig_sizes, contiguous_orig_strides)
+        out = torch.ops.fsdp.split_contiguous_view_as_strided(all_gather_output, all_gather_input_split_sizes, orig_sizes, contiguous_orig_strides)
         for i, unsharded_param in enumerate(unsharded_params):
             ctx = contextlib.nullcontext()
             if not torch.distributed._functional_collectives.is_torchdynamo_compiling():

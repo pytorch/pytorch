@@ -87,8 +87,8 @@ from .common import (
 from .multi_kernel import MultiKernel
 from .triton_utils import config_of, signature_of, signature_to_meta
 
-if TYPE_CHECKING:
-    from torch.utils._sympy.value_ranges import ValueRanges
+# if TYPE_CHECKING:
+from torch.utils._sympy.value_ranges import ValueRanges
 
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
