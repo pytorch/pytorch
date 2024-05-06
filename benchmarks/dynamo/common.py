@@ -2448,16 +2448,22 @@ class BenchmarkRunner:
             model_fp64 = None
             inputs_fp64 = None
             try:
-                model_fp64, inputs_fp64 = cast_to_fp64(
-                    self.deepcopy_and_maybe_parallelize(model),
-                    clone_inputs(example_inputs),
-                )
                 # Currently, XPU GEMM FP64 support is WIP. Therefore, we explicitly fallback to
                 # CPU to execute FP64 and take the result as the gold reference.
                 if current_device == "xpu":
-                    model_fp64, inputs_fp64 = cast_to_device(
-                        "cpu", model_fp64, inputs_fp64
+                    model_fp64, inputs_fp64 = cast_to_fp64(
+                        cast_to_device(
+                            "cpu",
+                            self.deepcopy_and_maybe_parallelize(model),
+                            clone_inputs(example_inputs),
+                        )
                     )
+                else:
+                    model_fp64, inputs_fp64 = cast_to_fp64(
+                        self.deepcopy_and_maybe_parallelize(model),
+                        clone_inputs(example_inputs),
+                    )
+
                 # current_device of init_optimizer only impacts which optimizer will be applied. It does
                 # not change any tensor internally. Hence, we leave as it is rather than passing cpu.
                 self.init_optimizer(name, current_device, model_fp64.parameters())
@@ -2475,16 +2481,19 @@ class BenchmarkRunner:
                         else x,
                         fp64_outputs,
                     )
-            except Exception:
+            except Exception as e:
                 log.warning(
                     "fp64 golden ref were not generated for %s. Setting accuracy check to cosine",
                     name,
                 )
+                error_msg = f"current_device={current_device}; error:{str(e)}"
+                log.warning(error_msg)
                 self.args.cosine = True
                 fp64_outputs = None
             finally:
                 del model_fp64, inputs_fp64
                 torch.cuda.empty_cache()
+                torch.xpu.empty_cache()
 
             tolerance, cos_similarity = self.get_tolerance_and_cosine_flag(
                 self.args.training, current_device, name
