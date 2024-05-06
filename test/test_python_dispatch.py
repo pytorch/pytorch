@@ -1177,6 +1177,23 @@ def forward(self, x_a_1, x_b_1, y_1):
             torch._C._dispatch_keys(x).has(DispatchKey.AutogradNestedTensor)
         )
 
+    def test_wrapper_subclass_multiprocessing_preserves_dtype(self):
+        # a and b have dtype of int64, which is purposefully different from the default
+        # assumed by _make_wrapper_subclass().
+        a = torch.randperm(5)
+        b = torch.randperm(5)
+        data = TwoTensor(a, b)
+        expected_dtype = data.dtype
+
+        loader = torch.utils.data.DataLoader(
+            [data, data],
+            batch_size=2,
+            num_workers=2,
+            collate_fn=lambda x: x,
+        )
+        for batch in loader:
+            self.assertEqual(batch[0].dtype, expected_dtype)
+
     def test_index_put_where_only_index_is_subclass(self) -> None:
         called_funcs = []
 
