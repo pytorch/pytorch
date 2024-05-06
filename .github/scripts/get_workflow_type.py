@@ -44,7 +44,7 @@ def get_issue(gh: Github, repo: str, issue_num: int) -> Issue:
 
 
 def is_exception_branch(branch: str) -> bool:
-    return branch.split("/")[0] in ["main", "nightly", "release", "landchecks"]
+    return branch.split("/")[0] in {"main", "nightly", "release", "landchecks"}
 
 
 def get_workflow_type(issue: Issue, username: str) -> str:
