@@ -33,14 +33,14 @@ static c10::IValue output_sizes_key = "output_sizes";
 static c10::IValue time_created_key = "time_created_ns";
 static c10::IValue duration_key = "duration_ms";
 
-c10::IValue frames_key = "frames";
-c10::IValue state_key = "state";
-c10::IValue line_key = "line";
-c10::IValue name_key = "name";
-c10::IValue filename_key = "filename";
-c10::IValue retired_key = "retired";
-c10::IValue time_discovered_started_key = "time_discovered_started_ns";
-c10::IValue time_discovered_completed_key = "time_discovered_completed_ns";
+static c10::IValue frames_key = "frames";
+static c10::IValue state_key = "state";
+static c10::IValue line_key = "line";
+static c10::IValue name_key = "name";
+static c10::IValue filename_key = "filename";
+static c10::IValue retired_key = "retired";
+static c10::IValue time_discovered_started_key = "time_discovered_started_ns";
+static c10::IValue time_discovered_completed_key = "time_discovered_completed_ns";
 
 /* Trace Utils Related to TORCH_NCCL_DESYNC_DEBUG */
 
