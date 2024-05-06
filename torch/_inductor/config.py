@@ -356,7 +356,7 @@ always_keep_tensor_constants = False
 assert_indirect_indexing = True
 
 # compute CSE bounds on variables that do not appear in the FX graph
-compute_all_bounds = True
+compute_all_bounds = False
 
 # constant folding on the joint graph
 joint_graph_constant_folding = True
