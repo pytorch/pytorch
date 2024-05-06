@@ -16561,9 +16561,9 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_svd_lowrank,
            decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack, with_tf32_off,
-                       DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-03)}),
-                                    'TestCommon', 'test_noncontiguous_samples',
-                                    device_type='cuda')],
+                       DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-03),
+                                                       torch.complex64: tol(atol=1e-03, rtol=1e-03)}),
+                                    'TestCommon', 'test_noncontiguous_samples')],
            skips=(
                # test does not work with passing lambda for op
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
@@ -16576,7 +16576,7 @@ op_db: List[OpInfo] = [
                lambda a, b, **kwargs: torch.pca_lowrank(a @ b.mT, **kwargs),
                *args, **kwargs
            ),
-           dtypes=floating_types(),
+           dtypes=floating_and_complex_types(),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
            supports_out=False,
@@ -16587,9 +16587,9 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_pca_lowrank,
            decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack, with_tf32_off,
-                       DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-03)}),
-                                    'TestCommon', 'test_noncontiguous_samples',
-                                    device_type='cuda')],
+                       DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-03),
+                                                       torch.complex64: tol(atol=1e-03, rtol=1e-03)}),
+                                    'TestCommon', 'test_noncontiguous_samples')],
            skips=(
                # test does not work with passing lambda for op
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
