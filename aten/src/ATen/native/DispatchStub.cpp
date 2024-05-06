@@ -10,7 +10,18 @@
 #include <cstdlib>
 #include <cstring>
 
+#ifdef HAVE_ZVECTOR_CPU_DEFINITION
+#include <sys/auxv.h>
+#endif
+
 namespace at::native {
+
+#ifdef HAVE_ZVECTOR_CPU_DEFINITION
+static inline bool cpu_has_vxe()
+{
+  return (getauxval(AT_HWCAP) & HWCAP_S390_VXE);
+}
+#endif
 
 static CPUCapability compute_cpu_capability() {
   auto envar = std::getenv("ATEN_CPU_CAPABILITY");
@@ -60,10 +71,16 @@ static CPUCapability compute_cpu_capability() {
 #endif
   }
 #endif
+
+#ifdef HAVE_ZVECTOR_CPU_DEFINITION
+  // vxe is needed for fp32 vector instructions
+  if (cpu_has_vxe()) {
+    return CPUCapability::ZVECTOR;
+  }
+#endif
+
 #ifdef HAVE_VSX_CPU_DEFINITION
   return CPUCapability::VSX;
-#elif HAVE_ZVECTOR_CPU_DEFINITION
-  return CPUCapability::ZVECTOR;
 #else
   return CPUCapability::DEFAULT;
 #endif
