@@ -240,7 +240,7 @@ class TestTransformers(NNTestCase):
                 # Expect uint8 type not supported
                 ex = None
                 try:
-                    encoder(test, src_key_padding_mask=pad_mask.to(torch.uint8))
+                    test_train_uint8 = encoder(test, src_key_padding_mask=pad_mask.to(torch.uint8))
                 except AssertionError as e:
                     continue
                 self.assertFalse(e, "Failed to catch unsupported uint8 type exception")  # noqa: F821
