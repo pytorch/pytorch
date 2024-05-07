@@ -159,6 +159,7 @@ coverage_ignore_functions = [
     "hierarchical_pickle",
     # torch.amp.autocast_mode
     "autocast_decorator",
+    "is_autocast_available",
     # torch.ao.nn.quantized.dynamic.modules.rnn
     "apply_permutation",
     "pack_weight_bias",
