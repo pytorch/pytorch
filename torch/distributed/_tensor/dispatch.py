@@ -188,11 +188,12 @@ class OpDispatcher:
                     # did not already construct one
                     random._rng_tracker = random.OffsetBasedRNGTracker(mesh.device_type)
 
+                first_arg, first_local_arg = cast(dtensor.DTensor, args[0]), cast(
+                    torch.Tensor, local_tensor_args[0]
+                )
                 rng_context = (
-                    random._rng_tracker._distribute_region(
-                        cast(dtensor.DTensor, args[0])._spec
-                    )
-                    if random._rng_tracker and not local_tensor_args[0].is_meta
+                    random._rng_tracker._distribute_region(first_arg._spec)
+                    if random._rng_tracker and not first_local_arg.is_meta
                     else contextlib.nullcontext()
                 )
 
