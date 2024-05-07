@@ -9,6 +9,9 @@ def is_fbcode():
     return not hasattr(torch.version, "git_version")
 
 
+if is_fbcode():
+    from triton.fb import build_paths
+
 # add some debug printouts
 debug = False
 
@@ -23,6 +26,9 @@ verbose_progress = False
 
 # use fx aot graph codegen cache
 fx_graph_cache = os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE") == "1"
+
+# use fx aot graph codegen cache
+fx_graph_remote_cache = os.environ.get("TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE") == "1"
 
 # enable autotune local cache
 autotune_local_cache = True
@@ -510,7 +516,7 @@ decompose_mem_bound_mm: bool = False
 # assume_aligned_inputs means that we assume that inputs will be aligned; we generate
 # code using this assumption, and clone tensors before use if they aren't aligned.
 # In the common case, most inputs will be aligned.
-assume_aligned_inputs: bool = True
+assume_aligned_inputs: bool = False
 
 
 # config specific to codegen/cpp.py
@@ -753,7 +759,9 @@ class cuda:
     # The default path only works under PyTorch local development environment.
     cutlass_dir = os.environ.get(
         "TORCHINDUCTOR_CUTLASS_DIR",
-        os.path.abspath(
+        build_paths.cutlass()
+        if is_fbcode() and not torch.version.hip
+        else os.path.abspath(
             os.path.join(os.path.dirname(torch.__file__), "../third_party/cutlass/")
         ),
     )
