@@ -423,7 +423,6 @@ def get_patched_config_dict(config_patches=None) -> Dict[str, Any]:
 # the backward graph as well.
 @_use_lazy_graph_module(dynamo_config.use_lazy_graph_module)
 @dynamo_utils.dynamo_timed(phase_name="inductor_compile")
-@dynamo_utils.maybe_cprofile
 def compile_fx_inner(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],

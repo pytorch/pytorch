@@ -87,6 +87,7 @@ from .utils import (
     is_namedtuple,
     istype,
     LazyString,
+    maybe_cprofile,
     orig_code_map,
     record_compilation_metrics,
     reset_graph_break_dup_checker,
@@ -283,6 +284,71 @@ def exception_handler(e, code, frame=None, export=False):
 
 FRAME_COUNTER = 0
 FRAME_COMPILE_COUNTER: typing.Counter[int] = collections.Counter()
+
+
+def maybe_cprofile(func):
+    if config.cprofile:
+        return cprofile_wrapper(func)
+    return func
+
+
+def cprofile_wrapper(func):
+    @wraps(func)
+    def profile_wrapper(*args, **kwargs):
+        global FRAME_COUNTER
+        global FRAME_COMPILE_COUNTER
+        profile_path = Path(
+            f"/tmp/{func.__name__}_{FRAME_COUNTER}_{FRAME_COMPILE_COUNTER}.profile"
+        )
+        prof = cProfile.Profile()
+        prof.enable()
+        start_ts = time.time()
+        retval = prof.runcall(func, *args, **kwargs)
+        profile_latency = time.time() - start_ts
+        prof.disable()
+        log.info(
+            "### Cprofile for %s iter %d took %.3f seconds ###",
+            func.__name__,
+            profile_cnt,
+            profile_latency,
+        )
+        ps = pstats.Stats(prof)
+        try:
+            prof.dump_stats(profile_path)
+        except PermissionError:
+            log.info("Cannot write to %s", str(profile_path))
+        svg_path = profile_path.with_suffix(".svg")
+        try:
+            gprof2dot_process = subprocess.Popen(
+                [
+                    "gprof2dot",
+                    "-f",
+                    "pstats",
+                    "--node-label=total-time-percentage",
+                    "--node-label=self-time-percentage",
+                    "--node-label=total-time",
+                    str(profile_path),
+                ],
+                stdout=subprocess.PIPE,
+            )
+            subprocess.check_call(
+                ["dot", "-Tsvg", "-o", str(svg_path)],
+                stdin=gprof2dot_process.stdout,
+            )
+            log.info("Generated SVG from profile at %s", str(svg_path))
+        except FileNotFoundError:
+            log.info(
+                "Failed to generate SVG from profile -- dumping stats instead."
+                "Try installing gprof2dot and dot for a better visualization"
+            )
+            ps.sort_stats(pstats.SortKey.TIME).print_stats(20)
+            ps.sort_stats(pstats.SortKey.CUMULATIVE).print_stats(20)
+
+        maybe_upload_prof_stats_to_manifold(str(profile_path))  # fb-only
+
+        return retval
+
+    return profile_wrapper
 
 
 def convert_frame_assert(
@@ -510,6 +576,7 @@ def _compile(
             instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
 
     @dynamo_timed(phase_name="entire_frame_compile")
+    @maybe_cprofile
     def compile_inner(
         code: types.CodeType,
         one_graph: bool,
