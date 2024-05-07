@@ -13,7 +13,7 @@ import operator
 import re
 import sys
 import types
-from typing import List, NamedTuple, Optional, Union
+from typing import Any, List, NamedTuple, Optional, Union
 
 from torch.utils._sympy.value_ranges import ValueRanges
 
@@ -26,6 +26,7 @@ import torch
 
 from torch import SymInt
 from torch._guards import GuardSource, TracingContext
+from torch._higher_order_ops.torchbind import call_torchbind
 from torch._ops import HigherOrderOperator
 from torch._streambase import _EventBase, _StreamBase
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
@@ -154,6 +155,7 @@ from .misc import (
 )
 from .nn_module import FSDPManagedNNModuleVariable, UnspecializedNNModuleVariable
 from .optimizer import OptimizerVariable
+from .script_object import TorchScriptObjectVariable
 
 from .sdpa import SDPAParamsVariable
 from .tensor import (
@@ -904,13 +906,65 @@ class VariableBuilder:
                     user_cls_source=AttrSource(self.source, "__class__"),
                 ),
             )
+        elif TorchScriptObjectVariable.is_matching_cls(type(value)):
+            from ..source import (
+                FlattenScriptObjectSource,
+                ScriptObjectQualifiedNameSource,
+            )
+
+            # This exists to allow a smoother transition.
+            # The implications are:
+            # The script objects won't be tracked as proxies.
+            # Methods on these objects won't show up in the graph.
+            # The original script object might be mutated.
+            if not hasattr(value, "__obj_flatten__"):
+                return self.wrap_user_defined(value)
+
+            # Install the guards on the fully qualified name of the script object
+            LazyVariableTracker.realize_all(
+                VariableBuilder(self.tx, ScriptObjectQualifiedNameSource(self.source))(
+                    value._type().qualified_name()  # type: ignore[attr-defined]
+                )
+            )
+            # Install the guards on the content of the script object by setting the source
+            # to be FlattenScriptObjectSource, which calls __obj_flatten__() to get the contents.
+            LazyVariableTracker.realize_all(
+                VariableBuilder(self.tx, FlattenScriptObjectSource(self.source))(
+                    value.__obj_flatten__()
+                )
+            )
+
+            fake_script_obj = torch._library.fake_class_registry.to_fake_obj(
+                self.tx.output.fake_mode, value
+            )
+
+            proxy = self.tx.output.root_tracer.create_graph_input(
+                re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+                type(value),
+                source=self.source,
+            )
+
+            # setting is_unspecialized=False to not insert a as_tensor call in reconstruct by default
+            # seting example to be real value because these example values will be used
+            # as example_inputs for user compiler.
+            proxy.node.meta["grapharg"] = GraphArg(
+                self.source, value, False, None, False, fake_script_obj
+            )
+            return TorchScriptObjectVariable.create(
+                proxy,
+                fake_script_obj,
+                source=self.source,
+            )
         else:
-            self.install_guards(GuardBuilder.TYPE_MATCH)
-            result = UserDefinedObjectVariable(value, source=self.source)
-            if not SideEffects.cls_supports_mutation_side_effects(type(value)):
-                # don't allow STORE_ATTR mutation with custom __setattr__
-                return result
-            return self.tx.output.side_effects.track_object_existing(value, result)
+            return self.wrap_user_defined(value)
+
+    def wrap_user_defined(self, value: Any):
+        self.install_guards(GuardBuilder.TYPE_MATCH)
+        result = UserDefinedObjectVariable(value, source=self.source)
+        if not SideEffects.cls_supports_mutation_side_effects(type(value)):
+            # don't allow STORE_ATTR mutation with custom __setattr__
+            return result
+        return self.tx.output.side_effects.track_object_existing(value, result)
 
     def wrap_listlike(self, value: Union[tuple, list, odict_values, NamedTuple]):
         if config.specialize_int and type(value) is torch.Size:
@@ -1780,6 +1834,12 @@ def wrap_fx_proxy_cls(
         torch.backends.cuda.can_use_flash_attention,
         torch.backends.cuda.can_use_efficient_attention,
     ]:
+        set_example_value(proxy.node, example_value)
+        return ConstantVariable.create(example_value, **options)
+    elif (
+        isinstance(example_value, (int, float, bool))
+        and proxy.node.target is call_torchbind
+    ):
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
     else:
