@@ -130,7 +130,7 @@ def _disable_dynamo_if_unsupported(single_tensor_fn=None):
         @functools.wraps(func)
         def maybe_fallback(self, *args, **kwargs):
             if is_compiling() and not kwargs.get("capturable", False):
-                return torch._dynamo_disable(func(self, *args, **kwargs))
+                return torch._disable_dynamo(func(self, *args, **kwargs))
             else:
                 return func(self, *args, **kwargs)
 
