@@ -1,10 +1,10 @@
 # mypy: ignore-errors
-
 import collections
 import dataclasses
 import functools
 import inspect
 import itertools
+import re
 import sys
 import types
 from typing import Dict, List
@@ -22,6 +22,7 @@ from ..utils import (
     identity,
     is_tensor_base_attr_getter,
     proxy_args_kwargs,
+    set_example_value,
 )
 from .base import VariableTracker
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
@@ -356,14 +357,19 @@ class AutogradFunctionVariable(VariableTracker):
             and torch.is_grad_enabled()
             and config.capture_autograd_function
         ):
-            # Note - this is the same check used in autograd/function.py, except inverted.
-            # If we want to support functorch transforms here, we will need to enable this.
-            if (
-                self.fn_cls.setup_context
-                != torch.autograd.function._SingleLevelFunction.setup_context
-            ):
-                unimplemented(
-                    "NYI - autograd.Function with custom setup_context method"
+            from torch._functorch.autograd_function import (
+                autograd_function_forward_rewritten,
+            )
+            from torch.autograd.function import _is_setup_context_defined
+
+            forward_fn = self.fn_cls.forward
+
+            is_setup_ctx_defined = _is_setup_context_defined(self.fn_cls.setup_context)
+            if is_setup_ctx_defined:
+                # If setup_context is defined, we generate a new forward function which includes
+                # the original forward and setup_context function, and trace the new forward function.
+                forward_fn = autograd_function_forward_rewritten(
+                    self.fn_cls.forward, self.fn_cls.setup_context
                 )
 
             vjp_fn = self.fn_cls.vjp  # type: ignore[attr-defined]
@@ -382,12 +388,25 @@ class AutogradFunctionVariable(VariableTracker):
                     tx.import_source(self.fn_cls.__module__), self.fn_cls.__name__
                 )
 
-            return AutogradFunctionApplyVariable(
-                self.fn_cls.forward,
+            val = AutogradFunctionApplyVariable(
+                forward_fn,
                 self.fn_cls.backward,
                 source,
                 source=AttrSource(source, member="apply"),
             ).call_function(tx, args, kwargs)
+            # Inside of AutogradFunctionApplyVariable.call_function, we use sourceless variable wrapping
+            # the forward function, as we don't want to generate guards for new_forward.__closure__
+            # if forward is rewritten by autograd_function_forward_rewritten.
+            # But we still need to generate correct guards for the original forward and setup_context
+            # functions, so we have to add guards manually.
+            if self.source:
+                fwd_src = AttrSource(self.source, "forward")
+                install_guard(fwd_src.make_guard(GuardBuilder.FUNCTION_MATCH))
+                if is_setup_ctx_defined:
+                    setup_ctx_src = AttrSource(self.source, "setup_context")
+                    install_guard(setup_ctx_src.make_guard(GuardBuilder.FUNCTION_MATCH))
+
+            return val
 
         if self.source:
             source = AttrSource(self.source, "forward")
@@ -395,7 +414,7 @@ class AutogradFunctionVariable(VariableTracker):
             source = None
 
         fn = self.fn_cls.forward
-        ctx = AutogradFunctionContextVariable.create(tx)
+        ctx = AutogradFunctionContextVariable.create(tx, args, kwargs)
         args = [ctx, *args]
         if isinstance(fn, types.FunctionType):
             return variables.UserFunctionVariable(fn, source=source).call_function(
@@ -442,7 +461,32 @@ class AutogradFunctionVariable(VariableTracker):
                 return self.call_apply(tx, args, kwargs)
 
         else:
-            unimplemented(f"Unsupported method: {name}")
+            from .. import trace_rules
+
+            source = AttrSource(self.source, name) if self.source is not None else None
+            try:
+                obj = inspect.getattr_static(self.fn_cls, name)
+            except AttributeError:
+                obj = None
+
+            if isinstance(obj, staticmethod):
+                func = obj.__get__(self.fn_cls)
+                if source is not None:
+                    return (
+                        trace_rules.lookup(func)
+                        .create_with_source(func, source=source)
+                        .call_function(tx, args, kwargs)
+                    )
+                else:
+                    return trace_rules.lookup(func)(func).call_function(
+                        tx, args, kwargs
+                    )
+            elif isinstance(obj, classmethod):
+                return variables.UserMethodVariable(
+                    obj.__func__, self, source=source
+                ).call_function(tx, args, kwargs)
+            else:
+                unimplemented(f"Unsupported method: {name}")
 
 
 @dataclasses.dataclass
@@ -469,15 +513,23 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         inference=False,
         proxy=None,
         saved_tensors=None,
+        needs_input_grad=None,
         **kwargs,
     ):
         super().__init__(value=value, value_type=value_type, **kwargs)
         self.inference = inference
         self.proxy = proxy
         self.saved_tensors = saved_tensors
+        self.needs_input_grad = needs_input_grad
 
     @staticmethod
-    def create(tx):
+    def create(tx, args=None, kwargs=None):
+        needs_input_grad = None
+        if args and not kwargs:
+            needs_input_grad = tuple(
+                isinstance(x, variables.TensorVariable) and x.requires_grad
+                for x in args
+            )
         proxy = tx.output.create_proxy(
             "call_function", torch.autograd.function.FunctionCtx, tuple(), {}
         )
@@ -489,10 +541,12 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
                 inference=True,
                 proxy=proxy,
                 saved_tensors=SavedTensorBox(),
+                needs_input_grad=needs_input_grad,
             ),
             {},
         )
-        proxy.node.meta["example_value"] = out.value
+        set_example_value(proxy.node, out.value)
+
         return out
 
     def as_proxy(self):
@@ -534,6 +588,15 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             )
         if name == "saved_tensors" and self.saved_tensors is not None:
             return variables.TupleVariable(list(self.saved_tensors.tensors))
+        if name == "needs_input_grad":
+            if self.needs_input_grad is not None:
+                return variables.ConstantVariable.create(self.needs_input_grad)
+            if self.source:
+                from .builder import VariableBuilder
+
+                return VariableBuilder(tx, AttrSource(self.source, "needs_input_grad"))(
+                    self.value.needs_input_grad
+                )
         return super().var_getattr(tx, name)
 
 
@@ -573,13 +636,13 @@ class GetAttrVariable(VariableTracker):
 
     def const_getattr(self, tx, name):
         if not isinstance(self.obj, variables.NNModuleVariable):
-            raise NotImplementedError()
+            raise NotImplementedError
         step1 = tx.output.get_submodule(self.obj.module_key)
         if self.name not in step1.__dict__:
-            raise NotImplementedError()
+            raise NotImplementedError
         step2 = inspect.getattr_static(step1, self.name)
         if name not in step2.__dict__:
-            raise NotImplementedError()
+            raise NotImplementedError
         return inspect.getattr_static(step2, name)
 
     def reconstruct(self, codegen):
@@ -758,8 +821,9 @@ class NumpyVariable(VariableTracker):
         if not config.trace_numpy:
             unimplemented(f"numpy.{self.value}()")
 
-        from ..utils import numpy_to_tensor_wrapper
+        import numpy as np
 
+        from ..utils import numpy_to_tensor_wrapper
         from .tensor import NumpyNdarrayVariable
 
         # lookup method name in tnp. Things like np.dtype(float) are not supported yet.
@@ -767,6 +831,18 @@ class NumpyVariable(VariableTracker):
             unimplemented(
                 f"numpy dtype function is not supported yet. Got type {type(self.value)}."
             )
+        elif self.value in (np.iinfo, np.finfo):
+            try:
+                return NumpyTypeInfoVariable(
+                    self.value(
+                        *[x.as_python_constant() for x in args],
+                        **{k: v.as_python_constant() for k, v in kwargs.items()},
+                    )
+                )
+            except NotImplementedError:
+                unimplemented(
+                    f"{self.value.__name__} with non-const args: {args} {kwargs}"
+                )
         else:  # We are dealing with a callable.
             func = get_np_to_tnp_map().get(self.value)
             if func is None:
@@ -976,3 +1052,75 @@ class StopIterationVariable(VariableTracker):
         codegen.load_import_from("builtins", "StopIteration")
         codegen.foreach(self.args)
         codegen.call_function(len(self.args), True)
+
+
+class ConstantLikeVariable(VariableTracker):
+    """self.value is a compile-time constant, but not a literal"""
+
+    _error_prefix = "ConstantLikeVariable"
+    try:
+        from numpy import floating as np_floating
+    except ImportError:
+        np_floating = type("invalid_type", (), {})
+
+    def __init__(self, value, **kwargs):
+        super().__init__(**kwargs)
+        self.value = value
+
+    def python_type(self):
+        return type(self.value)
+
+    def as_python_constant(self):
+        return self.value
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: List[VariableTracker],
+        kwargs: Dict[str, VariableTracker],
+    ) -> VariableTracker:
+        try:
+            # we only support constant propagation for methods
+            cargs = [x.as_python_constant() for x in args]
+            ckwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+        except NotImplementedError:
+            unimplemented(f"{self._error_prefix}.{name}(*{args}, **{kwargs})")
+
+        result = getattr(self.value, name)(*cargs, **ckwargs)
+
+        if variables.ConstantVariable.is_literal(result):
+            return variables.ConstantVariable.create(result)
+        if isinstance(result, re.Match):
+            return ConstantRegexMatchVariable(result)
+
+        unimplemented(f"{self._error_prefix}.{name}() -> {result}")
+
+    def var_getattr(self, tx, name: str) -> VariableTracker:
+        result = getattr(self.value, name)
+        if isinstance(result, self.np_floating):
+            result = float(result)
+        if variables.ConstantVariable.is_literal(result):
+            return variables.ConstantVariable.create(result)
+        return GetAttrVariable(self, name)
+
+
+class RegexPatternVariable(ConstantLikeVariable):
+    _error_prefix = "re.Pattern"
+
+
+class ConstantRegexMatchVariable(ConstantLikeVariable):
+    _error_prefix = "re.Match"
+
+
+class TorchVersionVariable(ConstantLikeVariable):
+    _error_prefix = "torch.__version__"
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("value", torch.__version__)
+        assert kwargs["value"] is torch.__version__
+        super().__init__(**kwargs)
+
+
+class NumpyTypeInfoVariable(ConstantLikeVariable):
+    _error_prefix = "np.iinfo/np.finfo"

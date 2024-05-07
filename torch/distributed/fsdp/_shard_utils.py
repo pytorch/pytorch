@@ -57,7 +57,11 @@ def _create_chunk_sharded_tensor(
         else device.type
     )
     placements = [
-        _get_remote_device_str(r, device_type, num_devices_per_node)
+        _get_remote_device_str(
+            dist.get_global_rank(pg, r),
+            device_type,
+            num_devices_per_node,
+        )
         for r in range(len(chunk_sizes))
     ]
     assert len(chunk_sizes) == len(chunk_offsets) == len(placements)
