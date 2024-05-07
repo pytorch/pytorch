@@ -456,7 +456,7 @@ def aot_dispatch_autograd(
                 fw_metadata=fw_metadata,
             )
 
-            compiled_fw_func = FunctionalizedRngRuntimeWrapper().post_compile(
+            compiled_fw_func = FunctionalizedRngRuntimeWrapper(return_new_outs=False).post_compile(
                 compiled_fw_func, aot_config, fw_metadata=fw_metadata
             )
 
@@ -904,7 +904,7 @@ Got grad_output types: {str(grad_output_types)}"""
                     with context():
                         out = normalize_as_list(bw_module(*all_args))
                     # TODO: replace with post_compile wrapper
-                    out = FunctionalizedRngRuntimeWrapper._functionalized_rng_runtime_epilogue(
+                    out = FunctionalizedRngRuntimeWrapper()._functionalized_rng_runtime_epilogue(
                         CompiledFunction.metadata, out, offset_index=len(out) - 1
                     )
                     return tuple(out)
@@ -960,7 +960,7 @@ Got grad_output types: {str(grad_output_types)}"""
                     disable_amp=disable_amp,
                 )
                 # TODO: replace this with FunctionalizedRngRuntimeWrapper.post_compile
-                out = FunctionalizedRngRuntimeWrapper._functionalized_rng_runtime_epilogue(
+                out = FunctionalizedRngRuntimeWrapper()._functionalized_rng_runtime_epilogue(
                     CompiledFunction.metadata, out, offset_index=len(out) - 1
                 )
                 return tuple(out)

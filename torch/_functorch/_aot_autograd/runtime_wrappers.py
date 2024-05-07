@@ -401,8 +401,17 @@ def _create_runtime_wrapper(
 
     return runtime_wrapper
 
-
+@dataclass
 class FunctionalizedRngRuntimeWrapper(CompilerWrapper):
+    # TODO: I would love to get rid of this argument, but it's
+    # Wrapped pretty tightly around our aot_dispatch_autograd logic.
+    # Specifically, tensors_saved_for_backwards_slice's value is both used for calculating indices
+    # for setting placeholder strides(which is done before runtime, before this wrapper runs)
+    # and for saving tensors for backward (which is done during runtime, after this wrapper runs)
+    # So in aot_dispatch_autograd, this wrapper can't edit the set of outs without making one
+    # of those two indices incorrect.
+    return_new_outs : bool = True
+
     def post_compile(
         self,
         compiled_fn,
@@ -417,7 +426,7 @@ class FunctionalizedRngRuntimeWrapper(CompilerWrapper):
                 seed, offset = CUDARngStateHelper.get_torch_state_as_tuple()
                 runtime_args.extend([seed, offset])
                 out = compiled_fn(runtime_args)
-                out = FunctionalizedRngRuntimeWrapper._functionalized_rng_runtime_epilogue(
+                out = self._functionalized_rng_runtime_epilogue(
                     fw_metadata,
                     out,
                     # TODO: this won't be right for the backward when we convert the call_compiled_backward to use the wrapper
@@ -430,16 +439,18 @@ class FunctionalizedRngRuntimeWrapper(CompilerWrapper):
 
     # Calling convention: If we are running functionalized RNG, then outs consists
     # of (user_outs, rng_offset)
-    @staticmethod
     def _functionalized_rng_runtime_epilogue(
-        metadata: ViewAndMutationMeta, outs, offset_index
+        self, metadata: ViewAndMutationMeta, outs, offset_index,
     ):
         if metadata.is_rng_op_functionalized:
             assert metadata.num_outputs_rng_offset == 1
             new_rng_offset = outs[offset_index]
             CUDARngStateHelper.set_new_offset(new_rng_offset)
-            user_outs = outs[:offset_index] + outs[offset_index + 1 :]
-            return user_outs
+            if self.return_new_outs:
+                user_outs = outs[:offset_index] + outs[offset_index + 1 :]
+                return user_outs
+            else:
+                return outs
 
         return outs
 
