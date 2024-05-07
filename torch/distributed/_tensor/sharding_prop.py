@@ -1,11 +1,15 @@
 from functools import lru_cache
 from itertools import chain
-from typing import Callable, cast, Dict, List, Optional, Sequence, Union
+from typing import Callable, cast, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 from torch._ops import OpOverload
 from torch._subclasses import FakeTensorMode
-from torch.distributed._tensor._utils import try_find_mesh_from_args
+from torch.distributed._tensor._utils import (
+    compute_local_shape,
+    compute_local_stride,
+    try_find_mesh_from_args,
+)
 from torch.distributed._tensor.op_schema import (
     DTensorSpec,
     OpInfo,
@@ -18,7 +22,7 @@ from torch.distributed._tensor.op_schema import (
     StrategyType,
     TupleStrategy,
 )
-from torch.distributed._tensor.placement_types import Replicate, Shard, TensorMeta
+from torch.distributed._tensor.placement_types import Placement, Replicate, TensorMeta
 from torch.distributed.device_mesh import DeviceMesh
 
 aten = torch.ops.aten
@@ -42,6 +46,16 @@ class ShardingPropagator:
         # op map to save static argnum to decide to reuse sharding prop cache or re-run sharding prop
         self.op_to_schema_info: Dict[OpOverload, RuntimeSchemaInfo] = {}
         self.propagate_op_sharding = lru_cache(None)(self.propagate_op_sharding_non_cached)  # type: ignore[method-assign]
+        # op map to save indices of size (and stride) args which may need to be modified in sharding prop
+        self.op_to_size_and_stride_idx: Dict[
+            OpOverload, Union[int, Tuple[int, int]]
+        ] = {
+            aten.new_empty.default: 1,
+            aten.new_full.default: 1,
+            aten.new_ones.default: 1,
+            aten.new_zeros.default: 1,
+            aten.new_empty_strided.default: (1, 2),
+        }
 
     def register_sharding_prop_rule(
         self,
@@ -248,13 +262,7 @@ class ShardingPropagator:
                     suggestion_schema._inplace_rewrap_schema_suggestion(op_schema)
 
                 # size and stride args need to be modified for new factory ops, potentially
-                if op_schema.op in (
-                    aten.new_empty.default,
-                    aten.new_full.default,
-                    aten.new_ones.default,
-                    aten.new_zeros.default,
-                    aten.new_empty_strided.default,
-                ):
+                if op_schema.op in self.op_to_size_and_stride_idx:
                     assert isinstance(output_strategy.output_spec, DTensorSpec)
                     # It happens when the output has the same shape as the input
                     # and the input placements are not all Replicate().
@@ -263,7 +271,7 @@ class ShardingPropagator:
                     ):
                         needs_redistribute = True
                         suggestion_schema = self._adjust_size_and_stride_args(
-                            op_schema, output_strategy.output_spec, mesh
+                            op_schema, output_strategy.output_spec.placements, mesh
                         )
 
                 # construct output spec for the op
@@ -438,40 +446,26 @@ class ShardingPropagator:
         return strategy.strategies[strategy_costs.index(min(strategy_costs))]
 
     def _adjust_size_and_stride_args(
-        self, op_schema: OpSchema, spec: DTensorSpec, mesh: DeviceMesh
+        self, op_schema: OpSchema, placements: Sequence[Placement], mesh: DeviceMesh
     ) -> OpSchema:
+        size_stride_idx = self.op_to_size_and_stride_idx[op_schema.op]
+        if isinstance(size_stride_idx, tuple):
+            size_idx, stride_idx = size_stride_idx
+        else:
+            size_idx = size_stride_idx
+            stride_idx = None
+
         expected_input_schema = list(op_schema.args_schema)
-        # hard code size_idx until we need to support different cases
-        size_idx = 1
-        size = expected_input_schema[size_idx]
-        assert isinstance(size, list)
-        size = list(size)
-        # adjust size to be the same as that of the _local_tensor
-        # of the DTensor input arg at index 0, which can only be inferred
-        for i, p in enumerate(spec.placements):
-            if p.is_shard():
-                assert isinstance(p, Shard)
-                size[p.dim] //= mesh.size(i)
-        expected_input_schema[size_idx] = torch.Size(size)
+        size = cast(list, expected_input_schema[size_idx])
+        # # adjust size to be the same as that of the _local_tensor
+        # # of the DTensor input arg at index 0, which is inferred
+        expected_input_schema[size_idx] = compute_local_shape(size, mesh, placements)
 
         # adjust the stride arg for aten.new_empty_strided.default
-        if op_schema.op == aten.new_empty_strided.default:
-            # hard code stride_idx until we need to support different cases
-            stride_idx = 2
-            stride = expected_input_schema[stride_idx]
-            assert isinstance(stride, list)
-
-            stride_divisors = [1] * len(stride)
-            for i, mesh_idx in enumerate(spec.dim_map):
-                if mesh_idx != -1:
-                    # tensor dimension i is sharded on mesh dimension mesh_idx,
-                    # so we need to divide all the strides larger than stride[i]
-                    # (by the submesh size)
-                    for j in range(len(stride)):
-                        if stride[j] > stride[i]:
-                            stride_divisors[j] *= mesh.size(mesh_idx)
-            expected_input_schema[stride_idx] = tuple(
-                stride[i] // stride_divisors[i] for i in range(len(stride))
+        if stride_idx:
+            stride = cast(list, expected_input_schema[stride_idx])
+            expected_input_schema[stride_idx] = compute_local_stride(
+                stride, mesh, placements
             )
 
         return OpSchema(op_schema.op, tuple(expected_input_schema), {})
