@@ -4446,11 +4446,9 @@ class TestSparseMeta(TestCase):
             self.assertIsInstance(f, FakeTensor)
             self.assertEqualMeta(f, t, 0)
 
-            if layout is torch.sparse_coo:
-                # TODO: fix sparse compressed tensor detach
-                d = f.detach()
-                self.assertIsInstance(d, FakeTensor)
-                self.assertEqualMeta(d, t, 0)
+            d = f.detach()
+            self.assertIsInstance(d, FakeTensor)
+            self.assertEqualMeta(d, t, 0)
 
     @all_sparse_layouts('layout', include_strided=False)
     @parametrize("dtype", [torch.float64])

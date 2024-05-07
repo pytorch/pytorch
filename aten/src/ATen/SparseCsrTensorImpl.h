@@ -2,6 +2,7 @@
 
 #include <ATen/Tensor.h>
 #include <c10/core/TensorImpl.h>
+#include <c10/core/impl/TorchDispatchModeTLS.h>
 #include <c10/util/Exception.h>
 namespace at {
 
@@ -107,15 +108,28 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
     }
   }
 
-  /**
-   * Return a TensorImpl that is a shallow-copy of this TensorImpl.
-   *
-   * For usage of `version_counter` and `allow_tensor_metadata_change`,
-   * see NOTE [ TensorImpl Shallow-Copying ].
-   */
-  c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
-      const c10::VariableVersion& version_counter,
-      bool allow_tensor_metadata_change) const override {
+  template <typename VariableVersion>
+  c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach_core(
+      VariableVersion&& version_counter,
+      bool allow_tensor_metadata_change) const {
+    const auto mode_stack_len = c10::impl::TorchDispatchModeTLS::stack_len();
+    if (mode_stack_len > 0 &&
+        !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
+      const auto& cur_torch_dispatch_mode_state =
+          c10::impl::TorchDispatchModeTLS::get_stack_at(mode_stack_len - 1);
+      auto r = cur_torch_dispatch_mode_state->pyinterpreter()->detach(this);
+      r->set_version_counter(std::forward<VariableVersion>(version_counter));
+      r->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+      return r;
+    } else if (
+        key_set_.has(DispatchKey::Python) &&
+        !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
+      auto r = (pyobj_slot_.load_pyobj_interpreter())->detach(this);
+      r->set_version_counter(std::forward<VariableVersion>(version_counter));
+      r->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+      return r;
+    }
+    // otherwise just copy the SparseTensorImpl and not the PyObject.
     auto impl = c10::make_intrusive<SparseCsrTensorImpl>(
         key_set(), device(), layout_impl(), dtype());
     copy_tensor_metadata(
@@ -134,17 +148,23 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
    * see NOTE [ TensorImpl Shallow-Copying ].
    */
   c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
+      const c10::VariableVersion& version_counter,
+      bool allow_tensor_metadata_change) const override {
+    return shallow_copy_and_detach_core(
+        version_counter, allow_tensor_metadata_change);
+  }
+
+  /**
+   * Return a TensorImpl that is a shallow-copy of this TensorImpl.
+   *
+   * For usage of `version_counter` and `allow_tensor_metadata_change`,
+   * see NOTE [ TensorImpl Shallow-Copying ].
+   */
+  c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
       c10::VariableVersion&& version_counter,
       bool allow_tensor_metadata_change) const override {
-    auto impl = c10::make_intrusive<SparseCsrTensorImpl>(
-        key_set(), device(), layout_impl(), dtype());
-    copy_tensor_metadata(
-        /*src_sparse_impl=*/this,
-        /*dest_sparse_impl=*/impl.get(),
-        /*version_counter=*/std::move(version_counter),
-        /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
-    impl->refresh_numel();
-    return impl;
+    return shallow_copy_and_detach_core(
+        std::move(version_counter), allow_tensor_metadata_change);
   }
 
  private:
