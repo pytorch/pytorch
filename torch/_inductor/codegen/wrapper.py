@@ -1028,11 +1028,11 @@ class WrapperCodeGen(CodeGen):
 
             if len(V.graph.torchbind_constants) > 0:
                 output.writeline("import pickle")
-                for name, value in V.graph.torchbind_constants.items():
+                for name, torchbind_obj in V.graph.torchbind_constants.items():
                     # all the constants are global variables, that's why we need
                     # these 'global var_name' lines
                     output.writeline(f"global {name}")
-                    add_torchbind_input(name, value)
+                    add_torchbind_input(name, torchbind_obj)
 
             for name, value in V.graph.graph_inputs.items():
                 if isinstance(value, sympy.Symbol) and isinstance(

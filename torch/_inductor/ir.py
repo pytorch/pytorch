@@ -4087,7 +4087,7 @@ class ExternKernel(InputsKernel):
         # Rerun fake tensor propagation, because Inductor may have changed the
         # strides of inputs and we need to determine accurately what the
         # output stride will be.
-        example_args = []
+        example_args: List[torch.Tensor, torch._C.ScriptObject] = []
 
         # We need to retain the constant values of fake tensors that we originally
         # propagated the graph with, because for some operators running without a
@@ -6482,7 +6482,12 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
         algorithm,
     ):
         transposed = True
-        (inputs, constant_args, kernel_layout, _,) = _prepare_convolution_fusion_create(
+        (
+            inputs,
+            constant_args,
+            kernel_layout,
+            _,
+        ) = _prepare_convolution_fusion_create(
             cls,
             x,
             weight,

@@ -99,6 +99,7 @@ perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
 aten = torch.ops.aten
 
+_post_grad_graph_counter = itertools.count()
 
 if config.is_fbcode():
     from torch._inductor.fb.utils import log_module_code
@@ -391,6 +392,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.aot_mode = aot_mode
         self.graph_id = graph_id
+        self.post_grad_graph_id = next(_post_grad_graph_counter)
         self.scheduler: "torch._inductor.scheduler.Scheduler" = None  # type: ignore[assignment]
         self.nodes_prefer_channels_last = (
             self.find_nodes_prefer_channels_last() if self.layout_opt else set()
@@ -992,11 +994,11 @@ class GraphLowering(torch.fx.Interpreter):
         if isinstance(value, torch.fx.GraphModule):
             return ir.Subgraph(name=target, graph_module=value)
 
-        elif isinstance(value, torch._C.ScriptObject):
+        if isinstance(value, torch._C.ScriptObject):
             self.torchbind_constants[target] = value
             return TorchBindObject(target, value)
 
-        elif (
+        if (
             config.aot_inductor.use_runtime_constant_folding
             or config.always_keep_tensor_constants
             or unsupported_output_tensor(value)
