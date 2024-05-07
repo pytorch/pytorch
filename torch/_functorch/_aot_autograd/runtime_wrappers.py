@@ -8,6 +8,7 @@ This module defines runtime wrappers, which, based on previous analysis attempts
 
 import collections
 import pprint
+from dataclasses import dataclass
 from functools import wraps
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
@@ -61,17 +62,16 @@ class CompilerWrapper:
 
     Each wrapper below should be implemented as a CompilerWrapper, so that we can facilitate
     caching on the compiled output, and re-wrapping the output via epilogues.
+    Extra metadata that is needed to compute pre or post compile can be passed in via attributes.
     """
 
-    @classmethod
     def pre_compile(
-        cls,
+        self,
         flat_fn,
         flat_args: List[Tensor],
         aot_config: AOTConfig,
         *,
         fw_metadata: ViewAndMutationMeta,
-        **kwargs,
     ):
         """
         Process the inputs to the compiler_fn. You can pass in extra metadata via kwargs.
@@ -80,19 +80,16 @@ class CompilerWrapper:
         flat_args: Metadata from example inputs of the function to compile
         aot_config: AOTConfig passed in at compile time
         fw_metadata: ViewAndMutationMeta generated from flat_fn and flat_args
-        kwargs: Extra metadata available at compile time
         """
         return flat_fn, flat_args, aot_config, fw_metadata
 
-    @classmethod
-    def post_compile(cls, compiled_fn, aot_config, *, fw_metadata, **kwargs):
+    def post_compile(self, compiled_fn, aot_config, *, fw_metadata):
         """
         Given an output of the compiler, wrap it with information received from prologue.
         Args:
         compiled_fn: Callable after calling compiler_fn
         aot_config: AOTConfig after calling prologue
         fw_metadata: ViewAndMutationMeta after calling prologue
-        kwargs: Any extra metadata that's available post compile needed to pass to the wrapper
         Example:
 
         def wrapped_compiled_fn(args):
@@ -103,9 +100,8 @@ class CompilerWrapper:
         """
         return compiled_fn
 
-    @classmethod
     def create(
-        cls,
+        self,
         flat_fn,
         flat_args: List[Tensor],
         aot_config: AOTConfig,
@@ -119,13 +115,13 @@ class CompilerWrapper:
             new_flat_args,
             new_aot_config,
             new_fw_metadata,
-        ) = cls.pre_compile(
+        ) = self.pre_compile(
             flat_fn, flat_args, aot_config, fw_metadata=fw_metadata, **kwargs
         )
         compiled_fn = compiler_fn(
             wrapped_flat_fn, new_flat_args, new_aot_config, fw_metadata=new_fw_metadata
         )
-        return cls.post_compile(
+        return self.post_compile(
             compiled_fn, new_aot_config, fw_metadata=new_fw_metadata, **kwargs
         )
 
@@ -138,26 +134,26 @@ class CompilerWrapper:
 # This is because there are some minor differences in how we treat these cases at runtime:
 # - resize_() is currently handled in the inference case, but not fully handled in the autograd case.
 # - the autograd cases inserts TensorAlias wrapper objects for outputs that alias inputs
+@dataclass
 class RuntimeWrapper(CompilerWrapper):
-    @classmethod
-    def post_compile(  # type: ignore[override]
-        cls,
+    indices_of_inps_to_detach: List[int]
+    trace_joint: bool
+    disable_amp: bool
+
+    def post_compile(
+        self,
         compiled_fn,
         aot_config: AOTConfig,
         *,
         fw_metadata: ViewAndMutationMeta,
-        indices_of_inps_to_detach: List[int],
-        trace_joint: bool,
-        disable_amp: bool,
-        **kwargs,
     ):
         return _create_runtime_wrapper(
             compiled_fn,
             runtime_metadata=fw_metadata,
-            indices_of_inps_to_detach=indices_of_inps_to_detach,
-            trace_joint=trace_joint,
+            indices_of_inps_to_detach=self.indices_of_inps_to_detach,
+            trace_joint=self.trace_joint,
             keep_input_mutations=aot_config.keep_inference_input_mutations,
-            disable_amp=disable_amp,
+            disable_amp=self.disable_amp,
         )
 
 
