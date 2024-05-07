@@ -466,7 +466,7 @@ class _TargetArgsExpr(_TargetExpr):
             from torch.fx.operator_schemas import normalize_function
 
             normalized_args_and_kwargs = normalize_function(
-                node.target, node.args, node.kwargs  # type: ignore[arg-type]
+                node.target, node.args, node.kwargs
             )
 
             if normalized_args_and_kwargs is None:
@@ -914,7 +914,7 @@ class ReplacementPatternEntry(PatternEntry):
                     queue.extend(arg.all_input_nodes)
 
         with graph.inserting_before(last_node):
-            replacement = Replacer(replacement_graph).run(*args)  # type: ignore[arg-type]
+            replacement = Replacer(replacement_graph).run(*args)
             if isinstance(replacement, torch.fx.Node):
                 replacement = [replacement]
 
@@ -932,7 +932,7 @@ class ReplacementPatternEntry(PatternEntry):
                     return
                 assert isinstance(old, torch.fx.Node)
                 if new is None:
-                    old.replace_all_uses_with(None)  # type: ignore[arg-type]
+                    old.replace_all_uses_with(None)
                     graph.erase_node(old)
                     return
                 if isinstance(new, torch.fx.Node):
@@ -1061,7 +1061,7 @@ def register_replacement(
                 )
 
         args = list(
-            torch.fx.map_arg(  # type: ignore[arg-type]
+            torch.fx.map_arg(
                 [match.kwargs[name] for name in argnames], lambda n: n.meta["val"]
             )
         )
@@ -1465,8 +1465,8 @@ class PatternMatcherPass:
     def apply(self, graph: torch.fx.GraphModule) -> int:
         if not self.patterns:
             return 0
-        if isinstance(graph, torch.fx.GraphModule):  # type: ignore[assignment]
-            graph = graph.graph  # type: ignore[assignment]
+        if isinstance(graph, torch.fx.GraphModule):
+            graph = graph.graph
         if self.prevent_match_across_mutations:
             if should_compute_mutation_region_ids(graph):
                 compute_mutation_region_ids(graph)
@@ -1649,7 +1649,7 @@ def joint_fwd_bwd(fn, args) -> torch.fx.GraphModule:
 
 
 def _args(n: torch.fx.Node) -> List[torch.fx.node.Argument]:
-    args: List[torch.fx.node.Argument] = []
+    args: List[torch.fx.node.Argument] = list()
     torch.fx.map_arg((n.args, n.kwargs), args.append)
     return args
 
