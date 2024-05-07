@@ -273,6 +273,11 @@ class TestCuda(TestCase):
         tensor.fill_(1)
         self.assertTrue((tensor == 1).all())
 
+    def test_uuid(self):
+        uuid = torch.cuda.get_device_properties(0).uuid
+        assert len(str(uuid)) == 36  # xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+        assert len(uuid.bytes) == 16
+
     def test_copy_non_blocking(self):
         def _test_copy_non_blocking(a, b):
             event = torch.cuda.Event()
