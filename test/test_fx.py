@@ -55,6 +55,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     IS_MACOS,
     IS_WINDOWS,
+    find_library_location,
     run_tests,
     skipIfTorchDynamo,
 )
