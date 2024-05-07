@@ -1,10 +1,13 @@
 import collections
+import cProfile
 import dis
 import functools
 import itertools
 import logging
 import os
+import pstats
 import random
+import subprocess
 import sys
 import threading
 import time
@@ -12,7 +15,10 @@ import traceback
 import types
 import typing
 import weakref
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set
+
+from torch._utils_internal import maybe_upload_prof_stats_to_manifold
 
 from torch.fx._lazy_graph_module import (  # type: ignore[attr-defined]
     _use_lazy_graph_module,
@@ -292,7 +298,7 @@ def maybe_cprofile(func):
 
 
 def cprofile_wrapper(func):
-    @wraps(func)
+    @functools.wraps(func)
     def profile_wrapper(*args, **kwargs):
         global FRAME_COUNTER
         global FRAME_COMPILE_COUNTER
@@ -306,9 +312,10 @@ def cprofile_wrapper(func):
         profile_latency = time.time() - start_ts
         prof.disable()
         log.info(
-            "### Cprofile for %s iter %d took %.3f seconds ###",
+            "### Cprofile for %s compile id [%d/%d] took %.3f seconds ###",
             func.__name__,
-            profile_cnt,
+            FRAME_COUNTER,
+            FRAME_COMPILE_COUNTER,
             profile_latency,
         )
         ps = pstats.Stats(prof)
