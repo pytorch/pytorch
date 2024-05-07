@@ -140,7 +140,6 @@ class CUDATemplate(KernelTemplate):
                 #include <vector>
             """
         )
-
         return res
 
     def globals(self) -> IndentedBuffer:
