@@ -175,7 +175,7 @@ MPSGraphTensor* log1p(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
   return [mpsGraph logarithmWithTensor:addedTensor name:nil];
 }
 
-static MPSGraphTensor* lengthOfComplexAsReal(MPSGraph *mpsGraph, MPSGraphTensor* inputTensor) {
+static MPSGraphTensor* lengthOfComplexAsReal(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
   auto squares = [mpsGraph squareWithTensor:inputTensor name:nil];
   auto sumSquares = [mpsGraph reductionSumWithTensor:squares axis:-1 name:nil];
   return [mpsGraph squareRootWithTensor:sumSquares name:nil];
