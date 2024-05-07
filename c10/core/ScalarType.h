@@ -430,9 +430,10 @@ static inline ScalarType toUnderlying(ScalarType t) {
 static inline bool isSignedType(ScalarType t) {
   TORCH_CHECK(!isQIntType(t), "isSignedType not supported for quantized types");
 
-#define CASE_ISSIGNED(name)                      \
-  case ScalarType::name:                         \
-    return std::numeric_limits<::c10::impl::ScalarTypeToCPPTypeT<ScalarType::name>>::is_signed;
+#define CASE_ISSIGNED(name)     \
+  case ScalarType::name:        \
+    return std::numeric_limits< \
+        ::c10::impl::ScalarTypeToCPPTypeT<ScalarType::name>>::is_signed;
 
   switch (t) {
     case ScalarType::QInt8:
@@ -447,26 +448,26 @@ static inline bool isSignedType(ScalarType t) {
     case ScalarType::Bits8:
     case ScalarType::Bits16:
       TORCH_CHECK(false, "Bits types are undefined");
-    CASE_ISSIGNED(UInt16);
-    CASE_ISSIGNED(UInt32);
-    CASE_ISSIGNED(UInt64);
-    CASE_ISSIGNED(BFloat16);
-    CASE_ISSIGNED(Float8_e5m2);
-    CASE_ISSIGNED(Float8_e5m2fnuz);
-    CASE_ISSIGNED(Float8_e4m3fn);
-    CASE_ISSIGNED(Float8_e4m3fnuz);
-    CASE_ISSIGNED(Byte);
-    CASE_ISSIGNED(Char);
-    CASE_ISSIGNED(Short);
-    CASE_ISSIGNED(Int);
-    CASE_ISSIGNED(Long);
-    CASE_ISSIGNED(Half);
-    CASE_ISSIGNED(Float);
-    CASE_ISSIGNED(Double);
-    CASE_ISSIGNED(ComplexHalf);
-    CASE_ISSIGNED(ComplexFloat);
-    CASE_ISSIGNED(ComplexDouble);
-    CASE_ISSIGNED(Bool);
+      CASE_ISSIGNED(UInt16);
+      CASE_ISSIGNED(UInt32);
+      CASE_ISSIGNED(UInt64);
+      CASE_ISSIGNED(BFloat16);
+      CASE_ISSIGNED(Float8_e5m2);
+      CASE_ISSIGNED(Float8_e5m2fnuz);
+      CASE_ISSIGNED(Float8_e4m3fn);
+      CASE_ISSIGNED(Float8_e4m3fnuz);
+      CASE_ISSIGNED(Byte);
+      CASE_ISSIGNED(Char);
+      CASE_ISSIGNED(Short);
+      CASE_ISSIGNED(Int);
+      CASE_ISSIGNED(Long);
+      CASE_ISSIGNED(Half);
+      CASE_ISSIGNED(Float);
+      CASE_ISSIGNED(Double);
+      CASE_ISSIGNED(ComplexHalf);
+      CASE_ISSIGNED(ComplexFloat);
+      CASE_ISSIGNED(ComplexDouble);
+      CASE_ISSIGNED(Bool);
     case ScalarType::UInt1:
     case ScalarType::UInt2:
     case ScalarType::UInt3:
@@ -478,6 +479,8 @@ static inline bool isSignedType(ScalarType t) {
     case ScalarType::Undefined:
     case ScalarType::NumOptions:
       break;
+      // Do not add default here, but rather define behavior of every new entry
+      // here
   }
   TORCH_CHECK(false, "Unknown ScalarType ", t);
 #undef CASE_ISSIGNED
