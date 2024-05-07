@@ -361,8 +361,12 @@ class DistTensorOpsTest(DTensorTestBase):
             new_empty_strided_dt = input_dt.new_empty_strided((12, 8), (8, 1))
             self.assertEqual(comm_mode.get_total_counts(), 0)
         self.assertEqual(new_empty_strided_dt.placements, placement)
-        self.assertEqual(new_empty_strided_dt._local_tensor.size(), (12, 8 // self.world_size))
-        self.assertEqual(new_empty_strided_dt._local_tensor.stride(), (8 // self.world_size, 1))
+        self.assertEqual(
+            new_empty_strided_dt._local_tensor.size(), (12, 8 // self.world_size)
+        )
+        self.assertEqual(
+            new_empty_strided_dt._local_tensor.stride(), (8 // self.world_size, 1)
+        )
         self.assertTrue(new_empty_strided_dt.contiguous() is new_empty_strided_dt)
 
         # output shape same as input shape, unevenly sharded input -> output replicated
