@@ -615,7 +615,11 @@ class TestExport(TestCase):
         self.assertEqual(actual_result, expected_result)
 
     # TODO(yidi)
-    @unittest.expectedFailure
+    # When run_decomp, the top-level cond node has pre-existing metadata,
+    # which overrides the metada for operators in subgraph due to interpreter.run
+    # and the way we preserve metadata.
+    @testing.expectedFailurePreDispatchRunDecomp
+    @testing.expectedFailureRetraceability
     def test_export_cond_preserve_torch_fn_for_subgraphs(self):
         class MySubModule(torch.nn.Module):
             def foo(self, x):
