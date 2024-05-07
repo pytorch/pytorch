@@ -120,9 +120,13 @@ static void unary_op(const Tensor& self,
       self_ = self;
     }
 
+    bool gatherTensorData = true;
     // NS: This check is wrong and needs to be fixed, as it would produce wrong results for transposed outputs
-    // See https://github.com/pytorch/pytorch/issues/10076
-    bool gatherTensorData = needsGather(output);
+    // See https://github.com/pytorch/pytorch/issues/100764
+
+    if (!output.is_contiguous() || output.is_view()) {
+      gatherTensorData = false;
+    }
 
     auto selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self_, /*mpsShape=*/nullptr, gatherTensorData);
     auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output, /*mpsShape=*/nullptr, false);
