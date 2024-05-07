@@ -84,6 +84,26 @@ INSTANTIATE_INT4MM(bfloat, 256);
 #endif
 
 template<typename T>
+struct Vec4Type {};
+
+template<>
+struct Vec4Type<float> {
+  using type = float4;
+};
+
+template<>
+struct Vec4Type<half> {
+  using type = half4;
+};
+
+#if __METAL_VERSION__ >= 310
+template<>
+struct Vec4Type<bfloat> {
+  using type = bfloat4;
+};
+#endif
+
+template<typename T>
 kernel void int8pack_mm(
     constant T                 * A              [[buffer(0)]],
     constant char              * B              [[buffer(1)]],
@@ -95,14 +115,15 @@ kernel void int8pack_mm(
     const uint ldc = sizes.z;
     const uint m = thread_index.y; // 0..sizes.x-1
     const uint n = thread_index.x; // 0..sizes.z-1
-    constant T *A_ptr = A + m * lda;
-    constant char *B_ptr = B + n * lda;
+    using vecT = typename Vec4Type<T>::type;
+    constant vecT *A_ptr = reinterpret_cast<constant vecT*>(A + m * lda);
+    constant char4 *B_ptr = reinterpret_cast<constant char4*>(B + n * lda);
 
     float rc = 0.0;
-    for(uint k = 0; k < sizes.y;  k++) {
-      const auto a_val = float(A_ptr[k]);
-      const auto b_val = float(B_ptr[k]);
-      rc += a_val * b_val;
+    for(uint k = 0; k < sizes.y/4;  k++) {
+      const auto a_val = float4(A_ptr[k]);
+      const auto b_val = float4(B_ptr[k]);
+      rc += dot(a_val, b_val);
     }
     outputData[m * sizes.z + n] = T(rc * float(scales[n]));
 }
