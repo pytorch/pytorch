@@ -691,7 +691,9 @@ void PyTorchStreamWriter::setup(const string& file_name) {
 
   ar_->m_pIO_opaque = this;
   ar_->m_pWrite = ostream_write_func;
+#if !defined(C10_MOBILE)
   ar_->m_pSeek = ostream_seek_func;
+#endif
 
   mz_zip_writer_init_v2(ar_.get(), 0, MZ_ZIP_FLAG_WRITE_ZIP64);
   valid("initializing archive ", file_name.c_str());
