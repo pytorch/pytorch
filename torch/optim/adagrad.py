@@ -7,7 +7,6 @@ from .optimizer import (
     _default_to_fused_or_foreach,
     _differentiable_doc,
     _foreach_doc,
-    _fused_doc,
     _get_scalar_dtype,
     _get_value,
     _maximize_doc,
@@ -224,8 +223,10 @@ Adagrad.__doc__ = (
         {_foreach_doc}
         {_maximize_doc}
         {_differentiable_doc}
-        {_fused_doc}
-
+        fused (bool, optional): whether the fused implementation (CPU only) is used.
+            Currently, `torch.float64`, `torch.float32`, `torch.float16`, and `torch.bfloat16`
+            are supported. (default: None). Please note that the fused implementations does not
+            support sparse or complex gradients.
     .. _Adaptive Subgradient Methods for Online Learning and Stochastic
         Optimization: http://jmlr.org/papers/v12/duchi11a.html
 
