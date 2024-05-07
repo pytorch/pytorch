@@ -489,6 +489,55 @@ class AutogradFunctionVariable(VariableTracker):
                 unimplemented(f"Unsupported method: {name}")
 
 
+class AutogradBackwardCFunctionVariable(VariableTracker):
+    """represents a torch.autograd.BackwardCFunction subclass"""
+
+    _nonvar_fields = {
+        "fn_cls",
+        *VariableTracker._nonvar_fields,
+    }
+
+    def __init__(self, fn_cls, **kwargs):
+        super().__init__(**kwargs)
+        assert self.source
+        self.fn_cls = fn_cls
+
+    def call_apply(self, tx, args, kwargs):
+        self.source = AttrSource(self.source, "backward")
+        fn = self.fn_cls._forward_cls.backward
+
+        # self.tx.output.side_effects.track_object_existing(
+        ctx = AutogradFunctionContextVariable.create(tx, args, kwargs)
+        args = [ctx, *args]
+
+        # static methods like backward are FunctionType
+        assert isinstance(fn, types.FunctionType)
+        return variables.UserFunctionVariable(fn, source=self.source).call_function(
+            tx, args, kwargs
+        )
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ):
+        if name == "apply":
+            return self.call_apply(tx, args, kwargs)
+
+        unimplemented(f"Unsupported autograd.BackwardCFunction method: {name}")
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        breakpoint()
+        return self.fn(*args, **kwargs)
+
+    def python_type(self):
+        return self.fn_cls
+
+
 @dataclasses.dataclass
 class SavedTensorBox:
     tensors: List[VariableTracker] = dataclasses.field(default_factory=list)

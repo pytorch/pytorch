@@ -1,6 +1,7 @@
 # This module contains functions that *will be allowed* by dynamo
 
 import functools
+from typing import List
 
 import torch
 import torch.utils._pytree as pytree
@@ -66,21 +67,42 @@ def wrap_numpy(f):
     return wrap
 
 
-class FakeContext:
-    def __init__(self, saved_tensors):
-        # this will cache the results of saved_tensors
-        # and will no longer call into c++ binding
+class FakeBackwardCFunction:
+    # duck type
+    def __init__(
+        self,
+        other: torch.autograd.function.BackwardCFunction,
+        saved_tensors: List[torch.Tensor],
+    ):
+        blocklist = {
+            "saved_tensors",
+            "saved_variables",
+            "_raw_saved_tensors",
+            "materialize_grads",
+        }
+        for attr_name in dir(other):
+            if attr_name.startswith("__") or attr_name in blocklist:
+                continue
+            setattr(self, attr_name, getattr(other, attr_name))
+
+        self._forward_cls = other._forward_cls  # type: ignore[attr-defined]
         self.saved_tensors = saved_tensors
 
 
-def call_backward(backward_fn, saved_tensors, *args):
-    grads = backward_fn(FakeContext(saved_tensors), *args)
+def call_backward(backward_c_function, saved_tensors, *args):
+    # TODO: speculate instead of always graph breaking
+    @torch._dynamo.disable()
+    def run_eager():
+        fake = FakeBackwardCFunction(backward_c_function, saved_tensors)
+        grads = fake._forward_cls.backward(fake, *args)  # type: ignore[attr-defined]
 
-    # in eager, we wrap in a tuple when there's only one grad output
-    if type(grads) is not tuple:
-        grads = (grads,)
+        # in eager, we wrap in a tuple when there's only one grad output
+        if type(grads) is not tuple:
+            grads = (grads,)
 
-    return grads
+        return grads
+
+    return run_eager()
 
 
 def untyped_storage_size(x: torch.Tensor):

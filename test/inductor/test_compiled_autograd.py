@@ -19,14 +19,22 @@ from torch.testing._internal.logging_utils import logs_to_string
 # note: these tests are not run on windows due to inductor_utils.HAS_CPU
 
 
-def compiler_fn(gm):
-    """Same as torch.compile() but counts number of compiles"""
+def make_compiler_fn(fullgraph=True, dynamic=True):
+    def _compiler_fn(gm):
+        """Same as torch.compile() but counts number of compiles"""
 
-    def inner_compiler(gm_, example_inputs_):
-        counters["compiled_autograd"]["compiles"] += 1
-        return inductor.compile(gm_, example_inputs_)
+        def _inner_compiler(gm_, example_inputs_):
+            counters["compiled_autograd"]["compiles"] += 1
+            return inductor.compile(gm_, example_inputs_)
 
-    return torch.compile(gm, backend=inner_compiler, fullgraph=True, dynamic=True)
+        return torch.compile(
+            gm, backend=_inner_compiler, fullgraph=fullgraph, dynamic=dynamic
+        )
+
+    return _compiler_fn
+
+
+compiler_fn = make_compiler_fn()
 
 
 # TODO(jansel): hooks as lambdas creates recompiles in dynamo, we should fix that
@@ -46,6 +54,10 @@ class TestCompiledAutograd(TestCase):
     def check_output_and_recompiles(
         self, fn, count=1, compiler_fn=compiler_fn, compile_fn=False
     ):
+        if isinstance(count, list):
+            captures, compiles = count
+        else:
+            captures, compiles = count, count
         with torch.autograd.set_multithreading_enabled(False):
             torch._dynamo.reset()
             counters["compiled_autograd"].clear()
@@ -56,8 +68,8 @@ class TestCompiledAutograd(TestCase):
                 opt_fn = torch.compile(fn) if compile_fn else fn
                 actual = list(opt_fn())
             self.assertEqual(expected, actual)
-            self.assertEqual(counters["compiled_autograd"]["captures"], count)
-            self.assertEqual(counters["compiled_autograd"]["compiles"], count)
+            self.assertEqual(counters["compiled_autograd"]["captures"], captures)
+            self.assertEqual(counters["compiled_autograd"]["compiles"], compiles)
 
     def test_dynamo_flaky_segfault(self):
         import os
@@ -601,7 +613,9 @@ main()
                 loss.backward()
                 yield x.grad
 
-        self.check_output_and_recompiles(fn, 2)
+        self.check_output_and_recompiles(
+            fn, count=[2, 4], compiler_fn=make_compiler_fn(fullgraph=False)
+        )
 
     def test_custom_fn_saved_multiple_tensors(self):
         def fn():
@@ -624,7 +638,9 @@ main()
                 loss.backward()
                 yield x.grad
 
-        self.check_output_and_recompiles(fn, 2)
+        self.check_output_and_recompiles(
+            fn, count=[2, 4], compiler_fn=make_compiler_fn(fullgraph=False)
+        )
 
     def test_custom_fn_saved_multiple_tensors_dedup(self):
         def fn():
@@ -646,7 +662,9 @@ main()
                 loss.backward()
                 yield x.grad
 
-        self.check_output_and_recompiles(fn, 2)
+        self.check_output_and_recompiles(
+            fn, count=[2, 4], compiler_fn=make_compiler_fn(fullgraph=False)
+        )
 
     def test_custom_fn_saved_shape_tensor(self):
         def fn():
@@ -668,7 +686,9 @@ main()
                 loss.backward()
                 yield x.grad
 
-        self.check_output_and_recompiles(fn, 2)
+        self.check_output_and_recompiles(
+            fn, count=[2, 4], compiler_fn=make_compiler_fn(fullgraph=False)
+        )
 
     def test_custom_fn_saved_attr(self):
         def fn():
@@ -694,7 +714,9 @@ main()
             torch._dynamo.exc.InternalTorchDynamoError,
             "is not subscriptable",
         ):
-            self.check_output_and_recompiles(fn, 2)
+            self.check_output_and_recompiles(
+                fn, count=[2, 4], compiler_fn=make_compiler_fn(fullgraph=False)
+            )
 
     def test_custom_fn_multiple_grads(self):
         def fn():
@@ -716,7 +738,9 @@ main()
                 yield x.grad
                 yield y.grad
 
-        self.check_output_and_recompiles(fn, 2)
+        self.check_output_and_recompiles(
+            fn, count=[2, 4], compiler_fn=make_compiler_fn(fullgraph=False)
+        )
 
     def test_custom_fn_non_variable_input(self):
         def fn():
@@ -740,7 +764,9 @@ main()
                 yield y
                 yield z
 
-        self.check_output_and_recompiles(fn, 2)
+        self.check_output_and_recompiles(
+            fn, count=[2, 4], compiler_fn=make_compiler_fn(fullgraph=False)
+        )
 
     @unittest.skipIf(not HAS_CUDA, "requires cuda")
     def test_custom_fn_output_metadata(self):
@@ -756,7 +782,7 @@ main()
                 return inductor.compile(gm_, example_inputs_)
 
             return torch.compile(
-                gm, backend=inner_compiler, fullgraph=True, dynamic=True
+                gm, backend=inner_compiler, fullgraph=False, dynamic=True
             )
 
         def fn():
@@ -780,7 +806,7 @@ main()
             yield x.device
             yield x.grad
 
-        self.check_output_and_recompiles(fn, 1, my_compiler_fn)
+        self.check_output_and_recompiles(fn, count=[1, 2], compiler_fn=my_compiler_fn)
 
     def test_custom_fns_with_same_graph(self):
         def fn():
@@ -812,7 +838,7 @@ main()
                 yield x.grad
 
         self.check_output_and_recompiles(
-            fn, 2
+            fn, count=[2, 4], compiler_fn=make_compiler_fn(fullgraph=False)
         )  # should compile once for MyFn1 and once for MyFn2
 
     def test_dynamically_defined_class(self):
@@ -836,7 +862,9 @@ main()
                 loss.backward()
                 yield x.grad
 
-        self.check_output_and_recompiles(fn, 3)
+        self.check_output_and_recompiles(
+            fn, count=[3, 6], compiler_fn=make_compiler_fn(fullgraph=False)
+        )
 
     def test_mismatch_fake_tensor_mode(self, dynamic_shape=False):
         """
@@ -1495,12 +1523,14 @@ def load_test_module(name):
         ).load_module()
 
 
-def make_wrapped(fn):
+def make_wrapped(fn, fullgraph):
     @functools.wraps(fn)
     def wrapped(self):
         torch._dynamo.reset()
-        with compiled_autograd.enable(compiler_fn):
-            return fn(self)
+        with compiled_autograd.enable(make_compiler_fn(fullgraph=fullgraph)):
+            out = fn(self)
+
+        return out
 
     return wrapped
 
@@ -1514,7 +1544,8 @@ def wrap_test_class(orig_cls):
         elif known_failures_re.match(name) or name in known_failing_tests:
             dct[name] = unittest.expectedFailure
         elif name.startswith("test_"):
-            dct[name] = make_wrapped(fn)
+            fullgraph = name not in known_graph_breaks_tests
+            dct[name] = make_wrapped(fn, fullgraph)
 
     return type(
         orig_cls.__name__ + "WithCompiledAutograd",
@@ -1522,6 +1553,18 @@ def wrap_test_class(orig_cls):
         dct,
     )
 
+
+known_graph_breaks_tests = {
+    # autograd.Function eager fallback
+    "test_autograd_python_custom_function_inplace",
+    "test_custom_function_saved_tensors",
+    "test_custom_function_setup_context_simple",
+    "test_dep_nograd",
+    "test_function_returns_input",
+    "test_return_leaf_inplace",
+    "test_saved_tensor_hooks_custom_function_intermediates",
+    "test_too_many_grads",
+}
 
 # These groups of tests aren't supported yet
 known_failures_re = re.compile(

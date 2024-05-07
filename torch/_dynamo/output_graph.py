@@ -92,6 +92,7 @@ from .variables.builder import (
     VariableBuilder,
     wrap_fx_proxy,
 )
+from .variables.lists import BaseListVariable
 from .variables.misc import NullVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
@@ -872,11 +873,19 @@ class OutputGraph:
         ] = {}
         maybe_gm = self.local_scope.get("self")
         stolen_list_names = get_locals_to_steal(maybe_gm)
-        for x in [
+        queue = [
             *tx.stack,
             *tx.symbolic_locals.values(),
             *self.side_effects.store_attr_mutations.keys(),
-        ]:
+        ]
+
+        while queue:
+            x = queue.pop()
+            if isinstance(x, BaseListVariable):
+                assert isinstance(x.items, List)
+                queue += x.items
+                continue
+
             if not (
                 isinstance(x, (VariableTracker, AttributeMutationExisting))
                 and isinstance(x.source, GetItemSource)
@@ -890,7 +899,7 @@ class OutputGraph:
                 needs_alias[stolen_name] = []
             needs_alias[stolen_name].append(x)
 
-        visited = set()
+        visited = {}
         for arg in self.graphargs:
             if not (
                 isinstance(arg._example, list)
@@ -904,12 +913,12 @@ class OutputGraph:
             assert list_name in self.code_options["co_varnames"]
             for x in needs_alias[list_name]:
                 list_idx = x.source.index
-                alias_name = self.new_var(
-                    f"{list_name}_ref"
-                )  # self.new_var already adds unique id suffix
-
                 if list_idx not in visited:
-                    visited.add(list_idx)
+                    alias_name = self.new_var(
+                        f"{list_name}_ref"
+                    )  # self.new_var already adds unique id suffix
+
+                    visited[list_idx] = alias_name
                     # bytecode of `alias_name = list_name[list_idx]`
                     alias_insts.extend(
                         [
@@ -921,7 +930,7 @@ class OutputGraph:
                     )
 
                 # operate on alias, handled by suffix codegen
-                x.source = LocalSource(alias_name)
+                x.source = LocalSource(visited[list_idx])
 
         return alias_insts
 

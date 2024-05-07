@@ -134,6 +134,7 @@ from .lists import (
     TupleVariable,
 )
 from .misc import (
+    AutogradBackwardCFunctionVariable,
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
     ComptimeVariable,
@@ -616,6 +617,11 @@ class VariableBuilder:
                 value,
                 source=self.source,
             )
+        elif isinstance(value, torch.autograd.function.BackwardCFunction):
+            install_guard(
+                self.source.make_guard(GuardBuilder.TYPE_MATCH),
+            )
+            return AutogradBackwardCFunctionVariable(value, source=self.source)
         elif isinstance(value, torch.autograd.function.FunctionCtx):
             saved_tensors_source = AttrSource(self.source, "saved_tensors")
             install_guard(
