@@ -75,18 +75,9 @@ static bool is_empty_tensor(const Tensor& self) {
   return self.numel() == 0;
 }
 
-static void unary_op_noresize(const Tensor& self,
-                              const Tensor& output_,
-                              std::string op_name,
-                              UnaryOpBlock unaryBlock,
-                              is_noop_p is_noop = is_empty_tensor) {
+static void unary_op_noresize(const Tensor& self, const Tensor& output_, std::string op_name, UnaryOpBlock unaryBlock) {
   TORCH_CHECK(!(!is_macos_13_or_newer() && self.scalar_type() == ScalarType::Byte),
               "MPS support unary op with uint8 natively starting from macOS 13.0");
-
-  if (is_noop(self)) {
-    output_.copy_(self);
-    return;
-  }
 
   auto output = output_;
   bool needsCopyToOutput = false;
@@ -143,7 +134,13 @@ static void unary_op(const Tensor& self,
   if (!output_.is_same_size(self)) {
     output_.resize_(self.sizes());
   }
-  unary_op_noresize(self, output_, op_name, unaryBlock, is_noop);
+
+  if (is_noop(self)) {
+    output_.copy_(self);
+    return;
+  }
+
+  unary_op_noresize(self, output_, op_name, unaryBlock);
 }
 
 MPSGraphTensor* trunc_tensor(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
@@ -264,9 +261,15 @@ CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(atanh_out_mps, atanh)
 
 Tensor& abs_out_mps(const Tensor& self, Tensor& output) {
   using namespace mps;
+
   if (!output.is_same_size(self)) {
     output.resize_(self.sizes());
   }
+
+  if (self.numel() == 0) {
+    return output;
+  }
+
   if (supportsComplex() || !self.is_complex()) {
     unary_op_noresize(self, output, "abs_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
       auto rc = [mpsGraph absoluteWithTensor:inputTensor name:nil];
