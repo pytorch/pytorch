@@ -118,20 +118,25 @@ def _dispatch_sqrt(
         return math.sqrt(x)
 
 
-def _disable_dynamo_if_unsupported(func):
-    def maybe_fallback(self, *args, **kwargs):
-        if is_compiling() and not kwargs.get("capturable", False):
-            import torch._dynamo
+def _disable_dynamo_if_unsupported(single_tensor_fn=None):
+    # workaround for torchscript BC
+    # it requires all called functions to be in the
+    # global environment at the site at which the
+    # maybe_fallback closure is created
+    if single_tensor_fn:
+        globals()[single_tensor_fn.__name__] = single_tensor_fn
 
-            @torch._disable_dynamo
-            def disabled_func(self, *args, **kwargs):
+    def wrapper(func):
+        @functools.wraps(func)
+        def maybe_fallback(self, *args, **kwargs):
+            if is_compiling() and not kwargs.get("capturable", False):
+                return torch._dynamo_disable(func(self, *args, **kwargs))
+            else:
                 return func(self, *args, **kwargs)
 
-            disabled_func(self, *args, **kwargs)
-        else:
-            return func(self, *args, **kwargs)
+        return maybe_fallback
 
-    return maybe_fallback
+    return wrapper
 
 
 # For any optimizer with a faster implementation, we attempt to default to the
