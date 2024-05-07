@@ -329,6 +329,7 @@ auto build_graph_and_tensors(
     // scaled_dot_product_flash_attention_options.set_alibi_mask(true);
   }
 
+<<<<<<< HEAD
   auto seq_q = mha_graph->tensor(fe::graph::Tensor_attributes()
                                      .set_name("Seq_q")
                                      .set_dim({b, 1, 1, 1})
@@ -339,6 +340,18 @@ auto build_graph_and_tensors(
                                       .set_dim({b, 1, 1, 1})
                                       .set_stride({1, 1, 1, 1})
                                       .set_data_type(fe::DataType_t::INT32));
+=======
+  // auto seq_q = mha_graph->tensor(fe::graph::Tensor_attributes()
+  //                                    .set_name("seq_q")
+  //                                    .set_dim({b, 1, 1, 1})
+  //                                    .set_stride({1, 1, 1, 1})
+  //                                    .set_data_type(fe::DataType_t::INT32));
+  // auto seq_kv = mha_graph->tensor(fe::graph::Tensor_attributes()
+  //                                     .set_name("seq_kv")
+  //                                     .set_dim({b, 1, 1, 1})
+  //                                     .set_stride({1, 1, 1, 1})
+  //                                     .set_data_type(fe::DataType_t::INT32));
+>>>>>>> cced3401825 (fix cudnn attention check)
 
   // if (cudnnGetVersion() >= 8903) {
   //     scaled_dot_product_flash_attention_options.set_bias(bias)

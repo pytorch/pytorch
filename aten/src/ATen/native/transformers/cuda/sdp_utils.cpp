@@ -304,11 +304,23 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
   const auto num_heads{params.query.sym_size(1)},
       query_lengths{params.query.sym_size(2)},
       head_dim{params.query.sym_size(3)};
-  const bool ok = query_lengths % 64 == 0 && head_dim % 64 == 0;
+  // const bool ok = query_lengths % 64 == 0 && head_dim % 64 == 0;
+  // if (!ok) {
+  //   if (debug) {
+  //     TORCH_WARN(
+  //         "CuDNN requires sequence length and head dim to be divisible by 64. Got sequence length: ",
+  //         query_lengths,
+  //         ", head dim: ",
+  //         head_dim,
+  //         ".");
+  //   }
+  //   return false;
+  // }
+  const bool ok = query_lengths % 64 == 0 && head_dim <= 128 && head_dim % 8 == 0;
   if (!ok) {
     if (debug) {
       TORCH_WARN(
-          "CuDNN requires sequence length and head dim to be divisible by 64. Got sequence length: ",
+          "CuDNN requires sequence length to be divisible by 64 and head dim to be less than or equal to 128 and divisible by 8. Got sequence length: ",
           query_lengths,
           ", head dim: ",
           head_dim,
@@ -326,23 +338,41 @@ bool check_cudnn_layout(sdp_params const& params, bool debug) {
   const int64_t s_k = params.key.size(2);
   const int64_t s_v = params.value.size(2);
   // corresponds to cuDNN's "packed QKV" layout
-  const bool query_layout_ok = (params.query.stride(0) == s_q * 3 * h * d) &&
-                                 (params.query.stride(1) == d) &&
-                                 (params.query.stride(2) == 3 * h * d) &&
-                                 (params.query.stride(3) == 1);
-  const bool key_layout_ok = (params.key.stride(0) == s_k * 3 * h * d) &&
-                               (params.key.stride(1) == d) &&
-                               (params.key.stride(2) == 3 * h * d) &&
-                               (params.key.stride(3) == 1);
-  const bool value_layout_ok = (params.value.stride(0) == s_v * 3 * h * d) &&
-                                 (params.value.stride(1) == d) &&
-                                 (params.value.stride(2) == 3 * h * d) &&
-                                 (params.value.stride(3) == 1);
+  // const bool query_layout_ok = (params.query.stride(0) == s_q * 3 * h * d) &&
+  //                                (params.query.stride(1) == d) &&
+  //                                (params.query.stride(2) == 3 * h * d) &&
+  //                                (params.query.stride(3) == 1);
+  // const bool key_layout_ok = (params.key.stride(0) == s_k * 3 * h * d) &&
+  //                              (params.key.stride(1) == d) &&
+  //                              (params.key.stride(2) == 3 * h * d) &&
+  //                              (params.key.stride(3) == 1);
+  // const bool value_layout_ok = (params.value.stride(0) == s_v * 3 * h * d) &&
+  //                                (params.value.stride(1) == d) &&
+  //                                (params.value.stride(2) == 3 * h * d) &&
+  //                                (params.value.stride(3) == 1);
+  // if (debug) {
+  //   if (!query_layout_ok) { TORCH_WARN("Query tensor was not in cuDNN-supported packed QKV layout", params.query.strides()); }
+  //   if (!key_layout_ok) { TORCH_WARN("Key tensor was not in cuDNN-supported packed QKV layout"); }
+  //   if (!value_layout_ok) { TORCH_WARN("Value tensor was not in cuDNN-supported packed QKV layout"); }
+  // }
+  const bool query_layout_ok = (params.query.stride(0) == s_q * h * d) &&
+                               (params.query.stride(1) == d) &&
+                               (params.query.stride(2) == h * d) &&
+                               (params.query.stride(3) == 1);
+  const bool key_layout_ok = (params.key.stride(0) == s_k * h * d) &&
+                              (params.key.stride(1) == d) &&
+                              (params.key.stride(2) == h * d) &&
+                              (params.key.stride(3) == 1);
+  const bool value_layout_ok = (params.value.stride(0) == s_v * h * d) &&
+                               (params.value.stride(1) == d) &&
+                               (params.value.stride(2) == h * d) &&
+                               (params.value.stride(3) == 1);
   if (debug) {
-    if (!query_layout_ok) { TORCH_WARN("Query tensor was not in cuDNN-supported packed QKV layout", params.query.strides()); }
-    if (!key_layout_ok) { TORCH_WARN("Key tensor was not in cuDNN-supported packed QKV layout"); }
-    if (!value_layout_ok) { TORCH_WARN("Value tensor was not in cuDNN-supported packed QKV layout"); }
+    if (!query_layout_ok) { TORCH_WARN("Query tensor was not in cuDNN-supported QKV layout. Shape: ", params.query.sizes(), " Strides: ", params.query.strides()); }
+    if (!key_layout_ok) { TORCH_WARN("Key tensor was not in cuDNN-supported QKV layout. Shape: ", params.key.sizes(), " Strides: ", params.key.strides()); }
+    if (!value_layout_ok) { TORCH_WARN("Value tensor was not in cuDNN-supported QKV layout. Shape: ", params.value.sizes(), " Strides: ", params.value.strides()); }
   }
+
   return query_layout_ok && key_layout_ok && value_layout_ok;
 }
 
@@ -434,14 +464,14 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
   constexpr auto general_constraints =
       array_of<bool (*)(sdp_params const&, bool)>(
           check_runtime_enabled_cudnn,
-          check_cudnn_hardware_support);
-          // check_all_tensors_on_device,
-          // check_cudnn_tensor_shapes,
-          // check_cudnn_layout,
+          check_cudnn_hardware_support,
+          check_all_tensors_on_device,
+          check_cudnn_tensor_shapes,
+          check_cudnn_layout,
           // check_is_causal,
-          // check_for_nested_inputs,
-          // check_cudnn_requires_grad,
-          // check_dtypes_low_precision
+          check_for_nested_inputs,
+          check_cudnn_requires_grad,
+          check_dtypes_low_precision);
   for (auto& constraint : general_constraints) {
     if (!constraint(params, debug)) {
       return false;
