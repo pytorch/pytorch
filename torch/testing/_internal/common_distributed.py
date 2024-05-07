@@ -1361,6 +1361,12 @@ class MultiProcContinousTest(TestCase):
         """
         c10d.destroy_process_group()
         super().tearDownClass()
+        # Clear up the rendezvous file
+        if cls.rdvz_file:
+            try:
+                os.remove(cls.rdvz_file)
+            except OSError:
+                pass
         print(f"Rank {cls.rank} teardown complete")
 
     @classmethod
