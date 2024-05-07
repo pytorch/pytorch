@@ -11,6 +11,7 @@ import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor
 from ctypes import byref, c_size_t, c_void_p, CDLL
+from types import ModuleType
 from typing import (
     Any,
     Callable,
@@ -800,7 +801,6 @@ class CPUDeviceBenchmarkRequest(BenchmarkRequest):
         return do_bench_cpu(fn)
 
 
-@dataclasses.dataclass
 class CppBenchmarkRequest(CPUDeviceBenchmarkRequest):
     # Important: Instances of this class have to be serializable
     # across process boundaries. Do not put Tensors in here!
