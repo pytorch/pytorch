@@ -305,7 +305,7 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
       query_lengths{params.query.sym_size(2)},
       head_dim{params.query.sym_size(3)};
   const bool packed_qkv_ok = query_lengths % 64 == 0 && query_lengths <= 512 && head_dim % 64 == 0;
-  const bool qkv_ok = query_lengths % 64 == 0 && head_dim <= 128 && head_dim % 8 == 0;
+  const bool qkv_ok = head_dim <= 128 && head_dim % 8 == 0;
   if (!packed_qkv_ok && !qkv_ok) {
     if (debug) {
       if (!packed_qkv_ok) {
@@ -318,9 +318,7 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
       }
       if (!qkv_ok) {
         TORCH_WARN(
-          "CuDNN requires sequence length to be divisible by 64 and head dim to be less than or equal to 128 and divisible by 8 for unpacked QKV. Got sequence length: ",
-          query_lengths,
-          ", head dim: ",
+          "CuDNN requires head dim to be less than or equal to 128 and divisible by 8 for unpacked QKV. Got head dim: ",
           head_dim,
           ".");
       }
