@@ -1260,7 +1260,11 @@ if(DEFINED USE_CUSTOM_DEBINFO)
     foreach(SOURCE_FILE ${SOURCE_FILES_LIST})
         # We have to specify the scope here. We do this by specifying the
         # targets we care about and caffe2/ for all test targets defined there
-        set(ALL_PT_TARGETS "torch_python;c10;torch_cpu;torch")
+        if(BUILD_LIBTORCHLESS)
+          set(ALL_PT_TARGETS "torch_python;${C10_LIB};torch_cpu;torch")
+        else()
+          set(ALL_PT_TARGETS "torch_python;c10;torch_cpu;torch")
+        endif()
         set_source_files_properties(${SOURCE_FILE} DIRECTORY "caffe2/" TARGET_DIRECTORY ${ALL_PT_TARGETS} PROPERTIES COMPILE_FLAGS "-g")
     endforeach()
 
