@@ -87,7 +87,6 @@ from .utils import (
     is_namedtuple,
     istype,
     LazyString,
-    maybe_cprofile,
     orig_code_map,
     record_compilation_metrics,
     reset_graph_break_dup_checker,
