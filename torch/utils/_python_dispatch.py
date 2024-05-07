@@ -534,7 +534,7 @@ def return_and_correct_aliasing(func, args, kwargs, out):
         return None
 
     def get_arg_from_alias(output_alias, schema_info, args, kwargs):
-        new_args, new_kwargs = torch.fx.operator_schemas.normalize_function(  # type: ignore[misc]
+        new_args, new_kwargs = torch.fx.operator_schemas.normalize_function(
             func, args=args, kwargs=kwargs
         )
 
