@@ -34,7 +34,6 @@ from torch._C._functorch import (
     maybe_get_level,
     peek_interpreter_stack,
 )
-from torch._guards import Source
 
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.weak import WeakIdKeyDictionary
@@ -42,6 +41,7 @@ from torch.utils.weak import WeakIdKeyDictionary
 if TYPE_CHECKING:
     from torch._C._autograd import CreationMeta
     from torch._C._functorch import CInterpreter
+    from torch._guards import Source
 
     # Import here to avoid cycle
     from torch._subclasses.fake_tensor import FakeTensorMode

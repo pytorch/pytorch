@@ -190,7 +190,7 @@ def is_mm_compute_bound(M: int, K: int, N: int, dtype: torch.dtype) -> bool:
         and K > M
         and K > N
         and torch.cuda.get_device_capability() < (9, 0)
-    ):  # doenst repro on h100s:
+    ):  # doesnt repro on h100s:
         return True
 
     # Fails with AMD
