@@ -1721,7 +1721,7 @@ class _OnnxPatch:
 
 
 @dataclasses.dataclass
-class OnnxExportErrorRow:
+class ErrorRow:
     device: str
     model_name: str
     batch_size: int
@@ -1752,7 +1752,7 @@ class OnnxExportErrorRow:
         return [getattr(self, field.name) for field in dataclasses.fields(self)]
 
 
-class OnnxExportErrorParser:
+class ErrorParser:
     def __init__(self, device: str, model_name: str, batch_size: int):
         self.device = device
         self.model_name = model_name
@@ -1766,12 +1766,12 @@ class OnnxExportErrorParser:
     def parse_diagnostic_context(
         self,
         diagnostic_context: diagnostics.DiagnosticContext,
-    ) -> Generator[OnnxExportErrorRow, Any, Any]:
+    ) -> Generator[ErrorRow, Any, Any]:
         from torch.onnx._internal.fx import diagnostics
 
         for diagnostic in diagnostic_context.diagnostics:
             if diagnostic.level >= diagnostics.levels.ERROR:
-                yield OnnxExportErrorRow(
+                yield ErrorRow(
                     device=self.device,
                     model_name=self.model_name,
                     batch_size=self.batch_size,
@@ -1781,8 +1781,8 @@ class OnnxExportErrorParser:
                     diagnostic_message=diagnostic.message,
                 )
 
-    def parse_exception(self, exception: Exception) -> OnnxExportErrorRow:
-        return OnnxExportErrorRow(
+    def parse_exception(self, exception: Exception) -> ErrorRow:
+        return ErrorRow(
             device=self.device,
             model_name=self.model_name,
             batch_size=self.batch_size,
@@ -1823,7 +1823,7 @@ def optimize_onnx_ctx(
             output_filename.find(".csv") > 0
         ), f"expected output_filename to be a .csv, but got {output_filename}"
         output_error_filename = output_filename[:-4] + "_export_error.csv"
-        parser = OnnxExportErrorParser(current_device, current_name, current_batch_size)
+        parser = ErrorParser(current_device, current_name, current_batch_size)
         try:
             nonlocal context
             if context.onnx_model is None:
@@ -2591,6 +2591,17 @@ class BenchmarkRunner:
                         new_result = optimized_model_iter_fn(model_copy, example_inputs)
             except Exception as e:
                 log.exception("")
+                if self._args is not None and self._args.log_exceptions:
+                    error_parser = ErrorParser(
+                        current_device, current_name, current_batch_size
+                    )
+                    parsed_error = error_parser.parse_exception(e)
+                    # TODO: Rename 'export_error', since this is for 'torch.compile' backends
+                    # and not necessarily 'export', and adjust downstream tools.
+                    output_error_filename = output_filename[:-4] + "_export_error.csv"
+                    output_csv(
+                        output_error_filename, parsed_error.headers, parsed_error.row
+                    )
                 print(
                     "TorchDynamo optimized model failed to run because of following error"
                 )
@@ -3525,6 +3536,11 @@ def parse_args(args=None):
         "--log-conv-args",
         action="store_true",
         help="Dump convolution input/weight/bias's shape/stride/dtype and other options to json",
+    )
+    group.add_argument(
+        "--log-exceptions",
+        action="store_true",
+        help="Dump runtime exceptions to .csv file",
     )
     group.add_argument(
         "--recompile-profiler",
