@@ -289,14 +289,18 @@ class ShardingPropagator:
 
                 needs_redistribute = False
                 suggestion_args: List[object] = []
-                for arg_idx, arg in enumerate(op_schema.args_schema):
-                    if isinstance(arg, (list, tuple)) and isinstance(
-                        arg[0], DTensorSpec
+                tensor_or_list_tensor_arg_idx = 0
+
+                for arg in op_schema.args_schema:
+                    if (
+                        arg
+                        and isinstance(arg, (list, tuple))
+                        and isinstance(arg[0], DTensorSpec)
                     ):
                         expected_input_spec_list: List[DTensorSpec] = []
                         for idx, arg_spec in enumerate(arg):
                             expected_input_spec = selected_strategies[idx].input_spec(
-                                arg_idx
+                                tensor_or_list_tensor_arg_idx
                             )
                             expected_input_spec = (
                                 expected_input_spec.shallow_copy_with_tensor_meta(
@@ -311,8 +315,12 @@ class ShardingPropagator:
                             if isinstance(arg, tuple)
                             else expected_input_spec_list
                         )
+                        tensor_or_list_tensor_arg_idx += 1
+
                     elif isinstance(arg, DTensorSpec):
-                        expected_input_spec = selected_strategies[0].input_spec(arg_idx)
+                        expected_input_spec = selected_strategies[0].input_spec(
+                            tensor_or_list_tensor_arg_idx
+                        )
                         expected_input_spec = (
                             expected_input_spec.shallow_copy_with_tensor_meta(
                                 arg.tensor_meta
@@ -321,6 +329,7 @@ class ShardingPropagator:
                         if arg.placements != expected_input_spec.placements:
                             needs_redistribute = True
                         suggestion_args.append(expected_input_spec)
+                        tensor_or_list_tensor_arg_idx += 1
                     else:
                         suggestion_args.append(arg)
 
