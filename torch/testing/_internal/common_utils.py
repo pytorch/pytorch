@@ -1235,7 +1235,9 @@ TEST_MPS = torch.backends.mps.is_available()
 TEST_XPU = torch.xpu.is_available()
 TEST_CUDA = torch.cuda.is_available()
 custom_device_mod = getattr(torch, torch._C._get_privateuse1_backend_name(), None)
-TEST_PRIVATEUSE1 = True if (hasattr(custom_device_mod, "is_available") and custom_device_mod.is_available()) else False
+custom_device_is_available = hasattr(custom_device_mod, "is_available") and custom_device_mod.is_available()
+TEST_PRIVATEUSE1 = True if custom_device_is_available else False
+TEST_PRIVATEUSE1_DEVICE_TYPE = torch._C._get_privateuse1_backend_name()
 TEST_NUMBA = _check_module_exists('numba')
 TEST_TRANSFORMERS = _check_module_exists('transformers')
 TEST_DILL = _check_module_exists('dill')
@@ -2679,10 +2681,14 @@ class TestCase(expecttest.TestCase):
                         # The path isn't strictly correct but it's arguably better than nothing.
                         return os.path.split(abs_test_path)[1]
 
-                    test_filename = _get_rel_test_path(inspect.getfile(type(self)))
+                    # NB: In Python 3.8, the getfile() call will return a path relative
+                    # to the working directory, so convert that to absolute.
+                    abs_test_path = os.path.abspath(inspect.getfile(type(self)))
+                    test_filename = _get_rel_test_path(abs_test_path)
+                    class_name = type(self).__name__
                     repro_str = f"""
 To execute this test, run the following from the base repo dir:
-    {env_var_prefix} python {test_filename} -k {method_name}
+    {env_var_prefix} python {test_filename} -k {class_name}.{method_name}
 
 This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                     self.wrap_with_policy(

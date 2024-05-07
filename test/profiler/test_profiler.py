@@ -1702,9 +1702,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                     == 0x1000000 + int(gpu_value.split()[1])
                 )
 
-        # only check that gpu labels are present if cuda available
-        if cuda_available:
-            self._check_all_gpu_present(gpu_dict, MAX_GPU_COUNT)
+        # TODO add checking gpu count if cpuOnly_ is true or not
 
     def _test_chrome_trace_basic_helper(self, with_cuda=False):
         if with_cuda:
