@@ -461,3 +461,34 @@ def reinplace_all_gather(mod):
             mod.graph.erase_node(all_gather_node)
     mod.graph.lint()
     mod.recompile()
+
+
+def remove_storage_resize_and_copy(mod):
+    """
+    TODO(yf225): this is a generic pass not specific to FSDP, so we should move it out of this file.
+
+    resize_storage_bytes_ = torch.ops.inductor.resize_storage_bytes_.default(primals_5, 262144000)
+    copy_: "bf16[32000, 4096]" = torch.ops.aten.copy_.default(primals_5, getitem_2);  primals_5 = getitem_2 = None
+    ... (no more use of primals_5)
+
+    ->
+
+    (all removed)
+    """
+    node_list = list(mod.graph.nodes)
+    for i, n in enumerate(node_list):
+        if n.target == torch.ops.inductor.resize_storage_bytes_.default:
+            resize_storage_bytes_node = n
+            copy_node = None
+            copy_node_idx = None
+            for j in range(i+1, len(node_list)):
+                nj = node_list[j]
+                if nj.target == torch.ops.aten.copy_.default and nj.args[0] == resize_storage_bytes_node.args[0]:
+                    copy_node = nj
+                    copy_node_idx = j
+                    break
+            if copy_node is not None and _find_next_use_of_node(node_list[copy_node_idx+1:], resize_storage_bytes_node.args[0]) is None:
+                mod.graph.erase_node(copy_node)
+                mod.graph.erase_node(resize_storage_bytes_node)
+    mod.graph.lint()
+    mod.recompile()
