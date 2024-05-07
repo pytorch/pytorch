@@ -3877,6 +3877,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         self.assertTrue(same(ref, res))
 
+    @torch._dynamo.config.patch(guard_nn_modules=True)
     def test_source_non_input_grad_access(self):
         # This test creates a model, and accesses the grads
         # from its parameter. This means that within dynamo,
@@ -4642,6 +4643,19 @@ def fn():
         res2 = opt_fn(x)
         self.assertEqual(res, res2)
 
+    @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
+    def test_tensor_ctor_list_of_tensor(self):
+        def fn(x):
+            return torch.tensor([x], dtype=torch.int64)
+
+        x = torch.tensor(20)
+        res = fn(x)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        res2 = opt_fn(x)
+        self.assertEqual(res, res2)
+        self.assertEqual(cnts.frame_count, 1)
+
     def test_tensor_types(self):
         def fn(dtype, tensor_type):
             x = torch.empty(4, dtype=dtype)
@@ -4872,6 +4886,7 @@ def fn():
             self.assertEqual(k_a, k)
             self.assertTrue(torch.allclose(v_a, v))
 
+    @torch._dynamo.config.patch(guard_nn_modules=True)
     def test_module_complex_iter(self):
         n_embd = 768
         block_size = 128
@@ -5734,6 +5749,7 @@ def fn():
         res = opt_fn(x, m)
         self.assertTrue(torch.allclose(ref, res))
 
+    @torch._dynamo.config.patch(guard_nn_modules=True)
     def test_repro_graph_breaks_in__get_item_by_idx(self):
         class Mod(torch.nn.Module):
             def __init__(self):
@@ -10524,6 +10540,23 @@ fn
         fn(torch.randn(4), d)
         with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
             fn(torch.randn(4), d)
+
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    @torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True)
+    def test_interpolate_propagate_real_tensors(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(mask, box):
+            # u0, u1 = mask.tolist()
+            mask = torch.randn(1, 1, 30, 30, device="cuda")
+            h, w = box.tolist()
+            return torch.nn.functional.interpolate(
+                mask, (h, w), mode="bilinear", align_corners=False
+            )
+
+        f(torch.tensor([30, 30], device="cuda"), torch.tensor([68, 32], device="cuda"))
 
     def test_custom_iter_dict(self):
         class ReversedDict(dict):
