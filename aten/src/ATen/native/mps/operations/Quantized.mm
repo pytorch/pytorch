@@ -82,6 +82,48 @@ INSTANTIATE_INT4MM(bfloat, 64);
 INSTANTIATE_INT4MM(bfloat, 128);
 INSTANTIATE_INT4MM(bfloat, 256);
 #endif
+
+template<typename T>
+kernel void int8pack_mm(
+    constant T                 * A              [[buffer(0)]],
+    constant char              * B              [[buffer(1)]],
+    constant T                 * scales         [[buffer(2)]],
+    device   T                 * outputData     [[buffer(3)]],
+    constant uint3             & sizes          [[buffer(4)]],
+    uint2                        thread_index   [[thread_position_in_grid]]) {
+    const uint lda = sizes.y;
+    const uint ldc = sizes.z;
+    const uint m = thread_index.y; // 0..sizes.x-1
+    const uint n = thread_index.x; // 0..sizes.z-1
+    constant T *A_ptr = A + m * lda;
+    constant char *B_ptr = B + n * lda;
+
+    float rc = 0.0;
+    for(uint k = 0; k < sizes.y;  k++) {
+      const auto a_val = float(A_ptr[k]);
+      const auto b_val = float(B_ptr[k]);
+      rc += a_val * b_val;
+    }
+    outputData[m * sizes.z + n] = T(rc * float(scales[n]));
+}
+
+#define INSTANTIATE_INT8MM(DTYPE)                                     \
+template                                                              \
+[[host_name("int8pack_mm_" #DTYPE)]]                                  \
+kernel void int8pack_mm<DTYPE>(                                       \
+    constant DTYPE            * A            [[buffer(0)]],           \
+    constant char             * B            [[buffer(1)]],           \
+    constant DTYPE            * scales       [[buffer(2)]],           \
+    device   DTYPE            * outputData   [[buffer(3)]],           \
+    constant uint3            & sizes        [[buffer(4)]],           \
+    uint2                       thread_index [[thread_position_in_grid]])
+
+INSTANTIATE_INT8MM(half);
+INSTANTIATE_INT8MM(float);
+#if __METAL_VERSION__ >= 310
+INSTANTIATE_INT8MM(bfloat);
+#endif
+
 )METAL_QUANTIZED");
 
 Tensor _weight_int4pack_mm_mps(const Tensor& A, const Tensor& B, int64_t qGroupSize, const Tensor& qScaleAndZeros) {
@@ -163,7 +205,36 @@ Tensor _weight_int8pack_mm_mps(const Tensor& A, const Tensor& B, const Tensor& s
   TORCH_CHECK(scales.dim() == 1 && scales.size(0) == N, __func__, " : expect scales to be 1d tensor with size ", N);
 
   auto C = at::empty({M, N}, A.options());
-
+#if 1
+  MPSStream* mpsStream = getCurrentMPSStream();
+  std::array<uint32_t, 3> sizes = {static_cast<uint32_t>(M), static_cast<uint32_t>(K), static_cast<uint32_t>(N)};
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    @autoreleasepool {
+#if _CAPTURE_KERNEL
+      if (getMPSProfiler().isCaptureEnabled()) {
+        getMPSProfiler().startCapture(fmt::format("int8pack_mm_{}x{}x{}", M, N, K), mpsStream);
+      }
+#endif
+      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
+      const std::string kernel = fmt::format("int8pack_mm_{}", scalarToMetalTypeString(A));
+      id<MTLComputePipelineState> quantizedPSO = lib.getPipelineStateForFunc(kernel);
+      const auto maxThreadsPerGroup = static_cast<decltype(M)>([quantizedPSO maxTotalThreadsPerThreadgroup]);
+      [computeEncoder setComputePipelineState:quantizedPSO];
+      mtl_setBuffer(computeEncoder, A, 0);
+      mtl_setBuffer(computeEncoder, B, 1);
+      mtl_setBuffer(computeEncoder, scales, 2);
+      mtl_setBuffer(computeEncoder, C, 3);
+      [computeEncoder setBytes:sizes.data() length:sizeof(uint32_t) * sizes.size() atIndex:4];
+      [computeEncoder dispatchThreads:MTLSizeMake(N, M, 1)
+                threadsPerThreadgroup:MTLSizeMake(std::min(maxThreadsPerGroup, M), 1, 1)];
+#if _CAPTURE_KERNEL
+      if (getMPSProfiler().isCapturing()) {
+        getMPSProfiler().stopCapture(mpsStream);
+      }
+#endif
+    }
+  });
+#else
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
     MPSGraphTensor *ATensor = nil, *BTensor = nil, *scalesTensor = nil;
@@ -193,6 +264,7 @@ Tensor _weight_int8pack_mm_mps(const Tensor& A, const Tensor& B, const Tensor& s
                 dictionaryFromPlaceholders(APlaceholder, BPlaceholder, scalesPlaceholder),
                 outputPlaceholder);
   }
+#endif
 
   return C;
 }
