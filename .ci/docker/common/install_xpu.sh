@@ -14,8 +14,8 @@ function install_ubuntu() {
     # Set up the repository. To do this, download the key to the system keyring
     wget -qO - https://repositories.intel.com/gpu/intel-graphics.key \
         | gpg --dearmor --output /usr/share/keyrings/intel-graphics.gpg
-    wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
-        | gpg --dearmor | tee /usr/share/keyrings/intel-for-pytorch-gpu-dev-keyring.gpg
+    wget -qO - https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
+        | gpg --dearmor --output /usr/share/keyrings/intel-for-pytorch-gpu-dev-keyring.gpg
 
     # Add the signed entry to APT sources and configure the APT client to use the Intel repository
     echo "deb [arch=amd64 signed-by=/usr/share/keyrings/intel-graphics.gpg] \
