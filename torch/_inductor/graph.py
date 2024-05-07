@@ -7,7 +7,18 @@ import sys
 import time
 from collections import defaultdict
 from contextlib import contextmanager
-from typing import Any, Callable, DefaultDict, Dict, List, Optional, Set, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    DefaultDict,
+    Dict,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    TYPE_CHECKING,
+    Union,
+)
 
 import sympy
 
@@ -16,7 +27,6 @@ import torch._logging
 import torch.fx
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import defake, dynamo_timed
-from torch._higher_order_ops.effects import _EffectType
 from torch._logging import LazyString, trace_structured
 from torch._prims_common import make_channels_last_strides_for
 from torch._subclasses.fake_tensor import FakeTensor
@@ -80,11 +90,15 @@ from .utils import (
 )
 from .virtualized import V
 
+if TYPE_CHECKING:
+    from torch._higher_order_ops.effects import _EffectType
+
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
 aten = torch.ops.aten
 
+_post_grad_graph_counter = itertools.count()
 
 if config.is_fbcode():
     from torch._inductor.fb.utils import log_module_code
@@ -376,6 +390,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.aot_mode = aot_mode
         self.graph_id = graph_id
+        self.post_grad_graph_id = next(_post_grad_graph_counter)
         self.scheduler: "torch._inductor.scheduler.Scheduler" = None  # type: ignore[assignment]
         self.nodes_prefer_channels_last = (
             self.find_nodes_prefer_channels_last() if self.layout_opt else set()
