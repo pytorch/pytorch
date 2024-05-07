@@ -1246,6 +1246,7 @@ def _is_valid_dequant_promotion_pattern(dtype=torch.float32):
         dequant_pattern_end_node = match.output_node()
         if dequant_pattern_end_node.target not in [
             quantized_decomposed.dequantize_per_tensor.default,
+            quantized_decomposed.dequantize_per_tensor.tensor,
             prims.convert_element_type.default,
             aten.reshape.default,
         ]:
@@ -1271,7 +1272,11 @@ def _is_valid_dequant_promotion_pattern(dtype=torch.float32):
             )
 
         if (
-            dequant_node.target is quantized_decomposed.dequantize_per_tensor.default
+            dequant_node.target
+            in [
+                quantized_decomposed.dequantize_per_tensor.default,
+                quantized_decomposed.dequantize_per_tensor.tensor,
+            ]
             and len(list(dequant_pattern_end_node.users)) > 1
         ):
             # If dequant pattern has more than 1 users, then do dequant promoted
@@ -1336,6 +1341,7 @@ def _register_dequant_promotion_pass(pattern, pass_number, dtype=torch.float32):
         dequant_pattern_end_node = match.output_node()
         assert dequant_pattern_end_node.target in [
             quantized_decomposed.dequantize_per_tensor.default,
+            quantized_decomposed.dequantize_per_tensor.tensor,
             prims.convert_element_type.default,
             aten.reshape.default,
         ]
@@ -1345,7 +1351,10 @@ def _register_dequant_promotion_pass(pattern, pass_number, dtype=torch.float32):
         # * OPT(prims.convert_element_type.default) (to_bf16)
         # * dequantize_per_tensor
         def _find_first_node_in_dequant_pattern(_node):
-            if _node.target is quantized_decomposed.dequantize_per_tensor.default:
+            if _node.target in [
+                quantized_decomposed.dequantize_per_tensor.default,
+                quantized_decomposed.dequantize_per_tensor.tensor,
+            ]:
                 # For a dequant pattern, we expect the start node is a dequantize_per_tensor node
                 return _node
             else:
@@ -1358,10 +1367,10 @@ def _register_dequant_promotion_pass(pattern, pass_number, dtype=torch.float32):
             dequant_pattern_end_node
         )
 
-        assert (
-            dequant_pattern_start_node.target
-            is quantized_decomposed.dequantize_per_tensor.default
-        )
+        assert dequant_pattern_start_node.target in [
+            quantized_decomposed.dequantize_per_tensor.default,
+            quantized_decomposed.dequantize_per_tensor.tensor,
+        ]
 
         # Clone the dequant pattern for each user node
         graph = match.graph
@@ -2010,9 +2019,9 @@ def _generate_qlinear_weight_prepack_patterns(
 
 def _register_dequant_promotion():
     dequant_pattern_cases = itertools.product(
-        [torch.float32, torch.bfloat16], [True, False]
+        [torch.float32, torch.bfloat16], [True, False], [True, False]
     )
-    for dtype, input_dim_exceeds_two in dequant_pattern_cases:
+    for dtype, input_dim_exceeds_two, is_tensor_overload in dequant_pattern_cases:
         # 4 dequantization patterns will be matched based on the dtype and input dimension size.
         # Case 1: int8-mixed-fp32, input dim size is 2
         # Case 2: int8-mixed-fp32, input dim size exceeds 2
@@ -2036,7 +2045,9 @@ def _register_dequant_promotion():
         _register_dequant_promotion_pass(
             _may_generate_pattern_with_reshape(
                 _may_generate_pattern_with_dtype_convert(
-                    get_dequantize_per_tensor_activation_pattern(),
+                    get_dequantize_per_tensor_activation_pattern(
+                        is_tensor_overload=is_tensor_overload
+                    ),
                     KeywordArg("autocast_act_dtype"),
                     dtype == torch.bfloat16,
                 ),
