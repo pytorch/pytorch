@@ -3,11 +3,12 @@ from __future__ import annotations
 import copy
 import functools
 
-from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
 
 import torch
 import torch._dynamo as torchdynamo
 import torch.nn.functional as F
+from torch.ao.quantization import ObserverOrFakeQuantize
 from torch.ao.quantization.fake_quantize import (
     FakeQuantize,
     FusedMovingAvgObsFakeQuantize,
@@ -21,7 +22,11 @@ from torch.ao.quantization.observer import (
     PlaceholderObserver,
 )
 
-from torch.ao.quantization.quantizer import QuantizationSpec, Quantizer
+from torch.ao.quantization.quantizer import (
+    DerivedQuantizationSpec,
+    QuantizationSpec,
+    Quantizer,
+)
 
 from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
     _convert_scalars_to_attrs,
@@ -168,13 +173,37 @@ def get_symmetric_quantization_config(
         ),
     )
 
-    bias_quantization_spec = None
+    def derive_qparams_fn(
+        obs_or_fqs: List[ObserverOrFakeQuantize],
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        assert (
+            len(obs_or_fqs) == 2
+        ), f"Expecting two obs/fqs, one for activation and one for weight, got: {len(obs_or_fqs)}"
+        act_obs_or_fq = obs_or_fqs[0]
+        weight_obs_or_fq = obs_or_fqs[1]
+        act_scale, act_zp = act_obs_or_fq.calculate_qparams()
+        (
+            weight_scale,
+            weight_zp,
+        ) = weight_obs_or_fq.calculate_qparams()
+        return torch.tensor([act_scale * weight_scale]).to(
+            torch.float32
+        ), torch.tensor([0]).to(torch.int32)
+
+    bias_quantization_spec = DerivedQuantizationSpec(
+        derived_from=[], # to be modified when activation and weight node are known
+        derive_qparams_fn=derive_qparams_fn,
+        dtype=torch.int32,
+        quant_min=-(2**31),
+        quant_max=2**31 - 1,
+        qscheme=weight_qscheme, # same as weights
+    )
     if is_dynamic:
         quantization_config = QuantizationConfig(
             act_quantization_spec,
             None,
             weight_quantization_spec,
-            bias_quantization_spec,
+            None, # bias quantization spec is None
             is_qat,
         )
     else:
