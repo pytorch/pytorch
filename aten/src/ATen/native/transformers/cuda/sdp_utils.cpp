@@ -301,27 +301,46 @@ bool check_all_tensors_on_device(sdp_params const& params, bool debug) {
 }
 
 bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
-  const auto num_heads{params.query.sym_size(1)},
-      query_lengths{params.query.sym_size(2)},
-      head_dim{params.query.sym_size(3)};
-  const bool packed_qkv_ok = query_lengths % 64 == 0 && query_lengths <= 512 && head_dim % 64 == 0;
-  const bool qkv_ok = head_dim <= 128 && head_dim % 8 == 0;
-  if (!packed_qkv_ok && !qkv_ok) {
+  const auto s_q = params.query.sym_size(2);
+  const auto s_k = params.key.sym_size(2);
+  const auto head_dim = params.query.sym_size(3);
+  long cudnn_version = at::detail::getCUDAHooks().versionCuDNN();
+  if (head_dim % 8 != 0 or head_dim > 256) {
     if (debug) {
-      if (!packed_qkv_ok) {
-        TORCH_WARN(
-          "CuDNN requires sequence length and head dim to be divisible by 64, and sequence length to be no more than 512 for packed QKV. Got sequence length: ",
-          query_lengths,
-          ", head dim: ",
-          head_dim,
-          ".");
+      TORCH_WARN("head_dim should be a multiple of 8 and no more than 256");
+    }
+    return false;
+  }
+  if (cudnn_version < 8903) {
+    if (debug) {
+      TORCH_WARN("SDPA fprop requires cudnn 8.9.3 or higher");
+    }
+    return false;
+  }
+  if (params.dropout != 0.0 and cudnn_version < 8906) {
+    if (debug) {
+      TORCH_WARN("Dropout reference is only supported on 8.9.6 onwards.");
+    }
+    return false;
+  }
+  if (cudnn_version < 90000) {
+    if (s_q < 64) {
+      if (debug) {
+        TORCH_WARN("s_q less than 64 is not supported before cudnn 9.0.0");
       }
-      if (!qkv_ok) {
+      return false;
+    }
+    if ((s_q % 64 != 0 or s_k % 64 != 0) and params.dropout != 0.0) {
+      if (debug) {
         TORCH_WARN(
-          "CuDNN requires head dim to be less than or equal to 128 and divisible by 8 for unpacked QKV. Got head dim: ",
-          head_dim,
-          ".");
+            "s_q not a multiple of 64 with padding/dropout is not supported with cudnn version 9.0.0");
       }
+      return false;
+    }
+  }
+  if (s_k % 64 != 0 and cudnn_version < 8906) {
+    if (debug) {
+      TORCH_WARN("not-multiple-of-64 seq_kv is not supported below 8.9.6");
     }
     return false;
   }
