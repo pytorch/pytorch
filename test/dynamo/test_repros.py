@@ -4745,6 +4745,35 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(v.data.shape, (10, 20))
         self.assertEqual(type(v), Matrix)
 
+    def test_nn_parametrize(self):
+        class Module(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.randn(10, 10))
+
+            def forward(self, x):
+                return self.param @ x
+
+        class Parametrization(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        def parametrize(model: nn.Module):
+            mods = list(model.modules())
+            for mod in mods:
+                params = list(mod._parameters.items())
+                for name, p in params:
+                    if p is not None:
+                        torch.nn.utils.parametrize.register_parametrization(
+                            mod, name, Parametrization(), unsafe=True
+                        )
+
+        m = Module()
+        parametrize(m)
+        opt_m = torch.compile(m, backend="eager")
+        inp = torch.randn(10, 10)
+        self.assertEqual(m(inp), opt_m(inp))
+
     def test_global_fn_mutation(self):
         def foo(x, y):
             return global_fn(x) + y
