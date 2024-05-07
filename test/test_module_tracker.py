@@ -66,7 +66,8 @@ class TestModuleTracker(TestCase):
         with ModuleTracker() as tracker:
             mod(torch.rand(2, requires_grad=True)).sum().backward()
             self.assertFalse(tracker.is_bw)
-            self.assertEqual(tracker.parents, {'Global'})
+            self.assertEqual(tracker.parents, {"Global"})
+
 
 if __name__ == "__main__":
     run_tests()

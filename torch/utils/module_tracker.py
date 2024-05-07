@@ -49,11 +49,6 @@ class ModuleTracker:
     A Set containing the fqn for each module currently running their forward
     """
 
-    is_bw: bool
-    """
-    A boolean marking if this is currently running during the backward pass or not
-    """
-
     def __init__(self):
         self.parents = {"Global"}
         self._known_modules: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
@@ -68,11 +63,15 @@ class ModuleTracker:
         def callback():
             self.parents = {"Global"}
             self._has_callback = False
+
         torch.autograd.Variable._execution_engine.queue_callback(callback)
         self._has_callback = True
 
     @property
     def is_bw(self):
+        """
+        A boolean marking if this is currently running during the backward pass or not
+        """
         return torch._C._current_graph_task_id() != -1
 
     def _get_mod_name(self, mod):
