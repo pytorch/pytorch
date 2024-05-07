@@ -102,6 +102,9 @@ class Adagrad(Optimizer):
 
     def __setstate__(self, state):
         super().__setstate__(state)
+        #  define "fused" for
+        #  MYPY error: Name "fused" may be undefined
+        fused = None
         for group in self.param_groups:
             group.setdefault("foreach", None)
             group.setdefault("maximize", False)
@@ -524,6 +527,7 @@ def _fused_adagrad(
     ) in grouped_tensors.items():
         device_grad_scale, device_found_inf = None, None
         if grad_scale is not None:
+            assert grad_scale_dict is not None
             if device not in grad_scale_dict:
                 grad_scale_dict[device] = grad_scale.to(device, non_blocking=True)
             device_grad_scale = grad_scale_dict[device]
