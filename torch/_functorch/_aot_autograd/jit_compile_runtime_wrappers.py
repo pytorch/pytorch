@@ -193,7 +193,7 @@ def aot_dispatch_base(
         compiled_fw,
         aot_config,  # not used
         fw_metadata=fw_metadata,
-        subclass_meta=maybe_subclass_meta,
+        maybe_subclass_meta=maybe_subclass_meta,
         num_fw_outs_saved_for_bw=None,
     )
 

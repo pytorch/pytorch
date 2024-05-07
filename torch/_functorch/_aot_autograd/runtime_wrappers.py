@@ -84,7 +84,14 @@ class CompilerWrapper:
         return flat_fn, flat_args, aot_config, fw_metadata
 
     @classmethod
-    def post_compile(cls, compiled_fn, aot_config, *, fw_metadata, **kwargs):
+    def post_compile(
+        cls,
+        compiled_fn,
+        aot_config: AOTConfig,
+        *,
+        fw_metadata: ViewAndMutationMeta,
+        **kwargs,
+    ):
         """
         Given an output of the compiler, wrap it with information received from prologue.
         Args:
@@ -431,22 +438,22 @@ class FunctionalizedRngRuntimeWrapper(CompilerWrapper):
 
         return wrapper
 
-        # Calling convention: If we are running functionalized RNG, then outs consists
-        # of (user_outs, rng_offset)
-        @classmethod
-        def _functionalized_rng_runtime_epilogue(
-            cls, metadata: ViewAndMutationMeta, outs, return_new_outs=True
-        ):
-            if metadata.is_rng_op_functionalized:
-                assert metadata.num_outputs_rng_offset == 1
-                new_rng_offset = outs[-1]
-                CUDARngStateHelper.set_new_offset(new_rng_offset)
-                if return_new_outs:
-                    user_outs = outs[:-1]
-                    return user_outs
-                else:
-                    return None
-            return outs
+    # Calling convention: If we are running functionalized RNG, then outs consists
+    # of (user_outs, rng_offset)
+    @classmethod
+    def _functionalized_rng_runtime_epilogue(
+        cls, metadata: ViewAndMutationMeta, outs, return_new_outs=True
+    ):
+        if metadata.is_rng_op_functionalized:
+            assert metadata.num_outputs_rng_offset == 1
+            new_rng_offset = outs[-1]
+            CUDARngStateHelper.set_new_offset(new_rng_offset)
+            if return_new_outs:
+                user_outs = outs[:-1]
+                return user_outs
+            else:
+                return None
+        return outs
 
 
 class FakifiedOutWrapper(CompilerWrapper):
@@ -454,7 +461,7 @@ class FakifiedOutWrapper(CompilerWrapper):
     def post_compile(
         cls,
         compiled_fn,
-        _aot_config: AOTConfig,
+        aot_config: AOTConfig,
         *,
         fw_metadata: ViewAndMutationMeta,
         fakified_out_opt=None,
