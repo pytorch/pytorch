@@ -27,6 +27,9 @@ verbose_progress = False
 # use fx aot graph codegen cache
 fx_graph_cache = os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE") == "1"
 
+# use fx aot graph codegen cache
+fx_graph_remote_cache = os.environ.get("TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE") == "1"
+
 # enable autotune local cache
 autotune_local_cache = True
 
@@ -757,7 +760,7 @@ class cuda:
     cutlass_dir = os.environ.get(
         "TORCHINDUCTOR_CUTLASS_DIR",
         build_paths.cutlass()
-        if is_fbcode()
+        if is_fbcode() and not torch.version.hip
         else os.path.abspath(
             os.path.join(os.path.dirname(torch.__file__), "../third_party/cutlass/")
         ),
