@@ -3,9 +3,7 @@ import itertools
 import logging
 import operator
 from collections import Counter, defaultdict
-from typing import Any, Dict, List, Optional, Set, Union
-
-from sympy import Expr
+from typing import Any, Dict, List, Optional, Set, TYPE_CHECKING, Union
 
 import torch
 import torch._inductor as inductor
@@ -48,6 +46,9 @@ from .group_batch_fusion import group_batch_fusion_passes, POST_GRAD_FUSIONS
 from .pre_grad import is_same_dict, save_inductor_dict
 from .reinplace import reinplace_inplaceable_ops
 from .split_cat import POST_GRAD_PATTERNS
+
+if TYPE_CHECKING:
+    from sympy import Expr
 
 
 log = logging.getLogger(__name__)

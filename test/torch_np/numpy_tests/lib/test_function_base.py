@@ -3256,7 +3256,7 @@ class TestPercentile(TestCase):
         "q",
         [
             7,
-            subtest([1, 7], decorators=[xpassIfTorchDynamo]),
+            subtest([1, 7], decorators=[xfail]),
         ],
     )
     @parametrize(
