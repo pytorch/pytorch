@@ -6,6 +6,7 @@ Automatic Mixed Precision package - torch.amp
 
 .. Both modules below are missing doc entry. Adding them here for now.
 .. This does not add anything to the rendered page
+.. py:module:: torch.amp
 .. py:module:: torch.cpu.amp
 .. py:module:: torch.cuda.amp
 
@@ -40,7 +41,7 @@ For CUDA and CPU, APIs are also provided separately:
 
 Autocasting
 ^^^^^^^^^^^
-.. currentmodule:: torch.amp.autocast_mode
+.. currentmodule:: torch.amp
 
 .. autofunction::  is_autocast_available
 
