@@ -1,12 +1,14 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
+import itertools
 
 import torch
 
 import torch.distributed as dist
 
-from torch.distributed._tensor import DeviceMesh, distribute_tensor, Replicate
+from torch.distributed._tensor import DeviceMesh, distribute_tensor, Replicate, Shard
+from torch.distributed._tensor.debug import CommDebugMode
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -88,7 +90,7 @@ class DistOtherOpsTest(DTensorTestBase):
             inp = input_list[i].to(self.device_type).requires_grad_()
             grad_output = grad_output_list[i].to(self.device_type)
 
-            # bernoulli  with dtensor
+            # bernoulli with dtensor
             inp_dtensor = distribute_tensor(inp, device_mesh, shard_spec)
             grad_output_dtensor = distribute_tensor(
                 grad_output, device_mesh, shard_spec
@@ -137,6 +139,41 @@ class DistOtherOpsTest(DTensorTestBase):
                 grad_mse_rel <= 1e-6,
                 f"Too large relative mse for gradient, expected less equal 1e-6, got {grad_mse_rel}",
             )
+
+    @with_comms
+    def test_bernoulli_strategy(self):
+        # this test is to test the strategy-based sharding for bernoulli
+        device_mesh = self.build_device_mesh()
+        placement_list = [Shard(0), Shard(1), Replicate()]
+        comm_mode = CommDebugMode()
+
+        # out is None
+        inp = torch.empty(self.world_size, self.world_size, device=self.device_type)
+        for inp_placement in placement_list:
+            inp_d = distribute_tensor(inp, device_mesh, [inp_placement])
+            with comm_mode:
+                out_d = torch.bernoulli(inp_d)
+                assert out_d._spec.placements[0] == inp_placement
+
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+
+        # out in kwargs
+        out = torch.empty(self.world_size, self.world_size, device=self.device_type)
+        for inp_placement, out_placement in itertools.product(
+            placement_list, placement_list
+        ):
+            inp_d = distribute_tensor(inp, device_mesh, [inp_placement])
+            out_d = distribute_tensor(out, device_mesh, [out_placement])
+            with comm_mode:
+                out_d = torch.bernoulli(inp_d, out=out_d)
+                assert out_d._spec.placements[0] == out_placement
+
+            exp_comm_count = (
+                0
+                if (inp_placement.is_replicate()) or (inp_placement == out_placement)
+                else 1
+            )
+            self.assertEqual(comm_mode.get_total_counts(), exp_comm_count)
 
     @with_comms
     def test_nll(self):
