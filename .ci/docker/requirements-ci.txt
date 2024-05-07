@@ -310,3 +310,5 @@ lxml==5.0.0.
 #Description: This is a requirement of unittest-xml-reporting
 
 # Python-3.9 binaries
+
+PyGithub==2.3.0
