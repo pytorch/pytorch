@@ -587,6 +587,50 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         set_model_state_dict(ddp_model, get_model_state_dict(ddp_model))
         self.assertEqual(model.state_dict(), get_model_state_dict(ddp_model))
 
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_broadcast_from_rank0(self) -> None:
+        model = CompositeParamModel(device=torch.device("cuda"))
+        optim = torch.optim.Adam(model.parameters())
+        fsdp_model = FSDP2(copy.deepcopy(model))
+        fsdp_optim = torch.optim.Adam(fsdp_model.parameters())
+
+        batch = torch.rand(8, 100, device="cuda")
+        model(batch).sum().backward()
+        optim.step()
+        states, _ = get_state_dict(model, optim)
+
+        fsdp_model(batch).sum().backward()
+        fsdp_optim.step()
+
+        def check(equal):
+            fsdp_states, fsdp_optim_states = get_state_dict(
+                fsdp_model, fsdp_optim, options=StateDictOptions(full_state_dict=True)
+            )
+            if equal:
+                self.assertEqual(states, fsdp_states)
+            else:
+                self.assertNotEqual(states, fsdp_states)
+
+        check(equal=True)
+        fsdp_model(batch).sum().backward()
+        fsdp_optim.step()
+        check(equal=False)
+
+        # Drop the states to simulate loading from rank0
+        if dist.get_rank() > 0:
+            load_states = {}
+            load_optim_states = {}
+        else:
+            load_states = copy.deepcopy(states)
+
+        set_model_state_dict(
+            fsdp_model,
+            load_states,
+            options=StateDictOptions(broadcast_from_rank0=True, full_state_dict=True),
+        )
+        check(equal=True)
+
 
 if __name__ == "__main__":
     run_tests()
