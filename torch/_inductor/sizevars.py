@@ -1,16 +1,33 @@
 import functools
 import itertools
 import logging
-from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Union,
+)
 
 import sympy
 from sympy import Expr
 
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
+from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import bound_sympy
 
-from .utils import sympy_index_symbol, sympy_subs, VarRanges
+from .utils import (
+    sympy_index_symbol,
+    sympy_index_symbol_with_prefix,
+    sympy_subs,
+    VarRanges,
+)
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -384,7 +401,7 @@ class SizeVarAllocator:
         return [self.evaluate_static_shape(x) for x in left]
 
     def remove_precomputed_replacements(self, expr: Expr) -> Expr:
-        if any(s.name.startswith("ps") for s in expr.free_symbols):  # type: ignore[attr-defined]
+        if any(symbol_is_type(s, SymT.PRECOMPUTED_SIZE) for s in expr.free_symbols):  # type: ignore[attr-defined]
             return sympy_subs(expr, self.inv_precomputed_replacements)  # type: ignore[arg-type]
         return expr
 
@@ -450,8 +467,8 @@ class SizeVarAllocator:
 
         def stride_vars(
             index: Expr,
-            vars: List[sympy.Symbol],
-            support_vars: Optional[List[sympy.Symbol]] = None,
+            vars: Sequence[sympy.Symbol],
+            support_vars: Optional[Sequence[sympy.Symbol]] = None,
         ) -> List[Expr]:
             if not support_vars:
                 support_vars = vars
@@ -460,7 +477,10 @@ class SizeVarAllocator:
         return stride_vars
 
     def _stride_vars(
-        self, index: Expr, vars: List[sympy.Symbol], support_vars: List[sympy.Symbol]
+        self,
+        index: Expr,
+        vars: Sequence[sympy.Symbol],
+        support_vars: Sequence[sympy.Symbol],
     ) -> List[Expr]:
         """Convert an indexing expression back into strides
 
@@ -504,11 +524,11 @@ class SizeVarAllocator:
     def stride_hints(
         self,
         index: Expr,
-        vars: List[sympy.Symbol],
-        support_vars: Optional[List[sympy.Symbol]] = None,
+        vars: Sequence[sympy.Symbol],
+        support_vars: Optional[Sequence[sympy.Symbol]] = None,
     ) -> List[int]:
         for v in index.free_symbols:
-            if v.name.startswith("indirect"):  # type: ignore[attr-defined]
+            if symbol_is_type(v, SymT.INDIRECT):  # type: ignore[attr-defined]
                 index = sympy_subs(index, {v: 0})  # type: ignore[dict-item]
         result = []
         for s in self.stride_vars(index, vars, support_vars):
@@ -533,7 +553,9 @@ class SizeVarAllocator:
             return expr
         expr = self.remove_precomputed_replacements(expr)
         if expr not in self.precomputed_replacements:
-            sym = sympy_index_symbol(f"ps{len(self.precomputed_replacements)}")
+            sym = sympy_index_symbol_with_prefix(
+                SymT.PRECOMPUTED_SIZE, len(self.precomputed_replacements)
+            )
             self.precomputed_replacements[expr] = sym
             self.inv_precomputed_replacements[sym] = expr
         return self.precomputed_replacements[expr]

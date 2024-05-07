@@ -26,6 +26,7 @@ from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter
 from torch.utils._pytree import tree_map
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch import nn
+import torch._functorch.config
 import re
 
 import functools
@@ -1541,6 +1542,22 @@ def forward(self, lengths_1, values_1):
                 self.fail("didn't raise exception")
             except GuardOnDataDependentSymNode:
                 pass
+
+        make_fx(f, tracing_mode="symbolic")(torch.randn(4))
+
+    @torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True)
+    def test_invalidate_nonzero_propagate_real_tensors(self):
+        def f(a):
+            b = a.clone()
+            x = b.nonzero()
+            x1 = b.nonzero()
+            x2 = b.nonzero()
+            assert x1.shape[0] == x2.shape[0]
+            b.normal_()
+            y = b.nonzero()
+            # Because you're not actually going to generate exactly zero with
+            # normal_ lol
+            assert x1.shape[0] == y.shape[0]
 
         make_fx(f, tracing_mode="symbolic")(torch.randn(4))
 

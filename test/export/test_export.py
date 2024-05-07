@@ -555,7 +555,7 @@ class TestExport(TestCase):
                 self.z = (self.z[0] + 6,)
                 return x + self.x + self.y["k"] + self.z[0]
 
-        ep = torch.export.export(M(), (torch.randn(2, 3),), strict=False)
+        ep = export(M(), (torch.randn(2, 3),))
         self.assertTrue(
             torch.allclose(ep.module()(torch.zeros(2, 3)), torch.ones(2, 3) * 21)
         )
@@ -1243,7 +1243,7 @@ class TestExport(TestCase):
                 "Specializations unexpectedly required"
                 ".*\n.*\\[0\\] must be specialized to 3.*guards.*too complex(.*\n)*.*"
                 "Suggested fixes:(.*\n)*.*"
-                "dim0_x = None  # 3(.*\n)*.*"
+                "dim0_x = 3(.*\n)*.*"
                 "dim1_x = 2\\*_dim1_x"
             ),
         ):
@@ -1537,7 +1537,7 @@ class TestExport(TestCase):
                 "Constraints violated \\(batch\\)!(.*\n)*.*"
                 "batch was inferred to be a constant(.*\n)*.*"
                 "Suggested fixes:(.*\n)*.*"
-                "batch = None  # 10"
+                "batch = 10"
             ),
         ):
             export(
@@ -1738,7 +1738,7 @@ class TestExport(TestCase):
                 "Constraints violated \\(K1\\)!(.*\n)*.*"
                 "K1 was inferred to be a constant(.*\n)*.*"
                 "Suggested fixes:(.*\n)*.*"
-                "K1 = None  # 3"
+                "K1 = 3"
             ),
         ):
             export(
@@ -4560,6 +4560,35 @@ def forward(self, x):
         div_spec = ep.graph_signature.input_specs[2]
         self.assertEqual(div_spec.arg.name, "div")
         self.assertEqual(div_spec.arg.value, "floor")
+
+    def test_nested_dynamic_shapes_spec(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                (a0, a1), (b0, b1), (c0, c1, c2) = x
+                return a0 + a1 + b0 + b1 + c0 + c1 + c2
+
+        f = Foo()
+        inputs = (
+            (1, 2),
+            (
+                torch.randn(4, 4),
+                torch.randn(4, 4),
+            ),
+            (
+                torch.randn(4, 4),
+                torch.randn(4, 4),
+                torch.randn(4, 4),
+            ),
+        )
+        # make sure this gets parsed correctly as 7 individual inputs, not 3 tensors
+        dynamic_shapes = {
+            "x": (
+                (None, None),
+                (None, None),
+                (None, None, None),
+            )
+        }
+        export(f, (inputs,), dynamic_shapes=dynamic_shapes)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
