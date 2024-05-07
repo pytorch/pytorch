@@ -615,8 +615,9 @@ class TestExport(TestCase):
         self.assertEqual(actual_result, expected_result)
 
     # TODO(yidi)
-    # When run_decomp, the top-level cond node has pre-existing metadata,
-    # which overrides the metada for operators in subgraph due to interpreter.run
+    # Expected failure for test cases that calls run_decomposition().
+    # The top-level cond node has pre-existing metadata,
+    # which overrides the metadata for operators in subgraph due to interpreter.run()
     # and the way we preserve metadata.
     @testing.expectedFailurePreDispatchRunDecomp
     @testing.expectedFailureRetraceability
