@@ -691,7 +691,7 @@ void PyTorchStreamWriter::setup(const string& file_name) {
 
   ar_->m_pIO_opaque = this;
   ar_->m_pWrite = ostream_write_func;
-#if !defined(C10_MOBILE)
+#ifdef C10_MOBILE
   ar_->m_pSeek = ostream_seek_func;
 #endif
 
