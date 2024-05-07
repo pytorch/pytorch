@@ -277,13 +277,13 @@ def gen_declaration_and_definition(
 
 def gen_static_dispatch_backend_call_signature(
     sig: Union[CppSignature, DispatcherSignature],
-    func: NativeFunction,
+    f: NativeFunction,
 ) -> CppSignature:
-    sig = DispatcherSignature.from_schema(func.func)
+    sig = DispatcherSignature.from_schema(f.func)
     cpp_sigs = CppSignatureGroup.from_native_function(
-        func, method=False, fallback_binding=False
+        f, method=False, fallback_binding=False
     )
-    if sig.symint and func.func.has_symint():
+    if sig.symint and f.func.has_symint():
         cpp_sig = cpp_sigs.symint_signature
     else:
         cpp_sig = cpp_sigs.signature
@@ -292,11 +292,11 @@ def gen_static_dispatch_backend_call_signature(
 
 
 def gen_static_dispatch_backend_call(
-    func: NativeFunction,
+    f: NativeFunction,
     backend_index: BackendIndex,
 ) -> str:
-    sig = DispatcherSignature.from_schema(func.func)
-    cpp_sig = gen_static_dispatch_backend_call_signature(sig, func)
+    sig = DispatcherSignature.from_schema(f.func)
+    cpp_sig = gen_static_dispatch_backend_call_signature(sig, f)
     return f"at::{backend_index.dispatch_key.lower()}::{cpp_sig.name()}"
 
 
