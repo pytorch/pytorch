@@ -206,7 +206,7 @@ def _insert_stage_symbolic_backward(
                 input_nodes = list(node.all_input_nodes)
                 grads_proxy = fx.Proxy(grads)
                 for i, input_node in enumerate(input_nodes):
-                    assign_or_accumulate_grad(input_node, grads_proxy[i].node)  # type: ignore[index]
+                    assign_or_accumulate_grad(input_node, grads_proxy[i].node)
 
     return g
 
@@ -407,15 +407,15 @@ class _LinearNodeList:
     def __init__(self, node_list):
         self.serialize_node_list = []
         for node in node_list:
-            node_args = fx.node.map_arg(node.args, lambda n: _NodeReference(n.name))  # type: ignore[arg-type,return-value]
-            node_kwargs = fx.node.map_arg(node.kwargs, lambda n: _NodeReference(n.name))  # type: ignore[arg-type,return-value]
+            node_args = fx.node.map_arg(node.args, lambda n: _NodeReference(n.name))
+            node_kwargs = fx.node.map_arg(node.kwargs, lambda n: _NodeReference(n.name))
             serialize_node = fx.Node(
-                graph=None,  # type: ignore[arg-type]
+                graph=None,
                 name=node.name,
                 op=node.op,
                 target=node.target,
-                args=node_args,  # type: ignore[arg-type]
-                kwargs=node_kwargs,  # type: ignore[arg-type]
+                args=node_args,
+                kwargs=node_kwargs,
                 return_type=node.type,
             )
             serialize_node.meta = copy.copy(node.meta)
@@ -438,8 +438,8 @@ class _LinearNodeList:
             deser_node = graph.create_node(
                 op=node.op,
                 target=node.target,
-                args=node_args,  # type: ignore[arg-type]
-                kwargs=node_kwargs,  # type: ignore[arg-type]
+                args=node_args,
+                kwargs=node_kwargs,
                 name=node.name,
                 type_expr=node.type,
             )
@@ -731,7 +731,7 @@ class Pipe(QualnameMapMixin, torch.nn.Module):
         splitter_qualname_map: Dict[str, str] = {}
         # TODO: what does split do with module invocations? does it move the modules
         # into the submodules?
-        split = split_module(traced, mod, split_callback, splitter_qualname_map)  # type: ignore[arg-type]
+        split = split_module(traced, mod, split_callback, splitter_qualname_map)
         # a (custom) tracer can produce dead code like orphan get_attr nodes
         split.graph.eliminate_dead_code()
 
@@ -1364,11 +1364,14 @@ class ArgsChunkSpec:
         self,
         chunk_dims: Tuple[int, ...],
     ):
-        self.args_chunk_spec = map_aggregate(chunk_dims, TensorChunkSpec)  # type: ignore[arg-type]
+        self.args_chunk_spec = map_aggregate(
+            chunk_dims,
+            lambda dim: TensorChunkSpec(dim),
+        )
 
     def __enter__(self):
         # Inject into the Pipe class
-        Pipe.args_chunk_spec = self.args_chunk_spec  # type: ignore[assignment]
+        Pipe.args_chunk_spec = self.args_chunk_spec
         return self.args_chunk_spec
 
     def __exit__(self, exc_type, exc_val, traceback):
@@ -1390,11 +1393,14 @@ class KwargsChunkSpec:
         self,
         chunk_dims: Dict[str, int],
     ):
-        self.kwargs_chunk_spec = map_aggregate(chunk_dims, TensorChunkSpec)  # type: ignore[arg-type]
+        self.kwargs_chunk_spec = map_aggregate(
+            chunk_dims,
+            lambda dim: TensorChunkSpec(dim),
+        )
 
     def __enter__(self):
         # Inject into the Pipe class
-        Pipe.kwargs_chunk_spec = self.kwargs_chunk_spec  # type: ignore[assignment]
+        Pipe.kwargs_chunk_spec = self.kwargs_chunk_spec
         return self.kwargs_chunk_spec
 
     def __exit__(self, exc_type, exc_val, traceback):
