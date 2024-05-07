@@ -129,10 +129,6 @@ class CKGemmTemplate(CKTemplate):
 
         Returns None if the op is not suitable, otherwise returns the op to be used.
         """
-
-        # TBD return None if alignment or layout or dtype is invalid
-        
-
         X_meta, W_meta, Y_meta = map(
             lambda T: T.get_layout(), [*self.input_nodes, self.output_node]
         )

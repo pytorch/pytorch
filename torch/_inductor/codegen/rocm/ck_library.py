@@ -1,4 +1,3 @@
-# manually selected (through benchmarking) F16/F16/F16 Row/Col/Row instances
 from dataclasses import fields, replace
 from functools import lru_cache
 import logging
@@ -11,6 +10,7 @@ from torch._inductor import config
 
 log = logging.getLogger(__name__)
 
+# manually selected (through benchmarking) F16/F16/F16 Row/Col/Row instances
 RCR_F16_PRESELECTED_INSTANCES = r"""
 # Compute-friendly, 7 instances
 DeviceGemm_Xdl_CShuffleV3<Row, Col, Row, F16, F16, F16, F32, F16, PassThrough, PassThrough, PassThrough, GemmSpecialization::MNKPadding, 256, 224, 256, 64, 8, 8, 16, 16, 7, 8, S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0, S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0, 1, 2, S<1, 32, 1, 8>, 8, BlockGemmPipelineScheduler::Intrawave, BlockGemmPipelineVersion::v3>,
