@@ -71,6 +71,7 @@ test_failures_cpp_wrapper = {
 
 if config.abi_compatible:
     xfail_list = [
+        "test_add_complex_cpu",
         "test_bernoulli1_cpu",  # cpp fallback op naming issue
         "test_conv2d_binary_inplace_fusion_failed_cpu",
         "test_conv2d_binary_inplace_fusion_pass_cpu",
@@ -88,7 +89,6 @@ if config.abi_compatible:
         "test_qlinear_cpu",
         "test_qlinear_dequant_promotion_cpu",
         "test_qlinear_relu_cpu",
-        "test_tensor2_cpu",
     ]
     for test_name in xfail_list:
         test_failures_cpp_wrapper[test_name] = test_torchinductor.TestFailure(
@@ -174,6 +174,7 @@ if RUN_CPU:
         code_string_count: dict = {}
 
     for item in [
+        BaseTest("test_add_complex"),
         BaseTest("test_add_complex4"),
         BaseTest("test_as_strided"),  # buffer reuse
         BaseTest("test_bernoulli1"),

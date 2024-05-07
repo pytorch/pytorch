@@ -258,7 +258,9 @@ static void _validate_sparse_compressed_tensor_args_worker(const Tensor& compres
       compressed_indices_name, " and ", plain_indices_name, " dtype must be Int or Long, but got ",
       compressed_indices_type);
 
-  if (!compressed_indices.is_meta()) {
+  if (compressed_indices.is_meta()) {
+    TORCH_CHECK(values_nnz == 0, "expected nnz to be 0 for sparse ", layout_name, " meta tensor but got ", values_nnz);
+  } else {
     // Indices invariants
     at::_validate_compressed_sparse_indices(
         /*is_crow = */layout == kSparseCsr || layout == kSparseBsr,
