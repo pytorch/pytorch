@@ -1753,17 +1753,6 @@ dynamic shape operator: _torch_testing.numpy_nonzero.default
             res = torch._library.utils.is_functional_schema(schema)
             self.assertEqual(res, expected)
 
-    def test_incorrect_schema_types(self):
-        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
-            with self.assertRaisesRegex(RuntimeError, "unknown type specifier"):
-                lib.define("foo12(Tensor a) -> asdfasdf")
-            with self.assertRaisesRegex(RuntimeError, "unknown type specifier"):
-                lib.define("foo12(asdf a) -> Tensor")
-            with self.assertRaisesRegex(RuntimeError, "Use `SymInt` or `int`"):
-                lib.define("foo12(int64_t a) -> Tensor")
-            with self.assertRaisesRegex(RuntimeError, "Use `float`"):
-                lib.define("foo12(double a) -> Tensor")
-
     def test_is_tensorlist_like_type(self):
         tensorlists = [
             # Tensor[]
@@ -2434,6 +2423,16 @@ class TestCustomOpAPI(TestCase):
             self.assertGreater(after, prev)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    @parametrize("idx", [0, 1, 2, 3, 4, 5])
+    def test_library_register_fake_source(self, idx):
+        opname = f"source{idx}"
+        op = getattr(torch.ops._torch_testing, opname).default
+        entry = torch._library.simple_registry.singleton.find(op._name)
+        source = entry.abstract_impl.kernel.source
+        assert source is not None
+        self.assertTrue("custom_op_db.py" in source)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_library_register_fake(self):
         for mode in ["function", "qualname", "opoverload"]:
 
@@ -2447,10 +2446,15 @@ class TestCustomOpAPI(TestCase):
 
             if mode == "function":
                 dec = torch.library.register_fake(add)
+                self.assertIsNotNone(dec)
             elif mode == "qualname":
                 dec = torch.library.register_fake("_torch_testing::add")
+                self.assertIsNotNone(dec)
             elif mode == "opoverload":
                 dec = torch.library.register_fake(torch.ops._torch_testing.add.default)
+                self.assertIsNotNone(dec)
+            else:
+                raise AssertionError("should not get here")
 
             @dec
             def _(x, y):
@@ -2833,30 +2837,6 @@ Please use `add.register_fake` to add an fake impl.""",
         x = x.cuda()
         y = f(x)
         self.assertEqual(y, x.sin())
-
-    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    def test_overloading(self):
-        called_f = 0
-        called_f1 = 0
-
-        @torch.library.custom_op("_torch_testing::f", mutates_args=())
-        def f(x: Tensor) -> Tensor:
-            nonlocal called_f
-            called_f += 1
-            return x.clone()
-
-        x = torch.randn(2, 3)
-        torch.ops._torch_testing.f(x)
-        self.assertEqual(called_f, 1)
-
-        @torch.library.custom_op("_torch_testing::f.overload", mutates_args=())
-        def f1(x: Tensor, y: Tensor) -> Tensor:
-            nonlocal called_f1
-            called_f1 += 1
-            return x.clone()
-
-        torch.ops._torch_testing.f(x, x)
-        self.assertEqual(called_f1, 1)
 
     def test_disallows_output_aliasing(self):
         @torch.library.custom_op("_torch_testing::f", mutates_args=())

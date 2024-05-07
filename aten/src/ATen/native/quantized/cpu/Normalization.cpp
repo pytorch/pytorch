@@ -80,8 +80,8 @@ Tensor q_batch_norm1d_impl(
   TORCH_CHECK(weight.numel() == C, "Expect weight size to match C");
   TORCH_CHECK(bias.numel() == C, "Expect weight size to match C");
 
-  const float* weight_data = weight.template data_ptr<float>();
-  const float* bias_data = bias.template data_ptr<float>();
+  const float* weight_data = weight.template const_data_ptr<float>();
+  const float* bias_data = bias.template const_data_ptr<float>();
 
   TORCH_CHECK(mean.numel() == C, "Mean size must match channel dimension");
   TORCH_CHECK(var.numel() == C, "Variance size must match channel dimension");
@@ -91,8 +91,8 @@ Tensor q_batch_norm1d_impl(
   float* alpha_data = alpha.mutable_data_ptr<float>();
   float* beta_data = beta.data_ptr<float>();
 
-  const float* mean_data = mean.template data_ptr<float>();
-  const float* var_data = var.template data_ptr<float>();
+  const float* mean_data = mean.template const_data_ptr<float>();
+  const float* var_data = var.template const_data_ptr<float>();
 
   if (ndim == 2) {
     // create a fake H and W dimension so we can use NHWC
@@ -189,8 +189,8 @@ Tensor q_batch_norm2d_impl(
   TORCH_CHECK(weight.numel() == C, "Expect weight size to match C");
   TORCH_CHECK(bias.numel() == C, "Expect weight size to match C");
 
-  const float* weight_data = weight.template data_ptr<float>();
-  const float* bias_data = bias.template data_ptr<float>();
+  const float* weight_data = weight.template const_data_ptr<float>();
+  const float* bias_data = bias.template const_data_ptr<float>();
 
   TORCH_CHECK(mean.numel() == C, "Mean size must match channel dimension");
   TORCH_CHECK(var.numel() == C, "Variance size must match channel dimension");
@@ -200,8 +200,8 @@ Tensor q_batch_norm2d_impl(
   float* alpha_data = alpha.mutable_data_ptr<float>();
   float* beta_data = beta.data_ptr<float>();
 
-  const float* mean_data = mean.template data_ptr<float>();
-  const float* var_data = var.template data_ptr<float>();
+  const float* mean_data = mean.template const_data_ptr<float>();
+  const float* var_data = var.template const_data_ptr<float>();
 
   auto oSizes = qx.sizes();
   auto qx_nhwc = qx.contiguous(MemoryFormat::ChannelsLast);
@@ -285,8 +285,8 @@ Tensor q_batch_norm3d_impl(
   TORCH_CHECK(weight.numel() == C, "Expect weight size to match C");
   TORCH_CHECK(bias.numel() == C, "Expect weight size to match C");
 
-  const float* weight_data = weight.template data_ptr<float>();
-  const float* bias_data = bias.template data_ptr<float>();
+  const float* weight_data = weight.template const_data_ptr<float>();
+  const float* bias_data = bias.template const_data_ptr<float>();
 
   TORCH_CHECK(mean.numel() == C, "Mean size must match channel dimension");
   TORCH_CHECK(var.numel() == C, "Variance size must match channel dimension");
@@ -296,8 +296,8 @@ Tensor q_batch_norm3d_impl(
   float* alpha_data = alpha.mutable_data_ptr<float>();
   float* beta_data = beta.data_ptr<float>();
 
-  const float* mean_data = mean.template data_ptr<float>();
-  const float* var_data = var.template data_ptr<float>();
+  const float* mean_data = mean.template const_data_ptr<float>();
+  const float* var_data = var.template const_data_ptr<float>();
 
   auto oSizes = qx.sizes();
   auto qx_nhwc = qx.contiguous(MemoryFormat::ChannelsLast3d);

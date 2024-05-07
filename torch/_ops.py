@@ -807,6 +807,7 @@ class TorchBindOpOverload(OpOverload):
             DispatchKey.AutogradCPU,
             DispatchKey.AutogradCUDA,
             DispatchKey.ADInplaceOrView,
+            DispatchKey.BackendSelect,
             DispatchKey.PythonTLSSnapshot,
             DispatchKey.PythonDispatcher,
         ]
@@ -889,8 +890,13 @@ class TorchBindOpOverload(OpOverload):
                 )
 
             raise RuntimeError(
-                f"Cannot handle FakeScriptObject with python dispatcher with dispatch key {handler}."
-                f"Please implement it by annotating a python callable with py_impl({handler})."
+                f"Torchbind op {self} received a FakeScriptObject input when dispatching {handler}."
+                f" but no python implementation is found."
+                f" Please file an issue on this when you encounter this error."
+                f" This error can happen when you export or compile the model."
+                f" It can still happpen even if a C++ implementation for {dispatch_key}. "
+                f" has been registered. That's because FakeScriptObject purely lives in python and cannot work "
+                f" with a C++ implementation."
             )
 
         assert isinstance(handler, Callable)  # type: ignore[arg-type]
@@ -1119,10 +1125,8 @@ class _OpNamespace(types.ModuleType):
         # for overloads and raise an exception if there are more than one.
         namespace_name = self.name
         qualified_op_name = f"{namespace_name}::{op_name}"
-        module_name = self.__module__ + "." + namespace_name
-
         try:
-            op, overload_names = _get_packet(qualified_op_name, module_name)
+            op, overload_names = torch._C._jit_get_operation(qualified_op_name)
             if op is None:
                 raise AttributeError(
                     f"'_OpNamespace' '{self.name}' object has no attribute '{op_name}'"
@@ -1134,7 +1138,10 @@ class _OpNamespace(types.ModuleType):
                 f"'_OpNamespace' '{self.name}' object has no attribute '{op_name}'"
             ) from e
 
-        op.__module__ = module_name
+        # let the script frontend know that op is identical to the builtin op
+        # with qualified_op_name
+        torch.jit._builtins._register_builtin(op, qualified_op_name)
+        op.__module__ = self.__module__ + "." + namespace_name
         opoverloadpacket = OpOverloadPacket(
             qualified_op_name, op_name, op, overload_names
         )
@@ -1144,23 +1151,6 @@ class _OpNamespace(types.ModuleType):
         setattr(self, op_name, opoverloadpacket)
         self._dir.append(op_name)
         return opoverloadpacket
-
-
-def _get_packet(qualname, op_module):
-    op, overload_names = torch._C._jit_get_operation(qualname)
-    if op is not None:
-        # let the script frontend know that op is identical to the builtin op
-        # with qualified_op_name
-        torch.jit._builtins._register_builtin(op, qualname)
-        op.__module__ = op_module
-    return op, overload_names
-
-
-def _refresh_packet(packet):
-    op, overload_names = _get_packet(packet._qualified_op_name, packet._op.__module__)
-    assert op is not None
-    packet._op = op
-    packet._overload_names = overload_names
 
 
 class _PyOpNamespace(_OpNamespace):
