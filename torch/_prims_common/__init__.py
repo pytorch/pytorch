@@ -1350,11 +1350,15 @@ class RETURN_TYPE(Enum):
 
 
 # TODO: when NumberType contains the sym types, can simplify this
-def number_type(x: Union[NumberType, torch.SymInt, torch.SymFloat]) -> Type:
+def number_type(
+    x: Union[NumberType, torch.SymInt, torch.SymFloat, torch.SymBool]
+) -> Type:
     if isinstance(x, torch.SymInt):
         return int
     elif isinstance(x, torch.SymFloat):
         return float
+    elif isinstance(x, torch.SymBool):
+        return bool
     else:
         return type(x)
 
