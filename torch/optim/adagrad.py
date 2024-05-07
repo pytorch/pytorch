@@ -67,8 +67,7 @@ class Adagrad(Optimizer):
             self._step_supports_amp_scaling = True
             fused_supported_devices = _get_fused_kernels_supported_devices()
             # Not support CUDA yet
-            cuda = fused_supported_devices.pop(0)
-            assert cuda == "cuda"
+            fused_supported_devices.remove("cuda")
             if not all(
                 p.device.type in fused_supported_devices and torch.is_floating_point(p)
                 for pg in self.param_groups
@@ -84,7 +83,15 @@ class Adagrad(Optimizer):
         for group in self.param_groups:
             for p in group["params"]:
                 state = self.state[p]
-                state["step"] = torch.tensor(0.0, dtype=_get_scalar_dtype())
+                state["step"] = (
+                    torch.zeros(
+                        (),
+                        dtype=_get_scalar_dtype(is_fused=group["fused"]),
+                        device=p.device,
+                    )
+                    if group["fused"]
+                    else torch.tensor(0.0, dtype=_get_scalar_dtype())
+                )
                 init_value = (
                     complex(initial_accumulator_value, initial_accumulator_value)
                     if torch.is_complex(p)
@@ -130,9 +137,6 @@ class Adagrad(Optimizer):
                 state_sums.append(state["sum"])
                 state_steps.append(state["step"])
 
-        is_fused = group["fused"]
-        if is_fused and (has_sparse_grad or has_complex):
-            raise RuntimeError("`fused` does not support sparse grad or complex param")
         return has_sparse_grad, has_complex
 
     @_use_grad_for_differentiable
@@ -485,13 +489,16 @@ def _fused_adagrad(
     weight_decay: float,
     lr_decay: float,
     eps: float,
-    has_sparse_grad: bool,  # Needed for consistency.
+    has_sparse_grad: bool,
     maximize: bool,
     differentiable: bool,
-    has_complex: bool,  # Needed for consistency.
+    has_complex: bool,
 ) -> None:
     if not params:
         return
+    if has_sparse_grad or has_complex:
+        raise RuntimeError("`fused` does not support sparse grad or complex param")
+
     if differentiable:
         raise RuntimeError(
             "adagrad with fused=True does not support differentiable=True"

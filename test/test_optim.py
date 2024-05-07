@@ -1299,7 +1299,7 @@ class TestOptimRenewed(TestCase):
             return closure_loss if optim_info.step_requires_closure else None
 
         for optim_input in cpu_optim_inputs:
-            if "fused" in optim_input.kwargs and optim_input.kwargs["fused"]:
+            if "fused" in optim_input.kwargs and "cuda" not in optim_info.supports_fused_on:
                 self.skipTest(f"cuda is not supported for fused on {optim_cls.__name__}")
             params = [Parameter(torch.randn(2, 3, device="cpu", dtype=dtype)) for _ in range(2)]
             for p in params:
