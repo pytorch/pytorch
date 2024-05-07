@@ -25,7 +25,6 @@ from torch.distributed.checkpoint.state_dict import (
     get_state_dict,
     set_model_state_dict,
     set_optimizer_state_dict,
-    set_state_dict,
     StateDictOptions,
 )
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
