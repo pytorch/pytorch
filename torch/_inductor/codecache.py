@@ -2635,17 +2635,17 @@ def _nvcc_compiler_options() -> List[str]:
     return options
 
 
-def _ck_include_paths() -> List[str]:
+def _rocm_include_paths() -> List[str]:
     from torch.utils import cpp_extension
     rocm_include = os.path.join(config.rocm.rocm_home, 'include') if config.rocm.rocm_home else f"{cpp_extension._join_rocm_home('include')}"
     ck_include = os.path.join(config.rocm.ck_dir, 'include')
     return [rocm_include, ck_include]
 
 
-def _hip_lib_options() -> List[str]:
+def _rocm_lib_options() -> List[str]:
     from torch.utils import cpp_extension
 
-    rocm_lib_dir = os.path.join(config.rocm.rocm_home, 'include') if config.rocm.rocm_home else cpp_extension._join_rocm_home('lib')
+    rocm_lib_dir = os.path.join(config.rocm.rocm_home, 'lib') if config.rocm.rocm_home else cpp_extension._join_rocm_home('lib')
     hip_lib_dir = os.path.join(config.rocm.rocm_home, 'hip', 'lib') if config.rocm.rocm_home else cpp_extension._join_rocm_home('hip', 'lib')
 
     return [
@@ -2655,7 +2655,7 @@ def _hip_lib_options() -> List[str]:
     ]
 
 
-def _hip_compiler_options() -> List[str]:
+def _rocm_compiler_options() -> List[str]:
     opts = [
         config.rocm.compile_opt_level,
         "-x", 
@@ -2684,7 +2684,7 @@ def _hip_compiler_options() -> List[str]:
     return opts
 
 
-def _hip_compiler() -> Optional[str]:
+def _rocm_compiler() -> Optional[str]:
     if is_linux():
         if config.rocm.rocm_home:
             return os.path.join(config.rocm.rocm_home, 'llvm', 'bin', 'clang')
@@ -2698,13 +2698,13 @@ def _hip_compiler() -> Optional[str]:
 
 
 @lru_cache(None)
-def _hip_compiler_version() -> Optional[str]:
-    hip_compiler = _hip_compiler()
-    if not hip_compiler:
+def _rocm_compiler_version() -> Optional[str]:
+    rocm_compiler = _rocm_compiler()
+    if not rocm_compiler:
         return None
     try:
         import subprocess
-        return subprocess.check_output([hip_compiler, "--version"], text=True)
+        return subprocess.check_output([rocm_compiler, "--version"], text=True)
     except subprocess.CalledProcessError:
         return None
 
@@ -2715,10 +2715,10 @@ def rocm_compile_command(
     dst_file_ext: str,
     extra_args: Optional[List[str]] = None,
 ) -> str:
-    include_paths = _ck_include_paths()
-    lib_options = _hip_lib_options()
-    compiler_options = _hip_compiler_options()
-    compiler = _hip_compiler()
+    include_paths = _rocm_include_paths()
+    lib_options = _rocm_lib_options()
+    compiler_options = _rocm_compiler_options()
+    compiler = _rocm_compiler()
     options = (
         compiler_options
         + (extra_args if extra_args else [])
@@ -2855,7 +2855,7 @@ class CUDACodeCache:
     _SOURCE_CODE_SUFFIX = "cu"
 
     if torch.version.hip:
-        log.debug(f"HIP compiler version:\n{_hip_compiler_version()}")
+        log.debug(f"HIP compiler version:\n{_rocm_compiler_version()}")
 
     @classmethod
     def write(cls, source_code, dst_file_ext) -> Tuple[str, str]:
