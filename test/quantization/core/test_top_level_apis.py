@@ -62,24 +62,31 @@ class TestDefaultObservers(TestCase):
 
 
 class TestQConfig(TestCase):
-
     REDUCE_RANGE_DICT = {
-        'fbgemm': (True, False),
-        'qnnpack': (False, False),
-        'onednn': (False, False),
-        'x86': (True, False),
+        "fbgemm": (True, False),
+        "qnnpack": (False, False),
+        "onednn": (False, False),
+        "x86": (True, False),
     }
 
     def test_reduce_range_qat(self) -> None:
         for backend, reduce_ranges in self.REDUCE_RANGE_DICT.items():
             for version in range(2):
-                qconfig = torch.ao.quantization.get_default_qat_qconfig(backend, version)
+                qconfig = torch.ao.quantization.get_default_qat_qconfig(
+                    backend, version
+                )
 
                 fake_quantize_activ = qconfig.activation()
-                self.assertEqual(fake_quantize_activ.activation_post_process.reduce_range, reduce_ranges[0])
+                self.assertEqual(
+                    fake_quantize_activ.activation_post_process.reduce_range,
+                    reduce_ranges[0],
+                )
 
                 fake_quantize_weight = qconfig.weight()
-                self.assertEqual(fake_quantize_weight.activation_post_process.reduce_range, reduce_ranges[1])
+                self.assertEqual(
+                    fake_quantize_weight.activation_post_process.reduce_range,
+                    reduce_ranges[1],
+                )
 
     def test_reduce_range(self) -> None:
         for backend, reduce_ranges in self.REDUCE_RANGE_DICT.items():
