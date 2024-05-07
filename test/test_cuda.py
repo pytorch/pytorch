@@ -276,8 +276,8 @@ class TestCuda(TestCase):
 
     def test_uuid(self):
         uuid = torch.cuda.get_device_properties(0).uuid
-        assert len(str(uuid)) == 36  # xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-        assert len(uuid.bytes) == 16
+        self.assertEqual(len(str(uuid)), 36)  # xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+        self.assertEqual(len(uuid.bytes), 16)
 
     def test_copy_non_blocking(self):
         def _test_copy_non_blocking(a, b):
