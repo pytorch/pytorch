@@ -14,7 +14,7 @@ from torch.backends.cuda import (
 )
 
 from torch.nn.attention import SDPBackend
-from .nested_tensor import buffer_from_jagged, NestedTensor, ViewNestedFromBuffer
+from .nested_tensor import NestedTensor
 
 log = logging.getLogger(__name__)
 
@@ -363,7 +363,7 @@ def _view_as_dense(
     tensor: torch.Tensor, Nnz: int, num_heads: int, head_dim: int
 ) -> torch.Tensor:
     if tensor.is_nested:
-        return buffer_from_jagged(tensor)
+        return tensor.values()
     return tensor.view(Nnz, num_heads, head_dim)
 
 
@@ -754,16 +754,18 @@ def jagged_scaled_dot_product_attention(
         d2 = value._size[-1]
 
         min_seqlen_tensor = query._metadata_cache.get(
-            "min_seqlen", None)  # type: ignore[attr-defined]
+            "min_seqlen", None
+        )  # type: ignore[attr-defined]
         max_seqlen_tensor = query._metadata_cache.get(
-            "max_seqlen", None)  # type: ignore[attr-defined]
+            "max_seqlen", None
+        )  # type: ignore[attr-defined]
 
         # convert jagged layout Nested Tensor to strided layout Nested Tensor
         # which support the math implementation of SDPA
         def get_strided_layout_nested_tensor(jagged_layout_nt):
             lengths = jagged_layout_nt._offsets[1:] - jagged_layout_nt._offsets[:-1]
             transpose = torch.transpose(jagged_layout_nt, 1, 2)
-            tensor_list = buffer_from_jagged(transpose).split(list(lengths), dim=0)
+            tensor_list = transpose.values().split(list(lengths), dim=0)
             strided_nt = torch.nested.as_nested_tensor(list(tensor_list))
             strided_nt = strided_nt.transpose(1, 2).contiguous()
             return strided_nt
@@ -776,7 +778,10 @@ def jagged_scaled_dot_product_attention(
             query, key, value, attn_mask, dropout_p, is_causal, scale=scale
         )[0]
 
-        from torch.nested._internal.nested_tensor import nested_view_from_values_offsets
+        from torch.nested._internal.nested_tensor import (
+            _load_val_from_tensor,
+            nested_view_from_values_offsets,
+        )
 
         # convert strided layout Nested Tensor back to jagged layout Nested Tensor
         attn_out = attn_out.transpose(1, 2).contiguous().values()
@@ -784,8 +789,16 @@ def jagged_scaled_dot_product_attention(
         attn_out = nested_view_from_values_offsets(
             attn_out,
             offsets,
-            min_seqlen=(None if min_seqlen_tensor is None else min_seqlen_tensor.shape[0]),
-            max_seqlen=(None if max_seqlen_tensor is None else max_seqlen_tensor.shape[0]),
+            min_seqlen=(
+                None
+                if min_seqlen_tensor is None
+                else _load_val_from_tensor(min_seqlen_tensor)
+            ),
+            max_seqlen=(
+                None
+                if max_seqlen_tensor is None
+                else _load_val_from_tensor(max_seqlen_tensor)
+            ),
         ).transpose(1, 2)
 
         return attn_out

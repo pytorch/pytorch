@@ -4408,7 +4408,7 @@ class TestNestedTensorSubclass(TestCase):
         def f(nt):
             return torch.ones_like(nt) * nt.max_seqlen()
 
-        for dynamic in [False, True]:
+        for dynamic in [False, True, None]:
             self.assertFalse(_recompiles_for_inputs(f, (nt,), (nt2,), dynamic=dynamic))
 
     @dtypes(torch.float32)
@@ -4435,7 +4435,7 @@ class TestNestedTensorSubclass(TestCase):
         def f(nt):
             return torch.ones_like(nt) * nt.min_seqlen()
 
-        for dynamic in [False, True]:
+        for dynamic in [False, True, None]:
             self.assertFalse(_recompiles_for_inputs(f, (nt,), (nt2,), dynamic=dynamic))
 
     @dtypes(torch.float32)
@@ -4443,7 +4443,7 @@ class TestNestedTensorSubclass(TestCase):
     @unittest.skipIf(sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+")
     @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    def test_compile_with_dynamic_seq_lens(self, device, dtype):
+    def test_compile_with_propagated_dynamic_max_seq_len(self, device, dtype):
         # shape (B, *, D)
         # max seq len: 18
         nt = torch.nested.nested_tensor([
@@ -4467,8 +4467,31 @@ class TestNestedTensorSubclass(TestCase):
         output = torch.compile(f, fullgraph=True, dynamic=False)(nt)
         self.assertEqual(ref, output)
 
-        for dynamic in [False, True]:
+        for dynamic in [False, True, None]:
             self.assertFalse(_recompiles_for_inputs(f, (nt,), (nt2,), dynamic=dynamic))
+
+    @dtypes(torch.float32)
+    @skipIfTorchDynamo("Test compiles internally")
+    @unittest.skipIf(sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+")
+    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    def test_compile_with_manually_set_seq_lens(self, device, dtype):
+        # shape (B, *, D)
+        # max seq len: 10
+        nt = torch.nested.nested_tensor([
+            torch.randn(2, 5),
+            torch.randn(3, 5),
+            torch.randn(10, 5),
+        ], layout=torch.jagged)
+
+        # max seq len: 11
+        nt2 = torch.nested.nested_tensor([
+            torch.randn(2, 5),
+            torch.randn(3, 5),
+            torch.randn(11, 5),
+        ], layout=torch.jagged)
+
+        # TODO: demonstrate usage of new API with manually set seq lengths
 
 
 instantiate_parametrized_tests(TestNestedTensor)
