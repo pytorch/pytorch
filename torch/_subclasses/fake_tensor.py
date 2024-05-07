@@ -763,6 +763,14 @@ def extract_tensor_metadata(t: torch.Tensor) -> TensorMetadata:
     """
     Extract the TensorMetadata of a tensor.
     """
+
+    # WARNING: Any changes to this (probably) need to be reflected in
+    # extract_tensor_metadata() in fake_tensor.cpp. So why have it in both
+    # places? This one emits a TensorMetadata which is actually used to
+    # reconstruct aspects of the tensor - so needs to be reversable. The one in
+    # fake_tensor.cpp is used for a cache key and is one-way (but much faster
+    # because it doesn't need to build up a python data structure).
+
     memory_format: Optional[torch.memory_format] = suggest_memory_format(t)
     if is_sparse_any(t) or not t.is_contiguous(memory_format=memory_format):
         memory_format = None
@@ -1052,8 +1060,7 @@ class FakeTensorMode(TorchDispatchMode):
         and cache the result (if the result is eligible for caching).
         """
         output: Union[FakeTensor, _Unassigned] = _UNASSIGNED
-        key = self._cache_key(func, args, kwargs)  # XYZZY
-        # key = torch._C._FakeTensor_compute_cache_key(self, func, args, kwargs)
+        key = self._cache_key(func, args, kwargs)
         entry = FakeTensorMode.cache.get(key, None)
         if isinstance(entry, _DispatchCacheEntry):
             output = self._output_from_cache_entry(entry, func, args)
@@ -1871,7 +1878,7 @@ class FakeTensorMode(TorchDispatchMode):
         any_constant = any(e.constant is not None for e in flat_arg_fake_tensors)
         schema_info = get_schema_info(func)
         if any_constant and schema_info.is_mutable():
-            _, new_kwargs = normalize_function(  # type: ignore[misc]
+            _, new_kwargs = normalize_function(
                 func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
             )
             for k, v in new_kwargs.items():

@@ -729,7 +729,7 @@ def _propagate_and_assign_input_shapes(
 # Defined in torch/csrc/jit/runtime/graph_executor.h
 class GraphExecutorState: ...
 
-# Defined in torch/torch/csrc/jit/ir/alias_analysis.h
+# Defined in torch/csrc/jit/ir/alias_analysis.h
 class AliasDb:
     def __str__(self) -> str: ...
 
@@ -858,7 +858,7 @@ class Node:
     def tys(self, name: str) -> List[JitType]: ...
     def tys_(self, name: str, val: List[JitType]) -> Node: ...
 
-# Defined in torch/torch/csrc/jit/ir/ir.h
+# Defined in torch/csrc/jit/ir/ir.h
 class Graph:
     def inputs(self) -> Iterator[Value]: ...
     def outputs(self) -> Iterator[Value]: ...
@@ -883,13 +883,13 @@ class Graph:
     def makeMultiOutputIntoTuple(self) -> None: ...
     def copy(self) -> Graph: ...
 
-# Defined in torch/aten/src/ATen/core/alias_info.h
+# Defined in aten/src/ATen/core/alias_info.h
 class AliasInfo:
     is_write: _bool
     before_set: Set[str]
     after_set: Set[str]
 
-# Defined in torch/aten/src/ATen/core/function_schema.h
+# Defined in aten/src/ATen/core/function_schema.h
 class Argument:
     name: str
     type: JitType
@@ -1891,6 +1891,7 @@ class _CudaDeviceProperties:
     is_multi_gpu_board: _int
     max_threads_per_multi_processor: _int
     gcnArchName: str
+    uuid: str
 
 # Functions related to SDPA
 class _SDPAParams:
@@ -2001,6 +2002,9 @@ class _CUDAGraph:
 
 def _cuda_isCurrentStreamCapturing() -> _bool: ...
 def _graph_pool_handle() -> Tuple[_int, _int]: ...
+
+# Defined in torch/csrc/tensor/fake_tensor.cpp
+def _FakeTensor_extract_tensor_metadata(tensor: Tensor) -> bytes: ...
 
 # Defined in torch/csrc/xpu/Module.cpp
 def _xpu_setDevice(device: _int) -> None: ...
