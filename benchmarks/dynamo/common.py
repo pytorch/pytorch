@@ -1945,12 +1945,7 @@ def cast_to_fp32(model, inputs):
 
 def cast_to_device(device, model, inputs):
     model = model.to(device=device)
-    inputs = tree_map(
-        lambda x: x.to(device=device)
-        if isinstance(x, torch.Tensor) and x.is_floating_point()
-        else x,
-        inputs,
-    )
+    inputs = tree_map_only(torch.Tensor, lambda x: x.to(device=device), inputs)
     return model, inputs
 
 
@@ -2475,10 +2470,9 @@ class BenchmarkRunner:
                     fp64_outputs,
                 )
                 if current_device == "xpu":
-                    fp64_outputs = tree_map(
-                        lambda x: x.to(device=current_device)
-                        if isinstance(x, torch.Tensor) and x.is_floating_point()
-                        else x,
+                    fp64_outputs = tree_map_only(
+                        torch.Tensor,
+                        lambda x: x.to(device=current_device),
                         fp64_outputs,
                     )
             except Exception as e:
