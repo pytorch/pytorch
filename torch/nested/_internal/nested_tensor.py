@@ -31,6 +31,10 @@ def _store_val_in_tensor(val) -> torch.Tensor:
     return torch.zeros(val, 0)
 
 
+def _load_val_from_tensor(t: torch.Tensor):
+    return t.shape[0]
+
+
 class NestedTensor(torch.Tensor):
     _values: torch.Tensor  # type: ignore[assignment]
     _offsets: torch.Tensor
@@ -147,7 +151,7 @@ class NestedTensor(torch.Tensor):
             )
             max_seqlen_tensor = _store_val_in_tensor(max_val)
             self._metadata_cache["max_seqlen"] = max_seqlen_tensor
-        return max_seqlen_tensor.shape[0]
+        return _load_val_from_tensor(max_seqlen_tensor)
 
     def min_seqlen(self):
         min_seqlen_tensor = self._min_seqlen_tensor
@@ -159,7 +163,7 @@ class NestedTensor(torch.Tensor):
             )
             min_seqlen_tensor = _store_val_in_tensor(min_val)
             self._metadata_cache["min_seqlen"] = min_seqlen_tensor
-        return min_seqlen_tensor.shape[0]
+        return _load_val_from_tensor(min_seqlen_tensor)
 
     # Private accessors used for treating min / max seqlen as inner tensors for
     # flatten / unflatten. These do not compute / cache if not present.
@@ -181,8 +185,9 @@ class NestedTensor(torch.Tensor):
                 torch.max,
                 self._offsets.diff() if self._lengths is None else self._lengths,
             )
-            self._metadata_cache["max_seqlen"] = _store_val_in_tensor(max_val)
-        return max_seqlen_tensor.shape[0]
+            max_seqlen_tensor = _store_val_in_tensor(max_val)
+            self._metadata_cache["max_seqlen"] = max_seqlen_tensor
+        return _load_val_from_tensor(max_seqlen_tensor)
 
     @property
     def _min_seqlen(self):
@@ -193,8 +198,9 @@ class NestedTensor(torch.Tensor):
                 torch.min,
                 self._offsets.diff() if self._lengths is None else self._lengths,
             )
-            self._metadata_cache["min_seqlen"] = _store_val_in_tensor(min_val)
-        return min_seqlen_tensor.shape[0]
+            min_seqlen_tensor = _store_val_in_tensor(min_val)
+            self._metadata_cache["min_seqlen"] = min_seqlen_tensor
+        return _load_val_from_tensor(min_seqlen_tensor)
 
     def __repr__(self):
         # We should implement this in torch/_tensor_str.py instead
@@ -332,6 +338,15 @@ class ViewNestedFromBuffer(torch.autograd.Function):
         offsets: torch.Tensor,
         metadata_cache: Optional[Dict[str, Any]] = None,
     ):  # type: ignore[override]
+        # maintain BC with this usages of this where the seqlens are stuffed
+        # directly into the metadata cache as non-Tensors / ints
+        if metadata_cache is not None:
+            min_seqlen = metadata_cache.get("min_seqlen", None)
+            max_seqlen = metadata_cache.get("max_seqlen", None)
+            if min_seqlen is not None and not isinstance(min_seqlen, torch.Tensor):
+                metadata_cache["min_seqlen"] = _store_val_in_tensor(min_seqlen)
+            if max_seqlen is not None and not isinstance(max_seqlen, torch.Tensor):
+                metadata_cache["max_seqlen"] = _store_val_in_tensor(max_seqlen)
         return NestedTensor(
             values.detach(),
             offsets=offsets,
