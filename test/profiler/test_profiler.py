@@ -711,10 +711,13 @@ class TestProfiler(TestCase):
                 # or use kineto__tensor_core_insts, kineto__cuda_core_flops
                 "kineto__tensor_core_insts",
                 "dram__bytes_read.sum",
-                "dram__bytes_write.sum"],
+                "dram__bytes_write.sum",
+            ],
             profiler_measure_per_kernel=True,
         )
-        with _profile(use_cuda=True, use_kineto=True, experimental_config=exp_config) as p:
+        with _profile(
+            use_cuda=True, use_kineto=True, experimental_config=exp_config
+        ) as p:
             self.payload(use_cuda=True)
 
         def check_trace(fname):
