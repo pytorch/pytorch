@@ -212,13 +212,14 @@ def aot_dispatch_base(
     if not hasattr(compiled_fw_func, "_boxed_call"):
         compiled_fw_func = make_boxed_func(compiled_fw_func)
 
-    compiled_fn = RuntimeWrapper.post_compile(
-        compiled_fw_func,
-        aot_config,
-        fw_metadata=fw_metadata,
+    compiled_fn = RuntimeWrapper(
         indices_of_inps_to_detach=[],
         trace_joint=False,
         disable_amp=disable_amp,
+    ).post_compile(
+        compiled_fw_func,
+        aot_config,
+        fw_metadata=fw_metadata,
     )
 
     return compiled_fn
@@ -1041,13 +1042,14 @@ Got grad_output types: {str(grad_output_types)}"""
                 return (*[None] * num_tokens, *outs_wrapped)
             return (*[None] * num_tokens, *out)
 
-    compiled_function = RuntimeWrapper.post_compile(
-        CompiledFunction.apply,
-        aot_config,
-        fw_metadata=fw_metadata,
+    compiled_function = RuntimeWrapper(
         indices_of_inps_to_detach=_indices_of_inps_to_detach,
         trace_joint=True,
         disable_amp=disable_amp,
+    ).post_compile(
+        CompiledFunction.apply,
+        aot_config,
+        fw_metadata=fw_metadata,
     )
 
     if not config.debug_assert:
