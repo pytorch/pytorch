@@ -81,6 +81,33 @@ class TestSelectAlgorithm(TestCase):
             1 if out_features != 1 else 0,
         )
 
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("bias", (True, False))
+    @dtypes(torch.float)
+    def test_linear_input_transpose(self, bias, dtype):
+        batch_size = 384
+        in_features = 196
+        out_features = 384
+
+        class M(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.linear = torch.nn.Linear(in_features, out_features, bias)
+
+            @torch.compile
+            def forward(self, x):
+                return self.linear(x)
+
+        counters.clear()
+        mod = M(bias=bias).to(dtype=dtype).eval()
+        v = torch.randn(in_features, batch_size).to(dtype=dtype)
+        mod(v.transpose(0, 1))
+        # TODO(jgong5): support transposed input
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 0)
+
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
 class _DynamicShapesTestBase(TestCase):

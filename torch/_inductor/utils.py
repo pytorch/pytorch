@@ -978,7 +978,7 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2):
         return False
 
     layout_dtypes = [torch.float32]
-    m, n, k, *_ = mm_args(mat1, mat2)
+    m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2)
     # TODO(jgong5): support dynamic shapes for n or k
     if has_free_symbols((n, k)):
         return False
@@ -992,6 +992,7 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2):
         layout.dtype in layout_dtypes
         and micro_gemm is not None
         and n % micro_gemm.register_blocking[1] == 0
+        and mat1.get_stride()[-1] == 1  # TODO(jgong5): support transposed input
         and isinstance(mat2, ir.StorageBox)
         and mat2.is_module_buffer()
     )
