@@ -915,7 +915,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
       .def_property_readonly(
           "bytes",
           [](const CUuuid& uuid) {
-            return std::vector<int8_t>(uuid.bytes, uuid.bytes + 16);
+            return std::vector<uint8_t>(uuid.bytes, uuid.bytes + 16);
           })
       .def("__str__", [](const CUuuid& uuid) {
         // UUIDs are a 128-bit label. CUDA and HIP store this as char[16].
