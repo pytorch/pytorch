@@ -273,7 +273,7 @@ def checkpoint_wrapper(module, config):
         )
 
 
-test_case = "simple_mlp"  # "simple_mlp" / "simple_seq_module" / "nested_fully_shard" / "toy_transformer"
+test_case = "nested_fully_shard"  # "simple_mlp" / "simple_seq_module" / "nested_fully_shard" / "toy_transformer"
 balanced = True
 mixed_precision = False  # TODO(yf225): when True, fails accuracy test, needs debugging
 apply_fsdp = True
@@ -611,9 +611,9 @@ if __name__ == "__main__":
     for activation_checkpoint in ac_test_order:
         for backend in backends:
             losses_compiled = test_compile(activation_checkpoint, backend)
-        # losses_eager = test_eager(activation_checkpoint)
-        # for loss_compiled, loss_eager in zip(losses_compiled, losses_eager):
-        #     assert torch.allclose(torch.tensor(loss_compiled), torch.tensor(loss_eager), rtol=1e-3), f"{loss_compiled} vs {loss_eager}"
+        losses_eager = test_eager(activation_checkpoint)
+        for loss_compiled, loss_eager in zip(losses_compiled, losses_eager):
+            assert torch.allclose(torch.tensor(loss_compiled), torch.tensor(loss_eager), rtol=1e-3), f"{loss_compiled} vs {loss_eager}"
 
     if dist.get_rank() == 0:
         export_memory_snapshot(f"combined_fsdp{apply_fsdp}_ac{ac_test_order}_backend{backends}_memory_snapshot")
