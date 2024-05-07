@@ -226,14 +226,6 @@ CREATE_MPS_STRUCTURED_UNARY_ROUNDING_TORCH_IMPL_FUNC(round_out_mps, round)
     });                                                                                                          \
   }
 
-#define CREATE_MPS_UNARY_TORCH_IMPL_FUNC(func_out, func_stub)                                                    \
-  Tensor& func_out(const Tensor& self, Tensor& output) {                                                         \
-    mps::unary_op(self, output, #func_out, ^MPSGraphTensor*(MPSGraph * mpsGraph, MPSGraphTensor * inputTensor) { \
-      return [mpsGraph func_stub##WithTensor:inputTensor name:nil];                                              \
-    });                                                                                                          \
-    return output;                                                                                               \
-  }
-
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(exp_out_mps, exponent)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(exp2_out_mps, exponentBase2)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(reciprocal_out_mps, reciprocal)
@@ -257,7 +249,17 @@ CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(asinh_out_mps, asinh)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(acosh_out_mps, acosh)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(atanh_out_mps, atanh)
 
-CREATE_MPS_UNARY_TORCH_IMPL_FUNC(abs_out_mps, absolute)
+Tensor& abs_out_mps(const Tensor& self, Tensor& output) {
+  mps::unary_op(self, output, "abs_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
+    auto rc = [mpsGraph absoluteWithTensor:inputTensor name:nil];
+    if (self.is_complex()) {
+      TORCH_CHECK_TYPE(mps::supportsComplex(), "MPS complex types are only supported on MacOS 14.0 or newer.");
+      rc = [mpsGraph realPartOfTensor:rc name:nil];
+    }
+    return rc;
+  });
+  return output;
+}
 
 Tensor& logical_not_out_mps(const Tensor& self, Tensor& output) {
   auto bool_self = self.to(ScalarType::Bool);
