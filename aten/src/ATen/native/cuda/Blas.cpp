@@ -157,7 +157,7 @@ enum class Activation {
   GELU,
 };
 
-#if (!defined(USE_ROCM) && !defined(_MSC_VER)) || defined(USE_ROCM)
+#ifndef _MSC_VER
 cuda::blas::GEMMAndBiasActivationEpilogue activation_to_gemm_and_blas_arg(Activation a) {
   switch (a) {
     case Activation::None:
@@ -334,7 +334,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!args.result->is_conj());
 
-#if (!defined(USE_ROCM) && !defined(_MSC_VER)) || defined(USE_ROCM)
+#ifndef _MSC_VER
   if (useLtInterface) {
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half,
