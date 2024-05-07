@@ -93,7 +93,7 @@ class MLPStacked(nn.Module):
 class ModelArgs:
     n_layers: int = 2
     vocab_size: int = 8
-    max_seq_len: int = 8
+    max_seq_len: int = 16
     dim: int = 16
     n_heads: int = 4
     dropout_p: float = 0.1
