@@ -1329,7 +1329,7 @@ def export(
             # Running graph with interpreter is needed for propagating the stack_trace
             def graph_with_interpreter(*args):
                 with torch.fx.traceback.preserve_node_meta():
-                    return torch.fx.Interpreter(graph).run(*args)  # type: ignore[arg-type]
+                    return torch.fx.Interpreter(graph).run(*args)
 
             with maybe_disable_fake_tensor_mode(), enable_python_dispatcher(), (
                 fake_mode
