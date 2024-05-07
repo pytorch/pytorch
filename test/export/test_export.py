@@ -555,7 +555,7 @@ class TestExport(TestCase):
                 self.z = (self.z[0] + 6,)
                 return x + self.x + self.y["k"] + self.z[0]
 
-        ep = torch.export.export(M(), (torch.randn(2, 3),), strict=False)
+        ep = export(M(), (torch.randn(2, 3),))
         self.assertTrue(
             torch.allclose(ep.module()(torch.zeros(2, 3)), torch.ones(2, 3) * 21)
         )
