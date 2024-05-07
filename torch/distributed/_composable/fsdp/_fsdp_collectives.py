@@ -195,7 +195,6 @@ def foreach_all_gather_copy_out(
             all_gather_input_numels, all_gather_input_dtypes, world_size, device
         )  # no-op after 1st call
         fsdp_param.alloc_all_gather_outputs()
-        fsdp_param.init_unsharded_param()  # no-op after 1st call. Need to call here so that ._unsharded_param access below doesn't fail.
     all_gather_output = all_gather_output.view(world_size, -1)
     # NOTE: This is the biggest difference between eager and compile code path.
     # In eager, we directly copy from `all_gather_output` into `fsdp_param.all_gather_output` (`fsdp_param._unsharded_param` will be updated because of shared storage),
