@@ -78,7 +78,6 @@ from .utils import (
     graph_break_reasons,
     increment_op_count,
     lazy_format_graph_code,
-    lazy_format_graph_tabular,
     LazyString,
     nn_module_proxy,
     same,
@@ -1274,10 +1273,10 @@ class OutputGraph:
         torch._logging.trace_structured(
             "dynamo_output_graph",
             lambda: {"sizes": self.get_graph_sizes_structured()},
-            payload_fn=lambda: gm.print_readable(print_output=False),
+            payload_fn=lambda: gm.print_readable(
+                print_output=False, include_stride=True, include_device=True
+            ),
         )
-        graph_tabular_log.debug("%s", lazy_format_graph_tabular(name, gm))
-        graph_sizes_log.debug("%s", LazyString(lambda: self.get_graph_sizes(name)))
         self.call_cleanup_hooks()
         old_fake_mode = self.tracing_context.fake_mode
         if not self.export:
@@ -1435,7 +1434,11 @@ class OutputGraph:
             self.remove_node(node)
             self.real_value_cache.pop(node, None)
 
-        used_symbols = set()
+        used_symbols: Set[sympy.Symbol] = set()
+
+        def update_used_symbols(used_symbols, fake: Union[torch.SymInt, torch.Tensor]):
+            used_symbols |= free_symbols(fake)
+
         recheck_placeholders = []
         for node in self.placeholders:
             binds_symbol = placeholder_binds_symbol(node) is not None
@@ -1453,10 +1456,22 @@ class OutputGraph:
                     arg = node.meta["grapharg"]
                     if isinstance(arg, BackwardStateGraphArg):
                         continue
+                    if isinstance(node.meta["grapharg"].example, torch.ScriptObject):
+                        real_script_obj = node.meta["grapharg"].example
+                        fake_script_obj = node.meta["grapharg"].example_strong_ref
+                        flat_dict = dict(real_script_obj.__obj_flatten__())  # type: ignore[attr-defined]
+                        for attr in flat_dict.keys():
+                            fake_attr_val = getattr(fake_script_obj.wrapped_obj, attr)
+                            pytree.tree_map_only(
+                                (torch.SymInt, torch.Tensor),
+                                lambda t: update_used_symbols(used_symbols, t),
+                                fake_attr_val,
+                            )
+                        continue
                     fake = (
                         arg.fake_tensor if arg.fake_tensor is not None else arg.example
                     )
-                    used_symbols |= free_symbols(fake)
+                    update_used_symbols(used_symbols, fake)
 
         # After removing unused graphargs, prune unused binds_symbol
         for node in recheck_placeholders:
