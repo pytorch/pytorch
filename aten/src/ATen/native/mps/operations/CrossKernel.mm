@@ -8,7 +8,9 @@
 namespace at::native {
 namespace {
 
-static const char* METAL_CROSS = R"CROSS_METAL(
+using namespace mps;
+
+static MetalShaderLibrary lib(R"CROSS_METAL(
 #include <metal_array>
 
 #include <metal_stdlib>
@@ -76,44 +78,7 @@ REGISTER_CROSS_OP(char);
 REGISTER_CROSS_OP(uchar);
 REGISTER_CROSS_OP(bool);
 
-)CROSS_METAL";
-
-using namespace mps;
-
-static id<MTLLibrary> compileCrossOpLibrary(id<MTLDevice> device) {
-  static id<MTLLibrary> crossLibrary = nil;
-  if (crossLibrary) {
-    return crossLibrary;
-  }
-
-  NSError* error = nil;
-  MTLCompileOptions* options = [[MTLCompileOptions new] autorelease];
-  [options setLanguageVersion:MTLLanguageVersion2_3];
-  crossLibrary = [device newLibraryWithSource:[NSString stringWithCString:METAL_CROSS encoding:NSASCIIStringEncoding]
-                                      options:options
-                                        error:&error];
-  TORCH_CHECK(crossLibrary, "Failed to create metal cross library, error: ", [[error description] UTF8String]);
-  return crossLibrary;
-}
-
-static id<MTLComputePipelineState> crossPipelineState(id<MTLDevice> device, ScalarType scalar_type) {
-  std::string kernel = "cross_" + scalarToMetalTypeString(scalar_type);
-  static std::unordered_map<std::string, id<MTLComputePipelineState>> psoCache;
-  id<MTLComputePipelineState> pso = psoCache[kernel];
-  if (pso) {
-    return pso;
-  }
-
-  NSError* error = nil;
-  id<MTLLibrary> crossLib = compileCrossOpLibrary(device);
-  id<MTLFunction> crossFunc = [crossLib newFunctionWithName:[NSString stringWithUTF8String:kernel.c_str()]];
-  TORCH_CHECK(crossFunc, "Failed to create function state object for: ", kernel);
-  pso = [device newComputePipelineStateWithFunction:crossFunc error:&error];
-  TORCH_CHECK(pso, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
-
-  psoCache[kernel] = pso;
-  return pso;
-}
+)CROSS_METAL");
 
 void cross_mps_impl(const Tensor& out, const Tensor& input, const Tensor& other, int64_t dim) {
   TORCH_CHECK(input.dtype() != at::kDouble, "float64 is not supported on MPS");
@@ -139,7 +104,7 @@ void cross_mps_impl(const Tensor& out, const Tensor& input, const Tensor& other,
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
       auto kernelDataOffsets = generateKernelDataOffsets(computeEncoder, iter);
 
-      id<MTLComputePipelineState> crossPSO = crossPipelineState(device, out.scalar_type());
+      auto crossPSO = lib.getPipelineStateForFunc("cross_" + scalarToMetalTypeString(out));
 
       // this function call is a no-op if MPS Profiler is not enabled
       getMPSProfiler().beginProfileKernel(crossPSO, "cross", {input, other});
