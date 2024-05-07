@@ -1,4 +1,4 @@
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, asdict
 from typing import Optional, Tuple
 
 
@@ -77,4 +77,7 @@ class CKGemmOperation:
 
     def key_name(self):
         # TBD; must be unique per instance. Intended to use as dict key
-        return f"{'_'.join(['K' + f.name.replace('_', '').lower() + 'V' + ('x'.join(map(str, iter(getattr(self, f.name)))) if isinstance(getattr(self, f.name), tuple) else str(getattr(self, f.name)).replace(':', '')) for f in fields(self)])}"
+        return f"{'_'.join(['K' + field_name.replace('_', '').lower() + 'V' + ('x'.join(map(str, iter(field_value))) if isinstance(field_value, tuple) else str(field_value).replace(':', '')) for field_name, field_value in self.dict_items()])}"
+
+    def dict_items(self):
+        return asdict(self).items()

@@ -1,4 +1,3 @@
-from dataclasses import fields
 import logging
 import random
 import sympy
@@ -26,7 +25,7 @@ def torch_layout_to_ck_layout(torch_layout):
         return "Col"
     else:
         return None
-    
+
 class CKGemmTemplate(CKTemplate):
     # the JINJA template for rendering CK Universal GEMMs
     gemm_template = r"""
@@ -221,15 +220,14 @@ class CKGemmTemplate(CKTemplate):
     Operation_{{operation_name}}
 """
         template_params = []
-        for f in fields(op):
-            field_value = getattr(op, f.name)
+        for field_name, field_value in op.dict_items():
             if isinstance(field_value, tuple):
                 template_params.append(
-                    f"/* {f.name} */ S<{', '.join(map(str, iter(field_value)))}>"
+                    f"/* {field_name} */ S<{', '.join(map(str, iter(field_value)))}>"
                 )
             else:
                 if field_value is not None:
-                    template_params.append(f"/* {f.name} */ {field_value}")
+                    template_params.append(f"/* {field_name} */ {field_value}")
         return self._template_from_string(template_definition).render(
             operation_name=op.name(),
             template_params=(",\n" + 12 * " ").join(template_params),
