@@ -24,8 +24,10 @@ import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._state_dict_utils import (
     _broadcast_state_dict,
+    _flatten_state_dict,
     _gather_state_dict,
     _offload_state_dict_to_cpu,
+    _unflatten_state_dict,
 )
 from torch.distributed._tensor import DTensor
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
@@ -47,6 +49,7 @@ from torch.distributed.fsdp._common_utils import (
 )
 from torch.nn.modules.module import _IncompatibleKeys
 from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils._pytree import tree_map_only
 
 
 FLAT_PARAM = "_flat_param"
@@ -295,7 +298,8 @@ def _verify_options(
                 offload_to_cpu=options.cpu_offload, rank0_only=options.cpu_offload
             )
             optim_state_dict_config = FullOptimStateDictConfig(
-                offload_to_cpu=options.cpu_offload, rank0_only=options.cpu_offload
+                offload_to_cpu=options.cpu_offload,
+                rank0_only=(options.cpu_offload or options.broadcast_from_rank0),
             )
             state_dict_type = StateDictType.FULL_STATE_DICT
         else:
@@ -356,8 +360,10 @@ def _verify_state_dict(
         )
 
     if info.handle_optim:
-        if not (optim_state_dict and optim_state_dict[STATE]) and not (
-            info.cpu_offload and info.full_state_dict
+        if (
+            not (optim_state_dict and optim_state_dict[STATE])
+            and not (info.cpu_offload and info.full_state_dict)
+            and (not info.broadcast_from_rank0)
         ):
             raise RuntimeError(
                 "The option indicates that model state_dict is required to save, "
@@ -666,7 +672,11 @@ def _load_optim_state_dict(
         return
 
     for optim in optimizers:
-        optim_state_dict = _split_optim_state_dict(model, optim, state_dict, info)
+        _init_optim_state(optim)
+        if state_dict:
+            optim_state_dict = _split_optim_state_dict(model, optim, state_dict, info)
+        else:
+            optim_state_dict = {}
         if info.fsdp_modules:
             # We need to specially handle FlatParameter FSDP as
             # FlatParameter FSDP converts the FQNs.
@@ -696,11 +706,33 @@ def _load_optim_state_dict(
                 optim_state_dict = FSDP.optim_state_dict_to_load(
                     model, optim, optim_state_dict
                 )
+        elif info.broadcast_from_rank0:
+            info.full_state_dict = False
+            local_state_dict = _get_optim_state_dict(model, (optim,), info)
+            info.full_state_dict = True
+            device = None
+
+            def _device(t):
+                if t.dim() > 0:
+                    nonlocal device
+                    if device is None:
+                        device = t.device
+                    elif device != t.device:
+                        raise ValueError("Device mismatch")
+                return t
+
+            _ = tree_map_only(torch.Tensor, _device, local_state_dict)
+            assert device is not None
+            flatten_osd, osd_mapping = _flatten_state_dict(optim_state_dict)
+            flatten_local_osd, local_osd_mapping = _flatten_state_dict(local_state_dict)
+            _broadcast_state_dict(flatten_osd, flatten_local_osd, device=device)
+            optim_state_dict = _unflatten_state_dict(
+                flatten_local_osd, local_osd_mapping
+            )
 
         # Note that we do not have to convert the FQN back to param id here if
         # order in optim.param_groups[idx][PARAMS] is the same as the one in
         # optim_state_dict[PG][idx][PARAMS].
-        _init_optim_state(optim)
         _state_dict_fn(optim, "load_state_dict")(state_dict=optim_state_dict)
 
 
