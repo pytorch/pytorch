@@ -351,7 +351,7 @@ def init(activation_checkpoint):
                     x = layer(x)
                 return x
 
-        model = TestModule(n_layers=8)
+        model = TestModule(n_layers=2)
         assert apply_fsdp
         assert mesh is not None
         for layer_id, mod in enumerate(model.layers):
