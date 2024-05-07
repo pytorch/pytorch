@@ -529,6 +529,7 @@ def run_test(
                 stderr=output,
                 env=env,
                 timeout=timeout,
+                retries=0,
             )
 
             # Pytest return code 5 means no test is collected. Exit code 4 is
