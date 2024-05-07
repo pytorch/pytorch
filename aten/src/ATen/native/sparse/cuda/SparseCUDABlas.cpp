@@ -21,6 +21,8 @@
 
 #if defined(USE_ROCM)
 #define IS_SPMM_HIP_AVAILABLE() 1
+#else
+#define IS_SPMM_HIP_AVAILABLE() 0
 #endif
 
 #if IS_SPMM_AVAILABLE() || IS_SPMM_HIP_AVAILABLE()
