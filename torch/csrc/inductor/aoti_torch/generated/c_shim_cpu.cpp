@@ -44,17 +44,20 @@
 #include <ATen/ops/adaptive_max_pool3d_backward_cpu_dispatch.h>
 #include <ATen/ops/adaptive_max_pool3d_cpu_dispatch.h>
 #include <ATen/ops/addbmm_cpu_dispatch.h>
+#include <ATen/ops/addmm_cpu_dispatch.h>
 #include <ATen/ops/addmv_cpu_dispatch.h>
 #include <ATen/ops/angle_cpu_dispatch.h>
 #include <ATen/ops/avg_pool2d_backward_cpu_dispatch.h>
 #include <ATen/ops/avg_pool2d_cpu_dispatch.h>
 #include <ATen/ops/avg_pool3d_backward_cpu_dispatch.h>
 #include <ATen/ops/avg_pool3d_cpu_dispatch.h>
+#include <ATen/ops/bmm_cpu_dispatch.h>
 #include <ATen/ops/bucketize_cpu_dispatch.h>
 #include <ATen/ops/cat_cpu_dispatch.h>
 #include <ATen/ops/cholesky_inverse_cpu_dispatch.h>
 #include <ATen/ops/cholesky_solve_compositeexplicitautograd_dispatch.h>
 #include <ATen/ops/convolution_backward_compositeexplicitautograd_dispatch.h>
+#include <ATen/ops/convolution_compositeexplicitautograd_dispatch.h>
 #include <ATen/ops/cummax_compositeexplicitautograd_dispatch.h>
 #include <ATen/ops/cummin_compositeexplicitautograd_dispatch.h>
 #include <ATen/ops/cumprod_cpu_dispatch.h>
@@ -94,6 +97,7 @@
 #include <ATen/ops/max_unpool2d_cpu_dispatch.h>
 #include <ATen/ops/max_unpool3d_cpu_dispatch.h>
 #include <ATen/ops/median_cpu_dispatch.h>
+#include <ATen/ops/mm_cpu_dispatch.h>
 #include <ATen/ops/mode_cpu_dispatch.h>
 #include <ATen/ops/mul_compositeexplicitautograd_dispatch.h>
 #include <ATen/ops/nanmedian_cpu_dispatch.h>
@@ -492,6 +496,15 @@ AOTITorchError aoti_torch_cpu_addbmm(AtenTensorHandle self, AtenTensorHandle bat
 }
 
 
+AOTITorchError aoti_torch_cpu_addmm_out(AtenTensorHandle out, AtenTensorHandle self, AtenTensorHandle mat1, AtenTensorHandle mat2, double beta, double alpha) {
+    AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+        at::cpu::addmm_out(
+            *tensor_handle_to_tensor_pointer(out), *tensor_handle_to_tensor_pointer(self), *tensor_handle_to_tensor_pointer(mat1), *tensor_handle_to_tensor_pointer(mat2), beta, alpha
+        );
+    });
+}
+
+
 AOTITorchError aoti_torch_cpu_addmv(AtenTensorHandle self, AtenTensorHandle mat, AtenTensorHandle vec, double beta, double alpha, AtenTensorHandle* ret0) {
     AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
         auto tmp_result = at::cpu::addmv(
@@ -552,6 +565,15 @@ AOTITorchError aoti_torch_cpu_avg_pool3d_backward(AtenTensorHandle grad_output, 
 }
 
 
+AOTITorchError aoti_torch_cpu_bmm_out(AtenTensorHandle out, AtenTensorHandle self, AtenTensorHandle mat2) {
+    AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+        at::cpu::bmm_out(
+            *tensor_handle_to_tensor_pointer(out), *tensor_handle_to_tensor_pointer(self), *tensor_handle_to_tensor_pointer(mat2)
+        );
+    });
+}
+
+
 AOTITorchError aoti_torch_cpu_bucketize_Tensor(AtenTensorHandle self, AtenTensorHandle boundaries, int32_t out_int32, int32_t right, AtenTensorHandle* ret0) {
     AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
         auto tmp_result = at::cpu::bucketize(
@@ -586,6 +608,16 @@ AOTITorchError aoti_torch_cpu_cholesky_solve(AtenTensorHandle self, AtenTensorHa
     AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
         auto tmp_result = at::compositeexplicitautograd::cholesky_solve(
             *tensor_handle_to_tensor_pointer(self), *tensor_handle_to_tensor_pointer(input2), upper
+        );
+        *ret0 = new_tensor_handle(std::move(tmp_result));;
+    });
+}
+
+
+AOTITorchError aoti_torch_cpu_convolution(AtenTensorHandle input, AtenTensorHandle weight, AtenTensorHandle* bias, const int64_t* stride, int64_t stride_len_, const int64_t* padding, int64_t padding_len_, const int64_t* dilation, int64_t dilation_len_, int32_t transposed, const int64_t* output_padding, int64_t output_padding_len_, int64_t groups, AtenTensorHandle* ret0) {
+    AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+        auto tmp_result = at::compositeexplicitautograd::convolution_symint(
+            *tensor_handle_to_tensor_pointer(input), *tensor_handle_to_tensor_pointer(weight), pointer_to_optional<at::Tensor>(bias), pointer_to_list<c10::SymInt>(stride, stride_len_), pointer_to_list<c10::SymInt>(padding, padding_len_), pointer_to_list<c10::SymInt>(dilation, dilation_len_), transposed, pointer_to_list<c10::SymInt>(output_padding, output_padding_len_), groups
         );
         *ret0 = new_tensor_handle(std::move(tmp_result));;
     });
@@ -1001,6 +1033,15 @@ AOTITorchError aoti_torch_cpu_median(AtenTensorHandle self, AtenTensorHandle* re
             *tensor_handle_to_tensor_pointer(self)
         );
         *ret0 = new_tensor_handle(std::move(tmp_result));;
+    });
+}
+
+
+AOTITorchError aoti_torch_cpu_mm_out(AtenTensorHandle out, AtenTensorHandle self, AtenTensorHandle mat2) {
+    AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+        at::cpu::mm_out(
+            *tensor_handle_to_tensor_pointer(out), *tensor_handle_to_tensor_pointer(self), *tensor_handle_to_tensor_pointer(mat2)
+        );
     });
 }
 

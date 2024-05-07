@@ -2368,9 +2368,9 @@ def gen_source_files(
                             f"{func.namespace}.{func.func.name.name}", None
                         ),
                     )
-            fallback_native_functions = [
+            fallback_native_functions = tuple(
                 value for _, value in sorted(fallbacks.items())
-            ]
+            )
 
             def get_header(
                 func: NativeFunction,

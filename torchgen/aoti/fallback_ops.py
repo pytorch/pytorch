@@ -1,4 +1,5 @@
 # This list is based on the fallback ops from torch/_inductor/lowering.py
+# If you add a new op to the list, remember to run `python torchgen/gen.py --update-aoti-c-shim` to update C shim files.
 inductor_fallback_ops = {
     "aten._adaptive_avg_pool2d_backward",
     "aten._adaptive_avg_pool2d",
@@ -10,12 +11,14 @@ inductor_fallback_ops = {
     "aten.adaptive_max_pool3d_backward",
     "aten.addbmm",
     "aten._addmm_activation",
+    "aten.addmm.out",
     "aten.addmv",
     "aten.angle",
     "aten.avg_pool2d_backward",
     "aten.avg_pool2d",
     "aten.avg_pool3d_backward",
     "aten.avg_pool3d",
+    "aten.bmm.out",
     "aten.bucketize.Tensor",
     "aten.cat",
     "aten._cdist_backward",
@@ -25,6 +28,7 @@ inductor_fallback_ops = {
     "aten.convolution_backward",
     "aten._cudnn_rnn",
     "aten._cudnn_rnn_backward",
+    "aten.convolution",
     "aten.cummax",
     "aten.cummin",
     "aten.cumprod",
@@ -85,6 +89,7 @@ inductor_fallback_ops = {
     "aten.max_unpool2d",
     "aten.max_unpool3d",
     "aten.median",
+    "aten.mm.out",
     "aten.mode",
     "aten.mul.Scalar",
     "aten.nanmedian",

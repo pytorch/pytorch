@@ -327,7 +327,7 @@ def get_backend_index_for_aoti(
     return backend_index
 
 
-def get_fallback_op_name(func: NativeFunction):
+def get_fallback_op_name(func: NativeFunction) -> str:
     return (
         f"{func.namespace}.{func.func.name.name}.{func.func.name.overload_name}"
         if func.func.name.overload_name
@@ -337,7 +337,7 @@ def get_fallback_op_name(func: NativeFunction):
 
 def gen_c_shim(
     func: NativeFunction,
-    func_group: NativeFunctionsGroup,
+    func_group: Optional[NativeFunctionsGroup],
     dispatch_key: DispatchKey,
     backend_indices: Dict[DispatchKey, BackendIndex],
     header: bool,
@@ -371,7 +371,7 @@ def gen_c_shim(
 
 @dataclass(frozen=True)
 class ShimGenerator:
-    func_group_mapping: Dict[str, NativeFunctionsGroup]
+    func_group_mapping: Dict[str, Optional[NativeFunctionsGroup]]
     dispatch_key: DispatchKey
     backend_indices: Dict[DispatchKey, BackendIndex]
     header: bool  # True to generate .h and False to generate .cpp
@@ -379,11 +379,11 @@ class ShimGenerator:
     @method_with_native_function
     def __call__(
         self,
-        func,
-    ) -> str:
+        func: NativeFunction,
+    ) -> Optional[str]:
         result = gen_c_shim(
             func,
-            self.func_group_mapping[get_fallback_op_name(func)],
+            self.func_group_mapping.get(get_fallback_op_name(func), None),
             self.dispatch_key,
             self.backend_indices,
             self.header,
@@ -453,5 +453,4 @@ extern "C" {{
 
 using namespace torch::aot_inductor;
 
-{body}
-"""
+{body}"""
