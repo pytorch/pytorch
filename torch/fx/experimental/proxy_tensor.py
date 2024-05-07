@@ -1269,15 +1269,14 @@ class _MakefxTracer:
 
         self.torch_fn_metadata_mode = TorchFunctionMetadataMode(fx_tracer)
 
-    # By default, subtracer creates new modes based on parent tracer's config.
-    # However, there are cases where we want to share the same modes with parent tracer
-    # 1. fake_tensor_mode: we want the example value's fake_mode of parent graph and subgraphs to be the same.
-    # 2. tracer.scope_root, proxy_paths, proxy_modules: these are used to construct 'nn_module_stack'
-    #   which has a special logic of handling module aliasing so parent and subgraphs should share the same states.
-    #   For detail, see comments in _ModuleSstackTracer.
-
     @contextmanager
     def _init_modes_from_parent(self, parent_tracer):
+        # By default, subtracer creates new modes based on parent tracer's config.
+        # However, there are cases where we want to share the same modes with parent tracer
+        # 1. fake_tensor_mode: we want the example value's fake_mode of parent graph and subgraphs to be the same.
+        # 2. tracer.scope_root, proxy_paths, proxy_modules: these are used to construct 'nn_module_stack'
+        #   which has a special logic of handling module aliasing so parent and subgraphs should share the same states.
+        #   For detail, see comments in _ModuleSstackTracer.
         prev_modes = self._checkpoint_modes()
         try:
             self.fake_tensor_mode = parent_tracer.fake_tensor_mode
