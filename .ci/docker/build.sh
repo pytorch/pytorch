@@ -226,7 +226,7 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    BASEKIT_VERSION=2024.0.0-49522
+    BASEKIT_VERSION=0.5
     NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
     TRITON=yes
