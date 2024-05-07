@@ -1,6 +1,6 @@
+import json
 from argparse import ArgumentParser
 from typing import Any
-import json
 
 from github import Auth, Github
 from github.Issue import Issue
