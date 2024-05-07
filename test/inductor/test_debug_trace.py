@@ -10,6 +10,7 @@ import unittest
 import torch
 from torch._inductor import config, test_operators
 from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.utils._triton import has_triton
 
 try:
     try:
@@ -169,7 +170,7 @@ buf2.node.kernel = extern_kernels.mm""",
         # intentionally only cleanup on success so debugging test is easier
         shutil.rmtree(filename)
 
-    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    @unittest.skipIf(not TEST_CUDA or not has_triton(), "requires cuda")
     def test_debug_multi_tempalte(self):
         class ToyModel(torch.nn.Module):
             def __init__(self):
