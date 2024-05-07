@@ -40,9 +40,11 @@ For CUDA and CPU, APIs are also provided separately:
 
 Autocasting
 ^^^^^^^^^^^
-.. currentmodule:: torch.amp
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
 
-.. autofunction::  is_autocast_available
+    is_autocast_available
 
 .. currentmodule:: torch
 
