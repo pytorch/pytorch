@@ -14,11 +14,13 @@ from torch import fx
 from torch.fx._utils import get_node_context, lazy_format_graph_code
 from torch.fx.experimental.sym_node import SymNode
 from torch.fx.graph_module import GraphModule
+from torch.fx._compatibility import compatibility
 
 log = logging.getLogger(__name__)
 graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
 
 
+@compatibility(is_backward_compatible=True)
 def get_example_value(node: fx.Node) -> Optional[str]:
     """
     Get the example value key for a node, since dynamo uses "example_value"
@@ -32,6 +34,7 @@ def get_example_value(node: fx.Node) -> Optional[str]:
         return None
 
 
+@compatibility(is_backward_compatible=True)
 def insert_deferred_runtime_asserts(
     gm: GraphModule,
     shape_env: ShapeEnv,
