@@ -401,6 +401,7 @@ def _create_runtime_wrapper(
 
     return runtime_wrapper
 
+
 @dataclass
 class FunctionalizedRngRuntimeWrapper(CompilerWrapper):
     # TODO: I would love to get rid of this argument, but it's
@@ -410,7 +411,7 @@ class FunctionalizedRngRuntimeWrapper(CompilerWrapper):
     # and for saving tensors for backward (which is done during runtime, after this wrapper runs)
     # So in aot_dispatch_autograd, this wrapper can't edit the set of outs without making one
     # of those two indices incorrect.
-    return_new_outs : bool = True
+    return_new_outs: bool = True
 
     def post_compile(
         self,
@@ -440,7 +441,10 @@ class FunctionalizedRngRuntimeWrapper(CompilerWrapper):
     # Calling convention: If we are running functionalized RNG, then outs consists
     # of (user_outs, rng_offset)
     def _functionalized_rng_runtime_epilogue(
-        self, metadata: ViewAndMutationMeta, outs, offset_index,
+        self,
+        metadata: ViewAndMutationMeta,
+        outs,
+        offset_index,
     ):
         if metadata.is_rng_op_functionalized:
             assert metadata.num_outputs_rng_offset == 1

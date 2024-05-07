@@ -456,9 +456,9 @@ def aot_dispatch_autograd(
                 fw_metadata=fw_metadata,
             )
 
-            compiled_fw_func = FunctionalizedRngRuntimeWrapper(return_new_outs=False).post_compile(
-                compiled_fw_func, aot_config, fw_metadata=fw_metadata
-            )
+            compiled_fw_func = FunctionalizedRngRuntimeWrapper(
+                return_new_outs=False
+            ).post_compile(compiled_fw_func, aot_config, fw_metadata=fw_metadata)
 
             compiled_fw_func = FakifiedOutWrapper(
                 fakified_out=fakified_out,
