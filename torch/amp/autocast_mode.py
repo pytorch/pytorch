@@ -213,7 +213,6 @@ class autocast:
             self._enabled = enabled
             self.device = device_type
             self.fast_dtype = dtype
-            # TODO: support get_autocast_gpu/cpu_dtype
             assert dtype is not None
             return
         self.device = device_type

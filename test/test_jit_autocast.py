@@ -34,6 +34,23 @@ class TestAutocast(JitTestCase):
         super().tearDown()
 
     @unittest.skipIf(not TEST_CUDA, "No cuda")
+    def test_generic_jit_autocast(self):
+        @torch.jit.script
+        def fn_cuda(a, b):
+            with autocast():
+                x = torch.mm(a, b)
+                y = torch.sum(x)
+                return x, y
+
+        @torch.jit.script
+        def fn_generic(a, b):
+            with torch.amp.autocast(device_type='cpu'):
+                x = torch.mm(a, b)
+                y = torch.sum(x)
+                return x, y
+        self.assertEqual(fn_cuda(self.a_fp32, self.b_fp32), fn_generic(self.a_fp32, self.b_fp32))
+
+    @unittest.skipIf(not TEST_CUDA, "No cuda")
     def test_minimal(self):
         @torch.jit.script
         def fn(a, b):
