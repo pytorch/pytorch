@@ -42,6 +42,8 @@ else:
 def shard_dim_alltoall(input, gather_dim, shard_dim, mesh, mesh_dim):
     if mesh.device_type == "cpu":
         # Gloo does not support alltoall, so falling back to allgather + chunk
+
+        # TODO: This logs way too much
         logger.warning(
             "CPU process group does not support alltoall yet, falling back with allgather + chunk!"
         )
