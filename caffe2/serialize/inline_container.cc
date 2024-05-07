@@ -643,12 +643,18 @@ PyTorchStreamWriter::PyTorchStreamWriter(const std::string& file_name)
   setup(file_name);
 }
 
+
+size_t default_seek_func(size_t nbytes) {
+  TORCH_CHECK(false, "attempting to write record metadata but seek_func unimplemented, please implement seek_func");
+  return 0;
+}
+
 PyTorchStreamWriter::PyTorchStreamWriter(
     const std::function<size_t(const void*, size_t)> writer_func,
     const std::function<size_t(size_t)> seek_func)
     : archive_name_("archive"),
       writer_func_(writer_func),
-      seek_func_(seek_func) {
+      seek_func_(seek_func ? seek_func : default_seek_func) {
   setup(archive_name_);
 }
 
