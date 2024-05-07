@@ -21,6 +21,7 @@
 #include <ATen/ops/_embedding_bag_dense_backward_cpu_dispatch.h>
 #include <ATen/ops/_embedding_bag_forward_only_cpu_dispatch.h>
 #include <ATen/ops/_embedding_bag_per_sample_weights_backward_cpu_dispatch.h>
+#include <ATen/ops/_fft_c2c_cpu_dispatch.h>
 #include <ATen/ops/_fft_r2c_cpu_dispatch.h>
 #include <ATen/ops/_fused_moving_avg_obs_fq_helper_compositeexplicitautograd_dispatch.h>
 #include <ATen/ops/_fused_moving_avg_obs_fq_helper_cpu_dispatch.h>
@@ -107,10 +108,13 @@
 #include <ATen/ops/randint_compositeexplicitautograd_dispatch.h>
 #include <ATen/ops/randn_compositeexplicitautograd_dispatch.h>
 #include <ATen/ops/randperm_compositeexplicitautograd_dispatch.h>
+#include <ATen/ops/repeat_interleave_cpu_dispatch.h>
 #include <ATen/ops/replication_pad1d_backward_cpu_dispatch.h>
 #include <ATen/ops/replication_pad2d_backward_cpu_dispatch.h>
 #include <ATen/ops/resize_as_compositeexplicitautograd_dispatch.h>
 #include <ATen/ops/resize_cpu_dispatch.h>
+#include <ATen/ops/scatter_cpu_dispatch.h>
+#include <ATen/ops/scatter_reduce_cpu_dispatch.h>
 #include <ATen/ops/segment_reduce_cpu_dispatch.h>
 #include <ATen/ops/soft_margin_loss_backward_compositeexplicitautograd_dispatch.h>
 #include <ATen/ops/sort_compositeexplicitautograd_dispatch.h>
@@ -121,6 +125,7 @@
 #include <ATen/ops/upsample_linear1d_backward_cpu_dispatch.h>
 #include <ATen/ops/upsample_trilinear3d_backward_cpu_dispatch.h>
 #include <ATen/ops/view_as_complex_cpu_dispatch.h>
+#include <ATen/ops/view_as_real_cpu_dispatch.h>
 #include <ATen/ops/view_compositeexplicitautograd_dispatch.h>
 #include <ATen/ops/zeros_compositeexplicitautograd_dispatch.h>
 
@@ -249,6 +254,16 @@ AOTITorchError aoti_torch_cpu__embedding_bag_per_sample_weights_backward(AtenTen
     AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
         auto tmp_result = at::cpu::_embedding_bag_per_sample_weights_backward(
             *tensor_handle_to_tensor_pointer(grad), *tensor_handle_to_tensor_pointer(weight), *tensor_handle_to_tensor_pointer(indices), *tensor_handle_to_tensor_pointer(offsets), *tensor_handle_to_tensor_pointer(offset2bag), mode, padding_idx
+        );
+        *ret0 = new_tensor_handle(std::move(tmp_result));;
+    });
+}
+
+
+AOTITorchError aoti_torch_cpu__fft_c2c(AtenTensorHandle self, const int64_t* dim, int64_t dim_len_, int64_t normalization, int32_t forward, AtenTensorHandle* ret0) {
+    AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+        auto tmp_result = at::cpu::_fft_c2c_symint(
+            *tensor_handle_to_tensor_pointer(self), pointer_to_list<c10::SymInt>(dim, dim_len_), normalization, forward
         );
         *ret0 = new_tensor_handle(std::move(tmp_result));;
     });
@@ -1137,6 +1152,16 @@ AOTITorchError aoti_torch_cpu_randperm(int64_t n, int32_t* dtype, int32_t* layou
 }
 
 
+AOTITorchError aoti_torch_cpu_repeat_interleave_Tensor(AtenTensorHandle repeats, int64_t* output_size, AtenTensorHandle* ret0) {
+    AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+        auto tmp_result = at::cpu::repeat_interleave_symint(
+            *tensor_handle_to_tensor_pointer(repeats), pointer_to_optional<c10::SymInt>(output_size)
+        );
+        *ret0 = new_tensor_handle(std::move(tmp_result));;
+    });
+}
+
+
 AOTITorchError aoti_torch_cpu_replication_pad1d_backward(AtenTensorHandle grad_output, AtenTensorHandle self, const int64_t* padding, int64_t padding_len_, AtenTensorHandle* ret0) {
     AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
         auto tmp_result = at::cpu::replication_pad1d_backward_symint(
@@ -1173,6 +1198,24 @@ AOTITorchError aoti_torch_cpu_resize_as_(AtenTensorHandle self, AtenTensorHandle
             *tensor_handle_to_tensor_pointer(self), *tensor_handle_to_tensor_pointer(the_template), pointer_to_optional<c10::MemoryFormat>(memory_format)
         );
         *ret0 = new_tensor_handle(std::move(tmp_result));;
+    });
+}
+
+
+AOTITorchError aoti_torch_cpu_scatter_src_out(AtenTensorHandle out, AtenTensorHandle self, int64_t dim, AtenTensorHandle index, AtenTensorHandle src) {
+    AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+        at::cpu::scatter_out(
+            *tensor_handle_to_tensor_pointer(out), *tensor_handle_to_tensor_pointer(self), dim, *tensor_handle_to_tensor_pointer(index), *tensor_handle_to_tensor_pointer(src)
+        );
+    });
+}
+
+
+AOTITorchError aoti_torch_cpu_scatter_reduce_two_out(AtenTensorHandle out, AtenTensorHandle self, int64_t dim, AtenTensorHandle index, AtenTensorHandle src, const char* reduce, int32_t include_self) {
+    AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+        at::cpu::scatter_reduce_out(
+            *tensor_handle_to_tensor_pointer(out), *tensor_handle_to_tensor_pointer(self), dim, *tensor_handle_to_tensor_pointer(index), *tensor_handle_to_tensor_pointer(src), reduce, include_self
+        );
     });
 }
 
@@ -1273,6 +1316,16 @@ AOTITorchError aoti_torch_cpu_view_dtype(AtenTensorHandle self, int32_t dtype, A
 AOTITorchError aoti_torch_cpu_view_as_complex(AtenTensorHandle self, AtenTensorHandle* ret0) {
     AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
         auto tmp_result = at::cpu::view_as_complex(
+            *tensor_handle_to_tensor_pointer(self)
+        );
+        *ret0 = new_tensor_handle(std::move(tmp_result));;
+    });
+}
+
+
+AOTITorchError aoti_torch_cpu_view_as_real(AtenTensorHandle self, AtenTensorHandle* ret0) {
+    AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+        auto tmp_result = at::cpu::view_as_real(
             *tensor_handle_to_tensor_pointer(self)
         );
         *ret0 = new_tensor_handle(std::move(tmp_result));;

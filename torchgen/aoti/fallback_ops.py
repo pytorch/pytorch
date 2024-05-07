@@ -1,5 +1,7 @@
 # This list is based on the fallback ops from torch/_inductor/lowering.py
-# If you add a new op to the list, remember to run `python torchgen/gen.py --update-aoti-c-shim` to update C shim files.
+# If you add a new op to the list, remember to run `python torchgen/gen.py --update-aoti-c-shim`
+# to update C shim files.
+
 inductor_fallback_ops = {
     "aten._adaptive_avg_pool2d_backward",
     "aten._adaptive_avg_pool2d",
@@ -41,6 +43,7 @@ inductor_fallback_ops = {
     "aten._embedding_bag_forward_only",
     "aten._embedding_bag_per_sample_weights_backward",
     "aten.exponential",
+    "aten._fft_c2c",
     "aten._fft_r2c",
     "aten._flash_attention_backward",
     "aten._flash_attention_forward",
@@ -106,6 +109,7 @@ inductor_fallback_ops = {
     "aten.randn",
     "aten.randn.generator",
     "aten.randperm",
+    "aten.repeat_interleave.Tensor",
     "aten.replication_pad1d_backward",
     "aten.replication_pad2d_backward",
     "aten.resize_",
@@ -117,6 +121,8 @@ inductor_fallback_ops = {
     "aten._scaled_dot_product_flash_attention_for_cpu_backward",
     "aten._scaled_dot_product_flash_attention_for_cpu",
     "aten._scaled_mm",
+    "aten.scatter_reduce.two_out",
+    "aten.scatter.src_out",
     "aten.searchsorted",
     "aten._segment_reduce_backward",
     "aten.segment_reduce",
@@ -135,6 +141,7 @@ inductor_fallback_ops = {
     "aten.upsample_linear1d_backward",
     "aten.upsample_trilinear3d_backward",
     "aten.view_as_complex",
+    "aten.view_as_real",
     "aten.view.dtype",
     "aten.zeros.names",
 }
