@@ -1346,7 +1346,7 @@ class TestFxDetectInputWeightEqualization(QuantizationTestCase):
                 # assert that each of the desired modules have the observers inserted
                 for fqn, module in prepared_for_callibrate_model.named_modules():
                     # check if module is a supported module
-                    is_in_include_list = sum([isinstance(module, x) for x in mods_to_check]) > 0
+                    is_in_include_list = sum(isinstance(module, x) for x in mods_to_check) > 0
 
                     if is_in_include_list:
                         # make sure it has the observer attribute
@@ -1563,7 +1563,7 @@ class TestFxDetectOutliers(QuantizationTestCase):
             obs_name_to_find = InputWeightEqualizationDetector.DEFAULT_PRE_OBSERVER_NAME
 
             number_of_obs_found = sum(
-                [1 if obs_name_to_find in str(node.target) else 0 for node in prepared_for_callibrate_model.graph.nodes]
+                1 if obs_name_to_find in str(node.target) else 0 for node in prepared_for_callibrate_model.graph.nodes
             )
             self.assertEqual(number_of_obs_found, correct_number_of_obs_inserted)
 
@@ -1753,7 +1753,7 @@ class TestFxDetectOutliers(QuantizationTestCase):
                     assert sum(counts_info) >= 2
 
                     # half of the recorded max values should be what we set
-                    matched_max = sum([val == 3.28e8 for val in module_dict[OutlierDetector.MAX_VALS_KEY]])
+                    matched_max = sum(val == 3.28e8 for val in module_dict[OutlierDetector.MAX_VALS_KEY])
                     self.assertEqual(matched_max, param_size / 2)
 
 

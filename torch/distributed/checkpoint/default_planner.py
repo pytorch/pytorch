@@ -147,6 +147,7 @@ class DefaultLoadPlanner(LoadPlanner):
 
     flatten_state_dict: Handle state_dict with nested dicts
     flatten_sharded_tensors: For FSDP in 2D parallel mode
+    allow_partial_load: If False, will raise a runtime error if a key is present in state_dict, but not in the checkpoint.
     """
 
     original_state_dict: STATE_DICT_TYPE
@@ -156,11 +157,13 @@ class DefaultLoadPlanner(LoadPlanner):
         self,
         flatten_state_dict: bool = True,
         flatten_sharded_tensors: bool = True,
+        allow_partial_load: bool = False,
     ) -> None:
         self.flatten_state_dict = flatten_state_dict
         self.flatten_sharded_tensors = flatten_sharded_tensors
         self.original_state_dict = {}
         self.mappings = {}
+        self.allow_partial_load = allow_partial_load
 
     def set_up_planner(
         self,
@@ -182,7 +185,9 @@ class DefaultLoadPlanner(LoadPlanner):
         self.is_coordinator = is_coordinator
 
     def create_local_plan(self) -> LoadPlan:
-        return create_default_local_load_plan(self.state_dict, self.metadata)
+        return create_default_local_load_plan(
+            self.state_dict, self.metadata, not self.allow_partial_load
+        )
 
     def create_global_plan(self, global_plan: List[LoadPlan]) -> List[LoadPlan]:
         return create_default_global_load_plan(global_plan)
@@ -234,6 +239,29 @@ class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
         self.keys = keys
         super().__init__(*args, **kwargs)
 
+    def _should_include_key(self, key: str, metadata: Metadata) -> bool:
+        if self.keys is None:
+            return True
+
+        if key in self.keys:
+            True
+
+        unflattened_keys: List[str] = []
+        planner_data = metadata.planner_data.get(key)
+        for unflattened_key in planner_data:
+            if unflattened_keys:
+                unflattened_keys.append(
+                    ".".join([unflattened_keys[-1], unflattened_key])
+                )
+
+            else:
+                unflattened_keys.append(unflattened_key)
+
+        if any(unflattened_key in self.keys for unflattened_key in unflattened_keys):
+            return True
+
+        return False
+
     def set_up_planner(
         self,
         state_dict: STATE_DICT_TYPE,
@@ -244,7 +272,7 @@ class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
 
         # rebuild the state dict from the metadata
         for k, v in metadata.state_dict_metadata.items():
-            if self.keys and k not in self.keys:
+            if not self._should_include_key(k, metadata):
                 continue
 
             if isinstance(v, TensorStorageMetadata):
@@ -258,8 +286,7 @@ class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
 
 
 def create_default_local_load_plan(
-    state_dict: Dict[str, Any],
-    metadata: Metadata,
+    state_dict: Dict[str, Any], metadata: Metadata, strict: bool = True
 ) -> LoadPlan:
     requests = []
     """
@@ -273,6 +300,13 @@ def create_default_local_load_plan(
     """
 
     for fqn, obj in state_dict.items():
+        # ignore state_dict keys which do not exist in `state_dict` if strict=False
+        if fqn not in metadata.state_dict_metadata:
+            if strict:
+                raise RuntimeError(f"Missing key in checkpoint state_dict: {fqn}.")
+            else:
+                continue
+
         md = metadata.state_dict_metadata[fqn]
         # Since DTensor supports submesh, adding extra check to ensure _create_read_items()
         # gets called only when the current rank is part of the mesh for the corresponding DTensor.

@@ -34,7 +34,6 @@ from torch._C._functorch import (
     maybe_get_level,
     peek_interpreter_stack,
 )
-from torch._guards import Source
 
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.weak import WeakIdKeyDictionary
@@ -42,6 +41,7 @@ from torch.utils.weak import WeakIdKeyDictionary
 if TYPE_CHECKING:
     from torch._C._autograd import CreationMeta
     from torch._C._functorch import CInterpreter
+    from torch._guards import Source
 
     # Import here to avoid cycle
     from torch._subclasses.fake_tensor import FakeTensorMode
@@ -764,10 +764,24 @@ class MetaConverter:
                 return base.as_strided(sizes, strides, storage_offset)
 
             from torch._dynamo.source import EphemeralSource
-            from torch.fx.experimental.symbolic_shapes import sym_eq
+            from torch.fx.experimental.symbolic_shapes import (
+                StatelessSymbolicContext,
+                sym_eq,
+            )
 
             def symint_visitor_fn(s):
-                if shape_env is None:
+                nonlocal symbolic_context
+                from torch.fx.experimental.symbolic_shapes import DimDynamic
+
+                all_static_sizes = (
+                    symbolic_context is not None
+                    and isinstance(symbolic_context, StatelessSymbolicContext)
+                    and all(
+                        x is DimDynamic.STATIC for x in symbolic_context.dynamic_sizes
+                    )
+                )
+                # Can't just rely on shape env being None - dynamo always initializes it
+                if all_static_sizes or shape_env is None:
                     return s
 
                 # NB: The symbol here is expected to be simplified out because we a priori
@@ -886,8 +900,12 @@ class MetaConverter:
                     if t.requires_grad:
                         r.requires_grad = True
                     if t.requires_grad and not is_leaf:
+                        # This should probably use DelayedError,
+                        # but clone is fine for now for sparse tensors.
+                        # (DelayedError does not work for sparse because it causes
+                        # the Fake sparse tensor to "lose" its fakeness)
+                        r = r.clone()
                         with torch.enable_grad():
-                            r = r.clone()
                             r._coalesced_(t.is_coalesced)
                 elif is_sparse_compressed_layout(t.layout):
                     is_leaf = t.is_leaf
@@ -923,8 +941,10 @@ class MetaConverter:
                     if t.requires_grad:
                         r.requires_grad = True
                     if t.requires_grad and not is_leaf:
-                        with torch.enable_grad():
-                            r = r.clone()
+                        r = torch._C._functions.DelayedError(
+                            "Internal error: Tried to backward() through example input",
+                            1,
+                        )(r)
                 elif t.is_nested and not t.is_traceable_wrapper_subclass:
                     # TODO: Handle this better in Dynamo?
                     # There are checks there now, but this can still be triggered by a dense
@@ -948,8 +968,10 @@ class MetaConverter:
                     if t.requires_grad:
                         r.requires_grad = True
                     if t.requires_grad and not is_leaf:
-                        with torch.enable_grad():
-                            r = r.clone()
+                        r = torch._C._functions.DelayedError(
+                            "Internal error: Tried to backward() through example input",
+                            1,
+                        )(r)
                 elif t.is_functorch_wrapped:
                     if t.is_view:
                         from torch._dynamo.exc import unimplemented
@@ -997,8 +1019,12 @@ class MetaConverter:
                             if t.requires_grad and safe_is_leaf(r):
                                 r.requires_grad = True
                             elif t.requires_grad and not is_leaf:
-                                with torch.enable_grad():
-                                    r = r.clone()
+                                r = torch._C._functions.DelayedError(  # type: ignore[assignment]
+                                    "Internal error: Tried to backward() through example input",
+                                    1,
+                                )(
+                                    r  # type: ignore[arg-type]
+                                )
                         elif t.is_functional:
                             assert t.unwrapped is not None
                             assert t.current_level is not None
@@ -1189,11 +1215,18 @@ class MetaConverter:
                         r.requires_grad = t.requires_grad
                         if not is_leaf:
                             # Fake up some autograd history.
-                            with torch.enable_grad():
-                                # preserve_format is the default, but we want to
-                                # emphasize how important it is to preserve
-                                # format here
-                                r = r.clone(memory_format=torch.preserve_format)
+                            # Note: we *used* to call .clone() here to mock up some autograd history.
+                            # This is bad for subclasses.
+                            # Consider the case where you have a wrapper subclass that is contiguous,
+                            # but its inner tensor is noncontiguous().
+                            # .clone() (or other ops) will have the side effect of changing
+                            # the metadata of the inner tensor.
+                            # So instead, we now have a dedicated fn to set autograd history,
+                            # without inadvertently changing other metadata.
+                            r = torch._C._functions.DelayedError(
+                                "Internal error: Tried to backward() through example input",
+                                1,
+                            )(r)
 
                     # Graph-Break for wrapped tensors
                     if (
@@ -1251,7 +1284,7 @@ class MetaConverter:
                         mb_fake_mode = maybe_get_fake_mode(r)
                         if mb_fake_mode is not None:
                             maybe_fake_mgr = in_kernel_invocation_manager(mb_fake_mode)
-                        with maybe_fake_mgr, torch.no_grad():
+                        with maybe_fake_mgr, torch.no_grad(), maybe_suppress():
                             r.set_(r_s, storage_offset, sizes, strides)
 
                 if t.grad is not None:

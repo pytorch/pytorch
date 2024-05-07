@@ -7,10 +7,11 @@ import operator
 import warnings
 from contextlib import nullcontext
 from functools import wraps
-from typing import Any, Callable, List, Optional, Tuple
+from typing import Any, Callable, List, Optional, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
+from torch._library.fake_class_registry import FakeScriptObject
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import py_sym_types
 
@@ -23,6 +24,7 @@ KNOWN_TYPES = [
     bool,
     type(None),
     *py_sym_types,
+    FakeScriptObject,
 ]
 
 original_zip = zip
@@ -77,10 +79,10 @@ def normalize_as_list(x):
 
 def _get_autocast_states():
     return [
-        torch.is_autocast_enabled(),
-        torch.is_autocast_cpu_enabled(),
-        torch.get_autocast_gpu_dtype(),
-        torch.get_autocast_cpu_dtype(),
+        torch.is_autocast_enabled("cuda"),
+        torch.is_autocast_enabled("cpu"),
+        torch.get_autocast_dtype("cuda"),
+        torch.get_autocast_dtype("cpu"),
         torch.is_autocast_cache_enabled(),
     ]
 
@@ -103,7 +105,9 @@ def make_boxed_compiler(compiler):
     return f
 
 
-def call_func_at_runtime_with_args(f, args, steal_args=False, disable_amp=False):
+def call_func_at_runtime_with_args(
+    f, args: Union[Tuple[Any], List[Any]], steal_args=False, disable_amp=False
+):
     if not steal_args:
         args = list(args)
     assert isinstance(args, list)
@@ -280,3 +284,13 @@ def unlift_tokens(fw_module, fw_metadata):
     fw_metadata.num_forward_returns -= num_tokens
     fw_metadata.num_forward -= num_tokens
     fw_metadata.tokens = {}
+
+
+def root_module_when_exporting_non_strict(flat_fn):
+    # When exporting in non-strict mode, we wrap the root module in a specific pattern.
+    # See `_aot_export_non_strict` in torch.export._trace.py.
+    # We look for that wrapping pattern here.
+    if hasattr(flat_fn, "_orig_mod") and hasattr(flat_fn._orig_mod, "_export_root"):
+        return flat_fn._orig_mod._export_root
+    else:
+        return None

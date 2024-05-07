@@ -152,8 +152,11 @@ def _get_fqns(
     Returns:
         The canonical FQNs based on the model traversal.
     """
+
+    # Remove the checkpoint prefix, if it exists.
+    name = name.replace(_CHECKPOINT_PREFIX, "")
     if "." not in name:
-        return {name.replace(_CHECKPOINT_PREFIX, "")}
+        return {name}
 
     obj_names = name.split(".")
     fqn_obj_names = []
@@ -170,8 +173,6 @@ def _get_fqns(
                 flat_param = getattr(curr_obj, FLAT_PARAM)
                 if prefix:
                     prefix = f"{prefix}."
-                # FSDP already handles removal of checkpoint prefix, so we can return
-                # directly
                 return {f"{prefix}{fqn}" for fqn in flat_param._fqns}
             curr_obj = getattr(curr_obj, FSDP_WRAPPED_MODULE)
             if curr_obj_name != FSDP_WRAPPED_MODULE:
@@ -218,7 +219,7 @@ def _verify_options(
             fqn_param_mapping[fqn] = param
             all_fqns.add(fqn)
 
-    submodule_prefixes = set()
+    submodule_prefixes: Set[str] = set()
     if submodules:
         submodules = set(submodules)
         for name, module in model.named_modules():
@@ -226,8 +227,7 @@ def _verify_options(
                 continue
             fqns = _get_fqns(model, name)
             assert len(fqns) == 1, "Submodule FQN should only have 1 instance"
-            for fqn in fqns:
-                submodule_prefixes.add(f"{fqn}.")
+            submodule_prefixes.update(f"{fqn}." for fqn in fqns)
 
     fsdp_modules = FSDP.fsdp_modules(model)
     state_dict_config: StateDictConfig
