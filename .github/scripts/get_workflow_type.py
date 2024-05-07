@@ -1,5 +1,6 @@
 from argparse import ArgumentParser
 from typing import Any
+import json
 
 from github import Auth, Github
 from github.Issue import Issue
@@ -79,15 +80,18 @@ def main() -> None:
     args = parse_args()
 
     if is_exception_branch(args.github_branch):
-        print(WORKFLOW_TYPE_LABEL)
+        output = {"workflow_type": WORKFLOW_TYPE_LABEL}
+    else:
+        try:
+            gh = get_gh_client(args.github_token)
+            issue = get_issue(gh, args.github_repo, args.github_issue)
 
-    try:
-        gh = get_gh_client(args.github_token)
-        issue = get_issue(gh, args.github_repo, args.github_issue)
+            output = {"workflow_type": get_workflow_type(issue, args.github_user)}
+        except Exception as e:
+            output = {"workflow_type": WORKFLOW_TYPE_LABEL}
 
-        print(get_workflow_type(issue, args.github_user))
-    except Exception as e:
-        print(WORKFLOW_TYPE_LABEL)
+    json_output = json.dumps(output)
+    print(json_output)
 
 
 if __name__ == "__main__":
