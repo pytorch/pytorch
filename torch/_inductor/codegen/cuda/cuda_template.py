@@ -158,6 +158,7 @@ class CUDATemplate(KernelTemplate):
                 #define PT_EXPORT
                 #endif
                 #endif
+                using bfloat16 = nv_bfloat16;
             """
         )
         return res
@@ -190,7 +191,6 @@ class CUTLASSTemplate(CUDATemplate):
 
     def globals(self) -> IndentedBuffer:
         res = super().globals()
-        res.splice("using bfloat16 = nv_bfloat16;")
         res.splice(
             """
                 using namespace cute;
