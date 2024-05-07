@@ -465,6 +465,8 @@ def reinplace_all_gather(mod):
 
 def remove_storage_resize_and_copy(mod):
     """
+    TODO(yf225): seems we are removing too many things and it doesn't make sense in the BWD graph. Need a closer look.
+
     TODO(yf225): this is a generic pass not specific to FSDP, so we should move it out of this file.
 
     resize_storage_bytes_ = torch.ops.inductor.resize_storage_bytes_.default(primals_5, 262144000)

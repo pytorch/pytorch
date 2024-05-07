@@ -874,16 +874,6 @@ class _BaseGroupedSchedulerNode(BaseSchedulerNode):
             f"{self.get_name()}.snodes[{i}] =\n{node.debug_str()}"
             for i, node in enumerate(self.snodes)
         ]
-        device = self.snodes[0].node.get_device()
-        if ir.is_triton(device):
-            backend = self.scheduler.get_backend(device)
-            V.graph.scheduler.current_device = device
-            old_generated_kernel_count = metrics.generated_kernel_count
-            triton_code = backend.generate_kernel_code_from_nodes(self.snodes).strip()
-            metrics.generated_kernel_count = old_generated_kernel_count
-            lines.append(f"{self.get_name()} Triton code:")
-            lines.append(textwrap.indent(triton_code, "    "))
-
         return textwrap.indent("\n".join(lines).rstrip(), "    ")
 
     @cache_on_self
