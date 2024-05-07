@@ -555,7 +555,7 @@ class TestExport(TestCase):
                 self.z = (self.z[0] + 6,)
                 return x + self.x + self.y["k"] + self.z[0]
 
-        ep = torch.export.export(M(), (torch.randn(2, 3),), strict=False)
+        ep = export(M(), (torch.randn(2, 3),))
         self.assertTrue(
             torch.allclose(ep.module()(torch.zeros(2, 3)), torch.ones(2, 3) * 21)
         )
@@ -1243,7 +1243,7 @@ class TestExport(TestCase):
                 "Specializations unexpectedly required"
                 ".*\n.*\\[0\\] must be specialized to 3.*guards.*too complex(.*\n)*.*"
                 "Suggested fixes:(.*\n)*.*"
-                "dim0_x = None  # 3(.*\n)*.*"
+                "dim0_x = 3(.*\n)*.*"
                 "dim1_x = 2\\*_dim1_x"
             ),
         ):
@@ -1537,7 +1537,7 @@ class TestExport(TestCase):
                 "Constraints violated \\(batch\\)!(.*\n)*.*"
                 "batch was inferred to be a constant(.*\n)*.*"
                 "Suggested fixes:(.*\n)*.*"
-                "batch = None  # 10"
+                "batch = 10"
             ),
         ):
             export(
@@ -1738,7 +1738,7 @@ class TestExport(TestCase):
                 "Constraints violated \\(K1\\)!(.*\n)*.*"
                 "K1 was inferred to be a constant(.*\n)*.*"
                 "Suggested fixes:(.*\n)*.*"
-                "K1 = None  # 3"
+                "K1 = 3"
             ),
         ):
             export(
