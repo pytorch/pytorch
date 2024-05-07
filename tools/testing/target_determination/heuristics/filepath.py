@@ -47,7 +47,6 @@ custom_matchers: Dict[str, Callable[[str], bool]] = {
 
 @lru_cache(maxsize=1)
 def get_keywords(file: str) -> List[str]:
-    print(f"Getting keywords for {file}")
     keywords = []
     for folder in Path(file).parts[:-1]:
         folder = sanitize_folder_name(folder)
