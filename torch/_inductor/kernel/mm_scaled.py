@@ -3,13 +3,19 @@ import logging
 import sympy
 
 import torch
-from ..ir import FlexibleLayout
-from ..lowering import register_lowering, constrain_to_fx_strides, add_layout_constraint, empty
+
+from .. import config as inductor_config
+from ..lowering import (
+    add_layout_constraint,
+    constrain_to_fx_strides,
+    empty,
+    register_lowering,
+)
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
-    TritonTemplate,
     realize_inputs,
+    TritonTemplate,
 )
 from ..utils import (
     use_aten_gemm_kernels,
@@ -17,22 +23,20 @@ from ..utils import (
     use_max_autotune,
     use_triton_template,
 )
-from .mm_common import (
-    mm_args,
-    mm_configs,
-    mm_grid,
-    mm_options,
-)
 from .mm import _is_static_problem  # TODO(yangsiyu) move to mm_common
+from .mm_common import mm_args, mm_configs, mm_grid, mm_options
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
+
+
+# {{def_kernel("A", "B", "bias_ptr", "A_inverse_scale", "B_inverse_scale", "scale_result", "output_amax_ptr")}}
 
 scaled_mm_template = TritonTemplate(
     name="scaled_mm",
     grid=mm_grid,
     source=r"""
-{{def_kernel("A", "B", "bias_ptr", "A_inverse_scale", "B_inverse_scale", "scale_result", "output_amax_ptr")}}
+{{def_kernel("A", "B", "A_inverse_scale", "B_inverse_scale")}}
     M = {{size("A", 0)}}
     N = {{size("B", 1)}}
     K = {{size("A", 1)}}
@@ -100,9 +104,9 @@ scaled_mm_template = TritonTemplate(
     rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
     rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
 
-    if bias_ptr is not None:
-        bias = tl.load(bias_ptr + rn, mask=rn < N)
-        acc += bias
+    # if HAS_BIAS:
+    #     bias = tl.load(bias_ptr + rn, mask=rn < N)
+    #     acc += bias
 
     idx_m = rm[:, None]
     idx_n = rn[None, :]
@@ -125,7 +129,7 @@ aten__scaled_mm = ExternKernelChoice(
 # also changed select_algorithm to use_fallback_kernel if True without checking other conditions
 
 
-def scaled_mm_options(config, sym_m, sym_n, sym_k, layout, scale_a, scale_b, use_fast_accum, b_prologue_cast_type=None):
+def scaled_mm_options(config, sym_m, sym_n, sym_k, layout, bias, scale_a, scale_b, use_fast_accum, b_prologue_cast_type=None):
     # copied from mm_common.mm_options()
     even_k_symbolic = (
         # it isn't worth guarding on this
@@ -137,7 +141,7 @@ def scaled_mm_options(config, sym_m, sym_n, sym_k, layout, scale_a, scale_b, use
         or ((sym_m % 16) == 0 and (sym_n % 16) == 0 and (sym_k % 8) == 0)
     )
     if scale_a or scale_b:
-        assert len(scale_a.shape) == len(scale_b.shape), f"Expect inverse scale_a and scale_b to be both scalars (tensor-wise scaling) or tensors (rowwise scaling)"
+        assert len(scale_a.get_size()) == len(scale_b.get_size()), f"Expect inverse scale_a and scale_b to be both scalars (tensor-wise scaling) or tensors (rowwise scaling)"
     is_scaling = not (scale_a is None and scale_b is None)
     return dict(
         GROUP_M=8,
@@ -145,10 +149,12 @@ def scaled_mm_options(config, sym_m, sym_n, sym_k, layout, scale_a, scale_b, use
         ALLOW_TF32=allow_tf32,
         ACC_TYPE="tl.float32",  # should acc always be in float32?
         B_PROLOGUE_CAST_TYPE=b_prologue_cast_type,
+        FP8_FAST_ACCUM=use_fast_accum,
         num_stages=config.num_stages,
         num_warps=config.num_warps,
         SCALING=is_scaling,
-        SCALING_ROWWISE=is_scaling and len(scale_a.shape) != 0,  # tensor-wise scaling if scalar scale
+        SCALING_ROWWISE=is_scaling and len(scale_a.get_size()) != 0,  # tensor-wise scaling if scalar scale
+        HAS_BIAS=bias is not None,
         **config.kwargs,
     )
 
@@ -188,30 +194,45 @@ def tuned_scaled_mm(
     static_shape, is_nonzero = _is_static_problem([mat_a, mat_b], layout)
     if is_nonzero and use_triton_template(layout, enable_float8=True):
 
-        # see NOTE:[TritonTemplates with multiple outputs]
-        # TODO currently scaled_mm_template does not compute the output_amax!
-        output_amax = empty((), dtype=torch.float32, device=mat_a.get_device())
-
         for config in mm_configs(m, n, k):
-            kwargs = scaled_mm_options(config, m, n, k, layout, scale_a, scale_b, use_fast_accum)
+            kwargs = scaled_mm_options(config, m, n, k, layout, bias, scale_a, scale_b, use_fast_accum)
             log.warning(f"Siyu DEBUG mm_options output {kwargs}")
+
+            # if bias is None:
+            #     bias_placeholder = empty((), dtype=torch.float32, device=mat_a.get_device())
+
+            # # TODO Pass scale_result and use appropriately
+            # scale_result_placeholder = empty((), dtype=torch.float32, device=mat_a.get_device())
+
+            # # see NOTE:[TritonTemplates with multiple outputs]
+            # # TODO currently scaled_mm_template does not compute the output_amax!
+            # output_amax_placeholder = empty((), dtype=torch.float32, device=mat_a.get_device())
 
             # possibly appends a TritonTemplateCaller to choices
             scaled_mm_template.maybe_append_choice(
                 choices,
-                input_nodes=(mat_a, mat_b, bias, scale_a, scale_b, scale_result, output_amax),
+                # No bias, scale_result_placeholder for now
+                input_nodes=(mat_a, mat_b, scale_a, scale_b),
                 layout=layout,
-                mutated_inputs=[
-                    output_amax,
-                ],
+                # mutated_inputs=[
+                #     output_amax_placeholder,
+                # ],
                 **kwargs,
             )
         # TODO _scaled_mm() returns two tensors, use mutated inputs
 
     log.info(f"Siyu DEBUG, scaled_mm len choices: {len(choices)}")
 
-    output = autotune_select_algorithm("scaled_mm", choices, [mat_a, mat_b, output_amax], layout)
-    return output, output_amax
+    # if bias is None:
+    #     bias_placeholder = empty((1), dtype=torch.float32, device=mat_a.get_device())
+    # scale_result_placeholder = empty((1), dtype=torch.float32, device=mat_a.get_device())
+    output_amax_placeholder = empty((1), dtype=torch.float32, device=mat_a.get_device())
+
+    log.info("Siyu DEBUG, NO BIAS, No scale_result_placeholder")
+    example_inputs = [mat_a, mat_b, scale_a, scale_b]
+
+    output = autotune_select_algorithm("scaled_mm", choices, example_inputs, layout)
+    return output, output_amax_placeholder
     # return autotune_select_algorithm("scaled_mm", choices, [mat_a, mat_b], layout)  # 2 positional inputs
 
 # _scaled_mm_out_cuda(mat_a, mat_b, bias, out_dtype, scale_a, scale_b, scale_result, use_fast_accum, out, amax)
