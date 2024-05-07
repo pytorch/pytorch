@@ -418,7 +418,10 @@ class FunctionalizedRngRuntimeWrapper(CompilerWrapper):
                 runtime_args.extend([seed, offset])
                 out = compiled_fn(runtime_args)
                 out = FunctionalizedRngRuntimeWrapper._functionalized_rng_runtime_epilogue(
-                    fw_metadata, out
+                    fw_metadata,
+                    out,
+                    # TODO: this won't be right for the backward when we convert the call_compiled_backward to use the wrapper
+                    fw_metadata.num_forward_returns,
                 )
                 return out
             return compiled_fn(runtime_args)
@@ -429,17 +432,15 @@ class FunctionalizedRngRuntimeWrapper(CompilerWrapper):
     # of (user_outs, rng_offset)
     @staticmethod
     def _functionalized_rng_runtime_epilogue(
-        metadata: ViewAndMutationMeta, outs, return_new_outs=True
+        metadata: ViewAndMutationMeta, outs, offset_index
     ):
         if metadata.is_rng_op_functionalized:
             assert metadata.num_outputs_rng_offset == 1
-            new_rng_offset = outs[-1]
+            new_rng_offset = outs[offset_index]
             CUDARngStateHelper.set_new_offset(new_rng_offset)
-            if return_new_outs:
-                user_outs = outs[:-1]
-                return user_outs
-            else:
-                return None
+            user_outs = outs[:offset_index] + outs[offset_index + 1 :]
+            return user_outs
+
         return outs
 
 

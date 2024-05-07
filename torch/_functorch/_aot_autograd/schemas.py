@@ -431,21 +431,14 @@ class ViewAndMutationMeta:
             + self.num_intermediate_bases
             + len(self.tokens)
         )
-        # In case of functionalization of rng ops, the fw_module returns one
-        # additional output for rng offset. This rng offset is used right
-        # away to advance the rng state, and is not passed on to the raw
-        # outputs. However, we need to know the exact boundary to identify
-        # which tensors to be saved for the bwd graph.  num_forward captures
-        # this information.
-        self.num_forward = self.num_forward_returns + self.num_outputs_rng_offset
 
     @property
     def tensors_saved_for_backwards_slice(self):
         assert self.num_symints_saved_for_bw is not None
         if self.num_symints_saved_for_bw > 0:
-            return slice(self.num_forward, -self.num_symints_saved_for_bw)
+            return slice(self.num_forward_returns, -self.num_symints_saved_for_bw)
         else:
-            return slice(self.num_forward, None)
+            return slice(self.num_forward_returns, None)
 
     @property
     def symints_saved_for_backwards_slice(self):

@@ -601,7 +601,6 @@ def aot_dispatch_autograd(
             )
             num_tokens = len(CompiledFunction.metadata.tokens)
             num_forward_returns = CompiledFunction.metadata.num_forward_returns
-            num_forward = CompiledFunction.metadata.num_forward
 
             # Partitioners must put symint arguments at the end separate from tensor arguments
             tensors_saved_for_backwards = fw_outs[
@@ -906,7 +905,7 @@ Got grad_output types: {str(grad_output_types)}"""
                         out = normalize_as_list(bw_module(*all_args))
                     # TODO: replace with post_compile wrapper
                     out = FunctionalizedRngRuntimeWrapper._functionalized_rng_runtime_epilogue(
-                        CompiledFunction.metadata, out
+                        CompiledFunction.metadata, out, offset_index=len(out) - 1
                     )
                     return tuple(out)
                 assert (
@@ -962,7 +961,7 @@ Got grad_output types: {str(grad_output_types)}"""
                 )
                 # TODO: replace this with FunctionalizedRngRuntimeWrapper.post_compile
                 out = FunctionalizedRngRuntimeWrapper._functionalized_rng_runtime_epilogue(
-                    CompiledFunction.metadata, out
+                    CompiledFunction.metadata, out, offset_index=len(out) - 1
                 )
                 return tuple(out)
 
