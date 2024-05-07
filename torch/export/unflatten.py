@@ -1,10 +1,11 @@
 import abc
 import copy
 import operator
+from collections import defaultdict
 from copy import deepcopy
 from enum import Enum
 from itertools import chain
-from typing import Any, cast, Dict, List, Optional, Union
+from typing import Any, cast, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.fx._pytree as fx_pytree
@@ -14,6 +15,7 @@ from torch.export._tree_utils import reorder_kwargs
 from torch.export.exported_program import (
     ConstantArgument,
     ExportedProgram,
+    InputKind,
     ModuleCallSignature,
     SymIntArgument,
     TensorArgument,
@@ -212,22 +214,52 @@ class UnflattenedModule(torch.nn.Module):
                 attr_kind=_AttrKind.CONSTANT,
             )
 
-        inputs_to_state: Dict[str, str] = {
-            **self.graph_signature.inputs_to_parameters,
-            **self.graph_signature.inputs_to_buffers,
-            **self.graph_signature.inputs_to_lifted_tensor_constants,
-            **self.graph_signature.inputs_to_lifted_custom_objs,
-        }
+        # This is to handle parameters/buffers that point to the same tensor
+        # object id -> list of (node_name, target_name)
+        consts_map: Dict[int, List[Tuple[str, str]]] = defaultdict(list)
+
+        def add_to_consts_map(obj_id, node_name, target_name):
+            name_list = consts_map[obj_id]
+            name_list.append((node_name, target_name))
+
+        for s in self.graph_signature.input_specs:
+            if s.kind == InputKind.PARAMETER or (
+                s.kind == InputKind.BUFFER and s.persistent
+            ):
+                assert hasattr(s.arg, "name")
+                assert isinstance(s.target, str)
+                add_to_consts_map(
+                    id(export_module.state_dict[s.target]), s.arg.name, s.target
+                )
+            elif (
+                (s.kind == InputKind.BUFFER and not s.persistent)
+                or s.kind == InputKind.CONSTANT_TENSOR
+                or s.kind == InputKind.CUSTOM_OBJ
+            ):
+                assert hasattr(s.arg, "name")
+                assert isinstance(s.target, str)
+                add_to_consts_map(
+                    id(export_module.constants[s.target]), s.arg.name, s.target
+                )
+
+        # node name -> list of possible targets
+        inputs_to_state: Dict[str, List[str]] = {}
+        for node_target in consts_map.values():
+            targets = [t[1] for t in node_target]
+            for n, _ in node_target:
+                inputs_to_state[n] = targets
 
         _sink_params(self, inputs_to_state, [])
         # Check all input nodes has been processed.
-        for module in self.modules():
-            if not isinstance(module, torch.fx.GraphModule):
+        for name, module in self.named_modules():
+            if not hasattr(module, "graph"):
                 continue
             for node in module.graph.nodes:
                 if node.op != "placeholder":
                     continue
-                assert node.name not in inputs_to_state
+                assert (
+                    node.name not in inputs_to_state
+                ), f"{node.name} was not sunk into the module {name} which has the graph: {module.graph}"
 
         # Cache so we don't have to compute this every time.
         # NOTE: this needs to be kept in sync with the placeholders in
@@ -857,7 +889,7 @@ def _reorder_submodules(
 
 def _sink_params(
     module: torch.nn.Module,
-    inputs_to_state: Dict[str, str],
+    inputs_to_state: Dict[str, List[str]],
     scope: List[str],
 ):
     """Sink params, buffers, and constants from graph inputs into get_attr nodes.
@@ -896,16 +928,25 @@ def _sink_params(
             continue
 
         if len(node.users) > 0:
-            state_name = inputs_to_state[node.name].split(".")
-            # If there's a mismatch beteewn scope name and state name, then there must be multuple scopes
-            # pointing to the same state name, meaning some modules are shared. In such case, we can simply
-            # skip updating the current node because another later iteration will take care of this input
-            # node when the unique match between scope and state name occurs.
-            # To make sure this always happen, we should enforce the invariant that no placeholder node
-            # in the unflattened graph appears in inputs_to_state dict, which means all the extra input
-            # nodes have been handled.
-            if state_name[: len(scope)] != scope:
+            state_name = None
+            for sn in inputs_to_state[node.name]:
+                sn_split = sn.split(".")
+                if sn_split[: len(scope)] == scope:
+                    state_name = sn_split
+                    break
+
+            # If there's a mismatch beteewn scope name and state name, then
+            # there must be multuple scopes pointing to the same state name,
+            # meaning some modules are shared. In such case, we can simply skip
+            # updating the current node because another later iteration will
+            # take care of this input node when the unique match between scope
+            # and state name occurs.  To make sure this always happen, we should
+            # enforce the invariant that no placeholder node in the unflattened
+            # graph appears in inputs_to_state dict, which means all the extra
+            # input nodes have been handled.
+            if state_name is None:
                 continue
+
             attr_path = state_name[len(scope) :]
             state_attr = _recursive_getattr(module, attr_path)
             assert isinstance(state_attr, (torch.Tensor, torch.ScriptObject))

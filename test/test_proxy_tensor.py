@@ -26,6 +26,7 @@ from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter
 from torch.utils._pytree import tree_map
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch import nn
+import torch._functorch.config
 import re
 
 import functools
@@ -1347,7 +1348,7 @@ def forward(self, crop_camera_1, mask_1):
                 for s in p.shape:
                     guard_int(s)
             x = x[mask]
-            torch._constrain_as_value(x.shape[0], min=1)
+            torch._check(x.shape[0] >= 1)
             for p in params.values():
                 p.grad = None
             return torch.func.functional_call(mod, {**params, **buffers}, (x,)).sum()
@@ -1498,6 +1499,7 @@ def forward(self, x_1, y_1):
             # tolist not directly supported atm
             sizes = [lengths[i].item() for i in range(lengths.size(0))]
             for s in sizes:
+                # TODO(avik): no assertion generated with torch._check_is_size?
                 torch._constrain_as_size(s)
             return torch.split(values, sizes)
 
@@ -1540,6 +1542,22 @@ def forward(self, lengths_1, values_1):
                 self.fail("didn't raise exception")
             except GuardOnDataDependentSymNode:
                 pass
+
+        make_fx(f, tracing_mode="symbolic")(torch.randn(4))
+
+    @torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True)
+    def test_invalidate_nonzero_propagate_real_tensors(self):
+        def f(a):
+            b = a.clone()
+            x = b.nonzero()
+            x1 = b.nonzero()
+            x2 = b.nonzero()
+            assert x1.shape[0] == x2.shape[0]
+            b.normal_()
+            y = b.nonzero()
+            # Because you're not actually going to generate exactly zero with
+            # normal_ lol
+            assert x1.shape[0] == y.shape[0]
 
         make_fx(f, tracing_mode="symbolic")(torch.randn(4))
 
