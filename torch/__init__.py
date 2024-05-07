@@ -66,6 +66,7 @@ __all__ = [
 ################################################################################
 
 if sys.platform == 'win32':
+    import sysconfig
     pfiles_path = os.getenv('ProgramFiles', 'C:\\Program Files')
     py_dll_path = os.path.join(sys.exec_prefix, 'Library', 'bin')
     th_dll_path = os.path.join(os.path.dirname(__file__), 'lib')
