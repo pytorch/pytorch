@@ -3241,6 +3241,7 @@ MOD_INLINELIST = {
     "torch.optim.asgd",
     "torch.optim.sgd",
     "torch.optim.adadelta",
+    "torch.optim.adagrad",
 }
 
 
