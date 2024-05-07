@@ -718,18 +718,27 @@ class SchedulerNode(BaseSchedulerNode):
             lines.append(textwrap.indent(self._body.debug_str(), "    "))
 
         if ir.is_triton(self.node.get_device()):
-            backend = self.scheduler.get_backend(self.node.get_device())
-            V.graph.scheduler.current_device = self.node.get_device()
+            is_multi_template = self.is_template() and isinstance(
+                self.get_template_node(), ir.MultiTemplateBuffer
+            )
+            if (
+                is_multi_template
+                and self.get_template_node().make_kernel_render is None
+            ):
+                lines.append(f"{self.get_name()} Unfinalized multi template buffer")
+            else:
+                backend = self.scheduler.get_backend(self.node.get_device())
+                V.graph.scheduler.current_device = self.node.get_device()
 
-            # Don't increment kernel count when generating debug string.
-            # This will confuse some unit tests that check the number of
-            # generated kernels.
-            old_generated_kernel_count = metrics.generated_kernel_count
-            triton_code = backend.generate_kernel_code_from_nodes((self,)).strip()
-            metrics.generated_kernel_count = old_generated_kernel_count
+                # Don't increment kernel count when generating debug string.
+                # This will confuse some unit tests that check the number of
+                # generated kernels.
+                old_generated_kernel_count = metrics.generated_kernel_count
+                triton_code = backend.generate_kernel_code_from_nodes((self,)).strip()
+                metrics.generated_kernel_count = old_generated_kernel_count
 
-            lines.append(f"{self.get_name()} Triton code:")
-            lines.append(textwrap.indent(triton_code, "    "))
+                lines.append(f"{self.get_name()} Triton code:")
+                lines.append(textwrap.indent(triton_code, "    "))
         return "\n".join(lines)
 
     def get_ranges(self):
@@ -889,13 +898,24 @@ class FusedSchedulerNode(BaseSchedulerNode):
         ]
         device = self.snodes[0].node.get_device()
         if ir.is_triton(device):
-            backend = self.scheduler.get_backend(device)
-            V.graph.scheduler.current_device = device
-            old_generated_kernel_count = metrics.generated_kernel_count
-            triton_code = backend.generate_kernel_code_from_nodes(self.snodes).strip()
-            metrics.generated_kernel_count = old_generated_kernel_count
-            lines.append(f"{self.get_name()} Triton code:")
-            lines.append(textwrap.indent(triton_code, "    "))
+            is_multi_template = self.is_template() and isinstance(
+                self.get_template_node(), ir.MultiTemplateBuffer
+            )
+            if (
+                is_multi_template
+                and self.get_template_node().make_kernel_render is None
+            ):
+                lines.append(f"{self.get_name()} Unfinalized multi template buffer")
+            else:
+                backend = self.scheduler.get_backend(device)
+                V.graph.scheduler.current_device = device
+                old_generated_kernel_count = metrics.generated_kernel_count
+                triton_code = backend.generate_kernel_code_from_nodes(
+                    self.snodes
+                ).strip()
+                metrics.generated_kernel_count = old_generated_kernel_count
+                lines.append(f"{self.get_name()} Triton code:")
+                lines.append(textwrap.indent(triton_code, "    "))
 
         return textwrap.indent("\n".join(lines).rstrip(), "    ")
 
