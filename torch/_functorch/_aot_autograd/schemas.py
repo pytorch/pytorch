@@ -308,14 +308,6 @@ class ViewAndMutationMeta:
         # When keep_input_mutations is set, we don't need to worry about our epilogue
         # handling data-only mutations, because we keep them directly in the graph.
 
-        from torch.distributed._functional_collectives import AsyncCollectiveTensor
-
-        self.async_collective_inp_indices = [
-            i
-            for i, x in enumerate(self.subclass_inp_meta)
-            if isinstance(x, SubclassCreationMeta)
-            and isinstance(x.original_subclass, AsyncCollectiveTensor)
-        ]
         mutated_inp_runtime_indices = [
             i
             for i, m in enumerate(self.input_info)

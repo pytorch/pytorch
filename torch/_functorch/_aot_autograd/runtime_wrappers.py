@@ -105,8 +105,6 @@ def create_runtime_wrapper(
 
         # stash a ref to each input tensor we plan to use after the compiled function
         orig_inputs = {i: args[i] for i in epilogue_args_idx}
-        for i in runtime_metadata.async_collective_inp_indices:
-            args[i] = args[i].trigger_wait()
 
         if trace_joint:
             args_ = list(args)
