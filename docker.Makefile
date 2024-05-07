@@ -83,6 +83,22 @@ devel-push: DOCKER_TAG := $(PYTORCH_VERSION)-cuda$(CUDA_VERSION_SHORT)-cudnn$(CU
 devel-push:
 	$(DOCKER_PUSH)
 
+ifeq ("$(CUDA_VERSION_SHORT)","cpu")
+
+.PHONY: runtime-image
+runtime-image: BASE_IMAGE := $(BASE_RUNTIME)
+runtime-image: DOCKER_TAG := $(PYTORCH_VERSION)-runtime
+runtime-image:
+	$(DOCKER_BUILD)
+
+.PHONY: runtime-push
+runtime-push: BASE_IMAGE := $(BASE_RUNTIME)
+runtime-push: DOCKER_TAG := $(PYTORCH_VERSION)-runtime
+runtime-push:
+	$(DOCKER_PUSH)
+
+else
+
 .PHONY: runtime-image
 runtime-image: BASE_IMAGE := $(BASE_RUNTIME)
 runtime-image: DOCKER_TAG := $(PYTORCH_VERSION)-cuda$(CUDA_VERSION_SHORT)-cudnn$(CUDNN_VERSION)-runtime
@@ -94,6 +110,8 @@ runtime-push: BASE_IMAGE := $(BASE_RUNTIME)
 runtime-push: DOCKER_TAG := $(PYTORCH_VERSION)-cuda$(CUDA_VERSION_SHORT)-cudnn$(CUDNN_VERSION)-runtime
 runtime-push:
 	$(DOCKER_PUSH)
+
+endif
 
 .PHONY: clean
 clean:

@@ -264,7 +264,7 @@ class BaseStructuredSparsifier(BaseSparsifier):
                     BiasHook(module.parametrizations.weight[0], prune_bias)
                 )
 
-    def prune(self) -> torch.fx.GraphModule:
+    def prune(self) -> None:
         r"""
         This function will FX symbolically trace the model and then find instances of the patterns
         defined in self.patterns (by default SUPPORTED_STRUCTURED_PRUNING_PATTERNS ).
