@@ -2315,7 +2315,6 @@ class InstructionTranslator(InstructionTranslatorBase):
                 )
                 argnames_ctx_vars.append((name, target_values))
                 # Replace the local with the context class
-                cg.append_output(create_instruction("LOAD_FAST", argval=name))
                 ctx.reconstruct_type(cg)
                 cg.append_output(create_instruction("STORE_FAST", argval=name))
 
