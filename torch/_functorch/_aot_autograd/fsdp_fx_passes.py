@@ -494,3 +494,67 @@ def remove_storage_resize_and_copy(mod):
                 mod.graph.erase_node(resize_storage_bytes_node)
     mod.graph.lint()
     mod.recompile()
+
+
+def reinplace_primal_copyout_from_allgather_output(mod):
+    """
+    split_contiguous_view_as_strided = torch.ops.fsdp.split_contiguous_view_as_strided.default(view_1, [13107200, 2560, 13107200, 2560, 13107200, 2560], [[5120, 5120], [5120], [5120, 5120], [5120], [5120, 5120], [5120]], [[5120, 1], [1], [5120, 1], [1], [5120, 1], [1]]);  view_1 = None
+    getitem_2: "f32[5120, 5120]" = split_contiguous_view_as_strided[0]
+    ... (other ops)
+    # File: /data/users/willfeng/pytorch_yf225/torch/distributed/_composable/fsdp/_fsdp_collectives.py:231 in foreach_all_gather_copy_out, code: unsharded_param.copy_(out[i])
+    copy_1: "f32[5120, 5120]" = torch.ops.aten.copy.default(primals_8, getitem_2);  getitem_2 = None
+    ... (uses copy_1)
+    (at end of graph)
+    resize_storage_bytes_ = torch.ops.inductor.resize_storage_bytes_.default(primals_8, 104857600)
+    copy_: "f32[5120, 5120]" = torch.ops.aten.copy_.default(primals_8, copy_1);  primals_8 = copy_1 = None
+
+    ->
+
+    resize_storage_bytes_ = torch.ops.inductor.resize_storage_bytes_.default(primals_8, 104857600)
+    copy_1: "f32[5120, 5120]" = torch.ops.aten.copy_.default(primals_8, getitem_2);  None
+    ... (uses primals_8)
+    """
+    primal_inputs_tensor_only = [x for x in list(filter(torch._functorch.partitioners._is_primal, mod.graph.nodes)) if isinstance(x.meta.get('val', None), torch.Tensor)]
+    node_list = list(mod.graph.nodes)
+    primal_inputs_used = set()
+    primal_resize_copy_info_dict = {}
+    for i, n in enumerate(reversed(node_list)):
+        if n.target == torch.ops.inductor.resize_storage_bytes_.default and n.args[0] in primal_inputs_tensor_only:
+            primal_input = n.args[0]
+            resize_storage_bytes_node = n
+            inplace_copy_node = None
+            inplace_copy_node_idx = None
+            for j in range(i+1, len(node_list)):
+                nj = node_list[j]
+                if nj.target == torch.ops.aten.copy_.default and nj.args[0] == primal_input:
+                    inplace_copy_node = nj
+                    inplace_copy_node_idx = j
+                    break
+            if inplace_copy_node is not None:
+                primal_resize_copy_info_dict[primal_input] = {
+                    "resize_storage_bytes_node": resize_storage_bytes_node,
+                    "inplace_copy_node": inplace_copy_node,
+                }
+                primal_inputs_used.add(primal_input)
+    for i, n in enumerate(node_list):
+        if (
+            n.target is torch.ops.aten.copy.default
+            and n.args[0] in primal_inputs_used
+            and n.args[1].target is operator.getitem
+            and n.args[1].args[0].target is torch.ops.fsdp.split_contiguous_view_as_strided.default
+        ):
+            primal_input = n.args[0]
+            resize_node = primal_resize_copy_info_dict[primal_input]["resize_storage_bytes_node"]
+            inplace_copy_node = primal_resize_copy_info_dict[primal_input]["inplace_copy_node"]
+            copyout_from_allgather_node = n
+            with mod.graph.inserting_before(copyout_from_allgather_node):
+                new_resize_node = mod.graph.call_function(resize_node.target, resize_node.args, resize_node.kwargs)
+                new_inplace_copy_node = mod.graph.call_function(inplace_copy_node.target, copyout_from_allgather_node.args, copyout_from_allgather_node.kwargs)
+            inplace_copy_node.replace_all_uses_with(new_inplace_copy_node, propagate_meta=True)
+            mod.graph.erase_node(inplace_copy_node)
+            resize_node.replace_all_uses_with(new_resize_node, propagate_meta=True)
+            mod.graph.erase_node(resize_node)
+            copyout_from_allgather_node.replace_all_uses_with(primal_input, propagate_meta=False)
+            mod.graph.erase_node(copyout_from_allgather_node)
+    mod.graph.lint()
+    mod.recompile()
