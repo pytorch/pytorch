@@ -87,7 +87,6 @@ from .utils import (
     is_namedtuple,
     istype,
     LazyString,
-    maybe_cprofile,
     orig_code_map,
     record_compilation_metrics,
     reset_graph_break_dup_checker,
@@ -428,7 +427,6 @@ def register_bytecode_hook(hook: BytecodeHook) -> RemovableHandle:
 
 @compile_time_strobelight_meta(phase_name="_compile")
 @_use_lazy_graph_module(config.use_lazy_graph_module)
-@maybe_cprofile
 def _compile(
     code: types.CodeType,
     globals: Dict[str, object],
