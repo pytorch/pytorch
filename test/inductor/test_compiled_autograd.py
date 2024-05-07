@@ -1516,11 +1516,13 @@ def wrap_test_class(orig_cls):
         elif name.startswith("test_"):
             dct[name] = make_wrapped(fn)
 
-    return type(
+    cls = type(
         orig_cls.__name__ + "WithCompiledAutograd",
         orig_cls.__bases__,
         dct,
     )
+    cls.__file__ = __file__
+    return cls
 
 
 # These groups of tests aren't supported yet

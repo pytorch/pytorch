@@ -300,6 +300,36 @@ class ConvertIntSource(ChainedSource):
 
 
 @dataclasses.dataclass(frozen=True)
+class FlattenScriptObjectSource(ChainedSource):
+    def __post_init__(self):
+        assert self.base is not None
+
+    def reconstruct(self, codegen):
+        self.base.reconstruct(codegen)
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return f"{self.base.name()}.__obj_flatten__()"
+
+
+@dataclasses.dataclass(frozen=True)
+class ScriptObjectQualifiedNameSource(ChainedSource):
+    def __post_init__(self):
+        assert self.base is not None
+
+    def reconstruct(self, codegen):
+        self.base.reconstruct(codegen)
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return f"{self.base.name()}._type().qualified_name()"
+
+
+@dataclasses.dataclass(frozen=True)
 class DefaultsSource(ChainedSource):
     idx_key: Union[int, str]
     is_kw: bool = False
@@ -561,6 +591,14 @@ def is_from_local_source(source: Source, *, allow_cell_or_freevar=True):
     if not allow_cell_or_freevar and source.cell_or_freevar:
         return False
     return True
+
+
+def is_from_flatten_script_object_source(source: Source):
+    if isinstance(source, FlattenScriptObjectSource):
+        return True
+    elif isinstance(source, ChainedSource):
+        return is_from_flatten_script_object_source(source.base)
+    return False
 
 
 def is_from_optimizer_source(source: Source):
