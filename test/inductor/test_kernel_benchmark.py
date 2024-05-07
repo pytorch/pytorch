@@ -276,7 +276,6 @@ class TestKernelBenchmark(TestCase):
         #        = 0.032
         self.check_bandwidth(compiled_module, "0.032")
 
-    @expectedFailureXPU
     def test_mm_slice_add_bandwidth_computation(self):
         M, N, K = 1000, 1000, 30
 
@@ -299,7 +298,14 @@ class TestKernelBenchmark(TestCase):
         # num_gb = x0 + 2 * size_slice_c + size_out
         # num_gb = (1000 * 1000 + 2 * 1000 * 1000 + 1000 * 1000) * 2/ 1e9
         #        = 0.008
-        self.check_bandwidth(compiled_module, "0.008")
+        num_gb = "0.008"
+        if GPU_TYPE == "xpu":
+            # In XPU backend, mm + add + add will be fused as admm + add
+            # And CUDA prefer not fuse add + mm, please check in function
+            # `should_prefer_unfused_addmm` in torch/_inductor/fx_passes/post_grad.py
+            num_gb = "0.006"
+
+        self.check_bandwidth(compiled_module, num_gb)
 
     def test_mm_slice_add_bandwidth_computation_2(self):
         M, N, K = 1000, 1000, 30
