@@ -1245,18 +1245,29 @@ class _MakefxTracer:
                 if not self.tracing_mode == "real":
                     raise AssertionError(f"Unexpected tracing type: {self.tracing_mode}")
 
-            if self.pre_dispatch:
-                self.proxy_function_mode = PreDispatchTorchFunctionMode(self.fx_tracer)
-            # pre-autograd tracing uses per-dispatch-key modes,
-            # which requires the python dispatcher
-            if self.tracing_mode == "symbolic" or self.pre_dispatch:
-                self.python_dispatcher_mode = enable_python_dispatcher()
-
-            self.torch_fn_metadata_mode = TorchFunctionMetadataMode(self.fx_tracer)
-
+            self._init_modes_from_fx_tracer(self.fx_tracer)
             yield
         finally:
             self._restore_modes(*prev_modes)
+
+    def _init_modes_from_fx_tracer(self, fx_tracer):
+        self.proxy_mode = ProxyTorchDispatchMode(
+            fx_tracer,
+            self.tracing_mode,
+            pre_dispatch=self.pre_dispatch,
+            _allow_fake_constant=self._allow_fake_constant,
+            _error_on_data_dependent_ops=self._error_on_data_dependent_ops
+        )
+
+        if self.pre_dispatch:
+            self.proxy_function_mode = PreDispatchTorchFunctionMode(fx_tracer)
+
+        # pre-autograd tracing uses per-dispatch-key modes,
+        # which requires the python dispatcher
+        if self.tracing_mode == "symbolic" or self.pre_dispatch:
+            self.python_dispatcher_mode = enable_python_dispatcher()
+
+        self.torch_fn_metadata_mode = TorchFunctionMetadataMode(fx_tracer)
 
     # By default, subtracer creates new modes based on parent tracer's config.
     # However, there are cases where we want to share the same modes with parent tracer
@@ -1264,6 +1275,7 @@ class _MakefxTracer:
     # 2. tracer.scope_root, proxy_paths, proxy_modules: these are used to construct 'nn_module_stack'
     #   which has a special logic of handling module aliasing so parent and subgraphs should share the same states.
     #   For detail, see comments in _ModuleSstackTracer.
+
     @contextmanager
     def _init_modes_from_parent(self, parent_tracer):
         prev_modes = self._checkpoint_modes()
@@ -1286,23 +1298,7 @@ class _MakefxTracer:
                 return sub_tracer
 
             self.fx_tracer = _create_sub_fx_tracer(parent_tracer.fx_tracer)
-            # These modes are re-constructed based on fx_tracer
-            if self.pre_dispatch:
-                self.proxy_function_mode = PreDispatchTorchFunctionMode(self.fx_tracer)
-            self.proxy_mode = ProxyTorchDispatchMode(
-                self.fx_tracer,
-                self.tracing_mode,
-                pre_dispatch=self.pre_dispatch,
-                _allow_fake_constant=self._allow_fake_constant,
-                _error_on_data_dependent_ops=self._error_on_data_dependent_ops
-            )
-
-            # pre-autograd tracing uses per-dispatch-key modes,
-            # which requires the python dispatcher
-            if self.tracing_mode == "symbolic" or self.pre_dispatch:
-                self.python_dispatcher_mode = enable_python_dispatcher()
-            self.torch_fn_metadata_mode = TorchFunctionMetadataMode(self.fx_tracer)
-
+            self._init_modes_from_fx_tracer(self.fx_tracer)
             yield
         finally:
             self._restore_modes(*prev_modes)
