@@ -3176,7 +3176,6 @@ LEGACY_MOD_INLINELIST = {
     "torch.ao.quantization.pt2e.representation.rewrite",
     "torch.ao.quantization.pt2e.utils",
     "torch.ao.quantization.quantizer.xnnpack_quantizer",
-    "torch.optim",
 }
 
 if torch.distributed.is_available():
@@ -3231,6 +3230,17 @@ MOD_INLINELIST = {
     "torch._higher_order_ops.strict_mode",
     "torch._higher_order_ops.while_loop",
     "torch._higher_order_ops.associative_scan",
+    "torch.optim.optimizer",
+    "torch.optim.adam",
+    "torch.optim.adamw",
+    "torch.optim.radam",
+    "torch.optim.nadam",
+    "torch.optim.adamax",
+    "torch.optim.rmsprop",
+    "torch.optim.rprop",
+    "torch.optim.asgd",
+    "torch.optim.sgd",
+    "torch.optim.adadelta",
 }
 
 
