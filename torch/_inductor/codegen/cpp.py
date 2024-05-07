@@ -1493,7 +1493,7 @@ class CppKernel(Kernel):
         self.local_reduction_init = IndentedBuffer()
         self.local_reduction_stores = IndentedBuffer()
         self.is_reduction = False
-        self.reduction_weight_recps = IndentedBuffer()
+        self.non_parallel_reduction_prefix = IndentedBuffer()
         self.reduction_cse = CSE(self.newvar_prefix, self.suffix, name_prefix="tmp_acc")
         self.preloads = IndentedBuffer()
         self.poststores = IndentedBuffer()
@@ -1883,7 +1883,7 @@ class CppKernel(Kernel):
                             if loop.parallel:
                                 prefix = prefix + kernel.parallel_reduction_prefix
                             else:
-                                prefix = prefix + kernel.reduction_weight_recps
+                                prefix = prefix + kernel.non_parallel_reduction_prefix
                             return prefix
 
             def gen_loops(loops: List[LoopLevel], in_reduction=False):
@@ -2331,7 +2331,7 @@ class CppVecKernel(CppKernel):
                 self.tiling_factor if self.tiling_idx >= self.reduction_depth else 1
             )
             self.weight_recp_vec_range = reduction_size // reduction_factor
-            self.reduction_weight_recps.writeline(
+            self.non_parallel_reduction_prefix.writeline(
                 self.welford_weight_reciprocal_vec(dtype, None)
             )
             self.stores.writeline(
