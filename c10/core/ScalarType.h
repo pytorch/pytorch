@@ -428,8 +428,6 @@ static inline ScalarType toUnderlying(ScalarType t) {
 }
 
 static inline bool isSignedType(ScalarType t) {
-  TORCH_CHECK(!isQIntType(t), "isSignedType not supported for quantized types");
-
 #define CASE_ISSIGNED(name)     \
   case ScalarType::name:        \
     return std::numeric_limits< \
@@ -480,7 +478,7 @@ static inline bool isSignedType(ScalarType t) {
     case ScalarType::NumOptions:
       break;
       // Do not add default here, but rather define behavior of every new entry
-      // here
+      // here.  `-Wswitch-enum` would raise a warning in those cases.
   }
   TORCH_CHECK(false, "Unknown ScalarType ", t);
 #undef CASE_ISSIGNED
