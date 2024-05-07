@@ -1,6 +1,8 @@
 import functools
+from typing import Optional
 
 import torch
+import torch.utils._pytree as pytree
 from torch._inductor.compile_fx import fake_tensor_prop
 from ..._dynamo.utils import counters
 
@@ -38,7 +40,11 @@ def freezing_passes(gm: torch.fx.GraphModule, aot_example_inputs):
 
     from ..freezing import constant_fold
 
-    lazy_init()
+    inputs_devices = list(
+        {i.device for i in pytree.tree_flatten(aot_example_inputs)[0]}
+    ) + [None]
+    assert len(inputs_devices) > 0
+    lazy_init(input_device=next(iter(inputs_devices)))
     # We need a few rounds of binary folding to get rid of all the
     # unnecessary nodes, but may need a good method to chose the rounds number.
     # works like: conv+binary+binary.
@@ -82,7 +88,7 @@ def freezing_passes(gm: torch.fx.GraphModule, aot_example_inputs):
 
 
 @init_once_fakemode
-def lazy_init():
+def lazy_init(input_device: Optional[torch.device] = None):
     if torch._C._has_mkldnn and config.cpp.weight_prepack:
         from .mkldnn_fusion import _mkldnn_weight_pack_init
 
@@ -90,7 +96,7 @@ def lazy_init():
 
     from .binary_folding import binary_folding_init
 
-    addmm_patterns_init()
+    addmm_patterns_init(input_device=input_device)
     binary_folding_init()
 
 
@@ -111,12 +117,15 @@ def register_binary_folding_pattern(pattern, extra_check=_return_true):
 
 
 @functools.lru_cache(None)
-def addmm_patterns_init():
-    if torch.cuda.is_available():
-        # workaround https://github.com/pytorch/pytorch/issues/97894
-        device = "cuda"
+def addmm_patterns_init(input_device: Optional[torch.device] = None):
+    if input_device is None:
+        if torch.cuda.is_available():
+            # workaround https://github.com/pytorch/pytorch/issues/97894
+            device = "cuda"
+        else:
+            device = "cpu"
     else:
-        device = "cpu"
+        device = str(input_device)
     val = functools.partial(torch.empty, (10, 10), device=device, requires_grad=False)
 
     def check_concat_weights(match):

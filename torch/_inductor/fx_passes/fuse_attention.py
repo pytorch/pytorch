@@ -2,6 +2,7 @@ import functools
 import inspect
 import logging
 import math
+from typing import Optional
 
 import torch
 from ..._dynamo.utils import counters
@@ -577,14 +578,17 @@ def partialize_and_update_signature(func, **kwargs):
     return wrapper
 
 
-def _get_sfdp_patterns():
+def _get_sfdp_patterns(input_device: Optional[torch.device] = None):
     from .joint_graph import patterns
 
-    if torch.cuda.is_available():
-        # workaround https://github.com/pytorch/pytorch/issues/97894
-        device = "cuda"
+    if input_device is None:
+        if torch.cuda.is_available():
+            # workaround https://github.com/pytorch/pytorch/issues/97894
+            device = "cuda"
+        else:
+            device = "cpu"
     else:
-        device = "cpu"
+        device = str(input_device)
 
     # sizes/values don't actually matter for initial trace
     # once we get a possible match we re-trace with the actual values and verify the match still holds
@@ -844,6 +848,8 @@ def _get_sfdp_patterns():
 
 
 @functools.lru_cache(None)
-def _sfdp_init():
-    for key, register_replacement_kwargs in _get_sfdp_patterns():
+def _sfdp_init(input_device: Optional[torch.device] = None):
+    for key, register_replacement_kwargs in _get_sfdp_patterns(
+        input_device=input_device
+    ):
         gen_register_replacement(key, **register_replacement_kwargs)
