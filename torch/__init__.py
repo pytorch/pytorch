@@ -69,6 +69,7 @@ if sys.platform == 'win32':
     pfiles_path = os.getenv('ProgramFiles', 'C:\\Program Files')
     py_dll_path = os.path.join(sys.exec_prefix, 'Library', 'bin')
     th_dll_path = os.path.join(os.path.dirname(__file__), 'lib')
+    appdata_dll_path = os.path.join(os.getenv('APPDATA'), 'Python', 'Library', 'bin')
 
     # When users create a virtualenv that inherits the base environment,
     # we will need to add the corresponding library directory into
@@ -79,7 +80,7 @@ if sys.platform == 'win32':
     else:
         base_py_dll_path = ''
 
-    dll_paths = list(filter(os.path.exists, [th_dll_path, py_dll_path, base_py_dll_path]))
+    dll_paths = list(filter(os.path.exists, [th_dll_path, py_dll_path, base_py_dll_path, appdata_dll_path]))
 
     if all(not os.path.exists(os.path.join(p, 'nvToolsExt64_1.dll')) for p in dll_paths):
         nvtoolsext_dll_path = os.path.join(
