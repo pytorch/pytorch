@@ -307,7 +307,6 @@ class NNModuleVariable(VariableTracker):
             # NB: torch.nn.utils.parametrize changes the class type of a
             # parametrized module such that its __module__ points to
             # "torch.nn.utils.parametrize".
-            print(mod.__module__)
             if (
                 tx.output.is_root_tracer()
                 and mod.__module__.startswith(("torch.nn.", "torch.ao."))
