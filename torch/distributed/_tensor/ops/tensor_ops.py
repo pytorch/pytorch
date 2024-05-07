@@ -182,7 +182,6 @@ def new_factory_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     # Currently there are two strategies:
     # 1. let the output be replicated
     # 2. let the output follow the input if input and output have the same shape
-    #    and both are evenly shardable
     input_strategy = op_schema.args_schema[0]
     assert isinstance(input_strategy, OpStrategy)
     input_shape = input_strategy.output_shape
@@ -202,9 +201,15 @@ def new_factory_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
         )
 
         # if input shape is the same as output shape, we can just propagate input sharding
-        if tuple(input_shape) == tuple(output_shape) and is_tensor_evenly_shardable(
-            input_shape, input_spec
-        ):
+        if tuple(input_shape) == tuple(output_shape):
+            # NOTE: for new_empty_strided, currently the non-replicate sharding
+            #       is supported only when the shape is evenly shardable
+            if (
+                op_schema.op == aten.new_empty_strided.default
+                and not is_tensor_evenly_shardable(input_shape, input_spec)
+            ):
+                continue
+
             new_factory_strategy.strategies.append(
                 PlacementStrategy(
                     output_specs=input_spec,
