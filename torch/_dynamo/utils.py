@@ -182,7 +182,7 @@ def cprofile_wrapper(func):
                 ["dot", "-Tsvg", "-o", str(svg_path)],
                 stdin=gprof2dot_process.stdout,
             )
-            log.info(f"Generated SVG from profile at {str(svg_path)}")
+            log.info("Generated SVG from profile at %s", str(svg_path))
         except FileNotFoundError:
             log.info(
                 "Failed to generate SVG from profile -- dumping stats instead."
