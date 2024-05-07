@@ -40,8 +40,8 @@ function install_ubuntu() {
     # Development Packages
     apt-get install -y libigc-dev intel-igc-cm libigdfcl-dev libigfxcmrt-dev level-zero-dev
     # Install Intel Support Packages
-    if [ -n "$BASEKIT_VERSION" ]; then
-        apt-get install -y intel-for-pytorch-gpu-dev-${BASEKIT_VERSION}
+    if [ -n "$XPU_VERSION" ]; then
+        apt-get install -y intel-for-pytorch-gpu-dev-${XPU_VERSION}
     else
         apt-get install -y intel-for-pytorch-gpu-dev
     fi
