@@ -40,7 +40,8 @@ static c10::IValue name_key = "name";
 static c10::IValue filename_key = "filename";
 static c10::IValue retired_key = "retired";
 static c10::IValue time_discovered_started_key = "time_discovered_started_ns";
-static c10::IValue time_discovered_completed_key = "time_discovered_completed_ns";
+static c10::IValue time_discovered_completed_key =
+    "time_discovered_completed_ns";
 
 /* Trace Utils Related to TORCH_NCCL_DESYNC_DEBUG */
 
