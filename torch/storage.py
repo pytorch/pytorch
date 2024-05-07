@@ -1,7 +1,7 @@
 import io
 
 import torch
-from ._utils import _type, _cuda, _hpu
+from ._utils import _type, _to
 from torch.types import Storage
 from typing import cast, Any, Dict as _Dict, Optional as _Optional, TypeVar, Type, Union
 import copy
@@ -38,8 +38,41 @@ class _StorageBase:
         return self.nbytes()
 
     def type(self, dtype: _Optional[str] = None, non_blocking: bool = False) -> T: ...  # type: ignore[empty-body, misc, type-var] # noqa: E704
-    def cuda(self, device=None, non_blocking=False, **kwargs) -> T: ...  # type: ignore[empty-body, misc, type-var] # noqa: E704
-    def hpu(self, device=None, non_blocking=False, **kwargs) -> T: ...  # type: ignore[empty-body, misc, type-var] # noqa: E704
+
+    def cuda(self, device=None, non_blocking=False, **kwargs) -> T:  # type: ignore[type-var] # noqa: E704
+        """Returns a copy of this object in CUDA memory.
+
+        If this object is already in CUDA memory and on the correct device, then
+        no copy is performed and the original object is returned.
+
+        Args:
+            device (int): The destination GPU id. Defaults to the current device.
+            non_blocking (bool): If ``True`` and the source is in pinned memory,
+                the copy will be asynchronous with respect to the host. Otherwise,
+                the argument has no effect.
+            **kwargs: For compatibility, may contain the key ``async`` in place of
+                the ``non_blocking`` argument.
+        """
+        device2 = torch.device('cuda', device) if device else torch.device('cuda')
+        return self.to(device2, non_blocking, **kwargs)
+
+    def hpu(self, device=None, non_blocking=False, **kwargs) -> T:  # type: ignore[type-var] # noqa: E704
+        """Returns a copy of this object in HPU memory.
+
+        If this object is already in HPU memory and on the correct device, then
+        no copy is performed and the original object is returned.
+
+        Args:
+            device (int): The destination HPU id. Defaults to the current device.
+            non_blocking (bool): If ``True`` and the source is in pinned memory,
+                the copy will be asynchronous with respect to the host. Otherwise,
+                the argument has no effect.
+            **kwargs: For compatibility, may contain the key ``async`` in place of
+                the ``non_blocking`` argument.
+        """
+        device2 = torch.device('hpu', device) if device else torch.device('hpu')
+        return self.to(device2, non_blocking, **kwargs)
+
     def element_size(self) -> int: ...  # type: ignore[empty-body, type-var] # noqa: E704
 
     def get_device(self) -> int:
@@ -152,6 +185,9 @@ class _StorageBase:
         if storage.data_ptr() == self.data_ptr():
             storage = storage.clone()
         return storage
+
+    def to(self, device: torch.device, non_blocking: bool = False, **kwargs) -> T:  # type: ignore[type-var] # noqa: E704
+        return _to(self, device, non_blocking, **kwargs)
 
     def double(self):
         """Casts this storage to double type."""
@@ -382,8 +418,6 @@ def _load_from_bytes(b):
 
 
 _StorageBase.type = _type  # type: ignore[assignment]
-_StorageBase.cuda = _cuda  # type: ignore[assignment]
-_StorageBase.hpu = _hpu  # type: ignore[assignment]
 
 
 @lru_cache(maxsize=None)
@@ -826,6 +860,13 @@ class TypedStorage:
         hpu_storage: torch.UntypedStorage = self._untyped_storage.hpu(device, non_blocking, **kwargs)
         return self._new_wrapped_storage(hpu_storage)
 
+    def to(self, device: torch.device, non_blocking: bool = False, **kwargs) -> T:  # type: ignore[type-var]
+        _warn_typed_storage_removal()
+        if self.dtype in [torch.quint8, torch.quint4x2, torch.quint2x4, torch.qint32, torch.qint8]:
+            raise RuntimeError(f"Cannot create {device.type.upper()} storage with quantized dtype")
+        to_storage: torch.UntypedStorage = self._untyped_storage.to(device, non_blocking, **kwargs)
+        return self._new_wrapped_storage(to_storage)
+
     def element_size(self):
         _warn_typed_storage_removal()
         return self._element_size()
@@ -1209,8 +1250,9 @@ class TypedStorage:
             return None
 
 TypedStorage.type.__doc__ = _type.__doc__
-TypedStorage.cuda.__doc__ = _cuda.__doc__
-TypedStorage.hpu.__doc__ = _hpu.__doc__
+TypedStorage.cuda.__doc__ = _StorageBase.cuda.__doc__
+TypedStorage.hpu.__doc__ = _StorageBase.hpu.__doc__
+TypedStorage.to.__doc__ = _to.__doc__
 
 class _LegacyStorageMeta(type):
     dtype: torch.dtype
