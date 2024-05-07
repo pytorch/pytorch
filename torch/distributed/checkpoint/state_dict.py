@@ -487,7 +487,20 @@ def _init_optim_state(optim: torch.optim.Optimizer) -> None:
                 )
             if param.requires_grad:
                 param.grad = torch.zeros_like(param)
+
+    # Some optimizers will update parameters regardless of grads due to lr, so
+    # make lr to zero when calling `step()`.
+    lrs = []
+    for param_group in optim.param_groups:
+        if "lr" in param_group:
+            lrs.append(param_group["lr"])
+            param_group["lr"] = 0.0
     optim.step(closure=None)
+    # Whether to recover the "lr" should not matter too much as we will
+    # restore checkpointing later.
+    for param_group in optim.param_groups:
+        if "lr" in param_group:
+            param_group["lr"] = lrs.pop(0)
     optim.zero_grad(set_to_none=True)
 
 
