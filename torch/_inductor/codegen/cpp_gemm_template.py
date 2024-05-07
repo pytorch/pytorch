@@ -34,7 +34,7 @@ extern "C"
 
     static_assert(N % N0 == 0, "N dimension must be multiple of N0");
 
-    // TODO(jgong5): improve cache blocking with CPU info (M2, K2)
+    // TODO(jgong5): improve cache blocking with CPU info (Mc, Kc)
     {%- if is_dynamic_M %}
     const int64_t M = {{kernel.size(Y, 0)}};
     const int64_t M0_blocks = (M + M0 - 1) / M0;
@@ -45,16 +45,16 @@ extern "C"
     const auto Nt_blocks = N0_blocks;
     const auto Kt_blocks = K0_blocks;
     {%- endif %}
-    const int64_t M2_blocks = Mt_blocks;
-    const int64_t K2_blocks = Kt_blocks;
+    const int64_t Mc_blocks = Mt_blocks;
+    const int64_t Kc_blocks = Kt_blocks;
     {%- else %}
     constexpr int64_t M = {{kernel.size(Y, 0)}};
     constexpr int64_t M0_blocks = (M + M0 - 1) / M0;
     constexpr int64_t Mt_blocks = {{template.thread_blocking().block_m}};
     constexpr int64_t Nt_blocks = {{template.thread_blocking().block_n}};
     constexpr int64_t Kt_blocks = {{template.thread_blocking().block_k}};
-    constexpr int64_t M2_blocks = {{template.cache_blocking().block_m}};
-    constexpr int64_t K2_blocks = {{template.cache_blocking().block_k}};
+    constexpr int64_t Mc_blocks = {{template.cache_blocking().block_m}};
+    constexpr int64_t Kc_blocks = {{template.cache_blocking().block_k}};
     {%- endif %}
 
     // TODO(jgong5): support k-slicing
@@ -82,11 +82,11 @@ extern "C"
         int64_t k_block_start = 0;
         int64_t k_block_end = K0_blocks;
     {%- endif %}
-        for (int64_t m2 = m_block_start; m2 < m_block_end; m2 += M2_blocks) {
-            int64_t m_start = m2 * M0;
-            int64_t m_end = std::min((m2 + M2_blocks) * M0, M);
-            for (int64_t n2 = n_block_start; n2 < n_block_end; ++n2) {
-                int64_t n_start = n2 * N0;
+        for (int64_t mc = m_block_start; mc < m_block_end; mc += Mc_blocks) {
+            int64_t m_start = mc * M0;
+            int64_t m_end = std::min((mc + Mc_blocks) * M0, M);
+            for (int64_t nc = n_block_start; nc < n_block_end; ++nc) {
+                int64_t n_start = nc * N0;
                 // TODO(jgong5): use float32 temporary buffer to support bfloat16/float16 gemm
                 {%- if inp is not none and beta != 0 %}
                 for (int64_t m = m_start; m < m_end; ++m) {
@@ -96,17 +96,17 @@ extern "C"
                     }
                 }
                 {%- endif %}
-                for (int64_t k2 = k_block_start; k2 < k_block_end; k2 += K2_blocks) {
-                    int64_t k_start = k2 * K0;
-                    int64_t k_end = std::min((k2 + K2_blocks) * K0, K);
+                for (int64_t kc = k_block_start; kc < k_block_end; kc += Kc_blocks) {
+                    int64_t k_start = kc * K0;
+                    int64_t k_end = std::min((kc + Kc_blocks) * K0, K);
                     {%- set tile_X = kernel.slice_nd(X, [("m_start", "m_end"), ("k_start", "k_end")]) %}
-                    {%- set tile_W_3d = kernel.slice_nd(W, [("n2", "n2 + 1"), ("k_start", "k_end"), ()]) %}
+                    {%- set tile_W_3d = kernel.slice_nd(W, [("nc", "nc + 1"), ("k_start", "k_end"), ()]) %}
                     {%- set tile_W = kernel.view(tile_W_3d, ["k_end - k_start", micro_gemm.register_blocking.block_n]) %}
                     {%- set tile_Y = kernel.slice_nd(Y, [("m_start", "m_end"), ("n_start", "n_start + N0")]) %}
                     {%- if inp is not none and beta != 0 %}
                     {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, tile_Y, accum=True)|indent(20, false) }}
                     {%- else %}
-                    if (k2 == k_block_start) {
+                    if (kc == k_block_start) {
                         {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, tile_Y, accum=False)|indent(24, false) }}
                     } else {
                         {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, tile_Y, accum=True)|indent(24, false) }}
