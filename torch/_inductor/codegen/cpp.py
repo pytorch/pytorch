@@ -2330,7 +2330,7 @@ class CppVecKernel(CppKernel):
             reduction_factor = (
                 self.tiling_factor if self.tiling_idx >= self.reduction_depth else 1
             )
-            self.weight_recp_vec_range = reduction_size / reduction_factor
+            self.weight_recp_vec_range = reduction_size // reduction_factor
             self.reduction_weight_recps.writeline(
                 self.welford_weight_reciprocal_vec(dtype, None)
             )
@@ -2468,7 +2468,8 @@ class CppVecKernel(CppKernel):
             if num_threads
             else self.weight_recp_vec_range
         )
-        return f"static WeightRecp<{self._get_vec_type(dtype)}> weight_recps({vec_num_range_thread});"
+        vec_num_range_thread_expr = cexpr_index(vec_num_range_thread)
+        return f"static WeightRecp<{self._get_vec_type(dtype)}> weight_recps({vec_num_range_thread_expr});"
 
     def reduction_combine_vec(
         self, reduction_type, var, next_value, use_weight_recps=False
