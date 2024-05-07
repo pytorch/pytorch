@@ -182,31 +182,35 @@ def aot_dispatch_base(
         compiled_fw = make_boxed_func(compiled_fw)
 
     # Create a wrapper to set up the rng functionalize and fakified out bits
-    compiled_fw = FunctionalizedRngRuntimeWrapper.post_compile(
+    compiled_fw = FunctionalizedRngRuntimeWrapper().post_compile(
         compiled_fw, aot_config, fw_metadata=fw_metadata
     )
-    compiled_fw = FakifiedOutWrapper.post_compile(
-        compiled_fw, aot_config, fw_metadata=fw_metadata, fakified_out_opt=fakified_out
+    compiled_fw = FakifiedOutWrapper(fakified_out=fakified_out).post_compile(
+        compiled_fw,
+        aot_config,
+        fw_metadata=fw_metadata,
     )
 
-    compiled_fw_func = AOTDispatchSubclassWrapper.post_compile(
+    compiled_fw_func = AOTDispatchSubclassWrapper(
+        maybe_subclass_meta=maybe_subclass_meta,
+        num_fw_outs_saved_for_bw=None,
+    ).post_compile(
         compiled_fw,
         aot_config,  # not used
         fw_metadata=fw_metadata,
-        maybe_subclass_meta=maybe_subclass_meta,
-        num_fw_outs_saved_for_bw=None,
     )
 
     if not hasattr(compiled_fw_func, "_boxed_call"):
         compiled_fw_func = make_boxed_func(compiled_fw_func)
 
-    compiled_fn = RuntimeWrapper.post_compile(
-        compiled_fw_func,
-        aot_config,
-        fw_metadata=fw_metadata,
+    compiled_fn = RuntimeWrapper(
         indices_of_inps_to_detach=[],
         trace_joint=False,
         disable_amp=disable_amp,
+    ).post_compile(
+        compiled_fw_func,
+        aot_config,
+        fw_metadata=fw_metadata,
     )
 
     return compiled_fn
@@ -443,23 +447,25 @@ def aot_dispatch_autograd(
                     fw_module, fwd_output_strides
                 )
 
-            compiled_fw_func = AOTDispatchSubclassWrapper.post_compile(
+            compiled_fw_func = AOTDispatchSubclassWrapper(
+                maybe_subclass_meta=maybe_subclass_meta,
+                num_fw_outs_saved_for_bw=num_fw_outs_saved_for_bw,
+            ).post_compile(
                 compiled_fw_func,
                 aot_config,  # not used
                 fw_metadata=fw_metadata,
-                maybe_subclass_meta=maybe_subclass_meta,
-                num_fw_outs_saved_for_bw=num_fw_outs_saved_for_bw,
             )
 
-            compiled_fw_func = FunctionalizedRngRuntimeWrapper.post_compile(
+            compiled_fw_func = FunctionalizedRngRuntimeWrapper().post_compile(
                 compiled_fw_func, aot_config, fw_metadata=fw_metadata
             )
 
-            compiled_fw_func = FakifiedOutWrapper.post_compile(
+            compiled_fw_func = FakifiedOutWrapper(
+                fakified_out=fakified_out,
+            ).post_compile(
                 compiled_fw_func,
                 aot_config,
                 fw_metadata=fw_metadata,
-                fakified_out_opt=fakified_out,
             )
 
         # NB: It's important to compile backwards ahead of time, as this may
@@ -1014,13 +1020,14 @@ Got grad_output types: {str(grad_output_types)}"""
                 return (*[None] * num_tokens, *outs_wrapped)
             return (*[None] * num_tokens, *out)
 
-    compiled_function = RuntimeWrapper.post_compile(
-        CompiledFunction.apply,
-        aot_config,
-        fw_metadata=fw_metadata,
+    compiled_function = RuntimeWrapper(
         indices_of_inps_to_detach=_indices_of_inps_to_detach,
         trace_joint=True,
         disable_amp=disable_amp,
+    ).post_compile(
+        CompiledFunction.apply,
+        aot_config,
+        fw_metadata=fw_metadata,
     )
 
     if not config.debug_assert:
