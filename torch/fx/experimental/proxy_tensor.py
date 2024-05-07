@@ -1154,124 +1154,150 @@ class _MakefxTracer:
         _allow_fake_constant: bool,
         _error_on_data_dependent_ops: bool
     ):
-
-        self.decomposition_table = decomposition_table or {}
+        # Configurations that are used to initialize the context managers and their states.
+        # Should not modify them during tracing.
+        self.decomposition_table: Dict[Callable, Callable] = decomposition_table or {}
         self.decomposition_table.setdefault(torch.ops.aten.sym_numel.default, torch._decomp.decompositions.sym_numel)
-        self.tracing_mode = tracing_mode
-        self._allow_non_fake_inputs = _allow_non_fake_inputs
-        self.pre_dispatch = pre_dispatch
-        self.record_module_stack = record_module_stack
-        self._allow_fake_constant = _allow_fake_constant
-        self._error_on_data_dependent_ops = _error_on_data_dependent_ops
+        self.tracing_mode: str = tracing_mode
+        self._allow_non_fake_inputs: bool = _allow_non_fake_inputs
+        self.pre_dispatch: bool = pre_dispatch
+        self.record_module_stack: bool = record_module_stack
+        self._allow_fake_constant: bool = _allow_fake_constant
+        self._error_on_data_dependent_ops: bool = _error_on_data_dependent_ops
 
-        self.python_dispatcher_mode: Any = nullcontext()
-        self.fake_tensor_mode: Optional[FakeTensorMode] = nullcontext()
-        self.proxy_mode: Any = nullcontext()
-        self.proxy_function_mode = nullcontext()
-        self.fx_tracer: Optional[Tracer] = None
-        # pre-autograd tracing uses per-dispatch-key modes,
-        # which requires the python dispatcher
-        if self.tracing_mode == "symbolic" or self.pre_dispatch:
-            self.python_dispatcher_mode = enable_python_dispatcher()
+        # All context managers and their states should be initialized before tracing based on the inputs
+        # and configurations.
+        # After tracing, thier states should be cleaned except for shape_env.
+        null_ctx_type = type(nullcontext)
+        self.fake_tensor_mode: Union[null_ctx_type, FakeTensorMode] = nullcontext()
+        self.proxy_mode: Union[null_ctx_type, ProxyTorchDispatchMode] = nullcontext()
+        self.proxy_function_mode: Union[null_ctx_type, PreDispatchTorchFunctionMode] = nullcontext()
+        self.fx_tracer: Union[null_ctx_type, Tracer] = nullcontext()
+        self.python_dispatcher_mode: Union[null_ctx_type, Any] = nullcontext()
+        self.torch_fn_metadata_mode: Union[null_ctx_type, TorchFunctionMetadataMode] = nullcontext()
 
-    # TODO: change to a context mananer _override_defaults_based_on_inputs(f, args)
-    # dep graph
+    @contextmanager
     def _init_modes_from_inputs(self, f, args):
-        # Avoid importing sympy at a module level
-        from .symbolic_shapes import ShapeEnv
-        if hasattr(f, "_orig_mod") and self.record_module_stack:
-            scope_root = f._orig_mod
-            self.fx_tracer = _ModuleStackTracer(scope_root)
-        else:
-            self.fx_tracer = PythonKeyTracer()
+        prev_fake_tensor_mode = self.fake_tensor_mode
+        prev_proxy_mode = self.proxy_mode
+        prev_proxy_function_mode = self.proxy_function_mode
+        prev_fx_tracer = self.fx_tracer
+        prev_python_dispatcher_mode = self.python_dispatcher_mode
+        prev_torch_fn_metadata_mode = self.torch_fn_metadata_mode
 
-        if self.tracing_mode == "fake":
-            import torch._dynamo
-            fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(args)
-            if fake_tensor_mode is None:
-                import torch._functorch.config as _config
-                with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
-                    fake_tensor_mode = FakeTensorMode(
-                        allow_fallback_kernels=True,
-                        allow_non_fake_inputs=self._allow_non_fake_inputs,
-                        shape_env=ShapeEnv(),
-                        static_shapes=True,
-                    )
-            self.fake_tensor_mode = fake_tensor_mode
-        elif self.tracing_mode == "symbolic":
-            import torch._dynamo
-            fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(args)
-            if fake_tensor_mode is None:
-                shape_env = ShapeEnv()
-                import torch._functorch.config as _config
-                with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
-                    fake_tensor_mode = FakeTensorMode(
-                        allow_fallback_kernels=False,
-                        allow_non_fake_inputs=self._allow_non_fake_inputs,
-                        shape_env=shape_env)
-            assert fake_tensor_mode.shape_env is not None, "shape_env should be set if tracing with 'symbolic'"
-            self.fake_tensor_mode = fake_tensor_mode
-        else:
-            if not self.tracing_mode == "real":
-                raise AssertionError(f"Unexpected tracing type: {self.tracing_mode}")
+        try:
+            # Avoid importing sympy at a module level
+            from .symbolic_shapes import ShapeEnv
+            if hasattr(f, "_orig_mod") and self.record_module_stack:
+                scope_root = f._orig_mod
+                self.fx_tracer = _ModuleStackTracer(scope_root)
+            else:
+                self.fx_tracer = PythonKeyTracer()
 
-        self.proxy_mode = ProxyTorchDispatchMode(
-            self.fx_tracer,
-            self.tracing_mode,
-            pre_dispatch=self.pre_dispatch,
-            _allow_fake_constant=self._allow_fake_constant,
-            _error_on_data_dependent_ops=self._error_on_data_dependent_ops
-        )
-        self.torch_fn_metadata_mode = TorchFunctionMetadataMode(self.fx_tracer)
-        if self.pre_dispatch:
-            self.proxy_function_mode = PreDispatchTorchFunctionMode(self.fx_tracer)
+            if self.tracing_mode == "fake":
+                import torch._dynamo
+                fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(args)
+                if fake_tensor_mode is None:
+                    import torch._functorch.config as _config
+                    with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
+                        fake_tensor_mode = FakeTensorMode(
+                            allow_fallback_kernels=True,
+                            allow_non_fake_inputs=self._allow_non_fake_inputs,
+                            shape_env=ShapeEnv(),
+                            static_shapes=True,
+                        )
+                self.fake_tensor_mode = fake_tensor_mode
+            elif self.tracing_mode == "symbolic":
+                import torch._dynamo
+                fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(args)
+                if fake_tensor_mode is None:
+                    shape_env = ShapeEnv()
+                    import torch._functorch.config as _config
+                    with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
+                        fake_tensor_mode = FakeTensorMode(
+                            allow_fallback_kernels=False,
+                            allow_non_fake_inputs=self._allow_non_fake_inputs,
+                            shape_env=shape_env)
+                assert fake_tensor_mode.shape_env is not None, "shape_env should be set if tracing with 'symbolic'"
+                self.fake_tensor_mode = fake_tensor_mode
+            else:
+                if not self.tracing_mode == "real":
+                    raise AssertionError(f"Unexpected tracing type: {self.tracing_mode}")
 
+            self.proxy_mode = ProxyTorchDispatchMode(
+                self.fx_tracer,
+                self.tracing_mode,
+                pre_dispatch=self.pre_dispatch,
+                _allow_fake_constant=self._allow_fake_constant,
+                _error_on_data_dependent_ops=self._error_on_data_dependent_ops
+            )
 
-    def _wrap_fake(self, args: Tuple[Any]) -> Tuple[Any]:
-        arg_count = 0
+            if self.pre_dispatch:
+                self.proxy_function_mode = PreDispatchTorchFunctionMode(self.fx_tracer)
 
-        def inner_wrap_fake(x):
-            nonlocal arg_count
-            # TODO: it would be nice to line these up with the names
-            # FX will choose for the placeholders, but we don't
-            # actually know what the names will be at this point yet
-            # NB: the Source here is actually meaningless
-            from torch._dynamo.source import ConstantSource
-            source = ConstantSource(f"input{arg_count}")
-            if isinstance(x, torch.Tensor):
-                arg_count += 1
-                return self.fake_tensor_mode.from_tensor(x, source=source)  # type: ignore[attr-defined]
-            # NB: don't match on bools
-            elif type(x) is int and self.tracing_mode == "symbolic":
-                return self.fake_tensor_mode.shape_env.create_symintnode(
-                    self.fake_tensor_mode.shape_env.create_symbol(x, source, positive=None),
-                    hint=x,
-                    source=source
-                )
-            elif isinstance(x, torch.ScriptObject):
-                return torch._library.fake_class_registry.to_fake_obj(self.fake_tensor_mode, x)
+            # pre-autograd tracing uses per-dispatch-key modes,
+            # which requires the python dispatcher
+            if self.tracing_mode == "symbolic" or self.pre_dispatch:
+                self.python_dispatcher_mode = enable_python_dispatcher()
 
-            assert not isinstance(x, FakeScriptObject), f"ScriptObject {x} has been fakified. Cannot wrap_fake it again."
-            return x
+            self.torch_fn_metadata_mode = TorchFunctionMetadataMode(self.fx_tracer)
 
-        wrap_fn_map = {
-            "real": lambda x: x,
-            "fake": inner_wrap_fake,
-            "symbolic": inner_wrap_fake,
-        }
-        return pytree.tree_map(wrap_fn_map[self.tracing_mode], args)
+            yield
+        finally:
+            self.fake_tensor_mode = prev_fake_tensor_mode
+            self.proxy_mode = prev_proxy_mode
+            self.proxy_function_mode = prev_proxy_function_mode
+            self.fx_tracer = prev_fx_tracer
+            self.python_dispatcher_mode = prev_python_dispatcher_mode
+            self.torch_fn_metadata_mode = prev_torch_fn_metadata_mode
 
-    def _wrap_func(self, f, phs):
-        if not hasattr(inspect.unwrap(f), '__code__') or inspect.unwrap(f).__code__.co_flags & inspect.CO_VARARGS:
-            # FX doesn't support varargs, so we gotta fake up a wrapper
-            # TODO: Would be nice to fix this at the source...
-            return fake_signature(f, len(phs))
-        return f
 
     def _trace_inner(self, f, *args):
         phs = pytree.tree_map(lambda _: fx.PH, args)  # type: ignore[attr-defined]
-        args = self._wrap_fake(args)
-        func = self._wrap_func(f, phs)
+
+        def _wrap_fake(args: Tuple[Any]) -> Tuple[Any]:
+            arg_count = 0
+
+            def inner_wrap_fake(x):
+                nonlocal arg_count
+                # TODO: it would be nice to line these up with the names
+                # FX will choose for the placeholders, but we don't
+                # actually know what the names will be at this point yet
+                # NB: the Source here is actually meaningless
+                from torch._dynamo.source import ConstantSource
+                source = ConstantSource(f"input{arg_count}")
+                if isinstance(x, torch.Tensor):
+                    arg_count += 1
+                    return self.fake_tensor_mode.from_tensor(x, source=source)  # type: ignore[attr-defined]
+                # NB: don't match on bools
+                elif type(x) is int and self.tracing_mode == "symbolic":
+                    return self.fake_tensor_mode.shape_env.create_symintnode(
+                        self.fake_tensor_mode.shape_env.create_symbol(x, source, positive=None),
+                        hint=x,
+                        source=source
+                    )
+                elif isinstance(x, torch.ScriptObject):
+                    return torch._library.fake_class_registry.to_fake_obj(self.fake_tensor_mode, x)
+
+                assert not isinstance(x, FakeScriptObject), f"ScriptObject {x} has been fakified. Cannot wrap_fake it again."
+                return x
+
+            wrap_fn_map = {
+                "real": lambda x: x,
+                "fake": inner_wrap_fake,
+                "symbolic": inner_wrap_fake,
+            }
+            return pytree.tree_map(wrap_fn_map[self.tracing_mode], args)
+
+        def _wrap_func(f, phs):
+            if not hasattr(inspect.unwrap(f), '__code__') or inspect.unwrap(f).__code__.co_flags & inspect.CO_VARARGS:
+                # FX doesn't support varargs, so we gotta fake up a wrapper
+                # TODO: Would be nice to fix this at the source...
+                return fake_signature(f, len(phs))
+            return f
+
+        args = _wrap_fake(args)
+        func = _wrap_func(f, phs)
         # We disable the autocast cache as the autocast cache causes type conversions on parameters to
         # check a cache, which introduces untracked tensors into the graph
         #
@@ -1292,8 +1318,8 @@ class _MakefxTracer:
         return t
 
     def trace(self, f, *args) -> torch.fx.GraphModule:
-        self._init_modes_from_inputs(f, args)
-        return self._trace_inner(f, *args)
+        with self._init_modes_from_inputs(f, args):
+            return self._trace_inner(f, *args)
 
 def make_fx(
         f,
