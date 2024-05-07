@@ -154,13 +154,16 @@ def cprofile_wrapper(func):
         profile_latency = time.time() - start_ts
         prof.disable()
         log.info(
-            f"### Cprofile for {func.__name__} iter {profile_cnt} took {profile_latency:.3f} seconds ###"
+            "### Cprofile for %s iter %d took %.3f seconds ###",
+            func.__name__,
+            profile_cnt,
+            profile_latency,
         )
         ps = pstats.Stats(prof)
         try:
             prof.dump_stats(profile_path)
         except PermissionError:
-            log.info(f"Cannot write to {str(profile_path)}")
+            log.info("Cannot write to %s", str(profile_path))
         svg_path = profile_path.with_suffix(".svg")
         try:
             gprof2dot_process = subprocess.Popen(
