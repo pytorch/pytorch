@@ -4109,7 +4109,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
     def test_public_api_surface(self):
         non_back_compat_objects = {}
 
-        def check_symbols_have_bc_designation(m, seen=set()):
+        def check_symbols_have_bc_designation(m, seen):
             if not m.__name__.startswith('torch.fx'):
                 return
             if m.__name__.startswith('torch.fx.experimental'):
@@ -4130,8 +4130,8 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
                     if v not in _MARKED_WITH_COMPATIBILITY:
                         non_back_compat_objects.setdefault(v)
 
-        check_symbols_have_bc_designation(torch.fx)
-        check_symbols_have_bc_designation(torch.fx.passes)
+        check_symbols_have_bc_designation(torch.fx, set())
+        check_symbols_have_bc_designation(torch.fx.passes, set())
 
         non_back_compat_strs = [torch.typename(obj) for obj in non_back_compat_objects.keys()]
         # Only want objects in torch.fx
