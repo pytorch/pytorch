@@ -1,5 +1,4 @@
 import logging
-import warnings
 from typing import Any, Dict, Optional, Protocol, Tuple
 
 import torch
@@ -36,19 +35,22 @@ class FakeClassRegistry:
 
     def register(self, full_qualname: str, fake_class=None) -> None:
         if self.has_impl(full_qualname):
-            warnings.warn(
-                f"{full_qualname} is already registered. Previous fake class is overrided with {fake_class}."
+            log.warning(
+                "%s is already registered. Previous fake class is overrided with  %s.",
+                full_qualname,
+                fake_class,
             )
         self._registered_class[full_qualname] = fake_class
 
     def deregister(self, full_qualname: str) -> Any:
         if not self.has_impl(full_qualname):
-            raise RuntimeError(
-                f"Cannot deregister {full_qualname}. Please use register_fake_class to register it first."
-                f" Or do you dereigster it twice?"
+            log.warning(
+                "Cannot deregister %s. Please use register_fake_class to register it first."
+                " Or do you dereigster it twice?",
+                full_qualname,
             )
-        self._check_registered(full_qualname)
-        return self._registered_class.pop(full_qualname)
+        else:
+            return self._registered_class.pop(full_qualname)
 
     def clear(self) -> None:
         self._registered_class.clear()
