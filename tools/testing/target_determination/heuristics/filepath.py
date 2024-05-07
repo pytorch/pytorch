@@ -1,4 +1,5 @@
 from collections import defaultdict
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Dict, List
 from warnings import warn
@@ -14,13 +15,15 @@ from tools.testing.target_determination.heuristics.utils import (
 )
 from tools.testing.test_run import TestRun
 
-keyword_synonyms = [
-    ["amp", "mixed_precision"],
-    ["quantized", "quantization", "quant", "quantize"],
-    ["decomp", "decomposition", "decompositions"],
-    ["numpy", "torch_np", "numpy_tests"],
-    ["ops", "opinfo"],
-]
+REPO_ROOT = Path(__file__).parent.parent.parent.parent
+
+keyword_synonyms: Dict[str, List[str]] = {
+    "amp": ["mixed_precision"],
+    "quant": ["quantized", "quantization", "quantize"],
+    "decomp": ["decomposition", "decompositions"],
+    "numpy": ["torch_np", "numpy_tests"],
+    "ops": ["opinfo"],
+}
 
 not_keyword = [
     "torch",
@@ -42,12 +45,13 @@ custom_matchers: Dict[str, Callable[[str], bool]] = {
 }
 
 
+@lru_cache(maxsize=1)
 def get_keywords(file: str) -> List[str]:
+    print(f"Getting keywords for {file}")
     keywords = []
     for folder in Path(file).parts[:-1]:
         folder = sanitize_folder_name(folder)
         keywords.append(folder)
-
     return [kw for kw in keywords if kw not in not_keyword]
 
 
@@ -55,11 +59,22 @@ def sanitize_folder_name(folder_name: str) -> str:
     if folder_name.startswith("_"):
         folder_name = folder_name[1:]
 
-    for syns in keyword_synonyms:
-        if folder_name in syns:
-            return syns[0]
+    for syn_rep, syns in keyword_synonyms.items():
+        if folder_name in syns or folder_name == syn_rep:
+            return syn_rep
 
     return folder_name
+
+
+def file_matches_keyword(file: str, keyword: str) -> bool:
+    keywords = get_keywords(file)
+    return (
+        keyword in keywords
+        or any(
+            syn in keywords or syn in file for syn in keyword_synonyms.get(keyword, [])
+        )
+        or custom_matchers.get(keyword, lambda x: keyword in x)(file)  # type: ignore[no-untyped-call]
+    )
 
 
 class Filepath(HeuristicInterface):
@@ -84,9 +99,8 @@ class Filepath(HeuristicInterface):
         test_ratings: Dict[str, float] = defaultdict(float)
 
         for test in tests:
-            test_keywords = get_keywords(test)
             for keyword, frequency in keyword_frequency.items():
-                if keyword in test_keywords or custom_matchers.get(keyword, lambda x: keyword in x)(str(test)):  # type: ignore[no-untyped-call]
+                if file_matches_keyword(test, keyword):
                     test_ratings[test] += frequency
         test_ratings = {TestRun(k): v for (k, v) in test_ratings.items() if k in tests}
         return TestPrioritizations(
