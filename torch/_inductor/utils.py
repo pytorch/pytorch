@@ -298,7 +298,7 @@ def gen_gm_and_inputs(target, args, kwargs):
         len(target._schema.returns) == 1
         and str(target._schema.returns[0].type) == "Tensor"
     ):
-        node = (node,)  # type: ignore[assignment]
+        node = (node,)
     g.output(node)
 
     gm = torch.fx.GraphModule({}, g)
@@ -975,6 +975,9 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2):
     from .kernel.mm_common import mm_args
 
     if not _use_template_for_cpu(layout) or not _use_autotune_backend("CPP"):
+        return False
+
+    if not config.cpp.weight_prepack:
         return False
 
     layout_dtypes = [torch.float32]
