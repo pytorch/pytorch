@@ -9,7 +9,8 @@ import torch
 from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
-from torch._inductor.ir import ChoiceCaller
+from torch._inductor.codegen.cuda.cutlass_utils import get_max_alignment
+from torch._inductor.ir import ChoiceCaller, FixedLayout
 from torch._inductor.select_algorithm import NoValidChoicesError
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_inductor_cache
@@ -168,8 +169,8 @@ class TestCutlassBackend(TestCase):
         def mm(a, b):
             return a @ b
 
-        a = torch.randn(100, 10).cuda().half()
-        b = torch.randn(10, 100).cuda().half()
+        a = torch.randn(128, 16).cuda().half()
+        b = torch.randn(16, 128).cuda().half()
 
         with config.patch(
             {
@@ -183,6 +184,59 @@ class TestCutlassBackend(TestCase):
             Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
             Y = mm(a, b)
             torch.testing.assert_close(Y_compiled, Y)
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_max_autotune_cutlass_backend_regular_mm_streamk(
+        self, dynamic: bool = False, max_autotune_gemm_backends: str = "CUTLASS"
+    ):
+        """
+        Make sure autotuning mm in sub processes work without crashes.
+        """
+
+        if max_autotune_gemm_backends == "CUTLASS" and torch.version.hip:
+            return
+
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+
+        def mm(a, b):
+            return a @ b
+
+        a = torch.randn(128, 16).cuda().half()
+        b = torch.randn(16, 128).cuda().half()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": True,
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "cuda.cutlass_dir": _CUTLASS_DIR,
+                "cuda.cutlass_max_profiling_configs": 2,
+                "cuda.cutlass_op_allowlist_regex": "stream_k",  # only stream-k GEMM Kernels
+            }
+        ):
+            for M, K, N in (
+                (128, 16, 128),
+                (1024, 256, 1024),
+                (
+                    16384,
+                    1024,
+                    16384,
+                ),
+                (
+                    16384,
+                    1408,
+                    16384,
+                ),
+            ):
+                a = torch.randn(M, K).cuda().half()
+                b = torch.randn(K, N).cuda().half()
+                Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
+                Y = mm(a, b)
+                # we need relaxed numerical limits due to the sheer size of the
+                # matmuls involved. Many small addition differences add up.
+                torch.testing.assert_close(Y_compiled, Y, atol=0.01, rtol=0.01)
 
     def _test_max_autotune_cutlass_backend_epilogue_fusion(
         self,
@@ -615,6 +669,52 @@ class TestCutlassBackend(TestCase):
                             ), "Only pingpong Kernels should have been allowed"
                             cuda_template_count += 1
                     assert cuda_template_count > 0, "No CUDATemplateCaller choices"
+
+    @unittest.skipIf(not SM80OrLater, "need sm_90")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_get_max_alignment(self):
+        l4 = FixedLayout("cpu", torch.half, size=(1, 2, 4), stride=(0, 4, 1))
+        m4 = get_max_alignment(l4)
+        self.assertEqual(
+            m4, 4, "Wrong max alignment. Should have been 4. (simple, contiguous case)"
+        )
+
+        l4_2 = FixedLayout("cpu", torch.half, size=(1, 4, 2), stride=(0, 1, 4))
+        m4_2 = get_max_alignment(l4_2)
+        self.assertEqual(
+            m4_2,
+            4,
+            "Wrong max alignment. Should have been 4. Did not deal with strides correctly",
+        )
+
+        l1 = FixedLayout("cpu", torch.half, size=(2, 4, 2), stride=(23, 1, 4))
+        m1 = get_max_alignment(l1)
+        self.assertEqual(
+            m1,
+            1,
+            "Wrong max alignment. Should have been 1. Did not take stride into account correctly",
+        )
+
+        l2 = FixedLayout("cpu", torch.half, size=(1, 2, 4), stride=(0, 4, 1), offset=6)
+        m2 = get_max_alignment(l2)
+        self.assertEqual(
+            m2, 2, "Wrong max alignment. Should have been 2. (due to choice of offset)"
+        )
+
+        l8 = FixedLayout(
+            "cpu", torch.half, size=(2, 2, 8), stride=(32, 8, 1), offset=24
+        )
+        m8 = get_max_alignment(l8)
+        self.assertEqual(m8, 8, "Wrong max alignment. Should have been 8.")
+
+        l4 = FixedLayout(
+            "cpu", torch.float32, size=(2, 2, 8), stride=(32, 8, 1), offset=24
+        )
+        m4 = get_max_alignment(l4)
+        self.assertEqual(
+            m4, 4, "Wrong max alignment. Should have been 4 (due to float32 dtype )."
+        )
 
 
 if __name__ == "__main__":

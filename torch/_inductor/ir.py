@@ -58,6 +58,7 @@ from torch.fx.experimental.symbolic_shapes import (
     SymTypes,
 )
 from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
+from torch.utils._sympy.symbol import SymT
 
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
@@ -83,6 +84,7 @@ from .utils import (
     pad_listlike,
     sympy_dot,
     sympy_index_symbol,
+    sympy_index_symbol_with_prefix,
     sympy_product,
     sympy_subs,
 )
@@ -418,9 +420,9 @@ class Loops(IRNode):
         return TensorBox.create(r)
 
     @staticmethod
-    def _index(ranges, prefix="i"):
+    def _index(ranges, prefix=SymT.INDEX):
         return [
-            sympy.Integer(0) if s == 1 else sympy_index_symbol(f"{prefix}{n}")
+            sympy.Integer(0) if s == 1 else sympy_index_symbol_with_prefix(prefix, n)
             for n, s in enumerate(ranges)
         ]
 
@@ -645,12 +647,12 @@ class Reduction(Loops):
 
     def inner_fn_args(self):
         index = self._index(self.ranges)
-        rindex = self._index(self.reduction_ranges, "r")
+        rindex = self._index(self.reduction_ranges, SymT.RINDEX)
         return (index, rindex)
 
     def inner_fn_free_unbacked_symbols(self):
         index = self._index(self.ranges)
-        rindex = self._index(self.reduction_ranges, "r")
+        rindex = self._index(self.reduction_ranges, SymT.RINDEX)
         return extract_free_unbacked_symbols(self.inner_fn, index, rindex)
 
     def constant_to_device(self, device):
@@ -1637,13 +1639,13 @@ class Scan(Loops):
 
     def inner_fn_args(self):
         index = self._index(self.ranges)
-        rindex = self._index(self.scan_ranges, "r")
+        rindex = self._index(self.scan_ranges, SymT.RINDEX)
         idx = self.reindex(index, rindex)
         return (idx,)
 
     def inner_fn_free_unbacked_symbols(self):
         index = self._index(self.ranges)
-        rindex = self._index(self.scan_ranges, "r")
+        rindex = self._index(self.scan_ranges, SymT.RINDEX)
         idx = self.reindex(index, rindex)
         return extract_free_unbacked_symbols(self.inner_fn, idx)
 
@@ -2107,7 +2109,9 @@ class GenericView(BaseView):
         return self.reindex
 
     def reindex_str(self):
-        index_old = [sympy_index_symbol(f"i{n}") for n in range(len(self.size))]
+        index_old = [
+            sympy_index_symbol_with_prefix(SymT.INDEX, n) for n in range(len(self.size))
+        ]
         index_new = list(self.reindex(index_old))
         return f"lambda {', '.join(map(str, index_old))}: {index_new}"
 
@@ -2212,7 +2216,11 @@ class View(GenericView):
         Perform a reshape entirely by modifying indexing math
         """
         size_hint = V.graph.sizevars.size_hint
-        vars = [sympy_index_symbol(f"view{i}") for i in range(len(new_size))]
+        # TODO: These symbols may not escape, if they don't assert so and
+        # treat them as temporary
+        vars = [
+            sympy_index_symbol_with_prefix(SymT.VIEW, i) for i in range(len(new_size))
+        ]
 
         stack_new = list(zip(vars, new_size))
         stack_old = list(old_size)
@@ -3814,12 +3822,6 @@ class ConcatKernel(NopKernel):
                     break
         any_input_is_storage_and_layout = any(is_storage_and_layout(x) for x in inputs)
         fx_node_args = V.graph.current_node.args[0]
-        target_func = (
-            V.graph.current_node.target.func
-            if isinstance(V.graph.current_node.target, functools.partial)
-            else V.graph.current_node.target
-        )
-        assert target_func in [aten.cat, aten.cat.default]
         assert isinstance(fx_node_args, list)
         # If any of the inputs has meta tensor and the meta tensor is in CL format, use CL format for the output
         if any_input_is_storage_and_layout is False and any(
@@ -4410,6 +4412,7 @@ class ExternKernel(InputsKernel):
         sizes = self.get_size()
         strides = self.get_stride()
         strides = [sizevars.size_hint(x) for x in strides]
+        # TODO: I can't tell if the symbols here are temporary
         index_vars = [sympy_index_symbol(f"d{i}") for i in range(len(sizes))]
         # reorder index vars according to stride
         index_order = sorted(range(len(strides)), key=strides.__getitem__, reverse=True)
@@ -5522,6 +5525,15 @@ class FallbackKernel(ExternKernelAlloc):
         if kernel.namespace == "aten":  # type: ignore[union-attr]
             # Aten Fallback Ops
             assert isinstance(kernel, torch._ops.OpOverload)
+
+            if (
+                kernel == aten.mul.Tensor
+                and len(self.inputs) == 1
+                and len(self.constant_args) == 1
+            ):
+                # When aten.mul.Tensor's second arg is constant, cpp wrapper expects to call mul_Scalar
+                kernel = aten.mul.Scalar
+
             if V.graph.cpp_wrapper:
                 if (
                     config.is_fbcode()
@@ -5538,7 +5550,7 @@ class FallbackKernel(ExternKernelAlloc):
                     self.set_cpp_kernel(kernel)
                 else:
                     self.cpp_kernel_name = get_aten_cpp_kernel_name(kernel)
-                    schema = kernel._schema
+                    schema = kernel._schema  # type: ignore[union-attr]
                     self.init_args_default_value(schema)
             else:
                 self.python_kernel_name = str(kernel)
@@ -7744,8 +7756,7 @@ class LoopBody:
         return name
 
     def add_indirect(self, size):
-        name = f"indirect{len(self.indirect_vars)}"
-        var = sympy_index_symbol(name)
+        var = sympy_index_symbol_with_prefix(SymT.INDIRECT, len(self.indirect_vars))
         self.indirect_vars.append(var)
         return var
 
@@ -7938,521 +7949,6 @@ class LoopBodyBlock:
         )
 
 
-class Wait(ExternKernelAlloc):
-    """
-    Wait should not be used by itself.  It should always be constructed in tandem
-    with a collective op that produces a work to wait on.
-    """
-
-    def __init__(
-        self,
-        layout,
-        inputs,
-        constant_args=(),
-    ):
-        super().__init__(layout, inputs, constant_args)
-
-    def should_allocate(self):
-        return False
-
-    def codegen(self, wrapper):
-        from .codegen.wrapper import ReuseLine
-
-        wrapper.add_import_once(
-            "from torch.distributed._functional_collectives_impl import _wait_tensor"
-        )
-        (input_collective,) = (t.codegen_reference() for t in self.inputs)
-        wrapper.writeline(f"{input_collective} = _wait_tensor({input_collective})")
-
-        # wait op still needs to produce a 'buffer' that represents the tensor output.
-        # this is a symbolic gesture, and it gets handled by WrapperCodegen.
-        # codegen outputs a '# reuse' line that assigns the input buffer here ('input_collective')
-        # to a new name (`self.get_name()`) and `del`s the old name.
-        wrapper.writeline(ReuseLine(wrapper, self.inputs[0], self, delete_old=False))
-
-    @classmethod
-    def create(cls, collective_op: "TensorBox"):
-        # TODO(whc) i'm not sure what's going on here, this probably means I missed something upstream
-        collective_op.decide_layout()
-        return Wait(
-            layout=NonOwningLayout(collective_op),
-            inputs=[collective_op],
-        )
-
-    def get_inputs_that_alias_output(self):
-        # Signal to codegen that our output buffer isn't safe to reuse
-        return [self.inputs[0].get_name()]
-
-    def get_mutation_names(self):
-        # The generated `_wait_tensor` op mutates the input tensor
-        return [self.inputs[0].get_name()]
-
-
-class CollectiveKernel(ExternKernel):
-    """
-    Each collective should follow the pattern:
-    - extend InPlaceCollectiveKernel or OutOfPlaceCollectiveKernel.
-    - the kernel delegates into c10d processgroup, which returns a 'work' obj
-    - the work obj is registered via _register_tensor_work so it can be waited on later
-    """
-
-    def __init__(self, layout, inputs, constant_args):
-        super().__init__(None, layout, inputs, constant_args)
-        self.name = V.graph.register_buffer(self)
-
-    def should_emit_register_tensor_work(self):
-        return True
-
-    def should_emit_find_or_create_pg(self):
-        return True
-
-    def codegen_collective(self, wrapper, output_name, input_names):
-        # factor so the boilerplate can be handled in CollectiveKernel.codegen
-        raise NotImplementedError("Must implement")
-
-    def codegen_output(self, wrapper, output_name, input_names):
-        # factor so the boilerplate can be handled in CollectiveKernel.codegen
-        raise NotImplementedError("Must implement")
-
-    @classmethod
-    def wrap_inputs_as_inplace(cls, inputs):
-        def wrap_input(var):
-            op = InPlaceHint(
-                FlexibleLayout(var.get_device(), var.get_dtype(), var.get_size()), var
-            )
-            return TensorBox.create(op)
-
-        return list(map(wrap_input, inputs))
-
-    def codegen(self, wrapper):
-        wrapper.add_import_once("import torch.distributed as dist")
-        wrapper.add_import_once("import torch.distributed.distributed_c10d as c10d")
-        wrapper.add_import_once(
-            "import torch.distributed._functional_collectives_impl as fun_col_impl"
-        )
-        # extract references to our args in string form for codegen output
-        input_names = [t.codegen_reference() for t in self.inputs]
-        output_name = self.get_name()
-        tag, ranks, group_size = self.constant_args
-
-        if self.should_emit_find_or_create_pg():
-            # TODO: avoid more than one ref of the same pg (even though they are cached inside the api)
-            wrapper.writeline(
-                f"{output_name}_pg = c10d._find_or_create_pg_by_ranks_and_tag('{tag}', {ranks}, {group_size})"
-            )
-
-        self.codegen_output(wrapper, output_name, input_names)
-        self.codegen_collective(wrapper, output_name, input_names)
-        if self.should_emit_register_tensor_work():
-            wrapper.writeline(
-                f"fun_col_impl._register_tensor_work({output_name}, {output_name}_work)"
-            )
-
-
-class InPlaceCollectiveKernel(CollectiveKernel):
-    """
-    InPlaceCollectiveKernel are those with in-out arguments such as all_reduce.
-    Extend this kernel if your collective needs to modify its inputs in-place.
-    """
-
-    def __init__(self, layout, inputs, constant_args):
-        super().__init__(layout, inputs, constant_args)
-
-    def should_allocate(self):
-        return False
-
-    def has_side_effects(self):
-        return True
-
-    def codegen_output(self, wrapper, output_name, input_names):
-        if len(input_names) > 1:
-            wrapper.writeline(f"{output_name} = [{','.join(input_names)}] ")
-        else:
-            wrapper.writeline(f"{output_name} = {input_names[0]}")
-
-
-class OutOfPlaceCollectiveKernel(CollectiveKernel):
-    """
-    OutOfPlaceCollectiveKernel are those that allocate their
-    outputs and leave their inputs inplace, such as all_gather.
-    """
-
-    def __init__(self, layout, inputs, outputs, constant_args):
-        super().__init__(layout, inputs + outputs, constant_args)
-        self.outputs = outputs
-        self.original_inputs = inputs
-        # NOTE: As seen in issue #108780, output buffers of out-of-place collectives
-        # could be incorrectly reused. As a safety measure, here we just ban the reuse of them.
-        # TODO: A better fix is to figure out how to propagate the aliases properly,
-        # so that the buffer is only reused after all its users have consumed it.
-        for x in self.outputs:
-            V.graph.never_reuse_buffers.add(x.name)
-
-    def should_allocate(self):
-        return False
-
-    def has_side_effects(self):
-        return True
-
-    def codegen_output(self, wrapper, output_name, input_names):
-        input_names = [t.codegen_reference() for t in self.original_inputs]
-        wrapper.writeline(f"{output_name}_inputs = [{','.join(input_names)}]")
-        wrapper.writeline(f"{output_name} = [{','.join(x.name for x in self.outputs)}]")
-
-    @classmethod
-    def create_output_buffers(cls, inputs, size_cb=None):
-        outputs = []
-        for input in inputs:
-            new_size = input.get_size()
-            if size_cb is not None:
-                size_cb(new_size)
-            # new_size[0] *= group_size
-
-            buff = OutputBuffer(
-                layout=FlexibleLayout(
-                    device=input.get_device(),
-                    dtype=input.get_dtype(),
-                    size=new_size,
-                ),
-            )
-            outputs.append(buff)
-        return outputs
-
-    @classmethod
-    def create_output_nodes(cls, coll, output_buffers):
-        return [
-            MultiOutputNoSizeAssert(
-                out_t.layout,
-                coll,
-                f"[{i}]",
-            )
-            for i, out_t in enumerate(output_buffers)
-        ]
-
-
-class InPlaceHint(ExternKernel):
-    """
-    Helper OP to encode an in/out argument that tries to make it inplace whenever possible.
-    Wrap the input of your inplace op to enable this behavior.
-
-    The design is based on two key decisions:
-    - this node is responsible for allocating the in/out buffer used by the collective.
-        This is controlled by the ``should_allocate`` method that returns True here and
-        False for the collective node
-    - The scheduler special-case this node and enable it to reuse its input.
-    """
-
-    def codegen(self, wrapper):
-        input_name = self.inputs[0].codegen_reference()
-        output_name = self.get_name()
-        if not wrapper.did_reuse(self, self.inputs[0]):
-            wrapper.writeline(f"{output_name}.copy_({input_name}) #no reuse")
-
-    def __init__(self, layout, input):
-        input = self.realize_input(input)
-        super().__init__(None, layout, self.unwrap_storage([input]), ())
-        self.name = V.graph.register_buffer(self)
-
-    def should_allocate(self):
-        return True
-
-
-class OutputBuffer(ExternKernel):
-    """
-    Represent the output buffer used by ops that require multiple of them
-    """
-
-    def __init__(self, layout):
-        super().__init__(name=None, layout=layout, inputs=[])
-        self.name = V.graph.register_buffer(self)
-
-    def should_allocate(self):
-        return True
-
-    def codegen(self, wrapper):
-        wrapper.writeline(f"# collective out buffer {self.name}")
-
-
-class MultiOutputNoSizeAssert(MultiOutput):
-    """
-    Extract partial output from a multi-output OP.
-    Works like MultiOutput but doesn't assert size. This must be a property guaranteed by the op emitting this.
-    """
-
-    def __init__(self, layout, input, index):
-        super().__init__(layout, input, [])
-        self.index = index
-
-    def codegen(self, wrapper):
-        wrapper.writeline(
-            f"{self.get_name()} = {self.inputs[0].get_name()}{self.index}"
-        )
-
-
-class Broadcast(InPlaceCollectiveKernel):
-    def __init__(self, layout, inputs, constant_args, src):
-        super().__init__(layout, inputs, constant_args)
-        self.src = src
-
-    def get_mutation_names(self):
-        return [self.inputs[0].get_name()]
-
-    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
-        return set()
-
-    @classmethod
-    def create(
-        cls, x: "TensorBox", src: int, tag: str, ranks: List[int], group_size: int
-    ):
-        inplace_inputs = cls.wrap_inputs_as_inplace([x])
-        packed = Broadcast(
-            layout=NoneLayout(inplace_inputs[0].get_device()),  # type: ignore[arg-type]
-            inputs=inplace_inputs,
-            constant_args=[tag, ranks, group_size],
-            src=src,
-        )
-        mark_node_as_mutating(packed, inplace_inputs[0])
-        return inplace_inputs[0]
-
-    def codegen_collective(self, wrapper, output_name, input_names):
-        wrapper.writeline(
-            f"{output_name}_work = dist.broadcast("
-            f"{output_name}, async_op=True, group={output_name}_pg, src={self.src})"
-        )
-
-
-class AllReduceCoalesced(InPlaceCollectiveKernel):
-    def __init__(self, layout, inputs, constant_args, reduce_op):
-        super().__init__(layout, inputs, constant_args)
-        self.reduce_op = reduce_op
-
-    def should_allocate(self):
-        return False
-
-    def get_mutation_names(self):
-        return [self.inputs[0].get_name()]
-
-    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
-        return set()
-
-    @classmethod
-    def create(
-        cls,
-        inputs: List["TensorBox"],
-        reduce_op: str,
-        tag: str,
-        ranks: List[int],
-        group_size: int,
-    ):
-        inplace_inputs = cls.wrap_inputs_as_inplace(inputs)
-        packed = AllReduceCoalesced(
-            layout=NoneLayout(inplace_inputs[0].get_device()),  # type: ignore[arg-type]
-            inputs=inplace_inputs,
-            constant_args=[tag, ranks, group_size],
-            reduce_op=reduce_op,
-        )
-        mark_node_as_mutating(packed, inplace_inputs[0])
-        return inplace_inputs
-
-    def codegen_collective(self, wrapper, output_name, input_names):
-        wrapper.writeline(
-            f"{output_name}_work = dist.all_reduce_coalesced("
-            f"{output_name}, "
-            f"op=fun_col_impl._str_to_reduce_op('{str(self.reduce_op)}'), "
-            f"group={output_name}_pg, "
-            "async_op=True)"
-        )
-
-
-class AllReduce(InPlaceCollectiveKernel):
-    def __init__(self, layout, inputs, constant_args, reduce_op):
-        super().__init__(layout, inputs, constant_args)
-        self.reduce_op = reduce_op
-
-    def get_mutation_names(self):
-        return [self.inputs[0].get_name()]
-
-    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
-        return set()
-
-    @classmethod
-    def create(
-        cls, x: "TensorBox", reduce_op: str, tag: str, ranks: List[int], group_size: int
-    ):
-        inplace_inputs = cls.wrap_inputs_as_inplace([x])
-
-        packed = AllReduce(
-            layout=NoneLayout(inplace_inputs[0].get_device()),  # type: ignore[arg-type]
-            inputs=inplace_inputs,
-            constant_args=[tag, ranks, group_size],
-            reduce_op=reduce_op,
-        )
-        mark_node_as_mutating(packed, inplace_inputs[0])
-        return inplace_inputs[0]
-
-    def codegen_collective(self, wrapper, output_name, input_names):
-        wrapper.writeline(
-            f"{output_name}_work = dist.all_reduce("
-            f"{output_name}, async_op=True, group={output_name}_pg, op=fun_col_impl._str_to_reduce_op('{str(self.reduce_op)}'))"
-        )
-
-
-class AllGatherIntoTensor(OutOfPlaceCollectiveKernel):
-    def __init__(self, layout, inputs, outputs, constant_args):
-        super().__init__(layout, inputs, outputs, constant_args)
-
-    @classmethod
-    def create(cls, x: "TensorBox", tag: str, ranks: List[int], group_size: int):
-        inputs = [cls.realize_input(x)]
-
-        def compute_size(new_size):
-            new_size[0] *= group_size
-
-        outputs = cls.create_output_buffers(inputs, compute_size)
-
-        layout = MultiOutputLayout(inputs[0].get_device())
-
-        packed = AllGatherIntoTensor(
-            layout=layout,
-            inputs=inputs,
-            outputs=outputs,
-            constant_args=[tag, ranks, group_size],
-        )
-        return cls.create_output_nodes(packed, outputs)[0]
-
-    def codegen_collective(self, wrapper, output_name, input_names):
-        wrapper.writeline(
-            f"{output_name}_work = dist.all_gather_into_tensor("
-            f"{output_name}[0], {output_name}_inputs[0], async_op=True, group={output_name}_pg)"
-        )
-
-
-class ReduceScatterTensor(OutOfPlaceCollectiveKernel):
-    def __init__(self, layout, inputs, outputs, constant_args, reduce_op):
-        super().__init__(layout, inputs, outputs, constant_args)
-        self.reduce_op = reduce_op
-
-    @classmethod
-    def create(
-        cls,
-        x: "TensorBox",
-        reduce_op: str,
-        tag: str,
-        ranks: List[int],
-        group_size: int,
-    ):
-        inputs = [cls.realize_input(x)]
-
-        def compute_size(new_size):
-            new_size[0] //= group_size
-
-        outputs = cls.create_output_buffers(inputs, compute_size)
-
-        layout = MultiOutputLayout(inputs[0].get_device())
-
-        packed = ReduceScatterTensor(
-            layout=layout,
-            inputs=inputs,
-            outputs=outputs,
-            constant_args=[tag, ranks, group_size],
-            reduce_op=reduce_op,
-        )
-        return cls.create_output_nodes(packed, outputs)[0]
-
-    def codegen_collective(self, wrapper, output_name, input_names):
-        wrapper.writeline(
-            f"{output_name}_work = dist.reduce_scatter_tensor("
-            f"{output_name}[0], {output_name}_inputs[0], "
-            f"async_op=True, group={output_name}_pg, op=fun_col_impl._str_to_reduce_op('{str(self.reduce_op)}'))"
-        )
-
-
-class AllGatherIntoTensorCoalesced(OutOfPlaceCollectiveKernel):
-    def __init__(self, layout, inputs, outputs, constant_args):
-        super().__init__(layout, inputs, outputs, constant_args)
-
-    @classmethod
-    def create(
-        cls,
-        inputs: List["TensorBox"],
-        tag: str,
-        ranks: List[int],
-        group_size: int,
-    ):
-        inputs = [cls.realize_input(x) for x in inputs]
-
-        def compute_size(new_size):
-            new_size[0] *= group_size
-
-        outputs = cls.create_output_buffers(inputs, compute_size)
-
-        layout = MultiOutputLayout(inputs[0].get_device())
-
-        packed = AllGatherIntoTensorCoalesced(
-            layout=layout,
-            inputs=inputs,
-            outputs=outputs,
-            constant_args=[tag, ranks, group_size],
-        )
-
-        return outputs
-        # return cls.create_output_nodes(packed, outputs)
-
-    def codegen_collective(self, wrapper, output_name, input_names):
-        wrapper.writeline(
-            f"{output_name}_work = fun_col_impl._all_gather_into_tensor_coalesced_fallback("
-            f"output_tensors={output_name}, "
-            f"input_tensors={output_name}_inputs, "
-            f"group={output_name}_pg, "
-            "async_op=True)"
-        )
-
-
-class ReduceScatterTensorCoalesced(OutOfPlaceCollectiveKernel):
-    def __init__(self, layout, inputs, outputs, constant_args, reduce_op):
-        super().__init__(layout, inputs, outputs, constant_args)
-        self.reduce_op = reduce_op
-
-    @classmethod
-    def create(
-        cls,
-        inputs: List["TensorBox"],
-        reduce_op: str,
-        tag: str,
-        ranks: List[int],
-        group_size: int,
-    ):
-        inputs = [cls.realize_input(x) for x in inputs]
-
-        def compute_size(new_size):
-            new_size[0] //= group_size
-
-        outputs = cls.create_output_buffers(inputs, compute_size)
-
-        layout = MultiOutputLayout(inputs[0].get_device())
-
-        _ = ReduceScatterTensorCoalesced(
-            layout=layout,
-            inputs=inputs,
-            outputs=outputs,
-            constant_args=[tag, ranks, group_size],
-            reduce_op=reduce_op,
-        )
-
-        return outputs
-
-    def codegen_collective(self, wrapper, output_name, input_names):
-        wrapper.writeline(
-            f"{output_name}_work = fun_col_impl._reduce_scatter_tensor_coalesced_fallback("
-            f"output_tensors={output_name}, "
-            f"input_tensors={output_name}_inputs, "
-            f"op=fun_col_impl._str_to_reduce_op('{str(self.reduce_op)}'), "
-            f"group={output_name}_pg, "
-            "async_op=True)"
-        )
-
-
-# TODO(yifu): replace the CollectiveKernel IR hierarchy with _CollectiveKernel.
 class _CollectiveKernel(FallbackKernel):
     def should_allocate(self):
         return False
@@ -8659,69 +8155,3 @@ def maybe_free_unbacked_symbols(s):
         return free_unbacked_symbols(s)
     else:
         return set()
-
-
-class AllToAllSingle(OutOfPlaceCollectiveKernel):
-    def __init__(
-        self,
-        layout,
-        inputs,
-        outputs,
-        constant_args,
-        output_split_sizes,
-        input_split_sizes,
-    ):
-        super().__init__(layout, inputs, outputs, constant_args)
-        self.output_split_sizes = output_split_sizes
-        self.input_split_sizes = input_split_sizes
-
-    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
-        r = set()
-        if self.output_split_sizes is not None:
-            r |= free_unbacked_symbols(self.output_split_sizes)
-        if self.input_split_sizes is not None:
-            r |= free_unbacked_symbols(self.input_split_sizes)
-        return r
-
-    @classmethod
-    def create(
-        cls,
-        x: "TensorBox",
-        output_split_sizes: Optional[List[Expr]],
-        input_split_sizes: Optional[List[Expr]],
-        tag: str,
-        ranks: List[int],
-        group_size: int,
-    ):
-        inputs = [cls.realize_input(x)]
-
-        def compute_size(new_size):
-            if output_split_sizes is not None:
-                new_size[0] = sum(output_split_sizes)
-
-        outputs = cls.create_output_buffers(inputs, compute_size)
-
-        layout = MultiOutputLayout(inputs[0].get_device())
-
-        packed = AllToAllSingle(
-            layout=layout,
-            inputs=inputs,
-            outputs=outputs,
-            constant_args=[tag, ranks, group_size],
-            output_split_sizes=output_split_sizes,
-            input_split_sizes=input_split_sizes,
-        )
-        return cls.create_output_nodes(packed, outputs)[0]
-
-    def codegen_collective(self, wrapper, output_name, input_names):
-        tag, ranks, group_size = self.constant_args
-
-        # TODO: might be necessary to do some pretty printing on
-        # split sizes
-        wrapper.writeline(
-            f"{output_name}_work = dist.all_to_all_single("
-            f"{output_name}[0], {output_name}_inputs[0], "
-            f"output_split_sizes={self.output_split_sizes}, "
-            f"input_split_sizes={self.input_split_sizes}, "
-            f"group={output_name}_pg, async_op=True)"
-        )

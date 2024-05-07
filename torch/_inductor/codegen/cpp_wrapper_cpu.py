@@ -18,6 +18,7 @@ from ..utils import cache_on_self, sympy_product
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import IndentedBuffer
+from .cpp_utils import cexpr, CppPrinter, DEVICE_TO_ATEN, DTYPE_TO_ATEN, DTYPE_TO_CPP
 from .wrapper import EnterSubgraphLine, ExitSubgraphLine, WrapperCodeGen
 
 
@@ -54,9 +55,6 @@ class CppWrapperCpu(WrapperCodeGen):
         self.cached_output_id = count()
         self.scalar_to_tensor_id = count()
         self.custom_op_wrapper_loaded = False
-
-        from .cpp import cexpr, CppPrinter
-
         self.expr_printer = cexpr
 
         # CppPrinter sometimes calls at::native functions which causes problems in
@@ -273,7 +271,6 @@ class CppWrapperCpu(WrapperCodeGen):
     @staticmethod
     def get_input_cpp_type(input):
         assert config.use_minimal_arrayref_interface
-        from .cpp import DTYPE_TO_CPP
 
         if isinstance(input, sympy.Expr):
             from ..graph import may_get_constant_buffer_dtype
@@ -284,8 +281,6 @@ class CppWrapperCpu(WrapperCodeGen):
         return f"ArrayRefTensor<{DTYPE_TO_CPP[input.get_dtype()]}>"
 
     def generate_input_output_runtime_checks(self):
-        from .cpp import DTYPE_TO_ATEN
-
         # In debug_compile mode, we generate checks to ensure the dtype/shape/stride of each
         # real input/output tensor match ones provided at compile time via sample
         # input/output.
@@ -386,8 +381,6 @@ class CppWrapperCpu(WrapperCodeGen):
         inputs_len = len(V.graph.graph_inputs.keys())
         if V.graph.aot_mode:
             if config.use_minimal_arrayref_interface and not V.graph.is_const_graph:
-                from .cpp import DTYPE_TO_CPP
-
                 input_cpp_types = ", ".join(
                     f"{CppWrapperCpu.get_input_cpp_type(x)}"
                     for x in V.graph.graph_inputs.values()
@@ -550,7 +543,6 @@ class CppWrapperCpu(WrapperCodeGen):
                     # unwrap input tensor back to scalar
                     if isinstance(V.graph.graph_inputs[input_key], sympy.Expr):
                         from ..graph import may_get_constant_buffer_dtype
-                        from .cpp import DTYPE_TO_CPP
 
                         dtype = may_get_constant_buffer_dtype(
                             V.graph.graph_inputs[input_key]
@@ -593,9 +585,14 @@ class CppWrapperCpu(WrapperCodeGen):
                 else:
                     # Append constants as inputs to the graph
                     constants_idx = inputs_len + idx
-                    self.prefix.writeline(
-                        f"auto {constants_key} = inputs[{constants_idx}];"
-                    )
+                    if config.abi_compatible:
+                        self.prefix.writeline(
+                            f"auto {constants_key} = std::move(inputs[{constants_idx}]);"
+                        )
+                    else:
+                        self.prefix.writeline(
+                            f"auto {constants_key} = inputs[{constants_idx}];"
+                        )
 
             self.codegen_inputs(self.prefix, V.graph.graph_inputs)
 
@@ -1389,8 +1386,6 @@ class CppWrapperCpu(WrapperCodeGen):
         return f"{{{', '.join(parts)}}}"
 
     def codegen_dynamic_scalar(self, node):
-        from .cpp import DTYPE_TO_ATEN, DTYPE_TO_CPP
-
         (data,) = (t.codegen_reference() for t in node.inputs)
         if config.abi_compatible:
             dtype = node.inputs[0].get_dtype()
@@ -1476,8 +1471,6 @@ class CppWrapperCpu(WrapperCodeGen):
             self.used_cached_devices.add(device.type)
             return f"cached_torch_device_type_{device.type}, {device.index if device.index else 0}"
         else:
-            from .cpp import DEVICE_TO_ATEN
-
             return (
                 f"c10::Device({DEVICE_TO_ATEN[device.type]}, {device.index})"
                 if device.index is not None
@@ -1490,8 +1483,6 @@ class CppWrapperCpu(WrapperCodeGen):
             self.used_cached_dtypes.add(dtype_str)
             return f"cached_torch_dtype_{dtype_str}"
         else:
-            from .cpp import DTYPE_TO_ATEN
-
             return DTYPE_TO_ATEN[dtype]
 
     @functools.lru_cache(None)
@@ -1554,8 +1545,6 @@ class CppWrapperCpu(WrapperCodeGen):
             device_type, device_id = device_str.split(",")
             device_idx = "this->device_idx_" if V.graph.aot_mode else device_id
             if buffer_if_can_stack_allocate is not None:
-                from .cpp import DTYPE_TO_CPP
-
                 self.stack_allocated_buffers[name] = buffer_if_can_stack_allocate
                 cpp_type = DTYPE_TO_CPP[dtype]
                 numel = buffer_if_can_stack_allocate.get_numel()
