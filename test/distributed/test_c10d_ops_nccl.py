@@ -937,6 +937,19 @@ class ProcessGroupNCCLOpTest(MultiProcContinousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_send_recv_object_list(self):
+        device = self.rank_to_GPU[self.rank][0]
+
+        val = 99 if self.rank == 0 else None
+        object_list = [val] * self.world_size
+        if self.rank == 0:
+            dist.send_object_list(object_list, 1, device=device)
+        if self.rank == 1:
+            dist.recv_object_list(object_list, 0, device=device)
+            self.assertEqual(object_list[0], 99)
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_tensor_register_hook(self):
         os.environ["TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK"] = "1"
 

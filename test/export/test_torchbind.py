@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: export"]
 
-import unittest
 
 import torch
 import torch.utils._pytree as pytree
@@ -11,38 +10,25 @@ from torch.export import export
 from torch.export._trace import _export
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
-    find_library_location,
     instantiate_parametrized_tests,
-    IS_FBCODE,
-    IS_MACOS,
-    IS_SANDCASTLE,
-    IS_WINDOWS,
     parametrize,
     run_tests,
     skipIfTorchDynamo,
     TestCase,
 )
-from torch.testing._internal.torchbind_impls import register_fake_operators
-
-
-def load_torchbind_test_lib():
-    if IS_SANDCASTLE or IS_FBCODE:
-        torch.ops.load_library("//caffe2/test/cpp/jit:test_custom_class_registrations")
-    elif IS_MACOS:
-        raise unittest.SkipTest("non-portable load_library call used in test")
-    else:
-        lib_file_path = find_library_location("libtorchbind_test.so")
-        if IS_WINDOWS:
-            lib_file_path = find_library_location("torchbind_test.dll")
-        torch.ops.load_library(str(lib_file_path))
-
-    register_fake_operators()
+from torch.testing._internal.torchbind_impls import init_torchbind_implementations
 
 
 @skipIfTorchDynamo("torchbind not supported with dynamo yet")
 class TestExportTorchbind(TestCase):
     def setUp(self):
-        load_torchbind_test_lib()
+        init_torchbind_implementations()
+
+        test = self
+        test.tq_push_counter = 0
+        test.tq_pop_counter = 0
+        test.tq_size_counter = 0
+        test.foo_add_tensor_counter = 0
 
         @torch._library.register_fake_class("_TorchScriptTesting::_Foo")
         class FakeFoo:
@@ -56,12 +42,8 @@ class TestExportTorchbind(TestCase):
                 return cls(x, y)
 
             def add_tensor(self, z):
+                test.foo_add_tensor_counter += 1
                 return (self.x + self.y) * z
-
-        test = self
-        test.tq_push_counter = 0
-        test.tq_pop_counter = 0
-        test.tq_size_counter = 0
 
         @torch._library.register_fake_class("_TorchScriptTesting::_TensorQueue")
         class FakeTensorQueue:
@@ -248,7 +230,16 @@ def forward(self, token, obj_attr, x):
         )
 
     @parametrize("pre_dispatch", [True, False])
-    def test_input(self, pre_dispatch):
+    @parametrize("fakify_script_obj", [True, False])
+    def test_input(self, pre_dispatch, fakify_script_obj):
+        cc = torch.classes._TorchScriptTesting._Foo(10, 20)
+        if not fakify_script_obj:
+            qual_name = cc._type().qualified_name()  # type: ignore[att-defined]
+            if torch._library.fake_class_registry.has_fake_class(qual_name):
+                torch._library.fake_class_registry.deregister_fake_class(
+                    "_TorchScriptTesting::_Foo"
+                )
+
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -256,7 +247,6 @@ def forward(self, token, obj_attr, x):
             def forward(self, x, cc):
                 return x + cc.add_tensor(x)
 
-        cc = torch.classes._TorchScriptTesting._Foo(10, 20)
         ep = self._test_export_same_as_eager(
             MyModule(), (torch.ones(2, 3), cc), strict=False, pre_dispatch=pre_dispatch
         )
@@ -277,9 +267,23 @@ def forward(self, x, cc):
     add = torch.ops.aten.add.Tensor(x, call_torchbind);  x = call_torchbind = None
     return (add,)""",
         )
+        # aot_export_function runs the program twice
+        # in run_functionalized_fw_and_collect_metadata and create_aot_dispatcher_function
+        # We also have a re-tracing test, which doubles the count.
+        if fakify_script_obj:
+            self.assertEqual(self.foo_add_tensor_counter, 4)
 
     @parametrize("pre_dispatch", [True, False])
-    def test_input_as_custom_op_argument(self, pre_dispatch):
+    @parametrize("fakify_script_obj", [True, False])
+    def test_input_as_custom_op_argument(self, pre_dispatch, fakify_script_obj):
+        cc = torch.classes._TorchScriptTesting._Foo(10, 20)
+        if not fakify_script_obj:
+            qual_name = cc._type().qualified_name()  # type: ignore[att-defined]
+            if torch._library.fake_class_registry.has_fake_class(qual_name):
+                torch._library.fake_class_registry.deregister_fake_class(
+                    "_TorchScriptTesting::_Foo"
+                )
+
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -287,10 +291,33 @@ def forward(self, x, cc):
             def forward(self, x, cc):
                 return x + torch.ops._TorchScriptTesting.takes_foo(cc, x)
 
-        cc = torch.classes._TorchScriptTesting._Foo(10, 20)
+        del torch.ops._TorchScriptTesting.takes_foo.default.py_kernels[
+            torch._C.DispatchKey.Meta
+        ]
+        torch.ops._TorchScriptTesting.takes_foo.default._dispatch_cache.clear()
+        # Even though a C++ implementation for takes_foo.default is registered,
+        # we still need the python implementation for takes_foo.default to trace with FakeFoo.
+        if fakify_script_obj:
+            with self.assertRaisesRegex(
+                RuntimeError, "no python implementation is found"
+            ):
+                self._test_export_same_as_eager(
+                    MyModule(),
+                    (torch.ones(2, 3), cc),
+                    strict=False,
+                    pre_dispatch=pre_dispatch,
+                )
+
+        torch.ops._TorchScriptTesting.takes_foo.default.py_impl(
+            torch._C.DispatchKey.Meta
+        )(lambda cc, x: cc.add_tensor(x))
         ep = self._test_export_same_as_eager(
-            MyModule(), (torch.ones(2, 3), cc), strict=False, pre_dispatch=pre_dispatch
+            MyModule(),
+            (torch.ones(2, 3), cc),
+            strict=False,
+            pre_dispatch=pre_dispatch,
         )
+
         self.assertExpectedInline(
             ep.module().code.strip(),
             """\
@@ -805,7 +832,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 @skipIfTorchDynamo("torchbind not supported with dynamo yet")
 class TestRegisterFakeClass(TestCase):
     def setUp(self):
-        load_torchbind_test_lib()
+        init_torchbind_implementations()
 
     def tearDown(self):
         torch._library.fake_class_registry.global_fake_class_registry.clear()
@@ -850,21 +877,6 @@ class TestRegisterFakeClass(TestCase):
                 return cls(x, y)
 
         torch._library.register_fake_class("_TorchScriptTesting::_Foo", FakeFoo)
-
-    def test_register_fake_class_duplicate_registration(self):
-        @torch._library.register_fake_class("_TorchScriptTesting::_Foo")
-        class FakeFoo:
-            def __init__(self, x, y):
-                self.x = x
-                self.y = y
-
-            @classmethod
-            def from_real(cls, foo_obj):
-                x, y = foo_obj.__getstate__()
-                return cls(x, y)
-
-        with self.assertWarnsRegex(UserWarning, "already registered"):
-            torch._library.register_fake_class("_TorchScriptTesting::_Foo", FakeFoo)
 
 
 instantiate_parametrized_tests(TestExportTorchbind)
