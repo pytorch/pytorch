@@ -2655,11 +2655,7 @@ def _hip_lib_options() -> List[str]:
     ]
 
 
-def _hipcc_host_compiler_options() -> List[str]:
-    return []
-
-
-def _hipcc_device_compiler_options() -> List[str]:
+def _hip_compiler_options() -> List[str]:
     opts = [
         config.rocm.compile_opt_level,
         "-x", 
@@ -2713,26 +2709,51 @@ def _hip_compiler_version() -> Optional[str]:
         return None
 
 
+def rocm_compile_command(
+    src_files: List[str],
+    dst_file: str,
+    dst_file_ext: str,
+    extra_args: Optional[List[str]] = None,
+) -> str:
+    include_paths = _ck_include_paths()
+    lib_options = _hip_lib_options()
+    compiler_options = _hip_compiler_options()
+    compiler = _hip_compiler()
+    options = (
+        compiler_options
+        + (extra_args if extra_args else [])
+        + ["-I" + path for path in include_paths]
+        + lib_options
+    )
+    src_file = " ".join(src_files)
+    res = ""
+    if dst_file_ext == "o":
+        res = f"{compiler} {' '.join(options)} -c -o {dst_file} {src_file}"
+    elif dst_file_ext == "so":
+        options.append("-shared")
+        res = f"{compiler} {' '.join(options)} -o {dst_file} {src_file}"
+    elif dst_file_ext == "exe":
+        res = f"{compiler} {' '.join(options)} -o {dst_file} {src_file}"
+    else:
+        raise NotImplementedError(f"Unsupported output file suffix {dst_file_ext}!")
+    return res
+
+
 def cuda_compile_command(
     src_files: List[str],
     dst_file: str,
     dst_file_ext: str,
     extra_args: Optional[List[str]] = None,
 ) -> str:
-    if torch.version.cuda:
-        include_paths = _cutlass_include_paths()
-        lib_options = _cuda_lib_options()
-        host_compiler_options = _nvcc_host_compiler_options()
-        device_compiler_options = _nvcc_compiler_options()
-        compiler = _cuda_compiler()
-    elif torch.version.hip:
-        include_paths = _ck_include_paths()
-        lib_options = _hip_lib_options()
-        host_compiler_options = _hipcc_host_compiler_options()
-        device_compiler_options = _hipcc_device_compiler_options()
-        compiler = _hip_compiler()
-    else:
+    if torch.version.hip:
+        return rocm_compile_command(src_files, dst_file, dst_file_ext, extra_args)
+    if not torch.version.cuda:
         return ""
+    include_paths = _cutlass_include_paths()
+    lib_options = _cuda_lib_options()
+    host_compiler_options = _nvcc_host_compiler_options()
+    device_compiler_options = _nvcc_compiler_options()
+    compiler = _cuda_compiler()
     options = (
         device_compiler_options
         + (extra_args if extra_args else [])
