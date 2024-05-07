@@ -6,7 +6,7 @@ from .. import ir, lowering as L
 
 from ..kernel.mm_common import mm_args
 from ..select_algorithm import DataProcessorTemplateWrapper
-from ..utils import cache_on_self, parallel_num_threads
+from ..utils import cache_on_self, has_free_symbols, parallel_num_threads
 from ..virtualized import V
 from .cpp_micro_gemm import create_micro_gemm
 from .cpp_template import CppTemplate
@@ -138,7 +138,7 @@ class CppPackedGemmTemplate(CppTemplate):
         m, n = layout.size
         _, k = input_nodes[0].get_size()
         self.m, self.n, self.k = m, n, k
-        self.is_dynamic_M = len(self.m.free_symbols) > 0
+        self.is_dynamic_M = has_free_symbols((m,))
 
     @cache_on_self
     def thread_blocking(self) -> GemmBlocking:
