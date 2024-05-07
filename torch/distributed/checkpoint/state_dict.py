@@ -23,6 +23,7 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._state_dict_utils import (
+    _broadcast_state_dict,
     _gather_state_dict,
     _offload_state_dict_to_cpu,
 )
@@ -110,6 +111,13 @@ class StateDictOptions:
     - ``strict``: the ``strict`` option when ``set_state_dict`` calls
       model.load_state_dict().
       The default value is False.
+
+    - ``broadcast_from_rank0``: when the option is True, rank0 should receive a
+       full state_dict and will broadcast the tensors in the state_dict/
+       optim_state_dict one by one to other ranks. Other ranks will receive
+       the tensors and shard according to the local shards in the model and
+       optimizer. ``full_state_dict`` must be set to True when using this option.
+       This option currently only supports DTensor, not the legacy ShardedTensor.
     """
 
     full_state_dict: bool = False
@@ -117,6 +125,7 @@ class StateDictOptions:
     ignore_frozen_params: bool = False
     keep_submodule_prefixes: bool = True
     strict: bool = True
+    broadcast_from_rank0: bool = False
 
 
 @dataclass
@@ -271,6 +280,10 @@ def _verify_options(
             assert len(fqns) == 1, "Submodule FQN should only have 1 instance"
             submodule_prefixes.update(f"{fqn}." for fqn in fqns)
 
+    if options.broadcast_from_rank0 and not options.full_state_dict:
+        raise ValueError(
+            "full_state_dict must be True when broadcast_from_rank0 is True."
+        )
     fsdp_modules = FSDP.fsdp_modules(model)
     state_dict_config: StateDictConfig
     optim_state_dict_config: OptimStateDictConfig
@@ -334,6 +347,7 @@ def _verify_state_dict(
         and not info.ignore_frozen_params
         and not (info.cpu_offload and info.full_state_dict)
         and info.strict
+        and not info.broadcast_from_rank0
     ):
         raise RuntimeError(
             "The option indicates that model state_dict is required to save "
@@ -445,17 +459,35 @@ def _load_model_state_dict(
     state_dict: Dict[str, ValueType],
     info: _StateDictInfo,
 ) -> _IncompatibleKeys:
-    if not info.handle_model or not state_dict:
+    if not info.handle_model or (not state_dict and not info.broadcast_from_rank0):
         return _IncompatibleKeys({}, {})
 
-    for key, _ in _iterate_valid_model_state(model):
+    local_state_dict = {}
+    for key, value in _iterate_valid_model_state(model):
         fqns = _get_fqns(model, key)
         fqns_with_prefix = _get_fqns(
             model, key, skip_ddp_prefix=False, skip_compiler_prefix=False
         )
+
         for fqn, fqn_with_prefix in zip(fqns, fqns_with_prefix):
-            if fqn != fqn_with_prefix:
+            if (
+                not info.broadcast_from_rank0 or dist.get_rank() == 0
+            ) and fqn != fqn_with_prefix:
                 state_dict[fqn_with_prefix] = state_dict.pop(fqn)
+            local_state_dict[fqn_with_prefix] = value
+
+    if info.broadcast_from_rank0:
+        device = None
+        for key, value in local_state_dict.items():
+            if torch.is_tensor(value) and value.dim() > 0:
+                if device is None:
+                    device = value.device
+                else:
+                    assert device == value.device
+        assert device is not None
+        _broadcast_state_dict(state_dict, local_state_dict, device=device)
+        for fqn, local_state in local_state_dict.items():
+            state_dict[fqn] = local_state
 
     with info.fsdp_context():
         return cast(
