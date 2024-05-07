@@ -30,7 +30,7 @@ from bisect import bisect_right
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from copy import copy
 from ctypes import c_void_p, cdll, CDLL
-from functools import lru_cache, partial
+from functools import partial
 from pathlib import Path
 from threading import Thread
 from time import sleep, time
@@ -53,6 +53,7 @@ from torch._dynamo.device_interface import get_registered_device_interfaces
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
+from torch._inductor.codegen.rocm.compile_command import rocm_compile_command, rocm_compiler_version
 from torch._inductor.runtime.compile_tasks import (
     _module_to_triton_kernel,
     _reload_python_module,
@@ -2635,110 +2636,6 @@ def _nvcc_compiler_options() -> List[str]:
     return options
 
 
-def _rocm_include_paths() -> List[str]:
-    from torch.utils import cpp_extension
-    rocm_include = os.path.join(config.rocm.rocm_home, 'include') if config.rocm.rocm_home else f"{cpp_extension._join_rocm_home('include')}"
-    ck_include = os.path.join(config.rocm.ck_dir, 'include')
-    return [rocm_include, ck_include]
-
-
-def _rocm_lib_options() -> List[str]:
-    from torch.utils import cpp_extension
-
-    rocm_lib_dir = os.path.join(config.rocm.rocm_home, 'lib') if config.rocm.rocm_home else cpp_extension._join_rocm_home('lib')
-    hip_lib_dir = os.path.join(config.rocm.rocm_home, 'hip', 'lib') if config.rocm.rocm_home else cpp_extension._join_rocm_home('hip', 'lib')
-
-    return [
-        f"-L{rocm_lib_dir}",
-        f"-L{hip_lib_dir}",
-        "-lamdhip64",
-    ]
-
-
-def _rocm_compiler_options() -> List[str]:
-    opts = [
-        config.rocm.compile_opt_level,
-        "-x", 
-        "hip",
-        "-std=c++17",
-        f"--offload-arch={';'.join(config.rocm.arch) or 'native'}",
-        "-fno-gpu-rdc",
-        "-fPIC",
-        "-mllvm",
-        "-amdgpu-early-inline-all=true",
-        "-mllvm",
-        "-amdgpu-function-calls=false",
-        "-mllvm",
-        "-enable-post-misched=0",
-    ]
-    if config.rocm.is_debug:
-        opts += ["-DDEBUG_LOG=1", "-g"]
-    if config.rocm.save_temps:
-        opts += ["--save-temps=obj"]
-    if config.rocm.print_kernel_resource_usage:
-        opts += ["-Rpass-analysis=kernel-resource-usage"]
-    if config.rocm.flush_denormals:
-        opts += ["-fgpu-flush-denormals-to-zero"]
-    if config.rocm.use_fast_math:
-        opts += ["-ffast-math"]
-    return opts
-
-
-def _rocm_compiler() -> Optional[str]:
-    if is_linux():
-        if config.rocm.rocm_home:
-            return os.path.join(config.rocm.rocm_home, 'llvm', 'bin', 'clang')
-        try:
-            from torch.utils import cpp_extension
-            return cpp_extension._join_rocm_home('llvm', 'bin', 'clang')
-        except OSError:
-            # neither config.rocm.rocm_home nor env variable ROCM_HOME are set
-            return "clang"
-    return None
-
-
-@lru_cache(None)
-def _rocm_compiler_version() -> Optional[str]:
-    rocm_compiler = _rocm_compiler()
-    if not rocm_compiler:
-        return None
-    try:
-        import subprocess
-        return subprocess.check_output([rocm_compiler, "--version"], text=True)
-    except subprocess.CalledProcessError:
-        return None
-
-
-def rocm_compile_command(
-    src_files: List[str],
-    dst_file: str,
-    dst_file_ext: str,
-    extra_args: Optional[List[str]] = None,
-) -> str:
-    include_paths = _rocm_include_paths()
-    lib_options = _rocm_lib_options()
-    compiler_options = _rocm_compiler_options()
-    compiler = _rocm_compiler()
-    options = (
-        compiler_options
-        + (extra_args if extra_args else [])
-        + ["-I" + path for path in include_paths]
-        + lib_options
-    )
-    src_file = " ".join(src_files)
-    res = ""
-    if dst_file_ext == "o":
-        res = f"{compiler} {' '.join(options)} -c -o {dst_file} {src_file}"
-    elif dst_file_ext == "so":
-        options.append("-shared")
-        res = f"{compiler} {' '.join(options)} -o {dst_file} {src_file}"
-    elif dst_file_ext == "exe":
-        res = f"{compiler} {' '.join(options)} -o {dst_file} {src_file}"
-    else:
-        raise NotImplementedError(f"Unsupported output file suffix {dst_file_ext}!")
-    return res
-
-
 def cuda_compile_command(
     src_files: List[str],
     dst_file: str,
@@ -2855,7 +2752,7 @@ class CUDACodeCache:
     _SOURCE_CODE_SUFFIX = "cu"
 
     if torch.version.hip:
-        log.debug(f"HIP compiler version:\n{_rocm_compiler_version()}")
+        log.debug(f"HIP compiler version:\n{rocm_compiler_version()}")
 
     @classmethod
     def write(cls, source_code, dst_file_ext) -> Tuple[str, str]:
