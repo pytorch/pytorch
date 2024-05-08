@@ -4774,6 +4774,27 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         inp = torch.randn(10, 10)
         self.assertEqual(m(inp), opt_m(inp))
 
+    def test_nn_module_property_closure(self):
+        x = torch.randn(10, 10)
+
+        class Mod(torch.nn.Module):
+            @property
+            def y(self):
+                return torch.ones(10, 10) + x
+
+            def forward(self, x):
+                return x @ self.y
+
+        mod = Mod()
+
+        def fn(x):
+            return mod(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        inp = torch.randn(10, 10)
+        self.assertEqual(fn(inp), opt_fn(inp))
+
     def test_global_fn_mutation(self):
         def foo(x, y):
             return global_fn(x) + y
