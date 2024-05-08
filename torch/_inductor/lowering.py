@@ -36,6 +36,7 @@ from torch._prims_common import (
 )
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
+from torch.utils._triton import device_supports_triton_float8
 from .._dynamo.utils import import_submodule
 
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
@@ -545,7 +546,12 @@ def to_dtype(x: TensorBox, dtype: torch.dtype, copy=False):
 
 @register_lowering(prims.convert_element_type, type_promotion_kind=None)
 def _convert_element_type(x: TensorBox, dtype: torch.dtype):
-    if dtype.is_complex or x.get_dtype().is_complex:
+    is_complex = dtype.is_complex or x.get_dtype().is_complex
+    is_float8 = "float8" in str(dtype) or "float8" in str(x.get_dtype())
+    float8_and_unsupported = (
+        is_float8 and x.get_device().type == "cuda" and device_supports_triton_float8()
+    )
+    if is_complex or float8_and_unsupported:
         if x.get_size():
             # Decompose since aa aten fallback is more friendly for c++ codegen.
             # This decompostion doesn't work for empty tensor, which needs more investigation.

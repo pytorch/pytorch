@@ -3,6 +3,19 @@ import hashlib
 
 
 @functools.lru_cache(None)
+def device_supports_triton_float8() -> bool:
+    import torch
+
+    n = torch.cuda.device_count()
+    if n < 1:
+        return False
+    capabilities = {torch.cuda.get_device_capability(i) for i in range(n)}
+    min_capability = sorted(capabilities)[0]
+    # triton requires CUDA arch for native float8 support >= 89
+    return min_capability[0] >= 8 or (min_capability[0] == 8 and min_capability[1] >= 9)
+
+
+@functools.lru_cache(None)
 def has_triton_package() -> bool:
     try:
         import triton
