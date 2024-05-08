@@ -14041,6 +14041,7 @@
   python_module: linalg
   variants: function
   structured_delegate: linalg_vector_norm.out
+  tags: core
 
 - func: linalg_vector_norm.out(Tensor self, Scalar ord=2, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
