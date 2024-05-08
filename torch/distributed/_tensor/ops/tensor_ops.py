@@ -200,8 +200,7 @@ def new_factory_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
             )
         )
 
-        # if input shape is the same as output shape, we can just propagate input sharding
-        if tuple(input_shape) == tuple(output_shape):
+        if tuple(input_shape) == tuple(output_shape) and input_spec.is_sharded():
             # NOTE: for new_empty_strided, currently the non-replicate sharding
             #       is supported only when the shape is evenly shardable
             if (
