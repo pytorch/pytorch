@@ -1,7 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import contextlib
-import functools
-import operator
 from typing import cast, Dict, List, Optional, Sequence, Tuple, TYPE_CHECKING
 
 import torch
@@ -198,11 +196,22 @@ class OpDispatcher:
         # communicate the result to all ranks for some operators that return scalar value
         if output_sharding.output_spec is None:
             if op_call == aten.equal.default:
-                obj_list = [None for _ in range(dist.get_world_size())]
-                dist.all_gather_object(obj_list, local_results)  # type: ignore[possibly-undefined]
-                obj_list = list(filter(lambda x: x is not None, obj_list))
-                # perform reduce on the collection with AND op
-                local_results = functools.reduce(operator.and_, obj_list, True)
+                res_tensor_list = [
+                    torch.tensor(False, dtype=torch.bool, device=mesh.device_type)
+                    for _ in range(dist.get_world_size())
+                ]
+                if local_results is None:
+                    # this True value tensor serves as a placeholder for the all_gather
+                    local_results = torch.tensor(
+                        True, dtype=torch.bool, device=mesh.device_type
+                    )
+                else:
+                    local_results = torch.tensor(
+                        local_results, dtype=torch.bool, device=mesh.device_type
+                    )
+                # NOTE: this collective is performed over WORLD.
+                dist.all_gather(res_tensor_list, local_results)  # type: ignore[possibly-undefined]
+                local_results = all(t.item() for t in res_tensor_list)
 
         if _is_inplace_op(op_call):
             # inplace op should return self instead of re-wrapping
