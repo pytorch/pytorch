@@ -391,20 +391,21 @@ class TestFlopCounter(TestCase):
 
             return q, k, v
 
-        def get_dense_inputs(
-            batch_size,
-            n_heads,
-            max_seq_len_q,
-            max_seq_len_k,
-            head_dim,
-            head_dim_v,
-            dtype,
-        ):
-            dense_q = torch.randn(batch_size, n_heads, max_seq_len_q, head_dim, device="cuda", dtype=dtype, requires_grad=True)
-            dense_k = torch.randn(batch_size, n_heads, max_seq_len_k, head_dim, device="cuda", dtype=dtype, requires_grad=True)
-            dense_v = torch.randn(batch_size, n_heads, max_seq_len_k, head_dim_v, device="cuda", dtype=dtype, requires_grad=True)
+        def get_dense_flops(q, k, v, backend, with_backward=False):
+            def split_tensor(x):
+                return (
+                    y.unsqueeze(0).transpose(1, 2).detach().requires_grad_(True)
+                    for y in x.transpose(1, 2).unbind(0)
+                )
+            q_tensors = split_tensor(q)
+            k_tensors = split_tensor(k)
+            v_tensors = split_tensor(v)
 
-            return dense_q, dense_k, dense_v
+            flops = 0
+            for q_i, k_i, v_i in zip(q_tensors, k_tensors, v_tensors):
+                flops += get_flops(q_i, k_i, v_i, backend=backend, with_backward=with_backward)
+
+            return flops
 
         uniform_config = {
             "batch_size": 4,
@@ -428,28 +429,28 @@ class TestFlopCounter(TestCase):
         }
 
         self.assertEqual(
-            get_flops(*get_dense_inputs(**uniform_config), backend="flash", with_backward=False),
+            get_dense_flops(*get_nested_inputs(**uniform_config), backend="flash", with_backward=False),
             get_flops(*get_nested_inputs(**uniform_config), backend="flash", with_backward=False),
         )
         self.assertEqual(
-            get_flops(*get_dense_inputs(**uniform_config), backend="mem_efficient", with_backward=False),
+            get_dense_flops(*get_nested_inputs(**uniform_config), backend="mem_efficient", with_backward=False),
             get_flops(*get_nested_inputs(**uniform_config), backend="mem_efficient", with_backward=False),
         )
         self.assertEqual(
-            get_flops(*get_dense_inputs(**differing_config), backend="mem_efficient", with_backward=False),
+            get_dense_flops(*get_nested_inputs(**differing_config), backend="mem_efficient", with_backward=False),
             get_flops(*get_nested_inputs(**differing_config), backend="mem_efficient", with_backward=False),
         )
 
         self.assertEqual(
-            get_flops(*get_dense_inputs(**uniform_config), backend="flash", with_backward=True),
+            get_dense_flops(*get_nested_inputs(**uniform_config), backend="flash", with_backward=True),
             get_flops(*get_nested_inputs(**uniform_config), backend="flash", with_backward=True),
         )
         self.assertEqual(
-            get_flops(*get_dense_inputs(**uniform_config), backend="mem_efficient", with_backward=True),
+            get_dense_flops(*get_nested_inputs(**uniform_config), backend="mem_efficient", with_backward=True),
             get_flops(*get_nested_inputs(**uniform_config), backend="mem_efficient", with_backward=True),
         )
         self.assertEqual(
-            get_flops(*get_dense_inputs(**differing_config), backend="mem_efficient", with_backward=True),
+            get_dense_flops(*get_nested_inputs(**differing_config), backend="mem_efficient", with_backward=True),
             get_flops(*get_nested_inputs(**differing_config), backend="mem_efficient", with_backward=True),
         )
 

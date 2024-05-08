@@ -1,7 +1,7 @@
 import torch
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from .module_tracker import ModuleTracker
-from typing import List, Any, Dict, Optional, Union
+from typing import List, Any, Dict, Optional, Union, Tuple, Iterator
 from collections import defaultdict
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch._decomp import register_decomposition
@@ -249,39 +249,43 @@ def sdpa_flop(query_shape, key_shape, value_shape, *args, out_shape=None, **kwar
     return sdpa_flop_count(query_shape, key_shape, value_shape)
 
 
-def pad_flash_attention_nested_shapes(
+def unpack_flash_attention_nested_shapes(
     *,
-    query_shape,
-    key_shape,
-    value_shape,
-    grad_out_shape=None,
-    cum_seq_q_shape,
-    cum_seq_k_shape,
+    query,
+    key,
+    value,
+    grad_out=None,
+    cum_seq_q,
+    cum_seq_k,
     max_q,
     max_k,
-):
-    if cum_seq_q_shape is not None:
+) -> Iterator[Tuple[int, int, int, Optional[int]]]:
+    if cum_seq_q is not None:
         # This means we should be dealing with a Nested Jagged Tensor query.
         # The inputs will have shape                  (sum(sequence len), heads, dimension)
         # In comparison, non-Nested inputs have shape (batch, heads, sequence len, dimension)
         # To deal with this, we convert to a shape of (batch, heads, max_seq_len, dimension)
         # So the flops calculation in this case is an overestimate of the actual flops.
-        assert len(key_shape) == 3
-        assert len(value_shape) == 3
-        assert grad_out_shape is None or grad_out_shape == query_shape
-        _, h_q, d_q = query_shape
-        _, h_k, d_k = key_shape
-        _, h_v, d_v = value_shape
-        assert cum_seq_q_shape is not None
-        assert cum_seq_k_shape is not None
-        b = cum_seq_q_shape[0] - 1
-        assert cum_seq_q_shape == cum_seq_k_shape
-        new_query_shape = (b, h_q, max_q, d_q)
-        new_key_shape = (b, h_k, max_k, d_k)
-        new_value_shape = (b, h_v, max_k, d_v)
-        new_grad_out_shape = new_query_shape if grad_out_shape is not None else None
-        return new_query_shape, new_key_shape, new_value_shape, new_grad_out_shape
-    return query_shape, key_shape, value_shape, grad_out_shape
+        assert len(key.shape) == 3
+        assert len(value.shape) == 3
+        assert grad_out is None or grad_out.shape == query.shape
+        _, h_q, d_q = query.shape
+        _, h_k, d_k = key.shape
+        _, h_v, d_v = value.shape
+        assert cum_seq_q is not None
+        assert cum_seq_k is not None
+        assert cum_seq_q.shape == cum_seq_k.shape
+        seq_q_lengths = (cum_seq_q[1:] - cum_seq_q[:-1]).tolist()
+        seq_k_lengths = (cum_seq_k[1:] - cum_seq_k[:-1]).tolist()
+        for (seq_q_len, seq_k_len) in zip(seq_q_lengths, seq_k_lengths):
+            new_query_shape = (1, h_q, seq_q_len, d_q)
+            new_key_shape = (1, h_k, seq_k_len, d_k)
+            new_value_shape = (1, h_v, seq_k_len, d_v)
+            new_grad_out_shape = new_query_shape if grad_out is not None else None
+            yield new_query_shape, new_key_shape, new_value_shape, new_grad_out_shape
+        return
+
+    yield query.shape, key.shape, value.shape, grad_out.shape if grad_out is not None else None
 
 
 def pad_efficient_attention_nested_shapes(
@@ -322,13 +326,54 @@ def pad_efficient_attention_nested_shapes(
     return query_shape, key_shape, value_shape, grad_out_shape
 
 
-@register_flop_formula(aten._flash_attention_forward)
+def unpack_efficient_attention_nested_shapes(
+    *,
+    query,
+    key,
+    value,
+    grad_out=None,
+    cu_seqlens_q,
+    cu_seqlens_k,
+    max_seqlen_q,
+    max_seqlen_k,
+):
+    if cu_seqlens_q is not None:
+        # Unlike flash_attention_forward, we get a 4D tensor instead of a 3D tensor for efficient attention.
+        #
+        # This means we should be dealing with a Nested Jagged Tensor query.
+        # The inputs will have shape                  (sum(sequence len), heads, dimension)
+        # In comparison, non-Nested inputs have shape (batch, heads, sequence len, dimension)
+        # To deal with this, we convert to a shape of (batch, heads, max_seq_len, dimension)
+        # So the flops calculation in this case is an overestimate of the actual flops.
+        assert len(key.shape) == 4
+        assert len(value.shape) == 4
+        assert grad_out is None or grad_out.shape == query.shape
+        _, _, h_q, d_q = query.shape
+        _, _, h_k, d_k = key.shape
+        _, _, h_v, d_v = value.shape
+        assert cu_seqlens_q is not None
+        assert cu_seqlens_k is not None
+        assert cu_seqlens_q.shape == cu_seqlens_k.shape
+        seqlens_q = (cu_seqlens_q[1:] - cu_seqlens_q[:-1]).tolist()
+        seqlens_k = (cu_seqlens_k[1:] - cu_seqlens_k[:-1]).tolist()
+        for len_q, len_k in zip(seqlens_q, seqlens_k):
+            new_query_shape = (1, h_q, len_q, d_q)
+            new_key_shape = (1, h_k, len_k, d_k)
+            new_value_shape = (1, h_v, len_k, d_v)
+            new_grad_out_shape = new_query_shape if grad_out is not None else None
+            yield new_query_shape, new_key_shape, new_value_shape, new_grad_out_shape
+        return
+
+    yield query.shape, key_shape, value_shape, grad_out.shape if grad_out is not None else None
+
+
+@register_flop_formula(aten._flash_attention_forward, get_raw=True)
 def _flash_attention_forward_flop(
-    query_shape,
-    key_shape,
-    value_shape,
-    cum_seq_q_shape,
-    cum_seq_k_shape,
+    query,
+    key,
+    value,
+    cum_seq_q,
+    cum_seq_k,
     max_q,
     max_k,
     *args,
@@ -337,26 +382,31 @@ def _flash_attention_forward_flop(
 ) -> int:
     """Count flops for self-attention."""
     # NB: We aren't accounting for causal attention here
-    query_shape, key_shape, value_shape, _ = pad_flash_attention_nested_shapes(
-        query_shape=query_shape,
-        key_shape=key_shape,
-        value_shape=value_shape,
-        cum_seq_q_shape=cum_seq_q_shape,
-        cum_seq_k_shape=cum_seq_k_shape,
+    # in case this is a nested tensor, we unpack the individual batch elements
+    # and then sum the flops per batch element
+    sizes = unpack_flash_attention_nested_shapes(
+        query=query,
+        key=key,
+        value=value,
+        cum_seq_q=cum_seq_q,
+        cum_seq_k=cum_seq_k,
         max_q=max_q,
         max_k=max_k,
     )
-    return sdpa_flop_count(query_shape, key_shape, value_shape)
+    return sum(
+        sdpa_flop_count(query_shape, key_shape, value_shape)
+        for query_shape, key_shape, value_shape, _ in sizes
+    )
 
 
-@register_flop_formula(aten._efficient_attention_forward)
+@register_flop_formula(aten._efficient_attention_forward, get_raw=True)
 def _efficient_attention_forward_flop(
-    query_shape,
-    key_shape,
-    value_shape,
-    bias_shape,
-    cu_seqlens_q_shape,
-    cu_seqlens_k_shape,
+    query,
+    key,
+    value,
+    bias,
+    cu_seqlens_q,
+    cu_seqlens_k,
     max_seqlen_q,
     max_seqlen_k,
     *args,
@@ -364,16 +414,21 @@ def _efficient_attention_forward_flop(
 ) -> int:
     """Count flops for self-attention."""
     # NB: We aren't accounting for causal attention here
-    query_shape, key_shape, value_shape, _ = pad_efficient_attention_nested_shapes(
-        query_shape=query_shape,
-        key_shape=key_shape,
-        value_shape=value_shape,
-        cu_seqlens_q_shape=cu_seqlens_q_shape,
-        cu_seqlens_k_shape=cu_seqlens_k_shape,
+    # in case this is a nested tensor, we unpack the individual batch elements
+    # and then sum the flops per batch element
+    sizes = unpack_efficient_attention_nested_shapes(
+        query=query,
+        key=key,
+        value=value,
+        cu_seqlens_q=cu_seqlens_q,
+        cu_seqlens_k=cu_seqlens_k,
         max_seqlen_q=max_seqlen_q,
         max_seqlen_k=max_seqlen_k,
     )
-    return sdpa_flop_count(query_shape, key_shape, value_shape)
+    return sum(
+        sdpa_flop_count(query_shape, key_shape, value_shape)
+        for query_shape, key_shape, value_shape, _ in sizes
+    )
 
 
 def sdpa_backward_flop_count(grad_out_shape, query_shape, key_shape, value_shape):
@@ -408,62 +463,68 @@ def sdpa_backward_flop(grad_out_shape, query_shape, key_shape, value_shape, *arg
     """Count flops for self-attention backward."""
     return sdpa_backward_flop_count(grad_out_shape, query_shape, key_shape, value_shape)
 
-@register_flop_formula(aten._flash_attention_backward)
+@register_flop_formula(aten._flash_attention_backward, get_raw=True)
 def _flash_attention_backward_flop(
-    grad_out_shape,
-    query_shape,
-    key_shape,
-    value_shape,
-    _out_shape,  # named _out_shape to avoid kwarg collision with out_shape created in wrapper
-    logsumexp_shape,
-    cum_seq_q_shape,
-    cum_seq_k_shape,
+    grad_out,
+    query,
+    key,
+    value,
+    out,  # named _out_shape to avoid kwarg collision with out_shape created in wrapper
+    logsumexp,
+    cum_seq_q,
+    cum_seq_k,
     max_q,
     max_k,
     *args,
-    out_shape=None,
     **kwargs,
 ) -> int:
-    query_shape, key_shape, value_shape, grad_out_shape = pad_flash_attention_nested_shapes(
-        query_shape=query_shape,
-        key_shape=key_shape,
-        value_shape=value_shape,
-        grad_out_shape=grad_out_shape,
-        cum_seq_q_shape=cum_seq_q_shape,
-        cum_seq_k_shape=cum_seq_k_shape,
+    # in case this is a nested tensor, we unpack the individual batch elements
+    # and then sum the flops per batch element
+    shapes = unpack_flash_attention_nested_shapes(
+        query=query,
+        key=key,
+        value=value,
+        grad_out=grad_out,
+        cum_seq_q=cum_seq_q,
+        cum_seq_k=cum_seq_k,
         max_q=max_q,
         max_k=max_k,
     )
-    return sdpa_backward_flop_count(grad_out_shape, query_shape, key_shape, value_shape)
+    return sum(
+        sdpa_backward_flop_count(grad_out_shape, query_shape, key_shape, value_shape)
+        for query_shape, key_shape, value_shape, grad_out_shape in shapes
+    )
 
 
-@register_flop_formula(aten._efficient_attention_backward)
+@register_flop_formula(aten._efficient_attention_backward, get_raw=True)
 def _efficient_attention_backward_flop(
-    grad_out_shape,
-    query_shape,
-    key_shape,
-    value_shape,
-    bias_shape,
-    _out_shape,  # named _out_shape to avoid kwarg collision with out_shape created in wrapper
-    cu_seqlens_q_shape,
-    cu_seqlens_k_shape,
+    grad_out,
+    query,
+    key,
+    value,
+    bias,
+    out,  # named _out to avoid kwarg collision with out created in wrapper
+    cu_seqlens_q,
+    cu_seqlens_k,
     max_seqlen_q,
     max_seqlen_k,
     *args,
-    out_shape=None,
     **kwargs,
 ) -> int:
-    query_shape, key_shape, value_shape, grad_out_shape = pad_efficient_attention_nested_shapes(
-        query_shape=query_shape,
-        key_shape=key_shape,
-        value_shape=value_shape,
-        grad_out_shape=grad_out_shape,
-        cu_seqlens_q_shape=cu_seqlens_q_shape,
-        cu_seqlens_k_shape=cu_seqlens_k_shape,
+    shapes = unpack_efficient_attention_nested_shapes(
+        query=query,
+        key=key,
+        value=value,
+        grad_out=grad_out,
+        cu_seqlens_q=cu_seqlens_q,
+        cu_seqlens_k=cu_seqlens_k,
         max_seqlen_q=max_seqlen_q,
         max_seqlen_k=max_seqlen_k,
     )
-    return sdpa_backward_flop_count(grad_out_shape, query_shape, key_shape, value_shape)
+    return sum(
+        sdpa_backward_flop_count(grad_out_shape, query_shape, key_shape, value_shape)
+        for query_shape, key_shape, value_shape, grad_out_shape in shapes
+    )
 
 
 flop_registry = {
