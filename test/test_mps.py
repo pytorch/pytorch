@@ -9337,6 +9337,14 @@ class TestViewOpsMPS(TestCaseMPS):
         v[0, 1] = 0
         self.assertEqual(t[1, 0], v[0, 1])
 
+    def test_inplace_view_add(self):
+        # https://github.com/pytorch/pytorch/issues/96153
+        t_mps = torch.ones((2, 6,), device='mps')[1].reshape(2, 3)
+        t_cpu = torch.ones((2, 6,), device='cpu')[1].reshape(2, 3)
+        t_mps = t_mps + 1
+        t_cpu = t_cpu + 1
+        self.assertEqual(t_mps, t_cpu)
+
     def test_t_inplace_view(self, device="mps"):
         t = torch.ones(5, 5, device=device)
         v = t.view_as(t)
