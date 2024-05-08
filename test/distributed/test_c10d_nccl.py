@@ -4620,7 +4620,9 @@ class NCCLTraceTest(NCCLTraceTestBase):
                 self.assertEqual(
                     t["entries"][p2p_op_idx]["profiling_name"], profiling_name
                 )
-                self.assertEqual(t["entries"][p2p_op_idx]["collective_seq_id"], expected_seq)
+                self.assertEqual(
+                    t["entries"][p2p_op_idx]["collective_seq_id"], expected_seq
+                )
                 self.assertEqual(t["entries"][p2p_op_idx]["op_id"], expected_op_id)
                 expected_op_id += 1
                 self.assertEqual(t["entries"][p2p_op_idx]["input_sizes"], [input_sizes])
@@ -4640,7 +4642,9 @@ class NCCLTraceTest(NCCLTraceTestBase):
             self.assertEqual(
                 t["entries"][coalesced_op]["profiling_name"], "nccl:coalesced"
             )
-            self.assertEqual(t["entries"][coalesced_op]["collective_seq_id"], expected_seq)
+            self.assertEqual(
+                t["entries"][coalesced_op]["collective_seq_id"], expected_seq
+            )
             expected_seq += 1
             self.assertEqual(t["entries"][coalesced_op]["state"], "completed")
             self.assertEqual(t["entries"][coalesced_op]["input_sizes"], [])

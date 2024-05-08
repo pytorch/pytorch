@@ -1050,7 +1050,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Counting for the sequential number of NCCL collective call.
   // (specifically, how many actual kernels we launched, which differs from
   // op_id_ when coalescing is enabled)
-  uint64_t seq_{0};
+  uint64_t seqCollective_{0};
+
+  // Counting for the sequential number of NCCL P2P calls.
+  uint64_t seqP2p_{0};
 
   // Incrementing counter for logical operations (collective or p2p) issued on
   // the ProcessGroup
@@ -1064,10 +1067,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // the name of the last collective enqueued into workMetaList_
   std::string lastEnqueuedWorkName_;
 
-  // the sequential number of the last collective started as the kernal
+  // the sequential number of the last collective started as the kernel
   int64_t lastStartedSeq_{-1};
 
-  // the name of the last collective started as the kernal
+  // the name of the last collective started as the kernel
   std::string lastStartedWorkName_;
 
   // the sequential number of the last colletive completed marked by
