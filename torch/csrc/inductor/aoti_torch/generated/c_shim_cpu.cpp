@@ -644,9 +644,9 @@ AOTITorchError aoti_torch_cpu_convolution_backward(AtenTensorHandle grad_output,
         auto tmp_result = at::compositeexplicitautograd::convolution_backward_symint(
             *tensor_handle_to_tensor_pointer(grad_output), *tensor_handle_to_tensor_pointer(input), *tensor_handle_to_tensor_pointer(weight), pointer_to_optional_list<c10::SymInt>(bias_sizes, bias_sizes_len_), pointer_to_list<c10::SymInt>(stride, stride_len_), pointer_to_list<c10::SymInt>(padding, padding_len_), pointer_to_list<c10::SymInt>(dilation, dilation_len_), transposed, pointer_to_list<c10::SymInt>(output_padding, output_padding_len_), groups, pointer_to_list<3>(output_mask)
         );
-        *ret0 = new_tensor_handle(std::move(std::get<0>(tmp_result)));;
-        *ret1 = new_tensor_handle(std::move(std::get<1>(tmp_result)));;
-        *ret2 = new_tensor_handle(std::move(std::get<2>(tmp_result)));;
+        if (ret0) { *ret0 = new_tensor_handle(std::move(std::get<0>(tmp_result)));; }
+        if (ret1) { *ret1 = new_tensor_handle(std::move(std::get<1>(tmp_result)));; }
+        if (ret2) { *ret2 = new_tensor_handle(std::move(std::get<2>(tmp_result)));; }
     });
 }
 
