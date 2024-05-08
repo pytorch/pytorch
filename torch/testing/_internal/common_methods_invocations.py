@@ -8730,8 +8730,8 @@ def sample_inputs_efficient_attention_forward(op_info, device, dtype, requires_g
     samples.append(
         SampleInput(
             make((32, 2, 64)).view(-1, 8, 8).unsqueeze(0),
-            make((6, 64)).view(-1, 8, 8).unsqueeze(0),
-            make((6, 64)).view(-1, 8, 8).unsqueeze(0),
+            make((64, 64)).view(-1, 8, 8).unsqueeze(0),
+            make((64, 64)).view(-1, 8, 8).unsqueeze(0),
             bias=None,
             cu_seqlens_q=torch.arange(0, 32 * 2 + 2, 2, dtype=torch.int32, device=device),
             cu_seqlens_k=cu_seqlens_k,
