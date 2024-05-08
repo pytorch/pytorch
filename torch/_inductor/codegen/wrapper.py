@@ -1044,11 +1044,6 @@ class WrapperCodeGen(CodeGen):
         )
 
     def benchmark_compiled_module(self, output):
-        def add_torchbind_input(name, value):
-            import pickle
-
-            output.writeline(f"{name} = pickle.loads({pickle.dumps(value)!r})")
-
         output.writelines(
             ["", "", "def benchmark_compiled_module(times=10, repeat=10):"]
         )

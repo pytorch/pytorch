@@ -56,7 +56,6 @@ class TestTorchbind(TestCase):
         compiled = torch._inductor.compile(ep.module(), (torch.ones(2, 3),))
 
         new_res = compiled(torch.ones(2, 3))
-        breakpoint()
         self.assertTrue(torch.allclose(orig_res, new_res))
 
 
