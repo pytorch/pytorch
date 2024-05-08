@@ -4021,16 +4021,14 @@ class TestNestedTensorSubclass(TestCase):
         nt1_t, nt2_t, nt3_t, nt4_t = (x.transpose(1, 2) for x in (nt1, nt2, nt3, nt4))
         check_size(nt1_t, nt2_t, nt3_t, nt4_t)
 
-    # Doesn't work until we have real views
-    @xfailIfTorchDynamo
     # Note 1: Math fallback doesn't work with bfloat16 on CUDA
     # Note 2: ROCm doesn't support flash attention or mem_efficient attention for NT
     @unittest.skipIf(
         TEST_WITH_ROCM,
         "ROCm doesn't support flash attention or mem_efficient attention for NT",
     )
-    @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32] if
-                 SM80OrLater else [torch.float16, torch.float32])
+    @dtypes(*([torch.float16, torch.bfloat16, torch.float32] if SM80OrLater
+            else [torch.float16, torch.float32]))
     def test_sdpa(self, device, dtype):
         batch_size = 1
         emb_dims = 128
@@ -4088,7 +4086,8 @@ class TestNestedTensorSubclass(TestCase):
         attn_d1 = torch.nn.functional.scaled_dot_product_attention(q_d1_t, k_d1_t, v_d1_t).transpose(1, 2)
         attn_nt = torch.nn.functional.scaled_dot_product_attention(q_nt_t, k_nt_t, v_nt_t).transpose(1, 2)
 
-        self.assertEqual(attn_d1, attn_nt.unbind()[0].unsqueeze(0), atol=output_ref_atol, rtol=output_ref_rtol)
+        self.assertEqual(attn_d1, attn_nt.values().unsqueeze(0),
+                         atol=output_ref_atol, rtol=output_ref_rtol)
 
         # Simple case: 2 sentences, no extra params
         x_d2 = sen2.unsqueeze(0)
@@ -4216,8 +4215,6 @@ class TestNestedTensorSubclass(TestCase):
         output_dense = F.scaled_dot_product_attention(query._values, key._values, value._values)
         self.assertEqual(output._values, output_dense)
 
-    # Doesn't work until we have real views
-    @xfailIfTorchDynamo
     @onlyCUDA
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FUSED_ATTENTION,
