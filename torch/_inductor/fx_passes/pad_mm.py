@@ -155,7 +155,7 @@ def pad_addmm(
         mat2
         if mat2_pre_padded
         else pad_mat2(
-            mat2, k_padded_length=k_padded_length, n_padded_length=k_padded_length
+            mat2, k_padded_length=k_padded_length, n_padded_length=n_padded_length
         )
     )
     if input is not None:
@@ -447,7 +447,7 @@ def should_pad_mm(match: Match) -> bool:
     )
 
 
-def pad_mat1(mat1, m_padded_length, k_padded_length, is_bmm=False):
+def pad_mat1(mat1, *, m_padded_length, k_padded_length, is_bmm=False):
     if k_padded_length != 0 or m_padded_length != 0:
         # dim order is reversed for constant_pad_nd, for every dim we specify right and left padding
         pad_arg = [0, k_padded_length, 0, m_padded_length]
@@ -457,7 +457,7 @@ def pad_mat1(mat1, m_padded_length, k_padded_length, is_bmm=False):
     return mat1
 
 
-def pad_mat2(mat2, k_padded_length, n_padded_length, is_bmm=False):
+def pad_mat2(mat2, *,  k_padded_length, n_padded_length, is_bmm=False):
     if k_padded_length != 0 or n_padded_length != 0:
         # dim order is reversed for constant_pad_nd, for every dim we specify right and left padding
         pad_arg = [0, n_padded_length, 0, k_padded_length]
@@ -488,7 +488,7 @@ def pad_mm(
         mat2
         if mat2_pre_padded
         else pad_mat2(
-            mat2, k_padded_length=k_padded_length, n_padded_length=k_padded_length
+            mat2, k_padded_length=k_padded_length, n_padded_length=n_padded_length
         )
     )
     res = call_mm(mat1_padded, mat2_padded)
@@ -548,7 +548,7 @@ def pad_bmm(
         else pad_mat2(
             mat2,
             k_padded_length=k_padded_length,
-            n_padded_length=k_padded_length,
+            n_padded_length=n_padded_length,
             is_bmm=True,
         )
     )
