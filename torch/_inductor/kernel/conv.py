@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import functools
 import logging
-from typing import cast, List, Optional, Sequence, Tuple, TypedDict
+from typing import cast, List, Optional, Sequence, Tuple, TYPE_CHECKING, TypedDict
 
 import torch
 from .. import config, ir
-from ..ir import TensorBox
 
 from ..lowering import (
     add_layout_constraint,
@@ -29,6 +28,9 @@ from ..utils import (
 )
 from ..virtualized import V
 from .mm_common import filtered_configs
+
+if TYPE_CHECKING:
+    from ..ir import TensorBox
 
 log = logging.getLogger(__name__)
 
