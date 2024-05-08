@@ -585,6 +585,7 @@ def _export_non_strict(
     )
 
     from torch._guards import detect_fake_mode
+
     fake_mode = detect_fake_mode(flat_args)
 
     if should_insert_runtime_assertion:
