@@ -32,6 +32,7 @@ TRITON_VERSION           ?=
 BUILD_ARGS                = --build-arg BASE_IMAGE=$(BASE_IMAGE) \
 							--build-arg PYTHON_VERSION=$(PYTHON_VERSION) \
 							--build-arg CUDA_VERSION=$(CUDA_VERSION) \
+							--build-arg CUDA_VERSION_SHORT=$(CUDA_VERSION_SHORT) \
 							--build-arg CUDNN_VERSION=$(CUDNN_VERSION) \
 							--build-arg CUDNN_VERSION_SHORT=$(CUDNN_VERSION_SHORT) \
 							--build-arg CUDA_CHANNEL=$(CUDA_CHANNEL) \
