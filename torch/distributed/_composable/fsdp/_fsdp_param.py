@@ -209,6 +209,11 @@ class FSDPParam:
             global_tp_mesh_dim = _mesh_resources.get_parent_mesh_dim(tp_mesh)
             assert global_dp_mesh_dim is not None  # mypy
             assert global_tp_mesh_dim is not None  # mypy
+            # for PP, DP, TP case, dp mesh dim would be 1, tp mesh dim would be 2
+            # DP/TP would only live in the inner most 2-3 dims
+            if dp_global_mesh.ndim > 2:
+                global_dp_mesh_dim = global_dp_mesh_dim - (dp_global_mesh.ndim - 2)
+                global_tp_mesh_dim = global_tp_mesh_dim - (dp_global_mesh.ndim - 2)
             # TODO: Hard code FSDP + TP; need to support HSDP + TP
             global_placements[global_dp_mesh_dim] = Shard(0)
             global_placements[global_tp_mesh_dim] = self._tp_spec.placements[0]
