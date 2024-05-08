@@ -28,6 +28,7 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.exc import UserError, UserErrorType
 from torch._dynamo.source import ConstantSource
 from torch._export.passes.collect_tracepoints_pass import CollectTracepointsPass
+from torch._export.non_strict_utils import make_constraints
 from torch._functorch.aot_autograd import aot_export_module, GraphSignature
 from torch._functorch.eager_transforms import functionalize
 from torch._guards import detect_fake_mode
@@ -39,10 +40,10 @@ from torch._utils_internal import log_export_usage
 from torch.export._tree_utils import reorder_kwargs
 from torch.export._unlift import _create_stateful_graph_module
 from torch.export.dynamic_shapes import (
-    _process_constraints,
     Constraint,
     dims,
     dynamic_dim,
+    _combine_args,
 )
 from torch.export.exported_program import (
     _disable_prexisiting_fake_mode,
@@ -175,7 +176,14 @@ def capture_pre_autograd_graph(
                 _restore_state_dict(f, m)
 
             flat_args, _ = pytree.tree_flatten((args, kwargs or {}))
-            range_constraints = _process_constraints(fake_mode, m, 0, flat_args)
+            combined_args = _combine_args(f, args, kwargs)
+            range_constraints = make_constraints(
+                fake_mode,
+                m,
+                combined_args,
+                dynamic_shapes,
+                0,
+            )
 
             module = _create_stateful_graph_module(
                 m,

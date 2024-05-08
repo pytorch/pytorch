@@ -28,6 +28,7 @@ from torch.testing._internal.common_utils import (
     get_report_path,
     IS_CI,
     IS_MACOS,
+    IS_WINDOWS,
     parser as common_parser,
     retry_shell,
     set_cwd,
@@ -36,6 +37,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
+    TEST_WITH_SLOW,
     TEST_WITH_SLOW_GRADCHECK,
 )
 
@@ -58,6 +60,7 @@ from tools.testing.discover_tests import (
 )
 from tools.testing.do_target_determination_for_s3 import import_results
 from tools.testing.target_determination.gen_artifact import gen_ci_artifact
+from tools.testing.target_determination.heuristics.utils import get_pr_number
 
 from tools.testing.test_run import TestRun
 from tools.testing.test_selections import (
@@ -72,7 +75,7 @@ HAVE_TEST_SELECTION_TOOLS = True
 # Make sure to remove REPO_ROOT after import is done
 sys.path.remove(str(REPO_ROOT))
 
-
+TEST_CONFIG = os.getenv("TEST_CONFIG", "")
 RERUN_DISABLED_TESTS = os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1"
 DISTRIBUTED_TEST_PREFIX = "distributed"
 INDUCTOR_TEST_PREFIX = "inductor"
@@ -191,6 +194,8 @@ XPU_TEST = [
 RUN_PARALLEL_BLOCKLIST = [
     "test_cpp_extensions_jit",
     "test_cpp_extensions_open_device_registration",
+    "test_cpp_extensions_stream_and_event",
+    "test_cpp_extensions_mtia_backend",
     "test_jit_disabled",
     "test_mobile_optimizer",
     "test_multiprocessing",
@@ -214,25 +219,19 @@ CI_SERIAL_LIST = [
     "test_fake_tensor",
     "test_cpp_api_parity",
     "test_reductions",
-    "test_cuda",
-    "test_cuda_expandable_segments",
     "test_fx_backends",
-    "test_linalg",
     "test_cpp_extensions_jit",
     "test_torch",
     "test_tensor_creation_ops",
-    "test_sparse_csr",
     "test_dispatch",
     "test_python_dispatch",  # torch.library creation and deletion must be serialized
     "test_spectral_ops",  # Cause CUDA illegal memory access https://github.com/pytorch/pytorch/issues/88916
     "nn/test_pooling",
     "nn/test_convolution",  # Doesn't respect set_per_process_memory_fraction, results in OOM for other tests in slow gradcheck
     "distributions/test_distributions",
-    "test_modules",  # failed test due to mismatched elements
     "functorch/test_vmap",  # OOM
     "test_fx",  # gets SIGKILL
     "test_dataloader",  # frequently hangs for ROCm
-    "test_schema_check",  # Cause CUDA illegal memory access https://github.com/pytorch/pytorch/issues/95749
     "functorch/test_memory_efficient_fusion",  # Cause CUDA OOM on ROCm
     "test_utils",  # OOM
     "test_sort_and_select",  # OOM
@@ -487,19 +486,23 @@ def run_test(
         os.close(log_fd)
 
     command = (launcher_cmd or []) + executable + argv
-    should_retry = "--subprocess" not in command and not RERUN_DISABLED_TESTS
-    is_slow = "slow" in os.environ.get("TEST_CONFIG", "") or "slow" in os.environ.get(
-        "BUILD_ENVRIONMENT", ""
+    should_retry = (
+        "--subprocess" not in command
+        and not RERUN_DISABLED_TESTS
+        and not is_cpp_test
+        and "-n" not in command
     )
     timeout = (
         None
         if not options.enable_timeout
         else THRESHOLD * 6
-        if is_slow
+        if TEST_WITH_SLOW
         else THRESHOLD * 3
         if should_retry
         and isinstance(test_module, ShardedTest)
         and test_module.time is not None
+        else THRESHOLD * 3
+        if is_cpp_test
         else None
     )
     print_to_stderr(f"Executing {command} ... [{datetime.now()}]")
@@ -528,6 +531,7 @@ def run_test(
                 stderr=output,
                 env=env,
                 timeout=timeout,
+                retries=0,
             )
 
             # Pytest return code 5 means no test is collected. Exit code 4 is
@@ -1180,12 +1184,16 @@ def parse_args():
             or TEST_WITH_ASAN
             or (
                 strtobool(os.environ.get("TD_DISTRIBUTED", "False"))
-                and os.getenv("TEST_CONFIG") == "distributed"
+                and TEST_CONFIG == "distributed"
                 and TEST_CUDA
             )
+            or (IS_WINDOWS and not TEST_CUDA)
+            or TEST_CONFIG == "nogpu_AVX512"
+            or TEST_CONFIG == "nogpu_NO_AVX2"
         )
-        and os.getenv("BRANCH", "") != "main"
-        and not strtobool(os.environ.get("NO_TD", "False")),
+        and get_pr_number() is not None
+        and not strtobool(os.environ.get("NO_TD", "False"))
+        and not TEST_WITH_SLOW,
     )
     parser.add_argument(
         "additional_unittest_args",
