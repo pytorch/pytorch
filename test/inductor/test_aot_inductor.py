@@ -310,27 +310,24 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(self.device), example_inputs)
 
-    # TODO: unify freezing test into one function
     def test_freezing(self):
-        for dtype in [torch.float32, torch.bfloat16]:
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.weight = torch.randn(9, 10, device=device)
+                self.padding = torch.randn(1, 10, device=device)
 
-            class Model(torch.nn.Module):
-                def __init__(self, device):
-                    super().__init__()
-                    self.weight = torch.randn(10, 10, device=device).to(dtype)
-                    # self.padding = torch.randn(1, 512, device=device).to(dtype)
+            def forward(self, x, y):
+                padded_weight = torch.cat((self.weight, self.padding), dim=0)
+                return x + torch.nn.functional.linear(y, padded_weight)
 
-                def forward(self, y):
-                    # padded_weight = torch.cat((self.weight, self.padding), dim=0)
-                    return torch.nn.functional.linear(y, self.weight)
+        example_inputs = (
+            torch.randn(10, 10, device=self.device),
+            torch.randn(10, 10, device=self.device),
+        )
 
-            example_inputs = (
-                # torch.randn(10, 10, device=self.device).to(dtype),
-                torch.randn(10, 10, device=self.device).to(dtype),
-            )
-
-            with config.patch({"freezing": True}):
-                self.check_model(Model(self.device), example_inputs)
+        with config.patch({"freezing": True}):
+            self.check_model(Model(self.device), example_inputs)
 
     def test_conv_freezing(self):
         for dtype, groups in itertools.product([torch.bfloat16, torch.float], [1, 2]):
@@ -378,6 +375,22 @@ class AOTInductorTestsTemplate:
             example_inputs = (torch.randn(1, iC, 3, 3, device=self.device).to(dtype),)
             with config.patch({"freezing": True}):
                 self.check_model(Model(self.device), example_inputs)
+
+    def test_linear_freezing(self):
+        for dtype in [torch.float32, torch.bfloat16]:
+
+            class LinearModel(torch.nn.Module):
+                def __init__(self, device):
+                    super().__init__()
+                    self.weight = torch.randn(10, 10, device=device).to(dtype)
+
+                def forward(self, y):
+                    return torch.nn.functional.linear(y, self.weight)
+
+            example_inputs = (torch.randn(10, 10, device=self.device).to(dtype),)
+
+            with config.patch({"freezing": True}):
+                self.check_model(LinearModel(self.device), example_inputs)
 
     @torch._inductor.config.patch(
         pre_grad_fusion_options={
@@ -2819,6 +2832,12 @@ def fail_non_abi_compatible_cuda(is_skip=False):
 # test_failures, xfail by default, set is_skip=True to skip
 CPU_TEST_FAILURES = {
     "test_add_complex": fail_stack_allocation(is_skip=True),
+    # TODO: test_conv_freezing_abi_compatible_cpu fails,
+    #   AssertionError: None, i.e. optional output is not supported
+    "test_conv_freezing": fail_with_and_without_stack_allocation(is_skip=True),
+    # TODO: test_deconv_freezing_abi_compatible_cpu fails,
+    #   AssertionError: None, i.e. optional output is not supported
+    "test_deconv_freezing": fail_with_and_without_stack_allocation(is_skip=True),
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_duplicate_constant_folding": fail_with_and_without_stack_allocation(
         is_skip=True
@@ -2830,15 +2849,12 @@ CPU_TEST_FAILURES = {
     "test_dynamic_scalar": fail_stack_allocation(is_skip=True),
     # https://github.com/pytorch/pytorch/issues/122980
     "test_fft_c2c": fail_stack_allocation(is_skip=True),
-    # TODO: test_conv_freezing_abi_compatible_cpu fails,
-    #   AssertionError: None, i.e. optional output is not supported
-    "test_conv_freezing": fail_with_and_without_stack_allocation(is_skip=True),
-    # TODO: test_deconv_freezing_abi_compatible_cpu fails,
-    #   AssertionError: None, i.e. optional output is not supported
-    "test_deconv_freezing": fail_with_and_without_stack_allocation(is_skip=True),
     # TODO: test_freezing_abi_compatible_cpu fails,
     #   AssertionError: None, i.e. optional output is not supported
     "test_freezing": fail_with_and_without_stack_allocation(is_skip=True),
+    # TODO: test_linear_freezing_abi_compatible_cpu fails,
+    #   AssertionError: None, i.e. optional output is not supported
+    "test_linear_freezing": fail_with_and_without_stack_allocation(is_skip=True),
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_missing_cubin": fail_with_and_without_stack_allocation(is_skip=True),
     # minimal arrayref interface only works with CPU; test crashes.

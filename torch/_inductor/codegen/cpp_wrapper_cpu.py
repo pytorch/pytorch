@@ -749,7 +749,6 @@ class CppWrapperCpu(WrapperCodeGen):
                 self.prefix.writeline(
                     f"constants_info_[{idx}].stride = {{{stride_str}}};"
                 )
-                #: TODO: ‘kStrided’ is not a member of ‘at’ in ABI compatible mode
                 self.prefix.writeline(
                     f"constants_info_[{idx}].layout = static_cast<int8_t>({self.codegen_layout(tensor.layout)});"
                 )
