@@ -120,8 +120,8 @@ void preDispatchFallback(const c10::OperatorHandle& op, c10::DispatchKeySet disp
 
 } // anonymous namespace
 
-namespace at {
-namespace impl {
+
+namespace at::impl {
 
 RestorePythonTLSSnapshot::RestorePythonTLSSnapshot() : saved_(safe_get_tls_on_entry()), guard_(safe_get_tls_on_entry()) {
   tls_on_entry = c10::nullopt;
@@ -148,8 +148,7 @@ MaybeSetTLSOnEntryGuard::~MaybeSetTLSOnEntryGuard() {
 }
 
 
-} // namespace impl
-} // namespace at
+} // namespace at::impl
 
 TORCH_LIBRARY_IMPL(_, Python, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&pythonFallback>());

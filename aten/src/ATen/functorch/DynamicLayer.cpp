@@ -234,7 +234,7 @@ int64_t pushDynamicLayer(DynamicLayer&& dynamic_layer) {
   auto& dynamicLayerStack = dynamicLayerStackAccessor();
   int64_t layerId = 1 + dynamicLayerStack.size();
   TORCH_INTERNAL_ASSERT(layerId == dynamic_layer.layerId());
-  dynamicLayerStack.emplace_back(dynamic_layer);
+  dynamicLayerStack.emplace_back(std::move(dynamic_layer));
 
   if (layerId == 1) {
     setDynamicLayerFrontBackKeysIncluded(true);
@@ -257,7 +257,7 @@ int64_t initAndPushDynamicLayer(
     optional<bool> functionalize_add_back_views) {
   const auto& dynamicLayerStack = dynamicLayerStackAccessor();
   const auto layerId = 1 + dynamicLayerStack.size();
-  DynamicLayer new_layer(transform_type, layerId, batch_size, randomness, prev_grad_mode, prev_fwd_grad_mode, functionalize_add_back_views);
+  DynamicLayer new_layer(transform_type, layerId, std::move(batch_size), randomness, prev_grad_mode, prev_fwd_grad_mode, functionalize_add_back_views);
   // NB: this function should be called while holding the GIL to avoid races
   new_layer.interpreter().set_is_alive(true);
   pushDynamicLayer(std::move(new_layer));
@@ -306,7 +306,7 @@ void foreachTensorInplace(std::vector<IValue>& args, int64_t begin, int64_t end,
 }
 
 void foreachTensorInplaceWithFlag(std::vector<IValue>& args, int64_t begin, int64_t end,
-    const std::bitset<64> use_flag_relative, std::function<Tensor(const Tensor&, bool)> func){
+    const std::bitset<64> use_flag_relative, const std::function<Tensor(const Tensor&, bool)>& func){
   TORCH_INTERNAL_ASSERT(begin >= 0);
   TORCH_INTERNAL_ASSERT(end >= 0);
   TORCH_INTERNAL_ASSERT(begin <= end);

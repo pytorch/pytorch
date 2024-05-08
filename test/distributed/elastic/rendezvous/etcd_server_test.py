@@ -6,8 +6,8 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 import os
-import unittest
 import sys
+import unittest
 
 import etcd
 from torch.distributed.elastic.rendezvous.etcd_rendezvous import (
@@ -19,6 +19,7 @@ from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
 if os.getenv("CIRCLECI"):
     print("T85992919 temporarily disabling in circle ci", file=sys.stderr)
     sys.exit(0)
+
 
 class EtcdServerTest(unittest.TestCase):
     def test_etcd_server_start_stop(self):
@@ -40,19 +41,22 @@ class EtcdServerTest(unittest.TestCase):
         server = EtcdServer()
         server.start()
 
-        client = etcd.Client(server.get_host(), server.get_port())
+        try:
+            client = etcd.Client(server.get_host(), server.get_port())
 
-        rdzv = EtcdRendezvous(
-            client=client,
-            prefix="test",
-            run_id=1,
-            num_min_workers=1,
-            num_max_workers=1,
-            timeout=60,
-            last_call_timeout=30,
-        )
-        rdzv_handler = EtcdRendezvousHandler(rdzv)
-        store, rank, world_size = rdzv_handler.next_rendezvous()
-        self.assertIsNotNone(store)
-        self.assertEqual(0, rank)
-        self.assertEqual(1, world_size)
+            rdzv = EtcdRendezvous(
+                client=client,
+                prefix="test",
+                run_id=1,
+                num_min_workers=1,
+                num_max_workers=1,
+                timeout=60,
+                last_call_timeout=30,
+            )
+            rdzv_handler = EtcdRendezvousHandler(rdzv)
+            store, rank, world_size = rdzv_handler.next_rendezvous()
+            self.assertIsNotNone(store)
+            self.assertEqual(0, rank)
+            self.assertEqual(1, world_size)
+        finally:
+            server.stop()

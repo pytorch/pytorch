@@ -30,6 +30,7 @@
 #endif
 
 #include <cctype>
+#include <deque>
 #include <string>
 #include <utility>
 #include <vector>

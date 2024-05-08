@@ -265,6 +265,28 @@ static void expect_at_least_rank(
       rank, " dimensions instead.");
 }
 
+threeOutputs linalg_lu_unpack_batch_rule(
+    const Tensor& LU, optional<int64_t> LU_bdim,
+    const Tensor& pivots, optional<int64_t> pivots_bdim,
+    bool unpack_data, bool unpack_pivots) {
+  auto LU_ = moveBatchDimToFront(LU, LU_bdim);
+  auto pivots_ = moveBatchDimToFront(pivots, pivots_bdim);
+
+  // LU and pivots's first {N-2} (for LU), {N-1} (for pivots) dimensions must
+  // match So if only one of them is being vmapped over, we must expand out that
+  // dimension.
+  if (LU_bdim.has_value() != pivots_bdim.has_value()) {
+    auto bdim_size = get_bdim_size2(LU, LU_bdim, pivots, pivots_bdim);
+    LU_ = ensure_has_bdim(LU_, LU_bdim.has_value(), bdim_size);
+    pivots_ = ensure_has_bdim(pivots_, pivots_bdim.has_value(), bdim_size);
+    pivots_bdim = 0;
+    LU_bdim = 0;
+  }
+
+  const auto res = at::lu_unpack(LU_, pivots_, unpack_data, unpack_pivots);
+  return std::make_tuple(std::get<0>(res), 0, std::get<1>(res), 0, std::get<2>(res), 0);
+}
+
 oneOutput linalg_lu_solve_batch_rule(
     const Tensor& LU, optional<int64_t> LU_bdim,
     const Tensor& pivots, optional<int64_t> pivots_bdim,
@@ -348,7 +370,7 @@ fourOutputs solve_ex_batch_rule(
   TORCH_CHECK(A_logical_rank >= 2,
             "linalg.solve: The input tensor A must have at least 2 dimensions.");
 
-  int b_logical_rank = max_logical_rank;
+  auto b_logical_rank = max_logical_rank;
   if (A_logical_rank > B_logical_rank) {  // vector case: B was a vector or batched vector
     // not accurate but matches linalg error message
     TORCH_CHECK(B_logical_rank >= 1, "linalg.solve: The input tensor B must have at least 2 dimensions.");
@@ -552,6 +574,7 @@ pinv_batch_rule(
   }
 
 // These need to be outside. String constant must be declared outside of a macro to be used as template param
+// NOLINTBEGIN(*array*)
 LINALG_CHECK_MATRIX_UNARY_ONE_OUT(cholesky, cholesky);
 LINALG_CHECK_MATRIX_UNARY_ONE_OUT(cholesky_inverse, cholesky_inverse);
 LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_cholesky_ex, linalg.cholesky);
@@ -568,6 +591,7 @@ LINALG_CHECK_MATRIX_UNARY_THREE_OUT(_linalg_det, linalg.det);
 LINALG_CHECK_MATRIX_UNARY_TWO_OUT(_linalg_eigh, linalg.eigh);
 LINALG_CHECK_MATRIX_UNARY_FOUR_OUT(_linalg_slogdet, linalg.slogdet);
 LINALG_CHECK_MATRIX_UNARY_THREE_OUT(_linalg_svd, linalg.svd);
+// NOLINTEND(*array*)
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(bmm, bmm_batch_rule);
@@ -578,6 +602,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(dot, dot_batch_rule);
   VMAP_SUPPORT(mv, mv_batch_rule);
   VMAP_SUPPORT(mm, mm_batch_rule);
+  VMAP_SUPPORT(lu_unpack, linalg_lu_unpack_batch_rule);
   VMAP_SUPPORT(linalg_lu_solve, linalg_lu_solve_batch_rule);
   VMAP_SUPPORT(linalg_householder_product, householder_product_batch_rule);
   VMAP_SUPPORT(cholesky_solve, cholesky_solve_batch_rule);  // custom dim error

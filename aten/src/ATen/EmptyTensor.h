@@ -51,6 +51,13 @@ TORCH_API TensorBase empty_generic(
     ScalarType scalar_type,
     c10::optional<c10::MemoryFormat> memory_format_opt);
 
+TORCH_API TensorBase empty_generic_symint(
+    SymIntArrayRef size,
+    c10::Allocator* allocator,
+    c10::DispatchKeySet ks,
+    ScalarType scalar_type,
+    c10::optional<c10::MemoryFormat> memory_format_opt);
+
 TORCH_API TensorBase empty_strided_generic(
     IntArrayRef size,
     IntArrayRef stride,

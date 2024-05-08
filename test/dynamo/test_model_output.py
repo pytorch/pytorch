@@ -16,6 +16,7 @@ try:
         BaseModelOutput,
         BaseModelOutputWithPastAndCrossAttentions,
         BaseModelOutputWithPoolingAndCrossAttentions,
+        CausalLMOutputWithPast,
     )
 except ImportError:
     modeling_outputs = None
@@ -241,6 +242,31 @@ class TestModelOutput(torch._dynamo.test_case.TestCase):
         self.assertTrue(
             torch.allclose(orig_result.pooler_output, compiled_result.pooler_output)
         )
+
+    @maybe_skip
+    def test_none(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                x = x + 1
+                return CausalLMOutputWithPast(loss=None, logits=x)[0]
+
+        model = Model()
+        opt_model = torch.compile(model, backend="eager", fullgraph=True)
+        x = torch.randn(1, 1, 1, 1)
+
+        self.assertTrue(same(model(x), opt_model(x)))
+
+    @maybe_skip
+    def test_reconstruction(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                x = x + 1
+                return CausalLMOutputWithPast(loss=x, logits=None)
+
+        model = Model()
+        x = torch.randn(1, 1, 1, 1)
+        eo = torch._dynamo.export(Model(), aten_graph=True)(x)
+        self.assertTrue(same(model(x), eo.graph_module(x)))
 
 
 if __name__ == "__main__":

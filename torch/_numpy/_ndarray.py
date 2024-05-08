@@ -512,7 +512,7 @@ def array(obj, dtype=None, *, copy=True, order="K", subok=False, ndmin=0, like=N
     if like is not None:
         raise NotImplementedError("'like' parameter is not supported.")
     if order != "K":
-        raise NotImplementedError()
+        raise NotImplementedError
 
     # a happy path
     if (

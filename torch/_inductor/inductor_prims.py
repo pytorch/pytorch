@@ -88,3 +88,8 @@ _unsafe_index_put_ = make_prim(
     ),
     doc="Unsafe index_put_ (doesn't issue device asserts)",
 )
+fma = make_prim(
+    "fma(Tensor a, Tensor b, Tensor c) -> Tensor",
+    lambda a, b, c: (a * b) + c,
+    doc="Fused multiply add: fma(a, b, c) -> (a * b) + c without rounding after the multiplication",
+)
