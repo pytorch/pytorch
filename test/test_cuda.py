@@ -4445,57 +4445,6 @@ class TestBlockStateAbsorption(TestCase):
 class TestCudaOptims(TestCase):
     # These tests will be instantiate with instantiate_device_type_tests
     # to apply the new OptimizerInfo structure.
-    def _test_graphed_optims(self, steps_warmup, steps_train, optimizer_ctor, kwargs):
-        for actually_do_graphs in (True, False):
-            params = [torch.randn((i + 5, i + 5), device="cuda") for i in range(2)] + [
-                torch.randn((), device="cuda")
-            ]
-            params_control = [p.clone().requires_grad_() for p in params]
-            params_graphed = [p.clone().requires_grad_() for p in params]
-
-            grads = [
-                [torch.randn_like(p) for p in params]
-                for _ in range(steps_warmup + steps_train)
-            ]
-
-            # Control (capturable=False)
-            if "capturable" in kwargs:
-                del kwargs["capturable"]
-            opt = optimizer_ctor(params_control, capturable=False, **kwargs)
-
-            for i in range(steps_warmup + steps_train):
-                for j, p in enumerate(params_control):
-                    p.grad = grads[i][j]
-                opt.step()
-
-            # capturable=True
-
-            opt = optimizer_ctor(params_graphed, capturable=True, **kwargs)
-
-            for i in range(steps_warmup):
-                for j, p in enumerate(params_graphed):
-                    p.grad = grads[i][j]
-                opt.step()
-
-            if actually_do_graphs:
-                g = torch.cuda.CUDAGraph()
-                with torch.cuda.graph(g):
-                    opt.step()
-
-            for i in range(steps_train):
-                if actually_do_graphs:
-                    for j, p in enumerate(params_graphed):
-                        p.grad.copy_(grads[i + steps_warmup][j])
-                    g.replay()
-                else:
-                    # Passing capturable=True to the constructor and running without graphs should still be
-                    # numerically correct, even if it's not ideal for performance.
-                    for j, p in enumerate(params_graphed):
-                        p.grad = grads[i + steps_warmup][j]
-                    opt.step()
-
-            for p_control, p_graphed in zip(params_control, params_graphed):
-                self.assertEqual(p_control, p_graphed)
 
     @onlyCUDA
     @unittest.skipIf(
@@ -4505,18 +4454,7 @@ class TestCudaOptims(TestCase):
         [
             optim
             for optim in optim_db
-            if optim.optim_cls
-            in [
-                torch.optim.NAdam,
-                torch.optim.RAdam,
-                torch.optim.Rprop,
-                torch.optim.Adam,
-                torch.optim.AdamW,
-                torch.optim.Adamax,
-                torch.optim.ASGD,
-                torch.optim.Adadelta,
-                torch.optim.RMSprop,
-            ]
+            if optim.has_capturable_arg
         ],
         dtypes=[torch.float32],
     )
@@ -4531,6 +4469,10 @@ class TestCudaOptims(TestCase):
                 device="cpu", dtype=dtype
             )
         )
+
+        steps_warmup = 3
+        steps_train = 2
+
         for optim_input in all_optim_inputs:
             kwargs = optim_input.kwargs
             if "lr" in kwargs:
@@ -4538,8 +4480,57 @@ class TestCudaOptims(TestCase):
             kwargs["lr"] = 0.1
             if has_betas and optim_cls != torch.optim.Adamax:
                 kwargs["betas"] = (0.8, 0.7)
-            with self.subTest(optimizer_ctor=optim_cls, kwargs=kwargs):
-                self._test_graphed_optims(3, 2, optim_cls, kwargs)
+
+            for actually_do_graphs in (True, False): 
+                params = [torch.randn((i + 5, i + 5), device=device) for i in range(2)] + [
+                    torch.randn((), device=device)
+                ]
+                params_control = [p.clone().requires_grad_() for p in params]
+                params_graphed = [p.clone().requires_grad_() for p in params]
+
+                grads = [
+                    [torch.randn_like(p) for p in params]
+                    for _ in range(steps_warmup + steps_train)
+                ]
+
+                # Control (capturable=False)
+                
+                kwargs["capturable"]= False
+                
+                opt = optim_cls(params_control, **kwargs)
+                for i in range(steps_warmup + steps_train):
+                    for j, p in enumerate(params_control):
+                        p.grad = grads[i][j]
+                    opt.step()
+
+                # capturable=True
+                kwargs["capturable"] = True
+                opt = optim_cls(params_graphed, **kwargs) 
+
+                for i in range(steps_warmup):
+                    for j, p in enumerate(params_graphed):
+                        p.grad = grads[i][j]
+                    opt.step()
+
+                if actually_do_graphs: 
+                    g = torch.cuda.CUDAGraph()
+                    with torch.cuda.graph(g):
+                        opt.step()
+
+                for i in range(steps_train):
+                    if actually_do_graphs: 
+                        for j, p in enumerate(params_graphed):
+                            p.grad.copy_(grads[i + steps_warmup][j])
+                        g.replay()
+                    else: 
+                        # Passing capturable=True to the constructor and running without graphs should still be 
+                        # numerically correct, even if it's not ideal for performance. 
+                        for j, p in enumerate(params_graphed):
+                            p.grad = grads[i + steps_warmup][j]
+                        opt.step()
+
+                for p_control, p_graphed in zip(params_control, params_graphed):
+                    self.assertEqual(p_control, p_graphed)
 
     @onlyCUDA
     @unittest.skipIf(
@@ -4549,8 +4540,9 @@ class TestCudaOptims(TestCase):
         [
             optim
             for optim in optim_db
-            if optim.optim_cls in [torch.optim.Adam, torch.optim.AdamW, torch.optim.SGD]
-        ]
+            if "fused" in optim.supported_impls
+        ],
+        dtypes=[torch.float32],
     )
     def test_graph_scaling_fused_optimizers(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
@@ -4575,8 +4567,7 @@ class TestCudaOptims(TestCase):
             if has_betas:
                 kwargs["betas"] = (0.8, 0.7)
 
-            has_capturable_arg = optim_cls in (torch.optim.Adam, torch.optim.AdamW)
-            for actually_do_graphs in (True, False) if has_capturable_arg else (True,):
+            for actually_do_graphs in (True, False) if optim_info.has_capturable_arg else (True,):
                 params = [torch.randn((i + 5, i + 5), device="cuda") for i in range(2)]
                 params_control = [p.clone().requires_grad_() for p in params]
                 params_graphed = [p.clone().requires_grad_() for p in params]
@@ -4594,18 +4585,18 @@ class TestCudaOptims(TestCase):
                 scaler_for_control = torch.cuda.amp.GradScaler(init_scale=128.0)
                 with torch.no_grad():
                     scaler_for_control._lazy_init_scale_growth_tracker(
-                        torch.device("cuda")
+                        device
                     )
 
                 scaler_for_graphed = torch.cuda.amp.GradScaler()
                 scaler_for_graphed.load_state_dict(scaler_for_control.state_dict())
                 with torch.no_grad():
                     scaler_for_graphed._lazy_init_scale_growth_tracker(
-                        torch.device("cuda")
+                        device
                     )
 
                 # Control (capturable=False)
-                if has_capturable_arg:
+                if optim_info.has_capturable_arg:
                     kwargs["capturable"] = False
                 opt = optim_cls(params_control, **kwargs)
 
@@ -4616,7 +4607,7 @@ class TestCudaOptims(TestCase):
                     scaler_for_control.update()
 
                 # capturable=True
-                if has_capturable_arg:
+                if optim_info.has_capturable_arg:
                     kwargs["capturable"] = True
                 opt = optim_cls(params_graphed, **kwargs)
 
