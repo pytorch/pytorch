@@ -613,9 +613,7 @@ main()
                 loss.backward()
                 yield x.grad
 
-        self.check_output_and_recompiles(
-            fn, count=[2, 4], compiler_fn=make_compiler_fn(fullgraph=False)
-        )
+        self.check_output_and_recompiles(fn, count=2)
 
     def test_custom_fn_saved_multiple_tensors(self):
         def fn():
@@ -638,9 +636,7 @@ main()
                 loss.backward()
                 yield x.grad
 
-        self.check_output_and_recompiles(
-            fn, count=[2, 4], compiler_fn=make_compiler_fn(fullgraph=False)
-        )
+        self.check_output_and_recompiles(fn, count=2)
 
     def test_custom_fn_saved_multiple_tensors_dedup(self):
         def fn():
@@ -662,9 +658,7 @@ main()
                 loss.backward()
                 yield x.grad
 
-        self.check_output_and_recompiles(
-            fn, count=[2, 4], compiler_fn=make_compiler_fn(fullgraph=False)
-        )
+        self.check_output_and_recompiles(fn, count=2)
 
     def test_custom_fn_saved_shape_tensor(self):
         def fn():
@@ -686,9 +680,7 @@ main()
                 loss.backward()
                 yield x.grad
 
-        self.check_output_and_recompiles(
-            fn, count=[2, 4], compiler_fn=make_compiler_fn(fullgraph=False)
-        )
+        self.check_output_and_recompiles(fn, count=2)
 
     def test_custom_fn_saved_attr(self):
         def fn():
@@ -710,13 +702,9 @@ main()
                 loss.backward()
                 yield x.grad
 
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.InternalTorchDynamoError,
-            "is not subscriptable",
-        ):
-            self.check_output_and_recompiles(
-                fn, count=[2, 4], compiler_fn=make_compiler_fn(fullgraph=False)
-            )
+        self.check_output_and_recompiles(
+            fn, count=[2, 6], compiler_fn=make_compiler_fn(fullgraph=False)
+        )
 
     def test_custom_fn_multiple_grads(self):
         def fn():
@@ -738,9 +726,7 @@ main()
                 yield x.grad
                 yield y.grad
 
-        self.check_output_and_recompiles(
-            fn, count=[2, 4], compiler_fn=make_compiler_fn(fullgraph=False)
-        )
+        self.check_output_and_recompiles(fn, count=2)
 
     def test_custom_fn_non_variable_input(self):
         def fn():
@@ -764,9 +750,7 @@ main()
                 yield y
                 yield z
 
-        self.check_output_and_recompiles(
-            fn, count=[2, 4], compiler_fn=make_compiler_fn(fullgraph=False)
-        )
+        self.check_output_and_recompiles(fn, count=2)
 
     @unittest.skipIf(not HAS_CUDA, "requires cuda")
     def test_custom_fn_output_metadata(self):
@@ -806,9 +790,9 @@ main()
             yield x.device
             yield x.grad
 
-        self.check_output_and_recompiles(fn, count=[1, 2], compiler_fn=my_compiler_fn)
+        self.check_output_and_recompiles(fn, count=1)
 
-    def test_custom_fns_with_same_graph(self):
+    def test_custom_fn_with_same_graph(self):
         def fn():
             class MyFn1(torch.autograd.Function):
                 @staticmethod
@@ -838,10 +822,10 @@ main()
                 yield x.grad
 
         self.check_output_and_recompiles(
-            fn, count=[2, 4], compiler_fn=make_compiler_fn(fullgraph=False)
+            fn, count=2
         )  # should compile once for MyFn1 and once for MyFn2
 
-    def test_dynamically_defined_class(self):
+    def test_custom_fn_dynamically_defined_class(self):
         def fn():
             def create_class(multiplier: int):
                 class DynamicFn(torch.autograd.Function):
@@ -862,9 +846,7 @@ main()
                 loss.backward()
                 yield x.grad
 
-        self.check_output_and_recompiles(
-            fn, count=[3, 6], compiler_fn=make_compiler_fn(fullgraph=False)
-        )
+        self.check_output_and_recompiles(fn, count=3)
 
     def test_mismatch_fake_tensor_mode(self, dynamic_shape=False):
         """

@@ -618,6 +618,8 @@ class VariableBuilder:
                 source=self.source,
             )
         elif isinstance(value, torch.autograd.function.BackwardCFunction):
+            # WARNING: accessing saved_tensors directly from BackwardCFunction is side-effectful
+            # and will throw unless retain_graph=True
             install_guard(
                 self.source.make_guard(GuardBuilder.TYPE_MATCH),
             )

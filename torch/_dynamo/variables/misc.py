@@ -431,6 +431,16 @@ class AutogradFunctionVariable(VariableTracker):
                 f"non-function or method in subclass of torch.autograd.Function: {fn}"
             )
 
+    def call_backward(self, tx, args, kwargs):
+        fn = self.fn_cls.backward
+        self.source = AttrSource(self.source, "backward")
+        assert type(args[0].value) is torch._dynamo.external_utils.FakeBackwardCFunction
+        assert isinstance(fn, types.FunctionType)
+
+        return variables.UserFunctionVariable(fn, source=self.source).call_function(
+            tx, args, kwargs
+        )
+
     def call_function(self, tx, args, kwargs):
         return AutogradFunctionVariable(self.fn_cls)
 
@@ -460,6 +470,8 @@ class AutogradFunctionVariable(VariableTracker):
             else:
                 return self.call_apply(tx, args, kwargs)
 
+        elif name == "backward":
+            return self.call_backward(tx, args, kwargs)
         else:
             from .. import trace_rules
 
@@ -502,40 +514,16 @@ class AutogradBackwardCFunctionVariable(VariableTracker):
         assert self.source
         self.fn_cls = fn_cls
 
-    def call_apply(self, tx, args, kwargs):
-        self.source = AttrSource(self.source, "backward")
-        fn = self.fn_cls._forward_cls.backward
-
-        # self.tx.output.side_effects.track_object_existing(
-        ctx = AutogradFunctionContextVariable.create(tx, args, kwargs)
-        args = [ctx, *args]
-
-        # static methods like backward are FunctionType
-        assert isinstance(fn, types.FunctionType)
-        return variables.UserFunctionVariable(fn, source=self.source).call_function(
-            tx, args, kwargs
-        )
-
-    def call_method(
-        self,
-        tx,
-        name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
-    ):
-        if name == "apply":
-            return self.call_apply(tx, args, kwargs)
-
-        unimplemented(f"Unsupported autograd.BackwardCFunction method: {name}")
-
-    def call_function(
-        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
-    ) -> "VariableTracker":
-        breakpoint()
-        return self.fn(*args, **kwargs)
-
     def python_type(self):
         return self.fn_cls
+
+    def var_getattr(self, tx, name):
+        if name == "_forward_cls":
+            return AutogradFunctionVariable(
+                self.fn_cls._forward_cls, source=AttrSource(self.source, "_forward_cls")
+            )
+
+        return super().var_getattr(tx, name)
 
 
 @dataclasses.dataclass

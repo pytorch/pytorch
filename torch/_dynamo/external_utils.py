@@ -68,41 +68,28 @@ def wrap_numpy(f):
 
 
 class FakeBackwardCFunction:
-    # duck type
     def __init__(
         self,
-        other: torch.autograd.function.BackwardCFunction,
+        real: torch.autograd.function.BackwardCFunction,
         saved_tensors: List[torch.Tensor],
     ):
-        blocklist = {
-            "saved_tensors",
-            "saved_variables",
-            "_raw_saved_tensors",
-            "materialize_grads",
-        }
-        for attr_name in dir(other):
-            if attr_name.startswith("__") or attr_name in blocklist:
-                continue
-            setattr(self, attr_name, getattr(other, attr_name))
-
-        self._forward_cls = other._forward_cls  # type: ignore[attr-defined]
+        self.real = real
         self.saved_tensors = saved_tensors
+
+    def __getattr__(self, name):
+        # route any attribute that isn't defined on this obj
+        return getattr(self.real, name)
 
 
 def call_backward(backward_c_function, saved_tensors, *args):
-    # TODO: speculate instead of always graph breaking
-    @torch._dynamo.disable()
-    def run_eager():
-        fake = FakeBackwardCFunction(backward_c_function, saved_tensors)
-        grads = fake._forward_cls.backward(fake, *args)  # type: ignore[attr-defined]
+    fake = FakeBackwardCFunction(backward_c_function, saved_tensors)
+    grads = fake._forward_cls.backward(fake, *args)  # type: ignore[attr-defined]
 
-        # in eager, we wrap in a tuple when there's only one grad output
-        if type(grads) is not tuple:
-            grads = (grads,)
+    # in eager, we wrap in a tuple when there's only one grad output
+    if type(grads) is not tuple:
+        grads = (grads,)
 
-        return grads
-
-    return run_eager()
+    return grads
 
 
 def untyped_storage_size(x: torch.Tensor):
