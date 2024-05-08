@@ -413,7 +413,11 @@ class _TorchDynamoContext:
             cleanups = [enter() for enter in self.enter_exit_hooks]
             prior = set_eval_frame(callback)
             try:
-                return fn(*args, **kwargs)
+                # Ensure that if an assertion occurs after graph pushes
+                # something onto the DynamicLayerStack then we pop it off (the
+                # constructed graph code isn't guarded with try/finally).
+                with torch._C._functorch._PreserveDynamicLayerStack():
+                    return fn(*args, **kwargs)
             finally:
                 set_eval_frame(prior)
                 for cleanup in cleanups:
