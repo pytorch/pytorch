@@ -3829,7 +3829,7 @@ def _check_stack_inputs(tensors: TensorSequenceType) -> None:
     entry_shape = tensors[0].shape
     for i in range(1, len(tensors)):
         assert tensors[i].shape == entry_shape, (
-            f"stack expects each tensor to be equal size, but got {entry_shape} at entry 0"
+            f"stack expects each tensor to be equal size, but got {entry_shape} at entry 0 "
             f"and {tensors[i].shape} at entry {i}"
         )
 
@@ -6357,12 +6357,17 @@ def _infer_scalar_type(obj):
 
 # Analogous to recursive_store
 # xref: recursive_store in torch/csrc/utils/tensor_new.cpp
-def _recursive_build(scalarType: torch.dtype, obj: TensorOrNumberLikeType):
+def _recursive_build(
+    scalarType: torch.dtype, obj: Union[TensorOrNumberLikeType, TensorSequenceType]
+):
     if isinstance(obj, Tensor) and obj.ndim <= 1:
-        return obj.detach().to(dtype=scalarType, device="cpu", copy=True)[()]
+        return obj.detach().to(dtype=scalarType, device="cpu", copy=True).view(())
+    elif isinstance(obj, Tensor):
+        return obj
     elif isinstance(obj, Number):
         return torch.scalar_tensor(obj, dtype=scalarType)
 
+    # seq can be a list of tensors
     seq = obj
     return torch.stack([_recursive_build(scalarType, item) for item in seq])
 
