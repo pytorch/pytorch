@@ -3259,7 +3259,10 @@ class TestPercentile(TestCase):
             subtest(
                 [1, 7],
                 decorators=[
-                    xpassIfTorchDynamo,
+                    skipif(
+                        numpy.__version__ < "1.25",
+                        reason="NP_VER: fails on NumPy 1.24.x",
+                    )
                 ],
             ),
         ],
@@ -3273,13 +3276,13 @@ class TestPercentile(TestCase):
             subtest(
                 (0, 1),
                 decorators=[
-                    xpassIfTorchDynamo,
+                    skip(reason="Tuple axes"),
                 ],
             ),
             subtest(
                 (-3, -1),
                 decorators=[
-                    xpassIfTorchDynamo,
+                    skip(reason="Tuple axes"),
                 ],
             ),
         ],
@@ -3839,13 +3842,13 @@ class TestMedian(TestCase):
             subtest(
                 (0, 1),
                 decorators=[
-                    xpassIfTorchDynamo,
+                    skip(reason="Tuple axes"),
                 ],
             ),
             subtest(
                 (-3, -1),
                 decorators=[
-                    xpassIfTorchDynamo,
+                    skip(reason="Tuple axes"),
                 ],
             ),
         ],

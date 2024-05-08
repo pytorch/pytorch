@@ -66,7 +66,12 @@ from ..source import (
     Source,
     TupleIteratorGetItemSource,
 )
-from ..trace_rules import is_callable_allowed, is_numpy
+from ..trace_rules import (
+    is_callable_allowed,
+    is_numpy,
+    is_numpy_dtype,
+    is_numpy_type_info,
+)
 from ..utils import (
     build_checkpoint_variable,
     clone_input,
@@ -146,6 +151,8 @@ from .misc import (
     LambdaVariable,
     LoggingLoggerVariable,
     MethodWrapperVariable,
+    NumpyDTypeVariable,
+    NumpyTypeInfoVariable,
     NumpyVariable,
     PythonModuleVariable,
     RegexPatternVariable,
@@ -620,6 +627,12 @@ class VariableBuilder:
                 else GuardBuilder.TYPE_MATCH
             )
             return NumpyVariable(value, source=self.source)
+        elif is_numpy_dtype(value):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return NumpyDTypeVariable(value, source=self.source)
+        elif is_numpy_type_info(value):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return NumpyTypeInfoVariable(value, source=self.source)
         # NB: These can't be put in type_dispatch, they have to run later
         elif CollectiveFunctionRewriteVariable.can_rewrite(value):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)

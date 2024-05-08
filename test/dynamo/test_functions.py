@@ -1562,6 +1562,11 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return np.ones_like(x, dtype=np.float64)
 
     @make_test
+    def test_numpy_dtype_call_in_function(x):
+        dt = np.dtype("float")
+        return np.full_like(x, 2.4, dtype=dt)
+
+    @make_test
     def test_numpy_linalg(x):
         return np.linalg.norm(x.numpy(), axis=0)
 
@@ -2138,6 +2143,30 @@ class GraphModule(torch.nn.Module):
         input2 = torch.randn(1)
 
         self.assertTrue(same(program(input1, input2), input1 + input1))
+
+    @parametrize("int_or_float", ("int", "float"))
+    def test_np_constant_collections_as_input(self, int_or_float):
+        info_func = getattr(np, f"{int_or_float[0]}info")
+        dt_string_arg = f"{int_or_float}16"
+        np_dt_attr = getattr(np, dt_string_arg)
+
+        dt_args = [dt_string_arg, np_dt_attr]
+        arg_variants_iter = itertools.chain(
+            dt_args, map(np.dtype, dt_args), map(info_func, dt_args)
+        )
+
+        def func(a, b, info_or_dt):
+            return a + info_func(info_or_dt).max
+
+        opt_fn = torch.compile(func)
+
+        a = torch.randn(2)
+        b = torch.randn(2)
+        eager_result = func(a, b, dt_args[0])
+
+        for arg in arg_variants_iter:
+            opt_result = opt_fn(a, b, arg)
+            self.assertTrue(same(opt_result, eager_result))
 
     def test_compare_constant_and_tensor(self):
         for op in [

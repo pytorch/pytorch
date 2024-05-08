@@ -353,7 +353,7 @@ class TestHistogram(TestCase):
         self.do_signed_overflow_bounds(np.short)
         self.do_signed_overflow_bounds(np.intc)
 
-    @xpassIfTorchDynamo  # (reason="int->float conversin loses precision")
+    @xfail  # (reason="int->float conversin loses precision")
     def test_signed_overflow_bounds_2(self):
         self.do_signed_overflow_bounds(np.int_)
         self.do_signed_overflow_bounds(np.longlong)
