@@ -46,9 +46,9 @@ def _validate_tp_mesh_dim(
 
     parent_mesh = _mesh_resources.get_parent_mesh(device_mesh)
     if parent_mesh:
-        tp_mesh_dim = _mesh_resources.get_parent_mesh_dim(device_mesh)
-        if tp_mesh_dim != parent_mesh.ndim - 1:
+        tp_mesh_dim_in_parent = _mesh_resources.get_parent_mesh_dim(device_mesh)
+        if tp_mesh_dim_in_parent != parent_mesh.ndim - 1:
             raise RuntimeError(
-                f"Found TP device_mesh on the {tp_mesh_dim} dimension of its parent mesh.",
+                f"Found TP device_mesh on the {tp_mesh_dim_in_parent} dimension of its parent mesh.",
                 "Currently we only support intranode TP and TP needs to be the innermost dimension on its parent mesh.",
             )
