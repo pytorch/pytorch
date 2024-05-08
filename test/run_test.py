@@ -431,7 +431,7 @@ def run_test(
     # NB: These features are not available for C++ tests, but there is little incentive
     # to implement it because we have never seen a flaky C++ test before.
     if IS_CI and not is_cpp_test:
-        ci_args = ["--import-slow-tests", "--import-disabled-tests"]
+        ci_args = ["--import-slow-tests", "--disabled-tests-file=.pytorch-disabled-tests.json"]
         if RERUN_DISABLED_TESTS:
             ci_args.append("--rerun-disabled-tests")
         # use the downloaded test cases configuration, not supported in pytest

@@ -19,6 +19,7 @@ from _pytest.reports import TestReport
 from _pytest.stash import StashKey
 from _pytest.terminal import _get_raw_skip_reason
 from pytest_shard_custom import pytest_addoptions as shard_addoptions, PytestShardPlugin
+from pytest_disabled_tests import DisabledTestsPlugin, pytest_addoptions as disabled_addoptions
 
 # a lot of this file is copied from _pytest.junitxml and modified to get rerun info
 
@@ -85,6 +86,7 @@ def pytest_addoption(parser: Parser) -> None:
         default="xunit2",
     )
     shard_addoptions(parser)
+    disabled_addoptions(parser)
 
 
 def pytest_configure(config: Config) -> None:
@@ -108,6 +110,8 @@ def pytest_configure(config: Config) -> None:
         config.pluginmanager.register(StepcurrentPlugin(config), "stepcurrentplugin")
     if config.getoption("num_shards"):
         config.pluginmanager.register(PytestShardPlugin(config), "pytestshardplugin")
+    if config.getoption("disabled_tests_file"):
+        config.pluginmanager.register(DisabledTestsPlugin(config), "disabledtestsplugin")
 
 
 def pytest_unconfigure(config: Config) -> None:
