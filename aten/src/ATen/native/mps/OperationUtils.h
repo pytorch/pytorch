@@ -419,4 +419,8 @@ inline bool supportedFloatingType(const Tensor& t) {
   return supportedFloatingType(t.scalar_type());
 }
 
+inline bool needsGather(const Tensor& t) {
+  return !t.is_contiguous() || t.storage_offset();
+}
+
 } // namespace at::native::mps

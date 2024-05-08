@@ -60,6 +60,14 @@ class TestModuleTracker(TestCase):
             ],
         )
 
+    def test_bw_detection(self):
+        mod = torch.nn.Linear(2, 2)
+
+        with ModuleTracker() as tracker:
+            mod(torch.rand(2, requires_grad=True)).sum().backward()
+            self.assertFalse(tracker.is_bw)
+            self.assertEqual(tracker.parents, {"Global"})
+
 
 if __name__ == "__main__":
     run_tests()
