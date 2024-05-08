@@ -288,44 +288,6 @@ def unpack_flash_attention_nested_shapes(
     yield query.shape, key.shape, value.shape, grad_out.shape if grad_out is not None else None
 
 
-def pad_efficient_attention_nested_shapes(
-    *,
-    query_shape,
-    key_shape,
-    value_shape,
-    grad_out_shape=None,
-    cu_seqlens_q_shape,
-    cu_seqlens_k_shape,
-    max_seqlen_q,
-    max_seqlen_k,
-):
-    if cu_seqlens_q_shape is not None:
-        # Unlike flash_attention_forward, we get a 4D tensor instead of a 3D tensor for efficient attention.
-        #
-        # This means we should be dealing with a Nested Jagged Tensor query.
-        # The inputs will have shape                  (sum(sequence len), heads, dimension)
-        # In comparison, non-Nested inputs have shape (batch, heads, sequence len, dimension)
-        # To deal with this, we convert to a shape of (batch, heads, max_seq_len, dimension)
-        # So the flops calculation in this case is an overestimate of the actual flops.
-        assert len(key_shape) == 4
-        assert len(value_shape) == 4
-        assert grad_out_shape is None or grad_out_shape == query_shape
-        _, _, h_q, d_q = query_shape
-        _, _, h_k, d_k = key_shape
-        _, _, h_v, d_v = value_shape
-        assert cu_seqlens_q_shape is not None
-        assert cu_seqlens_k_shape is not None
-        b = cu_seqlens_q_shape[0] - 1
-        assert cu_seqlens_q_shape == cu_seqlens_k_shape
-        new_query_shape = (b, h_q, max_seqlen_q, d_q)
-        new_key_shape = (b, h_k, max_seqlen_k, d_k)
-        new_value_shape = (b, h_v, max_seqlen_k, d_v)
-        new_grad_out_shape = new_query_shape if grad_out_shape is not None else None
-        return new_query_shape, new_key_shape, new_value_shape, new_grad_out_shape
-
-    return query_shape, key_shape, value_shape, grad_out_shape
-
-
 def unpack_efficient_attention_nested_shapes(
     *,
     query,
@@ -336,7 +298,7 @@ def unpack_efficient_attention_nested_shapes(
     cu_seqlens_k,
     max_seqlen_q,
     max_seqlen_k,
-):
+) -> Iterator[Tuple[int, int, int, Optional[int]]]:
     if cu_seqlens_q is not None:
         # Unlike flash_attention_forward, we get a 4D tensor instead of a 3D tensor for efficient attention.
         #
@@ -511,6 +473,8 @@ def _efficient_attention_backward_flop(
     *args,
     **kwargs,
 ) -> int:
+    # in case this is a nested tensor, we unpack the individual batch elements
+    # and then sum the flops per batch element
     shapes = unpack_efficient_attention_nested_shapes(
         query=query,
         key=key,
