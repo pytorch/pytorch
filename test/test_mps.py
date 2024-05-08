@@ -905,9 +905,9 @@ def mps_ops_modifier(ops):
             'fft.rfft2': None,
             'fft.rfftn': None,
             'stft': None,
-            # Error in TestConsistencyCPU.test_output_match_isin_cpu_int32,
+            # Error in TestConsistencyCPU.test_output_match_isin_cpu fails for integers,
             # not reproducible in later OS. Added assert to op if used in < 14.0
-            'isin': [torch.int32],
+            'isin': [torch.int64, torch.int32, torch.int16, torch.uint8, torch.int8],
         })
 
     UNDEFINED_XFAILLIST = {
