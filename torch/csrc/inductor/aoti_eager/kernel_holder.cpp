@@ -146,9 +146,9 @@ void AOTIPythonKernelHolder::operator()(
     const c10::OperatorHandle& op,
     c10::DispatchKeySet keyset,
     torch::jit::Stack* stack) {
-  AOTIKernelState kernel_state;
-  if (cache_lookup(op, keyset, stack, kernel_state)) {
-    cache_hit(kernel_state, op, keyset, stack);
+  AOTIKernelMetadata aoti_kernel_metadata;
+  if (cache_lookup(op, keyset, stack, aoti_kernel_metadata)) {
+    cache_hit(aoti_kernel_metadata, op, keyset, stack);
   } else {
     cache_miss(op, keyset, stack);
   }
@@ -158,7 +158,7 @@ bool AOTIPythonKernelHolder::cache_lookup(
     const c10::OperatorHandle& op,
     const c10::DispatchKeySet& keyset,
     const torch::jit::Stack* stack,
-    AOTIKernelState& kernel_state) {
+    AOTIKernelMetadata& aoti_kernel_metadata) {
   TORCH_CHECK_NOT_IMPLEMENTED(
       op.schema().returns().size() == 1,
       "Not implemented for operations that return either multiple values or no value.");
@@ -169,8 +169,8 @@ bool AOTIPythonKernelHolder::cache_lookup(
   auto inputs_metadata =
       unpack_input_parameters(op.schema().arguments(), *stack);
   for (const auto& aoti_kernel_cache : aoti_kernel_cache_) {
-    if (aoti_kernel_cache.look_up(inputs_metadata)) {
-      kernel_state = aoti_kernel_cache;
+    if (aoti_kernel_cache.check(inputs_metadata)) {
+      aoti_kernel_metadata = aoti_kernel_cache;
       return true;
     }
   }
@@ -179,14 +179,14 @@ bool AOTIPythonKernelHolder::cache_lookup(
 }
 
 void AOTIPythonKernelHolder::cache_hit(
-    const AOTIKernelState& kernel_state,
+    const AOTIKernelMetadata& aoti_kernel_metadata,
     const c10::OperatorHandle& op,
     const c10::DispatchKeySet& keyset,
     torch::jit::Stack* stack) {
   auto inputs = unpack_tensors(op.schema().arguments(), *stack, device_);
   torch::jit::drop(*stack, op.schema().arguments().size());
 
-  auto outputs = kernel_state.kernel_runner_->run(inputs);
+  auto outputs = aoti_kernel_metadata.kernel_runner_->run(inputs);
   for (auto& output : outputs) {
     stack->push_back(output);
   }
@@ -305,10 +305,10 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
       }
     }
 
-    AOTIKernelState aoti_kernel_state;
-    aoti_kernel_state.parameter_metadata_list_ = parameter_metadata_list;
-    aoti_kernel_state.kernel_runner_ = load_aoti_model_runner(kernel_path);
-    aoti_kernel_cache_.push_back(aoti_kernel_state);
+    AOTIKernelMetadata aoti_kernel_metadata;
+    aoti_kernel_metadata.parameter_metadata_list_ = parameter_metadata_list;
+    aoti_kernel_metadata.kernel_runner_ = load_aoti_model_runner(kernel_path);
+    aoti_kernel_cache_.push_back(aoti_kernel_metadata);
   }
 }
 

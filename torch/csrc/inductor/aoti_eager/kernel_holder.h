@@ -14,12 +14,18 @@
 
 namespace torch::inductor {
 
-struct AOTIKernelState {
+// Represent AOTI kernel. It contains all the parameter metadata of the kernel
+// and the AOTI model runner.
+struct AOTIKernelMetadata {
+  // Represent all the parameters of AOTI kernel
   std::vector<ParameterMetadata> parameter_metadata_list_;
+  // AOTI model runner to run the AOTI kernel
   std::shared_ptr<AOTIModelContainerRunner> kernel_runner_;
-  AOTIKernelState() : parameter_metadata_list_(), kernel_runner_(nullptr) {}
+  AOTIKernelMetadata() : parameter_metadata_list_(), kernel_runner_(nullptr) {}
 
-  bool look_up(
+  // Check whether the given parameter metadata list is the same as the
+  // parameter metadata list of the AOTI kernel.
+  bool check(
       const std::vector<ParameterMetadata>& parameter_metadata_list) const {
     if (parameter_metadata_list_.size() != parameter_metadata_list.size()) {
       return false;
@@ -57,7 +63,7 @@ class AOTIPythonKernelHolder : public c10::OperatorKernel {
   // op_overload_name.
   c10::impl::PyInterpreter* pyinterpreter_;
   // Cache the produced kernels by AOTI and its metadata
-  std::vector<AOTIKernelState> aoti_kernel_cache_;
+  std::vector<AOTIKernelMetadata> aoti_kernel_cache_;
 
  public:
   AOTIPythonKernelHolder(
@@ -75,13 +81,13 @@ class AOTIPythonKernelHolder : public c10::OperatorKernel {
       const c10::OperatorHandle& op,
       const c10::DispatchKeySet& keyset,
       const torch::jit::Stack* stack,
-      AOTIKernelState& kernel_state);
+      AOTIKernelMetadata& aoti_kernel_metadata);
   void cache_miss(
       const c10::OperatorHandle& op,
       const c10::DispatchKeySet& keyset,
       torch::jit::Stack* stack);
   void cache_hit(
-      const AOTIKernelState& kernel_state,
+      const AOTIKernelMetadata& aoti_kernel_metadata,
       const c10::OperatorHandle& op,
       const c10::DispatchKeySet& keyset,
       torch::jit::Stack* stack);
