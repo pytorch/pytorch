@@ -126,7 +126,7 @@ def call_mm(*args, **kwargs):
 def should_pad_addmm(match: Match) -> bool:
     mat1, mat2, input = fetch_fake_tensors(match, ("mat1", "mat2", "input"))
     return should_pad_common(mat1, mat2, input) and should_pad_bench(
-        mat1, mat2, torch.ops.aten.addmm, input=input
+        match, mat1, mat2, torch.ops.aten.addmm, input=input
     )
 
 
@@ -139,21 +139,25 @@ def pad_addmm(
     n_padded_length: int,
     beta=1.0,
     alpha=1.0,
+    mat1_pre_padded: bool = False,
+    mat2_pre_padded: bool = False,
 ):
     # for paddings, dim order is reversed for some reasons
     # and for every dim, we need to specify left and right padding
-    if k_padded_length != 0 or m_padded_length != 0:
-        mat1_padded = aten.constant_pad_nd(
-            mat1, [0, k_padded_length, 0, m_padded_length]
+    mat1_padded = (
+        mat1
+        if mat1_pre_padded
+        else pad_mat1(
+            mat1, m_padded_length=m_padded_length, k_padded_length=k_padded_length
         )
-    else:
-        mat1_padded = mat1
-    if k_padded_length != 0 or n_padded_length != 0:
-        mat2_padded = aten.constant_pad_nd(
-            mat2, [0, n_padded_length, 0, k_padded_length]
+    )
+    mat2_padded = (
+        mat2
+        if mat2_pre_padded
+        else pad_mat2(
+            mat2, k_padded_length=k_padded_length, n_padded_length=k_padded_length
         )
-    else:
-        mat2_padded = mat2
+    )
     if input is not None:
         if len(input.shape) < 2:
             # make sure we have at least two dimensions
@@ -273,7 +277,7 @@ def should_pad_bench_key(
 
 
 def should_pad_bench(
-    mat1: Tensor, mat2: Tensor, op, input: Optional[Tensor] = None
+    match, mat1: Tensor, mat2: Tensor, op, input: Optional[Tensor] = None
 ) -> bool:
     do_bench = functools.partial(
         torch._inductor.runtime.runtime_utils.do_bench,
@@ -349,8 +353,8 @@ def should_pad_bench(
                 lambda: op(input, mat1, mat2),
             )
 
-        mat1_pad = torch.randn_like(mat1)
-        mat2_pad = torch.randn_like(mat2)
+        mat1_pad = mat1
+        mat2_pad = mat2
 
         if op is torch.ops.aten.addmm:
             input_pad = None
@@ -403,8 +407,29 @@ def mm_pattern(mat1: Tensor, mat2: Tensor) -> Tensor:
 def should_pad_mm(match: Match) -> bool:
     mat1, mat2 = fetch_fake_tensors(match, ("mat1", "mat2"))
     return should_pad_common(mat1, mat2) and should_pad_bench(
-        mat1, mat2, torch.ops.aten.mm
+        match, mat1, mat2, torch.ops.aten.mm
     )
+
+
+def pad_mat1(mat1, m_padded_length, k_padded_length, is_bmm=False):
+    if k_padded_length != 0 or m_padded_length != 0:
+        # dim order is reversed for constant_pad_nd, for every dim we specify right and left padding
+        pad_arg = [0, k_padded_length, 0, m_padded_length]
+        if is_bmm:
+            pad_arg.extend((0, 0))
+        return aten.constant_pad_nd(mat1, pad_arg)
+    return mat1
+
+
+def pad_mat2(mat2, k_padded_length, n_padded_length, is_bmm=False):
+    if k_padded_length != 0 or n_padded_length != 0:
+        # dim order is reversed for constant_pad_nd, for every dim we specify right and left padding
+        pad_arg = [0, n_padded_length, 0, k_padded_length]
+        if is_bmm:
+            pad_arg.extend((0, 0))
+        return aten.constant_pad_nd(mat2, pad_arg)
+    else:
+        return mat2
 
 
 def pad_mm(
@@ -413,21 +438,23 @@ def pad_mm(
     m_padded_length: int,
     k_padded_length: int,
     n_padded_length: int,
+    mat1_pre_padded: bool = False,
+    mat2_pre_padded: bool = False,
 ) -> Tensor:
-    if k_padded_length != 0 or m_padded_length != 0:
-        # dim order is reversed for constant_pad_nd, for every dim we specify right and left padding
-        mat1_padded = aten.constant_pad_nd(
-            mat1, [0, k_padded_length, 0, m_padded_length]
+    mat1_padded = (
+        mat1
+        if mat1_pre_padded
+        else pad_mat1(
+            mat1, m_padded_length=m_padded_length, k_padded_length=k_padded_length
         )
-    else:
-        mat1_padded = mat1
-    if k_padded_length != 0 or n_padded_length != 0:
-        # dim order is reversed for constant_pad_nd, for every dim we specify right and left padding
-        mat2_padded = aten.constant_pad_nd(
-            mat2, [0, n_padded_length, 0, k_padded_length]
+    )
+    mat2_padded = (
+        mat2
+        if mat2_pre_padded
+        else pad_mat2(
+            mat2, k_padded_length=k_padded_length, n_padded_length=k_padded_length
         )
-    else:
-        mat2_padded = mat2
+    )
     res = call_mm(mat1_padded, mat2_padded)
     if m_padded_length != 0:
         res = res[:-m_padded_length, :]
@@ -456,7 +483,7 @@ def bmm_pattern(mat1: Tensor, mat2: Tensor) -> Tensor:
 def should_pad_bmm(match: Match) -> bool:
     mat1, mat2 = fetch_fake_tensors(match, ("mat1", "mat2"))
     return should_pad_common(mat1, mat2) and should_pad_bench(
-        mat1, mat2, torch.ops.aten.bmm
+        match, mat1, mat2, torch.ops.aten.bmm
     )
 
 
@@ -466,20 +493,29 @@ def pad_bmm(
     m_padded_length: int,
     k_padded_length: int,
     n_padded_length: int,
+    mat1_pre_padded: bool = False,
+    mat2_pre_padded: bool = False,
 ) -> Tensor:
-    if k_padded_length != 0 or m_padded_length != 0:
-        mat1_padded = aten.constant_pad_nd(
-            mat1, [0, k_padded_length, 0, m_padded_length, 0, 0]
+    mat1_padded = (
+        mat1
+        if mat1_pre_padded
+        else pad_mat1(
+            mat1,
+            m_padded_length=m_padded_length,
+            k_padded_length=k_padded_length,
+            is_bmm=True,
         )
-    else:
-        mat1_padded = mat1
-    if k_padded_length != 0 or n_padded_length != 0:
-        mat2_padded = aten.constant_pad_nd(
-            mat2, [0, n_padded_length, 0, k_padded_length, 0, 0]
+    )
+    mat2_padded = (
+        mat2
+        if mat2_pre_padded
+        else pad_mat2(
+            mat2,
+            k_padded_length=k_padded_length,
+            n_padded_length=k_padded_length,
+            is_bmm=True,
         )
-    else:
-        mat2_padded = mat2
-
+    )
     res = call_bmm(mat1_padded, mat2_padded)
     if m_padded_length != 0:
         res = res[:, :-m_padded_length, :]
