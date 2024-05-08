@@ -1731,12 +1731,12 @@ class _TorchCompileInductorWrapper:
                 raise RuntimeError(
                     f"Unexpected optimization option {key}, known options are {list(current_config.keys())}"
                 )
-            if type(val) is not type(current_config[attr_name]):
-                val_type_str = type(val).__name__
-                expected_type_str = type(current_config[attr_name]).__name__
-                raise RuntimeError(
-                    f"Unexpected type of attr {key}, got {val_type_str} should be {expected_type_str}"
-                )
+            # if type(val) is not type(current_config[attr_name]):
+            #     val_type_str = type(val).__name__
+            #     expected_type_str = type(current_config[attr_name]).__name__
+            #     raise RuntimeError(
+            #         f"Unexpected type of attr {key}, got {val_type_str} should be {expected_type_str}"
+            #     )
             self.config[attr_name] = val
 
     def __call__(self, model_, inputs_):

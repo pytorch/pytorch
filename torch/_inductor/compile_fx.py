@@ -823,6 +823,11 @@ def fx_codegen_and_compile(
                 metrics_helper.get_deltas(),
             )
 
+    if config.aot_cache is not None:
+        with open(config.aot_cache, 'w') as file:
+            print(f"Writing to file {config.aot_cache}")
+            file.write(compiled_graph.source_code)
+
     return compiled_graph
 
 
@@ -1195,6 +1200,23 @@ def fw_compiler_freezing(
 
     return wrapper
 
+import importlib.util
+import sys
+
+def load_module_from_file(module_name, file_path):
+    # Create a module spec
+    spec = importlib.util.spec_from_file_location(module_name, file_path)
+    # Create a new module based on the spec
+    module = importlib.util.module_from_spec(spec)
+    # Add the module to sys.modules
+    sys.modules[module_name] = module
+    # Execute the module in its namespace
+    spec.loader.exec_module(module)
+    return module
+
+import importlib
+import os
+import time
 
 @_use_lazy_graph_module(dynamo_config.use_lazy_graph_module)
 def compile_fx(
@@ -1204,6 +1226,19 @@ def compile_fx(
     config_patches: Optional[Dict[str, Any]] = None,
     decompositions: Optional[Dict[OpOverload, Callable[..., Any]]] = None,
 ):
+    if config.aot_cache is not None and os.path.exists(config.aot_cache):
+        # code = open(config.aot_cache, 'r').read()
+        # importlib.import_module()
+        loaded_module = load_module_from_file('foo', f"./{config.aot_cache}")
+        # breakpoint()
+        # funcs = {}
+        # # breakpoint()
+        # exec(code, funcs)
+        # breakpoint()
+        # def call(*args):
+        #     return (args[0].cos(),)
+        call = loaded_module.call
+        return lambda *args: call(list(args))
     """Main entrypoint to a compile given FX graph"""
     if config_patches:
         with config.patch(config_patches):
