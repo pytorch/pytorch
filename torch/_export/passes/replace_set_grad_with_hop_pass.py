@@ -84,7 +84,7 @@ def _replace_with_hop(node: torch.fx.Node):
                     # Rename the name of getitem nodes to the actual name of its contents
                     # for passing verifier and better readability, also propagate metadata
                     for get_item_node in call_func_node.users.keys():
-                        idx: int = get_item_node.args[1]  # type: ignore[assignment]
+                        idx: int = get_item_node.args[1]
                         output_node = output_args[idx]
                         get_item_node._rename(output_node.name)
                         get_item_node.meta = output_node.meta
