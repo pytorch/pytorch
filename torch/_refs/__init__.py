@@ -17,6 +17,7 @@ import torch._prims as prims
 import torch._prims_common as utils
 from torch import sym_float, sym_int
 from torch._prims_common import (
+    BoolLike,
     DeviceLikeType,
     Dim,
     DimsSequenceType,
@@ -6311,7 +6312,7 @@ def _infer_scalar_type(obj):
         return torch.get_default_dtype()
     if isinstance(obj, IntLike) and not isinstance(obj, bool):  # careful!
         return torch.int64
-    if isinstance(obj, bool):
+    if isinstance(obj, BoolLike):
         return torch.bool
     if isinstance(obj, complex):
         default_dtype = torch.get_default_dtype()

@@ -22,6 +22,7 @@ from torch._export.non_strict_utils import (
     make_fake_params_buffers,
     produce_guards_and_solve_constraints,
 )
+from torch._export.passes._node_metadata_hook import _node_metadata_hook
 from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
     _AddRuntimeAssertionsForInlineConstraintsPass,
 )
@@ -1033,6 +1034,20 @@ def _export(
                     for fqn, obj in ep_non_strict.constants.items()
                 }
 
+            stack_trace = (
+                'File "torch/fx/passes/runtime_assert.py", line 24, '
+                "in insert_deferred_runtime_asserts"
+            )
+            with ep_non_strict.gm._set_create_node_hook(
+                functools.partial(_node_metadata_hook, stack_trace=stack_trace)
+            ):
+                insert_deferred_runtime_asserts(
+                    ep_non_strict.gm,
+                    fake_mode.shape_env,
+                    f"non strict exported program: {first_call_function_nn_module_stack(ep_non_strict.gm.graph)}",
+                    export=True,
+                )
+
         ep_non_strict.gm.meta["inline_constraints"] = {
             k: v
             for k, v in fake_mode.shape_env.var_to_range.items()
@@ -1112,12 +1127,6 @@ def _export(
             ),
             example_inputs=(args, kwargs),
             constants=ep_non_strict.constants,
-        )
-        insert_deferred_runtime_asserts(
-            exported_program.graph_module,
-            fake_mode.shape_env,
-            f"non strict exported program: {first_call_function_nn_module_stack(exported_program.graph)}",
-            export=True,
         )
         return exported_program
 
@@ -1307,8 +1316,18 @@ def _export(
         assert res is not None
         gm = res.graph_module
 
+    # We can't get rid of this yet, since for some reason
+    # insert_deferred_runtime_assertions doesn't add assertions to cond
+    # subgraphs
     if len(range_constraints) > 0:
-        res = _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints)(gm)
+        stack_trace = (
+            'File "torch/_export/passes/add_runtime_assertions_for_constraints_pass.py", line 46, '
+            "in _AddRuntimeAssertionsForInlineConstraintsPass"
+        )
+        with dynamo_fake_mode, gm._set_create_node_hook(
+            functools.partial(_node_metadata_hook, stack_trace=stack_trace)
+        ):
+            res = _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints)(gm)
         assert res is not None
         gm = res.graph_module
 
