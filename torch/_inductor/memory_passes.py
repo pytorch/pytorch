@@ -8,8 +8,18 @@ from . import config, ir, scheduler
 from .utils import contains_collective, contains_wait, tuple_sorted, sympy_product
 import logging
 from .virtualized import V
+from collections import defaultdict
 
 torch_log = logging.getLogger("torch")
+
+
+def get_users_from_unfused_nodes(snode):
+    # if a fused node has 2 subnodes (A, B) and each subnode has 2 users (A1, A2) and (B1, B2),
+    # this function returns (A1, A2, B1, B2).
+    if isinstance(snode, scheduler._BaseGroupedSchedulerNode):
+        return list(set([user for snode in snode.snodes for user in snode.users]))
+    else:
+        return snode.users
 
 
 def raise_last_usage(
@@ -17,18 +27,24 @@ def raise_last_usage(
 ) -> List["scheduler.BaseSchedulerNode"]:
     """
     For each node, we move its consumer nodes earlier if it satisfies the following conditions:
-        - The consumer node's all input args have their write sites scheduled before or at the current node.
+        - Assuming the consumer node X's input args have write sites W1, W2 before X in the original schedule,
+          then W1 and W2 have to be already scheduled in the new schedule before we can consider scheduling X.
+          (This is to ensure the value for those input args remains correct after reordering.)
         - The consumer node only writes to one output tensor.
         - The consumer node's out tensor is smaller than the sum memory of all its last-usage input args.
     If we found a consumer node of current node that satisfies the above conditions, we can schedule it right after the current node.
     After moving these consumer nodes up, we are able to immediately release the memory of their last-usage input args.
     """
-    last_write_map = {}  # buf -> its last write site
+    write_map = defaultdict(set)  # bufX -> set of nodes that write to bufX (including itself)
+    node_to_input_prev_writes = defaultdict(set)  # nodeY -> set of writes nodes to nodeY's input args before nodeY
     for snode in snodes:
         for dep in snode.read_writes.writes:
-            last_write_map[dep.name] = snode.get_name()
-    for graph_input in graph_inputs.keys():
-        last_write_map[graph_input] = graph_input
+            write_map[dep.name].add(snode.get_name())
+        if isinstance(snode.node, ir.ResizeStorageBytes):
+            write_map[snode.node.resized_buf_name].add(snode.get_name())
+        for dep in snode.read_writes.reads:
+            node_to_input_prev_writes[snode].update(write_map[dep.name])
+            node_to_input_prev_writes[snode].discard(snode.get_name())
 
     def get_numel_by_name(buf_name):
         def _compute_elems(buf):
@@ -54,14 +70,6 @@ def raise_last_usage(
                 buf = snode.node
             return _compute_elems(buf)
 
-    def get_users_from_unfused_nodes(snode):
-        # if a fused node has 2 subnodes (A, B) and each subnode has 2 users (A1, A2) and (B1, B2),
-        # this function returns (A1, A2, B1, B2).
-        if isinstance(snode, scheduler._BaseGroupedSchedulerNode):
-            return list(set([user for snode in snode.snodes for user in snode.users]))
-        else:
-            return snode.users
-
     new_order = []
     scheduled = set()
     scheduled.update(graph_inputs.keys())
@@ -76,6 +84,8 @@ def raise_last_usage(
             # Can't early release `snode` if it's needed by OutputNode
             if isinstance(user.node, scheduler.OutputNode):
                 break
+            if user.node.get_name() in scheduled:
+                continue
             if contains_collective(user.node) or contains_wait(user.node):
                 continue
             # For now, we don't move users that are MultiOutput
@@ -91,9 +101,19 @@ def raise_last_usage(
             if isinstance(user.node.node, ir.ExternKernel) and user.node.node.op_overload is torch.ops.higher_order.run_and_save_rng_state:
                 continue
             if (
-                all(last_write_map[x.name] in scheduled for x in user.node.read_writes.reads)
+                all(prev_write in scheduled for prev_write in node_to_input_prev_writes[user.node])
                 and len(user.node.read_writes.writes) == 1 and list(user.node.read_writes.writes)[0].name == user.node.get_name()
-                and get_numel_by_name(user.node.get_name()) < sum(get_numel_by_name(x_name) for x_name in user.node.last_usage)
+                and (
+                    # if raising the user node saves memory
+                    get_numel_by_name(user.node.get_name()) < sum(get_numel_by_name(x_name) for x_name in user.node.last_usage)
+                    or (
+                        # always profitable to raise resize-to-0
+                        isinstance(user.node.node, ir.ResizeStorageBytes)
+                        and user.node.node.constant_args[0] == 0
+                    )
+                    # always okay to raise nop kernel
+                    or isinstance(user.node, scheduler.NopKernelSchedulerNode)
+                )
             ):
                 user_node = name_to_fused_node[user.node.get_name()]
                 new_order.append(user_node)
