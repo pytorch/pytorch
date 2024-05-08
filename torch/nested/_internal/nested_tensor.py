@@ -140,8 +140,13 @@ class NestedTensor(torch.Tensor):
     def lengths(self):
         return self._lengths
 
-    # public accessors; purposefully not @properties because those don't work with PT2
-    def max_seqlen(self):
+    # Private accessor functions for min / max sequence length. They're
+    # purposefully not @properties because those don't work with PT2 (yet).
+    # These compute / cache if not present.
+    # TODO: Revisit this when @properties are better supported by PT2. I think the ideal
+    # state would be to have public @properties for min / max sequence length that compile
+    # (including setters).
+    def _get_max_seqlen(self):
         max_seqlen_tensor = self._max_seqlen_tensor
         if max_seqlen_tensor is None:
             # compute & cache
@@ -153,7 +158,7 @@ class NestedTensor(torch.Tensor):
             self._metadata_cache["max_seqlen"] = max_seqlen_tensor
         return _load_val_from_tensor(max_seqlen_tensor)
 
-    def min_seqlen(self):
+    def _get_min_seqlen(self):
         min_seqlen_tensor = self._min_seqlen_tensor
         if min_seqlen_tensor is None:
             # compute & cache
@@ -166,7 +171,8 @@ class NestedTensor(torch.Tensor):
         return _load_val_from_tensor(min_seqlen_tensor)
 
     # Private accessors used for treating min / max seqlen as inner tensors for
-    # flatten / unflatten. These do not compute / cache if not present.
+    # flatten / unflatten. These must be properties to work with the traceable wrapper
+    # subclass logic. These do not compute / cache if not present.
     @property
     def _max_seqlen_tensor(self) -> Optional[torch.Tensor]:
         return self._metadata_cache.get("max_seqlen", None)
@@ -175,32 +181,15 @@ class NestedTensor(torch.Tensor):
     def _min_seqlen_tensor(self) -> Optional[torch.Tensor]:
         return self._metadata_cache.get("min_seqlen", None)
 
-    # TODO: Remove these @property accessors (subject to BC issues ofc)
+    # These are old private @property accessors that are kept around for internal BC
+    # reasons. TODO: Remove these!
     @property
     def _max_seqlen(self):
-        max_seqlen_tensor = self._max_seqlen_tensor
-        if max_seqlen_tensor is None:
-            # compute & cache
-            max_val = _get_sdpa_extreme_seqlen(
-                torch.max,
-                self._offsets.diff() if self._lengths is None else self._lengths,
-            )
-            max_seqlen_tensor = _store_val_in_tensor(max_val)
-            self._metadata_cache["max_seqlen"] = max_seqlen_tensor
-        return _load_val_from_tensor(max_seqlen_tensor)
+        return self._get_max_seqlen()
 
     @property
     def _min_seqlen(self):
-        min_seqlen_tensor = self._min_seqlen_tensor
-        if min_seqlen_tensor is None:
-            # compute & cache
-            min_val = _get_sdpa_extreme_seqlen(
-                torch.min,
-                self._offsets.diff() if self._lengths is None else self._lengths,
-            )
-            min_seqlen_tensor = _store_val_in_tensor(min_val)
-            self._metadata_cache["min_seqlen"] = min_seqlen_tensor
-        return _load_val_from_tensor(min_seqlen_tensor)
+        return self._get_min_seqlen()
 
     def __repr__(self):
         # We should implement this in torch/_tensor_str.py instead
