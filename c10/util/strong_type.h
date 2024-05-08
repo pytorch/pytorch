@@ -20,11 +20,7 @@
 #include <type_traits>
 #include <utility>
 
-#if __cplusplus >= 201703L
 #define STRONG_NODISCARD [[nodiscard]]
-#else
-#define STRONG_NODISCARD
-#endif
 
 #if defined(_MSC_VER) && !defined(__clang__) && __MSC_VER < 1922
 #define STRONG_CONSTEXPR
