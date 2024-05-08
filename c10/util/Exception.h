@@ -68,7 +68,10 @@ class C10_API Error : public std::exception {
       const void* caller = nullptr);
 
   // Base constructor
-  Error(std::string msg, std::string backtrace, const void* caller = nullptr);
+  Error(
+      std::string msg,
+      std::string backtrace = "",
+      const void* caller = nullptr);
 
   // Add some new context to the message stack.  The last added context
   // will be formatted at the end of the context list upon printing.

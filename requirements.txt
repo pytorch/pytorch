@@ -14,6 +14,7 @@ filelock
 networkx
 jinja2
 fsspec
+lintrunner
 # setuptools was removed from default python install
 setuptools ; python_version >= "3.12"
 packaging

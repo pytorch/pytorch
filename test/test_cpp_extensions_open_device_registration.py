@@ -403,6 +403,9 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         ):
             cpu_untyped_storage.pin_memory(invalid_device)
 
+    @unittest.skip(
+        "Temporarily disable due to the tiny differences between clang++ and g++ in defining static variable in inline function"
+    )
     def test_open_device_serialization(self):
         self.module.set_custom_device_index(-1)
         storage = torch.UntypedStorage(4, device=torch.device("foo"))

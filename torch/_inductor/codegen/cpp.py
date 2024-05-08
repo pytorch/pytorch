@@ -18,6 +18,7 @@ from torch._inductor import dependencies
 from torch._prims_common import is_float_dtype
 from torch.utils import _pytree as pytree
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
+from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
 from .. import codecache, config, ir, metrics
@@ -33,12 +34,12 @@ from ..scheduler import (
 )
 from ..utils import (
     cache_on_self,
-    free_symbol_startswith,
     get_fused_kernel_name,
     is_welford_reduction,
     parallel_num_threads,
     Placeholder,
     sympy_index_symbol,
+    sympy_index_symbol_with_prefix,
     sympy_product,
     sympy_subs,
 )
@@ -52,7 +53,6 @@ from .common import (
     DataTypePropagation,
     DeferredLine,
     DTYPE_TO_COMPUTATION_DTYPE,
-    ExprPrinter,
     IndentedBuffer,
     Kernel,
     KernelArgs,
@@ -60,58 +60,9 @@ from .common import (
     OptimizationContext,
 )
 
+from .cpp_utils import cexpr, cexpr_index, DTYPE_TO_CPP, INDEX_TYPE, value_to_cpp
+
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
-
-DTYPE_TO_CPP = {
-    torch.float32: "float",
-    torch.float64: "double",
-    torch.float16: "half",
-    torch.int64: "int64_t",
-    torch.int32: "int",
-    torch.int16: "short",
-    torch.int8: "signed char",
-    torch.uint64: "uint64_t",
-    torch.uint32: "unsigned int",
-    torch.uint16: "unsigned short",
-    torch.uint8: "unsigned char",
-    torch.bool: "bool",
-    torch.bfloat16: "bfloat16",
-    torch.complex64: "complex64",
-    torch.float8_e4m3fn: "float8_e4m3fn",
-    torch.float8_e5m2: "float8_e5m2",
-}
-
-DTYPE_TO_ATEN = {
-    torch.float32: "at::kFloat",
-    torch.float64: "at::kDouble",
-    torch.float16: "at::kHalf",
-    torch.int64: "at::kLong",
-    torch.int32: "at::kInt",
-    torch.int16: "at::kShort",
-    torch.int8: "at::kChar",
-    torch.uint64: "at::kUInt64",
-    torch.uint32: "at::kUInt32",
-    torch.uint16: "at::kUInt16",
-    torch.uint8: "at::kByte",
-    torch.uint32: "at::kUInt32",
-    torch.uint64: "at::kUInt64",
-    torch.bool: "at::kBool",
-    torch.bfloat16: "at::kBFloat16",
-    torch.complex32: "at::kComplexHalf",
-    torch.complex64: "at::kComplexFloat",
-    torch.complex128: "at::kComplexDouble",
-    torch.float8_e4m3fn: "at::kFloat8_e4m3fn",
-    torch.float8_e5m2: "at::kFloat8_e5m2",
-    torch.float8_e4m3fnuz: "at::kFloat8_e4m3fnuz",
-    torch.float8_e5m2fnuz: "at::kFloat8_e5m2fnuz",
-}
-
-DEVICE_TO_ATEN = {
-    "cpu": "at::kCPU",
-    "cuda": "at::kCUDA",
-}
-
-INDEX_TYPE = "long"
 
 NATIVE_OMP_RTYPES = {"+", "*", "^", "||", "min", "max"}
 RTYPE_TO_CPP = {
@@ -161,19 +112,6 @@ DTYPE_LOWP_FP = [
 
 
 BIN_CMP_OPS = ["eq", "ne", "le", "ge", "lt", "gt"]
-
-
-def value_to_cpp(value, cpp_type):
-    if value == float("-inf"):
-        return f"-std::numeric_limits<{cpp_type}>::infinity()"
-    elif value == float("inf"):
-        return f"std::numeric_limits<{cpp_type}>::infinity()"
-    elif isinstance(value, bool):
-        return f"static_cast<{cpp_type}>({str(value).lower()})"
-    elif math.isnan(value):
-        return f"std::numeric_limits<{cpp_type}>::quiet_NaN()"
-    else:
-        return f"static_cast<{cpp_type}>({repr(value)})"
 
 
 def reduction_init(reduction_type, dtype):
@@ -525,168 +463,6 @@ class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
             self.outer_loop_fusion_depth,
         )
         return cpp_kernel_proxy_list[0]
-
-
-class CppPrinter(ExprPrinter):
-    def _print_Integer(self, expr):
-        return f"{int(expr)}L"
-
-    def _print_Where(self, expr):
-        c = self.paren(self.doprint(expr.args[0]))
-        p = self.paren(self.doprint(expr.args[1]))
-        q = self.paren(self.doprint(expr.args[2]))
-        return f"{c} ? {p} : {q}"
-
-    def _print_ModularIndexing(self, expr):
-        x, div, mod = expr.args
-        x = self.paren(self.doprint(x))
-        if div != 1:
-            div = self.paren(self.doprint(div))
-            if expr.is_integer:
-                x = f"c10::div_floor_integer({x}, {div})"
-            else:
-                x = f"c10::div_floor_floating(static_cast<double>({x}), static_cast<double>({div}))"
-        mod = self.paren(self.doprint(mod))
-        return f"static_cast<{INDEX_TYPE}>({x}) % static_cast<{INDEX_TYPE}>({mod})"
-
-    def _print_FloorDiv(self, expr):
-        x, div = expr.args
-        x = self.paren(self.doprint(x))
-        div = self.paren(self.doprint(div))
-        if expr.is_integer:
-            return f"c10::div_floor_integer({x}, {div})"
-        return f"c10::div_floor_floating(static_cast<double>({x}), static_cast<double>({div}))"
-
-    def _print_floor(self, expr):
-        assert len(expr.args) == 1
-        r = f"std::floor({self._print(expr.args[0])})"
-        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
-
-    def _print_Trunc(self, expr):
-        assert len(expr.args) == 1
-        r = f"std::trunc({self._print(expr.args[0])})"
-        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
-
-    def _print_Pow(self, expr):
-        # Uses float constants to perform FP div
-        base, exp = expr.args
-        base = self._print(base)
-
-        if exp == 0.5 or exp == -0.5:
-            return f"std::sqrt({base})" if exp == 0.5 else f"1.0/std::sqrt({base})"
-        assert exp.is_integer
-        exp = int(exp)
-        if exp > 0:
-            r = "*".join([self.paren(base)] * exp)
-        elif exp < 0:
-            r = "1.0/" + self.paren("*".join([self.paren(base)] * abs(exp)))
-        else:  # exp == 0
-            r = "1.0"
-
-        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
-
-    def _print_Rational(self, expr):
-        # Uses float constants to perform FP div
-        if expr.q == 1:
-            r = f"{expr.p}"
-        else:
-            r = f"{expr.p}.0/{expr.q}.0"
-        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
-
-    def _print_ceiling(self, expr):
-        assert len(expr.args) == 1
-        r = f"std::ceil({self._print(expr.args[0])})"
-        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
-
-    def _print_Min(self, expr):
-        args = [self._print(a) for a in expr.args]
-        if len(args) == 2:
-            return f"std::min({args[0]}, {args[1]})"
-        else:
-            # Initializer list overload
-            il = "{" + ", ".join(args) + "}"
-            return f"std::min({il})"
-
-    def _print_Max(self, expr):
-        args = [self._print(a) for a in expr.args]
-        if len(args) == 2:
-            return f"std::max({args[0]}, {args[1]})"
-        else:
-            # Initializer list overload
-            il = "{" + ", ".join(args) + "}"
-            return f"std::max({il})"
-
-    def _print_Abs(self, expr):
-        assert len(expr.args) == 1
-        return f"std::abs({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_cos(self, expr):
-        assert len(expr.args) == 1
-        return f"std::cos({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_cosh(self, expr):
-        assert len(expr.args) == 1
-        return f"std::cosh({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_acos(self, expr):
-        assert len(expr.args) == 1
-        return f"std::acos({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_sin(self, expr):
-        assert len(expr.args) == 1
-        return f"std::sin({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_sinh(self, expr):
-        assert len(expr.args) == 1
-        return f"std::sinh({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_asin(self, expr):
-        assert len(expr.args) == 1
-        return f"std::asin({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_tan(self, expr):
-        assert len(expr.args) == 1
-        return f"std::tan({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_tanh(self, expr):
-        assert len(expr.args) == 1
-        return f"std::tanh({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_atan(self, expr):
-        assert len(expr.args) == 1
-        return f"std::atan({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_sqrt(self, expr):
-        return f"std::sqrt({self._print(expr.args[0])})"
-
-    def _print_Round(self, expr):
-        assert len(expr.args) == 1
-        return f"std::lrint({self._print(expr.args[0])})"
-
-    def _print_RoundDecimal(self, expr):
-        assert len(expr.args) == 2
-        number, ndigits = expr.args
-        if number.is_integer:
-            # ndigits < 0 should have been filtered by the sympy function
-            assert ndigits < 0
-            raise ValueError(
-                f"For integer inputs, only non-negative ndigits are currently supported, but got {ndigits}."
-            )
-        return f"static_cast<double>(std::nearbyint(1e{ndigits} * {self.paren(self._print(number))}) * 1e{-ndigits})"
-
-    def _print_BooleanTrue(self, expr):
-        return "true"
-
-    def _print_BooleanFalse(self, expr):
-        return "false"
-
-
-# A function to print, useful for printing sympy symbols.
-cexpr = CppPrinter().doprint
-
-
-def cexpr_index(index):
-    return f"static_cast<{INDEX_TYPE}>({cexpr(index)})"
 
 
 class RecordOptimizationContext:
@@ -1998,7 +1774,8 @@ class CppKernel(Kernel):
             self.call_ranges = tuple(lengths) + tuple(reduction_lengths)
             self.ranges = [self.rename_indexing(x) for x in self.call_ranges]
             self.itervars = [
-                sympy_index_symbol(f"x{n}") for n in range(len(self.ranges))
+                sympy_index_symbol_with_prefix(SymT.XBLOCK, n)
+                for n in range(len(self.ranges))
             ]
             self.reduction_depth = len(lengths)
         return (
@@ -2223,7 +2000,7 @@ class CppVecKernel(CppKernel):
         for indirect_var in (
             self.cse.varname_map[s.name]  # type: ignore[attr-defined]
             for s in index.free_symbols
-            if s.name.startswith("tmp")  # type: ignore[attr-defined]
+            if symbol_is_type(s, SymT.TMP)
         ):
             assert isinstance(indirect_var, CppCSEVariable)
             if indirect_var.is_vec:
@@ -2372,7 +2149,7 @@ class CppVecKernel(CppKernel):
             for indirect_var in (
                 self.cse.varname_map[s.name]  # type: ignore[attr-defined]
                 for s in index.free_symbols
-                if s.name.startswith("tmp")  # type: ignore[attr-defined]
+                if symbol_is_type(s, SymT.TMP)
             ):
                 assert isinstance(indirect_var, CppCSEVariable)
                 if indirect_var.is_vec:
@@ -2582,8 +2359,7 @@ class CppVecKernel(CppKernel):
         index = self.rename_indexing(index)
         var = self.args.output(name)
         out_dtype = V.graph.get_dtype(name)
-        # Only float reductions are vectorized currently
-        dtype = torch.float
+        dtype = torch.float if out_dtype.is_floating_point else torch.int64
         code = IndentedBuffer()
         if self.tiling_idx >= self.reduction_depth:
             # Horizontal reduction
@@ -2593,16 +2369,11 @@ class CppVecKernel(CppKernel):
         else:
             # Vertical reduction
             if out_dtype != dtype:
-                if out_dtype in DTYPE_LOWP_FP and dtype == torch.float:
-                    _lowp_fp_tmpvar_vec = f"{DTYPE_TO_CPP[out_dtype]}_{value}"
-                    code.writeline(
-                        f"auto {_lowp_fp_tmpvar_vec} = at::vec::convert<{DTYPE_TO_CPP[out_dtype]}>({value});"
-                    )
-                    value = _lowp_fp_tmpvar_vec
-                else:
-                    raise AssertionError(
-                        f"Unsupported reduction type from {dtype} to {out_dtype}"
-                    )
+                converted_value = f"{DTYPE_TO_CPP[out_dtype]}_{value}"
+                code.writeline(
+                    f"auto {converted_value} = at::vec::convert<{DTYPE_TO_CPP[out_dtype]}>({value});"
+                )
+                value = converted_value
             code.splice(self._get_store_line(value, var, index, out_dtype))
         self.reduction_suffix.splice(code.map(lambda x: DeferredLine(name, x)))
 
@@ -2918,7 +2689,7 @@ class CppVecKernelChecker(CppVecKernel):
 
             if load_dtype not in self.supported_dtypes and (
                 index.has(self.itervars[self.tiling_idx])
-                or free_symbol_startswith(index, "tmp")
+                or free_symbol_is_type(index, SymT.TMP)
             ):
                 self.disable_vec(f"{load_dtype} not supported by load")
                 return var
@@ -3447,7 +3218,7 @@ class CppKernelProxy(CppKernel):
                     elif stride == 1:
                         contig_vars.add(int(var.name[1:]))
                         contig_vars_list.append(int(var.name[1:]))
-                    elif all(s.name.startswith("s") for s in stride.free_symbols):
+                    elif all(symbol_is_type(s, SymT.SIZE) for s in stride.free_symbols):
                         non_contig_stride_const.add(int(var.name[1:]))
                     else:
                         non_contig_stride_other.add(int(var.name[1:]))

@@ -326,6 +326,19 @@ class AOTInductorTestsTemplate:
         with config.patch({"freezing": True}):
             self.check_model(Model(self.device), example_inputs)
 
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "normalization_pass": {},
+            "remove_split_with_size_one_pass": {},
+            "merge_getitem_cat_pass": {},
+            "merge_stack_tahn_unbind_pass": {},
+            "merge_splits_pass": {},
+            "mutate_cat_pass": {},
+            "split_cat_pass": {},
+            "unbind_stack_pass": {},
+        },
+        post_grad_fusion_options={},
+    )
     def test_simple_split(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -2662,6 +2675,58 @@ class AOTInductorTestsTemplate:
 
         example_inputs = (torch.randn(16, 16, 16, device=self.device),)
         self.check_model(Model(), example_inputs)
+
+    def test_nested_tensor_from_jagged(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mlp = nn.Sequential(
+                    nn.Linear(128, 64), nn.ReLU(), nn.Linear(64, 32), nn.Sigmoid()
+                )
+
+            def forward(self, values, offsets):
+                nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+                res = self.mlp(nt)
+                return res.values()
+
+        model = Model().to(device=self.device)
+
+        example_inputs_1 = (
+            torch.randn((15, 128), device=self.device),
+            torch.tensor([0, 3, 4, 10, 15], device=self.device),
+        )
+
+        # same "NT batch size", different actual amount of data
+        example_inputs_2 = (
+            torch.randn((31, 128), device=self.device),
+            torch.tensor([0, 1, 20, 25, 31], device=self.device),
+        )
+
+        # same actual amount of data, different "NT batch size"
+        example_inputs_3 = (
+            torch.randn((15, 128), device=self.device),
+            torch.tensor([0, 3, 10, 15], device=self.device),
+        )
+
+        # different "NT batch size"
+        example_inputs_4 = (
+            torch.randn((37, 128), device=self.device),
+            torch.tensor([0, 5, 16, 25, 29, 37], device=self.device),
+        )
+
+        dim0_values = Dim("dim0_values", min=1, max=128)
+        dim0_offsets = Dim("dim0_offsets", min=1, max=9)
+        dynamic_shapes = {"values": {0: dim0_values}, "offsets": {0: dim0_offsets}}
+        example_inputs_list = [
+            example_inputs_1,
+            example_inputs_2,
+            example_inputs_3,
+            example_inputs_4,
+        ]
+
+        self.check_model_with_multiple_inputs(
+            model, example_inputs_list, dynamic_shapes=dynamic_shapes
+        )
 
     def test_misc_1(self):
         class Model(nn.Module):
