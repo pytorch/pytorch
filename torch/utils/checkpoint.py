@@ -16,12 +16,13 @@ from typing import (
     Optional,
     Tuple,
 )
+import enum
 from weakref import ReferenceType
 
 import torch
 import torch.fx.traceback as fx_traceback
 from torch._functorch._aot_autograd.functional_utils import is_fun
-from torch.utils._pytree import tree_map
+from torch.utils._pytree import tree_map, tree_map_only
 from torch.testing._internal.logging_tensor import capture_logs, LoggingTensorMode
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -1163,15 +1164,6 @@ def _is_compiling(func, args, kwargs):
     return False
 
 
-def _detach(x):
-    if isinstance(x, torch.Tensor):
-        return x.detach()
-    return x
-
-
-uid = count(1)
-
-
 # NOTE: torch.utils.checkpoint internal logic will call these two functions unknown number of times
 # (i.e. there could be _CachedTorchDispatchMode calls that doesn't map to a _CachingTorchDispatchMode call),
 # so we ignore these ops and just always recompute them.
@@ -1181,133 +1173,233 @@ _ignored_ops = {
 } | set(torch._subclasses.functional_tensor.FunctionalTensor.metadata_fns)
 
 
-class _CachingTorchDispatchMode(TorchDispatchMode):
-    r"""
-    A :class:`TorchDispatchMode` to implement selective activation checkpointing
-    that's compatible with torch.compile. Used together with _CachedTorchDispatchMode.
+class _VersionWrapper:
+    # Check that cached tensors are not mutated.
+    def __init__(self, val):
+        self.val: Union[Tensor, Any] = val
+        self.version: Optional[int] = val._version if isinstance(val, torch.Tensor) else None
+
+    def get_val(self):
+        if self.version is not None:
+            if self.val._version != self.version:
+                # Can we give user a stack trace of where the mutation happened?
+                raise RuntimeError(
+                    "Tensor cached during selective activation checkpoint has been mutated"
+                )
+        return self.val
+
+
+def _maybe_detach(x):
+    if isinstance(x, torch.Tensor):
+        # Ensure that the original tensor object is saved when x does not require grad
+        if x.requires_grad:
+            with torch._C._SetExcludeDispatchKeyGuard(torch._C.DispatchKey.ADInplaceOrView, False):
+                # Ensure that view performed beneath autograd properly propagates
+                # version counter. TODO: Use reentrant_dispatch instead of
+                # manually manipulating dispatch keys. Using reentrant_dispatch
+                # would respect inference_mode, though that is not relevant for
+                # this case.
+                x = x.detach()
+    return x
+
+
+class SelectiveCheckpointContext:
     """
+    Context object for selective checkpointing.
+
+    This class is used to pass relevant metadata to the policy function during
+    selective checkpointing. The metadata includes whether the current context
+    is for recomputation or not.
+    """
+    def __init__(self, *, is_recompute):
+        self.is_recompute = is_recompute
+
+    def is_recompute(self):
+        return self.is_recomputes
+
+
+class CheckpointPolicy(enum.Enum):
+    """
+    Enum for specifying the policy for checkpointing during backpropagation.
+
+    The following policies are supported:
+    - `SAVE_{NON,}_OVERRIDABLE`: The operation's output will be saved during the forward
+        pass and will not be recomputed during the backward pass
+    - `RECOMPUTE_{NON,}_OVERRIDABLE`: The operation's output will not be saved during the
+        forward pass and will be recomputed during the backward pass
+
+    "OVERRIDABLE" indicates that the policy can be overridden by other subsystems
+    like `torch.compile`.
+
+    .. note::
+        A policy function that always returns RECOMPUTE_OVERRIDABLE is
+        equivalent to vanilla checkpointing.
+
+        A policy function that returns ``SAVE_{NON,}_OVERRIDABLE`` every op is
+        NOT equivalent to not using checkpointing. Using such a policy would
+        save additional tensors not limited to ones that are actually needed for
+        gradient computation.
+    """
+    SAVE_NON_OVERRIDABLE = 0
+    SAVE_OVERRIDABLE = 1
+    RECOMPUTE_NON_OVERRIDABLE = 2
+    RECOMPUTE_OVERRIDABLE = 3
+
+
+class _CachingTorchDispatchMode(TorchDispatchMode):
+    # Used together with _CachedTorchDispatchMode to implement SAC.
     def __init__(self, policy_fn, storage):
         self.policy_fn = policy_fn
         self.storage = storage
 
-    def push_into_storage(self, out, func, args, kwargs):
-        out_detached = tree_map(_detach, out)
-        self.storage[func].append(out_detached)
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        kwargs = {} if kwargs is None else kwargs
+        policy = self.policy_fn(SelectiveCheckpointContext(is_recompute=False),
+                                func, *args, **kwargs)
+        is_compiling = _is_compiling(func, args, kwargs)
 
-    def _handle_compile_in_forward_ctx(self, should_not_recompute, func, args, kwargs):
         if func in _ignored_ops:
             return func(*args, **kwargs)
-        if should_not_recompute:
-            fx_traceback.current_meta["recompute"] = 0
-        # NOTE: Here we just store and reuse output of all ops, since in torch.compile mode
-        # we decide and handle recomputation in the partitioner.
-        out = func(*args, **kwargs)
-        self.push_into_storage(out, func, args, kwargs)
-        return out
 
-    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        if kwargs is None:
-            kwargs = {}
-        should_not_recompute = self.policy_fn("forward", func, *args, **kwargs)
-        if _is_compiling(func, args, kwargs):
-            return self._handle_compile_in_forward_ctx(should_not_recompute, func, args, kwargs)
-        else:
-            if should_not_recompute:
-                out = func(*args, **kwargs)
-                self.push_into_storage(out, func, args, kwargs)
-            else:
-                out = func(*args, **kwargs)
-            return out
+        if is_compiling:
+            fx_traceback.current_meta["recompute"] = policy
+
+        out = func(*args, **kwargs)
+
+        if policy in (CheckpointPolicy.SAVE_NON_OVERRIDABLE, CheckpointPolicy.SAVE_OVERRIDABLE) or is_compiling:
+            self.storage[func].append(tree_map(lambda x: _VersionWrapper(_maybe_detach(x)), out))
+        return out
 
 
 class _CachedTorchDispatchMode(TorchDispatchMode):
-    r"""
-    A :class:`TorchDispatchMode` to implement selective activation checkpointing
-    that's compatible with torch.compile. Used together with _CachingTorchDispatchMode.
-    """
+    # Used together with _CachedTorchDispatchMode to implement SAC.
     def __init__(self, policy_fn, storage):
         self.policy_fn = policy_fn
         self.storage = storage
 
-    def pop_from_storage(self, func, args, kwargs):
-        assert func in self.storage
-        out = self.storage[func].pop(0)
-        return out
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        kwargs = {} if kwargs is None else kwargs
+        policy = self.policy_fn(SelectiveCheckpointContext(is_recompute=True),
+                                func, *args, **kwargs)
+        is_compiling = _is_compiling(func, args, kwargs)
 
-    def _handle_compile_in_recompute_ctx(self, should_not_recompute, func, args, kwargs):
         if func in _ignored_ops:
             return func(*args, **kwargs)
-        out = self.pop_from_storage(func, args, kwargs)
+
+        if policy in (CheckpointPolicy.SAVE_NON_OVERRIDABLE, CheckpointPolicy.SAVE_OVERRIDABLE) or is_compiling:
+            storage = self.storage.get(func)
+            if func is None:
+                raise RuntimeError("")
+            if len(storage) == 0:
+                raise RuntimeError("Trying to backward an extra time")
+            out = tree_map(lambda x: x.get_val(), storage.pop(0))
+        else:
+            out = func(*args, **kwargs)
         return out
 
-    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        if kwargs is None:
-            kwargs = {}
-        should_not_recompute = self.policy_fn("recompute", func, *args, **kwargs)
-        if _is_compiling(func, args, kwargs):
-            return self._handle_compile_in_recompute_ctx(should_not_recompute, func, args, kwargs)
-        else:
-            if should_not_recompute:
-                out = self.pop_from_storage(func, args, kwargs)
-            else:
-                out = func(*args, **kwargs)
-            return out
 
-
-def _pt2_selective_checkpoint_context_fn_gen(policy_fn):
+def do_not_recompute_matmuls_context_fn():
     """
-    A helper function that generates a pair of contexts to be later passed into
-    `torch.utils.checkpoint` API to implment selective checkpointing.
+    Utility to avoid recomputing matmuls during activation checkpointing.
+
+    If this function is passed to `torch.utils.checkpoint.checkpoint`'s `context_fn`
+    argument, activation checkpoint will cache matmul ops during forward
+    and not recompute them when forward is run again during backward.
 
     .. warning::
-        This is context_fn is intended for use with torch.compile only.
+        The exact ops included in the policy specified by this function is
+        subject to change. For more control, consider using
+        :func:`gen_selective_checkpoint_context_fn` directly.
+    """
+    # What kind of bc-guarnantees should this function have? We are allowed
+    # to add (or remove?) to/from this list?
+    return gen_selective_checkpoint_context_fn([
+        torch.ops.aten.mm.default,
+        torch.ops.aten.addmm.default,
+        # Any other matmul-like ops?
+    ])
+
+def gen_selective_checkpoint_context_fn(policy_fn_or_list):
+    """
+    Helper to avoid recomputing certain ops during activation checkpointing.
+
+    It can be used with `torch.utils.checkpoint.checkpoint` to control which
+    operations are recomputed during the backward pass.
 
     Args:
-        policy_fn (Callable[[Callable, List[Any], Dict[str, Any]], bool]): Policy function
-            to decide whether a particular op should be recomputed in backward pass or not.
-            In eager mode:
-                If policy_fn(...) returns True, the op is guaranteed to NOT be recomputed.
-                If policy_fn(...) returns False, the op is guaranteed to be recomputed.
-            In torch.compile mode:
-                If policy_fn(...) returns True, the op is guaranteed to NOT be recomputed.
-                If policy_fn(...) returns False, the op may or may not be recomputed
-                (it's up to the partitioner to decide).
-
+        `policy_fn_or_list` (Callable or List):
+        - If a policy function is provided, it should accept a
+          :class:`SelectiveCheckpointContext`, the :class:`OpOverload`, args and
+          kwargs to the op, and return a :class:`CheckpointPolicy` enum value
+          indicating whether the execution of the op should be recomputed or not.
+        - If a list of operations is provided, it is equivalent to a policy
+          returning `CheckpointPolicy.SAVE_NON_OVERRIDABLE` for the specified
+          operations and `CheckpointPolicy.RECOMPUTE_OVERRIDABLE` for all other
+          operations.
     Returns:
-        A pair of generated contexts.
+        A callable returning a tuple of two context managers. This callable
+        should be passed to `torch.utils.checkpoint.checkpoint`'s `context_fn`
+        argument.
 
     Example:
         >>> # xdoctest: +REQUIRES(LINUX)
         >>>
-        >>> def get_custom_policy():
-        >>>     no_recompute_list = [
-        >>>         torch.ops.aten.mm.default,
-        >>>     ]
-        >>>     def custom_policy(mode, func, *args, **kwargs):
-        >>>         return func in no_recompute_list
-        >>>     return custom_policy
+        >>> ops_to_save = [
+        >>>    torch.ops.aten.mm.default,
+        >>> ]
         >>>
-        >>> def selective_checkpointing_context_fn():
-        >>>     return _pt2_selective_checkpoint_context_fn_gen(get_custom_policy())
+        >>> def policy_fn(ctx, op, *args, **kwargs):
+        >>>    if op in ops_to_save:
+        >>>        return CheckpointPolicy.SAVE_NON_OVERRIDABLE
+        >>>    else:
+        >>>        return CheckpointPolicy.RECOMPUTE_OVERRIDABLE
         >>>
-        >>> def gn(x, y):
-        >>>     return torch.sigmoid(torch.matmul(torch.matmul(x, y), y)) * y
+        >>> context_fn = gen_selective_checkpoint_context_fn(policy_fn)
+        >>>
+        >>> # or equivalently
+        >>> context_fn = gen_selective_checkpoint_context_fn(ops_to_save)
         >>>
         >>> def fn(x, y):
-        >>>     return torch.utils.checkpoint.checkpoint(
-        >>>         gn, x, y,
-        >>>         use_reentrant=False,
-        >>>         context_fn=selective_checkpointing_context_fn,
-        >>>     )
+        >>>     return torch.sigmoid(torch.matmul(torch.matmul(x, y), y)) * y
         >>>
-        >>> x = torch.randn(4, 4, requires_grad=True)
-        >>> y = torch.randn(4, 4, requires_grad=True)
-        >>>
-        >>> compiled_fn = torch.compile(fn)
+        >>> out = torch.utils.checkpoint.checkpoint(
+        >>>     fn, x, y,
+        >>>     use_reentrant=False,
+        >>>     context_fn=context_fn,
+        >>> )
     """
-    storage: Dict[Any, List[Any]] = defaultdict(list)
-    return _CachingTorchDispatchMode(policy_fn, storage), _CachedTorchDispatchMode(policy_fn, storage)
+    # NB: If grad_mode is disabled, checkpoint would not run forward under
+    #     context_fn anyway, so proceed as usual.
+    if isinstance(policy_fn_or_list, list):
+        for op in policy_fn_or_list:
+            if not isinstance(op, torch._ops.OpOverload):
+                _extra_msg = (
+                    "Please update the OpOverloadPacket to a specific OpOverload."
+                    "For example, if you have `torch.ops.aten.mm`, change it to `torch.ops.aten.mm.default`."
+                ) if isinstance(op, torch._ops.OpOverloadPacket) else ""
+                raise ValueError(
+                    f"Expected op in `op_list` to be an OpOverload but got: {op} "
+                    f"of type {type(op)}. {_extra_msg}"
+                )
 
+        def policy_fn(ctx, op, *args, **kwargs):
+            if op in policy_fn_or_list:
+                return CheckpointPolicy.SAVE_NON_OVERRIDABLE
+            else:
+                return CheckpointPolicy.RECOMPUTE_OVERRIDABLE
+    elif callable(policy_fn_or_list):
+        policy_fn = policy_fn_or_list
+    else:
+        raise TypeError("policy_fn_or_list must be either a function or a list of ops.")
+
+    def context_fn():
+        storage: Dict[Any, List[Any]] = defaultdict(list)
+        # TODO: when would I need to deepcopy the policy_fn?
+        return (
+            _CachingTorchDispatchMode(policy_fn, storage),
+            _CachedTorchDispatchMode(policy_fn, storage),
+        )
+    return context_fn
 
 # NB: this helper wraps fn before calling checkpoint_impl. kwargs and
 #     saving/restoring of global state is handled here.

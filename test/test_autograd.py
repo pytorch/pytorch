@@ -24,6 +24,8 @@ from functools import partial, reduce
 from itertools import product
 from operator import mul
 from typing import List, Tuple
+import numpy as np
+import functools
 
 import torch
 import torch.autograd._functions
@@ -78,7 +80,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils.checkpoint import checkpoint, checkpoint_sequential
+from torch.utils.checkpoint import checkpoint, checkpoint_sequential, gen_selective_checkpoint_context_fn
 from torch.utils.hooks import RemovableHandle
 
 
@@ -13104,6 +13106,164 @@ class TestNestedCheckpoint(TestCase):
             out = checkpoint(fn2, a, use_reentrant=False)
         out.backward()
         self.assertEqual(counter[0], 1)
+
+class TestSelectiveActivationCheckpoint(TestCase):
+    def test_basic(self):
+        # When SAC is enabled, the op is not computed a second time
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            counter = [0]
+
+            @torch.library.custom_op("mylib::sin_with_counter", mutates_args=())
+            def sin_with_counter(x: torch.Tensor) -> torch.Tensor:
+                counter[0] += 1
+                # hold a weakpointer to whatever is saved here?
+                return x.sin()
+
+            def setup_context(ctx, inputs, output) -> torch.Tensor:
+                (x,) = inputs
+                ctx.save_for_backward(x)
+
+            def backward(ctx, grad):
+                (x,) = ctx.saved_tensors
+                return grad * x.cos()
+
+            torch.library.register_autograd(
+                "mylib::sin_with_counter", setup_context, backward
+            )
+
+            x = torch.randn(3, requires_grad=True)
+
+            def fn(x):
+                return (torch.ops.mylib.sin_with_counter(x) * x.sin().exp()).sin()
+
+            def policy_fn(ctx, op, *args, **kwargs):
+                if op == torch.ops.mylib.sin_with_counter.default:
+                    return torch.utils.checkpoint.CheckpointPolicy.SAVE_NON_OVERRIDABLE
+                else:
+                    return torch.utils.checkpoint.CheckpointPolicy.RECOMPUTE_OVERRIDABLE
+
+            counter = [0]
+            context_fn = functools.partial(gen_selective_checkpoint_context_fn, policy_fn=policy_fn)
+            out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
+            out.sum().backward()
+            self.assertEqual(counter[0], 1)
+
+            counter = [0]
+            out = checkpoint(fn, x, use_reentrant=False)
+            out.sum().backward()
+            self.assertEqual(counter[0], 2)
+
+            counter = [0]
+            out = fn(x)
+            out.sum().backward()
+            self.assertEqual(counter[0], 1)
+
+    # Have some more example of policy functions we want here.
+    def test_list_of_ops_policy_helper(self):
+        pass
+
+    def test_counter_policy(self):
+        pass
+
+    def test_storage_lifetime(self):
+        # The storage object saved by SAC survives as long as the graph is alive
+        # graph -> the saved variable hooks -> recompute_context -> storage
+        # However, we make sure to eagerly free any cached objects upon use.
+        def policy_fn(ctx, op, *args, **kwargs):
+            if op == torch.ops.aten.sin.default:
+                return torch.utils.checkpoint.CheckpointPolicy.MUST_SAVE
+            else:
+                return torch.utils.checkpoint.CheckpointPolicy.RECOMPUTE
+
+        ref = None
+
+        # This hook fires after unpack is triggered.
+        def hook(x):
+            self.assertIsNone(ref())
+
+        def fn(x):
+            nonlocal ref
+            # IMPORTANT: the tensor object saved is the same exact tensor
+            # object as the output only when the tensor does not require grad.
+            # Detach, so we can conveniently access the reference here.
+            sin_out = x.detach().sin()
+            ref = weakref.ref(sin_out)
+
+            out = x.cos().exp()
+            out.register_hook(hook)
+            return out.cos()
+
+        x = torch.randn(3, requires_grad=True)
+        context_fn = gen_selective_checkpoint_context_fn(policy_fn=policy_fn)
+        out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
+        self.assertIsNotNone(ref())
+        out.sum().backward()
+        self.assertIsNone(ref())
+
+    def test_version_counter(self):
+        def policy_fn(ctx, op, *args, **kwargs):
+            if op == torch.ops.aten.sin.default:
+                return torch.utils.checkpoint.CheckpointPolicy.MUST_SAVE
+            else:
+                return torch.utils.checkpoint.CheckpointPolicy.RECOMPUTE
+
+        def fn(x):
+            return x.sin().mul_(2).cos().exp()
+
+        x = torch.randn(3, requires_grad=True)
+        context_fn = functools.partial(gen_selective_checkpoint_context_fn, policy_fn=policy_fn)
+        out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
+
+        with self.assertRaisesRegex(RuntimeError, "has been mutated"):
+            out.sum().backward()
+
+        functools.partial(gen_selective_checkpoint_context_fn, policy_fn=policy_fn, allow_mutation=True)
+
+    def test_override_verison_counter(self):
+        # TODO: Expose an override to allow the user to say they know what they are doing
+        # and don't care if the saved thing has been mutated. This may be useful
+        # for AutoAC.
+        pass
+
+    def test_function_with_more_than_one_output(self):
+        # var_mean has two outputs
+        pass
+
+    def test_function_with_non_tensor_output(self):
+        # all_close has no outputs
+        pass
+
+    def test_views(self):
+        pass
+
+    def test_inplace(self):
+        # Mutate things that are not cached should be ok.
+        pass
+
+    def test_randomness(self):
+        # We should have a list of ops that use randomness (what about for compile?)
+        pass
+
+    def test_can_only_trigger_recompute_once(self):
+        # We don't support this to avoid adding extra complexity for now.
+        # If there's a need, we could probably do some kind of use_count tracking.
+        # TODO: have a nice error message here.
+        def policy_fn(ctx, op, *args, **kwargs):
+            if op == torch.ops.aten.sin.default:
+                return torch.utils.checkpoint.CheckpointPolicy.MUST_SAVE
+            else:
+                return torch.utils.checkpoint.CheckpointPolicy.RECOMPUTE
+
+        def fn(x):
+            return x.sin().cos().exp()
+
+        x = torch.randn(3, requires_grad=True)
+        context_fn = gen_selective_ac_context_fn(policy_fn)
+        out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
+        out.sum().backward(retain_graph=True)
+
+        with self.assertRaisesRegex(RuntimeError, "trying to backward an extra time"):
+            out.sum().backward(retain_graph=True)
 
 
 class TestAutogradMultipleDispatch(TestCase):
