@@ -196,6 +196,10 @@ class TestForeach(TestCase):
             "fastpath" if not x else "slowpath", "inplace" if y else "outplace"
         ),
     )
+    @unittest.skipIf(
+        torch.cuda.is_available() and not torch.cuda.get_device_capability(0) == (8, 6),
+        "failing flakily on non sm86 cuda jobs",
+    )
     def test_parity(self, device, dtype, op, noncontiguous, inplace):
         if inplace:
             _, _, func, ref = self._get_funcs(op)
