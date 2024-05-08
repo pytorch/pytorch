@@ -916,7 +916,8 @@ class FakeTensorMode(TorchDispatchMode):
 
         self.shape_env: ShapeEnv = shape_env
 
-        self.stack = "".join(traceback.format_stack())
+        self._stack_trace = traceback.extract_stack()
+        self._stack = None
 
         # Indicates to our torch_dispatch dispatching infra that
         # this is an "infra" mode with lower dispatching precedence.
@@ -945,6 +946,12 @@ class FakeTensorMode(TorchDispatchMode):
     @property
     def avoid_device_init(self):
         return not torch.cuda.is_available()
+
+    @property
+    def stack(self):
+        if self._stack is None:
+            self._stack = "".join(traceback.format_list(self._stack_trace))
+        return self._stack
 
     @count
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
