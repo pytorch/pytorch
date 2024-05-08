@@ -94,7 +94,7 @@ TEST(XPUGuardTest, EventBehavior) {
   xpu_stream2.synchronize();
   EXPECT_TRUE(event1.query());
   validateHostData(hostData2, numel);
-  
+
   clearHostData(hostData2, numel);
   // ensure deviceData1 and deviceData2 are different buffers.
   int* deviceData2 = sycl::malloc_device<int>(numel, xpu_stream1);
