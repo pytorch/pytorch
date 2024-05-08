@@ -37,7 +37,7 @@ jobs:
 
   linux-jammy-py3_8-gcc11-build:
     name: linux-jammy-py3.8-gcc11
-    uses: ./.github/workflows/_linux-build-rg.yml
+    uses: ./.github/workflows/_linux-build-label.yml
     with:
       build-environment: linux-jammy-py3.8-gcc11
       docker-image-name: pytorch-linux-jammy-py3.8-gcc11
@@ -74,7 +74,7 @@ jobs:
 
   linux-jammy-py3_8-gcc11-no-ops:
     name: linux-jammy-py3.8-gcc11-no-ops
-    uses: ./.github/workflows/_linux-build-rg.yml
+    uses: ./.github/workflows/_linux-build-label.yml
     with:
       build-environment: linux-jammy-py3.8-gcc11-no-ops
       docker-image-name: pytorch-linux-jammy-py3.8-gcc11
@@ -85,7 +85,7 @@ jobs:
 
   linux-jammy-py3_8-gcc11-pch:
     name: linux-jammy-py3.8-gcc11-pch
-    uses: ./.github/workflows/_linux-build-rg.yml
+    uses: ./.github/workflows/_linux-build-label.yml
     with:
       build-environment: linux-jammy-py3.8-gcc11-pch
       docker-image-name: pytorch-linux-jammy-py3.8-gcc11
@@ -94,9 +94,10 @@ jobs:
           { config: "default", shard: 1, num_shards: 1 },
         ]}
 
+
   linux-jammy-py3_10-clang15-asan-build:
     name: linux-jammy-py3.10-clang15-asan
-    uses: ./.github/workflows/_linux-build-rg.yml
+    uses: ./.github/workflows/_linux-build-label.yml
     with:
       build-environment: linux-jammy-py3.10-clang15-asan
       docker-image-name: pytorch-linux-jammy-py3-clang15-asan
@@ -110,6 +111,7 @@ jobs:
           { config: "default", shard: 6, num_shards: 6, runner: "linux.4xlarge" },
         ]}
       sync-tag: asan-build
+
 
   linux-jammy-py3_10-clang15-asan-test:
     name: linux-jammy-py3.10-clang15-asan
@@ -125,7 +127,7 @@ jobs:
 
   linux-focal-py3_8-clang10-onnx-build:
     name: linux-focal-py3.8-clang10-onnx
-    uses: ./.github/workflows/_linux-build-rg.yml
+    uses: ./.github/workflows/_linux-build-label.yml
     with:
       build-environment: linux-focal-py3.8-clang10-onnx
       docker-image-name: pytorch-linux-focal-py3-clang10-onnx
@@ -148,7 +150,7 @@ jobs:
 
   linux-focal-py3_8-clang10-build:
     name: linux-focal-py3.8-clang10
-    uses: ./.github/workflows/_linux-build-rg.yml
+    uses: ./.github/workflows/_linux-build-label.yml
     with:
       build-environment: linux-focal-py3.8-clang10
       docker-image-name: pytorch-linux-focal-py3.8-clang10
@@ -163,7 +165,6 @@ jobs:
           { config: "dynamo", shard: 2, num_shards: 3, runner: "linux.2xlarge" },
           { config: "dynamo", shard: 3, num_shards: 3, runner: "linux.2xlarge" },
         ]}
-
   linux-focal-py3_8-clang10-test:
     name: linux-focal-py3.8-clang10
     uses: ./.github/workflows/_linux-test.yml
@@ -177,7 +178,7 @@ jobs:
 
   linux-focal-py3_11-clang10-build:
     name: linux-focal-py3.11-clang10
-    uses: ./.github/workflows/_linux-build-rg.yml
+    uses: ./.github/workflows/_linux-build-label.yml
     with:
       build-environment: linux-focal-py3.11-clang10
       docker-image-name: pytorch-linux-focal-py3.11-clang10
@@ -192,6 +193,7 @@ jobs:
           { config: "dynamo", shard: 2, num_shards: 3, runner: "linux.2xlarge" },
           { config: "dynamo", shard: 3, num_shards: 3, runner: "linux.2xlarge" },
         ]}
+
 
   linux-focal-py3_11-clang10-test:
     name: linux-focal-py3.11-clang10
@@ -215,6 +217,9 @@ jobs:
           { config: "default", shard: 1, num_shards: 3, runner: "linux.2xlarge" },
           { config: "default", shard: 2, num_shards: 3, runner: "linux.2xlarge" },
           { config: "default", shard: 3, num_shards: 3, runner: "linux.2xlarge" },
+          { config: "dynamo", shard: 1, num_shards: 3, runner: "linux.2xlarge" },
+          { config: "dynamo", shard: 2, num_shards: 3, runner: "linux.2xlarge" },
+          { config: "dynamo", shard: 3, num_shards: 3, runner: "linux.2xlarge" },
         ]}
 
   linux-focal-py3_12-clang10-test:
@@ -409,13 +414,13 @@ jobs:
           { config: "default", shard: 1, num_shards: 1 },
         ]}
 
-  linux-focal-rocm6_0-py3_8-build:
+  linux-focal-rocm6_1-py3_8-build:
     # don't run build twice on main
     if: github.event_name == 'pull_request'
-    name: linux-focal-rocm6.0-py3.8
+    name: linux-focal-rocm6.1-py3.8
     uses: ./.github/workflows/_linux-build-label.yml
     with:
-      build-environment: linux-focal-rocm6.0-py3.8
+      build-environment: linux-focal-rocm6.1-py3.8
       docker-image-name: pytorch-linux-focal-rocm-n-py3
       sync-tag: rocm-build
       test-matrix: |

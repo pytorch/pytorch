@@ -1,7 +1,7 @@
 # mypy: ignore-errors
 
 import weakref
-from typing import Dict, List
+from typing import Dict, List, TYPE_CHECKING
 
 import torch
 from torch.utils._pytree import tree_map_only
@@ -16,12 +16,14 @@ from ..source import (
 )
 from ..utils import GLOBAL_KEY_PREFIX
 
-from .base import VariableTracker
 from .constant import ConstantVariable
 from .dicts import ConstDictVariable
 from .lists import ListVariable
 from .misc import GetAttrVariable
 from .user_defined import UserDefinedObjectVariable
+
+if TYPE_CHECKING:
+    from .base import VariableTracker
 
 
 class ArgMappingException(Exception):
@@ -48,14 +50,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         tensor_to_source=None,
         **kwargs,
     ):
-        from ..decorators import mark_static_address
-
         super().__init__(value, **kwargs)
-
-        for group in self.value.param_groups:
-            for p in group["params"]:
-                mark_static_address(p)
-
         self.grad_to_source = grad_to_source or {}
         self.tensor_to_source = tensor_to_source or {}
         self.static_tensor_names = static_tensor_names or set()
@@ -101,6 +96,12 @@ class OptimizerVariable(UserDefinedObjectVariable):
             return GetAttrVariable(self, name, source=AttrSource(self.source, name))
 
         if name == "param_groups":
+            from ..decorators import mark_static_address
+
+            for group in self.value.param_groups:
+                for p in group["params"]:
+                    mark_static_address(p)
+
             self._set_capturable(tx)
 
         return super().var_getattr(tx, name)
@@ -113,9 +114,8 @@ class OptimizerVariable(UserDefinedObjectVariable):
         for g in self.value.param_groups:
             for p in g["params"]:
                 side_effects = tx.output.side_effects
-                if side_effects.has_pending_mutation(
-                    side_effects.id_to_variable.get(id(p), None)
-                ):
+                variable = side_effects.id_to_variable.get(id(p), None)
+                if variable and side_effects.has_pending_mutation(variable):
                     from ..exc import Unsupported
 
                     raise Unsupported("Pending mutation on parameter")
@@ -157,7 +157,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
             ):
                 return self.value.param_groups[arg.source.index]
 
-            raise ArgMappingException()
+            raise ArgMappingException
 
         new_args = [map_arg(arg) for arg in args]
         new_kwargs = {k: map_arg(v) for k, v in kwargs.items()}

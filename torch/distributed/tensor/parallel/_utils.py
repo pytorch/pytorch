@@ -48,18 +48,13 @@ def _validate_tp_mesh_dim(
 
     parent_mesh = _mesh_resources.get_parent_mesh(device_mesh)
     if parent_mesh:
-        # if parent_mesh.ndim != 2:
-        #     raise RuntimeError(
-        #         f"Found TP device_mesh has a parent mesh with dims {parent_mesh.ndim}",
-        #         "Currently we only support 2D TP composition with DP.",
-        #     )
+        tp_mesh_dim_in_parent = _mesh_resources.get_parent_mesh_dim(device_mesh)
+        if tp_mesh_dim_in_parent != parent_mesh.ndim - 1:
+            raise RuntimeError(
+                f"Found TP device_mesh on the {tp_mesh_dim_in_parent} dimension of its parent mesh.",
+                "Currently we only support intranode TP and TP needs to be the innermost dimension on its parent mesh.",
+            )
 
-        tp_mesh_dim = _mesh_resources.get_parent_mesh_dim(device_mesh)
-        # if tp_mesh_dim != 1:
-        #     raise RuntimeError(
-        #         f"Found TP device_mesh on the {tp_mesh_dim} dimension of its parent mesh.",
-        #         "Currently we only support intranode TP and TP needs to be the innermost dimension on its parent mesh.",
-        #     )
 
 def _check_tp_module_type(module, allowed_type):
     """
@@ -98,3 +93,4 @@ def _check_tp_module_type(module, allowed_type):
                         break
             return found
     return isinstance(module, allowed_type) or has_allowed_metadata(module)
+>>>>>>> a719c765341 (Hacks to get PP+TP working)

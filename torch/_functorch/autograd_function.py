@@ -498,7 +498,7 @@ def get_tangents_in_dims(input_dims, tangents):
 # in_dims = 0
 # vmap(Sum.apply, in_dims)(x)
 #
-# Let’s assume for a moment that we didn’t vmap setup_context in VmappedSum:
+# Let's assume for a moment that we didn't vmap setup_context in VmappedSum:
 #
 # class VmappedSum(torch.autograd.Function):
 #    @staticmethod
@@ -519,7 +519,7 @@ def get_tangents_in_dims(input_dims, tangents):
 #        return gx
 #
 # We end up saving [B, 4] as x_shape. In the backward, gy has shape [B],
-# and we’re doing:
+# and we're doing:
 #
 # def backward_no_context(gy):
 #     return gy.expand([B, 4])
@@ -682,25 +682,40 @@ def reductify_leaf(
     return grad_input
 
 
+def autograd_function_forward_rewritten(original_forward, original_setup_context):
+    def new_forward(ctx, *args, **kwargs):
+        output = original_forward(*args, **kwargs)
+        original_setup_context(ctx, args, output)
+        return output
+
+    return new_forward
+
+
 class AutogradFunctionApply(HigherOrderOperator):
     def __init__(self):
         super().__init__("autograd_function_apply")
 
-    def __call__(self, fwd, bwd, *fwd_args):
+    def __call__(self, fwd, bwd, *fwd_args, **fwd_kwargs):
         saved_values = None
+        args_tensor_mask = fwd_kwargs["args_tensor_mask"]
+        length_of_tensor_args = sum(args_tensor_mask)
+        # Filter out the original tensor args from fwd_args,
+        # lifted freevars should not be args of ApplyTemplate.apply
+        # since we don't need to calculate the gradients of them.
+        new_fwd_args = fwd_args[:length_of_tensor_args]
 
         class ApplyTemplate(torch.autograd.Function):
             @staticmethod
             def forward(ctx, *args):
                 nonlocal saved_values
-                output, saved_values = fwd(None, *args)
+                output, saved_values = fwd(None, *fwd_args)
                 return output
 
             @staticmethod
             def backward(ctx, *grad):
                 return bwd(None, *grad, *saved_values)
 
-        return ApplyTemplate.apply(*fwd_args)
+        return ApplyTemplate.apply(*new_fwd_args)
 
 
 autograd_function_apply = AutogradFunctionApply()
