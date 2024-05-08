@@ -380,12 +380,6 @@ def enforce_comm_node_ordering_for_fsdp(
     # for snode in snodes:
     #     torch_log.warning(f"snode: {snode}, snode.node: {snode.node}, snode.debug_str(): {snode.debug_str()}")
 
-    """
-    TODO: group "copy_in + getitem + all_gather" into one GroupedSchedulerNode, write its codegen correctly
-    TODO: group "wait_tensor + copy_out" into one GroupedSchedulerNode, write its codegen correctly
-    TODO: enforce ordering: copy_in_and_AG -> (other compute) -> wait_and_copy_out -> copy_in_and_AG -> (other compute) -> wait_and_copy_out
-    TODO: sink reduce_scatter wait to before next layer's RS
-    """
     new_order = []
     scheduled = set()
     prev_all_gather_wait_tensor_then_copy_out_node = None
