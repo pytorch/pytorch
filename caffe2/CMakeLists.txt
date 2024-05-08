@@ -1483,7 +1483,13 @@ if($ENV{TH_BINARY_BUILD})
   endif()
 endif()
 
-target_link_libraries(torch_cpu PUBLIC c10)
+if(BUILD_LIBTORCHLESS)
+  target_link_libraries(torch_cpu PUBLIC ${C10_LIB})
+else()
+  # unclear why we need to use c10 here otherwise c10 symbols are not included
+  target_link_libraries(torch_cpu PUBLIC c10)
+endif()
+
 target_link_libraries(torch_cpu PUBLIC ${Caffe2_PUBLIC_DEPENDENCY_LIBS})
 target_link_libraries(torch_cpu PRIVATE ${Caffe2_DEPENDENCY_LIBS})
 target_link_libraries(torch_cpu PRIVATE ${Caffe2_DEPENDENCY_WHOLE_LINK_LIBS})
@@ -1646,7 +1652,12 @@ if(USE_CUDA)
     target_link_libraries(torch_cpu PRIVATE torch::cudart)
   endif()
   target_link_libraries(torch_cuda INTERFACE torch::cudart)
-  target_link_libraries(torch_cuda PUBLIC c10_cuda torch::nvtoolsext)
+  if(BUILD_LIBTORCHLESS)
+    target_link_libraries(torch_cuda PUBLIC ${C10_CUDA_LIB} torch::nvtoolsext)
+  else()
+    # unclear why we need to use c10 here otherwise c10 symbols are not included
+    target_link_libraries(torch_cuda PUBLIC c10_cuda torch::nvtoolsext)
+  endif()
 
   target_include_directories(
       torch_cuda INTERFACE $<INSTALL_INTERFACE:include>)
@@ -1664,7 +1675,13 @@ endif()
 # ---[ XPU library.
 if(USE_XPU)
   target_link_libraries(torch_xpu INTERFACE torch::xpurt)
-  target_link_libraries(torch_xpu PUBLIC c10_xpu)
+
+  if(BUILD_LIBTORCHLESS)
+    target_link_libraries(torch_xpu PUBLIC ${C10_XPU_LIB})
+  else()
+    # unclear why we need to use c10 here otherwise c10 symbols are not included
+    target_link_libraries(torch_xpu PUBLIC c10_xpu)
+  endif()
 
   target_include_directories(
       torch_xpu INTERFACE $<INSTALL_INTERFACE:include>)
@@ -1743,7 +1760,13 @@ if(USE_ROCM)
 
   # Since PyTorch files contain HIP headers, these flags are required for the necessary definitions to be added.
   target_compile_options(torch_hip PUBLIC ${HIP_CXX_FLAGS})  # experiment
-  target_link_libraries(torch_hip PUBLIC c10_hip)
+
+  if(BUILD_LIBTORCHLESS)
+    target_link_libraries(torch_hip PUBLIC ${C10_HIP_LIB})
+  else()
+    # unclear why we need to use c10 here otherwise c10 symbols are not included
+    target_link_libraries(torch_hip PUBLIC c10_hip)
+  endif()
 
   if(NOT INTERN_BUILD_MOBILE)
     # TODO: Cut this over to ATEN_HIP_FILES_GEN_LIB.  At the moment, we
@@ -1806,7 +1829,7 @@ if(BUILD_TEST)
         if(NOT MSVC)
           add_executable(${test_name}_${CPU_CAPABILITY} "${test_src}" ../aten/src/ATen/native/quantized/AffineQuantizerBase.cpp)
           # TODO: Get rid of c10 dependency (which is only needed for the implementation of AT_ERROR)
-          target_link_libraries(${test_name}_${CPU_CAPABILITY} c10 sleef gtest_main)
+          target_link_libraries(${test_name}_${CPU_CAPABILITY} ${C10_LIB} sleef gtest_main)
           if(USE_FBGEMM)
             target_link_libraries(${test_name}_${CPU_CAPABILITY} fbgemm)
           endif()
