@@ -40,9 +40,12 @@ For CUDA and CPU, APIs are also provided separately:
 
 Autocasting
 ^^^^^^^^^^^
-.. currentmodule:: torch.amp
+:func:`torch.is_autocast_available` is used to indicate if autocast is supported.
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
 
-.. autofunction::  is_autocast_available
+    is_autocast_available
 
 .. currentmodule:: torch
 
