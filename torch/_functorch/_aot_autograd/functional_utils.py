@@ -397,7 +397,9 @@ def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
             ]:
                 suffix = True
                 # Can only copy_/set_ into an input, and can only do so once
-                assert n.args[0] in placeholders
+                assert (
+                    n.args[0] in placeholders
+                ), f"n={str(n)}, n.args[0]={str(n.args[0])}, placeholders={str(placeholders)}, graph={str(fx_g)}"
                 placeholders.remove(n.args[0])
                 mutation_count += 1
             else:
