@@ -81,6 +81,7 @@ class FakeBackwardCFunction:
         return getattr(self.real, name)
 
 
+# This function corresponds to the "eager" implementation of a lifted autograd.Function.backward
 def call_backward(backward_c_function, saved_tensors, *args):
     fake = FakeBackwardCFunction(backward_c_function, saved_tensors)
     grads = fake._forward_cls.backward(fake, *args)  # type: ignore[attr-defined]

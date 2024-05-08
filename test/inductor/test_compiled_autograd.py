@@ -1536,17 +1536,7 @@ def wrap_test_class(orig_cls):
     )
 
 
-known_graph_breaks_tests = {
-    # autograd.Function eager fallback
-    "test_autograd_python_custom_function_inplace",
-    "test_custom_function_saved_tensors",
-    "test_custom_function_setup_context_simple",
-    "test_dep_nograd",
-    "test_function_returns_input",
-    "test_return_leaf_inplace",
-    "test_saved_tensor_hooks_custom_function_intermediates",
-    "test_too_many_grads",
-}
+known_graph_breaks_tests = {}
 
 # These groups of tests aren't supported yet
 known_failures_re = re.compile(

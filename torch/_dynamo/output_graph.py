@@ -866,13 +866,16 @@ class OutputGraph:
 
     def handle_aliases_for_stolen_lists(self, tx):
         # If list inputs are stolen, but still needed after the function call, create aliases to keep them alive
-        alias_insts = []
+        maybe_gm = self.local_scope.get("self")
+        stolen_list_names = get_locals_to_steal(maybe_gm)
+        if not stolen_list_names:
+            return []
 
+        alias_insts = []
         needs_alias: Dict[
             str, List[Union[VariableTracker, AttributeMutationExisting]]
         ] = {}
-        maybe_gm = self.local_scope.get("self")
-        stolen_list_names = get_locals_to_steal(maybe_gm)
+
         queue = [
             *tx.stack,
             *tx.symbolic_locals.values(),
