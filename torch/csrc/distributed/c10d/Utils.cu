@@ -21,6 +21,7 @@ void checkForNan(const at::Tensor& tensor) {
   const int numBlocks = (tensor.numel() + blockSize - 1) / blockSize;
 
   checkForNaN<<<numBlocks, blockSize>>>(tensor.data_ptr<float>(), tensor.numel());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
   // Wait for the kernel to finish
   cudaDeviceSynchronize();
 
