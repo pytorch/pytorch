@@ -1056,7 +1056,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // the ProcessGroup
   uint64_t op_id_{0};
 
-  // the sequential number of the last colletive enqueued into workMetaList_
+  // the sequential number of the last collective enqueued into workMetaList_
   // This is useful for indentifying a rank that has not join a collective
   // initialized to be -1 to indicate no collective has been enqueued
   int64_t lastEnqueuedSeq_{-1};
@@ -1064,7 +1064,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // the name of the last collective enqueued into workMetaList_
   std::string lastEnqueuedWorkName_;
 
-  // the sequential number of the last colletive started as the kernal
+  // the sequential number of the last collective started as the kernal
   int64_t lastStartedSeq_{-1};
 
   // the name of the last collective started as the kernal

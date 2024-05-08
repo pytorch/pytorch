@@ -2335,7 +2335,7 @@ void ProcessGroupNCCL::startCoalescing() {
   // 'start' and 'end' coalescing region without doing an operation inbetween.
   seq_++;
 
-  // Don't bump op_id_ here, becuase startCoalescing isn't a logical operation.
+  // Don't bump op_id_ here, because startCoalescing isn't a logical operation.
   // Bump it for each logical op inside the coalescing group.
 }
 
@@ -2862,7 +2862,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
         {tensor},
         {tensor},
         nullptr,
-        nullptr);
+        nullptr,
+        /*isP2P=*/true);
     // TODO(whc) if we want to make the per-p2p-op flightrecorder entries get
     // their timings/states updated by proxy when the Work obj representing the
     // coalesce group gets its update, we could accumulate these trace_ids
@@ -2881,7 +2882,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     // output, not sure what
     work->outputs_ = std::make_shared<std::vector<at::Tensor>>();
     work->outputs_->push_back(tensor);
-    // TODO(whc) becuase we don't pass output {tensor} to initWork, we tell
+    // TODO(whc) because we don't pass output {tensor} to initWork, we tell
     // initWork to not record, and then we manually call record passing all the
     // information it wants.
     work->trace_id_ = NCCLTraceBuffer::get()->record(
@@ -2893,7 +2894,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
         {tensor},
         {tensor},
         work->ncclStartEvent_.get(),
-        work->ncclEndEvent_.get());
+        work->ncclEndEvent_.get(),
+        /*isP2P=*/true);
   }
 
   // is gpuGuard needed for the if block below, or can i swap them
