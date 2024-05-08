@@ -3062,5 +3062,6 @@ if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
     # cpp_extension N/A in fbcode
+    # test
     if HAS_CUDA or sys.platform == "darwin":
         run_tests(needs="filelock")
