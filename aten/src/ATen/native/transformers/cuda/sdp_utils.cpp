@@ -305,11 +305,20 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
   const auto s_k = params.key.sym_size(2);
   const auto head_dim = params.query.sym_size(3);
   long cudnn_version = at::detail::getCUDAHooks().versionCuDNN();
-  if (head_dim % 8 != 0 or head_dim > 128) {
-    if (debug) {
-      TORCH_WARN("head_dim should be a multiple of 8 and no more than 128");
+  if (cudnn_version >= 90000) {
+    if (head_dim % 8 != 0 or head_dim > 256) {
+      if (debug) {
+        TORCH_WARN("head_dim should be a multiple of 8 and no more than 256");
+      }
+      return false;
     }
-    return false;
+  } else {
+    if (head_dim % 8 != 0 or head_dim > 128) {
+      if (debug) {
+        TORCH_WARN("head_dim should be a multiple of 8 and no more than 128");
+      }
+      return false;
+    }
   }
   if (cudnn_version < 8903) {
     if (debug) {
