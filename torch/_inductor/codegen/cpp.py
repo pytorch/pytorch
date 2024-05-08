@@ -1666,6 +1666,28 @@ class CppKernel(Kernel):
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
         index = self.rename_indexing(index)
+
+        if getattr(
+            V.graph.scheduler.name_to_node.get(name, None),
+            "_use_thread_local_buf",
+            False,
+        ):
+            # Modify the index to use thread id
+            index_id = getattr(
+                V.graph.scheduler.name_to_node.get(name, None),
+                "_index_with_tl_tid",
+                None,
+            )
+            assert isinstance(index_id, dict)
+            sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)  # type: ignore[attr-defined]
+            replacements = {}
+            for x in sorted_symbols:
+                if x.name != f"x{index_id['keep_idx_id']}":  # type: ignore[attr-defined]
+                    # Remove the idx other than `keep_idx_id`
+                    replacements[x] = "0"
+            index = sympy_subs(index, replacements)  # type: ignore[arg-type]
+            var = "thread_local_buffer_ptr"
+
         line = f"{var}[{cexpr_index(index)}]"
         if V.graph.get_dtype(name) in [torch.float16]:
             line = f"static_cast<float>({line})"
