@@ -5456,11 +5456,7 @@ register_inplace(aten.__ixor__, aten.__xor__)
 
 @register_lowering(aten.sym_constrain_range)
 def sym_constrain_range(a, min=None, max=None):
-    tracing_context = torch._guards.TracingContext.try_get()
-    assert (
-        tracing_context is None or a in tracing_context.fake_mode.shape_env.var_to_range
-    )
-    return a
+    return None
 
 
 @register_lowering(aten.sym_size.int)
@@ -5666,23 +5662,24 @@ def associative_scan(combine_fn: ir.Subgraph, input, dim: int):
     from .subgraph_lowering import InputDescriptor, lower_pointwise_subgraph
 
     subgraph_inputs = [
-        InputDescriptor(dtype=input.get_dtype(), device=input.get_device())
-        for _ in range(2)
+        InputDescriptor(dtype=x.get_dtype(), device=x.get_device())
+        for x in itertools.chain(input, input)
     ]
     lowered_combine_fn = lower_pointwise_subgraph(combine_fn, subgraph_inputs)
 
     def wrapped_combine_fn(lhs, rhs):
-        res = lowered_combine_fn(
+        return lowered_combine_fn(
             *pytree.tree_leaves(lhs),
             *pytree.tree_leaves(rhs),
         )
-        return (res,)
 
-    kwargs = _make_scan_inner(input, axis=dim, dtype=None)
+    kwargs = _make_scan_inner(input[0], axis=dim, dtype=None)
+    kwargs["dtypes"] = tuple(x.get_dtype() for x in input)
+    kwargs["inner_fns"] = tuple(x.make_loader() for x in input)
     result = ir.Scan.create(**kwargs, combine_fn=wrapped_combine_fn)
     if result is None:
         raise RuntimeError("Unable to generate code for associative_scan op")
-    return result[0]
+    return result
 
 
 @register_lowering(torch.ops.prims._sink_tokens.default)
