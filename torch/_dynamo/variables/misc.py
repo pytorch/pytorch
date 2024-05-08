@@ -501,31 +501,6 @@ class AutogradFunctionVariable(VariableTracker):
                 unimplemented(f"Unsupported method: {name}")
 
 
-class AutogradBackwardCFunctionVariable(VariableTracker):
-    """represents a torch.autograd.BackwardCFunction subclass"""
-
-    _nonvar_fields = {
-        "fn_cls",
-        *VariableTracker._nonvar_fields,
-    }
-
-    def __init__(self, fn_cls, **kwargs):
-        super().__init__(**kwargs)
-        assert self.source
-        self.fn_cls = fn_cls
-
-    def python_type(self):
-        return self.fn_cls
-
-    def var_getattr(self, tx, name):
-        if name == "_forward_cls":
-            return AutogradFunctionVariable(
-                self.fn_cls._forward_cls, source=AttrSource(self.source, "_forward_cls")
-            )
-
-        return super().var_getattr(tx, name)
-
-
 @dataclasses.dataclass
 class SavedTensorBox:
     tensors: List[VariableTracker] = dataclasses.field(default_factory=list)
