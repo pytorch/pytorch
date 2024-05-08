@@ -122,8 +122,6 @@ if(BUILD_CAFFE2 AND NOT INTERN_BUILD_MOBILE)
   if(USE_NVRTC)
     add_subdirectory(cuda_rtc)
   endif()
-  add_subdirectory(db)
-  add_subdirectory(distributed)
   add_subdirectory(ideep)
   add_subdirectory(mobile)
   add_subdirectory(mpi)
@@ -352,7 +350,6 @@ if(NOT INTERN_DISABLE_AUTOGRAD AND NOT BUILD_LITE_INTERPRETER)
     "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_4.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/ADInplaceOrViewType_0.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/ADInplaceOrViewType_1.cpp"
-    "${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/generated/c_shim_cpu.cpp"
   )
   if(BUILD_LAZY_TS_BACKEND)
     list(APPEND GENERATED_CXX_TORCH
@@ -407,17 +404,12 @@ set(GENERATED_TESTING_PYTHON
   "${TORCH_SRC_DIR}/testing/_internal/generated/annotated_fn_args.py"
   )
 
-set(GENERATED_CXX_TORCH_CUDA
-  "${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/generated/c_shim_cuda.cpp"
-  )
-
 set(TORCH_GENERATED_CODE
   ${GENERATED_CXX_TORCH}
   ${GENERATED_H_TORCH}
   ${GENERATED_CXX_PYTHON}
   ${GENERATED_H_PYTHON}
   ${GENERATED_TESTING_PYTHON}
-  ${GENERATED_CXX_TORCH_CUDA}
   )
 
 set(GEN_PER_OPERATOR_FLAG)
@@ -966,7 +958,7 @@ endif()
 # Compile exposed libraries.
 if(USE_ROCM)
   set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
-  list(APPEND Caffe2_HIP_SRCS ${GENERATED_CXX_TORCH_CUDA})
+  list(APPEND Caffe2_HIP_SRCS)
   hip_add_library(torch_hip ${Caffe2_HIP_SRCS})
   if(USE_FLASH_ATTENTION)
     target_link_libraries(torch_hip PRIVATE __caffe2_aotriton)
@@ -986,7 +978,7 @@ if(USE_ROCM)
   endif()
 elseif(USE_CUDA)
   set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
-  list(APPEND Caffe2_GPU_SRCS ${GENERATED_CXX_TORCH_CUDA})
+  list(APPEND Caffe2_GPU_SRCS)
   if(CUDA_SEPARABLE_COMPILATION)
     # Separate compilation fails when kernels using `thrust::sort_by_key`
     # are linked with the rest of CUDA code. Workaround by linking them separately.

@@ -831,6 +831,8 @@ def trunc(x):
 
 @register_lowering(aten.expand, type_promotion_kind=None)
 def expand(x, sizes):
+    from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
     (x,) = promote_constants([x])
     if isinstance(x, ir.BaseConstant):
         return ExpandView.create(x, tuple(sizes))
@@ -839,15 +841,13 @@ def expand(x, sizes):
     if tuple(x.get_size()) == tuple(sizes):
         return x
 
-    if not any(V.graph.sizevars.shape_env.is_unbacked_symint(s) for s in x.get_size()):
+    if not free_unbacked_symbols(x.get_size()):
         x_size_product = V.graph.sizevars.size_hint(sympy_product(x.get_size()))
         # TODO: It would be better to realize the input if any of its sizes
         # are unbacked, because typically the size will be non-zero.  However,
         # this cannot be done directly as below as we'll choke on the size_hint
         # here
-        if x_size_product > 0 and not any(
-            V.graph.sizevars.shape_env.is_unbacked_symint(s) for s in sizes
-        ):
+        if x_size_product > 0 and not free_unbacked_symbols(sizes):
             # maybe realize input before broadcasting it
             x.mark_reuse(
                 V.graph.sizevars.size_hint(sympy_product(sizes)) // x_size_product
@@ -5666,23 +5666,24 @@ def associative_scan(combine_fn: ir.Subgraph, input, dim: int):
     from .subgraph_lowering import InputDescriptor, lower_pointwise_subgraph
 
     subgraph_inputs = [
-        InputDescriptor(dtype=input.get_dtype(), device=input.get_device())
-        for _ in range(2)
+        InputDescriptor(dtype=x.get_dtype(), device=x.get_device())
+        for x in itertools.chain(input, input)
     ]
     lowered_combine_fn = lower_pointwise_subgraph(combine_fn, subgraph_inputs)
 
     def wrapped_combine_fn(lhs, rhs):
-        res = lowered_combine_fn(
+        return lowered_combine_fn(
             *pytree.tree_leaves(lhs),
             *pytree.tree_leaves(rhs),
         )
-        return (res,)
 
-    kwargs = _make_scan_inner(input, axis=dim, dtype=None)
+    kwargs = _make_scan_inner(input[0], axis=dim, dtype=None)
+    kwargs["dtypes"] = tuple(x.get_dtype() for x in input)
+    kwargs["inner_fns"] = tuple(x.make_loader() for x in input)
     result = ir.Scan.create(**kwargs, combine_fn=wrapped_combine_fn)
     if result is None:
         raise RuntimeError("Unable to generate code for associative_scan op")
-    return result[0]
+    return result
 
 
 @register_lowering(torch.ops.prims._sink_tokens.default)
@@ -5712,60 +5713,6 @@ def with_effects(token, op, *args, **kwargs):
 
 try:
     import torch.distributed._functional_collectives
-
-    c10d_functional = torch.ops.c10d_functional
-
-    @register_lowering(c10d_functional.wait_tensor)
-    def wait(input):
-        return TensorBox.create(ir.Wait.create(input))
-
-    @register_lowering(c10d_functional.broadcast)
-    def broadcast(input, src, tag, ranks, group_size):
-        return ir.Broadcast.create(input, src, tag, ranks, group_size)
-
-    @register_lowering(c10d_functional.all_reduce)
-    def allreduce(input, reduce_op, tag, ranks, group_size):
-        return ir.AllReduce.create(input, reduce_op, tag, ranks, group_size)
-
-    @register_lowering(c10d_functional.all_gather_into_tensor)
-    def all_gather_into_tensor(shard, tag, ranks, group_size):
-        return TensorBox.create(
-            ir.AllGatherIntoTensor.create(
-                ir.ExternKernel.require_contiguous(shard), tag, ranks, group_size
-            )
-        )
-
-    @register_lowering(c10d_functional.reduce_scatter_tensor)
-    def reduce_scatter_tensor(input, reduce_op, tag, ranks, group_size):
-        return TensorBox.create(
-            ir.ReduceScatterTensor.create(input, reduce_op, tag, ranks, group_size)
-        )
-
-    @register_lowering(c10d_functional.all_reduce_coalesced)
-    def all_reduce_coalesced(input, reduce_op, tag, ranks, group_size):
-        return ir.AllReduceCoalesced.create(input, reduce_op, tag, ranks, group_size)
-
-    @register_lowering(c10d_functional.all_gather_into_tensor_coalesced)
-    def all_gather_into_tensor_coalesced(self, tag, ranks, group_size):
-        result = ir.AllGatherIntoTensorCoalesced.create(self, tag, ranks, group_size)
-        return list(map(TensorBox.create, result))
-
-    @register_lowering(c10d_functional.reduce_scatter_tensor_coalesced)
-    def reduce_scatter_tensor_coalesced(self, reduceOp, tag, ranks, group_size):
-        result = ir.ReduceScatterTensorCoalesced.create(
-            self, reduceOp, tag, ranks, group_size
-        )
-        return list(map(TensorBox.create, result))
-
-    @register_lowering(c10d_functional.all_to_all_single)
-    def all_to_all_single(
-        self, output_split_sizes, input_split_sizes, tag, ranks, group_size
-    ):
-        return TensorBox.create(
-            ir.AllToAllSingle.create(
-                self, output_split_sizes, input_split_sizes, tag, ranks, group_size
-            )
-        )
 
     _c10d_functional = torch.ops._c10d_functional
 
@@ -5897,7 +5844,7 @@ try:
             )
         )
 
-except ImportError:
+except (AttributeError, ImportError):
     log.info(
         "Inductor support for distributed collectives depends on building torch.distributed"
     )
