@@ -123,7 +123,7 @@ class OptimizerInfo:
         supported_impls: Tuple[str] = ("foreach", "differentiable"),
         # the optim supports passing in sparse gradients as well as dense grads
         supports_sparse: bool = False,
-        # the optim is capturable in a CUDA graph 
+        # the optim is capturable in a CUDA graph
         has_capturable_arg: bool = False,
         # the optim only supports one config: sparse grads w/ dense params, see SparseAdam
         only_supports_sparse_grads: bool = False,
