@@ -530,6 +530,7 @@ class ExportedProgram:
         For now, we do not decompose joint graphs.
         """
         from torch._decomp import core_aten_decompositions
+        from torch._export.passes._node_metadata_hook import _node_metadata_hook
         from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
             _AddRuntimeAssertionsForInlineConstraintsPass,
         )
@@ -663,9 +664,16 @@ class ExportedProgram:
         _replace_sym_size_ops_pass(gm)
 
         if len(new_range_constraints) > 0:
-            res = _AddRuntimeAssertionsForInlineConstraintsPass(new_range_constraints)(
-                gm
+            stack_trace = (
+                'File "torch/_export/passes/add_runtime_assertions_for_constraints_pass.py", line 46, '
+                "in _AddRuntimeAssertionsForInlineConstraintsPass"
             )
+            with gm._set_create_node_hook(
+                functools.partial(_node_metadata_hook, stack_trace=stack_trace)
+            ):
+                res = _AddRuntimeAssertionsForInlineConstraintsPass(
+                    new_range_constraints
+                )(gm)
             assert res is not None
             gm = res.graph_module
 
