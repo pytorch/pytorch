@@ -56,6 +56,7 @@ def get_workflow_type(issue: Issue, username: str) -> str:
         run_option = "single"
 
     if user_list[0] == "!":
+        # Use old runners for everyone
         return WORKFLOW_TYPE_LABEL
     elif user_list[1] == "*":
         if run_option == WORKFLOW_TYPE_BOTH:
