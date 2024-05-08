@@ -22,14 +22,6 @@ void checkForNan(const at::Tensor& tensor) {
 
   checkForNaN<<<numBlocks, blockSize>>>(tensor.data_ptr<float>(), tensor.numel());
   C10_CUDA_KERNEL_LAUNCH_CHECK();
-  // Wait for the kernel to finish
-  cudaDeviceSynchronize();
-
-  // Check if any errors occurred during the kernel execution
-  cudaError_t error = cudaGetLastError();
-  if (error != cudaSuccess) {
-      LOG(ERROR) << "CUDA error during checkForNan: " << cudaGetErrorString(error) << std::endl;
-  }
 }
 
 }
