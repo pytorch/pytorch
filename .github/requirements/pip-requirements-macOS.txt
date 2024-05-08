@@ -1,0 +1,32 @@
+boto3==1.19.12
+hypothesis==6.56.4
+expecttest==0.1.6
+librosa>=0.6.2
+mpmath==1.3.0
+networkx==2.8.7
+# Use numba-0.49.1 or older on Intel Macs, but 0.56.0 on M1 machines, as older numba is not available
+numba==0.56.0; platform_machine == "arm64"
+numba<=0.49.1; platform_machine != "arm64"
+opt-einsum>=3.3
+psutil==5.9.1
+nvidia-ml-py==11.525.84
+packaging==23.1
+pygments==2.15.0
+pytest==7.3.2
+pytest-xdist==3.3.1
+pytest-rerunfailures==10.3
+pytest-flakefinder==1.1.0
+scipy==1.10.1
+sympy==1.11.1
+unittest-xml-reporting<=3.2.0,>=2.0.0
+xdoctest==1.1.0
+filelock==3.6.0
+sympy==1.11.1
+pytest-cpp==2.3.0
+rockset==1.0.3
+z3-solver==4.12.2.0
+tensorboard==2.13.0
+optree==0.11.0
+# NB: test_hparams_* from test_tensorboard is failing with protobuf 5.26.0 in
+# which the stringify metadata is wrong when escaping double quote
+protobuf==3.20.2
