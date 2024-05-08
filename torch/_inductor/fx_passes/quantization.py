@@ -1564,20 +1564,20 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number, dtype=torch.float3
             new_conv_node.meta.update(conv_node.meta)
 
             # Erase the original conv node
-            graph.erase_node(conv_node)  # type: ignore[arg-type]
+            graph.erase_node(conv_node)
             # Erase the dequant pattern
             if dtype == torch.bfloat16:
-                graph.erase_node(convert_to_bf16)  # type: ignore[arg-type,possibly-undefined]
+                graph.erase_node(convert_to_bf16)  # type: ignore[possibly-undefined]
             # Erase the dequant pattern
-            graph.erase_node(mul_node)  # type: ignore[arg-type]
-            graph.erase_node(sub_node)  # type: ignore[arg-type]
-            graph.erase_node(to_fp32_node)  # type: ignore[arg-type]
+            graph.erase_node(mul_node)
+            graph.erase_node(sub_node)
+            graph.erase_node(to_fp32_node)
             # Erase the dequant per channel pattern
             if clone_node is not None:
-                graph.erase_node(clone_node)  # type: ignore[arg-type]
+                graph.erase_node(clone_node)
             if dtype == torch.bfloat16:
-                graph.erase_node(weight_to_bf16_node)  # type: ignore[arg-type,possibly-undefined]
-            graph.erase_node(dequant_per_channel)  # type: ignore[arg-type]
+                graph.erase_node(weight_to_bf16_node)  # type: ignore[possibly-undefined]
+            graph.erase_node(dequant_per_channel)
             counters["inductor"]["qconv2d_weight_prepack_matcher_count"] += 1
             counters["inductor"]["qconv2d_weight_prepack_matcher_nodes"] += len(
                 match.nodes
@@ -2261,8 +2261,8 @@ def quant_lift_up(graph_module: torch.fx.GraphModule):
 
                     new_args = map_arg(new_quant_node.args, maybe_replace_node)
                     new_kwargs = map_arg(new_quant_node.kwargs, maybe_replace_node)
-                    new_quant_node.args = new_args  # type: ignore[assignment]
-                    new_quant_node.kwargs = new_kwargs  # type: ignore[assignment]
+                    new_quant_node.args = new_args
+                    new_quant_node.kwargs = new_kwargs
                     graph_module.graph.erase_node(quant_node)
 
     graph_module.graph.lint()
