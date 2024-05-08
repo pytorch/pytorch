@@ -303,20 +303,18 @@ class NNModuleVariable(VariableTracker):
             # If we are tracing the higher order op, we want Dynamo to step
             # inside the module call so that Dynamo can see the underlying
             # parameters and buffers and raise them as inputs to the graph.
-            if tx.output.is_root_tracer() and mod.__module__.startswith(
-                ("torch.nn.", "torch.ao.")
+            #
+            # NB: torch.nn.utils.parametrize changes the class type of a
+            # parametrized module such that its __module__ points to
+            # "torch.nn.utils.parametrize".
+            if (
+                tx.output.is_root_tracer()
+                and mod.__module__.startswith(("torch.nn.", "torch.ao."))
+                and mod.__module__ != "torch.nn.utils.parametrize"
             ):
                 if nnmodule_has_hooks(
                     mod, check_forward_hooks=True, check_backward_hooks=True
                 ):
-                    # End of fn, this bubbles up and restarts tracing.
-                    self.convert_to_unspecialized(tx)
-
-                # NB: torch.nn.utils.parametrize changes the class type of the
-                # parametrized module such that its __module__ points to the
-                # "torch.nn.utils.parametrize". These modules should be treated
-                # as unspecialized since parametrizations can do arbitrary computation.
-                if mod.__module__ == "torch.nn.utils.parametrize":
                     # End of fn, this bubbles up and restarts tracing.
                     self.convert_to_unspecialized(tx)
 
