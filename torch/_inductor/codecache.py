@@ -2676,10 +2676,6 @@ def validate_new_cpp_commands():
                     )
 
 
-def _reload_python_module_in_subproc(key, path):
-    return PyCodeCache.load_by_key_path(key, path)
-
-
 class PyCodeCache:
     cache: Dict[str, ModuleType] = dict()
     linemaps: Dict[str, List[Tuple[Any, ...]]] = dict()

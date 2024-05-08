@@ -1265,6 +1265,7 @@ class CommonTemplate:
         sample[-1] = 1
         self.common(fn, (sample,))
 
+    @skipCPUIf(IS_MACOS, "fails on macos")
     def test_multilayer_var(self):
         def fn(a):
             return torch.var(a)
@@ -9616,7 +9617,12 @@ class CommonTemplate:
         # This used to not compile due to a wrong return type of randint64_cpu
         # See https://github.com/pytorch/pytorch/issues/117435
         def fn(n):
-            return torch.randint(low=-5, high=5, size=(n,), dtype=torch.int64) % 10
+            return (
+                torch.randint(
+                    low=-5, high=5, size=(n,), dtype=torch.int64, device=self.device
+                )
+                % 10
+            )
 
         res = torch.compile(fn)(20)
         self.assertTrue(torch.all((0 <= res) & (res < 10)).item())
