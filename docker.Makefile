@@ -11,7 +11,7 @@ endif
 CUDA_VERSION_SHORT       ?= 12.1
 CUDA_VERSION             ?= 12.1.1
 CUDNN_VERSION            ?= 8.9.2.26
-CUDNN_VESION_SHORT       ?= 8
+CUDNN_VERSION_SHORT      ?= 8
 BASE_RUNTIME              = ubuntu:22.04
 BASE_DEVEL                = nvidia/cuda:$(CUDA_VERSION)-devel-ubuntu22.04
 CMAKE_VARS               ?=
@@ -33,7 +33,7 @@ BUILD_ARGS                = --build-arg BASE_IMAGE=$(BASE_IMAGE) \
 							--build-arg PYTHON_VERSION=$(PYTHON_VERSION) \
 							--build-arg CUDA_VERSION=$(CUDA_VERSION) \
 							--build-arg CUDNN_VERSION=$(CUDNN_VERSION) \
-							--build-arg CUDNN_VESION_SHORT=$(CUDNN_VESION_SHORT) \
+							--build-arg CUDNN_VERSION_SHORT=$(CUDNN_VERSION_SHORT) \
 							--build-arg CUDA_CHANNEL=$(CUDA_CHANNEL) \
 							--build-arg PYTORCH_VERSION=$(PYTORCH_VERSION) \
 							--build-arg INSTALL_CHANNEL=$(INSTALL_CHANNEL) \
