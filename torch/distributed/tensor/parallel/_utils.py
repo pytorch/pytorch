@@ -93,4 +93,3 @@ def _check_tp_module_type(module, allowed_type):
                         break
             return found
     return isinstance(module, allowed_type) or has_allowed_metadata(module)
->>>>>>> a719c765341 (Hacks to get PP+TP working)
