@@ -189,10 +189,10 @@ class TestDynamismExpression(TestCase):
                 return torch.full((b, 1), 1)
 
         inp = (torch.tensor([3]),)
-        ep = torch.export.export(ConflictingConstraints(), inp)
+        ep = export(ConflictingConstraints(), inp)
 
         with self.assertRaisesRegex(
-            RuntimeError, r"is outside of inline constraint \[4, 5\]"
+            RuntimeError, r"Invalid value range for 3 between \[4, 5\]"
         ):
             ep.module()(torch.tensor([3]))
 
@@ -2228,8 +2228,6 @@ def forward(self, x):
         test_inp = (torch.randint(1, 2, (2, 2)), torch.randint(3, 5, (2, 3)))
         self.assertTrue(torch.allclose(ep.module()(*test_inp), fn(*test_inp)))
 
-    @testing.expectedFailureNonStrict
-    @testing.expectedFailureRetraceability
     def test_constrain_size_with_constrain_value(self):
         class Module(torch.nn.Module):
             def forward(self, x, y):
@@ -2249,7 +2247,7 @@ def forward(self, x):
             fn,
             (torch.randint(3, 4, (2, 2)), torch.randint(3, 5, (2, 3))),
         )
-        with self.assertRaisesRegex(RuntimeError, "is outside of inline constraint"):
+        with self.assertRaisesRegex(RuntimeError, "Invalid value range for 1 between"):
             test_inp = (torch.randint(1, 2, (2, 2)), torch.randint(3, 5, (2, 3)))
             _ = ep.module()(*test_inp)
 
@@ -2374,8 +2372,6 @@ def forward(self, x):
             )
         )
 
-    @testing.expectedFailureSerDerPreDispatch  # .item call becomes aten.item in predispatch IR
-    @testing.expectedFailurePreDispatchRunDecomp  # assert name is still referring to item
     def test_automatic_constrain_size(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -2385,11 +2381,9 @@ def forward(self, x):
         ep = export(M(), (torch.tensor(1), torch.ones(4, 5)))
 
         if is_non_strict_test(self._testMethodName):
-            error_msg = r"Runtime assertion failed for _local_scalar_dense >= 0"
-        elif is_retracebility_test(self._testMethodName):
-            error_msg = r"Runtime assertion failed for _local_scalar_dense_default >= 0"
+            error_msg = "Invalid value range"
         else:
-            error_msg = "_local_scalar_dense is outside of inline constraint \[0, 9223372036854775806\]."
+            error_msg = "is outside of inline constraint"
         with self.assertRaisesRegex(RuntimeError, error_msg):
             _ = ep.module()(torch.tensor(-1), torch.randn(4, 5))
 
@@ -2415,11 +2409,11 @@ def forward(self, x):
 
         ep = torch.export.export(M(), (torch.tensor(1),))
         FileCheck().check_count(
-            "torch.ops.aten._assert_async.msg", 2, exactly=True
+            "torch.ops.aten._assert_scalar.default", 2, exactly=True
         ).run(ep.graph_module.code)
         decompose_ep = ep.run_decompositions()
         FileCheck().check_count(
-            "torch.ops.aten._assert_async.msg", 2, exactly=True
+            "torch.ops.aten._assert_scalar.default", 2, exactly=True
         ).run(decompose_ep.graph_module.code)
 
     def test_mixed_input(self):
@@ -2438,10 +2432,6 @@ def forward(self, x):
             if node.op == "placeholder":
                 self.assertTrue(isinstance(node.meta["val"], (Tensor, int)))
 
-    @testing.expectedFailureNonStrict
-    @testing.expectedFailureSerDerPreDispatch  # .item() becomes aten.item in predispatch IR
-    @testing.expectedFailurePreDispatchRunDecomp  # Assert message is still using the old node name, so it shoudl fail
-    @testing.expectedFailureRetraceability  # assert message mismatch
     def test_export_with_inline_constraints(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -2455,16 +2445,15 @@ def forward(self, x):
         self.assertEqual(ep.module()(torch.tensor([6])).shape, (6, 4))
 
         FileCheck().check_count(
-            "torch.ops.aten._assert_async.msg", 2, exactly=True
+            "torch.ops.aten._assert_scalar.default", 2, exactly=True
         ).run(ep.graph_module.code)
 
         with self.assertRaisesRegex(
             RuntimeError,
-            r"_local_scalar_dense is outside of inline constraint \[4, 7\]",
+            r"Invalid value range for 30 between \[4, 7\]",
         ) as cm:
             ep.module()(torch.tensor([30]))
 
-    @testing.expectedFailureNonStrict  # assert not found
     def test_export_with_inline_constraints_complex(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -2479,7 +2468,7 @@ def forward(self, x):
         ep = export(f, (torch.tensor([6]),))
         self.assertEqual(ep.module()(torch.tensor([5])).shape, (10, 5))
         FileCheck().check_count(
-            "torch.ops.aten._assert_async.msg", 2, exactly=True
+            "torch.ops.aten._assert_scalar.default", 2, exactly=True
         ).run(ep.graph_module.code)
 
     def test_to_module_with_mutated_buffer(self):
@@ -3090,7 +3079,6 @@ def forward(self, x):
         inp = torch.randn(2)
         self.assertTrue(torch.allclose(ep.module()(inp), torch.nonzero(inp)))
 
-    @testing.expectedFailureNonStrict
     def test_redundant_asserts(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -3102,7 +3090,10 @@ def forward(self, x):
 
         ep = export(f, (torch.tensor([3]),))
         FileCheck().check_count(
-            "torch.ops.aten._assert_async.msg", 2, exactly=True
+            "torch.ops.aten.sym_constrain_range.default", 1, exactly=True
+        ).run(ep.graph_module.code)
+        FileCheck().check_count(
+            "torch.ops.aten._assert_scalar.default", 1, exactly=True
         ).run(ep.graph_module.code)
 
     def test_non_arg_name_dynamic_shapes_api(self):
