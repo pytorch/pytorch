@@ -281,9 +281,9 @@ class StreamContext:
             ``None``.
     .. note:: Streams are per-device.
     """
-    cur_stream: Optional["torch.Stream"]
+    cur_stream: Optional["torch.xpu.Stream"]
 
-    def __init__(self, stream: Optional["torch.Stream"]):
+    def __init__(self, stream: Optional["torch.xpu.Stream"]):
         self.stream = stream
         self.idx = _get_device_index(None, True)
         if self.idx is None:
@@ -312,7 +312,7 @@ class StreamContext:
         torch.xpu.set_stream(self.src_prev_stream)
 
 
-def stream(stream: Optional["torch.Stream"]) -> StreamContext:
+def stream(stream: Optional["torch.xpu.Stream"]) -> StreamContext:
     r"""Wrap around the Context-manager StreamContext that selects a given stream.
 
     Arguments:
@@ -335,7 +335,7 @@ def _set_stream_by_id(stream_id, device_index, device_type):
     )
 
 
-def set_stream(stream: torch.Stream):
+def set_stream(stream: torch.xpu.Stream):
     r"""Set the current stream.This is a wrapper API to set the stream.
         Usage of this function is discouraged in favor of the ``stream``
         context manager.
