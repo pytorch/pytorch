@@ -208,7 +208,6 @@ TestEnvironment.def_flag(
 TestEnvironment.def_flag("PRINT_REPRO_ON_FAILURE", env_var="PYTORCH_PRINT_REPRO_ON_FAILURE",
                          default=(not IS_FBCODE), include_in_repro=False)  # noqa: F821
 
-DEFAULT_DISABLED_TESTS_FILE = '.pytorch-disabled-tests.json'
 DEFAULT_SLOW_TESTS_FILE = '.pytorch-slow-tests.json'
 
 slow_tests_dict = {}
@@ -793,7 +792,6 @@ else:
 RERUN_DISABLED_TESTS = args.rerun_disabled_tests
 
 SLOW_TESTS_FILE = args.import_slow_tests
-DISABLED_TESTS_FILE = args.import_disabled_tests
 LOG_SUFFIX = args.log_suffix
 RUN_PARALLEL = args.run_parallel
 TEST_BAILOUTS = args.test_bailouts
