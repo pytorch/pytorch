@@ -187,10 +187,18 @@ class OpDispatcher:
                     # Default to `OffsetBasedRNGTracker` if the parallelism API
                     # did not already construct one
                     random._rng_tracker = random.OffsetBasedRNGTracker(mesh.device_type)
+
+                first_arg, first_local_arg = cast(dtensor.DTensor, args[0]), cast(
+                    torch.Tensor, local_tensor_args[0]
+                )
+                rng_context = (
+                    random._rng_tracker._distribute_region(first_arg._spec)
+                    if random._rng_tracker and not first_local_arg.is_meta
+                    else contextlib.nullcontext()
+                )
+
                 # For DTensor random operator, run it within a distribute region
-                with random._rng_tracker._distribute_region(
-                    cast(dtensor.DTensor, args[0])._spec
-                ) if random._rng_tracker else contextlib.nullcontext():
+                with rng_context:
                     local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
             else:
                 local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
