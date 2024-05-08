@@ -59,7 +59,9 @@ from .variables import (
     UserMethodVariable,
 )
 
-from .variables.base import VariableTracker
+
+if typing.TYPE_CHECKING:
+    from .variables.base import VariableTracker
 
 
 """
