@@ -926,7 +926,7 @@ void ProcessGroupNCCL::setSequenceNumberForGroup() {
 } // NCCL just starts sequence numbers at 0.
 
 uint64_t ProcessGroupNCCL::getSequenceNumberForGroup() {
-  return seq_;
+  return seqCollective_;
 }
 
 void ProcessGroupNCCL::registerOnCompletionHook(
@@ -2239,7 +2239,7 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
       device,
       rank,
       opType,
-      seq_,
+      seqCollective_,
       profilingTitle,
       profilingTitle != nullptr ? c10::optional<std::vector<at::Tensor>>(inputs)
                                 : c10::nullopt,
@@ -2263,7 +2263,8 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
     r->trace_id_ = NCCLTraceBuffer::get()->record(
         uid_,
         std::make_tuple(pg_name_, pg_desc_),
-        seq_,
+        seqCollective_,
+        seqP2P_,
         op_id_,
         profilingTitle ? profilingTitle : "",
         inputs,
@@ -2333,7 +2334,7 @@ void ProcessGroupNCCL::startCoalescing() {
   // same seq_ for those ops and its 'endCoalescing' op. Hence we bump during
   // start, which has one minor downside- we burn a seq_ if someone ever does a
   // 'start' and 'end' coalescing region without doing an operation inbetween.
-  seq_++;
+  seqCollective_++;
 
   // Don't bump op_id_ here, because startCoalescing isn't a logical operation.
   // Bump it for each logical op inside the coalescing group.
@@ -2431,7 +2432,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   errorIfCapturingNonCapturableNCCL(capture_status);
 
   // Bump collective counter
-  seq_++;
+  seqCollective_++;
   op_id_++;
 
   auto device = getDevice(input);
@@ -2586,7 +2587,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   errorIfCapturingNonCapturableNCCL(capture_status);
 
   // Bump collective counter
-  seq_++;
+  seqCollective_++;
   // For coalescingManager collectives, there is no individual c++ call per
   // collective so there is no flight record and we increment seq_ and op_id_
   // together. Compare this to startCoalesing/endCoalescing flow where we
@@ -2815,7 +2816,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     if (!coalescing_state_) {
       // Bump sequence number. Don't do so if it's a batch P2P, it will be
       // bumped in `endCoalescing`.
-      seq_++;
+      seqP2P_++;
     }
   }
 
@@ -2856,7 +2857,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     auto trace_id = NCCLTraceBuffer::get()->record(
         uid_,
         std::make_tuple(pg_name_, pg_desc_),
-        seq_,
+        seqCollective_,
+        seqP2P_,
         op_id_,
         profilingTitle,
         {tensor},
@@ -2888,7 +2890,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     work->trace_id_ = NCCLTraceBuffer::get()->record(
         uid_,
         std::make_tuple(pg_name_, pg_desc_),
-        seq_,
+        seqCollective_,
+        seqP2P_,
         op_id_,
         profilingTitle,
         {tensor},

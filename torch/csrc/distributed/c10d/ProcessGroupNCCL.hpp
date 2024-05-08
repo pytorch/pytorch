@@ -1053,7 +1053,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   uint64_t seqCollective_{0};
 
   // Counting for the sequential number of NCCL P2P calls.
-  uint64_t seqP2p_{0};
+  uint64_t seqP2P_{0};
 
   // Incrementing counter for logical operations (collective or p2p) issued on
   // the ProcessGroup

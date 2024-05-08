@@ -440,6 +440,7 @@ struct NCCLTraceBuffer {
     // group)
     size_t collective_seq_id_;
     size_t op_id_;
+    size_t p2p_seq_id_;
     std::string profiling_name_;
 
     std::shared_ptr<torch::CapturedTraceback> traceback_;
@@ -490,6 +491,7 @@ struct NCCLTraceBuffer {
       size_t pg_id,
       const std::tuple<std::string, std::string>& pg_name,
       size_t collective_seq_id,
+      size_t p2p_seq_id,
       size_t op_id,
       std::string profiling_name,
       const std::vector<at::Tensor>& inputs,
@@ -509,6 +511,7 @@ struct NCCLTraceBuffer {
         pg_id,
         pg_name,
         collective_seq_id,
+        p2p_seq_id,
         op_id,
         std::move(profiling_name),
         std::move(traceback),
@@ -669,6 +672,7 @@ struct NCCLTraceBuffer {
       dict.insert(pg_id_key, int64_t(e.pg_id_));
       dict.insert(pg_name_key, e.pg_name_);
       dict.insert(collective_seq_id_key, int64_t(e.collective_seq_id_));
+      dict.insert(p2p_seq_id_key, int64_t(e.p2p_seq_id_));
       dict.insert(op_id_key, int64_t(e.op_id_));
       dict.insert(profiling_name_key, e.profiling_name_);
       dict.insert(time_created_key, int64_t(e.time_created_));
