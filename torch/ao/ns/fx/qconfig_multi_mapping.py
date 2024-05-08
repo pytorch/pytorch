@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import copy
-from typing import Any, Callable, Dict, List, Union
+from typing import Any, Callable, Dict, List, Union, TYPE_CHECKING
 
 import torch
 from torch.ao.quantization import QConfigMapping
 from torch.ao.quantization.qconfig_mapping import _QCONFIG_STYLE_ORDER
-from torch.ao.quantization.qconfig import QConfigAny
+
+if TYPE_CHECKING:
+    from torch.ao.quantization.qconfig import QConfigAny
 
 __all__ = ["QConfigMultiMapping"]
 

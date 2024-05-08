@@ -15,11 +15,14 @@ import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo.exc import UserError, UserErrorType
 from torch._export.non_strict_utils import (
+    _fakify_script_objects,
+    _gather_constant_attrs,
     make_constraints,
     make_fake_inputs,
     make_fake_params_buffers,
     produce_guards_and_solve_constraints,
 )
+from torch._export.passes._node_metadata_hook import _node_metadata_hook
 from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
     _AddRuntimeAssertionsForInlineConstraintsPass,
 )
@@ -34,6 +37,8 @@ from torch._export.verifier import SpecViolationError
 from torch._export.wrappers import _wrap_submodules
 from torch._functorch.aot_autograd import aot_export_module
 from torch._guards import detect_fake_mode
+
+from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch._utils_internal import log_export_usage
 from torch.export.dynamic_shapes import _combine_args
@@ -69,7 +74,6 @@ from .graph_signature import (
     TensorArgument,
     TokenArgument,
 )
-
 
 log = logging.getLogger(__name__)
 
@@ -454,37 +458,6 @@ def _export_to_torch_ir(
     return gm_torch_level
 
 
-def _gather_constant_attrs(m: torch.nn.Module) -> ConstantAttrMap:
-    """Search the module hierarchy, gathering up all tensor and ScriptObject constants.
-
-    Returns a dictionary mapping hash(value) to the name of the constant. We
-    have to abuse `hash` here unfortunately, see: [ScriptObject hash].
-    """
-    constants = ConstantAttrMap()
-    buffers_parameters = set(m.buffers())
-    buffers_parameters.update(m.parameters())
-
-    def inner(m: torch.nn.Module, prefix_atoms: List[str], constants):
-        for k, v in m.__dict__.items():
-            if isinstance(v, (torch.Tensor, torch.ScriptObject)):
-                if v in buffers_parameters:
-                    # filter out buffers and parameters, leaving only constants
-                    continue
-
-                fqn = ".".join(prefix_atoms + [k])
-                if v in constants:
-                    raise ValueError(
-                        f"Duplicate reference to constant attribute found: '{constants[v]}' and '{fqn}'."
-                    )
-
-                constants[v] = fqn
-        for k, v in m.named_children():
-            inner(v, prefix_atoms + [k], constants)
-
-    inner(m, [], constants)
-    return constants
-
-
 def _export_non_strict(
     mod: torch.nn.Module,
     fake_args,
@@ -587,9 +560,9 @@ def _export_non_strict(
         elif isinstance(val, torch.SymInt):
             return SymIntArgument(name=node.name)
         elif isinstance(val, torch.ScriptObject):
-            return CustomObjArgument(
-                name=node.name, class_fqn=val._type().qualified_name()  # type: ignore[attr-defined]
-            )
+            return CustomObjArgument(name=node.name, class_fqn=val._type().qualified_name())  # type: ignore[attr-defined]
+        elif isinstance(val, FakeScriptObject):
+            return CustomObjArgument(name=node.name, class_fqn=val.script_class_name)
         elif isinstance(val, (int, bool, str, float, type(None))):
             return ConstantArgument(name=node.name, value=val)
         else:
@@ -644,7 +617,14 @@ def _export_non_strict(
     class _ExportedProgramNonStrict:
         gm: torch.fx.GraphModule
         sig: ExportGraphSignature
-        constants: Dict[str, Union[torch.Tensor, torch._C.ScriptObject]]
+        constants: Dict[
+            str,
+            Union[
+                torch.Tensor,
+                FakeScriptObject,
+                torch.ScriptObject,
+            ],
+        ]
 
     return _ExportedProgramNonStrict(
         gm,
@@ -942,8 +922,6 @@ def _export(
     if isinstance(dynamic_shapes, torch.export.ShapesCollection):
         dynamic_shapes = dynamic_shapes.dynamic_shapes(mod, args, kwargs)
 
-    constant_attrs = _gather_constant_attrs(mod)
-
     flat_args, orig_in_spec = pytree.tree_flatten((args, kwargs))
     original_state_dict = mod.state_dict(keep_vars=True)
     forward_arg_names = _get_forward_arg_names(mod, args, kwargs)
@@ -1030,16 +1008,46 @@ def _export(
         fake_params_buffers = make_fake_params_buffers(
             fake_mode, _get_params_buffers(mod)
         )
+
         with fake_mode:
-            ep_non_strict = _export_non_strict(
-                mod,
-                fake_args,
-                fake_kwargs,
-                fake_params_buffers,
-                constant_attrs,
-                pre_dispatch=pre_dispatch,
-                transform=_tuplify_outputs,
+            with _fakify_script_objects(mod, fake_args, fake_kwargs, fake_mode) as (
+                patched_mod,
+                new_fake_args,
+                new_fake_kwargs,
+                new_fake_constant_attrs,
+                map_fake_to_real,
+            ):
+                ep_non_strict = _export_non_strict(
+                    patched_mod,
+                    new_fake_args,
+                    new_fake_kwargs,
+                    fake_params_buffers,
+                    new_fake_constant_attrs,
+                    pre_dispatch=pre_dispatch,
+                    transform=_tuplify_outputs,
+                )
+                # ep_non_strict.constants contains only fake script objects, we need to map them back
+                ep_non_strict.constants = {
+                    fqn: map_fake_to_real[obj]
+                    if isinstance(obj, FakeScriptObject)
+                    else obj
+                    for fqn, obj in ep_non_strict.constants.items()
+                }
+
+            stack_trace = (
+                'File "torch/fx/passes/runtime_assert.py", line 24, '
+                "in insert_deferred_runtime_asserts"
             )
+            with ep_non_strict.gm._set_create_node_hook(
+                functools.partial(_node_metadata_hook, stack_trace=stack_trace)
+            ):
+                insert_deferred_runtime_asserts(
+                    ep_non_strict.gm,
+                    fake_mode.shape_env,
+                    f"non strict exported program: {first_call_function_nn_module_stack(ep_non_strict.gm.graph)}",
+                    export=True,
+                )
+
         ep_non_strict.gm.meta["inline_constraints"] = {
             k: v
             for k, v in fake_mode.shape_env.var_to_range.items()
@@ -1119,12 +1127,6 @@ def _export(
             ),
             example_inputs=(args, kwargs),
             constants=ep_non_strict.constants,
-        )
-        insert_deferred_runtime_asserts(
-            exported_program.graph_module,
-            fake_mode.shape_env,
-            f"non strict exported program: {first_call_function_nn_module_stack(exported_program.graph)}",
-            export=True,
         )
         return exported_program
 
@@ -1220,6 +1222,7 @@ def _export(
     _normalize_nn_module_stack(gm_torch_level, type(mod))
 
     # NOTE: graph module expects only positional args
+    constant_attrs = _gather_constant_attrs(mod)
     ep_non_strict = _export_non_strict(
         gm_torch_level,
         _convert_to_positional_args(orig_arg_names, fake_args, fake_kwargs),
@@ -1313,8 +1316,18 @@ def _export(
         assert res is not None
         gm = res.graph_module
 
+    # We can't get rid of this yet, since for some reason
+    # insert_deferred_runtime_assertions doesn't add assertions to cond
+    # subgraphs
     if len(range_constraints) > 0:
-        res = _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints)(gm)
+        stack_trace = (
+            'File "torch/_export/passes/add_runtime_assertions_for_constraints_pass.py", line 46, '
+            "in _AddRuntimeAssertionsForInlineConstraintsPass"
+        )
+        with dynamo_fake_mode, gm._set_create_node_hook(
+            functools.partial(_node_metadata_hook, stack_trace=stack_trace)
+        ):
+            res = _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints)(gm)
         assert res is not None
         gm = res.graph_module
 

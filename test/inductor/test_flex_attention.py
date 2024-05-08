@@ -126,7 +126,15 @@ D = 64
 
 
 class TestTemplatedSDPA(InductorTestCase):
-    def run_test(self, score_mod: Callable, dtype: torch.dtype = torch.float16):
+    def run_test(
+        self,
+        score_mod: Callable,
+        dtype: torch.dtype = torch.float16,
+        B: int = B,
+        H: int = H,
+        S: int = S,
+        D: int = D,
+    ):
         sdpa_partial = create_attention(score_mod)
         compiled_sdpa = torch.compile(sdpa_partial)
         q = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
@@ -288,6 +296,116 @@ class TestTemplatedSDPA(InductorTestCase):
             return torch.nn.functional.silu(score)
 
         self.run_test(silu_score, dtype)
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    def test_padded_dense_causal(self, dtype):
+        seq_len = torch.arange(B, device="cuda", dtype=torch.int32) + 1
+
+        def create_padded_dense_wrapper(orig_score_mod):
+            def njt_score_mod(qk, b, h, q, kv):
+                return torch.where(
+                    qk <= seq_len[b], orig_score_mod(qk, b, h, q, kv), -float("inf")
+                )
+
+            return njt_score_mod
+
+        causal_njt = create_padded_dense_wrapper(_causal)
+
+        self.run_test(causal_njt, dtype)
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    def test_captured_scale(self, dtype):
+        scale = torch.ones((), device="cuda", dtype=torch.int32)
+
+        def score_mod_scale(qk, b, h, q, kv):
+            return qk + scale
+
+        self.run_test(score_mod_scale, dtype)
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    def test_recompile_changed_score_mod(self, dtype):
+        scale = torch.ones((), device="cuda", dtype=torch.int32)
+        ADD = True
+
+        def score_mod_scale(qk, b, h, q, kv):
+            if ADD:
+                return qk + scale
+            else:
+                return qk * scale
+
+        self.run_test(score_mod_scale, dtype)
+        ADD = False
+        self.run_test(score_mod_scale, dtype)
+
+    @supported_platform
+    @expectedFailure  # If we capture a tensor then we can perform a reduction on it, and that shouldn't be allowed
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    def test_captured_reduction(self, dtype):
+        scale = torch.randn((B, 8), device="cuda")
+
+        def score_mod_scale(qk, b, h, q, kv):
+            return qk + scale[b].sum(dim=-1)
+
+        self.run_test(score_mod_scale, dtype)
+
+    @supported_platform
+    def test_multiple_score_mod_calls(self):
+        query = torch.randn((1, 8, 1024, 64), dtype=torch.float32, device="cuda")
+        keys = [
+            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device="cuda")
+            for _ in range(2)
+        ]
+        values = [
+            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device="cuda")
+            for _ in range(2)
+        ]
+
+        def scoremod_1(qk, b, h, q, kv):
+            return qk + (q - kv)
+
+        def scoremod_2(qk, b, h, q, kv):
+            return torch.where(q >= kv, qk, -float("inf"))
+
+        def f(q, k1, k2, v1, v2):
+            q2 = _flex_attention(q, k1, v1, score_mod=scoremod_1)
+            return _flex_attention(q2, k2, v2, score_mod=scoremod_2)
+
+        out = f(query, *keys, *values)
+        out2 = torch.compile(f)(query, *keys, *values)
+        tolerance = Tolerances(atol=2e-1, rtol=2e-1)
+        torch.testing.assert_close(out, out2, atol=tolerance.atol, rtol=tolerance.rtol)
+
+    @supported_platform
+    def test_multiple_score_mod_calls2(self):
+        query = torch.randn((1, 8, 1024, 64), dtype=torch.float32, device="cuda")
+        keys = [
+            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device="cuda")
+            for _ in range(3)
+        ]
+        values = [
+            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device="cuda")
+            for _ in range(3)
+        ]
+
+        def scoremod_1(qk, b, h, q, kv):
+            return qk + (q - kv)
+
+        def scoremod_2(qk, b, h, q, kv):
+            return torch.where(q >= kv, qk, -float("inf"))
+
+        attention1 = functools.partial(_flex_attention, score_mod=scoremod_1)
+
+        def f(q, k1, k2, k3, v1, v2, v3):
+            q2 = attention1(q, k1, v1)
+            q3 = _flex_attention(q2, k2, v2, score_mod=scoremod_2)
+            return _flex_attention(q3, k3, v3, score_mod=scoremod_1)
+
+        out = f(query, *keys, *values)
+        out2 = torch.compile(f)(query, *keys, *values)
+        self.assertTrue((out - out2).abs().mean() < 1e-2)
 
     @supported_platform
     @skip("Triton bug ")  # https://github.com/pytorch/pytorch/issues/124571
@@ -537,27 +655,26 @@ class TestTemplatedSDPA(InductorTestCase):
             norm_graph,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_args_0_ : torch.Tensor, L_args_1_ : torch.Tensor, L_args_2_ : torch.Tensor):
+    def forward(self, L_args_0_: "f64[2, 2, 8, 4]", L_args_1_: "f64[2, 2, 8, 4]", L_args_2_: "f64[2, 2, 8, 4]"):
         l_args_0_ = L_args_0_
         l_args_1_ = L_args_1_
         l_args_2_ = L_args_2_
 
-        new_empty = l_args_0_.new_empty([], requires_grad = True)
-        new_empty_1 = l_args_0_.new_empty([], dtype = torch.int32)
-        new_empty_2 = l_args_0_.new_empty([], dtype = torch.int32)
-        new_empty_3 = l_args_0_.new_empty([], dtype = torch.int32)
-        new_empty_4 = l_args_0_.new_empty([], dtype = torch.int32)
+        new_empty: "f64[]" = l_args_0_.new_empty([], requires_grad = True)
+        new_empty_1: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
+        new_empty_2: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
+        new_empty_3: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
+        new_empty_4: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
         flex_attention_0 = self.flex_attention_0
-        flex_attention = torch.ops.higher_order.flex_attention(l_args_0_, """
-            + """l_args_1_, l_args_2_, flex_attention_0);  l_args_0_ = l_args_1_ = l_args_2_ = flex_attention_0 = None
-        out = flex_attention[0];  flex_attention = None
+        flex_attention = torch.ops.higher_order.flex_attention(l_args_0_, l_args_1_, l_args_2_, flex_attention_0);  l_args_0_ = l_args_1_ = l_args_2_ = flex_attention_0 = None
+        out: "f64[2, 2, 8, 4]" = flex_attention[0];  flex_attention = None
         return (out,)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, new_empty, new_empty_1, new_empty_2, new_empty_3, new_empty_4):
-            mul = new_empty * new_empty;  new_empty = None
+        def forward(self, new_empty: "f64[]", new_empty_1: "i32[]", new_empty_2: "i32[]", new_empty_3: "i32[]", new_empty_4: "i32[]"):
+            mul: "f64[]" = new_empty * new_empty;  new_empty = None
             return mul
-""",
+""",  # noqa: B950
         )
         # Save the AOT graphs
         aot_graphs = []

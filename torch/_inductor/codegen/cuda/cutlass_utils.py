@@ -11,7 +11,6 @@ import sympy
 
 import torch
 from ... import config
-from ...config import cuda as inductor_cuda_config
 from ...ir import Layout
 
 from ...runtime.runtime_utils import cache_dir
@@ -57,7 +56,7 @@ def try_import_cutlass() -> bool:
     # TODO(ipiszy): remove this hack when CUTLASS solves Python scripts packaging structure issues.
 
     cutlass_py_full_path = os.path.abspath(
-        os.path.join(inductor_cuda_config.cutlass_dir, "python/cutlass_library")
+        os.path.join(config.cuda.cutlass_dir, "python/cutlass_library")
     )
     tmp_cutlass_py_full_path = os.path.abspath(
         os.path.join(cache_dir(), "torch_cutlass_library")
@@ -297,12 +296,29 @@ def get_max_alignment(inductor_layout: Layout) -> int:
     def is_static_int(number):
         return isinstance(number, (int, sympy.Integer))
 
-    if is_static_int(size[-1]) and is_static_int(offset):
+    try:
+        contiguous_dim = inductor_layout.stride.index(1)
+    except ValueError:
+        # No dim with stride 1 found, return 1
+        return 1
+    if (
+        is_static_int(size[contiguous_dim])
+        and is_static_int(offset)
+        and all(is_static_int(s) for s in inductor_layout.stride)
+    ):
         alignments = get_alignments(dtype)
         for alignment in alignments:
-            if int(size[-1]) % alignment == 0 and int(offset) % alignment == 0:
+            if (
+                int(size[contiguous_dim]) % alignment != 0
+                or int(offset) % alignment != 0
+            ):
+                continue
+            if all(
+                (dim == contiguous_dim)
+                or (inductor_layout.stride[dim] % alignment == 0)
+                for dim in range(len(size))
+            ):
                 return alignment
-
     return 1
 
 
