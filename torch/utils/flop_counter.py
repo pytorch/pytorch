@@ -259,7 +259,7 @@ def unpack_flash_attention_nested_shapes(
     cum_seq_k,
     max_q,
     max_k,
-) -> Iterator[Tuple[int, int, int, Optional[int]]]:
+) -> Iterator[Tuple[Tuple[int, ...], Tuple[int, ...], Tuple[int, ...], Optional[Tuple[int, ...]]]]:
     if cum_seq_q is not None:
         # This means we should be dealing with a Nested Jagged Tensor query.
         # The inputs will have shape                  (sum(sequence len), heads, dimension)
@@ -298,7 +298,7 @@ def unpack_efficient_attention_nested_shapes(
     cu_seqlens_k,
     max_seqlen_q,
     max_seqlen_k,
-) -> Iterator[Tuple[int, int, int, Optional[int]]]:
+) -> Iterator[Tuple[Tuple[int, ...], Tuple[int, ...], Tuple[int, ...], Optional[Tuple[int, ...]]]]:
     if cu_seqlens_q is not None:
         # Unlike flash_attention_forward, we get a 4D tensor instead of a 3D tensor for efficient attention.
         #
@@ -326,7 +326,7 @@ def unpack_efficient_attention_nested_shapes(
             yield new_query_shape, new_key_shape, new_value_shape, new_grad_out_shape
         return
 
-    yield query.shape, key_shape, value_shape, grad_out.shape if grad_out is not None else None
+    yield query.shape, key.shape, value.shape, grad_out.shape if grad_out is not None else None
 
 
 @register_flop_formula(aten._flash_attention_forward, get_raw=True)

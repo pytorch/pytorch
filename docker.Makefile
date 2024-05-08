@@ -57,8 +57,7 @@ PUSH_FLAG                 = --push
 endif
 endif
 
-DOCKER_BUILD              = DOCKER_BUILDKIT=1 \
-							docker $(BUILD) \
+DOCKER_BUILD              = docker $(BUILD) \
 								--progress=$(BUILD_PROGRESS) \
 								$(EXTRA_DOCKER_BUILD_FLAGS) \
 								$(PLATFORMS_FLAG) \
