@@ -284,7 +284,10 @@ def _reconstruct_fake_tensor(
     return fake_tensor
 
 
-def serialize_torch_artifact(artifact: Dict[str, Any]) -> bytes:
+def serialize_torch_artifact(artifact: Optional[Any]) -> bytes:
+    if artifact is None:
+        return b""
+
     assert (
         FakeTensor not in copyreg.dispatch_table
     ), "Refusing to stomp on existing FakeTensor reducer"

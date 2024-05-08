@@ -24,7 +24,7 @@ from torch.distributed.checkpoint.state_dict import (
     get_model_state_dict,
     get_state_dict,
     set_model_state_dict,
-    set_state_dict,
+    set_optimizer_state_dict,
     StateDictOptions,
 )
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
@@ -95,11 +95,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             dist_model, optimizers=dist_optim, options=options
         )
         self._verify_msd(msd, dist_msd, options)
-        # TODO: temporarily disable this check, as it seems for AdamW,
-        # setting the state dict affect the state_dict value.
-        # We need to investigate the root cause.
-        # Open Issue: https://github.com/pytorch/pytorch/issues/121186
-        # self._verify_osd_by_load(model, optim, copy_optim, dist_osd)
+        self._verify_osd_by_load(model, optim, copy_optim, dist_osd)
         self._verify_osd(model, optim, osd, dist_osd)
 
         # Initialize a completely new model to simulate checkpoint load.
@@ -117,10 +113,14 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         # We can directly load them back. This asser is to ensure that optimizer
         # state storage are initialized.
         # self.assertEqual(len(curr_dist_osd[STATE]), len(dist_osd[STATE]))
-        set_state_dict(
+        set_model_state_dict(
+            dist_model,
+            model_state_dict=dist_msd,
+            options=options,
+        )
+        set_optimizer_state_dict(
             dist_model,
             optimizers=dist_optim,
-            model_state_dict=dist_msd,
             optim_state_dict=dist_osd,
             options=options,
         )
@@ -556,6 +556,36 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         new_keys = get_model_state_dict(model).keys()
 
         self.assertEqual(original_keys, new_keys)
+
+    @with_comms
+    @skip_if_lt_x_gpu(1)
+    def test_extra_state(self) -> None:
+        model = CompositeParamModel(device=torch.device("cuda"))
+
+        def get_extra_state(self):
+            return "MyState"
+
+        def set_extra_state(self, state):
+            return
+
+        UnitModule.get_extra_state = get_extra_state
+        UnitModule.set_extra_state = set_extra_state
+
+        ddp_model = DDP(copy.deepcopy(model))
+        set_model_state_dict(ddp_model, get_model_state_dict(ddp_model))
+        self.assertEqual(model.state_dict()["u1._extra_state"], "MyState")
+        self.assertEqual(model.state_dict(), get_model_state_dict(ddp_model))
+
+    @with_comms
+    @skip_if_lt_x_gpu(1)
+    def test_non_persistent_buffers(self) -> None:
+        model = CompositeParamModel(device=torch.device("cuda"))
+        model.register_buffer(
+            "dont_save_me", torch.rand(100, device="cuda"), persistent=False
+        )
+        ddp_model = DDP(copy.deepcopy(model))
+        set_model_state_dict(ddp_model, get_model_state_dict(ddp_model))
+        self.assertEqual(model.state_dict(), get_model_state_dict(ddp_model))
 
 
 if __name__ == "__main__":
