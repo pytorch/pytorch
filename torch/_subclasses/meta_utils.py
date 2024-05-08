@@ -784,10 +784,6 @@ class MetaConverter:
                 if all_static_sizes or shape_env is None:
                     return s
 
-                # if it's already symbolic, just return it
-                if isinstance(s, torch.SymInt):
-                    return s
-
                 # NB: The symbol here is expected to be simplified out because we a priori
                 # allocate inner and outer symbols according to the appropriate symbolic
                 # contexts and prefer those over this symbol during symbol simplification
