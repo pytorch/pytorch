@@ -996,6 +996,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         if isinstance(value, torch._C.ScriptObject):
             self.torchbind_constants[target] = value
+            self.constant_reprs[target] = ""
             return TorchBindObject(target, value)
 
         if (

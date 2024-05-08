@@ -34,8 +34,6 @@ class TestTorchbind(TestCase):
             torch.ops.load_library(str(lib_file_path))
 
     def test_torchbind_inductor(self):
-        import torch._inductor
-
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -49,19 +47,16 @@ class TestTorchbind(TestCase):
                 b = torch.ops._TorchScriptTesting.takes_foo(self.attr, y)
                 return x + b
 
-        orig_res = M()(torch.ones(2, 3))
+        m = M()
+        orig_res = m(torch.ones(2, 3))
 
         # We can't directly torch.compile because dynamo doesn't trace ScriptObjects yet
         with enable_torchbind_tracing():
-            ep = torch.export.export(M(), (torch.ones(2, 3),), strict=False)
+            ep = torch.export.export(m, (torch.ones(2, 3),), strict=False)
         compiled = torch._inductor.compile(ep.module(), (torch.ones(2, 3),))
 
-        try:
-            new_res = compiled(torch.ones(2, 3))
-        except Exception as e:
-            print(e)
-            breakpoint()
-            raise e
+        new_res = compiled(torch.ones(2, 3))
+        breakpoint()
         self.assertTrue(torch.allclose(orig_res, new_res))
 
 
