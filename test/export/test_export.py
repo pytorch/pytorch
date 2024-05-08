@@ -4581,6 +4581,144 @@ def forward(self, x):
         }
         export(f, (inputs,), dynamic_shapes=dynamic_shapes)
 
+    def test_disable_forced_specializations(self):
+        # case 1
+        # check disable_forced_specializations flag behaves correctly
+        from torch.export import dims
+
+        class Mod4Reshape(torch.nn.Module):
+            def forward(self, x):
+                return x.reshape(x.shape[0] - 1, 4, -1)  # Mod(s0*s1, 4*(s0-1)) = 0
+
+        inputs = (torch.randn(10, 72),)
+        dx, dy = dims("dx", "dy")
+        with self.assertRaisesRegex(  # this will force specialize
+            torch._dynamo.exc.UserError,
+            r".*Specializations unexpectedly required(.*\n)*"
+            r".*dx = .* must be specialized to 10 because the guards generated for it are too complex(.*\n)*"
+            r".*dy = .* must be specialized to 72 because the guards generated for it are too complex(.*\n)*",
+        ):
+            torch.export._trace._export(
+                Mod4Reshape(),
+                inputs,
+                dynamic_shapes={"x": (dx, dy)},
+                strict=False,
+                _disable_forced_specializations=False,
+            )
+        ep = torch.export._trace._export(
+            Mod4Reshape(),
+            inputs,
+            dynamic_shapes={"x": (dx, dy)},
+            strict=False,
+            _disable_forced_specializations=True,
+        )
+        out1 = ep.module()(torch.randn(8, 7))
+        self.assertEqual(out1.shape, torch.ones(7, 4, 2).shape)
+        out2 = ep.module()(torch.randn(4, 3))
+        self.assertEqual(out2.shape, torch.ones(3, 4, 1).shape)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"shape .*7, 4, -1.* is invalid for input of size 64",
+        ):
+            ep.module()(torch.randn(8, 8))  # fail
+
+        # case 2
+        class FreeReshape(torch.nn.Module):
+            def forward(self, x, y, z):
+                return x.reshape([-1]) + y.reshape([-1]) + z  # s0*s1 = s2*s3 = s4
+
+        inputs = (
+            torch.randn(6, 8),
+            torch.randn(3, 16),
+            torch.randn(48),
+        )
+        dynamic_shapes = {
+            "x": [Dim(f"dx{i}") for i in range(2)],
+            "y": [Dim(f"dy{i}") for i in range(2)],
+            "z": [Dim(f"dz{i}") for i in range(1)],
+        }
+        with self.assertRaisesRegex(  # this will force specialize
+            torch._dynamo.exc.UserError,
+            r".*Specializations unexpectedly required(.*\n)*"
+            r".*dx0 = .* must be specialized to 6 because the guards generated for it are too complex(.*\n)*"
+            r".*dx1 = .* must be specialized to 8 because the guards generated for it are too complex(.*\n)*",
+        ):
+            torch.export._trace._export(
+                FreeReshape(),
+                inputs,
+                dynamic_shapes=dynamic_shapes,
+                strict=False,
+                _disable_forced_specializations=False,
+            )
+        ep = torch.export._trace._export(
+            FreeReshape(),
+            inputs,
+            dynamic_shapes=dynamic_shapes,
+            strict=False,
+            _disable_forced_specializations=True,
+        )
+        out1 = ep.module()(torch.randn(48, 1), torch.randn(4, 12), torch.randn(48))
+        self.assertEqual(out1.shape, torch.ones(48).shape)
+        out2 = ep.module()(torch.randn(5, 8), torch.randn(4, 10), torch.randn(40))
+        self.assertEqual(out2.shape, torch.ones(40).shape)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"The size of tensor a .* must match the size of tensor b .* at non-singleton dimension 0",
+        ):  # fail only at runtime
+            ep.module()(torch.randn(5, 8), torch.randn(4, 5), torch.randn(30))  # fail
+
+    def test_disable_forced_specializations_errors(self):
+        # check error messages with disable_forced_specializations=False/True
+        class Foo(torch.nn.Module):
+            def forward(self, w, x, y, z):
+                return w.reshape([-1]) + x, y + z  # simple: s0*s1 = s2, s3 = s4
+
+        inputs = (
+            torch.randn(3, 4),
+            torch.randn(12),
+            torch.randn(4),
+            torch.randn(4),
+        )
+        dynamic_shapes = {
+            "w": [Dim(f"dw{i}") for i in range(2)],
+            "x": [Dim(f"dx{i}") for i in range(1)],
+            "y": [Dim("dy")],  # y & z incorrect, export is supposed to fail.
+            "z": [Dim("dz")],  # suggested fix should be to match these up.
+        }
+        with self.assertRaisesRegex(  # if disable=False, suggested fixes should specialize 3, 4, 12.
+            torch._dynamo.exc.UserError,
+            r".*Specializations unexpectedly required(.*\n)*"
+            r"Suggested fixes:(.*\n)*"
+            r".*dy = Dim.*(.*\n)*"
+            r".*dw0 = 3(.*\n)*"
+            r".*dw1 = 4(.*\n)*"
+            r".*dx0 = 12(.*\n)*"
+            r".*dz = dy(.*\n)*",
+        ):
+            torch.export._trace._export(
+                Foo(),
+                inputs,
+                dynamic_shapes=dynamic_shapes,
+                strict=False,
+                _disable_forced_specializations=False,
+            )
+        with self.assertRaisesRegex(  # if disable=True, suggested fixes should not specialize.
+            torch._dynamo.exc.UserError,
+            r".*Constraints violated(.*\n)*"
+            r"Suggested fixes:(.*\n)*"
+            r".*dw0 = Dim.*(.*\n)*"
+            r".*dw1 = Dim.*(.*\n)*"
+            r".*dy = Dim.*(.*\n)*"
+            r".*dz = dy(.*\n)*",
+        ) as msg:
+            torch.export._trace._export(
+                Foo(),
+                inputs,
+                dynamic_shapes=dynamic_shapes,
+                strict=False,
+                _disable_forced_specializations=True,
+            )
+
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):
