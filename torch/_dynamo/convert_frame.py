@@ -71,7 +71,6 @@ from .guards import (
     GuardedCode,
 )
 from .hooks import Hooks
-from .output_graph import OutputGraph
 from .replay_record import ExecutionRecord
 from .symbolic_convert import InstructionTranslator, SpeculationLog
 from .trace_rules import is_numpy
@@ -437,6 +436,9 @@ def convert_frame_assert(
 from collections import OrderedDict
 
 from torch.utils.hooks import RemovableHandle
+
+if typing.TYPE_CHECKING:
+    from .output_graph import OutputGraph
 
 # we have to use `OrderedDict` to make `RemovableHandle` work.
 _bytecode_hooks: Dict[int, BytecodeHook] = OrderedDict()

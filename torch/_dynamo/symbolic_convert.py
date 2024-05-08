@@ -18,7 +18,7 @@ import traceback
 import types
 import typing
 import weakref
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type
+from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Type
 from unittest.mock import patch
 
 import torch
@@ -37,6 +37,7 @@ from .bytecode_transformation import (
     create_call_function,
     create_instruction,
     create_jump_absolute,
+    create_swap,
     get_code_keys,
     Instruction,
     is_generator,
@@ -112,6 +113,7 @@ log = logging.getLogger(__name__)
 graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
 trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 trace_source_log = torch._logging.getArtifactLogger(__name__, "trace_source")
+trace_bytecode_log = torch._logging.getArtifactLogger(__name__, "trace_bytecode")
 tls = threading.local()
 compare_op_handlers: Dict[str, Any] = {
     k: BuiltinVariable(v).call_function for k, v in supported_comparison_ops.items()
@@ -559,10 +561,10 @@ def break_graph_if_unsupported(*, push):
             self.output.compile_subgraph(self, reason=reason)
             cg = PyCodegen(self)
             cleanup: List[Instruction] = []
-            # Reconstruct the context variables in the block stack
+            # Reconstruct the context variable CLASS in the block stack
             for b in self.block_stack:
                 assert b.with_context is not None
-                cg(b.with_context)
+                b.with_context.reconstruct_type(cg)
                 cg.extend_output(b.resume_fn().try_except(cg.code_options, cleanup))
             self.output.add_output_instructions(cg.get_instructions())
             del cg
@@ -786,8 +788,10 @@ class InstructionTranslatorBase(
             if self.current_speculation.failed:
                 return self.step_graph_break(inst)
 
-        if log.isEnabledFor(logging.DEBUG):
-            log.debug("TRACE %s %s %s", inst.opname, inst.argval, self.stack)
+        if trace_bytecode_log.isEnabledFor(logging.DEBUG):
+            trace_bytecode_log.debug(
+                "TRACE %s %s %s", inst.opname, inst.argval, self.stack
+            )
 
         self.update_block_stack(inst)
 
@@ -1356,8 +1360,8 @@ class InstructionTranslatorBase(
             return self.store_attr_graph_break(inst)
         val, obj = self.popn(2)
 
-        if isinstance(obj, NNModuleVariable):
-            # We don't allow side effects during export
+        if isinstance(obj, NNModuleVariable) and not isinstance(val, ConstantVariable):
+            # We don't allow side effects during export on non-constant values
             # https://github.com/pytorch/torchdynamo/issues/1475
             assert (
                 not self.export
@@ -2282,24 +2286,38 @@ class InstructionTranslator(InstructionTranslatorBase):
         if sys.version_info < (3, 12):
             assert len(argnames_null) == 0, "variables should not be NULL in < 3.12"
 
-        # Handle inactive context variables - inactive context variables
-        # are reconstructed to be the class, NOT the object.
-        # So the resume function needs to construct the context object
-        # from the class and the context object's target values.
-        # e.g. torch.set_grad_enabled(True) will be reconstructed as
-        # torch.set_grad_enabled
+        cg = PyCodegen(self)
+
+        # Handle inactive context variables.
+        # The resume function assumes that context variables are the class, NOT the object.
+        # e.g. torch.set_grad_enabled(True) will be reconstructed as torch.set_grad_enabled
         stack_ctx_vars = []
         for i, var in enumerate(self.stack):
             if type.__instancecheck__(ContextWrappingVariable, var):
-                stack_ctx_vars.append((i, tuple(var.target_values)))  # type: ignore[attr-defined]
+                ctx = cast(ContextWrappingVariable, var)
+                target_values = (
+                    () if ctx.target_values is None else tuple(ctx.target_values)
+                )
+                stack_ctx_vars.append((i, target_values))
+                # Replace the current stack var with the context class
+                ctx.reconstruct_type(cg)
+                cg.extend_output(create_swap(len(self.stack) - i + 1))
+                cg.append_output(create_instruction("POP_TOP"))
+
         argnames_ctx_vars = []
         for name in argnames:
             if type.__instancecheck__(
                 ContextWrappingVariable, var := self.symbolic_locals[name]
             ):
-                argnames_ctx_vars.append((name, tuple(var.target_values)))  # type: ignore[attr-defined]
-
-        cg = PyCodegen(self)
+                ctx = cast(ContextWrappingVariable, var)
+                target_values = (
+                    () if ctx.target_values is None else tuple(ctx.target_values)
+                )
+                argnames_ctx_vars.append((name, target_values))
+                # Replace the local with the context class
+                cg.append_output(create_instruction("LOAD_FAST", argval=name))
+                ctx.reconstruct_type(cg)
+                cg.append_output(create_instruction("STORE_FAST", argval=name))
 
         # Python does not allow null to be an arg to a function, so
         # we remove nulls from the stack and restore them in the
