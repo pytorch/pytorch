@@ -20,7 +20,7 @@ CUDA_CHANNEL              = nvidia
 # The conda channel to use to install pytorch / torchvision
 INSTALL_CHANNEL          ?= pytorch
 
-PYTHON_VERSION           ?= 3.10
+PYTHON_VERSION           ?= 3.11
 # Match versions that start with v followed by a number, to avoid matching with tags like ciflow
 PYTORCH_VERSION          ?= $(shell git describe --tags --always --match "v[1-9]*.*")
 # Can be either official / dev
