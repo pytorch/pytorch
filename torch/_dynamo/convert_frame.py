@@ -300,10 +300,10 @@ def maybe_cprofile(func):
 def cprofile_wrapper(func):
     @functools.wraps(func)
     def profile_wrapper(*args, **kwargs):
-        global FRAME_COUNTER
-        global FRAME_COMPILE_COUNTER
+        trace_id = CompileContext.current_trace_id()
+        assert trace_id, "Trace id is None"
         profile_path = Path(
-            f"/tmp/{func.__name__}_{FRAME_COUNTER}_{FRAME_COMPILE_COUNTER}.profile"
+            f"/tmp/{func.__name__}_{str(trace_id).replace('/','_')}.profile"
         )
         prof = cProfile.Profile()
         prof.enable()
@@ -312,10 +312,9 @@ def cprofile_wrapper(func):
         profile_latency = time.time() - start_ts
         prof.disable()
         log.info(
-            "### Cprofile for %s compile id [%d/%d] took %.3f seconds ###",
+            "### Cprofile for %s trace id [%s] took %.3f seconds ###",
             func.__name__,
-            FRAME_COUNTER,
-            FRAME_COMPILE_COUNTER,
+            trace_id,
             profile_latency,
         )
         ps = pstats.Stats(prof)
