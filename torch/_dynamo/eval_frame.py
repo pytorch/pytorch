@@ -505,7 +505,6 @@ class DisableContext(_TorchDynamoContext):
             mod = fn
             mod.__call__ = self(mod.__call__)
             mod._call_impl = self(mod._call_impl)
-            mod.forward = self(mod.forward)
             return mod
 
         if inspect.isclass(fn):
