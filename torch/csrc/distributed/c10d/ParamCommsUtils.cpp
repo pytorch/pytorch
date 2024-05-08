@@ -19,10 +19,10 @@ ParamCommsDebugInfo::ParamCommsDebugInfo(
     int globalRankStart,
     int globalRankStride,
     int worldSize)
-    : pgName_(pgName),
+    : pgName_(std::move(pgName)),
       rank_(rank),
       worldSize_(worldSize),
-      collectiveName_(collName),
+      collectiveName_(std::move(collName)),
       inMessageNelems_(inNelems),
       outMessageNelems_(outNelems),
       dType_(dType),
