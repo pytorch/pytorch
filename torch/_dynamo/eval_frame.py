@@ -150,8 +150,10 @@ class OptimizedModule(torch.nn.Module):
 
     def _initialize(self):
         # Do this stuff in constructor to lower overhead slightly
-
-        if trace_rules.should_wrap_top_module() or (
+        if isinstance(self.dynamo_ctx, DisableContext):
+            # No need to check trace rules
+            self.forward = self.dynamo_ctx(self._orig_mod.__call__)
+        elif trace_rules.should_wrap_top_module() or (
             isinstance(self._orig_mod.forward, types.MethodType)
             and trace_rules.check(self._orig_mod.forward)
         ):
@@ -517,12 +519,11 @@ class DisableContext(_TorchDynamoContext):
         # create any wrapper.
         fn = innermost_fn(fn)
 
-        # Optimize the forward method of torch.nn.Module object
         if isinstance(fn, torch.nn.Module):
             mod = fn
-            mod.__call__ = self(mod.__call__)
-            mod._call_impl = self(mod._call_impl)
-            return mod
+            new_mod = OptimizedModule(mod, self)
+            new_mod._torchdynamo_orig_callable = mod.forward
+            return new_mod
 
         if inspect.isclass(fn):
             # User has wrapped the class with compile/disable decorator. Apply
