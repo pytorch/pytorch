@@ -34,6 +34,7 @@ from ..scheduler import (
 )
 from ..utils import (
     cache_on_self,
+    get_bounds_index_expr,
     get_fused_kernel_name,
     is_welford_reduction,
     parallel_num_threads,
@@ -53,7 +54,6 @@ from .common import (
     DataTypePropagation,
     DeferredLine,
     DTYPE_TO_COMPUTATION_DTYPE,
-    ExprPrinter,
     IndentedBuffer,
     Kernel,
     KernelArgs,
@@ -61,63 +61,9 @@ from .common import (
     OptimizationContext,
 )
 
+from .cpp_utils import cexpr, cexpr_index, DTYPE_TO_CPP, INDEX_TYPE, value_to_cpp
+
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
-
-DTYPE_TO_CPP = {
-    torch.float32: "float",
-    torch.float64: "double",
-    torch.float16: "half",
-    torch.int64: "int64_t",
-    torch.int32: "int",
-    torch.int16: "short",
-    torch.int8: "signed char",
-    torch.uint64: "uint64_t",
-    torch.uint32: "unsigned int",
-    torch.uint16: "unsigned short",
-    torch.uint8: "unsigned char",
-    torch.bool: "bool",
-    torch.bfloat16: "bfloat16",
-    torch.complex64: "complex64",
-    torch.float8_e4m3fn: "float8_e4m3fn",
-    torch.float8_e5m2: "float8_e5m2",
-}
-
-DTYPE_TO_ATEN = {
-    torch.float32: "at::kFloat",
-    torch.float64: "at::kDouble",
-    torch.float16: "at::kHalf",
-    torch.int64: "at::kLong",
-    torch.int32: "at::kInt",
-    torch.int16: "at::kShort",
-    torch.int8: "at::kChar",
-    torch.uint64: "at::kUInt64",
-    torch.uint32: "at::kUInt32",
-    torch.uint16: "at::kUInt16",
-    torch.uint8: "at::kByte",
-    torch.uint32: "at::kUInt32",
-    torch.uint64: "at::kUInt64",
-    torch.bool: "at::kBool",
-    torch.bfloat16: "at::kBFloat16",
-    torch.complex32: "at::kComplexHalf",
-    torch.complex64: "at::kComplexFloat",
-    torch.complex128: "at::kComplexDouble",
-    torch.float8_e4m3fn: "at::kFloat8_e4m3fn",
-    torch.float8_e5m2: "at::kFloat8_e5m2",
-    torch.float8_e4m3fnuz: "at::kFloat8_e4m3fnuz",
-    torch.float8_e5m2fnuz: "at::kFloat8_e5m2fnuz",
-}
-
-DEVICE_TO_ATEN = {
-    "cpu": "at::kCPU",
-    "cuda": "at::kCUDA",
-}
-
-LAYOUT_TO_ATEN = {
-    torch.strided: "at::kStrided",
-    torch._mkldnn: "at::kMkldnn",  # type: ignore[attr-defined]
-}
-
-INDEX_TYPE = "long"
 
 NATIVE_OMP_RTYPES = {"+", "*", "^", "||", "min", "max"}
 RTYPE_TO_CPP = {
@@ -167,19 +113,6 @@ DTYPE_LOWP_FP = [
 
 
 BIN_CMP_OPS = ["eq", "ne", "le", "ge", "lt", "gt"]
-
-
-def value_to_cpp(value, cpp_type):
-    if value == float("-inf"):
-        return f"-std::numeric_limits<{cpp_type}>::infinity()"
-    elif value == float("inf"):
-        return f"std::numeric_limits<{cpp_type}>::infinity()"
-    elif isinstance(value, bool):
-        return f"static_cast<{cpp_type}>({str(value).lower()})"
-    elif math.isnan(value):
-        return f"std::numeric_limits<{cpp_type}>::quiet_NaN()"
-    else:
-        return f"static_cast<{cpp_type}>({repr(value)})"
 
 
 def reduction_init(reduction_type, dtype):
@@ -531,168 +464,6 @@ class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
             self.outer_loop_fusion_depth,
         )
         return cpp_kernel_proxy_list[0]
-
-
-class CppPrinter(ExprPrinter):
-    def _print_Integer(self, expr):
-        return f"{int(expr)}L"
-
-    def _print_Where(self, expr):
-        c = self.paren(self.doprint(expr.args[0]))
-        p = self.paren(self.doprint(expr.args[1]))
-        q = self.paren(self.doprint(expr.args[2]))
-        return f"{c} ? {p} : {q}"
-
-    def _print_ModularIndexing(self, expr):
-        x, div, mod = expr.args
-        x = self.paren(self.doprint(x))
-        if div != 1:
-            div = self.paren(self.doprint(div))
-            if expr.is_integer:
-                x = f"c10::div_floor_integer({x}, {div})"
-            else:
-                x = f"c10::div_floor_floating(static_cast<double>({x}), static_cast<double>({div}))"
-        mod = self.paren(self.doprint(mod))
-        return f"static_cast<{INDEX_TYPE}>({x}) % static_cast<{INDEX_TYPE}>({mod})"
-
-    def _print_FloorDiv(self, expr):
-        x, div = expr.args
-        x = self.paren(self.doprint(x))
-        div = self.paren(self.doprint(div))
-        if expr.is_integer:
-            return f"c10::div_floor_integer({x}, {div})"
-        return f"c10::div_floor_floating(static_cast<double>({x}), static_cast<double>({div}))"
-
-    def _print_floor(self, expr):
-        assert len(expr.args) == 1
-        r = f"std::floor({self._print(expr.args[0])})"
-        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
-
-    def _print_Trunc(self, expr):
-        assert len(expr.args) == 1
-        r = f"std::trunc({self._print(expr.args[0])})"
-        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
-
-    def _print_Pow(self, expr):
-        # Uses float constants to perform FP div
-        base, exp = expr.args
-        base = self._print(base)
-
-        if exp == 0.5 or exp == -0.5:
-            return f"std::sqrt({base})" if exp == 0.5 else f"1.0/std::sqrt({base})"
-        assert exp.is_integer
-        exp = int(exp)
-        if exp > 0:
-            r = "*".join([self.paren(base)] * exp)
-        elif exp < 0:
-            r = "1.0/" + self.paren("*".join([self.paren(base)] * abs(exp)))
-        else:  # exp == 0
-            r = "1.0"
-
-        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
-
-    def _print_Rational(self, expr):
-        # Uses float constants to perform FP div
-        if expr.q == 1:
-            r = f"{expr.p}"
-        else:
-            r = f"{expr.p}.0/{expr.q}.0"
-        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
-
-    def _print_ceiling(self, expr):
-        assert len(expr.args) == 1
-        r = f"std::ceil({self._print(expr.args[0])})"
-        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
-
-    def _print_Min(self, expr):
-        args = [self._print(a) for a in expr.args]
-        if len(args) == 2:
-            return f"std::min({args[0]}, {args[1]})"
-        else:
-            # Initializer list overload
-            il = "{" + ", ".join(args) + "}"
-            return f"std::min({il})"
-
-    def _print_Max(self, expr):
-        args = [self._print(a) for a in expr.args]
-        if len(args) == 2:
-            return f"std::max({args[0]}, {args[1]})"
-        else:
-            # Initializer list overload
-            il = "{" + ", ".join(args) + "}"
-            return f"std::max({il})"
-
-    def _print_Abs(self, expr):
-        assert len(expr.args) == 1
-        return f"std::abs({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_cos(self, expr):
-        assert len(expr.args) == 1
-        return f"std::cos({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_cosh(self, expr):
-        assert len(expr.args) == 1
-        return f"std::cosh({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_acos(self, expr):
-        assert len(expr.args) == 1
-        return f"std::acos({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_sin(self, expr):
-        assert len(expr.args) == 1
-        return f"std::sin({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_sinh(self, expr):
-        assert len(expr.args) == 1
-        return f"std::sinh({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_asin(self, expr):
-        assert len(expr.args) == 1
-        return f"std::asin({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_tan(self, expr):
-        assert len(expr.args) == 1
-        return f"std::tan({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_tanh(self, expr):
-        assert len(expr.args) == 1
-        return f"std::tanh({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_atan(self, expr):
-        assert len(expr.args) == 1
-        return f"std::atan({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_sqrt(self, expr):
-        return f"std::sqrt({self._print(expr.args[0])})"
-
-    def _print_Round(self, expr):
-        assert len(expr.args) == 1
-        return f"std::lrint({self._print(expr.args[0])})"
-
-    def _print_RoundDecimal(self, expr):
-        assert len(expr.args) == 2
-        number, ndigits = expr.args
-        if number.is_integer:
-            # ndigits < 0 should have been filtered by the sympy function
-            assert ndigits < 0
-            raise ValueError(
-                f"For integer inputs, only non-negative ndigits are currently supported, but got {ndigits}."
-            )
-        return f"static_cast<double>(std::nearbyint(1e{ndigits} * {self.paren(self._print(number))}) * 1e{-ndigits})"
-
-    def _print_BooleanTrue(self, expr):
-        return "true"
-
-    def _print_BooleanFalse(self, expr):
-        return "false"
-
-
-# A function to print, useful for printing sympy symbols.
-cexpr = CppPrinter().doprint
-
-
-def cexpr_index(index):
-    return f"static_cast<{INDEX_TYPE}>({cexpr(index)})"
 
 
 class RecordOptimizationContext:
@@ -1071,7 +842,7 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def constant(val, dtype):
         opt_ctx: OptimizationContext = get_current_node_opt_ctx()
-        assert opt_ctx and opt_ctx.dtype is not None
+        assert opt_ctx and opt_ctx.dtype is not None, opt_ctx
         dtype = opt_ctx.dtype
         if dtype in DTYPE_LOWP_FP:
             # Since load promotes all half-precision inputs to float, constants
@@ -1084,7 +855,12 @@ class CppOverrides(OpOverrides):
         opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         assert opt_ctx and opt_ctx.dtype is not None
         dtype = opt_ctx.dtype
-        return ops.to_dtype(cexpr(V.kernel.rename_indexing(expr)), dtype)
+
+        idx_str = cexpr(V.kernel.rename_indexing(expr))
+        var = V.kernel.cse.generate(
+            V.kernel.compute, idx_str, bounds=get_bounds_index_expr(expr)
+        )
+        return ops.to_dtype(var, dtype)
 
     @staticmethod
     def masked(mask, body, other):
@@ -1583,7 +1359,7 @@ class CppVecOverrides(CppOverrides):
         ], f"{__name__} does not support {dtype}"
         node: torch.fx.Node = V.interpreter.current_node
         assert node and isinstance(node, torch.fx.Node)
-        opt_ctx_x = get_opt_ctx(node.args[1])  # type: ignore[arg-type]
+        opt_ctx_x = get_opt_ctx(node.args[1])
         assert opt_ctx_x
         assert opt_ctx_x.dtype is not None
         assert isinstance(V.kernel, CppVecKernel)
@@ -1681,7 +1457,10 @@ class CppVecOverrides(CppOverrides):
         if stride == 0:
             return CppOverrides.index_expr(expr, dtype)
         elif stride is not None:
-            value = ops.to_dtype(cexpr(index), dtype)
+            idx = V.kernel.cse.generate(
+                V.kernel.compute, cexpr(index), bounds=get_bounds_index_expr(expr)
+            )
+            value = ops.to_dtype(idx, dtype)
             if isinstance(value, OpsValue):
                 value = value.value
             csevar = V.kernel.arange(value, stride)
