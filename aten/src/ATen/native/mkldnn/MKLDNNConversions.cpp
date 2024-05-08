@@ -515,7 +515,6 @@ static Tensor mkldnn_serialize(const Tensor& self) {
   auto packed_w_desc = packed_w.get_desc();
   std::vector<uint8_t> serialized_wei_desc;
 
-  // TODO: test ideep versioning
 #if IDEEP_PREREQ(3, 4, 1, 2)
   serialized_wei_desc = packed_w_desc.get_blob();
 #else
@@ -523,7 +522,9 @@ static Tensor mkldnn_serialize(const Tensor& self) {
 #endif
   Tensor serialized_md = at::from_blob((void*)serialized_wei_desc.data(), {(int64_t)serialized_wei_desc.size()}, at::TensorOptions(at::kByte));
   auto res = at::empty_like(serialized_md);
-  // TODO: a copy is needed here so that from_blob won't be released
+  // serialized_md shares the buffer with serialized_wei_desc,
+  // which will be released outside of this function thus invalidating the buffer of serialized_md.
+  // A copy is needed here so that res has its own buffer, which remains valid even after serialized_wei_desc is released.
   res.copy_(serialized_md);
   return res;
 }

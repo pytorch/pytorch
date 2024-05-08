@@ -68,12 +68,6 @@ int64_t data_ptr_from_mkldnn(const Tensor& mkldnn_tensor) {
   return reinterpret_cast<int64_t>(data_ptr);
 }
 
-void* data_ptr_from_mkldnn_aot(at::Tensor* mkldnn_tensor) {
-  MKLDNNTensorImpl *mklimpl = static_cast<MKLDNNTensorImpl *>(mkldnn_tensor->unsafeGetTensorImpl());
-  void* data_ptr = mklimpl->unsafe_opaque_handle()->get_target().get_data_handle();
-  return data_ptr;
-}
-
 Tensor new_with_itensor_mkldnn(ideep::tensor&& it, c10::optional<ScalarType> dtype, c10::optional<Device> device) {
   // NOTE: int32_t dims from ideep::tensor but sizes needs int64_t
   // TODO: support int64_t dims in ideep::tensor to avoid extra conversion

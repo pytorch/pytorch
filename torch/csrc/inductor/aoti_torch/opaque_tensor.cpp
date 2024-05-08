@@ -12,8 +12,8 @@ namespace aot_inductor {
 #if AT_MKLDNN_ENABLED()
 
 void* data_ptr_from_mkldnn(at::Tensor* mkldnn_tensor) {
-  void* data_ptr = at::native::data_ptr_from_mkldnn_aot(mkldnn_tensor);
-  return data_ptr;
+  return reinterpret_cast<void*>(
+      at::native::data_ptr_from_mkldnn(*mkldnn_tensor));
 }
 
 at::Tensor mkldnn_tensor_from_data_ptr(
@@ -26,7 +26,6 @@ at::Tensor mkldnn_tensor_from_data_ptr(
   std::vector<uint8_t> vector_serialized_md{
       serialized_md, serialized_md + serialized_md_size};
   ideep::tensor::desc deserialized_ideep_desc;
-  // TODO: test ideep versioning
 #if IDEEP_PREREQ(3, 4, 1, 2)
   // groups is needed for grouped conv
   deserialized_ideep_desc = ideep::tensor::desc(vector_serialized_md);

@@ -1984,7 +1984,6 @@ class AotCodeCompiler:
                 return bytes(raw_array.contents)
 
             serialized_weights = b"".join(
-                # TODO: use size from opaque tensor for prepacked weight?
                 _to_bytes(graph.get_original_value_of_constant(name))
                 for name in graph.constants.keys()
                 if name not in graph.folded_constants
