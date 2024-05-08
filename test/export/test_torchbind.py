@@ -927,15 +927,15 @@ class TestCompileTorchbind(TestCase):
         self.assertExpectedInline(
             backend.graphs[0].code.strip(),
             """\
-def forward(self, L_tq_ : torch.ScriptObject, L_x_ : torch.Tensor):
-    l_tq_ = L_tq_
-    l_x_ = L_x_
-    cos = l_x_.cos()
-    call_torchbind = torch.ops.higher_order.call_torchbind(l_tq_, 'push', cos);  cos = None
-    sin = l_x_.sin();  l_x_ = None
-    call_torchbind_1 = torch.ops.higher_order.call_torchbind(l_tq_, 'push', sin);  sin = None
-    call_torchbind_2 = torch.ops.higher_order.call_torchbind(l_tq_, 'pop')
-    call_torchbind_3 = torch.ops.higher_order.call_torchbind(l_tq_, 'size');  l_tq_ = None
+def forward(self, L_args_0_ : torch.ScriptObject, L_args_1_ : torch.Tensor):
+    l_args_0_ = L_args_0_
+    l_args_1_ = L_args_1_
+    cos = l_args_1_.cos()
+    call_torchbind = torch.ops.higher_order.call_torchbind(l_args_0_, 'push', cos);  cos = None
+    sin = l_args_1_.sin();  l_args_1_ = None
+    call_torchbind_1 = torch.ops.higher_order.call_torchbind(l_args_0_, 'push', sin);  sin = None
+    call_torchbind_2 = torch.ops.higher_order.call_torchbind(l_args_0_, 'pop')
+    call_torchbind_3 = torch.ops.higher_order.call_torchbind(l_args_0_, 'size');  l_args_0_ = None
     x_sin = call_torchbind_2 - 1;  call_torchbind_2 = None
     return (x_sin,)""",
         )
@@ -1200,11 +1200,11 @@ def forward(self, L_x_ : torch.Tensor, L_tq_ : torch.ScriptObject):
         self.assertExpectedInline(
             backend.graphs[0].code.strip(),
             """\
-def forward(self, L_self_tq : torch.ScriptObject, L_x_ : torch.Tensor):
-    l_self_tq = L_self_tq
-    l_x_ = L_x_
-    call_torchbind = torch.ops.higher_order.call_torchbind(l_self_tq, 'push', l_x_);  l_x_ = None
-    call_torchbind_1 = torch.ops.higher_order.call_torchbind(l_self_tq, 'pop');  l_self_tq = None
+def forward(self, L_fn_tq : torch.ScriptObject, L_args_0_ : torch.Tensor):
+    l_fn_tq = L_fn_tq
+    l_args_0_ = L_args_0_
+    call_torchbind = torch.ops.higher_order.call_torchbind(l_fn_tq, 'push', l_args_0_);  l_args_0_ = None
+    call_torchbind_1 = torch.ops.higher_order.call_torchbind(l_fn_tq, 'pop');  l_fn_tq = None
     return (call_torchbind_1,)""",
         )
 
