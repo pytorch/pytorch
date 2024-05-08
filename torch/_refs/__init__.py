@@ -17,6 +17,7 @@ import torch._prims as prims
 import torch._prims_common as utils
 from torch import sym_float, sym_int
 from torch._prims_common import (
+    BoolLike,
     DeviceLikeType,
     Dim,
     DimsSequenceType,
@@ -3622,10 +3623,6 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
     # This indicates that the dimension's length should be inferred
     shape = utils.infer_size(shape, a.numel())
 
-    # Short-circuits if shape is the same
-    if guard_size_oblivious(sym_eq(tuple(a.shape), tuple(shape))):
-        return prims.view_of(a)
-
     # Special-cases tensors with no elements
     if guard_size_oblivious(a.numel() == 0):
         return as_strided(a, shape, utils.make_contiguous_strides_for(shape))
@@ -3636,7 +3633,10 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         for length in shape:
             assert length == 1
             _a = unsqueeze(_a, -1)
-        return _a
+        if _a is a:
+            return prims.view_of(a)
+        else:
+            return _a
 
     # Special-cases reshaping to zero dim tensors
     if len(shape) == 0:
@@ -3644,7 +3644,10 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         for length in a.shape:
             assert length == 1
             _a = squeeze(_a, -1)
-        return _a
+        if _a is a:
+            return prims.view_of(a)
+        else:
+            return _a
 
     # Handles general case: a 1+D tensor reshaped into a distinct 1+D shape
 
@@ -3721,7 +3724,10 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         )
         a_ = squeeze(a_, idx)
 
-    return a_
+    if a_ is a:
+        return prims.view_of(a)
+    else:
+        return a_
 
 
 # CompositeImplicitAutograd - don't register decomp
@@ -6306,7 +6312,7 @@ def _infer_scalar_type(obj):
         return torch.get_default_dtype()
     if isinstance(obj, IntLike) and not isinstance(obj, bool):  # careful!
         return torch.int64
-    if isinstance(obj, bool):
+    if isinstance(obj, BoolLike):
         return torch.bool
     if isinstance(obj, complex):
         default_dtype = torch.get_default_dtype()
@@ -6354,9 +6360,8 @@ def _infer_scalar_type(obj):
 # xref: recursive_store in torch/csrc/utils/tensor_new.cpp
 def _recursive_build(scalarType: torch.dtype, obj: TensorOrNumberLikeType):
     if isinstance(obj, Tensor) and obj.ndim <= 1:
-        obj = obj.item()
-        # fall through into next case
-    if isinstance(obj, Number):
+        return obj.detach().to(dtype=scalarType, device="cpu", copy=True).view(())
+    elif isinstance(obj, Number):
         return torch.scalar_tensor(obj, dtype=scalarType)
 
     seq = obj

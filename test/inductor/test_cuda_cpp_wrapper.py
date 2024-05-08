@@ -97,6 +97,7 @@ if TEST_WITH_ROCM:
 
 if config.abi_compatible:
     xfail_list = [
+        "test_add_complex_cuda",
         "test_bernoulli1_cuda",  # cpp fallback op naming issue
         "test_conv_backward_cuda",
         "test_profiler_mark_wrapper_call_cuda",
@@ -183,6 +184,7 @@ if RUN_CUDA:
 
     # Maintain two separate test lists for cuda and cpp for now
     for item in [
+        BaseTest("test_add_complex"),
         BaseTest("test_add_complex4"),
         BaseTest("test_as_strided"),  # buffer reuse
         BaseTest("test_batch_norm_2d_2"),

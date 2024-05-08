@@ -4124,11 +4124,13 @@
 - func: _weight_int4pack_mm(Tensor self, Tensor mat2, int qGroupSize, Tensor qScaleAndZeros) -> Tensor
   dispatch:
     CPU: _weight_int4pack_mm_cpu
+    MPS: _weight_int4pack_mm_mps
     CUDA: _weight_int4pack_mm_cuda
 
 - func: _weight_int8pack_mm(Tensor self, Tensor mat2, Tensor scales) -> Tensor
   dispatch:
     CPU: _weight_int8pack_mm_cpu
+    MPS: _weight_int8pack_mm_mps
 
 - func: _sparse_mm(Tensor sparse, Tensor dense) -> Tensor
   python_module: sparse
@@ -7463,7 +7465,7 @@
     MkldnnCPU: mkldnn_reorder_conv2d_weight
   autogen: mkldnn_reorder_conv2d_weight.out
 
-- func: mkldnn_reorder_conv3d_weight(Tensor self, SymInt[3] padding=0, SymInt[3] stride=1, SymInt[3] dilation=1, SymInt groups=1) -> Tensor
+- func: mkldnn_reorder_conv3d_weight(Tensor self, SymInt[3] padding=0, SymInt[3] stride=1, SymInt[3] dilation=1, SymInt groups=1, SymInt[]? input_size=None) -> Tensor
   variants: function
   python_module: nn
   dispatch:
@@ -14724,7 +14726,7 @@
     CUDA: _flash_attention_backward
 
 # Returns output, logsumexp if compute_logsumexp
-- func: _efficient_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? bias, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, int? max_seqlen_q, int? max_seqlen_k, float dropout_p, int custom_mask_type, bool compute_log_sumexp=False, *, float? scale=None, Tensor? causal_diagonal=None, Tensor? seqlen_k=None, int? window_size=None) -> (Tensor output, Tensor logsumexp, Tensor philox_seed, Tensor philox_offset, SymInt max_seqlen_batch_q, SymInt max_seqlen_batch_k)
+- func: _efficient_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? bias, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, SymInt? max_seqlen_q, SymInt? max_seqlen_k, float dropout_p, int custom_mask_type, bool compute_log_sumexp=False, *, float? scale=None, Tensor? causal_diagonal=None, Tensor? seqlen_k=None, int? window_size=None) -> (Tensor output, Tensor logsumexp, Tensor philox_seed, Tensor philox_offset, SymInt max_seqlen_batch_q, SymInt max_seqlen_batch_k)
   variants: function
   dispatch:
     CUDA: _efficient_attention_forward
