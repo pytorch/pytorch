@@ -1179,7 +1179,7 @@ def cat(inputs, dim=0):
 
         return x
 
-    def should_lower_cat_input(x) -> bool:
+    def should_lower_cat_input(x, lower_pointwise: bool) -> bool:
         # Unrealized inputs will not be storage and layouts, and we dont want to realize
         # them in case we want to fuse
         if ir.is_storage_and_layout(x):
@@ -1187,34 +1187,16 @@ def cat(inputs, dim=0):
             return not ir.ConcatKernel.can_realize_into_without_copy(storage)
 
         if isinstance(x, (TensorBox, ir.StorageBox)):
-            return should_lower_cat_input(unwrap_tensor(x))
+            return should_lower_cat_input(unwrap_tensor(x), lower_pointwise)
 
         if isinstance(x, ir.Pointwise):
-            return True
+            return lower_pointwise
 
         return False
 
-    def is_reduction(t):
-        return isinstance(t, ir.ComputedBuffer) and isinstance(t.data, ir.Reduction)
-
-    def can_fuse_reduction(t):
-        if isinstance(t, (TensorBox, ir.StorageBox)):
-            return can_fuse_reduction(unwrap_tensor(t))
-        return (
-            is_reduction(t)
-            or isinstance(t, ir.Pointwise)
-            and any(
-                can_fuse_reduction(V.graph.get_buffer(read))
-                for read in t.get_read_names()
-            )
-        )
-
-    # fusing reducutions into computed concat buffer can cause regressions.
-    fusable_reduction = any(can_fuse_reduction(t) for t in inputs)
-
     # TODO: We observed negative performance impact of pointwise_cat optimization on CPU so disabled it.
     #             We will revisit this later after enabling vectorization on index_expr.
-    if cpu_device or fusable_reduction:
+    if cpu_device:
         return TensorBox(ir.ConcatKernel.create(inputs, dim))
 
     def op_count(x):
@@ -1243,10 +1225,19 @@ def cat(inputs, dim=0):
         and all(op_count(t) <= MAX_SIMPLE_OP_COUNT for t in inputs)
     ):
         pointwise_uses = all(is_pointwise_use(use) for use in V.current_node.users)
-        all_pointwise_inputs = all(should_lower_cat_input(inp) for inp in inputs)
-        any_pointwise_inputs = any(should_lower_cat_input(inp) for inp in inputs)
+        # fuse in case we will be used in a pointwise node, and there are any inputs we
+        # we can prevent materialization of.
+        fuse_pointwise_use = (
+            any(should_lower_cat_input(inp, lower_pointwise=True) for inp in inputs)
+            and pointwise_uses
+        )
 
-        if all_pointwise_inputs or (any_pointwise_inputs and pointwise_uses):
+        # horizontal fuse in case all inputs will require a copy kernel anyway. dont include
+        # pointwise because we memory plan them.
+        horizontal_fuse_cat = all(
+            should_lower_cat_input(inp, lower_pointwise=False) for inp in inputs
+        )
+        if fuse_pointwise_use or horizontal_fuse_cat:
             return pointwise_cat(inputs, dim)
 
     return TensorBox(ir.ConcatKernel.create(inputs, dim))
