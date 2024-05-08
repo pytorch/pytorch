@@ -3640,6 +3640,16 @@ class CPUReproTests(TestCase):
         self.common(fn, (x,))
         assert metrics.generated_cpp_vec_kernel_count == 1
 
+    def test_reduction_float_to_int64(self):
+        # https://github.com/pytorch/pytorch/issues/124821
+        def fn(x):
+            return x.max(0).values
+
+        x = torch.randint(0, 100, (22, 51), dtype=torch.int64)
+        metrics.reset()
+        self.common(fn, (x,))
+        assert metrics.generated_cpp_vec_kernel_count == 1
+
     @config.patch({"cpp.dynamic_threads": True})
     def test_reduction_with_dynamic_threads(self):
         def fn(a, b):

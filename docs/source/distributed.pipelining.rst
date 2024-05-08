@@ -176,3 +176,37 @@ Note that since we split our model into three stages, we must run this script wi
 .. code-block:: bash
 
   torchrun --nproc_per_node=3 example.py
+
+Pipeline Transformation APIs
+============================
+
+The following set of APIs transform your model into a pipeline representation.
+
+.. currentmodule:: torch.distributed.pipelining
+
+.. autoclass:: SplitPoint
+
+.. autofunction:: pipeline
+
+.. autoclass:: Pipe
+
+.. autofunction:: annotate_split_points
+
+.. autofunction:: pipe_split
+
+.. autoclass:: ArgsChunkSpec
+
+.. autoclass:: KwargsChunkSpec
+
+Microbatch Utilities
+====================
+
+.. automodule:: torch.distributed.pipelining.microbatch
+
+.. currentmodule:: torch.distributed.pipelining.microbatch
+
+.. autoclass:: TensorChunkSpec
+
+.. autofunction:: split_args_kwargs_into_chunks
+
+.. autofunction:: merge_chunks

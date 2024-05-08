@@ -8,6 +8,7 @@ This module defines runtime wrappers, which, based on previous analysis attempts
 
 import collections
 import pprint
+from dataclasses import dataclass
 from functools import wraps
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
@@ -52,6 +53,79 @@ from .utils import (
 zip = strict_zip
 
 
+class CompilerWrapper:
+    """
+    A wrapper around the inputs and outputs to the compiler_fn. We separate these into two parts:
+
+    1. The prologue, which edits the input to the compiler_fn(flat_fn, flat_args, etc)
+    2. The epilogue, which edits the outputs of the compiler_fn (compiled_fn, real arguments)
+
+    Each wrapper below should be implemented as a CompilerWrapper, so that we can facilitate
+    caching on the compiled output, and re-wrapping the output via epilogues.
+    Extra metadata that is needed to compute pre or post compile can be passed in via attributes.
+    """
+
+    def pre_compile(
+        self,
+        flat_fn,
+        flat_args: List[Tensor],
+        aot_config: AOTConfig,
+        *,
+        fw_metadata: ViewAndMutationMeta,
+    ):
+        """
+        Process the inputs to the compiler_fn. You can pass in extra metadata via kwargs.
+        Args:
+        flat_fn: The function to compile
+        flat_args: Metadata from example inputs of the function to compile
+        aot_config: AOTConfig passed in at compile time
+        fw_metadata: ViewAndMutationMeta generated from flat_fn and flat_args
+        """
+        return flat_fn, flat_args, aot_config, fw_metadata
+
+    def post_compile(self, compiled_fn, aot_config, *, fw_metadata):
+        """
+        Given an output of the compiler, wrap it with information received from prologue.
+        Args:
+        compiled_fn: Callable after calling compiler_fn
+        aot_config: AOTConfig after calling prologue
+        fw_metadata: ViewAndMutationMeta after calling prologue
+        Example:
+
+        def wrapped_compiled_fn(args):
+            # do something with args, aot_config, fw_metadata
+            return compiled_fn(args)
+
+        return wrapped_compiled_fn
+        """
+        return compiled_fn
+
+    def create(
+        self,
+        flat_fn,
+        flat_args: List[Tensor],
+        aot_config: AOTConfig,
+        *,
+        fw_metadata: ViewAndMutationMeta,
+        compiler_fn,
+        **kwargs,
+    ):
+        (
+            wrapped_flat_fn,
+            new_flat_args,
+            new_aot_config,
+            new_fw_metadata,
+        ) = self.pre_compile(
+            flat_fn, flat_args, aot_config, fw_metadata=fw_metadata, **kwargs
+        )
+        compiled_fn = compiler_fn(
+            wrapped_flat_fn, new_flat_args, new_aot_config, fw_metadata=new_fw_metadata
+        )
+        return self.post_compile(
+            compiled_fn, new_aot_config, fw_metadata=new_fw_metadata, **kwargs
+        )
+
+
 # The wrapper created by this function handles all of the runtime aliasing and mutation "epilogue" logic
 # that needs to run after the compiled function.
 #
@@ -60,7 +134,30 @@ zip = strict_zip
 # This is because there are some minor differences in how we treat these cases at runtime:
 # - resize_() is currently handled in the inference case, but not fully handled in the autograd case.
 # - the autograd cases inserts TensorAlias wrapper objects for outputs that alias inputs
-def create_runtime_wrapper(
+@dataclass
+class RuntimeWrapper(CompilerWrapper):
+    indices_of_inps_to_detach: List[int]
+    trace_joint: bool
+    disable_amp: bool
+
+    def post_compile(
+        self,
+        compiled_fn,
+        aot_config: AOTConfig,
+        *,
+        fw_metadata: ViewAndMutationMeta,
+    ):
+        return _create_runtime_wrapper(
+            compiled_fn,
+            runtime_metadata=fw_metadata,
+            indices_of_inps_to_detach=self.indices_of_inps_to_detach,
+            trace_joint=self.trace_joint,
+            keep_input_mutations=aot_config.keep_inference_input_mutations,
+            disable_amp=self.disable_amp,
+        )
+
+
+def _create_runtime_wrapper(
     compiled_fn,
     *,
     runtime_metadata: ViewAndMutationMeta,
