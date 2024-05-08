@@ -44,6 +44,11 @@ from torch.utils._python_dispatch import (
 from torch.utils._pytree import tree_map, tree_map_only
 
 
+# used as DataLoader collate_fn below; named here to avoid trying to pickle a lambda
+def _identity(x):
+    return x
+
+
 class TestDispatcherPythonBindings(TestCase):
     def test_call_boxed(self) -> None:
         sin = torch._C._dispatch_find_schema_or_throw("aten::sin", "")
@@ -1058,18 +1063,22 @@ def forward(self, x_a_1, x_b_1, y_1):
 
     def test_wrapper_subclass_serializes(self) -> None:
         with tempfile.TemporaryFile() as f:
-            x = LoggingTensor(torch.randn(3))
+            # purposefully use int64 to test non-default dtype
+            x = LoggingTensor(torch.randperm(3))
             torch.save(x, f)
             f.seek(0)
             x_loaded = torch.load(f)
             self.assertTrue(type(x_loaded) is type(x))
+            self.assertEqual(x, x_loaded)
             self.assertEqual(x.elem, x_loaded.elem)
             self.assertFalse(x is x_loaded)
 
     def test_deepcopy_wrapper_subclass(self) -> None:
-        x = LoggingTensor(torch.randn(3))
+        # purposefully use int64 to test non-default dtype
+        x = LoggingTensor(torch.randperm(3))
         x_copy = deepcopy(x)
         self.assertTrue(type(x_copy) is type(x))
+        self.assertEqual(x, x_copy)
         self.assertEqual(x.elem, x_copy.elem)
         self.assertFalse(x is x_copy)
 
@@ -1176,6 +1185,23 @@ def forward(self, x_a_1, x_b_1, y_1):
         self.assertFalse(
             torch._C._dispatch_keys(x).has(DispatchKey.AutogradNestedTensor)
         )
+
+    def test_wrapper_subclass_multiprocessing_preserves_dtype(self):
+        # a and b have dtype of int64, which is purposefully different from the default
+        # assumed by _make_wrapper_subclass().
+        a = torch.randperm(5)
+        b = torch.randperm(5)
+        data = TwoTensor(a, b)
+        expected_dtype = data.dtype
+
+        loader = torch.utils.data.DataLoader(
+            [data, data],
+            batch_size=2,
+            num_workers=2,
+            collate_fn=_identity,
+        )
+        for batch in loader:
+            self.assertEqual(batch[0].dtype, expected_dtype)
 
     def test_index_put_where_only_index_is_subclass(self) -> None:
         called_funcs = []
