@@ -8248,8 +8248,8 @@ class TestLogical(TestCaseMPS):
 
         dtypes = [torch.float32, torch.float16, torch.int32, torch.int16, torch.uint8, torch.int8]
         if product_version < 14.0:
-            # Int32 expected to fail on MacOS < 14.0
-            dtypes.remove(torch.int32)
+            # Int types expected to fail on MacOS < 14.0
+            dtypes = [torch.float32, torch.float16]
 
         [helper(dtype) for dtype in dtypes]
 
