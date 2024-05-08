@@ -616,7 +616,8 @@ class _PipelineStage(PipelineStageBase):
         # code.  Here we provide a workaround for users to manually modify the
         # "device" kwarg of operations. Such operation may include:
         # `torch.ones`, `torch.zeros`, `torch.rand`, etc.
-        modify_graph_op_device(self.submod, self.device)
+        if isinstance(self.submod, torch.fx.GraphModule):
+            modify_graph_op_device(self.submod, self.device)
 
     def _prepare_forward_infra(self):
         """
@@ -808,7 +809,7 @@ class PipelineStage(_PipelineStage):
         pipe: Pipe,
         stage_index: int,
         device: torch.device,
-        group: dist.ProcessGroup = None,
+        group: Optional[dist.ProcessGroup] = None,
     ):
         """
         Create a pipeline stage given a `Pipe` (representing the whole pipeline) and a stage index.
