@@ -8,6 +8,7 @@ import torch
 import torch.nn.functional as F
 from torch.distributed._tensor import DeviceMesh, distribute_tensor
 from torch.distributed._tensor.api import DTensor
+from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed._tensor.placement_types import (
     _Partial,
     Placement,
@@ -269,6 +270,7 @@ class DistMatrixOpsTest(DTensorTestBase):
     @skip_unless_torch_gpu
     def test_scaled_dot_product_attention(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        comm_mode = CommDebugMode()
         # bsz, n_heads, slen, head_dim
         query = torch.rand(
             (4, 8, 8, 8),
@@ -295,35 +297,46 @@ class DistMatrixOpsTest(DTensorTestBase):
 
         from torch.nn.attention import sdpa_kernel, SDPBackend
 
-        with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
-            dropout_p = 0.0
-            is_causal = True
-            params = torch.backends.cuda.SDPAParams(
-                query, key, value, None, dropout_p, is_causal
-            )
-            if not torch.backends.cuda.can_use_flash_attention(params, debug=False):
-                self.skipTest("Flash attention is not available")
+        available_backends = []
+        dropout_p = 0.0
+        # TODO: Add test cases where is_causal=False and an attention mask is provided.
+        #       Gaps include missing op support for aten.masked_fill_.Scalar.
+        is_causal = True
+        params = torch.backends.cuda.SDPAParams(
+            query, key, value, None, dropout_p, is_causal
+        )
+        if torch.backends.cuda.can_use_flash_attention(params, debug=False):
+            available_backends.append(SDPBackend.FLASH_ATTENTION)
+        if torch.backends.cuda.can_use_efficient_attention(params, debug=False):
+            available_backends.append(SDPBackend.EFFICIENT_ATTENTION)
 
-            out = F.scaled_dot_product_attention(
-                query, key, value, dropout_p=dropout_p, is_causal=is_causal
-            )
-            dist_out = F.scaled_dot_product_attention(
-                dist_query,
-                dist_key,
-                dist_value,
-                dropout_p=dropout_p,
-                is_causal=is_causal,
-            )
-            self.assertEqual(dist_out.full_tensor(), out)
+        for backend in available_backends:
+            with sdpa_kernel(backends=[backend]):
+                out = F.scaled_dot_product_attention(
+                    query, key, value, dropout_p=dropout_p, is_causal=is_causal
+                )
+                with comm_mode:
+                    dist_out = F.scaled_dot_product_attention(
+                        dist_query,
+                        dist_key,
+                        dist_value,
+                        dropout_p=dropout_p,
+                        is_causal=is_causal,
+                    )
+                    self.assertEqual(comm_mode.get_total_counts(), 0)
+                    self.assertTrue(dist_out.placements[0].is_shard(dim=1))
+                    self.assertEqual(dist_out.full_tensor(), out)
 
-            out.sum().backward()
-            dist_out.sum().backward()
-            self.assertTrue(dist_query.grad.placements[0].is_shard(dim=1))
-            self.assertEqual(dist_query.grad.full_tensor(), query.grad)
-            self.assertTrue(dist_key.grad.placements[0].is_shard(dim=1))
-            self.assertEqual(dist_key.grad.full_tensor(), key.grad)
-            self.assertTrue(dist_value.grad.placements[0].is_shard(dim=1))
-            self.assertEqual(dist_value.grad.full_tensor(), value.grad)
+                out.sum().backward()
+                with comm_mode:
+                    dist_out.sum().backward()
+                    self.assertEqual(comm_mode.get_total_counts(), 0)
+                    self.assertTrue(dist_query.grad.placements[0].is_shard(dim=1))
+                    self.assertEqual(dist_query.grad.full_tensor(), query.grad)
+                    self.assertTrue(dist_key.grad.placements[0].is_shard(dim=1))
+                    self.assertEqual(dist_key.grad.full_tensor(), key.grad)
+                    self.assertTrue(dist_value.grad.placements[0].is_shard(dim=1))
+                    self.assertEqual(dist_value.grad.full_tensor(), value.grad)
 
 
 if __name__ == "__main__":

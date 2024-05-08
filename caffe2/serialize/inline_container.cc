@@ -620,35 +620,15 @@ size_t ostream_write_func(
   return ret;
 }
 
-// This func will not update combined_uncomp_crc32_ with the uncomp_crc32
-// since there is no way to get the uncomp_crc32 when no buffer is provided.
-size_t ostream_seek_func(
-  void* pOpaque,
-  mz_uint64 file_ofs,
-  size_t n) {
-  auto self = static_cast<PyTorchStreamWriter*>(pOpaque);
-  if (self->current_pos_ != file_ofs) {
-    CAFFE_THROW("unexpected pos ", self->current_pos_, " vs ", file_ofs);
-  }
-  size_t ret = self->seek_func_(n);
-  if (self->current_pos_ + n != ret) {
-    self->err_seen_ = true;
-  }
-  self->current_pos_ += n;
-  return n;
-}
-
 PyTorchStreamWriter::PyTorchStreamWriter(const std::string& file_name)
     : archive_name_(basename(file_name)) {
   setup(file_name);
 }
 
 PyTorchStreamWriter::PyTorchStreamWriter(
-    const std::function<size_t(const void*, size_t)> writer_func,
-    const std::function<size_t(size_t)> seek_func)
+    const std::function<size_t(const void*, size_t)> writer_func)
     : archive_name_("archive"),
-      writer_func_(writer_func),
-      seek_func_(seek_func) {
+      writer_func_(writer_func) {
   setup(archive_name_);
 }
 
@@ -677,15 +657,10 @@ void PyTorchStreamWriter::setup(const string& file_name) {
       file_stream_.write(static_cast<const char*>(buf), nbytes);
       return !file_stream_ ? 0 : nbytes;
     };
-    seek_func_ = [this](size_t nbytes) -> size_t {
-      file_stream_.seekp(nbytes, std::ios_base::cur);
-      return file_stream_.tellp();
-    };
   }
 
   ar_->m_pIO_opaque = this;
   ar_->m_pWrite = ostream_write_func;
-  ar_->m_pSeek = ostream_seek_func;
 
   mz_zip_writer_init_v2(ar_.get(), 0, MZ_ZIP_FLAG_WRITE_ZIP64);
   valid("initializing archive ", file_name.c_str());
@@ -715,20 +690,20 @@ void PyTorchStreamWriter::writeRecord(
       detail::getPadding(ar_->m_archive_size, full_name.size(), size, padding_);
   uint32_t flags = compress ? MZ_BEST_COMPRESSION : 0;
   mz_zip_writer_add_mem_ex_v2(
-      /*pZip=*/ar_.get(),
-      /*pArchive_name=*/full_name.c_str(),
-      /*pBuf=*/data,
-      /*buf_size=*/size,
-      /*pComment=*/nullptr,
-      /*comment_size=*/0,
-      /*level_and_flags=*/flags,
-      /*uncomp_size=*/0,
-      /*uncomp_crc32=*/0,
-      /*last_modified=*/nullptr,
-      /*user_extra_data=*/padding_.c_str(),
-      /*user_extra_data_len=*/padding_size,
-      /*user_extra_data_central=*/nullptr,
-      /*user_extra_data_central_len=*/0);
+      ar_.get(),
+      full_name.c_str(),
+      data,
+      size,
+      nullptr,
+      0,
+      flags,
+      0,
+      0,
+      nullptr,
+      padding_.c_str(),
+      padding_size,
+      nullptr,
+      0);
   valid("writing file ", name.c_str());
   files_written_.insert(name);
 }
