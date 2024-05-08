@@ -1414,6 +1414,29 @@ class CommonTemplate:
             r"triton_.*\.run\(arg[01]_1, arg[12]_1, buf1,"
         ).check_not("run(").run(code[0])
 
+    @skipCUDAIf(TEST_WITH_ROCM, "associative_scan is not supported on ROCm")
+    def test_custom_scan_op_multi_input(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("associative_scan only supported on GPU")
+
+        def argmax_combine(a, b):
+            a_value, a_index = a
+            b_value, b_index = b
+            mask = (a_value > b_value) | ((a_value == b_value) & (a_index > b_index))
+            return (
+                torch.where(mask, a_value, b_value),
+                torch.where(mask, a_index, b_index),
+            )
+
+        from torch._higher_order_ops.associative_scan import associative_scan
+
+        a = torch.randn(100, 100, device=self.device)
+        expect = torch.cummax(a, 0)
+
+        idx = torch.arange(100, device=self.device).view(100, 1).expand(100, 100)
+        actual = associative_scan(argmax_combine, (a, idx), 0)
+        self.assertEqual(expect, actual)
+
     def test_embedding_bag_byte_unpack(self):
         if self.device != "cpu":
             raise unittest.SkipTest(f"No {GPU_TYPE} implementation (it returns empty)")
@@ -6221,6 +6244,11 @@ class CommonTemplate:
             )
 
         self.common(fn, [torch.randn(64, 64)])
+
+    def test_new_cpp_build_logical(self):
+        from torch._inductor.codecache import validate_new_cpp_commands
+
+        validate_new_cpp_commands()
 
     def test_as_strided(self):
         def fn(x):

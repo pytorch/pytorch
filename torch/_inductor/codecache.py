@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import copyreg
+import ctypes
 import dataclasses
 import functools
 import hashlib
@@ -33,13 +34,14 @@ from ctypes import c_void_p, cdll, CDLL
 from functools import partial
 from pathlib import Path
 from threading import Thread
-from time import sleep, time
+from time import sleep, time, time_ns
 from types import ModuleType
 from typing import (
     Any,
     Callable,
     cast,
     Dict,
+    Generator,
     List,
     Optional,
     Set,
@@ -80,6 +82,8 @@ from torch.hub import _Faketqdm, tqdm
 _HERE = os.path.abspath(__file__)
 _TORCH_PATH = os.path.dirname(os.path.dirname(_HERE))
 _LINKER_SCRIPT = os.path.join(_TORCH_PATH, "_inductor/script.ld")
+
+_IS_WINDOWS = sys.platform == "win32"
 
 if config.is_fbcode():
     from triton.fb import build_paths
@@ -159,9 +163,11 @@ class CacheBase:
     @functools.lru_cache(None)
     def get_system() -> Dict[str, Any]:
         try:
-            import triton
+            from triton.compiler.compiler import triton_key
 
-            triton_version = triton.__version__  # type: ignore[attr-defined]
+            # Use triton_key instead of triton.__version__ as the version
+            # is not updated with each code change
+            triton_version = triton_key()
         except ModuleNotFoundError:
             triton_version = None
 
@@ -397,6 +403,13 @@ def write(
     if not os.path.exists(path):
         write_atomic(path, content, make_dirs=True)
     return basename, path
+
+
+def write_text(text: str) -> str:
+    """
+    Write the `text` to a file and return the path computed based on the hash.
+    """
+    return write(text, "txt")[1]
 
 
 def write_atomic(
@@ -745,15 +758,13 @@ class FxGraphCache:
     def _lookup_graph(
         key: str,
         example_inputs: List[torch.Tensor],
+        local,
+        remote_cache,
     ) -> Optional[CompiledFxGraph]:
         """
         Lookup a compiled graph in the cache by key. On a hit, return the
         deserialized CompiledFxGraph object. On a miss, return None.
         """
-        subdir = FxGraphCache._get_tmp_dir_for_key(key)
-        if not os.path.exists(subdir):
-            return None
-
         shape_env = FxGraphCache._get_shape_env()
         assert shape_env is not None
 
@@ -761,14 +772,22 @@ class FxGraphCache:
         assert all(has_hint(s) for s in symints)
         hints = [hint_int(s) for s in symints]
 
+        def iterate_over_candidates() -> Generator[CompiledFxGraph, None, None]:
+            if local:
+                subdir = FxGraphCache._get_tmp_dir_for_key(key)
+                if os.path.exists(subdir):
+                    for path in sorted(os.listdir(subdir)):
+                        with open(os.path.join(subdir, path), "rb") as f:
+                            yield pickle.load(f)
+            if remote_cache:
+                if (data := remote_cache.get(key)) is not None:
+                    yield pickle.loads(data)
+
         # Iterate over any entries in the subdir for this key and evaluate
         # their guards to determine whether there's a hit.
         graph = None
 
-        for path in sorted(os.listdir(subdir)):
-            with open(os.path.join(subdir, path), "rb") as f:
-                candidate: CompiledFxGraph = pickle.load(f)
-
+        for candidate in iterate_over_candidates():
             if not candidate.guards_expr:
                 # No guards to evaluate, so this is a hit.
                 graph = candidate
@@ -800,7 +819,20 @@ class FxGraphCache:
         artifact_path = get_path(graph.cache_key, "py")[2]
         if not os.path.exists(artifact_path):
             counters["inductor"]["fxgraph_lookup_write_file"] += 1
-            write_atomic(artifact_path, graph.source_code, make_dirs=True)
+            Path(os.path.dirname(artifact_path)).mkdir(parents=True, exist_ok=True)
+            code = graph.source_code
+            cpp_pp = cpp_prefix_path()
+            if os.path.basename(cpp_pp) in code:
+                if cpp_pp in code:
+                    # Great the name is correct
+                    pass
+                else:
+                    # Old dir name is included, replace it
+                    pattern = rf'#include\s*"[^"]+{os.path.basename(cpp_pp)}"'
+                    code = re.sub(pattern, f'#include "{cpp_pp}"', code)
+
+            write_atomic(artifact_path, code, make_dirs=True)
+
         try:
             graph.current_callable = PyCodeCache.load_by_key_path(
                 graph.cache_key,
@@ -833,7 +865,12 @@ class FxGraphCache:
 
     @staticmethod
     def _save_graph(
-        key: str, compiled_graph: CompiledFxGraph, example_inputs: List[torch.Tensor]
+        key: str,
+        compiled_graph: CompiledFxGraph,
+        example_inputs: List[torch.Tensor],
+        time_taken_ns,
+        local,
+        remote_cache,
     ):
         """
         Store a serialized CompiledFxGraph on disk.
@@ -862,13 +899,27 @@ class FxGraphCache:
             counters["inductor"]["fxgraph_cache_pickle_error"] += 1
             return
 
-        subdir = FxGraphCache._get_tmp_dir_for_key(key)
+        if local:
+            subdir = FxGraphCache._get_tmp_dir_for_key(key)
+            if not os.path.exists(subdir):
+                os.makedirs(subdir, exist_ok=True)
 
-        # Use a hash of the serialized CompiledFxGraph to get a unique file
-        # name. The specific name doesn't matter since a lookup involves
-        # iterating over all entries in the parent subdir.
-        path = os.path.join(subdir, sha256_hash(content))
-        write_atomic(path, content, make_dirs=True)
+            # Use a hash of the serialized CompiledFxGraph to get a unique file
+            # name. The specific name doesn't matter since a lookup involves
+            # iterating over all entries in the parent subdir.
+            path = os.path.join(subdir, sha256_hash(content))
+            write_atomic(path, content, make_dirs=True)
+
+        if remote_cache:
+            cache_data = (
+                {
+                    "data": content,
+                    "time_taken_ms": time_taken_ns // 1000000,  # Convert from NS to MS
+                }
+                if config.is_fbcode()
+                else content
+            )
+            remote_cache.put(key, cache_data)
 
     @staticmethod
     def _check_can_cache(gm: torch.fx.GraphModule):
@@ -898,22 +949,54 @@ class FxGraphCache:
         gm: torch.fx.GraphModule,
         example_inputs: List[torch.Tensor],
         fx_kwargs: Dict[str, Any],
+        local: bool,
+        remote: bool,
     ):
         """
         Load a compiled graph from the cache. If a cached entry does not exist,
         compile the graph and save it to the cache.
         """
+        assert local or remote, "at least one of them needs to be enabled"
         compiled_graph = None
         try:
             FxGraphCache._check_can_cache(gm)
             key = compiled_fx_graph_hash(gm, example_inputs, fx_kwargs)
 
-            compiled_graph = FxGraphCache._lookup_graph(key, example_inputs)
+            remote_cache = None
+            if remote:
+                cache_id = "fx-graph-v1"
+                try:
+                    import triton
+
+                    if config.is_fbcode():
+                        remote_cache = triton.runtime.fb_memcache.FbMemcacheRemoteFxGraphCacheBackend(
+                            cache_id
+                        )
+                    else:
+                        remote_cache = triton.runtime.cache.RedisRemoteCacheBackend(
+                            cache_id
+                        )
+                except Exception:
+                    remote_cache = None
+                    log.warning("Unable to create a remote cache", exc_info=True)
+
+            compiled_graph = FxGraphCache._lookup_graph(
+                key, example_inputs, local, remote_cache
+            )
             if compiled_graph is None:
                 log.debug("fx graph cache miss for key %s", key)
                 counters["inductor"]["fxgraph_cache_miss"] += 1
+                start_time = time_ns()
                 compiled_graph = compile_fx_fn(gm, example_inputs, **fx_kwargs)
-                FxGraphCache._save_graph(key, compiled_graph, example_inputs)
+                time_taken_ns = time_ns() - start_time
+                FxGraphCache._save_graph(
+                    key,
+                    compiled_graph,
+                    example_inputs,
+                    time_taken_ns,
+                    local,
+                    remote_cache,
+                )
             else:
                 log.debug("fx graph cache hit for key %s", key)
                 counters["inductor"]["fxgraph_cache_hit"] += 1
@@ -1111,7 +1194,7 @@ def _get_isa_dry_compile_fingerprint(isa_flags: str) -> str:
 
 class VecISA:
     _bit_width: int
-    _macro: str
+    _macro: List[str]
     _arch_flags: str
     _dtype_nelements: Dict[torch.dtype, int]
 
@@ -1157,7 +1240,7 @@ cdll.LoadLibrary("__lib_path__")
     def nelements(self, dtype: torch.dtype = torch.float) -> int:
         return self._dtype_nelements[dtype]
 
-    def build_macro(self) -> str:
+    def build_macro(self) -> List[str]:
         return self._macro
 
     def build_arch_flags(self) -> str:
@@ -1168,6 +1251,8 @@ cdll.LoadLibrary("__lib_path__")
 
     @functools.lru_cache(None)
     def __bool__(self) -> bool:
+        from torch._inductor.cpp_builder import CppBuilder, CppTorchOptions
+
         if config.cpp.vec_isa_ok is not None:
             return config.cpp.vec_isa_ok
 
@@ -1184,16 +1269,21 @@ cdll.LoadLibrary("__lib_path__")
         lock_dir = get_lock_dir()
         lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
         with lock:
-            output_path = input_path[:-3] + "so"
-            build_cmd = shlex.split(
-                cpp_compile_command(
-                    input_path, output_path, warning_all=False, vec_isa=self
-                )
+            output_dir = os.path.dirname(input_path)
+            buid_options = CppTorchOptions(chosen_isa=self, warning_all=False)
+            x86_isa_help_builder = CppBuilder(
+                key,
+                [input_path],
+                buid_options,
+                output_dir,
             )
             try:
                 # Check if the output file exist, and compile when not.
+                output_path = x86_isa_help_builder.get_target_file_path()
                 if not os.path.isfile(output_path):
-                    compile_file(input_path, output_path, build_cmd)
+                    status, target_file = x86_isa_help_builder.build()
+                    if status:
+                        return False
 
                 # Check build result
                 subprocess.check_call(
@@ -1214,7 +1304,7 @@ cdll.LoadLibrary("__lib_path__")
 @dataclasses.dataclass
 class VecNEON(VecISA):
     _bit_width = 256  # This is required to leverage the compute implemented in aten/src/ATen/cpu/vec/vec256/vec256_float_neon.h
-    _macro = "-DCPU_CAPABILITY_NEON"
+    _macro = ["CPU_CAPABILITY_NEON"]
     _arch_flags = ""  # Unused
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
 
@@ -1227,8 +1317,12 @@ class VecNEON(VecISA):
 @dataclasses.dataclass
 class VecAVX512(VecISA):
     _bit_width = 512
-    _macro = "-DCPU_CAPABILITY_AVX512"
-    _arch_flags = "-mavx512f -mavx512dq -mavx512vl -mavx512bw -mfma"
+    _macro = ["CPU_CAPABILITY_AVX512"]
+    _arch_flags = (
+        "-mavx512f -mavx512dq -mavx512vl -mavx512bw -mfma"
+        if not _IS_WINDOWS
+        else "/arch:AVX512"
+    )  # TODO: use cflags
     _dtype_nelements = {torch.float: 16, torch.bfloat16: 32, torch.float16: 32}
 
     def __str__(self) -> str:
@@ -1240,8 +1334,10 @@ class VecAVX512(VecISA):
 @dataclasses.dataclass
 class VecAVX2(VecISA):
     _bit_width = 256
-    _macro = "-DCPU_CAPABILITY_AVX2"
-    _arch_flags = "-mavx2 -mfma"
+    _macro = ["CPU_CAPABILITY_AVX2"]
+    _arch_flags = (
+        "-mavx2 -mfma" if not _IS_WINDOWS else "/arch:AVX2"
+    )  # TODO: use cflags
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
 
     def __str__(self) -> str:
@@ -1253,7 +1349,11 @@ class VecAVX2(VecISA):
 @dataclasses.dataclass
 class VecZVECTOR(VecISA):
     _bit_width = 256
-    _macro = "-DCPU_CAPABILITY_ZVECTOR -DCPU_CAPABILITY=ZVECTOR -DHAVE_ZVECTOR_CPU_DEFINITION"
+    _macro = [
+        "CPU_CAPABILITY_ZVECTOR",
+        "CPU_CAPABILITY=ZVECTOR",
+        "HAVE_ZVECTOR_CPU_DEFINITION",
+    ]
     _arch_flags = "-mvx -mzvector"
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
 
@@ -1265,7 +1365,7 @@ class VecZVECTOR(VecISA):
 
 class InvalidVecISA(VecISA):
     _bit_width = 0
-    _macro = ""
+    _macro = [""]
     _arch_flags = ""
     _dtype_nelements = {}
 
@@ -1276,6 +1376,31 @@ class InvalidVecISA(VecISA):
         return False
 
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__
+
+
+def x86_isa_checker() -> List[str]:
+    supported_isa: List[str] = []
+
+    def _check_and_append_supported_isa(
+        dest: List[str], isa_supported: bool, isa_name: str
+    ):
+        if isa_supported is True:
+            dest.append(isa_name)
+
+    Arch = platform.machine()
+    """
+    Arch value is x86_64 on Linux, and the value is AMD64 on Windows.
+    """
+    if Arch != "x86_64" and Arch != "AMD64":
+        return supported_isa
+
+    avx2 = torch.cpu._is_cpu_support_avx2()
+    avx512 = torch.cpu._is_cpu_support_avx512()
+
+    _check_and_append_supported_isa(supported_isa, avx2, "avx2")
+    _check_and_append_supported_isa(supported_isa, avx512, "avx512")
+
+    return supported_isa
 
 
 invalid_vec_isa = InvalidVecISA()
@@ -1290,7 +1415,8 @@ def valid_vec_isa_list() -> List[VecISA]:
     if sys.platform == "darwin" and platform.processor() == "arm":
         return [VecNEON()]
 
-    if sys.platform != "linux":
+    cur_os = sys.platform
+    if cur_os != "linux" and cur_os != "win32":
         return []
 
     if platform.machine() == "s390x":
@@ -1308,12 +1434,11 @@ def valid_vec_isa_list() -> List[VecISA]:
         return []
 
     isa_list = []
-    with open("/proc/cpuinfo") as _cpu_info:
-        _cpu_info_content = _cpu_info.read()
-        for isa in supported_vec_isa_list:
-            if str(isa) in _cpu_info_content and isa:
-                isa_list.append(isa)
-        return isa_list
+    _cpu_supported_isa = x86_isa_checker()
+    for isa in supported_vec_isa_list:
+        if str(isa) in _cpu_supported_isa:
+            isa_list.append(isa)
+    return isa_list
 
 
 def pick_vec_isa() -> VecISA:
@@ -1321,6 +1446,7 @@ def pick_vec_isa() -> VecISA:
         return VecAVX2()
 
     _valid_vec_isa_list: List[VecISA] = valid_vec_isa_list()
+
     if not _valid_vec_isa_list:
         return invalid_vec_isa
 
@@ -1489,7 +1615,14 @@ def get_include_and_linking_paths(
     _set_gpu_runtime_env()
     from torch.utils import cpp_extension
 
-    macros = vec_isa.build_macro() if vec_isa != invalid_vec_isa else ""
+    # Remove below in the further
+    # macros = "-D {}".format(vec_isa.build_macro()) if vec_isa != invalid_vec_isa else ""
+    macros = ""
+    if vec_isa != invalid_vec_isa:
+        for x in vec_isa.build_macro():
+            macros_def = f"-D{x} "
+            macros += macros_def
+
     build_arch_flags = ""
     if sys.platform == "linux" and (
         include_pytorch
@@ -1709,7 +1842,7 @@ def cpp_compile_command(
             {get_warning_all_flag(warning_all)} {cpp_flags()}
             {get_glibcxx_abi_build_flags()}
             {ipaths_str} {lpaths} {libs} {build_arch_flags}
-            {macros} {linker_paths} {clang_flags}
+            {macros} {linker_paths} {clang_flags} {cpp_wrapper_flags()}
             {optimization_flags()}
             {use_custom_generated_macros()}
             {use_fb_internal_macros()}
@@ -1961,7 +2094,6 @@ class AotCodeCompiler:
             def _to_bytes(t: torch.Tensor) -> bytes:
                 # This serializes the tensor's untyped_storage to bytes by accessing
                 # the raw data of the underlying structure.
-                import ctypes
 
                 if t.numel() == 0:
                     return b""
@@ -2185,8 +2317,18 @@ class CppCodeCache:
             "cuda": cuda,
             "vec_isa": pick_vec_isa(),
         }
-        cpp_command = repr(cpp_compile_command("i", "o", **compile_command))
-        key, input_path = write(source_code, "cpp", extra=cpp_command)
+
+        from torch._inductor.cpp_builder import CppBuilder, CppTorchOptions
+
+        picked_vec_isa = pick_vec_isa()
+        dummy_builder = CppBuilder("i", ["o"], CppTorchOptions(picked_vec_isa))
+        # write function will calc source_code hash, the same source code with different
+        # ISA level should be generate different hash.
+        # So we need get a command_line which contains isa related parameter as a part of hash key.
+        # And then pass the command_line to below write function as extra parameter to
+        # guarantee the source code hash contains ISA difference.
+        dummy_cmd = dummy_builder.get_command_line()
+        key, input_path = write(source_code, "cpp", extra=dummy_cmd)
 
         if key not in cls.cache:
             from filelock import FileLock
@@ -2455,7 +2597,85 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
     )
 
 
-@clear_on_fresh_inductor_cache
+# TODO: Will remove the temp code after switch to new cpp_builder
+def _temp_validate_new_and_old_command(new_cmd: List[str], old_cmd: List[str]):
+    new_diff: List[str] = [x for x in new_cmd if x not in old_cmd]
+    old_diff: List[str] = [y for y in old_cmd if y not in new_cmd]
+
+    if new_diff or old_diff:
+        print("!!! new_cmd: ", new_cmd)
+        print("!!! old_cmd: ", old_cmd)
+        print("!!! new_diff: ", new_diff)
+        print("!!! old_diff: ", old_diff)
+        raise RuntimeError("Error in new and old command different.")
+
+
+def _do_validate_cpp_commands(
+    include_pytorch: bool, cuda: bool, compile_only: bool, mmap_weights: bool
+):
+    # PreCI will failed if test machine can't run cuda.
+    test_cuda = torch.cuda.is_available() and cuda
+    input_path = "/temp/dummy_input.cpp"
+    output_path = "/temp/dummy_output.so"
+    if compile_only:
+        output_path = "/temp/dummy_output.o"
+    picked_isa = pick_vec_isa()
+
+    old_cmd = cpp_compile_command(
+        input=input_path,
+        output=output_path,
+        include_pytorch=include_pytorch,
+        vec_isa=picked_isa,
+        cuda=test_cuda,
+        aot_mode=False,
+        compile_only=compile_only,
+        use_absolute_path=False,
+        use_mmap_weights=mmap_weights,
+    ).split(" ")
+
+    from torch._inductor.cpp_builder import CppBuilder, CppTorchCudaOptions
+
+    dummy_build_option = CppTorchCudaOptions(
+        chosen_isa=picked_isa,
+        include_pytorch=include_pytorch,
+        use_cuda=test_cuda,
+        compile_only=compile_only,
+        use_mmap_weights=mmap_weights,
+    )
+
+    dummy_builder = CppBuilder(
+        name="dummy_output",
+        sources=input_path,
+        BuildOption=dummy_build_option,
+        output_dir="/temp/",
+        compile_only=compile_only,
+        use_absolute_path=False,
+    )
+    new_cmd = dummy_builder.get_command_line().split(" ")
+
+    _temp_validate_new_and_old_command(new_cmd, old_cmd)
+
+
+# TODO: Will remove the temp code after switch to new cpp_builder
+# It could help on sync new cpp_builder generate same command line as the old one.
+def validate_new_cpp_commands():
+    cuda = [True, False]
+    use_mmap_weights = [True, False]
+    compile_only = [True, False]
+    include_pytorch = [True, False]
+
+    for x in cuda:
+        for y in use_mmap_weights:
+            for z in compile_only:
+                for m in include_pytorch:
+                    print(
+                        f"!!! cuda:{x}, use_mmap_weights:{y}, compile_only:{z}, include_pytorch:{m}"
+                    )
+                    _do_validate_cpp_commands(
+                        include_pytorch=m, cuda=x, mmap_weights=y, compile_only=z
+                    )
+
+
 class PyCodeCache:
     cache: Dict[str, ModuleType] = dict()
     linemaps: Dict[str, List[Tuple[Any, ...]]] = dict()

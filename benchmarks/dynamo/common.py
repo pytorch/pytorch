@@ -1616,6 +1616,40 @@ class OnnxModelFromDynamoAotInline(OnnxModelFromDynamo):
         return onnx_program
 
 
+class OnnxModelFromDynamoAotOptimize(OnnxModelFromDynamo):
+    """Dynamo and Fx based export, with AOT optimize post export. `torch.onnx.dynamo_export`."""
+
+    _COMPILER_NAME = "dynamo_aot_optimize"
+
+    def _export(
+        self, model, example_inputs, output_path: str
+    ) -> torch.onnx.ONNXProgram:
+        if self.copy_before_export:
+            # Deepcopy model before export to avoid modification to baseline model.
+            model, example_inputs = self.deepcopy_model_and_inputs_to_device(
+                model, example_inputs, self._determine_deepcopy_target_device()
+            )
+
+        example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
+        options = torch.onnx.ExportOptions(dynamic_shapes=self._dynamic_shapes)
+        export_output = torch.onnx.dynamo_export(
+            model, *example_args, **example_kwargs, export_options=options
+        )
+
+        import onnx
+        from onnxscript.rewriter.onnxruntime import rewrite
+
+        model_proto = rewrite(export_output.model_proto)
+        onnx.save_model(
+            model_proto,
+            output_path,
+            save_as_external_data=True,
+            all_tensors_to_one_file=True,
+        )
+
+        return export_output
+
+
 class _OnnxPatch:
     @classmethod
     def patch_non_tensor_outputs(cls, correct_result, new_result, fp64_outputs):
@@ -3476,6 +3510,12 @@ def parse_args(args=None):
         help="Measure speedup with Dynamo ONNX AOT Inline, i.e. `torch.onnx.dynamo_export`",
     )
     group.add_argument(
+        "--dynamo-onnx-aot-optimize",
+        "--dynamo_onnx_aot_optimize",
+        action="store_true",
+        help="Measure speedup with Dynamo ONNX w/ ort fusions, i.e. `torch.onnx.dynamo_export`",
+    )
+    group.add_argument(
         "--backend",
         choices=torch._dynamo.list_backends(exclude_tags=None),
         help="measure speedup with a given backend",
@@ -3838,6 +3878,17 @@ def run(runner, args, original_dir=None):
         )
         experiment = speedup_experiment_onnx
         output_filename = "dynamo_onnx_aot_inline.csv"
+        current_onnx_compiler = "dynamo"
+    elif args.dynamo_onnx_aot_optimize:
+        optimize_ctx = functools.partial(
+            optimize_onnx_ctx,
+            args.output_directory or ".",
+            OnnxModelFromDynamoAotOptimize,
+            dynamic_shapes=args.dynamic_shapes,
+            copy_before_export=args.performance,
+        )
+        experiment = speedup_experiment_onnx
+        output_filename = "dynamo_onnx_aot_optimize.csv"
         current_onnx_compiler = "dynamo"
     elif args.speedup_dynamo_ts:
         optimize_ctx = torch._dynamo.optimize("ts", nopython=args.nopython)
