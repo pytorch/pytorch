@@ -7,7 +7,18 @@ import sys
 import time
 from collections import defaultdict
 from contextlib import contextmanager
-from typing import Any, Callable, DefaultDict, Dict, List, Optional, Set, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    DefaultDict,
+    Dict,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    TYPE_CHECKING,
+    Union,
+)
 
 import sympy
 
@@ -16,7 +27,6 @@ import torch._logging
 import torch.fx
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import defake, dynamo_timed
-from torch._higher_order_ops.effects import _EffectType
 from torch._logging import LazyString, trace_structured
 from torch._prims_common import make_channels_last_strides_for
 from torch._subclasses.fake_tensor import FakeTensor
@@ -26,6 +36,7 @@ from torch.fx.experimental.symbolic_shapes import (
     free_unbacked_symbols,
     has_free_symbols,
     resolve_unbacked_bindings,
+    RuntimeAssert,
     ShapeEnv,
     SymTypes,
 )
@@ -79,11 +90,15 @@ from .utils import (
 )
 from .virtualized import V
 
+if TYPE_CHECKING:
+    from torch._higher_order_ops.effects import _EffectType
+
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
 aten = torch.ops.aten
 
+_post_grad_graph_counter = itertools.count()
 
 if config.is_fbcode():
     from torch._inductor.fb.utils import log_module_code
@@ -316,6 +331,14 @@ class GraphLowering(torch.fx.Interpreter):
             self._shape_env = shape_env
             self.reuse_shape_env = True
         self._shape_env = shape_env
+        # We are going to start code generating runtime asserts, so make sure
+        # you don't start adding new ones in the lowering process
+        shape_env.freeze_runtime_asserts()
+        # We're going to mutate ras_by_symbol as we finish generating them
+        self.ras_by_symbol: Dict[
+            sympy.Symbol, List[RuntimeAssert]
+        ] = shape_env.deferred_runtime_asserts.copy()
+        self.bound_unbacked_symbols: Set[sympy.Symbol] = set()
         self.sizevars = SizeVarAllocator(shape_env)
         self.graph_input_names: List[str] = []
         self.graph_inputs: Dict[str, TensorBox] = {}
@@ -367,6 +390,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.aot_mode = aot_mode
         self.graph_id = graph_id
+        self.post_grad_graph_id = next(_post_grad_graph_counter)
         self.scheduler: "torch._inductor.scheduler.Scheduler" = None  # type: ignore[assignment]
         self.nodes_prefer_channels_last = (
             self.find_nodes_prefer_channels_last() if self.layout_opt else set()
@@ -705,7 +729,7 @@ class GraphLowering(torch.fx.Interpreter):
     def run(self, *args):
         return super().run(*args)
 
-    def register_buffer(self, buffer: ir.Buffer):
+    def register_buffer(self, buffer: ir.Buffer, *, set_name: bool = False):
         name = self.qualify_name(f"buf{len(self.buffers)}")
         self.buffers.append(buffer)
         self.name_to_buffer[name] = buffer
@@ -716,6 +740,8 @@ class GraphLowering(torch.fx.Interpreter):
         ):
             self.add_device_info(buffer.get_device())
 
+        if set_name:
+            buffer.name = name
         return name
 
     def register_list(self, buffer_names: List[str]):
@@ -786,6 +812,7 @@ class GraphLowering(torch.fx.Interpreter):
                         and data.device == value.device
                         and data.untyped_storage().data_ptr()
                         == value.untyped_storage().data_ptr()
+                        and data.storage_offset() == value.storage_offset()
                     ):
                         return constant_name
 
@@ -1359,6 +1386,64 @@ class GraphLowering(torch.fx.Interpreter):
             return "***\n".join(r)
 
         if n.op != "placeholder":
+            # Note [Backwards runtime asserts]
+            # Backwards poses an interesting problem for deferred runtime
+            # asserts.  In the easy case, we may solely close over data
+            # dependent sized tensors, and there are no binding sites for
+            # unbacked SymInts.  In this case, we can just drop all the
+            # runtime asserts on the floor: no non-placeholder bindings, no
+            # problem.
+            #
+            # However, it is *possible* for a fresh runtime assert to show up
+            # between forwards and backwards.  Right now, the freezing process
+            # that happens when we lower forwards means that we will freeze
+            # runtime asserts, and then the moment the backwards lowering
+            # process attempts to add a new deferred runtime assert, we will
+            # fail.  Let's say you remove that assert.  Now when we get here,
+            # we need to make sure we actually emit these asserts (because we
+            # can't emit them in forwards, we already compiled it).  So we
+            # have to do something here.  But we don't want to reemit ALL
+            # deferred runtime asserts, we only want to emit the NEW ones.
+            # Therefore needing some sort of stratification in the ShapeEnv.
+            # This is all doable, it just hasn't been done yet.
+            shape_env = V.graph.sizevars.shape_env
+
+            for i0 in new_unbacked_defs:
+                ras = self.ras_by_symbol.pop(i0, [])
+                # NB: size-like not needed, we won't retrace
+                vr = shape_env.var_to_range[i0]
+                if not shape_env._default_unspecified_value_range().issubset(vr):
+
+                    def convert(s):
+                        try:
+                            return int(s)
+                        except TypeError:
+                            return None
+
+                    if (lower := convert(vr.lower)) is not None:
+                        self.register_buffer(
+                            ir.AssertScalar(i0 >= vr.lower, f"{i0} >= {vr.lower}"),
+                            set_name=True,
+                        )
+                    if (upper := convert(vr.upper)) is not None:
+                        self.register_buffer(
+                            ir.AssertScalar(i0 <= vr.upper, f"{i0} <= {vr.upper}"),
+                            set_name=True,
+                        )
+
+                for ra in ras:
+                    fvs = free_unbacked_symbols(ra.expr)
+                    missing = fvs - self.bound_unbacked_symbols
+                    if missing:
+                        i1 = sorted(missing, key=lambda x: str(x))[0]
+                        self.ras_by_symbol.setdefault(i1, []).append(ra)
+                    else:
+                        self.register_buffer(
+                            ir.AssertScalar(ra.expr, f"{ra.expr}"), set_name=True
+                        )
+
+            self.bound_unbacked_symbols |= new_unbacked_defs
+
             unbacked_bindings = resolve_unbacked_bindings(
                 V.graph.sizevars.shape_env, n.meta.get("unbacked_bindings", {})
             )
