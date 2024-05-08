@@ -2922,14 +2922,12 @@ class CppKernelDispatcher(CppKernel):
 
             if self.tiling_ranges[1] == 0:
                 self.loops[1].steps = 1
-                self.vec_condition.writeline(
-                    f"if ({self.itervars[0]} < {cexpr_index(self.tiling_ranges[0])} && "
-                    + f"{self.itervars[1]} >= {cexpr_index(self.tiling_ranges[1])})"
-                )
-                self.scalar_condition.writeline(
-                    f"if ({self.itervars[0]} >= {cexpr_index(self.tiling_ranges[0])} && "
-                    + f"{self.itervars[1]} == 0)"
-                )
+                if self.tiling_ranges[0] != self.sizes[0]:
+                    self.vec_condition.writeline(f"if ({self.itervars[0]} < {cexpr_index(self.tiling_ranges[0])})")
+                    self.scalar_condition.writeline(
+                        f"if ({self.itervars[0]} >= {cexpr_index(self.tiling_ranges[0])} && "
+                        + f"{self.itervars[1]} == 0)"
+                    )
                 return
             
             
@@ -3039,14 +3037,18 @@ class CppKernelDispatcher(CppKernel):
 
     def codegen_vec_kernel(self, code):
         if self.vec_kernel and self.tiling_ranges[0] != 0:
-            code.splice(self.vec_condition)
-            with contextlib.ExitStack() as stack:
-                stack.enter_context(code.indent())
-                code.splice(self.vec_loop)
-                stack.enter_context(code.indent())
-                if len(self.tiling_ranges) == 2:
-                    self.replace_vars(self.vec_kernel, [1])
-                self.gen_kernel(self.vec_kernel, code)
+            if len(self.tiling_ranges) == 2:
+                with contextlib.ExitStack() as stack:
+                    stack.enter_context(code.indent())
+                    if self.tiling_ranges[1] != 0:
+                        code.splice(self.vec_loop)
+                        stack.enter_context(code.indent())
+                        self.replace_vars(self.vec_kernel, [1])
+                    self.gen_kernel(self.vec_kernel, code)
+            else:
+                with contextlib.ExitStack() as stack:
+                    stack.enter_context(code.indent())
+                    self.gen_kernel(self.vec_kernel, code)
 
     def codegen_tile2d_kernel(self, code):
         if self.tile2d_kernel and self.tiling_ranges[0] != 0 and self.tiling_ranges[1] != 0:
