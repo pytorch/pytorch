@@ -8246,10 +8246,10 @@ class TestLogical(TestCaseMPS):
                     mps_out = torch.isin(A_mps, B_mps, invert=inverted)
                     self.assertEqual(mps_out, cpu_ref)
 
-        dtypes = [torch.float32, torch.float16, torch.int32, torch.int16, torch.uint8, torch.int8]
+        dtypes = [torch.float32, torch.float16, torch.bfloat16, torch.int32, torch.int16, torch.uint8, torch.int8]
         if product_version < 14.0:
             # Int types expected to fail on MacOS < 14.0
-            dtypes = [torch.float32, torch.float16]
+            dtypes = [torch.float32, torch.float16, torch.bfloat16]
 
         [helper(dtype) for dtype in dtypes]
 
