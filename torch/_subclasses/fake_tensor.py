@@ -40,7 +40,6 @@ from torch._utils import render_call
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.overrides import TorchFunctionMode
-from torch.types import _bool
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
@@ -52,6 +51,7 @@ from torch.utils._traceback import CapturedTraceback
 
 if TYPE_CHECKING:
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
+    from torch.types import _bool
 
 
 class _Unassigned:
@@ -1700,14 +1700,14 @@ class FakeTensorMode(TorchDispatchMode):
             if not self.is_our_fake(x):
                 if torch.Tag.inplace_view in func.tags:
                     args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
-                    raise Exception(  # noqa: TRY002
+                    raise AssertionError(
                         f"Can't call metadata mutating ops on non-Fake Tensor inputs. Found in {render_call(func, args, kwargs)}"
                     )
                 if not self.allow_non_fake_inputs:
                     if isinstance(x, FakeTensor) and x.fake_mode is not self:
                         raise AssertionError("Mixing fake modes NYI")
                     args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
-                    raise Exception(  # noqa: TRY002
+                    raise AssertionError(
                         f"Please convert all Tensors to FakeTensors first or instantiate FakeTensorMode "
                         f"with 'allow_non_fake_inputs'. Found in {render_call(func, args, kwargs)}"
                     )
