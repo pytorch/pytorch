@@ -50,6 +50,10 @@ _IS_SM9X = False
 if torch.cuda.is_available():
     _IS_SM8X = torch.cuda.get_device_capability(0)[0] == 8
     _IS_SM9X = torch.cuda.get_device_capability(0)[0] == 9
+    _IS_MI300x = torch.version.hip is not None and GFX942_Exact
+    SEMI_STRUCTURED_SUPPORTED_BACKENDS["cutlass"] = SparseSemiStructuredTensorCUTLASS
+    if _IS_MI300x:
+        SEMI_STRUCTURED_SUPPORTED_BACKENDS["cusparselt"] = SparseSemiStructuredTensorCUSPARSELT
 
     # CUTLASS kernels only work for Ampere
     if _IS_SM8X:
