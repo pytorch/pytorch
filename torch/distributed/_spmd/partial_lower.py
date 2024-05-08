@@ -46,7 +46,7 @@ def _is_container_node(node: torch.fx.Node) -> bool:
             "Malformed graph: a container node is used as input for non-getitem nodes."
             "\nNode: {fmt_node}\nUsers: {fmt_users}".format(
                 fmt_node=node.format_node(),
-                fmt_users="\n".join(u.format_node() for u in node.users),  # type: ignore[misc]
+                fmt_users="\n".join(u.format_node() for u in node.users),
             )
         )
         return True
