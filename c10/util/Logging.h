@@ -126,7 +126,14 @@ constexpr bool IsUsingGoogleLogging() {
  */
 C10_API void ShowLogInfoToStderr();
 
-C10_API void SetStackTraceFetcher(std::function<string(void)> fetcher);
+C10_API void SetStackTraceFetcher(
+    std::function<::c10::Error::Backtrace()> fetcher);
+
+/**
+ * Convenience function for non-lazy stack trace fetchers. The Backtrace
+ * overload should be preferred when stringifying the backtrace is expensive.
+ */
+C10_API void SetStackTraceFetcher(std::function<std::string()> fetcher);
 
 using EnforceNotMet = ::c10::Error;
 
