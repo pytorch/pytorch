@@ -1218,6 +1218,7 @@ import importlib
 import os
 import time
 
+
 @_use_lazy_graph_module(dynamo_config.use_lazy_graph_module)
 def compile_fx(
     model_: torch.fx.GraphModule,
@@ -1237,8 +1238,19 @@ def compile_fx(
         # breakpoint()
         # def call(*args):
         #     return (args[0].cos(),)
+        params = {
+            **dict(model_.named_parameters(remove_duplicate=False)),
+            **dict(model_.named_buffers(remove_duplicate=False)),
+        }
+        params_flat, params_spec = pytree.tree_flatten(params)
         call = loaded_module.call
-        return lambda *args: call(list(args))
+        def call_with_params(*args):
+            all_args = params_flat + list(args)
+            with torch.no_grad():
+                out = call(list(all_args))
+                return out
+
+        return call_with_params
     """Main entrypoint to a compile given FX graph"""
     if config_patches:
         with config.patch(config_patches):
