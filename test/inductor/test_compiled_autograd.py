@@ -766,7 +766,7 @@ main()
                 return inductor.compile(gm_, example_inputs_)
 
             return torch.compile(
-                gm, backend=inner_compiler, fullgraph=False, dynamic=True
+                gm, backend=inner_compiler, fullgraph=True, dynamic=True
             )
 
         def fn():
