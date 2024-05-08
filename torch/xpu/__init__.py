@@ -281,9 +281,9 @@ class StreamContext:
             ``None``.
     .. note:: Streams are per-device.
     """
-    cur_stream: Optional["torch.xpu.Stream"]
+    cur_stream: Optional["torch.Stream"]
 
-    def __init__(self, stream: Optional["torch.xpu.Stream"]):
+    def __init__(self, stream: Optional["torch.Stream"]):
         self.stream = stream
         self.idx = _get_device_index(None, True)
         if self.idx is None:
@@ -312,7 +312,7 @@ class StreamContext:
         torch.xpu.set_stream(self.src_prev_stream)
 
 
-def stream(stream: Optional["torch.xpu.Stream"]) -> StreamContext:
+def stream(stream: Optional["torch.Stream"]) -> StreamContext:
     r"""Wrap around the Context-manager StreamContext that selects a given stream.
 
     Arguments:
