@@ -530,6 +530,8 @@ class WrapperCodeGen(CodeGen):
         Loads constants into the global scope so that the constants will be
         loaded when the wrapper module is loaded
         """
+        if len(V.graph.constants) == 0 and len(V.graph.torchbind_constants) == 0:
+            return
 
         def add_torchbind_input(name, value):
             import pickle
@@ -1044,6 +1046,9 @@ class WrapperCodeGen(CodeGen):
         )
 
     def benchmark_compiled_module(self, output):
+        def add_expr_input(name, val):
+            output.writeline(f"{name} = {val}")
+
         output.writelines(
             ["", "", "def benchmark_compiled_module(times=10, repeat=10):"]
         )
