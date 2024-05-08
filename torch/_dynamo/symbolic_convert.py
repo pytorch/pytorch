@@ -18,7 +18,7 @@ import traceback
 import types
 import typing
 import weakref
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type
+from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Type
 from unittest.mock import patch
 
 import torch
@@ -37,6 +37,7 @@ from .bytecode_transformation import (
     create_call_function,
     create_instruction,
     create_jump_absolute,
+    create_swap,
     get_code_keys,
     Instruction,
     is_generator,
@@ -112,6 +113,7 @@ log = logging.getLogger(__name__)
 graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
 trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 trace_source_log = torch._logging.getArtifactLogger(__name__, "trace_source")
+trace_bytecode_log = torch._logging.getArtifactLogger(__name__, "trace_bytecode")
 tls = threading.local()
 compare_op_handlers: Dict[str, Any] = {
     k: BuiltinVariable(v).call_function for k, v in supported_comparison_ops.items()
@@ -559,10 +561,10 @@ def break_graph_if_unsupported(*, push):
             self.output.compile_subgraph(self, reason=reason)
             cg = PyCodegen(self)
             cleanup: List[Instruction] = []
-            # Reconstruct the context variables in the block stack
+            # Reconstruct the context variable CLASS in the block stack
             for b in self.block_stack:
                 assert b.with_context is not None
-                cg(b.with_context)
+                b.with_context.reconstruct_type(cg)
                 cg.extend_output(b.resume_fn().try_except(cg.code_options, cleanup))
             self.output.add_output_instructions(cg.get_instructions())
             del cg
@@ -694,6 +696,11 @@ class InstructionTranslatorBase(
             self._cell_and_freevars = tuple(
                 self.code_options["co_cellvars"] or []
             ) + tuple(self.code_options["co_freevars"] or [])
+
+            # An inlined function might depend on the freevar of the parent
+            # function. So, recursively obtain parent cell and freevars.
+            if isinstance(self, InliningInstructionTranslator):
+                self._cell_and_freevars += self.parent.cell_and_freevars()
         return self._cell_and_freevars
 
     def prune_dead_locals(self):
@@ -781,8 +788,10 @@ class InstructionTranslatorBase(
             if self.current_speculation.failed:
                 return self.step_graph_break(inst)
 
-        if log.isEnabledFor(logging.DEBUG):
-            log.debug("TRACE %s %s %s", inst.opname, inst.argval, self.stack)
+        if trace_bytecode_log.isEnabledFor(logging.DEBUG):
+            trace_bytecode_log.debug(
+                "TRACE %s %s %s", inst.opname, inst.argval, self.stack
+            )
 
         self.update_block_stack(inst)
 
@@ -964,22 +973,6 @@ class InstructionTranslatorBase(
     def LOAD_CONST(self, inst):
         self.push(self._load_const(inst))
 
-    def get_global_source(self, name):
-        source: Source
-        if self.output.global_scope is self.f_globals:
-            source = GlobalSource(name)
-        else:
-            if "__name__" in self.f_globals:
-                source = AttrSource(
-                    self.import_source(self.f_globals["__name__"]), name
-                )
-            else:
-                mangled_name = self.output.install_global_by_id(
-                    "___unnamed_scope", self.f_globals
-                )
-                source = GetItemSource(GlobalSource(mangled_name), name)
-        return source
-
     def LOAD_GLOBAL(self, inst):
         if sys.version_info >= (3, 11):
             if inst.arg % 2:
@@ -1007,13 +1000,13 @@ class InstructionTranslatorBase(
         except KeyError:
             return self.load_builtin(inst)
 
-        source = self.get_global_source(name)
+        source = GlobalSource(name)
         self.push(VariableBuilder(self, source)(value))
 
     def STORE_GLOBAL(self, inst):
         value = self.pop()
         name = inst.argval
-        source = self.get_global_source(name)
+        source = GlobalSource(name)
         if name not in self.symbolic_globals:
             self.symbolic_globals[name] = object()  # type: ignore[assignment]  # sentinel object
         variable = self.output.side_effects.track_global_existing(
@@ -1242,7 +1235,7 @@ class InstructionTranslatorBase(
             if (
                 isinstance(val, BuiltinVariable) and val.fn is StopIteration
             ) or isinstance(val, variables.StopIterationVariable):
-                raise exc.UserStopIteration()
+                raise exc.UserStopIteration
             unimplemented(f"raise {exc}")
         else:
             unimplemented("raise ... from ...")
@@ -1367,8 +1360,8 @@ class InstructionTranslatorBase(
             return self.store_attr_graph_break(inst)
         val, obj = self.popn(2)
 
-        if isinstance(obj, NNModuleVariable):
-            # We don't allow side effects during export
+        if isinstance(obj, NNModuleVariable) and not isinstance(val, ConstantVariable):
+            # We don't allow side effects during export on non-constant values
             # https://github.com/pytorch/torchdynamo/issues/1475
             assert (
                 not self.export
@@ -1419,6 +1412,10 @@ class InstructionTranslatorBase(
     def STORE_SUBSCR(self, inst):
         val, obj, key = self.popn(3)
         result = obj.call_method(self, "__setitem__", [key, val], {})
+
+    def DELETE_SUBSCR(self, inst):
+        obj, key = self.popn(2)
+        obj.call_method(self, "__delitem__", [key], {})
 
     def BUILD_TUPLE(self, inst):
         items = self.popn(inst.argval)
@@ -2231,7 +2228,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             return self.f_locals[source.local_name]
         if isinstance(source, GlobalSource):
             return self.f_globals[source.global_name]
-        raise KeyError()
+        raise KeyError
 
     def run(self):
         super().run()
@@ -2270,13 +2267,57 @@ class InstructionTranslator(InstructionTranslatorBase):
             return [create_instruction("RETURN_CONST", argval=inst.argval)]
 
         reads = livevars_analysis(self.instructions, inst)
-        argnames = tuple(
+        all_argnames = tuple(
             k
             for k in self.symbolic_locals.keys()
             if k in reads and k not in self.cell_and_freevars()
         )
+        # NOTE: do not use isinstance, since it realizes lazy VT's
+        argnames = tuple(
+            k
+            for k in all_argnames
+            if not type.__instancecheck__(NullVariable, self.symbolic_locals[k])
+        )
+        argnames_null = tuple(
+            k
+            for k in all_argnames
+            if type.__instancecheck__(NullVariable, self.symbolic_locals[k])
+        )
+        if sys.version_info < (3, 12):
+            assert len(argnames_null) == 0, "variables should not be NULL in < 3.12"
 
         cg = PyCodegen(self)
+
+        # Handle inactive context variables.
+        # The resume function assumes that context variables are the class, NOT the object.
+        # e.g. torch.set_grad_enabled(True) will be reconstructed as torch.set_grad_enabled
+        stack_ctx_vars = []
+        for i, var in enumerate(self.stack):
+            if type.__instancecheck__(ContextWrappingVariable, var):
+                ctx = cast(ContextWrappingVariable, var)
+                target_values = (
+                    () if ctx.target_values is None else tuple(ctx.target_values)
+                )
+                stack_ctx_vars.append((i, target_values))
+                # Replace the current stack var with the context class
+                ctx.reconstruct_type(cg)
+                cg.extend_output(create_swap(len(self.stack) - i + 1))
+                cg.append_output(create_instruction("POP_TOP"))
+
+        argnames_ctx_vars = []
+        for name in argnames:
+            if type.__instancecheck__(
+                ContextWrappingVariable, var := self.symbolic_locals[name]
+            ):
+                ctx = cast(ContextWrappingVariable, var)
+                target_values = (
+                    () if ctx.target_values is None else tuple(ctx.target_values)
+                )
+                argnames_ctx_vars.append((name, target_values))
+                # Replace the local with the context class
+                cg.append_output(create_instruction("LOAD_FAST", argval=name))
+                ctx.reconstruct_type(cg)
+                cg.append_output(create_instruction("STORE_FAST", argval=name))
 
         # Python does not allow null to be an arg to a function, so
         # we remove nulls from the stack and restore them in the
@@ -2287,12 +2328,12 @@ class InstructionTranslator(InstructionTranslatorBase):
         if sys.version_info >= (3, 11):
             # find indices of NullVariables
             for i, var in enumerate(self.stack):
-                if isinstance(var, NullVariable):
+                if type.__instancecheck__(NullVariable, var):
                     null_idxes.append(i)
             # generate bytecode to pop the nulls
             null_cnt = 0
             for i, var in enumerate(reversed(self.stack)):
-                if isinstance(var, NullVariable):
+                if type.__instancecheck__(NullVariable, var):
                     for j in range(2, i + 2 - null_cnt):
                         cg.append_output(create_instruction("SWAP", arg=j))
                     cg.extend_output(cg.pop_null())
@@ -2312,7 +2353,10 @@ class InstructionTranslator(InstructionTranslatorBase):
             tuple(b.target.offset for b in self.block_stack),
             stack_len,
             argnames,
+            argnames_null,
             tuple(b.resume_fn() for b in self.block_stack),
+            tuple(stack_ctx_vars),
+            tuple(argnames_ctx_vars),
             tuple(null_idxes),
         )
 
@@ -2374,7 +2418,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             else create_instruction("RETURN_CONST", argval=inst.argval)
         )
         self.output.add_output_instructions([return_inst])
-        raise ReturnValueOp()
+        raise ReturnValueOp
 
     def RETURN_VALUE(self, inst):
         self._return(inst)
@@ -2623,7 +2667,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     self.output.root_tx.mutated_closure_cell_contents.add(
                         maybe_cell.source.name()
                     )
-                    raise exc.UnspecializeRestartAnalysis()
+                    raise exc.UnspecializeRestartAnalysis
                 unimplemented("write to __closure__ while inlining")
 
     def LOAD_DEREF(self, inst):
@@ -2662,12 +2706,69 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def RETURN_VALUE(self, inst):
         self.symbolic_result = self.pop()  # type: ignore[assignment]
         self.instruction_pointer = None
-        raise ReturnValueOp()
+        raise ReturnValueOp
 
     def RETURN_CONST(self, inst):
         self.symbolic_result = self._load_const(inst)
         self.instruction_pointer = None
-        raise ReturnValueOp()
+        raise ReturnValueOp
+
+    def get_globals_source_and_value(self, name):
+        if "__name__" in self.f_globals:
+            module_name = self.f_globals["__name__"]
+            module_source = self.import_source(module_name)
+            if "torch_package" in module_name:
+                fglobals_value = torch.package.package_importer._package_imported_modules[module_name]  # type: ignore[assignment]
+            else:
+                fglobals_value = importlib.import_module(module_name)  # type: ignore[assignment]
+            fglobals_vt = VariableBuilder(self, module_source)(fglobals_value)
+            global_source = AttrSource(module_source, name)
+        else:
+            globals_name = self.output.install_global_by_id(
+                "___unnamed_scope", self.f_globals
+            )
+            globals_source = GlobalSource(globals_name)
+            fglobals_value = self.f_globals  # type: ignore[assignment]
+            fglobals_vt = VariableBuilder(self, globals_source)(fglobals_value)
+            global_source = GetItemSource(globals_source, name)  # type: ignore[assignment]
+        return fglobals_value, fglobals_vt, global_source
+
+    def LOAD_GLOBAL(self, inst):
+        if self.output.global_scope is self.f_globals:
+            super().LOAD_GLOBAL(inst)
+        else:
+            if sys.version_info >= (3, 11):
+                if inst.arg % 2:
+                    self.PUSH_NULL(inst)
+
+            name = inst.argval
+            if inst.argval == "AssertionError":
+                unimplemented("assert with non-string message")
+
+            _, fglobals_vt, global_source = self.get_globals_source_and_value(name)
+            if self.output.side_effects.has_pending_mutation_of_attr(fglobals_vt, name):
+                self.push(self.output.side_effects.load_attr(fglobals_vt, name))
+            else:
+                try:
+                    value = self.f_globals[name]
+                except KeyError:
+                    return self.load_builtin(inst)
+
+                self.push(VariableBuilder(self, global_source)(value))
+
+    def STORE_GLOBAL(self, inst):
+        if self.f_globals is self.parent.f_globals:
+            super().STORE_GLOBAL(inst)
+        else:
+            value = self.pop()
+            if isinstance(value, RemovableHandleVariable):
+                unimplemented("Storing handles in globals - NYI")
+            name = inst.argval
+            fglobals_value, fglobals_vt, _ = self.get_globals_source_and_value(name)
+            fglobals_vt = self.output.side_effects.track_object_existing(
+                fglobals_value, fglobals_vt
+            )
+            self.output.side_effects.store_attr(fglobals_vt, name, value)
 
 
 class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):

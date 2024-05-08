@@ -813,13 +813,18 @@ void passEventsToKineto(
   // Generate Kineto events for each event recorded by the PyTorch profiler.
   for (const auto i : c10::irange(results.size())) {
     const auto& e = results[i];
+    // (TODO): This is a temporary fix for async traces to make sure that we do
+    // not use int64 MIN as end time in Kineto. If we use that value, the
+    // duration will overflow and become a very large positive number. For a
+    // long term solution, add guards in kineto for each activity type
+    int64_t act_end_time = std::max(e->endTimeNS(), e->start_time_ns_);
     auto* activity = cpu_trace.addCPUActivity(
         e->name(),
         e->kinetoType(),
         e->kineto_info_,
         e->correlationID(),
         e->start_time_ns_,
-        e->endTimeNS());
+        act_end_time);
 
     TORCH_INTERNAL_ASSERT(activity || !kKinetoAvailable);
     if (activity) {
@@ -951,7 +956,7 @@ class TransferEvents {
         static_cast<int32_t>(activity->resourceId())};
 
     auto event = Result::create(
-        activity->timestamp() * 1000,
+        activity->timestamp(),
         noTID, // Placeholder
         device_and_resource,
         ExtraFields<EventType::Kineto>{
@@ -1404,8 +1409,19 @@ RecordQueue::getRecords(
   }
 
   if (python_tracer_) {
-    for (const auto& i : python_tracer_->getEvents(
-             converter, python_enters, static_cast<c10::time_t>(end_time_ns))) {
+    std::vector<std::shared_ptr<torch::profiler::impl::Result>> ev;
+    try {
+      ev = python_tracer_->getEvents(
+          converter, python_enters, static_cast<c10::time_t>(end_time_ns));
+    } catch (std::exception& e) {
+      // Normally addKinetoEvents() below will stop the trace - but if an
+      // exception happens here then the events will never be stopped and future
+      // runs will be broken - so make sure to stopTrace() if we see an
+      // exception.
+      torch::profiler::impl::kineto::stopTrace();
+      throw;
+    }
+    for (const auto& i : ev) {
       out.push_back(i);
     }
     python_tracer_.reset();

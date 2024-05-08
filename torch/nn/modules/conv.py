@@ -204,7 +204,7 @@ class Conv1d(_ConvNd):
       amount of implicit padding applied on both sides.
 
     * :attr:`dilation` controls the spacing between the kernel points; also
-      known as the à trous algorithm. It is harder to describe, but this `link`_
+      known as the \uue0 trous algorithm. It is harder to describe, but this `link`_
       has a nice visualization of what :attr:`dilation` does.
 
     {groups_note}
@@ -341,7 +341,7 @@ class Conv2d(_ConvNd):
       amount of implicit padding applied on both sides.
 
     * :attr:`dilation` controls the spacing between the kernel points; also
-      known as the à trous algorithm. It is harder to describe, but this `link`_
+      known as the \u00e0 trous algorithm. It is harder to describe, but this `link`_
       has a nice visualization of what :attr:`dilation` does.
 
     {groups_note}
@@ -483,7 +483,7 @@ class Conv3d(_ConvNd):
       can be either a string {{'valid', 'same'}} or a tuple of ints giving the
       amount of implicit padding applied on both sides.
 
-    * :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
+    * :attr:`dilation` controls the spacing between the kernel points; also known as the \u00e0 trous algorithm.
       It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
 
     {groups_note}
@@ -638,9 +638,8 @@ class _ConvTransposeNd(_ConvNd):
                 output_size = output_size[num_non_spatial_dims:]
             if len(output_size) != num_spatial_dims:
                 raise ValueError(
-                    "ConvTranspose{}D: for {}D input, output_size must have {} or {} elements (got {})"
-                    .format(num_spatial_dims, input.dim(), num_spatial_dims,
-                            num_non_spatial_dims + num_spatial_dims, len(output_size)))
+                    f"ConvTranspose{num_spatial_dims}D: for {input.dim()}D input, output_size must have {num_spatial_dims} "
+                    f"or {num_non_spatial_dims + num_spatial_dims} elements (got {len(output_size)})")
 
             min_sizes = torch.jit.annotate(List[int], [])
             max_sizes = torch.jit.annotate(List[int], [])
@@ -691,7 +690,7 @@ class ConvTranspose1d(_ConvTransposeNd):
     * :attr:`output_padding` controls the additional size added to one side
       of the output shape. See note below for details.
 
-    * :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
+    * :attr:`dilation` controls the spacing between the kernel points; also known as the \u00e0 trous algorithm.
       It is harder to describe, but the link `here`_ has a nice visualization of what :attr:`dilation` does.
 
     {groups_note}
@@ -822,7 +821,7 @@ class ConvTranspose2d(_ConvTransposeNd):
     * :attr:`output_padding` controls the additional size added to one side
       of the output shape. See note below for details.
 
-    * :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
+    * :attr:`dilation` controls the spacing between the kernel points; also known as the \u00e0 trous algorithm.
       It is harder to describe, but the link `here`_ has a nice visualization of what :attr:`dilation` does.
 
     {groups_note}
@@ -979,7 +978,7 @@ class ConvTranspose3d(_ConvTransposeNd):
     * :attr:`output_padding` controls the additional size added to one side
       of the output shape. See note below for details.
 
-    * :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
+    * :attr:`dilation` controls the spacing between the kernel points; also known as the \u00e0 trous algorithm.
       It is harder to describe, but the link `here`_ has a nice visualization of what :attr:`dilation` does.
 
     {groups_note}
@@ -1176,15 +1175,15 @@ class _LazyConvXdMixin(LazyModuleMixin):
         num_dims_no_batch = num_spatial_dims + 1  # +1 for channels dim
         num_dims_batch = num_dims_no_batch + 1
         if input.dim() not in (num_dims_no_batch, num_dims_batch):
-            raise RuntimeError("Expected {}D (unbatched) or {}D (batched) input to {}, but "
-                               "got input of size: {}".format(num_dims_no_batch, num_dims_batch,
-                                                              self.__class__.__name__, input.shape))
+            raise RuntimeError(f"Expected {num_dims_no_batch}D (unbatched) or {num_dims_batch}D (batched) input "
+                               f"to {self.__class__.__name__}, but "
+                               f"got input of size: {input.shape}")
         return input.shape[1] if input.dim() == num_dims_batch else input.shape[0]
 
     # Function to return the number of spatial dims expected for inputs to the module.
     # This is expected to be implemented by subclasses.
     def _get_num_spatial_dims(self) -> int:
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 # LazyConv1d defines weight as a Tensor but derived class defines it as UnitializeParameter

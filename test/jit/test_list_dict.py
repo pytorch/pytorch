@@ -2871,7 +2871,7 @@ class TestScriptList(JitTestCase):
 
             def __next__(self):
                 if self.value == limit:  # noqa: F821
-                    raise StopIteration()
+                    raise StopIteration
 
                 ret = self.value
                 self.value += 1

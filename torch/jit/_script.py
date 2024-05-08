@@ -476,7 +476,7 @@ if _enabled:
         # RecursiveScriptClass.
         def forward_magic_method(self, method_name, *args, **kwargs):
             if not self._c._has_method(method_name):
-                raise TypeError()
+                raise TypeError
 
             self_method = self.__getattr__(method_name)
             return self_method(*args, **kwargs)
@@ -865,7 +865,7 @@ if _enabled:
             if getattr(self_method, "__func__", None) == getattr(
                 RecursiveScriptModule, method_name
             ):
-                raise NotImplementedError()
+                raise NotImplementedError
             return self_method(*args, **kwargs)
 
         def __iter__(self):
@@ -1391,6 +1391,7 @@ def script(
         _check_directly_compile_overloaded(obj)
         maybe_already_compiled_fn = _try_get_jit_cached_function(obj)
         if maybe_already_compiled_fn:
+            maybe_already_compiled_fn._torchdynamo_inline = obj  # type: ignore[attr-defined]
             return maybe_already_compiled_fn
         ast = get_jit_def(obj, obj.__name__)
         if _rcb is None:

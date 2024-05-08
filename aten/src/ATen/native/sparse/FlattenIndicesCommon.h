@@ -62,7 +62,7 @@ Tensor _flatten_indices_impl(const Tensor& indices, IntArrayRef size) {
       .build();
 
     {
-      const auto* RESTRICT ptr_indices = indices.data_ptr<index_t>();
+      const auto* RESTRICT ptr_indices = indices.const_data_ptr<index_t>();
 
       KernelLauncher<kernel_t>::launch(iter,
           // NOTE: capture by value required by CUDA

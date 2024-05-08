@@ -371,7 +371,7 @@ class TestWith(JitTestCase):
 
         @torch.jit.script
         def method_that_raises() -> torch.Tensor:
-            raise Exception("raised exception")
+            raise Exception("raised exception")  # noqa: TRY002
 
         @torch.jit.script
         def test_exception(x: torch.Tensor, c: Context) -> torch.Tensor:

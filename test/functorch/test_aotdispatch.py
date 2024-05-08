@@ -3261,6 +3261,7 @@ def forward(self, tangents_1):
 
         return lambda f: aot_function(f, fw_compiler=lambda g, _: partial(wrapper, g))
 
+    @patch("functorch.compile.config.view_replay_for_aliased_outputs", True)
     def test_output_aliases_input_view_meta_replay(self):
         @self._compile_and_erase_bases(0)
         def f(a):
@@ -3274,6 +3275,7 @@ def forward(self, tangents_1):
             str(out.grad_fn.__class__), """<class 'ViewBackward0'>"""
         )
 
+    @patch("functorch.compile.config.view_replay_for_aliased_outputs", True)
     def test_output_aliases_intermediate_view_meta_replay(self):
         @self._compile_and_erase_bases(0, 1)
         def f(a):
@@ -3293,6 +3295,7 @@ def forward(self, tangents_1):
             str(out2.grad_fn.__class__), """<class 'ViewBackward0'>"""
         )
 
+    @patch("functorch.compile.config.view_replay_for_aliased_outputs", True)
     def test_output_aliases_output_view_meta_replay(self):
         @self._compile_and_erase_bases(1)
         def f(a):
@@ -5405,9 +5408,6 @@ symbolic_aot_autograd_failures = {
         "nn.functional.embedding_bag", ""
     ),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail(
-        "nn.functional.fractional_max_pool2d", ""
-    ),  # rand() received an invalid combination of arguments - g...
-    xfail(
         "nn.functional.fractional_max_pool3d", ""
     ),  # rand() received an invalid combination of arguments - g...
     xfail(
@@ -5608,7 +5608,6 @@ symbolic_aot_autograd_module_failures = {
     torch.nn.GaussianNLLLoss,  # NotImplementedError: local_scalar_dense/item NYI for torch.bool
     torch.nn.GroupNorm,  # in native_group_norm_backward cpg, _rem = divmod(C, group)
     # TypeError: unsupported operand type(s) for divmod(): 'SymInt' and 'int'
-    torch.nn.FractionalMaxPool2d,  # int() argument must be a string, a bytes-like object or a number, not 'SymFloat'
     torch.nn.FractionalMaxPool3d,  # int() argument must be a string, a bytes-like object or a number, not 'SymFloat'
     torch.nn.BCELoss,  # new_size = _infer_size(target.size(), weight.size())
     # RuntimeError: expected int at position 0, but got: SymInt

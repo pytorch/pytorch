@@ -17,7 +17,7 @@
 namespace at::native {
 namespace mps {
 
-static const char* METAL_BUCKETIZATION = R"BUCKETIZE_METAL(
+static MetalShaderLibrary lib(R"BUCKETIZE_METAL(
 
 #include <metal_stdlib>
 using namespace metal;
@@ -194,44 +194,7 @@ REGISTER_SEARCHSORTED_OP(int, long);
 REGISTER_SEARCHSORTED_OP(long, int);
 REGISTER_SEARCHSORTED_OP(long, long);
 
-)BUCKETIZE_METAL";
-
-static id<MTLLibrary> compileBucketizationOpsLibrary(id<MTLDevice> device) {
-  static id<MTLLibrary> bucketizationLibrary = nil;
-  if (bucketizationLibrary) {
-    return bucketizationLibrary;
-  }
-
-  NSError* error = nil;
-  MTLCompileOptions* options = [[MTLCompileOptions new] autorelease];
-  [options setLanguageVersion:MTLLanguageVersion2_3];
-  bucketizationLibrary = [device newLibraryWithSource:[NSString stringWithCString:METAL_BUCKETIZATION
-                                                                         encoding:NSASCIIStringEncoding]
-                                              options:options
-                                                error:&error];
-  TORCH_CHECK(
-      bucketizationLibrary, "Failed to create metal bucketization library, error: ", [[error description] UTF8String]);
-  return bucketizationLibrary;
-}
-
-static id<MTLComputePipelineState> bucketizationPipelineState(id<MTLDevice> device, const std::string& kernel) {
-  static std::unordered_map<std::string, id<MTLComputePipelineState>> psoCache;
-  id<MTLComputePipelineState> pso = psoCache[kernel];
-  if (pso) {
-    return pso;
-  }
-
-  NSError* error = nil;
-  id<MTLLibrary> bucketizationLib = compileBucketizationOpsLibrary(device);
-  id<MTLFunction> bucketizationFunc =
-      [bucketizationLib newFunctionWithName:[NSString stringWithUTF8String:kernel.c_str()]];
-  TORCH_CHECK(bucketizationFunc, "Failed to create function state object for: ", kernel);
-  pso = [device newComputePipelineStateWithFunction:bucketizationFunc error:&error];
-  TORCH_CHECK(pso, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
-
-  psoCache[kernel] = pso;
-  return pso;
-}
+)BUCKETIZE_METAL");
 
 static void searchsorted_mps_contiguous(Tensor& result,
                                         const Tensor& input,
@@ -250,15 +213,14 @@ static void searchsorted_mps_contiguous(Tensor& result,
   int64_t right_i64 = right;
   int64_t is_1d_boundaries = boundaries.dim() == 1;
 
-  id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* mpsStream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
 
-      const std::string kernel = "searchsorted_" + scalarToMetalTypeString(input.scalar_type()) + "_" +
-          scalarToMetalTypeString(result.scalar_type()) + (sorter.defined() ? "_sorter" : "");
-      id<MTLComputePipelineState> bucketizationPSO = mps::bucketizationPipelineState(device, kernel);
+      const std::string kernel = "searchsorted_" + scalarToMetalTypeString(input) + "_" +
+          scalarToMetalTypeString(result) + (sorter.defined() ? "_sorter" : "");
+      id<MTLComputePipelineState> bucketizationPSO = lib.getPipelineStateForFunc(kernel);
 
       // this function call is a no-op if MPS Profiler is not enabled
       getMPSProfiler().beginProfileKernel(bucketizationPSO, kernel, {input, boundaries, sorter});

@@ -440,8 +440,7 @@ void initPythonBindings(PyObject* module) {
           "dtype",
           [](const TensorMetadata& metadata) {
             return py::reinterpret_borrow<py::object>(
-                torch::autograd::utils::wrap(
-                    torch::getTHPDtype(metadata.dtype_)));
+                torch::autograd::utils::wrap(metadata.dtype_));
           })
       .def_readonly("dim", &TensorMetadata::dim_)
       .def_readonly("sizes", &TensorMetadata::sizes_)

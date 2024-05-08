@@ -335,8 +335,9 @@ def aot_dispatch_subclass_wrapper(
     subclass_metas: List[Union[int, SubclassCreationMeta]],
     num_fw_outs_saved_for_bw: Optional[int],
 ) -> Callable:
-    def inner_fn(args):
+    def inner_fn(args: List[Any]):
         unwrapped_args = unwrap_tensor_subclasses(args, is_joint_structure=False)
+        args.clear()
         # expectation: runtime_fn is a boxed fn
         unwrapped_outs = runtime_fn(unwrapped_args)
         wrapped_outs = wrap_tensor_subclasses(

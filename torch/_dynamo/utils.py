@@ -50,6 +50,8 @@ from typing import (
     ValuesView,
 )
 
+from torch._utils_internal import maybe_upload_prof_stats_to_manifold
+
 from ..utils.hooks import RemovableHandle
 
 try:
@@ -95,9 +97,11 @@ import torch.fx.experimental.symbolic_shapes
 import torch.utils._pytree as pytree
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
+from torch._guards import TracingContext
 from torch._subclasses.meta_utils import is_sparse_compressed
 from torch._utils_internal import log_compilation_event
 
+from torch.fx._utils import _format_graph_code, lazy_format_graph_code
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._triton import has_triton, has_triton_package
 
@@ -142,7 +146,7 @@ def cprofile_wrapper(func):
     def profile_wrapper(*args, **kwargs):
         global timer_counter
         profile_cnt = next(timer_counter)
-        profile_path = Path(func.__name__ + f"{profile_cnt}.profile")
+        profile_path = Path("/tmp/" + func.__name__ + f"{profile_cnt}.profile")
         prof = cProfile.Profile()
         prof.enable()
         start_ts = time.time()
@@ -180,6 +184,9 @@ def cprofile_wrapper(func):
             )
             ps.sort_stats(pstats.SortKey.TIME).print_stats(20)
             ps.sort_stats(pstats.SortKey.CUMULATIVE).print_stats(20)
+
+        maybe_upload_prof_stats_to_manifold(str(profile_path))  # fb-only
+
         return retval
 
     return profile_wrapper
@@ -670,6 +677,10 @@ class CompilationMetrics:
     compliant_custom_ops: Set[str]
     restart_reasons: Set[str]
     dynamo_time_before_restart_s: float
+    # Sometimes, we will finish analyzing a frame but conclude we don't want
+    # to install any guarded code.  True means we actually decided to install
+    # a compiled frame
+    has_guarded_code: bool
 
 
 DEFAULT_COMPILATION_METRICS_LIMIT = 64
@@ -1141,6 +1152,21 @@ def enum_repr(value, local):
     scope = "L" if local else "G"
     local_name = f'{scope}["{name}"].{val}'
     return local_name
+
+
+def set_example_value(node, example_value):
+    # NB: example_value is a bit of a misnomer, because this is always a fake
+    # tensor of some sort.  Furthermore, these example values serve as the
+    # runtime state of Dynamo tracing, which means if metadata mutation
+    # occurs, the example_value gets directly updated (so you can't rely on
+    # this to accurately reflect what the state of the value was at the time
+    # the program was traced).
+    node.meta["example_value"] = example_value
+    shape_env = TracingContext.get().fake_mode.shape_env
+    if symbol_to_path := torch.fx.experimental.symbolic_shapes.compute_unbacked_bindings(
+        shape_env, example_value
+    ):
+        node.meta["unbacked_bindings"] = symbol_to_path
 
 
 def _get_fake_tensor(vt):
@@ -1793,7 +1819,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
                 "Tried to use data-dependent value in the subsequent computation. "
                 "This can happen when we encounter unbounded dynamic value that is unknown during tracing time.  "
                 "You will need to explicitly give hint to the compiler. Please take a look at "
-                f"constrain_as_value OR constrain_as_size APIs.  {cause}",
+                f"torch._check OR torch._check_is_size APIs.  {cause}",
                 case_name="constrain_as_size_example",
             )
         elif isinstance(cause, ValueRangeError):
@@ -2018,26 +2044,6 @@ def tensor_always_has_static_shape(
     if not is_tensor:
         return True, TensorStaticReason.NOT_TENSOR
     return False, None
-
-
-def lazy_format_graph_code(name, gm, maybe_id=None):
-    def format_name():
-        if maybe_id is not None:
-            return f"{name} {maybe_id}"
-        else:
-            return name
-
-    return LazyString(
-        lambda: _format_graph_code(
-            f"===== {format_name()} =====\n",
-            gm.forward.__code__.co_filename,
-            gm.print_readable(print_output=False),
-        )
-    )
-
-
-def _format_graph_code(name, filename, graph_str):
-    return f"TRACED GRAPH\n {name} {filename} {graph_str}\n"
 
 
 def lazy_format_graph_tabular(fn_name, gm):
