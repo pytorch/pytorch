@@ -118,186 +118,192 @@ def insert_deferred_runtime_asserts(
                     ),
                 )
 
-    for node in graph.nodes:
-        # Placeholders can match symbols, but when we destructure them
-        # with size we have to make sure we insert the nodes after all
-        # the placeholders
-        with graph.inserting_before(
-            node.next if node not in placeholders else last_placeholder.next
-        ):
-            # Unfortunately, this logic still must remain because manual
-            # make_fx calls may not explicitly bind all symbolic ints as
-            # arguments to the function, so we must infer it from the other
-            # arguments
-            if (
-                node in placeholders
-                and (example_value := get_example_value(node)) is not None
+    for module in gm.modules():
+        if not isinstance(module, torch.fx.GraphModule):
+            continue
+        for node in module.graph.nodes:
+            graph = module.graph
+            # Placeholders can match symbols, but when we destructure them
+            # with size we have to make sure we insert the nodes after all
+            # the placeholders
+            with graph.inserting_before(
+                node.next if node not in placeholders else last_placeholder.next
             ):
+                # Unfortunately, this logic still must remain because manual
+                # make_fx calls may not explicitly bind all symbolic ints as
+                # arguments to the function, so we must infer it from the other
+                # arguments
+                if (
+                    node in placeholders
+                    and (example_value := get_example_value(node)) is not None
+                ):
 
-                def match_symbol(symint, cb):
-                    if (
-                        isinstance(symint, torch.SymInt)
-                        and isinstance(symint.node, SymNode)
-                        and isinstance(s := symint.node.expr, sympy.Symbol)
-                        and s not in symbol_to_proxy
-                        and s in needed_symbols
-                    ):
-                        symbol_to_proxy[s] = fx.Proxy(cb())
+                    def match_symbol(symint, cb):
+                        if (
+                            isinstance(symint, torch.SymInt)
+                            and isinstance(symint.node, SymNode)
+                            and isinstance(s := symint.node.expr, sympy.Symbol)
+                            and s not in symbol_to_proxy
+                            and s in needed_symbols
+                        ):
+                            symbol_to_proxy[s] = fx.Proxy(cb())
+                            log.debug("symbol_to_proxy[%s] = %s", s, symbol_to_proxy[s])
+
+                    match_symbol(example_value, lambda: node)
+                    if isinstance(t := example_value, torch.Tensor):
+                        for i, s in enumerate(t.size()):
+                            match_symbol(s, lambda: graph.call_method("size", (node, i)))
+                        for i, s in enumerate(t.stride()):
+                            match_symbol(s, lambda: graph.call_method("stride", (node, i)))
+                        match_symbol(
+                            t.storage_offset(),
+                            lambda: graph.call_method("storage_offset", (node,)),
+                        )
+
+                # Handle asserts that aren't associated with any symbol.  This
+                # doesn't really have to be in the loop as it will only run once,
+                # it just needs to happen right after the placeholders.
+                if node not in placeholders:
+                    add_runtime_asserts(ras_by_symbol.pop(None, []))  # type: ignore[call-overload]
+
+                defs = []
+
+                if unbacked_bindings := node.meta.get("unbacked_bindings"):
+                    for s, keypath in unbacked_bindings.items():
+                        defs.append(s)
+
+                        # TODO: some CSE when generating these nodes can probably
+                        # help reduce graph size and improve compile itme
+                        def go(node, keypath):
+                            if keypath == ():
+                                return node
+                            if (
+                                len(keypath) >= 2
+                                and isinstance(keypath[0], CallMethodKey)
+                                and isinstance(keypath[1], pytree.SequenceKey)
+                            ):
+                                return go(
+                                    graph.call_method(
+                                        keypath[0].name, (node, keypath[1].idx)
+                                    ),
+                                    keypath[2:],
+                                )
+                            elif isinstance(keypath[0], CallMethodKey):
+                                return go(
+                                    graph.call_method(keypath[0].name, (node,)), keypath[1:]
+                                )
+                            elif isinstance(keypath[0], pytree.SequenceKey):
+                                return go(
+                                    graph.call_function(
+                                        operator.getitem, (node, keypath[0].idx)
+                                    ),
+                                    keypath[1:],
+                                )
+                            elif isinstance(keypath[0], ConvertIntKey):
+                                return go(
+                                    graph.call_function(
+                                        cast_symbool_to_symint_guardless, (node,)
+                                    ),
+                                    keypath[1:],
+                                )
+                            elif isinstance(keypath[0], DivideByKey):
+                                # TODO: need to assert divisibility
+                                return go(
+                                    graph.call_function(
+                                        operator.floordiv, (node, keypath[0].divisor)
+                                    ),
+                                    keypath[1:],
+                                )
+                            else:
+                                raise AssertionError(f"unrecognized keypath {keypath}")
+
+                        symbol_to_proxy[s] = fx.Proxy(go(node, keypath))
                         log.debug("symbol_to_proxy[%s] = %s", s, symbol_to_proxy[s])
 
-                match_symbol(example_value, lambda: node)
-                if isinstance(t := example_value, torch.Tensor):
-                    for i, s in enumerate(t.size()):
-                        match_symbol(s, lambda: graph.call_method("size", (node, i)))
-                    for i, s in enumerate(t.stride()):
-                        match_symbol(s, lambda: graph.call_method("stride", (node, i)))
-                    match_symbol(
-                        t.storage_offset(),
-                        lambda: graph.call_method("storage_offset", (node,)),
-                    )
+                for i0 in defs:
+                    ras = ras_by_symbol.pop(i0, [])
+                    # Before we perform any asserts, first apply range
+                    # refinement.  This is important, because if we are going
+                    # to retrace the graph (and we typically are if we send
+                    # the graph to AOTAutograd), we need to make sure we apply
+                    # range refinement (ala _check_is_size) first, BEFORE we
+                    # run any of the asserts.  Otherwise, we may decide to
+                    # perform substitutions based on the asserts which we then
+                    # can't back out, because value ranges can only be applied
+                    # to asserts.)
+                    #
+                    # A perhaps better long term plan is to avoid this order
+                    # dependence by making it possible to refine ranges on
+                    # arbitrary expressions, not just symbols.  But it is not
+                    # so easy to make use of this information, see
+                    # https://twitter.com/ezyang/status/1745801370299482492
+                    # We actually made an attempt at this in
+                    # https://github.com/pytorch/pytorch/pull/119043
+                    # which didn't work.
+                    #
+                    # Another ideas for how to do this:
+                    # - Have bound_sympy be the source of truth of the ranges of any expression
+                    # - Cache intermediate results for every subexpression of bound_sympy
+                    # - This cache should be possible to edit to refine ranges
+                    #
+                    # One issue with this proposal is that if
+                    # we have a bound on 2x, we are not going to be able to
+                    # apply it for 4x.  Similarly, we may have bounds for an
+                    # equivalent expression that we are not applying because
+                    # it's not a perfect match (e.g. x < y vs y > x)".
+                    #
+                    # The first issue we already have it and it's impossible
+                    # to solve in general, so any implementation on a best
+                    # effort basis should do.
+                    #
+                    # The second issue is a preexisting one. It can be mitigated
+                    # with a normalisation algorithm. In general, it may also
+                    # be on a best effort basis, but since our grammar is not
+                    # terribly difficult, chances are we could even fully
+                    # normalise SymPy expressions... who knows.
 
-            # Handle asserts that aren't associated with any symbol.  This
-            # doesn't really have to be in the loop as it will only run once,
-            # it just needs to happen right after the placeholders.
-            if node not in placeholders:
-                add_runtime_asserts(ras_by_symbol.pop(None, []))  # type: ignore[call-overload]
-
-            defs = []
-
-            if unbacked_bindings := node.meta.get("unbacked_bindings"):
-                for s, keypath in unbacked_bindings.items():
-                    defs.append(s)
-
-                    # TODO: some CSE when generating these nodes can probably
-                    # help reduce graph size and improve compile itme
-                    def go(node, keypath):
-                        if keypath == ():
-                            return node
-                        if (
-                            len(keypath) >= 2
-                            and isinstance(keypath[0], CallMethodKey)
-                            and isinstance(keypath[1], pytree.SequenceKey)
-                        ):
-                            return go(
-                                graph.call_method(
-                                    keypath[0].name, (node, keypath[1].idx)
-                                ),
-                                keypath[2:],
-                            )
-                        elif isinstance(keypath[0], CallMethodKey):
-                            return go(
-                                graph.call_method(keypath[0].name, (node,)), keypath[1:]
-                            )
-                        elif isinstance(keypath[0], pytree.SequenceKey):
-                            return go(
-                                graph.call_function(
-                                    operator.getitem, (node, keypath[0].idx)
-                                ),
-                                keypath[1:],
-                            )
-                        elif isinstance(keypath[0], ConvertIntKey):
-                            return go(
-                                graph.call_function(
-                                    cast_symbool_to_symint_guardless, (node,)
-                                ),
-                                keypath[1:],
-                            )
-                        elif isinstance(keypath[0], DivideByKey):
-                            # TODO: need to assert divisibility
-                            return go(
-                                graph.call_function(
-                                    operator.floordiv, (node, keypath[0].divisor)
-                                ),
-                                keypath[1:],
+                    if i0 in shape_env.size_like:
+                        if export:
+                            graph.call_function(
+                                torch.ops.aten.sym_constrain_range_for_size.default,
+                                (symbol_to_proxy[i0].node,),
                             )
                         else:
-                            raise AssertionError(f"unrecognized keypath {keypath}")
+                            graph.call_function(
+                                torch._check_is_size, (symbol_to_proxy[i0].node,)
+                            )
 
-                    symbol_to_proxy[s] = fx.Proxy(go(node, keypath))
-                    log.debug("symbol_to_proxy[%s] = %s", s, symbol_to_proxy[s])
+                    vr = shape_env.var_to_range[i0]
+                    if not shape_env._default_unspecified_value_range().issubset(vr):
+                        # The runtime range is constrained, so add a runtime
+                        # assert and also explicitly refine the range
+                        # (refinement should not be necessary once runtime
+                        # asserts cause refinement, but that's NYI)
+                        def convert(s):
+                            try:
+                                return int(s)
+                            except TypeError:
+                                return None
 
-            for i0 in defs:
-                ras = ras_by_symbol.pop(i0, [])
-                # Before we perform any asserts, first apply range
-                # refinement.  This is important, because if we are going
-                # to retrace the graph (and we typically are if we send
-                # the graph to AOTAutograd), we need to make sure we apply
-                # range refinement (ala _check_is_size) first, BEFORE we
-                # run any of the asserts.  Otherwise, we may decide to
-                # perform substitutions based on the asserts which we then
-                # can't back out, because value ranges can only be applied
-                # to asserts.)
-                #
-                # A perhaps better long term plan is to avoid this order
-                # dependence by making it possible to refine ranges on
-                # arbitrary expressions, not just symbols.  But it is not
-                # so easy to make use of this information, see
-                # https://twitter.com/ezyang/status/1745801370299482492
-                # We actually made an attempt at this in
-                # https://github.com/pytorch/pytorch/pull/119043
-                # which didn't work.
-                #
-                # Another ideas for how to do this:
-                # - Have bound_sympy be the source of truth of the ranges of any expression
-                # - Cache intermediate results for every subexpression of bound_sympy
-                # - This cache should be possible to edit to refine ranges
-                #
-                # One issue with this proposal is that if
-                # we have a bound on 2x, we are not going to be able to
-                # apply it for 4x.  Similarly, we may have bounds for an
-                # equivalent expression that we are not applying because
-                # it's not a perfect match (e.g. x < y vs y > x)".
-                #
-                # The first issue we already have it and it's impossible
-                # to solve in general, so any implementation on a best
-                # effort basis should do.
-                #
-                # The second issue is a preexisting one. It can be mitigated
-                # with a normalisation algorithm. In general, it may also
-                # be on a best effort basis, but since our grammar is not
-                # terribly difficult, chances are we could even fully
-                # normalise SymPy expressions... who knows.
+                        if export:
+                            graph.call_function(
+                                torch.ops.aten.sym_constrain_range.default,
+                                (symbol_to_proxy[i0].node,),
+                                {
+                                    "min": convert(vr.lower),
+                                    "max": convert(vr.upper),
+                                },
+                            )
+                        else:
+                            graph.call_function(
+                                torch._constrain_as_value,
+                                (
+                                    symbol_to_proxy[i0].node,
+                                    convert(vr.lower),
+                                    convert(vr.upper),
+                                ),
+                            )
 
-                if i0 in shape_env.size_like:
-                    if export:
-                        graph.call_function(
-                            torch.ops.aten.sym_constrain_range_for_size.default,
-                            (symbol_to_proxy[i0].node,),
-                        )
-                    else:
-                        graph.call_function(
-                            torch._check_is_size, (symbol_to_proxy[i0].node,)
-                        )
 
-                vr = shape_env.var_to_range[i0]
-                if not shape_env._default_unspecified_value_range().issubset(vr):
-                    # The runtime range is constrained, so add a runtime
-                    # assert and also explicitly refine the range
-                    # (refinement should not be necessary once runtime
-                    # asserts cause refinement, but that's NYI)
-                    def convert(s):
-                        try:
-                            return int(s)
-                        except TypeError:
-                            return None
-
-                    if export:
-                        graph.call_function(
-                            torch.ops.aten.sym_constrain_range.default,
-                            (symbol_to_proxy[i0].node,),
-                            {
-                                "min": convert(vr.lower),
-                                "max": convert(vr.upper),
-                            },
-                        )
-                    else:
-                        graph.call_function(
-                            torch._constrain_as_value,
-                            (
-                                symbol_to_proxy[i0].node,
-                                convert(vr.lower),
-                                convert(vr.upper),
-                            ),
-                        )
-
-                add_runtime_asserts(ras)
+                    add_runtime_asserts(ras)
+                    module.recompile()
