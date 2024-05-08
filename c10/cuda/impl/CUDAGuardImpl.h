@@ -205,10 +205,34 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     cuda_stream.synchronize();
   }
 
+  void synchronizeEvent(void* event) const override {
+    if (!event)
+      return;
+    cudaEvent_t cuda_event = static_cast<cudaEvent_t>(event);
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      (*interp)->trace_gpu_event_synchronization(
+          c10::kCUDA,
+          reinterpret_cast<uintptr_t>(cuda_event));
+    }
+    AT_CUDA_CHECK(cudaEventSynchronize(cuda_event));
+  }
+
   void recordDataPtrOnStream(const c10::DataPtr& data_ptr, const Stream& stream)
       const override {
     CUDAStream cuda_stream{stream};
     CUDACachingAllocator::recordStream(data_ptr, cuda_stream);
+  }
+
+  double elapsedTime(void* event1, void* event2) const override {
+    TORCH_CHECK(event1 && event2,
+      "Both events must be recorded before calculating elapsed time.");
+    cudaEvent_t cuda_event1 = static_cast<cudaEvent_t>(event1);
+    cudaEvent_t cuda_event2 = static_cast<cudaEvent_t>(event2);
+    float time_ms = 0;
+    // raise cudaErrorNotReady if either event is recorded but not yet completed
+    AT_CUDA_CHECK(cudaEventElapsedTime(&time_ms, cuda_event1, cuda_event2));
+    return static_cast<double>(time_ms);
   }
 };
 
