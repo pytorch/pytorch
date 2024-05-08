@@ -343,6 +343,24 @@ class CPUReproTests(TestCase):
         ]
         self.common(fn, inps)
 
+    @config.patch(freezing=True)
+    def test_module_buffer_mutation(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("foo", torch.rand((3, 10)))
+
+            def forward(self, x):
+                lx = [x, x.clone(), x.clone()]
+                y = []
+                for i in range(3):
+                    y.append(lx[i] + self.foo[i])
+                return torch.cat(y, 1)
+
+        with torch.no_grad():
+            example_inputs = (torch.rand(1, 10),)
+            self.common(Model(), example_inputs)
+
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_linear_packed(self):
@@ -3618,6 +3636,16 @@ class CPUReproTests(TestCase):
             return torch.nn.functional.pad(x, (0, 13))
 
         x = torch.randint(0, 100, (819,), dtype=torch.int64)
+        metrics.reset()
+        self.common(fn, (x,))
+        assert metrics.generated_cpp_vec_kernel_count == 1
+
+    def test_reduction_float_to_int64(self):
+        # https://github.com/pytorch/pytorch/issues/124821
+        def fn(x):
+            return x.max(0).values
+
+        x = torch.randint(0, 100, (22, 51), dtype=torch.int64)
         metrics.reset()
         self.common(fn, (x,))
         assert metrics.generated_cpp_vec_kernel_count == 1

@@ -3,7 +3,7 @@
 import os
 
 import run_test
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class DummyOptions:
@@ -30,7 +30,9 @@ class DeterminationTest(TestCase):
         return [
             test
             for test in cls.TESTS
-            if run_test.should_run_test(run_test.TARGET_DET_LIST, test, changed_files, DummyOptions())
+            if run_test.should_run_test(
+                run_test.TARGET_DET_LIST, test, changed_files, DummyOptions()
+            )
         ]
 
     def test_target_det_list_is_sorted(self):
@@ -42,9 +44,7 @@ class DeterminationTest(TestCase):
 
     def test_config_change_only(self):
         """CI configs trigger all tests"""
-        self.assertEqual(
-            self.determined_tests([".ci/pytorch/test.sh"]), self.TESTS
-        )
+        self.assertEqual(self.determined_tests([".ci/pytorch/test.sh"]), self.TESTS)
 
     def test_run_test(self):
         """run_test.py is imported by determination tests"""
@@ -68,14 +68,17 @@ class DeterminationTest(TestCase):
     def test_test_file(self):
         """Test files trigger themselves and dependent tests"""
         self.assertEqual(
-            self.determined_tests(["test/test_jit.py"]), ["test_jit_profiling", "test_jit"]
+            self.determined_tests(["test/test_jit.py"]),
+            ["test_jit_profiling", "test_jit"],
         )
         self.assertEqual(
             self.determined_tests(["test/jit/test_custom_operators.py"]),
             ["test_jit_profiling", "test_jit"],
         )
         self.assertEqual(
-            self.determined_tests(["test/quantization/eager/test_quantize_eager_ptq.py"]),
+            self.determined_tests(
+                ["test/quantization/eager/test_quantize_eager_ptq.py"]
+            ),
             ["test_quantization"],
         )
 
