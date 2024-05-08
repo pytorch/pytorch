@@ -496,11 +496,11 @@ void GroupNorm1dForward(
     auto iter = TensorIteratorConfig()
                     .resize_outputs(false)
                     .add_owned_output(Y.view({N, G, D}))
-                    .add_owned_input(X.view({N, G, D}))
+                    .add_owned_const_input(X.view({N, G, D}))
                     .add_owned_input(mean.view({N, G, 1}))
                     .add_owned_input(rstd.view({N, G, 1}))
-                    .add_owned_input(gamma.view({1, G, D}))
-                    .add_owned_input(beta.view({1, G, D}))
+                    .add_owned_const_input(gamma.view({1, G, D}))
+                    .add_owned_const_input(beta.view({1, G, D}))
                     .build();
     gpu_kernel(iter, [] GPU_LAMBDA(T x, T mean, T rstd, T gamma, T beta) -> T {
       return (static_cast<T_ACC>(x) - static_cast<T_ACC>(mean)) *
@@ -511,10 +511,10 @@ void GroupNorm1dForward(
     auto iter = TensorIteratorConfig()
                     .resize_outputs(false)
                     .add_owned_output(Y.view({N, G, D}))
-                    .add_owned_input(X.view({N, G, D}))
+                    .add_owned_const_input(X.view({N, G, D}))
                     .add_owned_input(mean.view({N, G, 1}))
                     .add_owned_input(rstd.view({N, G, 1}))
-                    .add_owned_input(gamma.view({1, G, D}))
+                    .add_owned_const_input(gamma.view({1, G, D}))
                     .build();
     gpu_kernel(iter, [] GPU_LAMBDA(T x, T mean, T rstd, T gamma) -> T {
       return (static_cast<T_ACC>(x) - static_cast<T_ACC>(mean)) *
@@ -524,10 +524,10 @@ void GroupNorm1dForward(
     auto iter = TensorIteratorConfig()
                     .resize_outputs(false)
                     .add_owned_output(Y.view({N, G, D}))
-                    .add_owned_input(X.view({N, G, D}))
+                    .add_owned_const_input(X.view({N, G, D}))
                     .add_owned_input(mean.view({N, G, 1}))
                     .add_owned_input(rstd.view({N, G, 1}))
-                    .add_owned_input(beta.view({1, G, D}))
+                    .add_owned_const_input(beta.view({1, G, D}))
                     .build();
     gpu_kernel(iter, [] GPU_LAMBDA(T x, T mean, T rstd, T beta) -> T {
       return (static_cast<T_ACC>(x) - static_cast<T_ACC>(mean)) *
@@ -538,7 +538,7 @@ void GroupNorm1dForward(
     auto iter = TensorIteratorConfig()
                     .resize_outputs(false)
                     .add_owned_output(Y.view({N * G, D}))
-                    .add_owned_input(X.view({N * G, D}))
+                    .add_owned_const_input(X.view({N * G, D}))
                     .add_owned_input(mean.view({N * G, 1}))
                     .add_owned_input(rstd.view({N * G, 1}))
                     .build();
@@ -590,7 +590,7 @@ void GroupNormKernelImplInternal(
     auto iter = TensorIteratorConfig()
                     .resize_outputs(false)
                     .add_owned_output(Y.view({N * G, D * HxW}))
-                    .add_owned_input(X.view({N * G, D * HxW}))
+                    .add_owned_const_input(X.view({N * G, D * HxW}))
                     .add_owned_input(mean.view({N * G, 1}))
                     .add_owned_input(rstd.view({N * G, 1}))
                     .build();
@@ -622,7 +622,7 @@ void GroupNormKernelImplInternal(
                     .check_all_same_dtype(std::is_same<T, T_ACC>::value)
                     .resize_outputs(false)
                     .add_owned_output(Y.view({N * C, HxW}))
-                    .add_owned_input(X.view({N * C, HxW}))
+                    .add_owned_const_input(X.view({N * C, HxW}))
                     .add_owned_input(a.view({N * C, 1}))
                     .add_owned_input(b.view({N * C, 1}))
                     .build();
@@ -719,12 +719,12 @@ void GroupNorm1dBackward(
                       .check_all_same_dtype(std::is_same<T, T_ACC>::value)
                       .resize_outputs(false)
                       .add_owned_output(dX.view({N, G, D}))
-                      .add_owned_input(dY.view({N, G, D}))
-                      .add_owned_input(X.view({N, G, D}))
-                      .add_owned_input(rstd.view({N, G, 1}))
-                      .add_owned_input(gamma.view({1, G, D}))
-                      .add_owned_input(c2.view({N, G, 1}))
-                      .add_owned_input(c3.view({N, G, 1}))
+                      .add_owned_const_input(dY.view({N, G, D}))
+                      .add_owned_const_input(X.view({N, G, D}))
+                      .add_owned_const_input(rstd.view({N, G, 1}))
+                      .add_owned_const_input(gamma.view({1, G, D}))
+                      .add_owned_const_input(c2.view({N, G, 1}))
+                      .add_owned_const_input(c3.view({N, G, 1}))
                       .build();
       gpu_kernel(
           iter,
@@ -739,11 +739,11 @@ void GroupNorm1dBackward(
                       .check_all_same_dtype(std::is_same<T, T_ACC>::value)
                       .resize_outputs(false)
                       .add_owned_output(dX.view({N * G, D}))
-                      .add_owned_input(dY.view({N * G, D}))
-                      .add_owned_input(X.view({N * G, D}))
-                      .add_owned_input(rstd.view({N * G, 1}))
-                      .add_owned_input(c2.view({N * G, 1}))
-                      .add_owned_input(c3.view({N * G, 1}))
+                      .add_owned_const_input(dY.view({N * G, D}))
+                      .add_owned_const_input(X.view({N * G, D}))
+                      .add_owned_const_input(rstd.view({N * G, 1}))
+                      .add_owned_const_input(c2.view({N * G, 1}))
+                      .add_owned_const_input(c3.view({N * G, 1}))
                       .build();
       gpu_kernel(
           iter, [] GPU_LAMBDA(T dy, T x, T rstd, T_ACC c2, T_ACC c3) -> T {
@@ -865,8 +865,8 @@ void GroupNormBackwardKernelImplInternal(
       auto iter = TensorIteratorConfig()
                       .check_all_same_dtype(std::is_same<T, T_ACC>::value)
                       .add_output(c1)
-                      .add_owned_input(rstd.view({N, G, 1}))
-                      .add_owned_input(gamma.view({1, G, D}))
+                      .add_owned_const_input(rstd.view({N, G, 1}))
+                      .add_owned_const_input(gamma.view({1, G, D}))
                       .build();
       gpu_kernel(iter, [] GPU_LAMBDA(T rstd, T gamma) -> T_ACC {
         return static_cast<T_ACC>(rstd) * static_cast<T_ACC>(gamma);
@@ -895,11 +895,11 @@ void GroupNormBackwardKernelImplInternal(
                       .check_all_same_dtype(std::is_same<T, T_ACC>::value)
                       .resize_outputs(false)
                       .add_owned_output(dX.view({N * G, D, HxW}))
-                      .add_owned_input(dY.view({N * G, D, HxW}))
-                      .add_owned_input(X.view({N * G, D, HxW}))
-                      .add_owned_input(c1.view({N * G, D, 1}))
-                      .add_owned_input(c2.view({N * G, 1, 1}))
-                      .add_owned_input(c3.view({N * G, 1, 1}))
+                      .add_owned_const_input(dY.view({N * G, D, HxW}))
+                      .add_owned_const_input(X.view({N * G, D, HxW}))
+                      .add_owned_const_input(c1.view({N * G, D, 1}))
+                      .add_owned_const_input(c2.view({N * G, 1, 1}))
+                      .add_owned_const_input(c3.view({N * G, 1, 1}))
                       .build();
       gpu_kernel(
           iter, [] GPU_LAMBDA(T dy, T x, T_ACC c1, T_ACC c2, T_ACC c3) -> T {
@@ -911,11 +911,11 @@ void GroupNormBackwardKernelImplInternal(
                       .check_all_same_dtype(std::is_same<T, T_ACC>::value)
                       .resize_outputs(false)
                       .add_owned_output(dX.view({N * G, D * HxW}))
-                      .add_owned_input(dY.view({N * G, D * HxW}))
-                      .add_owned_input(X.view({N * G, D * HxW}))
-                      .add_owned_input(rstd.view({N * G, 1}))
-                      .add_owned_input(c2.view({N * G, 1}))
-                      .add_owned_input(c3.view({N * G, 1}))
+                      .add_owned_const_input(dY.view({N * G, D * HxW}))
+                      .add_owned_const_input(X.view({N * G, D * HxW}))
+                      .add_owned_const_input(rstd.view({N * G, 1}))
+                      .add_owned_const_input(c2.view({N * G, 1}))
+                      .add_owned_const_input(c3.view({N * G, 1}))
                       .build();
       gpu_kernel(
           iter, [] GPU_LAMBDA(T dy, T x, T_ACC c1, T_ACC c2, T_ACC c3) -> T {

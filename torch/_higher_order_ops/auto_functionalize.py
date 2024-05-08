@@ -23,7 +23,7 @@ from torch.fx.experimental.proxy_tensor import (
 # op. First, when FakeTensor sees this op:
 # - If the schema says it returns nothing, we can generate a trivial
 #   FakeTensor rule for it (that returns nothing).
-# - Otherwise, the user needs to provide a FakeTensor rule (abstract impl)
+# - Otherwise, the user needs to provide a FakeTensor impl (fake impl)
 #
 # Next, when Python FunctionalTensor sees the op, it will functionalize
 # it by emitting a call to an auto_functionalize(op, ["x"], {"x": ...})
@@ -251,3 +251,11 @@ def do_auto_functionalize(
         ctx.sync(orig_arg)
 
     return ctx.wrap_tensors(unwrapped_actual_out)  # type: ignore[arg-type]
+
+
+@auto_functionalized.py_functionalize_impl
+def auto_functionalized_func(ctx, _mutable_op, **kwargs):
+    unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
+    with ctx.redispatch_to_next():
+        result = auto_functionalized(_mutable_op, **unwrapped_kwargs)
+    return ctx.wrap_tensors(result)

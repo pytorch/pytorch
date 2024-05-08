@@ -143,10 +143,10 @@ struct Argument {
         inferred_type_hint);
   }
 
-  Argument cloneWithType(TypePtr new_type) const {
+  Argument cloneWithType(const TypePtr& new_type) const {
     return Argument(
         name_,
-        std::move(new_type),
+        new_type,
         N_,
         default_value_,
         kwarg_only_,

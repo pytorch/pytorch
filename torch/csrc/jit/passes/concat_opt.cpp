@@ -1,6 +1,8 @@
 #include <torch/csrc/jit/passes/concat_opt.h>
 
 #include <algorithm>
+#include <deque>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 

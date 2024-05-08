@@ -1,16 +1,21 @@
 # Owner(s): ["module: unknown"]
 
 import copy
-from torch.testing._internal.common_utils import TestCase, skipIfTorchDynamo
 import logging
-import torch
-from torch.ao.pruning._experimental.activation_sparsifier.activation_sparsifier import ActivationSparsifier
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.ao.pruning.sparsifier.utils import module_to_fqn
 from typing import List
 
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.ao.pruning._experimental.activation_sparsifier.activation_sparsifier import (
+    ActivationSparsifier,
+)
+from torch.ao.pruning.sparsifier.utils import module_to_fqn
+from torch.testing._internal.common_utils import skipIfTorchDynamo, TestCase
+
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+)
 
 
 class Model(nn.Module):
@@ -45,7 +50,7 @@ class TestActivationSparsifier(TestCase):
         in the activation sparsifier
         """
         sparsifier_defaults = activation_sparsifier.defaults
-        combined_defaults = {**defaults, 'sparse_config': sparse_config}
+        combined_defaults = {**defaults, "sparse_config": sparse_config}
 
         # more keys are populated in activation sparsifier (eventhough they may be None)
         assert len(combined_defaults) <= len(activation_sparsifier.defaults)
@@ -54,7 +59,9 @@ class TestActivationSparsifier(TestCase):
             # all the keys in combined_defaults should be present in sparsifier defaults
             assert config == combined_defaults.get(key, None)
 
-    def _check_register_layer(self, activation_sparsifier, defaults, sparse_config, layer_args_list):
+    def _check_register_layer(
+        self, activation_sparsifier, defaults, sparse_config, layer_args_list
+    ):
         """Checks if layers in the model are correctly mapped to it's arguments.
 
         Args:
@@ -82,14 +89,14 @@ class TestActivationSparsifier(TestCase):
             sparse_config_actual = copy.deepcopy(sparse_config)
             sparse_config_actual.update(sparse_config_layer)
 
-            name = module_to_fqn(activation_sparsifier.model, layer_arg['layer'])
+            name = module_to_fqn(activation_sparsifier.model, layer_arg["layer"])
 
-            assert data_groups[name]['sparse_config'] == sparse_config_actual
+            assert data_groups[name]["sparse_config"] == sparse_config_actual
 
             # assert the rest
             other_config_actual = copy.deepcopy(defaults)
             other_config_actual.update(layer_arg)
-            other_config_actual.pop('layer')
+            other_config_actual.pop("layer")
 
             for key, value in other_config_actual.items():
                 assert key in data_groups[name]
@@ -119,13 +126,15 @@ class TestActivationSparsifier(TestCase):
         data_agg_actual = data_list[0]
         model = activation_sparsifier.model
         layer_name = module_to_fqn(model, model.conv1)
-        agg_fn = activation_sparsifier.data_groups[layer_name]['aggregate_fn']
+        agg_fn = activation_sparsifier.data_groups[layer_name]["aggregate_fn"]
 
         for i in range(1, len(data_list)):
             data_agg_actual = agg_fn(data_agg_actual, data_list[i])
 
-        assert 'data' in activation_sparsifier.data_groups[layer_name]
-        assert torch.all(activation_sparsifier.data_groups[layer_name]['data'] == data_agg_actual)
+        assert "data" in activation_sparsifier.data_groups[layer_name]
+        assert torch.all(
+            activation_sparsifier.data_groups[layer_name]["data"] == data_agg_actual
+        )
 
         return data_agg_actual
 
@@ -144,11 +153,11 @@ class TestActivationSparsifier(TestCase):
         layer_name = module_to_fqn(model, model.conv1)
         assert layer_name is not None
 
-        reduce_fn = activation_sparsifier.data_groups[layer_name]['reduce_fn']
+        reduce_fn = activation_sparsifier.data_groups[layer_name]["reduce_fn"]
 
         data_reduce_actual = reduce_fn(data_agg_actual)
-        mask_fn = activation_sparsifier.data_groups[layer_name]['mask_fn']
-        sparse_config = activation_sparsifier.data_groups[layer_name]['sparse_config']
+        mask_fn = activation_sparsifier.data_groups[layer_name]["mask_fn"]
+        sparse_config = activation_sparsifier.data_groups[layer_name]["sparse_config"]
         mask_actual = mask_fn(data_reduce_actual, **sparse_config)
 
         mask_model = activation_sparsifier.get_mask(layer_name)
@@ -156,8 +165,7 @@ class TestActivationSparsifier(TestCase):
         assert torch.all(mask_model == mask_actual)
 
         for config in activation_sparsifier.data_groups.values():
-            assert 'data' not in config
-
+            assert "data" not in config
 
     def _check_squash_mask(self, activation_sparsifier, data):
         """Makes sure that squash_mask() works as usual. Specifically, checks
@@ -172,11 +180,12 @@ class TestActivationSparsifier(TestCase):
             data (torch tensor)
                 dummy batched data
         """
+
         # create a forward hook for checking output == layer(input * mask)
         def check_output(name):
             mask = activation_sparsifier.get_mask(name)
-            features = activation_sparsifier.data_groups[name].get('features')
-            feature_dim = activation_sparsifier.data_groups[name].get('feature_dim')
+            features = activation_sparsifier.data_groups[name].get("features")
+            feature_dim = activation_sparsifier.data_groups[name].get("feature_dim")
 
             def hook(module, input, output):
                 input_data = input[0]
@@ -184,19 +193,27 @@ class TestActivationSparsifier(TestCase):
                     assert torch.all(mask * input_data == output)
                 else:
                     for feature_idx in range(0, len(features)):
-                        feature = torch.Tensor([features[feature_idx]], device=input_data.device).long()
-                        inp_data_feature = torch.index_select(input_data, feature_dim, feature)
-                        out_data_feature = torch.index_select(output, feature_dim, feature)
+                        feature = torch.Tensor(
+                            [features[feature_idx]], device=input_data.device
+                        ).long()
+                        inp_data_feature = torch.index_select(
+                            input_data, feature_dim, feature
+                        )
+                        out_data_feature = torch.index_select(
+                            output, feature_dim, feature
+                        )
 
-                        assert torch.all(mask[feature_idx] * inp_data_feature == out_data_feature)
+                        assert torch.all(
+                            mask[feature_idx] * inp_data_feature == out_data_feature
+                        )
+
             return hook
 
         for name, config in activation_sparsifier.data_groups.items():
-            if 'identity' in name:
-                config['layer'].register_forward_hook(check_output(name))
+            if "identity" in name:
+                config["layer"].register_forward_hook(check_output(name))
 
         activation_sparsifier.model(data)
-
 
     def _check_state_dict(self, sparsifier1):
         """Checks if loading and restoring of state_dict() works as expected.
@@ -222,8 +239,8 @@ class TestActivationSparsifier(TestCase):
 
         for name, state in sparsifier2.state.items():
             assert name in sparsifier1.state
-            mask1 = sparsifier1.state[name]['mask']
-            mask2 = state['mask']
+            mask1 = sparsifier1.state[name]["mask"]
+            mask2 = state["mask"]
 
             if mask1 is None:
                 assert mask2 is None
@@ -237,8 +254,8 @@ class TestActivationSparsifier(TestCase):
                     assert torch.all(mask1 == mask2)
 
         # make sure that the state dict is stored as torch sparse
-        for state in state_dict['state'].values():
-            mask = state['mask']
+        for state in state_dict["state"].values():
+            mask = state["mask"]
             if mask is not None:
                 if isinstance(mask, List):
                     for idx in range(len(mask)):
@@ -252,8 +269,16 @@ class TestActivationSparsifier(TestCase):
             assert layer_name in dg2
 
             # exclude hook and layer
-            config1 = {key: value for key, value in config.items() if key not in ['hook', 'layer']}
-            config2 = {key: value for key, value in dg2[layer_name].items() if key not in ['hook', 'layer']}
+            config1 = {
+                key: value
+                for key, value in config.items()
+                if key not in ["hook", "layer"]
+            }
+            config2 = {
+                key: value
+                for key, value in dg2[layer_name].items()
+                if key not in ["hook", "layer"]
+            }
 
             assert config1 == config2
 
@@ -263,6 +288,7 @@ class TestActivationSparsifier(TestCase):
         till squash_mask().
         The idea is to check that everything works as expected while in the workflow.
         """
+
         # defining aggregate, reduce and mask functions
         def agg_fn(x, y):
             return x + y
@@ -287,14 +313,9 @@ class TestActivationSparsifier(TestCase):
 
         # Creating default function and sparse configs
         # default sparse_config
-        sparse_config = {
-            'sparsity_level': 0.5
-        }
+        sparse_config = {"sparsity_level": 0.5}
 
-        defaults = {
-            'aggregate_fn': agg_fn,
-            'reduce_fn': reduce_fn
-        }
+        defaults = {"aggregate_fn": agg_fn, "reduce_fn": reduce_fn}
 
         # simulate the workflow
         # STEP 1: make data and activation sparsifier object
@@ -306,35 +327,41 @@ class TestActivationSparsifier(TestCase):
 
         # STEP 2: Register some layers
         register_layer1_args = {
-            'layer': model.conv1,
-            'mask_fn': _vanilla_norm_sparsifier
+            "layer": model.conv1,
+            "mask_fn": _vanilla_norm_sparsifier,
         }
-        sparse_config_layer1 = {'sparsity_level': 0.3}
+        sparse_config_layer1 = {"sparsity_level": 0.3}
 
         register_layer2_args = {
-            'layer': model.linear1,
-            'features': [0, 10, 234],
-            'feature_dim': 1,
-            'mask_fn': _vanilla_norm_sparsifier
+            "layer": model.linear1,
+            "features": [0, 10, 234],
+            "feature_dim": 1,
+            "mask_fn": _vanilla_norm_sparsifier,
         }
-        sparse_config_layer2 = {'sparsity_level': 0.1}
+        sparse_config_layer2 = {"sparsity_level": 0.1}
 
         register_layer3_args = {
-            'layer': model.identity1,
-            'mask_fn': _vanilla_norm_sparsifier
+            "layer": model.identity1,
+            "mask_fn": _vanilla_norm_sparsifier,
         }
-        sparse_config_layer3 = {'sparsity_level': 0.3}
+        sparse_config_layer3 = {"sparsity_level": 0.3}
 
         register_layer4_args = {
-            'layer': model.identity2,
-            'features': [0, 10, 20],
-            'feature_dim': 1,
-            'mask_fn': _vanilla_norm_sparsifier
+            "layer": model.identity2,
+            "features": [0, 10, 20],
+            "feature_dim": 1,
+            "mask_fn": _vanilla_norm_sparsifier,
         }
-        sparse_config_layer4 = {'sparsity_level': 0.1}
+        sparse_config_layer4 = {"sparsity_level": 0.1}
 
-        layer_args_list = [(register_layer1_args, sparse_config_layer1), (register_layer2_args, sparse_config_layer2)]
-        layer_args_list += [(register_layer3_args, sparse_config_layer3), (register_layer4_args, sparse_config_layer4)]
+        layer_args_list = [
+            (register_layer1_args, sparse_config_layer1),
+            (register_layer2_args, sparse_config_layer2),
+        ]
+        layer_args_list += [
+            (register_layer3_args, sparse_config_layer3),
+            (register_layer4_args, sparse_config_layer4),
+        ]
 
         # Registering..
         for layer_args in layer_args_list:
@@ -342,7 +369,9 @@ class TestActivationSparsifier(TestCase):
             activation_sparsifier.register_layer(**layer_arg, **sparse_config_layer)
 
         # check if things are registered correctly
-        self._check_register_layer(activation_sparsifier, defaults, sparse_config, layer_args_list)
+        self._check_register_layer(
+            activation_sparsifier, defaults, sparse_config, layer_args_list
+        )
 
         # check state_dict after registering and before model forward
         self._check_state_dict(activation_sparsifier)

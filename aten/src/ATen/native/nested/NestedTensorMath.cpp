@@ -403,7 +403,7 @@ Tensor NestedTensor_sum_dim_CPU(
   AT_DISPATCH_ALL_TYPES_AND2(
     ScalarType::Half, ScalarType::BFloat16, buffer.scalar_type(), "nested_sum_dim_cpu", [&]() {
     auto* output_data = output_buffer.data_ptr<scalar_t>();
-    const auto* input_data = buffer.data_ptr<scalar_t>();
+    const auto* input_data = buffer.const_data_ptr<scalar_t>();
     int64_t out_idx = 0, in_idx = 0;
     for (const auto i : c10::irange(ntensors)) {
       int64_t segments = num_segments[i].item<int64_t>();
@@ -859,6 +859,12 @@ Tensor _nested_view_from_buffer(
     nested_sizes,
     nested_strides,
     storage_offsets);
+}
+
+std::tuple<Tensor, Tensor> _nested_compute_contiguous_strides_offsets(const Tensor& nested_size) {
+  return std::make_tuple(
+      construct_nested_strides(nested_size),
+      construct_offsets(nested_size));
 }
 
 // See Note [Special size rule for nested tensor]

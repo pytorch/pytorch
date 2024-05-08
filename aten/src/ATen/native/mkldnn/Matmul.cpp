@@ -78,6 +78,13 @@ bool use_mkldnn_matmul(
     return false;
 }
 
+void mkldnn_matmul_i8i8i32(
+    const Tensor &mat1,
+    const Tensor &mat2,
+    const Tensor &result) {
+  TORCH_INTERNAL_ASSERT(false, __func__, ": ATen not compiled with MKLDNN support");
+}
+
 } // namespace native
 } // namespace at
 
@@ -400,6 +407,109 @@ bool use_mkldnn_matmul(
     const Tensor& mat2,
     const Tensor& result) {
   return (use_mkldnn_bf16_matmul(mat1, mat2, result) || use_mkldnn_fp16_matmul(mat1, mat2, result) || use_mkldnn_bf32_matmul(mat1, mat2, result));
+}
+
+static void _mkldnn_matmul_i8i8i32_with_primitive(
+    const Tensor &mat1,
+    const Tensor &mat2,
+    const Tensor &result) {
+  // Create ideep tensors for oneDNN computation
+  auto src = ideep::tensor(
+      {mat1.sizes().vec(),
+       ideep::tensor::data_type::s8,
+       mat1.strides().vec()},
+      mat1.data_ptr());
+  auto wei = ideep::tensor(
+      {mat2.sizes().vec(),
+       ideep::tensor::data_type::s8,
+       mat2.strides().vec()},
+      mat2.data_ptr());
+  auto dst = ideep::tensor(
+      {result.sizes().vec(),
+       ideep::tensor::data_type::s32,
+       result.strides().vec()},
+      result.data_ptr());
+  // Create primitive desc
+  auto engine = ideep::engine::cpu_engine();
+  ideep::attr_t op_attr;
+  op_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
+  auto src_desc = src.get_desc();
+  auto wei_desc = wei.get_desc();
+  auto dst_desc = dst.get_desc();
+  auto prim_desc = dnnl::matmul::primitive_desc(
+      engine, src_desc, wei_desc, dst_desc, op_attr);
+  // Reorder mat2 if needed
+  auto expected_weight = wei.reorder_if_differ_in(prim_desc.weights_desc());
+  // Prepare args for primitive
+  ideep::tensor scratchpad(prim_desc.scratchpad_desc());
+  ideep::exec_args args;
+  args.insert({DNNL_ARG_SRC, src});
+  args.insert({DNNL_ARG_WEIGHTS, expected_weight});
+  args.insert({DNNL_ARG_DST, dst});
+  args.insert({DNNL_ARG_SCRATCHPAD, scratchpad});
+  // Create primitve and execute
+  auto primitive = dnnl::matmul(prim_desc);
+  primitive.execute(ideep::stream::default_stream(), args);
+}
+
+static void _mkldnn_gemm_i8i8i32_with_blas(
+  const Tensor& self,
+  const Tensor& mat2,
+  const Tensor& result) {
+    const int m = result.size(0);
+    const int n = result.size(1);
+    const int k = self.size(1);
+
+    const char transa = self.strides()[1] == 1 ? 'N' : 'T';
+    const char transb = mat2.strides()[1] == 1 ? 'N' : 'T';
+    const char offsetc = 'F';
+
+    const int lda = transa == 'T' ? self.stride(1) : self.stride(0);
+    const int ldb = transb == 'T' ? mat2.stride(1) : mat2.stride(0);
+    const int ldc = n;
+
+    const float alpha = 1;
+    const float beta = 0;
+
+    int8_t ao = 0;
+    int8_t bo = 0;
+    int32_t co = 0;
+
+    dnnl::gemm_s8s8s32(
+        transa,
+        transb,
+        offsetc,
+        m,
+        n,
+        k,
+        alpha,
+        (int8_t*)self.data_ptr(),
+        lda,
+        ao,
+        (int8_t*)mat2.data_ptr(),
+        ldb,
+        bo,
+        beta,
+        (int32_t*)result.data_ptr(),
+        ldc,
+        &co);
+  }
+
+void mkldnn_matmul_i8i8i32(
+    const Tensor &mat1,
+    const Tensor &mat2,
+    const Tensor &result) {
+  // x:s8 * w:s8 -> y:s32
+  // both inputs should be 2d
+  // In most cases, using DNNL blas API is faster but it requires a/b contiguous along one dimentsion
+  bool a_is_contigous = (mat1.stride(0) == 1 || mat1.stride(1) == 1);
+  bool b_is_contigous = (mat2.stride(0) == 1 || mat2.stride(1) == 1);
+
+  if (a_is_contigous && b_is_contigous) {
+    _mkldnn_gemm_i8i8i32_with_blas(mat1, mat2, result);
+  } else {
+    _mkldnn_matmul_i8i8i32_with_primitive(mat1, mat2, result);
+  }
 }
 
 } // namespace native

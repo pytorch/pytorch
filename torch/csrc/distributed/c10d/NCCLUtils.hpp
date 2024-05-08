@@ -198,6 +198,9 @@ class TORCH_API DebugInfoWriter {
   virtual void write(const std::string& ncclTrace);
   static DebugInfoWriter& getWriter(int rank);
   static void registerWriter(std::unique_ptr<DebugInfoWriter> writer);
+  virtual std::string getWriterTarget() {
+    return filename_;
+  }
 
  protected:
   DebugInfoWriter(std::string namePrefix, int rank) {
@@ -300,7 +303,7 @@ class NCCLComm {
   }
 #endif
 
-#if defined(IS_NCCL_EXP) && defined(NCCL_COMM_DUMP)
+#if defined(IS_NCCLX) && defined(NCCL_COMM_DUMP)
   std::unordered_map<std::string, std::string> ncclCommDump() {
     std::unordered_map<std::string, std::string> dump;
     if (isAborted()) {

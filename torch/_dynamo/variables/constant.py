@@ -81,6 +81,9 @@ class ConstantVariable(VariableTracker):
     def as_python_constant(self):
         return self.value
 
+    def is_python_constant(self):
+        return True
+
     @property
     def items(self):
         """
@@ -119,7 +122,7 @@ class ConstantVariable(VariableTracker):
             )
         member = getattr(self.value, name)
         if callable(member):
-            raise NotImplementedError()
+            raise NotImplementedError
         return member
 
     def call_method(
@@ -209,5 +212,5 @@ class EnumVariable(VariableTracker):
     def const_getattr(self, tx, name):
         member = getattr(self.value, name)
         if callable(member):
-            raise NotImplementedError()
+            raise NotImplementedError
         return member

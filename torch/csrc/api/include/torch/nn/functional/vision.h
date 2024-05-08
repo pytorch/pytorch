@@ -95,7 +95,7 @@ inline Tensor grid_sample(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.grid_sample
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.grid_sample
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::GridSampleFuncOptions`
