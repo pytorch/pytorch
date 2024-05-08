@@ -699,6 +699,48 @@ class TestProfiler(TestCase):
         if torch.cuda.is_available():
             check_metrics(stats, "device_memory_usage", deallocs=["[memory]"])
 
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    def test_kineto_cupti_range_profiler(self):
+        """CUPTI provides a newer Profiling API from CUDA 10.0 that enables measuring
+        performance events for the GPU. This is supported as an experimental pytorch profiler feature.
+        Read more here https://docs.nvidia.com/cupti/r_main.html#r_profiler.
+        """
+        exp_config = _ExperimentalConfig(
+            profiler_metrics=[
+                # Metrics list at https://docs.nvidia.com/cupti/r_main.html#r_profiler
+                # or use kineto__tensor_core_insts, kineto__cuda_core_flops
+                "kineto__tensor_core_insts",
+                "dram__bytes_read.sum",
+                "dram__bytes_write.sum",
+            ],
+            profiler_measure_per_kernel=True,
+        )
+        with _profile(
+            use_cuda=True, use_kineto=True, experimental_config=exp_config
+        ) as p:
+            self.payload(use_cuda=True)
+
+        def check_trace(fname):
+            with open(fname) as f:
+                trace = json.load(f)
+                self.assertTrue("traceEvents" in trace)
+                events = trace["traceEvents"]
+                found_cupti_profiler_events = False
+                for evt in events:
+                    self.assertTrue("name" in evt)
+                    if "__cupti_profiler__" in evt["name"]:
+                        found_cupti_profiler_events = True
+                # PyTorch OSS CI runs in docker containers where the Range Profiler
+                # does not have sufficient privilege level (CUPTI_ERROR_INSUFFICIENT_PRIVILEGES).
+                # We can check that the profiler does not crash the job and the trace is not
+                # malformed, however do not check the actual presence of data.
+                self.assertTrue(1 or found_cupti_profiler_events)
+
+        with TemporaryFileName(mode="w+") as fname:
+            p.export_chrome_trace(fname)
+            check_trace(fname)
+
     @unittest.skipIf(
         IS_JETSON, "Jetson has a guard against OOM since host and gpu memory are shared"
     )

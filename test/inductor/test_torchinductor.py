@@ -6245,6 +6245,11 @@ class CommonTemplate:
 
         self.common(fn, [torch.randn(64, 64)])
 
+    def test_new_cpp_build_logical(self):
+        from torch._inductor.codecache import validate_new_cpp_commands
+
+        validate_new_cpp_commands()
+
     def test_as_strided(self):
         def fn(x):
             return (
@@ -9611,7 +9616,12 @@ class CommonTemplate:
         # This used to not compile due to a wrong return type of randint64_cpu
         # See https://github.com/pytorch/pytorch/issues/117435
         def fn(n):
-            return torch.randint(low=-5, high=5, size=(n,), dtype=torch.int64) % 10
+            return (
+                torch.randint(
+                    low=-5, high=5, size=(n,), dtype=torch.int64, device=self.device
+                )
+                % 10
+            )
 
         res = torch.compile(fn)(20)
         self.assertTrue(torch.all((0 <= res) & (res < 10)).item())
