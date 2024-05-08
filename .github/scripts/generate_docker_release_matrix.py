@@ -32,6 +32,9 @@ def generate_docker_matrix() -> Dict[str, List[Dict[str, str]]]:
                     "cudnn_version": generate_binary_build_matrix.CUDA_ARCHES_CUDNN_VERSION[
                         cuda
                     ],
+                    "cudnn_full_version": generate_binary_build_matrix.CUDA_ARCHES_FULL_CUDNN_VERSION[
+                        cuda
+                    ],
                     "image_type": image,
                     "platform": "linux/amd64",
                 }
@@ -41,6 +44,7 @@ def generate_docker_matrix() -> Dict[str, List[Dict[str, str]]]:
             "cuda": "cpu",
             "cuda_full_version": "",
             "cudnn_version": "",
+            "cudnn_full_version": "",
             "image_type": "runtime",
             "platform": "linux/arm64",
         }

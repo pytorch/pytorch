@@ -66,7 +66,8 @@ jobs:
       BUILD_PLATFORMS: ${{ matrix.platform }}
       CUDA_VERSION: ${{ matrix.cuda_full_version }}
       CUDA_VERSION_SHORT: ${{ matrix.cuda }}
-      CUDNN_VERSION: ${{ matrix.cudnn_version }}
+      CUDNN__VERSION: ${{ matrix.cudnn_full_version }}
+      CUDNN_VERSION_SHORT: ${{ matrix.cudnn_version }}
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
@@ -129,7 +130,7 @@ jobs:
       - name: Push nightly tags
         if: ${{ github.event.ref == 'refs/heads/nightly' && matrix.image_type == 'runtime' }}
         run: |
-          PYTORCH_DOCKER_TAG="${PYTORCH_VERSION}-cuda${CUDA_VERSION_SHORT}-cudnn${CUDNN_VERSION}-runtime"
+          PYTORCH_DOCKER_TAG="${PYTORCH_VERSION}-cuda${CUDA_VERSION_SHORT}-cudnn${CUDNN_VERSION_SHORT}-runtime"
           CUDA_SUFFIX="-cu${CUDA_VERSION}"
           if [[ ${CUDA_VERSION_SHORT} == "cpu" ]]; then
             PYTORCH_DOCKER_TAG="${PYTORCH_VERSION}-runtime"

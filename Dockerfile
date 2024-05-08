@@ -9,6 +9,20 @@ ARG BASE_IMAGE=ubuntu:22.04
 ARG PYTHON_VERSION=3.11
 
 FROM ${BASE_IMAGE} as dev-base
+
+ARG CUDNN_VERSION
+ARG CUDNN_VERSION_SHORT
+
+ENV NV_CUDNN_PACKAGE_NAME "libcudnn${CUDNN_VERSION_SHORT}"
+ENV NV_CUDNN_PACKAGE "${NV_CUDNN_PACKAGE_NAME}=${CUDNN_VERSION}-1+cuda${CUDA_VERSION}"
+ENV NV_CUDNN_PACKAGE_DEV "${NV_CUDNN_PACKAGE_NAME}-dev=${CUDNN_VERSION}-1+cuda${CUDA_VERSION}"
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ${NV_CUDNN_PACKAGE} \
+    ${NV_CUDNN_PACKAGE_DEV} \
+    && apt-mark hold ${NV_CUDNN_PACKAGE_NAME} \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         build-essential \
         ca-certificates \
