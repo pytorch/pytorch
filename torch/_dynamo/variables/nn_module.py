@@ -223,6 +223,11 @@ class NNModuleVariable(VariableTracker):
             return VariableBuilder(tx, NNModuleSource(source))(subobj)
         else:
             if istype(subobj, property):
+                if self.source:
+                    # Read the class attribute to reach the property
+                    source = AttrSource(AttrSource(self.source, "__class__"), name)
+                    # Get the getter function
+                    source = AttrSource(source, "fget")
                 return variables.UserFunctionVariable(
                     subobj.fget,
                     source=source,
