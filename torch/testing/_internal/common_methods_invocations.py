@@ -8724,7 +8724,7 @@ def sample_inputs_efficient_attention_forward(op_info, device, dtype, requires_g
     )
 
     # jagged (with query/keys offsets)
-    cu_seqlens_k = torch.arange(-1, 32 * 2 + 1, dtype=torch.int32, device=device)
+    cu_seqlens_k = torch.arange(-1, 32 * 2 + 1, 2, dtype=torch.int32, device=device)
     cu_seqlens_k[-1] = 62
     cu_seqlens_k[0] = 0
     samples.append(
@@ -8733,7 +8733,7 @@ def sample_inputs_efficient_attention_forward(op_info, device, dtype, requires_g
             make((6, 64)).view(-1, 8, 8).unsqueeze(0),
             make((6, 64)).view(-1, 8, 8).unsqueeze(0),
             bias=None,
-            cu_seqlens_q=torch.arange(0, 32 * 2 + 2, dtype=torch.int32, device=device),
+            cu_seqlens_q=torch.arange(0, 32 * 2 + 2, 2, dtype=torch.int32, device=device),
             cu_seqlens_k=cu_seqlens_k,
             max_seqlen_q=2,
             max_seqlen_k=2,
