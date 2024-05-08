@@ -33,6 +33,7 @@ from torch.testing._internal.common_quantized import (
 )
 from torch.ao.quantization import PerChannelMinMaxObserver
 from torch.testing._internal.common_cuda import TEST_CUDNN, TEST_CUDNN_VERSION, TEST_CUDA
+from torch.testing._internal.common_device_type import skipCUDAIfRocm
 from torch.testing._internal.optests import opcheck
 import torch.backends.xnnpack
 
@@ -907,6 +908,7 @@ class TestQuantizedOps(TestCase):
     (Similar to test_qadd_relu_different_qparams, will probably merge in the future)"""
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
     @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
+    @skipCUDAIfRocm
     def test_qadd_relu_cudnn(self):
         dtype = torch.qint8
         add_relu = torch.ops.quantized.add_relu
@@ -1392,6 +1394,7 @@ class TestQuantizedOps(TestCase):
            ceil_mode=st.booleans())
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
     @unittest.skipIf(TEST_CUDNN_VERSION <= 90100, "cuDNN maxpool2d mishandles -128 before v90100")
+    @skipCUDAIfRocm
     def test_max_pool2d_cudnn(self, X, kernel, stride, dilation, padding, ceil_mode):
         X, (scale, zero_point, torch_type) = X
         assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
@@ -5421,6 +5424,7 @@ class TestQuantizedConv(TestCase):
     @skipIfNoFBGEMM
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
     @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
+    @skipCUDAIfRocm
     def test_qconv2d_cudnn(
             self,
             batch_size,
@@ -6307,6 +6311,7 @@ class TestQuantizedConv(TestCase):
     @skipIfNoFBGEMM
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
     @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
+    @skipCUDAIfRocm
     def test_qconv1d_relu_cudnn(
         self,
         batch_size,
