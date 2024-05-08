@@ -47,6 +47,20 @@ struct VecMaskCast<int, 1, float, 1> {
   }
 };
 
+template <>
+struct VecMaskCast<float, 2, int, 2> {
+  static inline VecMask<float, 2> apply(const VecMask<int, 2>& vec_mask) {
+    return VectorizedN<float, 2>(_mm256_castsi256_ps(vec_mask[0]), _mm256_castsi256_ps(vec_mask[1]));
+  }
+};
+
+template <>
+struct VecMaskCast<int, 2, float, 2> {
+  static inline VecMask<int, 2> apply(const VecMask<float, 2>& vec_mask) {
+    return VectorizedN<int, 2>(_mm256_castps_si256(vec_mask[0]), _mm256_castps_si256(vec_mask[1]));
+  }
+};
+
 template <typename dst_t>
 struct VecMaskCast<dst_t, 1, int64_t, 2> {
   static inline VecMask<dst_t, 1> apply(const VecMask<int64_t, 2>& vec_mask) {
