@@ -1245,6 +1245,19 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_nan_assert(self):
+        os.environ["TORCH_NCCL_NAN_CHECK"] = "1"
+
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_nccl(store, self.opts())
+        device = self.rank_to_GPU[self.rank][0]
+        nan_tensor = torch.full((2, 3), float("nan"), device=device)
+        with self.assertRaises(RuntimeError):
+            pg.allreduce(nan_tensor)
+        del pg
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_destruct_before_terminate_pg(self):
         # Disable ASYNC_ERROR_HANDLING for this test to ensure we can programmatically
         # abort the process group.
