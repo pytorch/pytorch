@@ -12,6 +12,8 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <fmt/format.h>
 
+//#define _CAPTURE_KERNEL 1
+
 namespace at::native {
 
 using namespace mps;
@@ -103,6 +105,8 @@ struct Vec4Type<bfloat> {
 };
 #endif
 
+constant uint threadGroupSize = 128;
+
 template<typename T>
 kernel void int8pack_mm(
     constant T                 * A              [[buffer(0)]],
@@ -110,34 +114,47 @@ kernel void int8pack_mm(
     constant T                 * scales         [[buffer(2)]],
     device   T                 * outputData     [[buffer(3)]],
     constant uint3             & sizes          [[buffer(4)]],
-    uint2                        thread_index   [[thread_position_in_grid]]) {
+    uint2                        thread_index   [[thread_position_in_grid]],
+    uint2                        group_index    [[thread_position_in_threadgroup]]) {
     const uint lda = sizes.y;
     const uint ldc = sizes.z;
     const uint m = thread_index.y; // 0..sizes.x-1
     const uint n = thread_index.x; // 0..sizes.z-1
+    const uint k_max = sizes.y / 4;
+    const uint num_kb = (k_max  + threadGroupSize - 1) / threadGroupSize;
     using vecT = typename Vec4Type<T>::type;
     constant vecT *A_ptr = reinterpret_cast<constant vecT*>(A + m * lda);
     constant char4 *B_ptr = reinterpret_cast<constant char4*>(B + n * lda);
 
     float rc = 0.0;
-    for(uint k = 0; k < sizes.y/4;  k++) {
-      const auto a_val = float4(A_ptr[k]);
-      const auto b_val = float4(B_ptr[k]);
-      rc += dot(a_val, b_val);
+    uint k = 0;
+    threadgroup float4 A_shared[threadGroupSize];
+    for(uint kb = 0; kb  < num_kb ; kb++) {
+      const auto k_idx_lim = min(threadGroupSize, k_max - kb * threadGroupSize);
+      if (group_index.x < k_idx_lim) {
+        A_shared[group_index.x] = float4(A_ptr[kb * threadGroupSize + group_index.x]);
+      }
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+      for(uint k_idx = 0; k_idx < k_idx_lim; k_idx++, k++) {
+        const auto a_val = A_shared[k_idx];
+        const auto b_val = float4(B_ptr[k]);
+        rc += dot(a_val, b_val);
+      }
     }
     outputData[m * sizes.z + n] = T(rc * float(scales[n]));
 }
 
-#define INSTANTIATE_INT8MM(DTYPE)                                     \
-template                                                              \
-[[host_name("int8pack_mm_" #DTYPE)]]                                  \
-kernel void int8pack_mm<DTYPE>(                                       \
-    constant DTYPE            * A            [[buffer(0)]],           \
-    constant char             * B            [[buffer(1)]],           \
-    constant DTYPE            * scales       [[buffer(2)]],           \
-    device   DTYPE            * outputData   [[buffer(3)]],           \
-    constant uint3            & sizes        [[buffer(4)]],           \
-    uint2                       thread_index [[thread_position_in_grid]])
+#define INSTANTIATE_INT8MM(DTYPE)                                                  \
+template                                                                           \
+[[host_name("int8pack_mm_" #DTYPE)]]                                               \
+kernel void int8pack_mm<DTYPE>(                                                    \
+    constant DTYPE            * A            [[buffer(0)]],                        \
+    constant char             * B            [[buffer(1)]],                        \
+    constant DTYPE            * scales       [[buffer(2)]],                        \
+    device   DTYPE            * outputData   [[buffer(3)]],                        \
+    constant uint3            & sizes        [[buffer(4)]],                        \
+    uint2                       thread_index [[thread_position_in_grid]],          \
+    uint2                       group_index    [[thread_position_in_threadgroup]])
 
 INSTANTIATE_INT8MM(half);
 INSTANTIATE_INT8MM(float);
@@ -178,7 +195,6 @@ Tensor _weight_int4pack_mm_mps(const Tensor& A, const Tensor& B, int64_t qGroupS
   auto C = at::empty({M, N}, A.options());
   MPSStream* mpsStream = getCurrentMPSStream();
   std::array<uint32_t, 3> sizes = {static_cast<uint32_t>(M), static_cast<uint32_t>(K), static_cast<uint32_t>(N)};
-  static bool firstCapture = false;
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
 #if _CAPTURE_KERNEL
@@ -239,7 +255,6 @@ Tensor _weight_int8pack_mm_mps(const Tensor& A, const Tensor& B, const Tensor& s
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
       const std::string kernel = fmt::format("int8pack_mm_{}", scalarToMetalTypeString(A));
       id<MTLComputePipelineState> quantizedPSO = lib.getPipelineStateForFunc(kernel);
-      const auto maxThreadsPerGroup = static_cast<decltype(M)>([quantizedPSO maxTotalThreadsPerThreadgroup]);
       [computeEncoder setComputePipelineState:quantizedPSO];
       mtl_setBuffer(computeEncoder, A, 0);
       mtl_setBuffer(computeEncoder, B, 1);
@@ -247,7 +262,7 @@ Tensor _weight_int8pack_mm_mps(const Tensor& A, const Tensor& B, const Tensor& s
       mtl_setBuffer(computeEncoder, C, 3);
       [computeEncoder setBytes:sizes.data() length:sizeof(uint32_t) * sizes.size() atIndex:4];
       [computeEncoder dispatchThreads:MTLSizeMake(N, M, 1)
-                threadsPerThreadgroup:MTLSizeMake(std::min(maxThreadsPerGroup, M), 1, 1)];
+                threadsPerThreadgroup:MTLSizeMake(128, 1, 1)];
 #if _CAPTURE_KERNEL
       if (getMPSProfiler().isCapturing()) {
         getMPSProfiler().stopCapture(mpsStream);
