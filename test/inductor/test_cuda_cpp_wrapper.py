@@ -209,6 +209,7 @@ if RUN_CUDA:
         BaseTest("test_multi_device"),
         BaseTest("test_multi_threading"),
         BaseTest("test_profiler_mark_wrapper_call"),
+        BaseTest("test_randint"),
         BaseTest("test_reduction1"),  # Reduction
         BaseTest("test_relu"),  # multiple inputs
         BaseTest("test_repeat_interleave_2"),
