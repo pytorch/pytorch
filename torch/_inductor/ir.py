@@ -3595,8 +3595,8 @@ class TritonTemplateBuffer(TemplateBuffer):
         self.mutated_inputs = mutated_inputs
         if mutated_inputs is not None:
             # Ensure that the mutated inputs are only allowed for certain nodes
-            allowed_set = {"flex_attention"}
-            current_node = str(V.graph.current_node)
+            allowed_set = {torch.ops.higher_order.flex_attention}
+            current_node = V.graph.current_node.target
             assert (
                 current_node in allowed_set
             ), f"Mutated inputs are only allowed for {allowed_set} but got {current_node}"
@@ -7674,7 +7674,7 @@ class InterpreterShim(torch.fx.Interpreter):
         self.graph = graph
         self.submodules = submodules
         self.extra_traceback = False
-        self.fetch_attr = submodules.__getitem__  # type: ignore[method-assign]
+        self.fetch_attr = submodules.__getitem__
         self.current_node = None
 
     def run_node(self, n: torch.fx.Node) -> Any:
