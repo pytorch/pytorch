@@ -192,8 +192,9 @@ class autocast:
         enabled(bool, optional):  Whether autocasting should be enabled in the region.
             Default: ``True``
         dtype(torch_dtype, optional):  Data type for ops run in autocast. It uses the default value
-            (``torch.float16`` for CUDA and ``torch.bfloat16`` for CPU, by default), given by
-            :func:`~torch.get_autocast_dtype`, if :attr:`dtype` is ``None``(default).
+            (``torch.float16`` for CUDA and ``torch.bfloat16`` for CPU), given by
+            :func:`~torch.get_autocast_dtype`, if :attr:`dtype` is ``None``.
+            Default: ``None``
         cache_enabled(bool, optional):  Whether the weight cache inside autocast should be enabled.
             Default: ``True``
     """
