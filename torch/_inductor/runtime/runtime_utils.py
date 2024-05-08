@@ -10,7 +10,6 @@ import tempfile
 import time
 
 import torch
-from torch._inductor.utils import is_cpu_device
 
 
 def conditional_product(*args):
@@ -72,6 +71,8 @@ def get_max_y_grid():
 
 
 def do_bench(fn, fn_args, fn_kwargs, **kwargs):
+    from torch._inductor.utils import is_cpu_device
+
     args = list(fn_args)
     args.extend(fn_kwargs.values())
     if is_cpu_device(args):
