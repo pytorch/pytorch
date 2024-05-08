@@ -41,6 +41,8 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TestCase,
 )
+
+from torch.testing._internal.torchbind_impls import init_torchbind_implementations
 from torch.utils._pytree import (
     LeafSpec,
     tree_flatten,
@@ -562,18 +564,20 @@ class TestUnflatten(TestCase):
 
     @skipIfTorchDynamo("custom objects not supported in dynamo yet")
     def test_unflatten_constant_obj(self):
-        if IS_MACOS:
-            raise unittest.SkipTest("non-portable load_library call used in test")
-        elif IS_SANDCASTLE or IS_FBCODE:
-            torch.ops.load_library(
-                "//caffe2/test/cpp/jit:test_custom_class_registrations"
-            )
-        elif IS_WINDOWS:
-            lib_file_path = find_library_location("torchbind_test.dll")
-            torch.ops.load_library(str(lib_file_path))
-        else:
-            lib_file_path = find_library_location("libtorchbind_test.so")
-            torch.ops.load_library(str(lib_file_path))
+        init_torchbind_implementations()
+
+        @torch._library.register_fake_class("_TorchScriptTesting::_Foo")
+        class FakeFoo:
+            def __init__(self, x: int, y: int):
+                self.x = x
+                self.y = y
+
+            @classmethod
+            def __obj_unflatten__(cls, flat_ctx):
+                return cls(**dict(flat_ctx))
+
+            def add_tensor(self, z):
+                return (self.x + self.y) * z
 
         class SubMod(torch.nn.Module):
             def __init__(self):
