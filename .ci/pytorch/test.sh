@@ -522,6 +522,11 @@ test_single_dynamo_benchmark() {
   fi
 }
 
+test_inductor_micro_benchmark() {
+  TEST_REPORTS_DIR=$(pwd)/test/test-micro-reports
+  python benchmarks/gpt_fast/benchmark.py
+}
+
 test_dynamo_benchmark() {
   # Usage: test_dynamo_benchmark huggingface 0
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
@@ -1209,6 +1214,8 @@ elif [[ "$TEST_CONFIG" == deploy ]]; then
   test_torch_deploy
 elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
   test_inductor_distributed
+elif [[ "${TEST_CONFIG}" == *inductor-micro-benchmark* ]]; then
+  test_inductor_micro_benchmark
 elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
   install_torchvision
   id=$((SHARD_NUMBER-1))
