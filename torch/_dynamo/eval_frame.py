@@ -413,7 +413,11 @@ class _TorchDynamoContext:
             cleanups = [enter() for enter in self.enter_exit_hooks]
             prior = set_eval_frame(callback)
             try:
-                return fn(*args, **kwargs)
+                # Ensure that if an assertion occurs after graph pushes
+                # something onto the DynamicLayerStack then we pop it off (the
+                # constructed graph code isn't guarded with try/finally).
+                with torch._C._functorch._PreserveDynamicLayerStack():
+                    return fn(*args, **kwargs)
             finally:
                 set_eval_frame(prior)
                 for cleanup in cleanups:
@@ -1329,7 +1333,7 @@ def export(
             # Running graph with interpreter is needed for propagating the stack_trace
             def graph_with_interpreter(*args):
                 with torch.fx.traceback.preserve_node_meta():
-                    return torch.fx.Interpreter(graph).run(*args)  # type: ignore[arg-type]
+                    return torch.fx.Interpreter(graph).run(*args)
 
             with maybe_disable_fake_tensor_mode(), enable_python_dispatcher(), (
                 fake_mode
