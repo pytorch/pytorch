@@ -665,6 +665,10 @@ class TestForeach(TestCase):
         filter(lambda op: op.supports_out, foreach_binary_op_db),
         dtypes=OpDTypes.supported,
     )
+    @unittest.skipIf(
+        torch.cuda.is_available() and not torch.cuda.get_device_capability(0) == (8, 6),
+        "failing flakily on non sm86 cuda jobs, ex https://github.com/pytorch/pytorch/issues/125775",
+    )
     def test_binary_op_list_slow_path(self, device, dtype, op):
         foreach_op, native_op, foreach_op_, native_op_ = self._get_funcs(op)
         # 0-strides
