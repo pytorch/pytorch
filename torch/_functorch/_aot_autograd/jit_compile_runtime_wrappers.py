@@ -190,8 +190,12 @@ def aot_dispatch_base(
         aot_config,
         fw_metadata=fw_metadata,
     )
-
+    # Why do we need to pass in num_fw_outs_saved_for_bw?
+    # See Note: [Partitioner handling for Subclasses, Part 2]
     compiled_fw_func = AOTDispatchSubclassWrapper(
+        trace_joint=False,
+        # TODO: once we use pre_compile this will be flat_fn at the top of this function
+        fw_only=None,
         maybe_subclass_meta=maybe_subclass_meta,
         num_fw_outs_saved_for_bw=None,
     ).post_compile(
@@ -448,6 +452,8 @@ def aot_dispatch_autograd(
                 )
 
             compiled_fw_func = AOTDispatchSubclassWrapper(
+                fw_only=None,
+                trace_joint=False,
                 maybe_subclass_meta=maybe_subclass_meta,
                 num_fw_outs_saved_for_bw=num_fw_outs_saved_for_bw,
             ).post_compile(
@@ -588,6 +594,11 @@ def aot_dispatch_autograd(
                     ctx.mark_dirty(arg)
                 marked_dirty_inps.append(arg)
 
+            # There is a pretty complicated calling convention around what the compiled fw returns.
+            # The full list of outputs and their relative order is:
+            # (*tokens, *mutated_inputs, *fw_outs, *fw_intermediate_bases, *saved_tensors, *saved_symints)
+            # - Note that in the synthetic bases case, mutated_inputs will correspond to an updated version
+            #   of the original view, and not the synthetic base
             fw_outs = call_func_at_runtime_with_args(
                 CompiledFunction.compiled_fw,
                 args,

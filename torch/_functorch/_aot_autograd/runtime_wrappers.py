@@ -10,7 +10,7 @@ import collections
 import pprint
 from dataclasses import dataclass
 from functools import wraps
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.utils.dlpack
@@ -42,13 +42,14 @@ from .subclass_utils import (
     wrap_tensor_subclasses,
 )
 
+from .traced_function_transforms import aot_dispatch_subclass
+
 from .utils import (
     call_func_at_runtime_with_args,
     make_boxed_func,
     partial_flatten_asdict,
     strict_zip,
 )
-
 
 zip = strict_zip
 
@@ -490,8 +491,28 @@ class FakifiedOutWrapper(CompilerWrapper):
 # This function handles the wrapping and unwrapping of tensor subclasses at runtime.
 @dataclass
 class AOTDispatchSubclassWrapper(CompilerWrapper):
+    trace_joint: bool
+    fw_only: Optional[Callable]  # Not cached, only used in pre_compile
     maybe_subclass_meta: Optional[SubclassMeta]
     num_fw_outs_saved_for_bw: Optional[int]
+
+    def pre_compile(
+        self,
+        flat_fn,
+        flat_args: List[Tensor],
+        aot_config: AOTConfig,
+        *,
+        fw_metadata: ViewAndMutationMeta,
+    ):
+        (new_flat_fn, new_flat_args, subclass_meta) = aot_dispatch_subclass(
+            flat_fn,
+            flat_args,
+            is_joint_structure=self.trace_joint,
+            meta=fw_metadata,
+            fw_only=self.fw_only,  # type: ignore[arg-type]
+        )
+        self.maybe_subclass_meta = subclass_meta
+        return new_flat_fn, new_flat_args, aot_config, fw_metadata
 
     def post_compile(
         self,
@@ -507,7 +528,9 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
 
         @wraps(compiled_fn)
         def inner_fn(args: List[Any]):
-            unwrapped_args = unwrap_tensor_subclasses(args, is_joint_structure=False)
+            unwrapped_args = unwrap_tensor_subclasses(
+                args, is_joint_structure=self.trace_joint
+            )
             args.clear()
             # expectation: runtime_fn is a boxed fn
             unwrapped_outs = compiled_fn(unwrapped_args)
