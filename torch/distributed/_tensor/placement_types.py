@@ -646,6 +646,12 @@ class DTensorSpec:
         """
         return all(placement.is_replicate() for placement in self.placements)
 
+    def is_sharded(self):
+        """
+        return True if the current DTensorSpec is sharded on any mesh dims (devices)
+        """
+        return any(placement.is_shard() for placement in self.placements)
+
     def shallow_copy_with_tensor_meta(
         self, tensor_meta: Optional[TensorMeta]
     ) -> "DTensorSpec":
