@@ -455,6 +455,9 @@ pad_channels_last = False
 # For user visible outputs, inductor will make sure the stride matches with eager.
 bw_outputs_user_visible = True
 
+# Whether to always use shape padding if it is enabled and possible
+force_shape_pad: bool = False
+
 # Fx-based linear/matmul/bmm + permute/transpose vertical fusion
 permute_fusion = os.environ.get("TORCHINDUCTOR_PERMUTE_FUSION", "0") == "1"
 
