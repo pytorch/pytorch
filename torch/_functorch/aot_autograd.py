@@ -67,8 +67,8 @@ from ._aot_autograd.logging_utils import (  # noqa: F401
     track_graph_compiling,
 )
 from ._aot_autograd.runtime_wrappers import (  # noqa: F401
-    aot_wrapper_dedupe,
     aot_wrapper_synthetic_base,
+    AOTDedupeWrapper,
 )
 from ._aot_autograd.schemas import (  # noqa: F401
     AOTConfig,
@@ -675,7 +675,7 @@ or otherwise set torch._functorch.config.functionalize_rng_ops = False."""
             compiler_fn=compiler_fn,
             needs_autograd=needs_autograd,
         )
-        compiler_fn = partial(aot_wrapper_dedupe, compiler_fn=compiler_fn)
+        compiler_fn = partial(AOTDedupeWrapper().create(), compiler_fn=compiler_fn)
         # You can put more passes here
 
         compiled_fn = compiler_fn(
