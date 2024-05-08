@@ -632,7 +632,8 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
 class AOTDedupeWrapper(CompilerWrapper):
     keep_arg_mask: List[bool] = field(default_factory=list)
     add_dupe_map: List[int] = field(default_factory=list)
-    strategy_1_ok: bool = False
+    old_input_metadata: List[InputAliasInfo] = field(default_factory=list)
+    needs_post_compile: bool = True
 
     # NB: Hot path, avoid set lookups here
     # TODO: Can avoid the zip here too, probably
@@ -675,7 +676,7 @@ class AOTDedupeWrapper(CompilerWrapper):
                 break
 
         if ok:
-            self.strategy_1_ok = True
+            self.needs_post_compile = False
             return flat_fn, leaf_flat_args, aot_config, fw_metadata
 
         if requires_subclass_dispatch(leaf_flat_args, fw_metadata):
@@ -810,7 +811,7 @@ class AOTDedupeWrapper(CompilerWrapper):
         *,
         fw_metadata: ViewAndMutationMeta,
     ):
-        if self.strategy_1_ok:
+        if not self.needs_post_compile:
             return compiled_fn
 
         @wraps(compiled_fn)
@@ -866,154 +867,179 @@ class AOTDedupeWrapper(CompilerWrapper):
 # (This function will in theory work if there are duplicate args.
 # However, the synthetic base code path is a bit sub-optimal, and running with dupe'd inputs
 # would cause us to hit that path more frequently).
-def aot_wrapper_synthetic_base(
-    flat_fn,
-    flat_args: List[Tensor],
-    aot_config: AOTConfig,
-    *,
-    fw_metadata: ViewAndMutationMeta,
-    # Currently, the only reason we need to plumb this bool is because
-    # the synthetic base code prohibits more cases in the autograd case than the inference case.
-    needs_autograd: bool,
-    compiler_fn,
-):
-    is_inference = not needs_autograd
-    flat_args_with_synthetic_bases, synthetic_base_info = merge_view_inputs(
-        flat_args,
-        fw_metadata.input_info,
-        is_inference=is_inference,
-    )
-    # Happy path: we don't need synthetic bases
-    if synthetic_base_info is None:
-        return compiler_fn(flat_fn, flat_args, aot_config, fw_metadata=fw_metadata)
+@dataclass
+class AOTSyntheticBaseWrapper(CompilerWrapper):
+    trace_joint: bool  # TODO: refactor trace_joint
+    needs_post_compile: bool = True
+    aliased_arg_idx_with_metadata_mutations: List[int] = field(default_factory=list)
 
-    # export path: ban synthetic bases for now, add later if requested.
-    if requires_subclass_dispatch(flat_args, fw_metadata):
-        raise RuntimeError(
-            """\
-Encountered aliased inputs that are mutated in the graph, but at least one input/output
-to the graph is a tensor subclass. This is not supported today. You can try to
-remove the aliasing yourself as a workaround, or otherwise file an issue on github."""
+    def pre_compile(
+        self,
+        flat_fn,
+        flat_args: List[Any],
+        aot_config: AOTConfig,
+        *,
+        fw_metadata: ViewAndMutationMeta,
+    ):
+        is_inference = not self.trace_joint
+        flat_args_with_synthetic_bases, synthetic_base_info = merge_view_inputs(
+            flat_args,
+            fw_metadata.input_info,
+            is_inference=is_inference,
         )
 
-    if aot_config.is_export:
-        raise RuntimeError(
-            f"""\
-Encountered aliased inputs that are mutated in the graph you are trying to export.
-This functionality is currently not supported. If needed, please file a github issue.
+        # Happy path: we don't need synthetic bases
+        if synthetic_base_info is None:
+            self.needs_post_compile = False
+            return flat_fn, flat_args, aot_config, fw_metadata
 
-synthetic_base_info={str(synthetic_base_info)}
+        # export path: ban synthetic bases for now, add later if requested.
+        if requires_subclass_dispatch(flat_args, fw_metadata):
+            raise RuntimeError(
+                """\
+        Encountered aliased inputs that are mutated in the graph, but at least one input/output
+        to the graph is a tensor subclass. This is not supported today. You can try to
+        remove the aliasing yourself as a workaround, or otherwise file an issue on github."""
+            )
 
-fw_metadata={str(fw_metadata)}
-        """
+        if aot_config.is_export:
+            raise RuntimeError(
+                f"""\
+        Encountered aliased inputs that are mutated in the graph you are trying to export.
+        This functionality is currently not supported. If needed, please file a github issue.
+
+        synthetic_base_info={str(synthetic_base_info)}
+
+        fw_metadata={str(fw_metadata)}
+                """
+            )
+
+        assert len(fw_metadata.input_info) == len(synthetic_base_info)
+
+        # Update our forward metadata to take synthetic bases into account
+        (
+            fw_metadata_updated,
+            aliased_arg_idx_with_metadata_mutations,
+        ) = create_synthetic_base_metadata(
+            fw_metadata, synthetic_base_info, flat_args, flat_args_with_synthetic_bases
+        )
+        # Save old input args for post-compile
+        self.old_input_info = fw_metadata.input_info
+
+        self.aliased_arg_idx_with_metadata_mutations = (
+            aliased_arg_idx_with_metadata_mutations
         )
 
-    assert len(fw_metadata.input_info) == len(synthetic_base_info)
+        num_aliased_args_with_metadata_mutations = len(
+            aliased_arg_idx_with_metadata_mutations
+        )
 
-    # Update our forward metadata to take synthetic bases into account
-    (
-        fw_metadata_updated,
-        aliased_arg_idx_with_metadata_mutations,
-    ) = create_synthetic_base_metadata(
-        fw_metadata, synthetic_base_info, flat_args, flat_args_with_synthetic_bases
-    )
+        def _unpack_synthetic_bases(primals: Tuple[Any, ...]) -> List[Any]:
+            f_args_inner = []
+            for inner_idx_or_tuple in synthetic_base_info:
+                if isinstance(inner_idx_or_tuple, int):
+                    f_args_inner.append(primals[inner_idx_or_tuple])
+                else:
+                    inner_base_idx, view_tensor = inner_idx_or_tuple
+                    base = primals[inner_base_idx]
+                    view_arg = gen_alias_from_base(
+                        base, view_tensor, view_tensor.requires_grad
+                    )
+                    f_args_inner.append(view_arg)
+            return f_args_inner
 
-    num_aliased_args_with_metadata_mutations = len(
-        aliased_arg_idx_with_metadata_mutations
-    )
-
-    def _unpack_synthetic_bases(primals: Tuple[Any, ...]) -> List[Any]:
-        f_args_inner = []
-        for inner_idx_or_tuple in synthetic_base_info:
-            if isinstance(inner_idx_or_tuple, int):
-                f_args_inner.append(primals[inner_idx_or_tuple])
+        @wraps(flat_fn)
+        def wrapped_flat_fn(*args):
+            unpacked_args = _unpack_synthetic_bases(args)
+            # This is a bit subtle. The goal of this entire function (aot_dispatch_synthetic_bases)
+            # is to relieve the downstream logic from having to reason about mutations on inputs that alias
+            # each other, by replacing aliased inputs with a synthetic base.
+            # One area where this breaks down a bit however is if one of those aliased inputs
+            # experienced a metadata mutation.
+            # We are now obligated to reapply the metadata mutation directly to the user's input;
+            # it isn't enough to apply mutations back to the synthetic base in the downstream logic.
+            #
+            # The way we handle this is by pretending that those aliased inputs that experience metadata mutations
+            # are additional outputs in the user's forward function.
+            # The downstream logic will just treat these as "user outputs that alias inputs".
+            # However, we will manually grab them at runtime here, use them to reapply the metadata mutation
+            # to the user inputs, and not return them to the user.
+            aliased_args_with_metadata_mutations = [
+                x
+                for i, x in enumerate(unpacked_args)
+                if i in self.aliased_arg_idx_with_metadata_mutations
+            ]
+            if len(aliased_args_with_metadata_mutations) > 0:
+                return *(flat_fn(*unpacked_args)), *aliased_args_with_metadata_mutations
             else:
-                inner_base_idx, view_tensor = inner_idx_or_tuple
-                base = primals[inner_base_idx]
-                view_arg = gen_alias_from_base(
-                    base, view_tensor, view_tensor.requires_grad
-                )
-                f_args_inner.append(view_arg)
-        return f_args_inner
+                return flat_fn(*unpacked_args)
 
-    @wraps(flat_fn)
-    def wrapped_flat_fn(*args):
-        unpacked_args = _unpack_synthetic_bases(args)
-        # This is a bit subtle. The goal of this entire function (aot_dispatch_synthetic_bases)
-        # is to relieve the downstream logic from having to reason about mutations on inputs that alias
-        # each other, by replacing aliased inputs with a synthetic base.
-        # One area where this breaks down a bit however is if one of those aliased inputs
-        # experienced a metadata mutation.
-        # We are now obligated to reapply the metadata mutation directly to the user's input;
-        # it isn't enough to apply mutations back to the synthetic base in the downstream logic.
-        #
-        # The way we handle this is by pretending that those aliased inputs that experience metadata mutations
-        # are additional outputs in the user's forward function.
-        # The downstream logic will just treat these as "user outputs that alias inputs".
-        # However, we will manually grab them at runtime here, use them to reapply the metadata mutation
-        # to the user inputs, and not return them to the user.
-        aliased_args_with_metadata_mutations = [
-            x
-            for i, x in enumerate(unpacked_args)
-            if i in aliased_arg_idx_with_metadata_mutations
-        ]
-        if len(aliased_args_with_metadata_mutations) > 0:
-            return *(flat_fn(*unpacked_args)), *aliased_args_with_metadata_mutations
-        else:
-            return flat_fn(*unpacked_args)
-
-    if config.debug_assert:
-        ref_fw_metadata = run_functionalized_fw_and_collect_metadata(
+        if config.debug_assert:
+            ref_fw_metadata = run_functionalized_fw_and_collect_metadata(
+                wrapped_flat_fn,
+                keep_input_mutations=fw_metadata.keep_input_mutations,
+                is_train=fw_metadata.is_train,
+            )(*flat_args_with_synthetic_bases)
+            assert ref_fw_metadata == fw_metadata_updated, (
+                f"ref_metadata={pprint.pformat(partial_flatten_asdict(ref_fw_metadata))}, "
+                f"\nactual_metadata={pprint.pformat(partial_flatten_asdict(fw_metadata_updated))}"
+            )
+        return (
             wrapped_flat_fn,
-            keep_input_mutations=fw_metadata.keep_input_mutations,
-            is_train=fw_metadata.is_train,
-        )(*flat_args_with_synthetic_bases)
-        assert ref_fw_metadata == fw_metadata_updated, (
-            f"ref_metadata={pprint.pformat(partial_flatten_asdict(ref_fw_metadata))}, "
-            f"\nactual_metadata={pprint.pformat(partial_flatten_asdict(fw_metadata_updated))}"
+            flat_args_with_synthetic_bases,
+            aot_config,
+            fw_metadata_updated,
         )
 
-    compiled_fn = compiler_fn(
-        wrapped_flat_fn,
-        flat_args_with_synthetic_bases,
-        aot_config,
-        fw_metadata=fw_metadata_updated,
-    )
+    def post_compile(
+        self,
+        compiled_fn,
+        aot_config: AOTConfig,
+        *,
+        fw_metadata: ViewAndMutationMeta,
+    ):
+        if not self.needs_post_compile:
+            return compiled_fn
 
-    @wraps(compiled_fn)
-    def wrapped_compiled_fn(args):
-        args_with_synthetic_bases, synthetic_base_info = merge_view_inputs(
-            args, fw_metadata.input_info, is_inference=is_inference
-        )
-        assert synthetic_base_info is not None
-        aliased_args_w_metadata_mutations = [
-            args[i] for i in aliased_arg_idx_with_metadata_mutations
-        ]
-        args.clear()
-        outs = compiled_fn(args_with_synthetic_bases)
-        if num_aliased_args_with_metadata_mutations > 0:
-            # This code does not handle **all** input metadata mutations.
-            # Instead, it only handles metadata mutations on inputs that were converted into synthetic bases
-            # (which only happens if at least one aliased input experienced a data mutation).
-            # e.g:
-            # def f(a, b):
-            #     a.mul_(2)
-            #     b.t_(1, 0)
-            # f(x.view(2, 2), x.view(2, 2))
-            mutated_metadata_inps = outs[-num_aliased_args_with_metadata_mutations:]
-            user_outs = outs[:-num_aliased_args_with_metadata_mutations]
-            for inp, mutated_inp in zip(
-                aliased_args_w_metadata_mutations, mutated_metadata_inps
-            ):
-                inp.as_strided_(
-                    mutated_inp.size(),
-                    mutated_inp.stride(),
-                    mutated_inp.storage_offset(),
-                )
-            return user_outs
-        return outs
+        is_inference = not self.trace_joint
 
-    return wrapped_compiled_fn
+        @wraps(compiled_fn)
+        def wrapped_compiled_fn(args):
+            args_with_synthetic_bases, synthetic_base_info = merge_view_inputs(
+                args, self.old_input_info, is_inference=is_inference
+            )
+            assert synthetic_base_info is not None
+            aliased_args_w_metadata_mutations = [
+                args[i] for i in self.aliased_arg_idx_with_metadata_mutations
+            ]
+            num_aliased_args_with_metadata_mutations = len(
+                aliased_args_w_metadata_mutations
+            )
+            args.clear()
+            outs = compiled_fn(args_with_synthetic_bases)
+            if num_aliased_args_with_metadata_mutations > 0:
+                # This code does not handle **all** input metadata mutations.
+                # Instead, it only handles metadata mutations on inputs that were converted into synthetic bases
+                # (which only happens if at least one aliased input experienced a data mutation).
+                # e.g:
+                # def f(a, b):
+                #     a.mul_(2)
+                #     b.t_(1, 0)
+                # f(x.view(2, 2), x.view(2, 2))
+                mutated_metadata_inps = outs[-num_aliased_args_with_metadata_mutations:]
+                user_outs = outs[:-num_aliased_args_with_metadata_mutations]
+                for inp, mutated_inp in zip(
+                    aliased_args_w_metadata_mutations, mutated_metadata_inps
+                ):
+                    inp.as_strided_(
+                        mutated_inp.size(),
+                        mutated_inp.stride(),
+                        mutated_inp.storage_offset(),
+                    )
+                return user_outs
+            return outs
+
+        return wrapped_compiled_fn
 
 
 # Note [Handling mutations on an input that aliases other inputs]
