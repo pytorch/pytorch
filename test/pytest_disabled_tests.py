@@ -26,7 +26,7 @@ class DisabledTestsPlugin:
         except ImportError as e:
             print("Used --disabled-tests-file but failed to import torch.testing._internal.common_utils, aborting")
             raise e
-        if not IS_SANDCASTLE:
+        if IS_SANDCASTLE:
             return
 
         with open(self.file, "r") as f:
