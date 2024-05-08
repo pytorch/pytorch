@@ -18,7 +18,14 @@ from ..utils import cache_on_self, sympy_product
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import IndentedBuffer
-from .cpp_utils import cexpr, CppPrinter, DEVICE_TO_ATEN, DTYPE_TO_ATEN, DTYPE_TO_CPP, LAYOUT_TO_ATEN
+from .cpp_utils import (
+    cexpr,
+    CppPrinter,
+    DEVICE_TO_ATEN,
+    DTYPE_TO_ATEN,
+    DTYPE_TO_CPP,
+    LAYOUT_TO_ATEN,
+)
 from .wrapper import EnterSubgraphLine, ExitSubgraphLine, WrapperCodeGen
 
 
