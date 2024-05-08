@@ -1366,6 +1366,7 @@ class Scheduler:
             self.nodes = memory_passes.raise_last_usage(self.name_to_fused_node, V.graph.graph_inputs, self.nodes)
         if config.reorder_for_compute_comm_overlap:
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
+        self.nodes = memory_passes.raise_primal_resize_zero_if_primal_is_unused(self.name_to_fused_node, V.graph.graph_inputs, self.nodes)
         self.compute_last_usage()
 
         # for snode in self.nodes:

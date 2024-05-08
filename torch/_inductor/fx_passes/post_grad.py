@@ -151,6 +151,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     # fsdp_fx_passes.sink_prev_reduce_scatter_wait_to_before_next_reduce_scatter(gm)
     # torch_log.warning(lazy_format_graph_code("before decompose_all_gather_copy_in: ", gm))
     fsdp_fx_passes.reinplace_all_gather(gm)
+    # fsdp_fx_passes.raise_primal_resize_zero_if_primal_is_unused(gm)
     # fsdp_fx_passes.remove_storage_resize_and_copy(gm)
 
     decompose_auto_functionalized(gm.graph)

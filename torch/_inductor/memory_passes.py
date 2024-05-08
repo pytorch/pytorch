@@ -119,3 +119,30 @@ def raise_last_usage(
                 new_order.append(user_node)
                 scheduled.add(user_node.get_name())
     return new_order
+
+
+def raise_primal_resize_zero_if_primal_is_unused(
+    name_to_fused_node: Dict[str, "scheduler.BaseSchedulerNode"], graph_inputs: Dict[str, "Buffer"], snodes: List["scheduler.BaseSchedulerNode"]
+) -> List["scheduler.BaseSchedulerNode"]:
+    primal_to_reads = defaultdict(set)  # argX -> set of nodes that reads argX
+    primal_resize_zero_nodes = []
+    for snode in snodes:
+        for dep in snode.read_writes.reads:
+            if dep.name.startswith("arg"):
+                primal_to_reads[dep.name].add(snode.get_name())
+    for snode in snodes:
+        if (
+            isinstance(snode.node, ir.ResizeStorageBytes)
+            and snode.node.constant_args[0] == 0
+            and snode.node.resized_buf_name in graph_inputs
+            and len(primal_to_reads[snode.node.resized_buf_name]) == 1
+            and list(primal_to_reads[snode.node.resized_buf_name])[0] == snode.get_name()
+        ):
+            primal_resize_zero_nodes.append(snode)
+    new_order = primal_resize_zero_nodes
+    scheduled = set(x.get_name() for x in new_order)
+    for snode in snodes:
+        if snode.get_name() not in scheduled:
+            new_order.append(snode)
+            scheduled.add(snode.get_name())
+    return new_order
