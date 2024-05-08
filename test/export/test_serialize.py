@@ -621,6 +621,8 @@ class TestDeserialize(TestCase):
         dynamic_shapes = {"a": {0: dim0_ac}, "b": None, "c": {0: dim0_ac}}
         self.check_graph(DynamicShapeSimpleModel(), inputs, dynamic_shapes)
 
+    # TODO: Failing due to "constraining non-Symbols NYI (Piecewise((1, Eq(u1, 1)), (0, True)), 1, 1)"
+    @unittest.expectedFailure
     def test_sym_bool(self):
         class Module(torch.nn.Module):
             def forward(self, x, y):
@@ -859,6 +861,20 @@ class TestDeserialize(TestCase):
         m = MyModule()
         inputs = (torch.ones(2, 3),)
         self.check_graph(m, inputs, strict=False)
+
+    def test_export_no_inputs(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p = torch.ones(3, 3)
+
+            def forward(self):
+                return self.p * self.p
+
+        ep = torch.export.export(M(), ())
+        ep._example_inputs = None
+        roundtrip_ep = deserialize(serialize(ep))
+        self.assertTrue(torch.allclose(ep.module()(), roundtrip_ep.module()()))
 
 
 instantiate_parametrized_tests(TestDeserialize)

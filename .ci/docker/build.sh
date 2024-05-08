@@ -366,7 +366,7 @@ if [[ "$image" == *cuda*  && ${OS} == "ubuntu" ]]; then
 fi
 
 # Build image
-DOCKER_BUILDKIT=1 docker build \
+docker build \
        --no-cache \
        --progress=plain \
        --build-arg "BUILD_ENVIRONMENT=${image}" \
