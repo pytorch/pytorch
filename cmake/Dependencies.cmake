@@ -865,39 +865,11 @@ else()
   caffe2_update_option(USE_FAKELOWP OFF)
 endif()
 
-# ---[ LMDB
-if(USE_LMDB)
-  find_package(LMDB)
-  if(LMDB_FOUND)
-    include_directories(SYSTEM ${LMDB_INCLUDE_DIR})
-    list(APPEND Caffe2_DEPENDENCY_LIBS ${LMDB_LIBRARIES})
-  else()
-    message(WARNING "Not compiling with LMDB. Suppress this warning with -DUSE_LMDB=OFF")
-    caffe2_update_option(USE_LMDB OFF)
-  endif()
-endif()
-
 if(USE_OPENCL)
   message(INFO "USING OPENCL")
   find_package(OpenCL REQUIRED)
   include_directories(SYSTEM ${OpenCL_INCLUDE_DIRS})
   list(APPEND Caffe2_DEPENDENCY_LIBS ${OpenCL_LIBRARIES})
-endif()
-
-# ---[ LevelDB
-# ---[ Snappy
-if(USE_LEVELDB)
-  find_package(LevelDB)
-  find_package(Snappy)
-  if(LEVELDB_FOUND AND SNAPPY_FOUND)
-    include_directories(SYSTEM ${LevelDB_INCLUDE})
-    list(APPEND Caffe2_DEPENDENCY_LIBS ${LevelDB_LIBRARIES})
-    include_directories(SYSTEM ${Snappy_INCLUDE_DIR})
-    list(APPEND Caffe2_DEPENDENCY_LIBS ${Snappy_LIBRARIES})
-  else()
-    message(WARNING "Not compiling with LevelDB. Suppress this warning with -DUSE_LEVELDB=OFF")
-    caffe2_update_option(USE_LEVELDB OFF)
-  endif()
 endif()
 
 # ---[ NUMA
@@ -911,30 +883,6 @@ if(USE_NUMA)
   else()
     message(WARNING "NUMA is currently only supported under Linux.")
     caffe2_update_option(USE_NUMA OFF)
-  endif()
-endif()
-
-# ---[ ZMQ
-if(USE_ZMQ)
-  find_package(ZMQ)
-  if(ZMQ_FOUND)
-    include_directories(SYSTEM ${ZMQ_INCLUDE_DIR})
-    list(APPEND Caffe2_DEPENDENCY_LIBS ${ZMQ_LIBRARIES})
-  else()
-    message(WARNING "Not compiling with ZMQ. Suppress this warning with -DUSE_ZMQ=OFF")
-    caffe2_update_option(USE_ZMQ OFF)
-  endif()
-endif()
-
-# ---[ Redis
-if(USE_REDIS)
-  find_package(Hiredis)
-  if(HIREDIS_FOUND)
-    include_directories(SYSTEM ${Hiredis_INCLUDE})
-    list(APPEND Caffe2_DEPENDENCY_LIBS ${Hiredis_LIBRARIES})
-  else()
-    message(WARNING "Not compiling with Redis. Suppress this warning with -DUSE_REDIS=OFF")
-    caffe2_update_option(USE_REDIS OFF)
   endif()
 endif()
 
@@ -1893,6 +1841,8 @@ if(USE_KINETO)
       set(CUPTI_LIB_NAME "cupti.lib")
     endif()
 
+    set(NVPERF_HOST_LIB_NAME "libnvperf_host.so")
+
     find_library(CUPTI_LIBRARY_PATH ${CUPTI_LIB_NAME} PATHS
         ${CUDA_SOURCE_DIR}
         ${CUDA_SOURCE_DIR}/extras/CUPTI/lib64
@@ -1907,12 +1857,26 @@ if(USE_KINETO)
         ${CUDA_SOURCE_DIR}/include
         NO_DEFAULT_PATH)
 
+    find_library(NVPERF_HOST_LIBRARY_PATH ${NVPERF_HOST_LIB_NAME} PATHS
+        ${CUDA_SOURCE_DIR}
+        ${CUDA_SOURCE_DIR}/lib
+        ${CUDA_SOURCE_DIR}/lib64
+        ${CUDA_SOURCE_DIR}/extras/CUPTI/lib64
+        NO_DEFAULT_PATH)
+
     if(CUPTI_LIBRARY_PATH AND CUPTI_INCLUDE_DIR)
       message(STATUS "  CUPTI_INCLUDE_DIR = ${CUPTI_INCLUDE_DIR}")
       set(CUDA_cupti_LIBRARY ${CUPTI_LIBRARY_PATH})
       message(STATUS "  CUDA_cupti_LIBRARY = ${CUDA_cupti_LIBRARY}")
+      # CUPTI Range Profiler requires the NVPerf library
+      # for configuring metrics
+      if(NVPERF_HOST_LIBRARY_PATH)
+        set(CUDA_nvperf_host_LIBRARY ${NVPERF_HOST_LIBRARY_PATH})
+        message(STATUS "  CUDA_nvperf_host_LIBRARY = ${NVPERF_HOST_LIBRARY_PATH}")
+      endif()
       message(STATUS "Found CUPTI")
       set(LIBKINETO_NOCUPTI OFF CACHE STRING "" FORCE)
+
 
       # I've only tested this sanity check on Linux; if someone
       # runs into this bug on another platform feel free to
