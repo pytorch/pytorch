@@ -270,8 +270,7 @@ def _attn_bwd_dq(dq, q, K, V,  #
                  BLOCK_N2: tl.constexpr,  #
                  BLOCK_DMODEL: tl.constexpr,
                  # Filled in by the wrapper.
-                 start_m, start_n, num_steps,  #
-                 MASK: tl.constexpr):
+                 start_m, start_n, num_steps):
     offs_m = start_m + tl.arange(0, BLOCK_M2)
     offs_n = start_n + tl.arange(0, BLOCK_N2)
     offs_k = tl.arange(0, BLOCK_DMODEL)
@@ -289,10 +288,10 @@ def _attn_bwd_dq(dq, q, K, V,  #
         qk = tl.dot(q, kT)
         p = tl.math.exp2(qk - m)
         # Autoregressive masking.
-        if MASK:
-            offs_n = curr_n + tl.arange(0, BLOCK_N2)
-            mask = (offs_m[:, None] >= offs_n[None, :])
-            p = tl.where(mask, p, 0.0)
+        # if MASK:
+        #     offs_n = curr_n + tl.arange(0, BLOCK_N2)
+        #     mask = (offs_m[:, None] >= offs_n[None, :])
+        #     p = tl.where(mask, p, 0.0)
         # Compute dP and dS.
         dp = tl.dot(do, vT).to(tl.float32)
         ds = p * (dp - Di[:, None])
@@ -392,7 +391,6 @@ def _attn_bwd(Q, K, V, sm_scale,  #
                       H, N_CTX,  #
                       BLOCK_M2, BLOCK_N2, BLOCK_DMODEL,  #
                       start_m, 0, num_steps,  #
-                      MASK=False  #
                       )
     # Write back dQ.
     dq_ptrs = DQ + offs_m[:, None] * stride_tok + offs_k[None, :] * stride_d
