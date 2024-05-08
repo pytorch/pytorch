@@ -508,7 +508,7 @@ test_single_dynamo_benchmark() {
       # This can be removed once the ABI-compatible mode becomes default.
       export TORCHINDUCTOR_ABI_COMPATIBLE=1
     fi
-    python "benchmarks/dynamo/$suite.py" \
+    TORCHINDUCTOR_ABI_COMPATIBLE=1 TORCHINDUCTOR_CPP_WRAPPER=1 python "benchmarks/dynamo/$suite.py" \
       --ci --accuracy --timing --explain \
       "${DYNAMO_BENCHMARK_FLAGS[@]}" \
       "$@" "${partition_flags[@]}" \
