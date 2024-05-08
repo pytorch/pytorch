@@ -798,15 +798,6 @@ def get_np_to_tnp_map():
     return np_fn_to_tnp_fn
 
 
-@functools.lru_cache(maxsize=1)
-def np_constant_collections_map():
-    return {
-        tnp.finfo: NumpyTypeInfoVariable,
-        tnp.iinfo: NumpyTypeInfoVariable,
-        tnp.dtype: NumpyDTypeVariable,
-    }
-
-
 class NumpyVariable(VariableTracker):
     """
     Wrapper around `numpy.*`. Currently, is able to trace a small subset of numpy functions as well as numpy dtypes.
@@ -828,7 +819,7 @@ class NumpyVariable(VariableTracker):
     def get_constant_collection_for_func(cls, fn):
         mod = fn.__module__.split(".")
         assert len(mod) >= 2 and mod[:2] == ["torch", "_numpy"]
-        return np_constant_collections_map().get(fn, None)
+        return np_constant_collections_map.get(fn, None)
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -861,17 +852,7 @@ class NumpyVariable(VariableTracker):
                 unimplemented(
                     f"{self.value.__name__} with non-const args: {args} {kwargs}"
                 )
-        if self.can_constant_fold_through(func) and (
-            check_unspec_or_constant_args(args, kwargs)
-        ):
-            # constant fold
-            return variables.ConstantVariable.create(
-                self.as_python_constant()(
-                    *[x.as_python_constant() for x in args],
-                    **{k: v.as_python_constant() for k, v in kwargs.items()},
-                ),
-            )
-        else:  # We are dealing with a callable that produces a tensor
+        else:
             if (
                 func.__module__ == "torch._numpy.random"
                 and config.use_numpy_random_stream
@@ -881,6 +862,17 @@ class NumpyVariable(VariableTracker):
                 unimplemented(msg)
 
             args, kwargs = NumpyNdarrayVariable.patch_args(func.__name__, args, kwargs)
+
+            if self.can_constant_fold_through(func) and (
+                check_unspec_or_constant_args(args, kwargs)
+            ):
+                # constant fold
+                return variables.ConstantVariable.create(
+                    self.as_python_constant()(
+                        *[x.as_python_constant() for x in args],
+                        **{k: v.as_python_constant() for k, v in kwargs.items()},
+                    ),
+                )
 
             # TODO Add all the functions that go from constants to constants to can_constant_fold_through
             proxy = tx.output.create_proxy(
@@ -1149,11 +1141,6 @@ class NumpyTypeInfoVariable(ConstantLikeVariable):
 class NumpyDTypeVariable(ConstantLikeVariable):
     _error_prefix = "np.dtype[...]"
 
-    def __init__(self, value, **kwargs):
-        if isinstance(value, tnp.DType):
-            value = ConstantLikeVariable.np_dtype(value.name)
-        super().__init__(value, **kwargs)
-
     def as_proxy(self):
         """Similar to how numpy dtype descriptors (e.g. np.float32 ) are handled by NumpyVariable:
 
@@ -1161,3 +1148,10 @@ class NumpyDTypeVariable(ConstantLikeVariable):
         This also handles unsupported things nicely (i.e. structured arrays and object arrays).
         """
         return self.value.type.__name__
+
+
+np_constant_collections_map = {
+    tnp.finfo: NumpyTypeInfoVariable,
+    tnp.iinfo: NumpyTypeInfoVariable,
+    tnp.dtype: NumpyDTypeVariable,
+}
