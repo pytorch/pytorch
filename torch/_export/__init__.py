@@ -3,6 +3,7 @@ import dataclasses
 import functools
 import io
 import json
+import logging
 import os
 import re
 import sys
@@ -27,8 +28,8 @@ from torch._decomp import core_aten_decompositions, get_decompositions
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.exc import UserError, UserErrorType
 from torch._dynamo.source import ConstantSource
-from torch._export.passes.collect_tracepoints_pass import CollectTracepointsPass
 from torch._export.non_strict_utils import make_constraints
+from torch._export.passes.collect_tracepoints_pass import CollectTracepointsPass
 from torch._functorch.aot_autograd import aot_export_module, GraphSignature
 from torch._functorch.eager_transforms import functionalize
 from torch._guards import detect_fake_mode
@@ -39,12 +40,7 @@ from torch._subclasses.functional_tensor import FunctionalTensor
 from torch._utils_internal import log_export_usage
 from torch.export._tree_utils import reorder_kwargs
 from torch.export._unlift import _create_stateful_graph_module
-from torch.export.dynamic_shapes import (
-    Constraint,
-    dims,
-    dynamic_dim,
-    _combine_args,
-)
+from torch.export.dynamic_shapes import _combine_args, Constraint, dims, dynamic_dim
 from torch.export.exported_program import (
     _disable_prexisiting_fake_mode,
     ExportedProgram,
@@ -80,6 +76,7 @@ from .passes.add_runtime_assertions_for_constraints_pass import (
 )
 from .wrappers import _wrap_submodules
 
+log = logging.getLogger(__name__)
 
 @dataclasses.dataclass
 class ExportDynamoConfig:
@@ -130,12 +127,21 @@ def capture_pre_autograd_graph(
     from torch.export._trace import _convert_input_to_fake, DEFAULT_EXPORT_DYNAMO_CONFIG
     from torch._utils_internal import export_api_rollout_check
 
+    log.warning("+============================+")
+    log.warning("|     !!!   WARNING   !!!    |")
+    log.warning("+============================+")
+    log.warning("capture_pre_autograd_graph() is deprecated and doesn't provide any function guarantee moving forward.")
+    log.warning("Please switch to use torch.export instead.")
+    if config.is_fbcode():
+        log.warning("Unless the unittest is in the blocklist, capture_pre_autograd_graph() will fallback to torch.export.")
+
     assert isinstance(f, torch.nn.Module), "Expected an nn.Module instance."
 
     if kwargs is None:
         kwargs = {}
 
     if export_api_rollout_check():
+        log.warning("Using torch.export._trace._export")
         module = torch.export._trace._export(f, args, kwargs, dynamic_shapes=dynamic_shapes, pre_dispatch=True).module()
     else:
         log_export_usage(event="export.private_api", flags={"capture_pre_autograd_graph"})
