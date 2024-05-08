@@ -8,6 +8,10 @@
 #include <opcode.h>
 #include <stdbool.h>
 
+
+// Gave up on 3.13 See cpython_defs.c for hints
+#if !(IS_PYTHON_3_13_PLUS)
+
 // Problem in CPython includes when mixing core and non-core build
 // The fix was not backported to 3.12 so this is needed here
 // https://github.com/python/cpython/issues/105268
@@ -137,20 +141,6 @@ THP_PyFrame_FastToLocalsWithError(THP_EVAL_API_FRAME_OBJECT *frame, int *free_va
   return PyFrame_FastToLocalsWithError(frame);
 }
 #endif
-
-PyObject* guard_error_hook = NULL;
-const char* cache_lookup_profiler_str = "TorchDynamo Cache Lookup";
-
-static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
-
-inline static PyObject* eval_frame_callback_get(void) {
-  void* result = PyThread_tss_get(&eval_frame_callback_key);
-  if (unlikely(result == NULL)) {
-    return (PyObject*)Py_None;
-  } else {
-    return (PyObject*)result;
-  }
-}
 
 inline static void eval_frame_callback_set(PyObject* obj) {
   PyThread_tss_set(&eval_frame_callback_key, obj);
@@ -673,6 +663,48 @@ static PyObject* _custom_eval_frame(
     return eval_frame_default(tstate, frame, throw_flag);
   }
 }
+
+#else
+// Fake definitions for everything we removed
+
+typedef struct THPPyInterpreterFrame {
+  PyObject_HEAD
+  _PyInterpreterFrame* frame; // Borrowed reference
+} THPPyInterpreterFrame;
+
+inline static void enable_eval_frame_shim(PyThreadState* tstate) {}
+inline static void enable_eval_frame_default(PyThreadState* tstate) {}
+
+static struct PyGetSetDef THPPyInterpreterFrame_properties[] = {};
+
+static PyTypeObject THPPyInterpreterFrameType = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "torch._C.dynamo.eval_frame._PyInterpreterFrame",
+    .tp_basicsize = sizeof(THPPyInterpreterFrame),
+    .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_getset = THPPyInterpreterFrame_properties,
+};
+
+#endif // CPython 3.13
+
+PyObject* guard_error_hook = NULL;
+const char* cache_lookup_profiler_str = "TorchDynamo Cache Lookup";
+
+static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
+
+inline static PyObject* eval_frame_callback_get(void) {
+  void* result = PyThread_tss_get(&eval_frame_callback_key);
+  if (unlikely(result == NULL)) {
+    return (PyObject*)Py_None;
+  } else {
+    return (PyObject*)result;
+  }
+}
+
+inline static void eval_frame_callback_set(PyObject* obj) {
+  PyThread_tss_set(&eval_frame_callback_key, obj);
+}
+
 
 static int active_dynamo_threads = 0;
 
