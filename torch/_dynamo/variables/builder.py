@@ -134,7 +134,6 @@ from .lists import (
     TupleVariable,
 )
 from .misc import (
-    AutogradBackwardCFunctionVariable,
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
     ComptimeVariable,
@@ -617,23 +616,28 @@ class VariableBuilder:
                 value,
                 source=self.source,
             )
-        elif isinstance(value, torch.autograd.function.BackwardCFunction):
-            # WARNING: accessing saved_tensors directly from BackwardCFunction is side-effectful
-            # and will throw unless backward ran with retain_graph=True
-            install_guard(
-                self.source.make_guard(GuardBuilder.TYPE_MATCH),
-            )
-            return AutogradBackwardCFunctionVariable(value, source=self.source)
         elif isinstance(value, torch.autograd.function.FunctionCtx):
-            saved_tensors_source = AttrSource(self.source, "saved_tensors")
-            install_guard(
-                self.source.make_guard(GuardBuilder.TYPE_MATCH),
-                saved_tensors_source.make_guard(GuardBuilder.SEQUENCE_LENGTH),
-            )
-            saved_tensors = [
-                VariableBuilder(self.tx, GetItemSource(saved_tensors_source, n))(v)
-                for n, v in enumerate(value.saved_tensors)
-            ]
+            actual_saved_tensors = None
+            try:
+                actual_saved_tensors = value.saved_tensors
+            except RuntimeError:
+                pass
+
+            saved_tensors = []
+            guards = [self.source.make_guard(GuardBuilder.TYPE_MATCH)]
+            if isinstance(actual_saved_tensors, tuple):
+                saved_tensors_source = AttrSource(self.source, "saved_tensors")
+                guards.append(
+                    saved_tensors_source.make_guard(GuardBuilder.SEQUENCE_LENGTH)
+                )
+                for i, v in enumerate(actual_saved_tensors):
+                    saved_tensors.append(
+                        VariableBuilder(
+                            self.tx, GetItemSource(saved_tensors_source, i)
+                        )(v)
+                    )
+            install_guard(*guards)
+
             return self.tx.output.side_effects.track_object_existing(
                 value,
                 AutogradFunctionContextVariable(

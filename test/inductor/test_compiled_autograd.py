@@ -703,7 +703,7 @@ main()
                 yield x.grad
 
         self.check_output_and_recompiles(
-            fn, count=[2, 6], compiler_fn=make_compiler_fn(fullgraph=False)
+            fn, count=2, compiler_fn=make_compiler_fn(fullgraph=False)
         )
 
     def test_custom_fn_multiple_grads(self):
@@ -847,6 +847,87 @@ main()
                 yield x.grad
 
         self.check_output_and_recompiles(fn, count=3)
+
+    def test_custom_fn_bw_graph_break(self):
+        def fn():
+            class MySin(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    ctx.save_for_backward(x)
+                    return torch.sin(x)
+
+                @staticmethod
+                def backward(ctx, gO):
+                    print("graph break")
+                    (x,) = ctx.saved_tensors
+                    print("graph break")
+                    return gO * torch.cos(x)
+
+            for i in [10, 100, 10, 15, 20, 25]:
+                x = torch.arange(0.0, i, requires_grad=True)
+                out = MySin.apply(x)
+                loss = out.sum()
+                loss.backward()
+                yield x.grad
+
+        self.check_output_and_recompiles(
+            fn, count=[2, 6], compiler_fn=make_compiler_fn(fullgraph=False)
+        )
+
+    def test_custom_fn_compiled_fw_graph_break(self):
+        def fn():
+            class MySin(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    print("graph break")
+                    ctx.save_for_backward(x)
+                    return torch.sin(x)
+
+                @staticmethod
+                def backward(ctx, gO):
+                    (x,) = ctx.saved_tensors
+                    return gO * torch.cos(x)
+
+            opt_model = torch.compile(MySin.apply)
+            for i in [10, 100, 10, 15, 20, 25]:
+                x = torch.arange(0.0, i, requires_grad=True)
+                out = opt_model(x)
+                loss = out.sum()
+                loss.backward()
+                yield x.grad
+
+        self.check_output_and_recompiles(
+            fn, count=2, compiler_fn=make_compiler_fn(fullgraph=False)
+        )
+        self.assertEqual(counters["stats"]["unique_graphs"], 5)  # 3 fw, 2 bw
+
+    def test_custom_fn_compiled_fw_bw_graph_break(self):
+        def fn():
+            class MySin(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    print("graph break")
+                    ctx.save_for_backward(x)
+                    return torch.sin(x)
+
+                @staticmethod
+                def backward(ctx, gO):
+                    print("graph break")
+                    (x,) = ctx.saved_tensors
+                    return gO * torch.cos(x)
+
+            opt_model = torch.compile(MySin.apply)
+            for i in [10, 100, 10, 15, 20, 25]:
+                x = torch.arange(0.0, i, requires_grad=True)
+                out = opt_model(x)
+                loss = out.sum()
+                loss.backward()
+                yield x.grad
+
+        self.check_output_and_recompiles(
+            fn, count=[2, 6], compiler_fn=make_compiler_fn(fullgraph=False)
+        )
+        self.assertEqual(counters["stats"]["unique_graphs"], 9)  # 3 fw, 6 bw
 
     def test_mismatch_fake_tensor_mode(self, dynamic_shape=False):
         """
