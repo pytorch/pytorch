@@ -165,6 +165,9 @@ class TestCutlassBackend(TestCase):
 
         a = torch.randn(2240, 256, **tensor_options)
         b = torch.randn(256, 2048, **tensor_options)
+
+        assert 'rocm' in dir(config)
+
         with config.patch(
             {
                 "max_autotune": True,
