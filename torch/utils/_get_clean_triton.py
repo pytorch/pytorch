@@ -2,7 +2,7 @@ import argparse
 import os
 import re
 from pathlib import Path
-from typing import List
+from typing import Dict, List
 
 
 def remove_triton_function_declaration(source_code: str) -> str:
@@ -80,7 +80,7 @@ def add_launch_params(original: str, launch_params: str) -> str:
     return remove_inductor_wrappers
 
 
-def process_file(input_filename: str, output_filename: str) -> None:
+def process_file(input_filename: str, output_filename: str) -> str:
     with open(input_filename) as file:
         source_code = file.read()
 
@@ -102,9 +102,9 @@ def process_file(input_filename: str, output_filename: str) -> None:
     with open(launch_params_filename) as f:
         launch_params_meta = f.readlines()
 
-    launch_params_meta = [i.split("|") for i in launch_params_meta]
-    launch_params_meta = [[a.strip(), b.strip()] for a, b in launch_params_meta]
-    kernel_to_args = dict(launch_params_meta)
+    split_params = [i.split("|") for i in launch_params_meta]
+    strip_params = [[a.strip(), b.strip()] for a, b in split_params]
+    kernel_to_args: Dict[str, str] = dict(strip_params)
     transformed_code = add_launch_params(transformed_code, kernel_to_args)
 
     with open(output_filename, "w") as file:
@@ -119,7 +119,7 @@ def get_clean_triton(input_path: Path, output_path: Path = "triton_only_repro.py
         input_path (Optional[Path]): Path to inductor generated output codede
         output_path (Optional[Path]): Path to write out the new python file
     """
-    return process_file(input_path, output_path)
+    return process_file(str(input_path), str(output_path))
 
 
 if __name__ == "__main__":
