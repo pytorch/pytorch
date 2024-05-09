@@ -1034,11 +1034,9 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
    */
   template <typename T>
   void addCallback(T callback, bool uses_future = true) {
-#if __cpp_lib_is_invocable >= 201703
     static_assert(
         std::is_invocable_r<void, T, Future&>::value,
         "The callback must have signature void(Future&)");
-#endif
 
     std::unique_lock<std::mutex> lock(mutex_);
     if (completed()) {
@@ -1057,14 +1055,13 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   template <typename T>
   c10::intrusive_ptr<Future> then(T callback, TypePtr type) {
     using IValueWithStorages = std::tuple<IValue, std::vector<WeakStorage>>;
-#if __cpp_lib_is_invocable >= 201703
     static_assert(
         std::disjunction<
             std::is_invocable_r<IValue, T, Future&>,
             std::is_invocable_r<IValueWithStorages, T, Future&>>::value,
         "The callback must have signature IValue(Future&) or "
         "std::tuple<IValue, std::vector<Storage>>(Future&)");
-#endif
+
     auto childFut = createInstance(::std::move(type));
     addCallback([childFut,
                  cb = std::move(callback)](Future& parentFut) mutable {
@@ -1084,11 +1081,10 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
   template <typename T>
   c10::intrusive_ptr<Future> thenAsync(T callback, TypePtr type) {
-#if __cpp_lib_is_invocable >= 201703
     static_assert(
         std::is_invocable_r<c10::intrusive_ptr<Future>, T, Future&>::value,
         "The callback must have signature c10::intrusive_ptr<Future>(Future&)");
-#endif
+
     auto childFut = createInstance(std::move(type));
     addCallback(
         [childFut, cb = std::move(callback)](Future& parentFut) mutable {
@@ -1165,11 +1161,9 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   // synchronize them with the value, and so on (if needed).
   template<typename T>
   void invokeCallback(T callback, bool uses_future) {
-#if __cpp_lib_is_invocable >= 201703
     static_assert(
         std::is_invocable_r<void, T, Future&>::value,
         "The callback must have signature void(Future&)");
-#endif
 
     // The synchronization performed below shouldn't be needed when the future
     // is not used by the callback.
