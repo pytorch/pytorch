@@ -63,7 +63,7 @@ if torch.cuda.is_available():
     if torch.backends.cusparselt.is_available() and (_IS_SM8X or _IS_SM9X):
         SEMI_STRUCTURED_SUPPORTED_BACKENDS["cusparselt"] = SparseSemiStructuredTensorCUSPARSELT
 
-inference_dtypes = dtypes(torch.float16, torch.bfloat16, torch.int8)
+inference_dtypes = dtypes(torch.float16, torch.bfloat16, torch.int8) if torch.version.hip is not None else dtypes(torch.float16, torch.bfloat16, torch.float32, torch.int8)
 training_dtypes = dtypes(torch.float16, torch.bfloat16)
 parametrize_backends = parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
 
