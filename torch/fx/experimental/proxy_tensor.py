@@ -1167,7 +1167,7 @@ class _MakefxTracer:
 
         # All context managers and their states should be initialized before tracing based on the inputs
         # and configurations.
-        # After tracing, thier states should be cleaned except for shape_env.
+        # After tracing, their states should be cleaned except for shape_env.
         null_ctx_type = type(nullcontext)
         self.fake_tensor_mode: Union[null_ctx_type, FakeTensorMode] = nullcontext()
         self.proxy_mode: Union[null_ctx_type, ProxyTorchDispatchMode] = nullcontext()
