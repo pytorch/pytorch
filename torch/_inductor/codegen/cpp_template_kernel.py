@@ -35,24 +35,19 @@ class CppTemplateKernel(Kernel):
 
     def def_kernel(
         self,
-        inputs: List[ir.Buffer],
-        outputs: List[ir.Buffer],
-        names_str: str = "",
+        inputs: List[Tuple[str, ir.Buffer]],
+        outputs: List[Tuple[str, ir.Buffer]],
     ) -> str:
-        input_names = [inp.get_name() if inp is not None else None for inp in inputs]
-        output_names = [out.get_name() for out in outputs]
-        all_names = input_names + output_names
-        assert len(all_names) == len(names_str.split(",")), (
-            all_names,
-            names_str,
-        )
-        names = names_str.split(",")
-        for i, input_name in enumerate(input_names):
-            if input_name is not None:
-                self.args.input_buffers[input_name] = names[i].strip()
-        for i, output_name in enumerate(output_names):
-            self.args.output_buffers[output_name] = names[i + len(input_names)].strip()
-        inputs_not_none = [inp for inp in inputs if inp is not None]
+        assert all(
+            len(value) == 2 and isinstance(value[0], str)
+            for value in itertools.chain(inputs, outputs)
+        ), f"inputs: {inputs}, outputs: {outputs}"
+        for name, inp in inputs:
+            if inp is not None:
+                self.args.input_buffers[inp.get_name()] = name
+        for name, out in outputs:
+            self.args.output_buffers[out.get_name()] = name
+        inputs_not_none = [inp for _, inp in inputs if inp is not None]
         unique_sizevars = {
             s
             for input in inputs_not_none
@@ -61,7 +56,7 @@ class CppTemplateKernel(Kernel):
         }
         unique_sizevars |= {
             s
-            for output in outputs
+            for _, output in outputs
             for sym in itertools.chain(output.get_size(), output.get_stride())
             for s in sym.free_symbols
         }

@@ -20,7 +20,7 @@ GEMM_TEMPLATE = r"""
 {{micro_gemm.codegen_define(kernel)}}
 
 extern "C"
-{{kernel.def_kernel(inputs=[X, W, inp], outputs=[Y], names_str="X, W, inp, Y")}}
+{{kernel.def_kernel(inputs=[("X", X), ("W", W), ("inp", inp)], outputs=[("Y", Y)])}}
 {
     {{kernel.maybe_codegen_profile()}}
     constexpr int64_t num_threads = {{num_threads}};

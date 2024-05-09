@@ -81,7 +81,7 @@ def do_bench(fn, fn_args, fn_kwargs, **kwargs):
         return do_bench_gpu(lambda: fn(*fn_args, **fn_kwargs), **kwargs)
 
 
-def do_bench_gpu(fn, **kwargs):
+def do_bench_gpu(*args, **kwargs):
     @functools.lru_cache(None)
     def load_triton():
         try:
@@ -109,7 +109,7 @@ def do_bench_gpu(fn, **kwargs):
 
     if quantile_field_name not in kwargs:
         kwargs[quantile_field_name] = (0.5, 0.2, 0.8)
-    return triton_do_bench(fn, **kwargs)[0]
+    return triton_do_bench(*args, **kwargs)[0]
 
 
 def do_bench_cpu(fn, warmup=5, times=20):
