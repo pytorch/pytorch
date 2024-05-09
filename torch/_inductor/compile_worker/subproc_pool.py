@@ -52,10 +52,10 @@ class SubprocPool:
     """
 
     def __init__(self, nprocs: int):
+        entry = os.path.join(os.path.dirname(__file__), "__main__.py")
         cmd = [
             sys.executable,
-            "-m",
-            re.sub(r"[.][^.]*$", "", __name__),
+            entry,
             f"--workers={nprocs}",
             f"--parent={os.getpid()}",
         ]
