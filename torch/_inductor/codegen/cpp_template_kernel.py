@@ -47,17 +47,19 @@ class CppTemplateKernel(Kernel):
                 self.args.input_buffers[inp.get_name()] = name
         for name, out in outputs:
             self.args.output_buffers[out.get_name()] = name
-        inputs_not_none = [inp for _, inp in inputs if inp is not None]
         unique_sizevars = {
             s
-            for input in inputs_not_none
+            for _, input in inputs
+            if input is not None
             for sym in itertools.chain(input.get_size(), input.get_stride())
+            if isinstance(sym, sympy.Expr)
             for s in sym.free_symbols
         }
         unique_sizevars |= {
             s
             for _, output in outputs
             for sym in itertools.chain(output.get_size(), output.get_stride())
+            if isinstance(sym, sympy.Expr)
             for s in sym.free_symbols
         }
         sizevars = sorted(unique_sizevars, key=str)
