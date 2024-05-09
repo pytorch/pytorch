@@ -123,7 +123,7 @@ class OptimizerInfo:
         supported_impls: Tuple[str] = ("foreach", "differentiable"),
         # the optim supports passing in sparse gradients as well as dense grads
         supports_sparse: bool = False,
-        # the optim is capturable in a CUDA graph
+        # the optimizer constructor supports passing in capturable as a kwarg
         has_capturable_arg: bool = False,
         # the optim only supports one config: sparse grads w/ dense params, see SparseAdam
         only_supports_sparse_grads: bool = False,
@@ -314,6 +314,7 @@ def optim_inputs_func_adadelta(device, dtype=None):
         OptimizerInput(
             params=None, kwargs={"weight_decay": 0.1}, desc="nonzero weight_decay"
         ),
+        OptimizerInput(params=None, kwargs={"maximize": True}, desc="maximize"),
         OptimizerInput(
             params=None,
             kwargs={"weight_decay": 0.1, "maximize": True},
@@ -322,7 +323,7 @@ def optim_inputs_func_adadelta(device, dtype=None):
         OptimizerInput(
             params=None, kwargs={"rho": 0.95, "weight_decay": 0.9}, desc="rho"
         ),
-        OptimizerInput(params=None, kwargs={"maximize": True}, desc="maximize"),
+        
     ] + (cuda_supported_configs if "cuda" in str(device) else [])
 
 
@@ -532,14 +533,15 @@ def optim_inputs_func_adamax(device, dtype=None):
         ),
         OptimizerInput(
             params=None,
-            kwargs={"weight_decay": 0.1, "maximize": True},
-            desc="maximize, weight_decay",
-        ),
-        OptimizerInput(
-            params=None,
             kwargs={"maximize": True},
             desc="maximize",
         ),
+        OptimizerInput(
+            params=None,
+            kwargs={"weight_decay": 0.1, "maximize": True},
+            desc="maximize, weight_decay",
+        ),
+        
     ] + (cuda_supported_configs if "cuda" in str(device) else [])
 
 
@@ -691,6 +693,13 @@ def optim_inputs_func_nadam(device, dtype=None):
         ),
         OptimizerInput(
             params=None,
+            kwargs={
+                "weight_decay": 0.1,
+            },
+            desc="weight_decay",
+        ),
+        OptimizerInput(
+            params=None,
             kwargs={"weight_decay": 0.1, "momentum_decay": 6e-3},
             desc="weight_decay, momentum_decay",
         ),
@@ -701,13 +710,6 @@ def optim_inputs_func_nadam(device, dtype=None):
                 "decoupled_weight_decay": True,
             },
             desc="decoupled_weight_decay",
-        ),
-        OptimizerInput(
-            params=None,
-            kwargs={
-                "weight_decay": 0.1,
-            },
-            desc="weight_decay",
         ),
     ] + (cuda_supported_configs if "cuda" in str(device) else [])
 
@@ -834,8 +836,23 @@ def optim_inputs_func_rmsprop(device, dtype=None):
         ),
         OptimizerInput(
             params=None,
+            kwargs={
+                "maximize": True,
+            },
+            desc="maximize",
+        ),
+        OptimizerInput(
+            params=None,
             kwargs={"weight_decay": 0.1, "centered": True},
             desc="centered",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={
+                "maximize": True,
+                "weight_decay": 0.1,
+            },
+            desc="maximize, weight_decay",
         ),
         OptimizerInput(
             params=None,
@@ -851,21 +868,6 @@ def optim_inputs_func_rmsprop(device, dtype=None):
                 "maximize": True,
             },
             desc="maximize, centered, weight_decay, w/ momentum",
-        ),
-        OptimizerInput(
-            params=None,
-            kwargs={
-                "maximize": True,
-            },
-            desc="maximize",
-        ),
-        OptimizerInput(
-            params=None,
-            kwargs={
-                "maximize": True,
-                "weight_decay": 0.1,
-            },
-            desc="maximize, weight_decay",
         ),
     ] + (cuda_supported_configs if "cuda" in str(device) else [])
 
@@ -936,7 +938,15 @@ def optim_inputs_func_sgd(device, dtype=None):
         OptimizerInput(
             params=None, kwargs={"lr": torch.tensor(0.001)}, desc="tensor lr"
         ),
+        OptimizerInput(
+            params=None, kwargs={"weight_decay": 0.5}, desc="non-zero weight_decay"
+        ),
         OptimizerInput(params=None, kwargs={"momentum": 0.9}, desc="momentum"),
+        OptimizerInput(
+            params=None,
+            kwargs={"weight_decay": 0.1, "maximize": True},
+            desc="maximize",
+        ),
         OptimizerInput(
             params=None,
             kwargs={"momentum": 0.9, "dampening": 0.5},
@@ -951,14 +961,6 @@ def optim_inputs_func_sgd(device, dtype=None):
             params=None,
             kwargs={"momentum": 0.9, "nesterov": True, "weight_decay": 0.1},
             desc="nesterov",
-        ),
-        OptimizerInput(
-            params=None,
-            kwargs={"weight_decay": 0.1, "maximize": True},
-            desc="maximize",
-        ),
-        OptimizerInput(
-            params=None, kwargs={"weight_decay": 0.5}, desc="non-zero weight_decay"
         ),
     ]
 

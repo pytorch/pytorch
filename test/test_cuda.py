@@ -4459,23 +4459,13 @@ class TestCudaOptims(TestCase):
         all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
             device, dtype, optim_info, skip=("differentiable",)
         )
-        has_betas = any(
-            "betas" in error_inp.optimizer_error_input.kwargs
-            for error_inp in optim_info.optim_error_inputs_func(
-                device="cpu", dtype=dtype
-            )
-        )
 
         steps_warmup = 3
         steps_train = 2
 
         for optim_input in all_optim_inputs:
             kwargs = optim_input.kwargs
-            if "lr" in kwargs:
-                del kwargs["lr"]
-            kwargs["lr"] = 0.1
-            if has_betas and optim_cls != torch.optim.Adamax:
-                kwargs["betas"] = (0.8, 0.7)
+            kwargs["lr"]=0.1
 
             for actually_do_graphs in (True, False):
                 params = [
@@ -4543,26 +4533,15 @@ class TestCudaOptims(TestCase):
         steps_train = 2
 
         optim_inputs = optim_info.optim_inputs_func(device=device)
-        has_betas = any(
-            "betas" in error_inp.optimizer_error_input.kwargs
-            for error_inp in optim_info.optim_error_inputs_func(
-                device="cpu", dtype=dtype
-            )
-        )
 
         for optim_input in optim_inputs:
             kwargs = optim_input.kwargs
             kwargs["fused"] = True
-            if "lr" in kwargs:
-                del kwargs["lr"]
-            kwargs["lr"] = 0.1
-            if has_betas:
-                kwargs["betas"] = (0.8, 0.7)
 
             for actually_do_graphs in (
                 (True, False) if optim_info.has_capturable_arg else (True,)
             ):
-                params = [torch.randn((i + 5, i + 5), device="cuda") for i in range(2)]
+                params = [torch.randn((i + 5, i + 5), device=device) for i in range(2)]
                 params_control = [p.clone().requires_grad_() for p in params]
                 params_graphed = [p.clone().requires_grad_() for p in params]
 
