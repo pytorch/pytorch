@@ -4030,8 +4030,12 @@ class ShapeEnv:
             equiv[canonicalize_bool_expr(expr)] = sympy.true
             equiv[canonicalize_bool_expr(sympy.Not(expr))] = sympy.false
             if isinstance(expr, sympy.Rel):
-                # multiplying by -1 changes the direction of the inequality
-                dual = type(expr)(-expr.rhs, -expr.lhs)
+                if isinstance(expr, (sympy.Eq, sympy.Ne)):
+                    # multiplying by -1 ensures that equality is commutative
+                    dual = type(expr)(-expr.lhs, -expr.rhs)
+                else:
+                    # multiplying by -1 changes the direction of the inequality
+                    dual = type(expr)(-expr.rhs, -expr.lhs)
                 equiv[canonicalize_bool_expr(dual)] = sympy.true
                 equiv[canonicalize_bool_expr(sympy.Not(dual))] = sympy.false
 
