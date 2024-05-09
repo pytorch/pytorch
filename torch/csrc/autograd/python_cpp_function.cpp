@@ -255,11 +255,9 @@ struct DefaultFunctionType {
   }
 
   PyTypeObject type;
-};
+} default_type;
 
 PyObject* functionToPyObject(const std::shared_ptr<Node>& cdata) {
-  static DefaultFunctionType default_type;
-
   if (!cdata) {
     Py_RETURN_NONE;
   }
@@ -305,6 +303,9 @@ void registerCppFunction(const std::type_info& type, PyTypeObject* pytype) {
 
 bool THPCppFunction_Check(PyObject* obj) {
   THPObjectPtr type = THPObjectPtr(PyObject_Type(obj));
+  if ((PyTypeObject*)type.get() == &default_type.type) {
+    return true;
+  }
   if (cpp_function_types_set.find((PyTypeObject*)type.get()) ==
       cpp_function_types_set.end()) {
     return false;
