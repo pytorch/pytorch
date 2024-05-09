@@ -1167,8 +1167,9 @@ class _MakefxTracer:
         self._error_on_data_dependent_ops: bool = _error_on_data_dependent_ops
 
         # All context managers and their states should be initialized before tracing based on the inputs
-        # and configurations.
-        # After tracing, their states should be cleaned except for shape_env.
+        # and configurations. After tracing, their states should be cleaned except for shape_env.
+        # Rememer to specify how to intialize it from user inputs and from parent tracer whenever
+        # adding new modes in _MakefxTracer.
         null_ctx_type = type(nullcontext)
         self.fake_tensor_mode: Union[null_ctx_type, FakeTensorMode] = nullcontext()
         self.proxy_mode: Union[null_ctx_type, ProxyTorchDispatchMode] = nullcontext()
@@ -1245,12 +1246,12 @@ class _MakefxTracer:
                 if not self.tracing_mode == "real":
                     raise AssertionError(f"Unexpected tracing type: {self.tracing_mode}")
 
-            self._init_modes_from_fx_tracer(self.fx_tracer)
+            self._construct_modes_with_fx_tracer(self.fx_tracer)
             yield
         finally:
             self._restore_modes(*prev_modes)
 
-    def _init_modes_from_fx_tracer(self, fx_tracer):
+    def _construct_modes_with_fx_tracer(self, fx_tracer):
         self.proxy_mode = ProxyTorchDispatchMode(
             fx_tracer,
             self.tracing_mode,
@@ -1273,10 +1274,7 @@ class _MakefxTracer:
     def _init_modes_from_parent(self, parent_tracer):
         # By default, subtracer creates new modes based on parent tracer's config.
         # However, there are cases where we want to share the same modes with parent tracer
-        # 1. fake_tensor_mode: we want the example value's fake_mode of parent graph and subgraphs to be the same.
-        # 2. tracer.scope_root, proxy_paths, proxy_modules: these are used to construct 'nn_module_stack'
-        #   which has a special logic of handling module aliasing so parent and subgraphs should share the same states.
-        #   For detail, see comments in _ModuleSstackTracer.
+        # For example, fake_tensor_mode, we want the example value's fake_mode of parent graph and subgraphs to be the same.
         prev_modes = self._checkpoint_modes()
         try:
             self.fake_tensor_mode = parent_tracer.fake_tensor_mode
