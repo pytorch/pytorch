@@ -49,6 +49,7 @@ from torch.testing._internal.common_fsdp import (
 from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
     run_tests,
+    skipIfRocm,
     wrapSwapTensorsTest,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -909,6 +910,7 @@ class TestFullyShard2DTraining(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
+    @skipIfRocm
     def test_train_parity_2d_mlp(self):
         global_mesh = self.init_global_mesh()
         self.run_subtests(
