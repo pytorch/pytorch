@@ -199,7 +199,7 @@ static void _bitwise_op_out_mps(const Tensor& self,
 
   auto output_size = at::infer_size_dimvector(self.sizes(), other.sizes());
   resize_output(output, output_size);
-  if (!output.is_contiguous()) {
+  if (needsGather(output)) {
     output = output.contiguous();
     needs_output_copy = true;
   }
@@ -240,7 +240,7 @@ static void _bitwise_not_out_mps(const Tensor& self, const Tensor& output_) {
   bool needs_output_copy = false;
 
   resize_output(output, self.sizes());
-  if (!output.is_contiguous()) {
+  if (needsGather(output)) {
     output = output.contiguous();
     needs_output_copy = true;
   }
