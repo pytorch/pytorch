@@ -22,8 +22,17 @@ from torch.fx.experimental.proxy_tensor import (
 )
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from torch.fx.proxy import Proxy
+from torch.fx.traceback import preserve_node_meta, set_stack_trace
+from torch.utils._traceback import CapturedTraceback
 
 compiled_autograd_log = getArtifactLogger(__name__, "compiled_autograd")
+verbose_log = getArtifactLogger(__name__, "compiled_autograd_verbose")
+
+
+def snapshot_verbose_logging_enabled():
+    return torch._logging._internal.log_state.is_artifact_enabled(
+        "compiled_autograd_verbose"
+    )
 
 
 def maybe_clone(x):
@@ -89,6 +98,7 @@ class AutogradCompilerInstance:
         self.stack.enter_context(self.proxy_mode.sym_mode)
         self.stack.enter_context(self.proxy_mode)
         self.stack.enter_context(disable_autocast_cache())
+        self.stack.enter_context(preserve_node_meta())
         return inputs, sizes
 
     def proxy_call_backward(
@@ -203,6 +213,9 @@ class AutogradCompilerInstance:
         compiled_autograd_log.info(
             "%s", lazy_format_graph_code("Compiled autograd graph", graph)
         )
+        verbose_log.debug(
+            "%s", lazy_format_graph_code("Compiled autograd graph", graph)
+        )
         trace_structured(
             "compiled_autograd_graph",
             payload_fn=lambda: graph.print_readable(print_output=False),
@@ -245,6 +258,14 @@ class AutogradCompilerInstance:
         track_tensor_tree(bw_state, proxy, constant=None, tracer=self.fx_tracer)
         return bw_state
 
+    def set_node_origin(self, node_name, node_index):
+        raw_stack_trace = CapturedTraceback.extract().format()[-1]
+        new_code = f"{node_name} (NodeCall {node_index})"
+        new_stack_trace = raw_stack_trace.replace(
+            "raw_stack_trace = CapturedTraceback.extract().format()[-1]", new_code
+        )
+        set_stack_trace(new_stack_trace)
+
 
 compiled_autograd_enabled = False
 
@@ -268,6 +289,9 @@ compiled_autograd_enabled_count = 0
 def enable(compiler_fn):
     prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
         functools.partial(AutogradCompilerInstance, compiler_fn)
+    )
+    torch._C._dynamo.compiled_autograd.set_verbose_logging(
+        snapshot_verbose_logging_enabled()
     )
     global compiled_autograd_enabled, compiled_autograd_enabled_count
     compiled_autograd_enabled = True

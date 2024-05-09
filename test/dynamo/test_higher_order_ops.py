@@ -2690,6 +2690,25 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
             munge_exc(record.getMessage()),
         )
 
+    @make_logging_test(recompiles=True)
+    def test_linearize_recompiles(self, records):
+        @torch.compile(backend="eager")
+        def fn(x):
+            out, jvp_fn = torch.func.linearize(torch.sin, x)
+            return out, jvp_fn(x)
+
+        x = torch.randn(2, 3)
+        fn(x)
+        self.assertEqual(len(records), 0)
+
+        z = torch.randn(2, 3)
+        fn(z)
+        self.assertEqual(len(records), 0)
+
+        y = torch.randn(3, 4)
+        fn(y)
+        self.assertGreater(len(records), 0)
+
 
 class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
     def tearDown(self):
@@ -5077,6 +5096,87 @@ class GraphModule(torch.nn.Module):
             )
         self.assertEqual(actual, expected)
 
+    @config.patch(capture_func_transforms=True)
+    def test_linearize_jvp_fn(self):
+        counters.clear()
+
+        def wrapper_fn(x):
+            output, jvp_fn = torch.func.linearize(torch.sin, x)
+            return output, jvp_fn(x)
+
+        x = torch.randn(3, 3, 3)
+        wrapped_gm = self._compile_check(wrapper_fn, (x,), fullgraph=False, graph_idx=0)
+
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
+
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_self_tensor_constant0 : torch.Tensor):
+        l_self_tensor_constant0 = L_self_tensor_constant0
+
+        alias_default = torch.ops.aten.alias.default(l_self_tensor_constant0);  l_self_tensor_constant0 = None
+
+        sin_default = torch.ops.aten.sin.default(alias_default)
+
+        alias_default_1 = torch.ops.aten.alias.default(alias_default)
+
+        cos_default = torch.ops.aten.cos.default(alias_default_1);  alias_default_1 = None
+
+        alias_default_2 = torch.ops.aten.alias.default(sin_default)
+        return (alias_default, cos_default, sin_default)
+""",
+        )
+
+        wrapped_gm = self._compile_check(wrapper_fn, (x,), fullgraph=False, graph_idx=1)
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, getattr_L_self_FX_CONST_FOLDED_ATTRS_0_ : torch.nn.parameter.Parameter, getattr_L_self_FX_CONST_FOLDED_ATTRS_1_ : torch.nn.parameter.Parameter, L_flat_tangents_1_ : torch.Tensor):
+        getattr_l_self_fx_const_folded_attrs_0_ = getattr_L_self_FX_CONST_FOLDED_ATTRS_0_
+        getattr_l_self_fx_const_folded_attrs_1_ = getattr_L_self_FX_CONST_FOLDED_ATTRS_1_
+        l_flat_tangents_1_ = L_flat_tangents_1_
+
+        _new_zeros_with_same_feature_meta_default = torch.ops.aten._new_zeros_with_same_feature_meta.default(l_flat_tangents_1_, getattr_l_self_fx_const_folded_attrs_0_);  getattr_l_self_fx_const_folded_attrs_0_ = None
+
+        copy__default = torch.ops.aten.copy_.default(_new_zeros_with_same_feature_meta_default, l_flat_tangents_1_);  _new_zeros_with_same_feature_meta_default = l_flat_tangents_1_ = None
+
+        mul_tensor = torch.ops.aten.mul.Tensor(copy__default, getattr_l_self_fx_const_folded_attrs_1_);  copy__default = getattr_l_self_fx_const_folded_attrs_1_ = None
+        return (mul_tensor,)
+""",
+        )
+
+    def test_linearize_disable_capture(self):
+        counters.clear()
+        with config.patch(capture_func_transforms=False):
+            # We have verified above that this
+            # function compiles
+            def wrapper_fn(x):
+                out, _ = torch.func.linearize(torch.sin, x)
+                return out
+
+            x = torch.randn(2, 3)
+            actual = wrapper_fn(x)
+            expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(
+                x
+            )
+            self.assertEqual(len(counters["graph_break"]), 1)
+            self.assertEqual(
+                {
+                    "torch.func.linearize capture is disabled, it can be "
+                    "turned on by setting `torch._dynamo.config.capture_func_transforms=True`": 1,
+                },
+                dict(counters["graph_break"]),
+            )
+            self.assertEqual(actual, expected)
+
+    @config.patch(capture_func_transforms=True)
     @config.patch(error_on_recompile=True)
     def test_vmap_recompile(self):
         @torch.compile(backend="eager")

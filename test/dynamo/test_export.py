@@ -2604,7 +2604,7 @@ def forward(self, x):
     def test_export_preserve_constraints_as_metadata_scalar(self):
         def f(x, y):
             b = x.item()
-            torch._constrain_as_size(b)
+            torch._check_is_size(b)
             return torch.empty((b, y.shape[0]))
 
         x = torch.tensor([3])
@@ -2634,7 +2634,8 @@ def forward(self, x):
     def test_export_preserve_constraints_as_metadata_tensor(self):
         def f(x):
             b = x.nonzero()
-            torch._constrain_as_value(b.shape[0], min=2, max=5)
+            torch._check(b.shape[0] >= 2)
+            torch._check(b.shape[0] <= 5)
             return b
 
         y = torch.tensor([8, 8, 6])
@@ -2652,7 +2653,7 @@ def forward(self, x):
     def test_exported_graph_serialization(self):
         def f(x, y):
             b = x.item()
-            torch._constrain_as_size(b)
+            torch._check_is_size(b)
             return torch.empty((b, y.shape[0]))
 
         x = torch.tensor([3])

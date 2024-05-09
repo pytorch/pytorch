@@ -165,8 +165,14 @@ class LocalElasticAgent(SimpleElasticAgent):
             if watchdog_file_path is None:
                 watchdog_file_path = "/tmp/watchdog_timer_" + str(uuid.uuid4())
             logger.info("Starting a FileTimerServer with %s ...", watchdog_file_path)
+            if not envs:
+                logger.warning("Empty envs variables, using empty run_id for FileTimerServer")
+                run_id = ''
+            else:
+                run_id = envs[0]["TORCHELASTIC_RUN_ID"]
             self._worker_watchdog = timer.FileTimerServer(
                 file_path=watchdog_file_path,
+                run_id=run_id,
                 max_interval=0.1,
                 daemon=True,
                 log_event=self._log_watchdog_event)
