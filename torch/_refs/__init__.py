@@ -6364,7 +6364,7 @@ def _recursive_build(
     if isinstance(obj, Tensor) and obj.ndim <= 1:
         return obj.detach().to(dtype=scalarType, device="cpu", copy=True).view(())
     elif isinstance(obj, Tensor):
-        return obj
+        return obj.detach().to(dtype=scalarType, device="cpu", copy=True)
     elif isinstance(obj, Number):
         return torch.scalar_tensor(obj, dtype=scalarType)
 
