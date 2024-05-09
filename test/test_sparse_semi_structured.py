@@ -567,9 +567,8 @@ def create_random_mask(shape) -> torch.Tensor:
 class TestSparseSemiStructuredTraining(TestCase):
 
     def setUp(self):
-        if not _IS_SM8X:
-            self.skipTest("SparseSemiStructuredTensor training only supported on SM8x (Ampere)")
-
+        if not _IS_SM8X and not _IS_MI300x:
+            self.skipTest('Only runs on SM80/MI300x')
         if IS_WINDOWS:
             self.skipTest('CUTLASS not supported on windows')
 
