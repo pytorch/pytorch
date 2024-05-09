@@ -510,7 +510,7 @@ static std::vector<Tensor> mkldnn_reorder_mkldnn_rnn_layer_weight(
   return {packed_w1, packed_w2};
 }
 
-static Tensor mkldnn_serialize(const Tensor& self) {
+static Tensor get_mkldnn_serialized_md(const Tensor& self) {
   const ideep::tensor packed_w = itensor_from_tensor(self);
   auto packed_w_desc = packed_w.get_desc();
   std::vector<uint8_t> serialized_wei_desc;
@@ -546,8 +546,8 @@ TORCH_LIBRARY_IMPL(mkldnn, CPU, m) {
 
 TORCH_LIBRARY_IMPL(mkldnn, MkldnnCPU, m) {
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_mkldnn_serialize"),
-      TORCH_FN(mkldnn_serialize));
+      TORCH_SELECTIVE_NAME("mkldnn::_get_mkldnn_serialized_md"),
+      TORCH_FN(get_mkldnn_serialized_md ));
 }
 
 #else

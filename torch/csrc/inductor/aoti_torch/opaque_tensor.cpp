@@ -21,10 +21,10 @@ at::Tensor mkldnn_tensor_from_data_ptr(
     at::IntArrayRef dims,
     at::ScalarType dtype,
     at::Device device,
-    const uint8_t* serialized_md,
-    int64_t serialized_md_size) {
+    const uint8_t* opaque_metadata,
+    int64_t opaque_metadata_size) {
   std::vector<uint8_t> vector_serialized_md{
-      serialized_md, serialized_md + serialized_md_size};
+      opaque_metadata, opaque_metadata + opaque_metadata_size};
   ideep::tensor::desc deserialized_ideep_desc;
 #if IDEEP_PREREQ(3, 4, 1, 2)
   // groups is needed for grouped conv
@@ -48,8 +48,8 @@ at::Tensor mkldnn_tensor_from_data_ptr(
     at::IntArrayRef dims,
     at::ScalarType dtype,
     at::Device device,
-    const uint8_t* serialized_md,
-    int64_t serialized_md_size) {
+    const uint8_t* opaque_metadata,
+    int64_t opaque_metadata_size) {
   TORCH_CHECK(false, "MKL-DNN build is disabled");
 }
 

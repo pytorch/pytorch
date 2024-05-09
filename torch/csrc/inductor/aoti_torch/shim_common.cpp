@@ -324,8 +324,8 @@ AOTITorchError aoti_torch_create_tensor_from_blob(
     int32_t device_index,
     AtenTensorHandle* ret_new_tensor,
     int8_t layout,
-    const uint8_t* serialized_md,
-    int64_t serialized_md_size) {
+    const uint8_t* opaque_metadata,
+    int64_t opaque_metadata_size) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     c10::IntArrayRef sizes(sizes_ptr, ndim);
     c10::IntArrayRef strides(strides_ptr, ndim);
@@ -339,8 +339,8 @@ AOTITorchError aoti_torch_create_tensor_from_blob(
           sizes,
           static_cast<c10::ScalarType>(dtype),
           device,
-          serialized_md,
-          serialized_md_size));
+          opaque_metadata,
+          opaque_metadata_size));
     } else {
       c10::TensorOptions options = c10::TensorOptions().device(device).dtype(
           static_cast<c10::ScalarType>(dtype));

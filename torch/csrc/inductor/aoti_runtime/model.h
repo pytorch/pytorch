@@ -223,10 +223,10 @@ class AOTInductorModelBase {
       auto stride = this->constant_stride(i);
       auto offset = this->constant_offset(i);
       auto layout = this->constant_layout(i);
-      auto serialized_md_ptr = this->serialized_md(i);
-      auto serialized_md_size = this->serialized_md_size(i);
-      std::vector<uint8_t> vector_serialized_md{
-          serialized_md_ptr, serialized_md_ptr + serialized_md_size};
+      auto opaque_metadata_ptr = this->opaque_metadata(i);
+      auto opaque_metadata_size = this->opaque_metadata_size(i);
+      std::vector<uint8_t> vector_opaque_metadata{
+          opaque_metadata_ptr, opaque_metadata_ptr + opaque_metadata_size};
 
       AtenTensorHandle tensor_handle;
       AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob(
@@ -240,8 +240,8 @@ class AOTInductorModelBase {
           device_idx_,
           &tensor_handle,
           layout,
-          serialized_md_ptr,
-          serialized_md_size));
+          opaque_metadata_ptr,
+          opaque_metadata_size));
       constants_map_->emplace(std::move(name), tensor_handle);
     }
     if (constants_map_) {
@@ -364,12 +364,12 @@ class AOTInductorModelBase {
     return constants_info_.at(idx).original_fqn;
   }
 
-  const uint8_t* serialized_md(int64_t idx) const {
-    return constants_info_.at(idx).serialized_md.data();
+  const uint8_t* opaque_metadata(int64_t idx) const {
+    return constants_info_.at(idx).opaque_metadata.data();
   }
 
-  size_t serialized_md_size(int64_t idx) {
-    return constants_info_.at(idx).serialized_md.size();
+  size_t opaque_metadata_size(int64_t idx) {
+    return constants_info_.at(idx).opaque_metadata.size();
   }
 
   bool constant_from_folded(int64_t idx) const {
@@ -506,8 +506,8 @@ class AOTInductorModelBase {
     int64_t offset;
     size_t data_size;
     int8_t layout;
-    std::vector<uint8_t> serialized_md;
-    int64_t serialized_md_size;
+    std::vector<uint8_t> opaque_metadata;
+    int64_t opaque_metadata_size;
     const char* original_fqn = nullptr;
     bool from_folded;
   };

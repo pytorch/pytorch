@@ -753,15 +753,17 @@ class CppWrapperCpu(WrapperCodeGen):
                 )
 
                 if tensor.is_mkldnn:
-                    serialized_tensor = torch.ops.mkldnn._mkldnn_serialize(tensor)
+                    opaque_metadata_tensor = torch.ops.mkldnn._get_mkldnn_serialized_md(
+                        tensor
+                    )
                     assert (
-                        serialized_tensor.dim() == 1
-                    ), "Expect serialized_tensor to be 1-D"
+                        opaque_metadata_tensor.dim() == 1
+                    ), "Expect opaque_metadata_tensor to be 1-D"
 
-                    serialized_list = serialized_tensor.tolist()
-                    serialized_list_str = self.codegen_shape_tuple(serialized_list)
+                    opaque_metadata_list = opaque_metadata_tensor.tolist()
+                    opaque_metadata_str = self.codegen_shape_tuple(opaque_metadata_list)
                     self.prefix.writeline(
-                        f"constants_info_[{idx}].serialized_md = {serialized_list_str};"
+                        f"constants_info_[{idx}].opaque_metadata = {opaque_metadata_str};"
                     )
                 if name in V.graph.dynamo_flat_name_to_original_fqn:
                     original_fqn = V.graph.dynamo_flat_name_to_original_fqn.get(
@@ -1517,7 +1519,6 @@ class CppWrapperCpu(WrapperCodeGen):
 
     def codegen_layout(self, layout):
         if config.abi_compatible:
-            print("layout: ", layout)
             layout_str = str(layout).split(".")[-1]
             self.used_cached_layouts.add(layout_str)
             return f"cached_torch_layout_{layout_str}"
