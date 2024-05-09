@@ -191,7 +191,10 @@ class autocast:
                                      Thus, you may obtain the device type of a tensor using `Tensor.device.type`.
         enabled(bool, optional):  Whether autocasting should be enabled in the region.
             Default: ``True``
-        dtype(torch_dtype, optional):  Whether to use torch.float16 or torch.bfloat16.
+        dtype(torch_dtype, optional):  Data type for ops run in autocast. It uses the default value
+            (``torch.float16`` for CUDA and ``torch.bfloat16`` for CPU), given by
+            :func:`~torch.get_autocast_dtype`, if :attr:`dtype` is ``None``.
+            Default: ``None``
         cache_enabled(bool, optional):  Whether the weight cache inside autocast should be enabled.
             Default: ``True``
     """
@@ -207,11 +210,12 @@ class autocast:
             raise ValueError(
                 f"Expected `device_type` of type `str`, got: `{type(device_type)}`"
             )
+        if dtype is None:
+            dtype = torch.get_autocast_dtype(device_type)
         if torch._jit_internal.is_scripting():
             self._enabled = enabled
             self.device = device_type
             self.fast_dtype = dtype
-            # TODO: support get_autocast_gpu/cpu_dtype
             assert dtype is not None
             return
         self.device = device_type
