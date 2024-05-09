@@ -1700,14 +1700,14 @@ class FakeTensorMode(TorchDispatchMode):
             if not self.is_our_fake(x):
                 if torch.Tag.inplace_view in func.tags:
                     args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
-                    raise Exception(  # noqa: TRY002
+                    raise AssertionError(
                         f"Can't call metadata mutating ops on non-Fake Tensor inputs. Found in {render_call(func, args, kwargs)}"
                     )
                 if not self.allow_non_fake_inputs:
                     if isinstance(x, FakeTensor) and x.fake_mode is not self:
                         raise AssertionError("Mixing fake modes NYI")
                     args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
-                    raise Exception(  # noqa: TRY002
+                    raise AssertionError(
                         f"Please convert all Tensors to FakeTensors first or instantiate FakeTensorMode "
                         f"with 'allow_non_fake_inputs'. Found in {render_call(func, args, kwargs)}"
                     )
@@ -1797,7 +1797,7 @@ class FakeTensorMode(TorchDispatchMode):
         any_constant = any(e.constant is not None for e in flat_arg_fake_tensors)
         schema_info = get_schema_info(func)
         if any_constant and schema_info.is_mutable():
-            _, new_kwargs = normalize_function(  # type: ignore[misc]
+            _, new_kwargs = normalize_function(
                 func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
             )
             for k, v in new_kwargs.items():
