@@ -769,7 +769,7 @@ $1: f32[] = torch._ops.my_lib.weird.default(['None', '$0'])""",
         # test all sequence types are permissible returns
         for list_type in (list, tuple):
 
-            class A(torch._C.TensorBase):
+            class A(torch.Tensor):
                 @staticmethod
                 def __new__(cls, elem):
                     return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
@@ -789,7 +789,7 @@ $1: f32[] = torch._ops.my_lib.weird.default(['None', '$0'])""",
 
     def test_invalid_ret(self) -> None:
         # test invalid return gets reasonable error message
-        class A(torch._C.TensorBase):
+        class A(torch.Tensor):
             @staticmethod
             def __new__(cls, elem):
                 return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
