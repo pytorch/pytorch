@@ -273,9 +273,6 @@ def aot_dispatch_autograd(
             payload_fn=lambda: fx_g.print_readable(print_output=False),  # type: ignore[union-attr]
         )
 
-    fakify_first_call = False
-    fakified_out = None
-
     with torch.no_grad():
         inner_meta = (
             fw_metadata
