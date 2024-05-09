@@ -249,7 +249,7 @@ def sdpa_flop(query_shape, key_shape, value_shape, *args, out_shape=None, **kwar
     return sdpa_flop_count(query_shape, key_shape, value_shape)
 
 
-def unpack_flash_attention_nested_shapes(
+def _unpack_flash_attention_nested_shapes(
     *,
     query,
     key,
@@ -295,7 +295,7 @@ def unpack_flash_attention_nested_shapes(
     yield query.shape, key.shape, value.shape, grad_out.shape if grad_out is not None else None
 
 
-def unpack_efficient_attention_nested_shapes(
+def _unpack_efficient_attention_nested_shapes(
     *,
     query,
     key,
@@ -360,7 +360,7 @@ def _flash_attention_forward_flop(
     # NB: We aren't accounting for causal attention here
     # in case this is a nested tensor, we unpack the individual batch elements
     # and then sum the flops per batch element
-    sizes = unpack_flash_attention_nested_shapes(
+    sizes = _unpack_flash_attention_nested_shapes(
         query=query,
         key=key,
         value=value,
@@ -392,7 +392,7 @@ def _efficient_attention_forward_flop(
     # NB: We aren't accounting for causal attention here
     # in case this is a nested tensor, we unpack the individual batch elements
     # and then sum the flops per batch element
-    sizes = unpack_efficient_attention_nested_shapes(
+    sizes = _unpack_efficient_attention_nested_shapes(
         query=query,
         key=key,
         value=value,
@@ -456,7 +456,7 @@ def _flash_attention_backward_flop(
 ) -> int:
     # in case this is a nested tensor, we unpack the individual batch elements
     # and then sum the flops per batch element
-    shapes = unpack_flash_attention_nested_shapes(
+    shapes = _unpack_flash_attention_nested_shapes(
         query=query,
         key=key,
         value=value,
@@ -489,7 +489,7 @@ def _efficient_attention_backward_flop(
 ) -> int:
     # in case this is a nested tensor, we unpack the individual batch elements
     # and then sum the flops per batch element
-    shapes = unpack_efficient_attention_nested_shapes(
+    shapes = _unpack_efficient_attention_nested_shapes(
         query=query,
         key=key,
         value=value,
