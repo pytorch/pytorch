@@ -3037,6 +3037,7 @@ class CppKernelDispatcher(CppKernel):
 
     def codegen_vec_kernel(self, code):
         if self.vec_kernel and self.tiling_ranges[0] != 0:
+            code.splice(self.vec_condition)
             if len(self.tiling_ranges) == 2:
                 with contextlib.ExitStack() as stack:
                     stack.enter_context(code.indent())
