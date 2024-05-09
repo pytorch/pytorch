@@ -60,7 +60,7 @@ test_failures = {
     "test_AllenaiLongformerBase_repro_dynamic_shapes": TestFailure(
         ("cpu", "cuda", "xpu")
     ),
-    "test_conv_inference_heuristics_dynamic_shapes": TestFailure("cuda", "xpu"),
+    "test_conv_inference_heuristics_dynamic_shapes": TestFailure(("cuda", "xpu")),
 }
 
 if TEST_WITH_ROCM:
