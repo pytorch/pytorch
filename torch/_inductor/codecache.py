@@ -160,9 +160,11 @@ class CacheBase:
     @functools.lru_cache(None)
     def get_system() -> Dict[str, Any]:
         try:
-            import triton
+            from triton.compiler.compiler import triton_key
 
-            triton_version = triton.__version__  # type: ignore[attr-defined]
+            # Use triton_key instead of triton.__version__ as the version
+            # is not updated with each code change
+            triton_version = triton_key()
         except ModuleNotFoundError:
             triton_version = None
 
@@ -398,6 +400,13 @@ def write(
     if not os.path.exists(path):
         write_atomic(path, content, make_dirs=True)
     return basename, path
+
+
+def write_text(text: str) -> str:
+    """
+    Write the `text` to a file and return the path computed based on the hash.
+    """
+    return write(text, "txt")[1]
 
 
 def write_atomic(
@@ -2622,7 +2631,12 @@ def _cuda_compiler() -> Optional[str]:
 
 
 def _cutlass_include_paths() -> List[str]:
-    cutlass_path = config.cuda.cutlass_dir
+    if config.is_fbcode():
+        from libfb.py import parutil
+
+        cutlass_path = parutil.get_dir_path("cutlass-3-headers")
+    else:
+        cutlass_path = config.cuda.cutlass_dir
     return [
         # Use realpath to get canonical absolute paths, in order not to mess up cache keys
         os.path.realpath(os.path.join(cutlass_path, "include")),

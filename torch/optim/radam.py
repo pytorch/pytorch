@@ -7,6 +7,7 @@ from .optimizer import (
     _capturable_doc,
     _default_to_fused_or_foreach,
     _differentiable_doc,
+    _disable_dynamo_if_unsupported,
     _dispatch_sqrt,
     _foreach_doc,
     _get_scalar_dtype,
@@ -234,67 +235,6 @@ RAdam.__doc__ = (
 )
 
 
-def radam(
-    params: List[Tensor],
-    grads: List[Tensor],
-    exp_avgs: List[Tensor],
-    exp_avg_sqs: List[Tensor],
-    state_steps: List[Tensor],
-    # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
-    # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
-    decoupled_weight_decay: bool = False,
-    foreach: Optional[bool] = None,
-    differentiable: bool = False,
-    capturable: bool = False,
-    has_complex: bool = False,
-    *,
-    beta1: float,
-    beta2: float,
-    lr: float,
-    weight_decay: float,
-    eps: float,
-):
-    r"""Functional API that performs RAdam algorithm computation.
-
-    See :class:`~torch.optim.RAdam` for details.
-    """
-
-    if not all(isinstance(t, torch.Tensor) for t in state_steps):
-        raise RuntimeError(
-            "API has changed, `state_steps` argument must contain a list of singleton tensors"
-        )
-
-    if foreach is None:
-        _, foreach = _default_to_fused_or_foreach(
-            params, differentiable, use_fused=False
-        )
-
-    if foreach and torch.jit.is_scripting():
-        raise RuntimeError("torch.jit.script not supported with foreach optimizers")
-
-    if foreach and not torch.jit.is_scripting():
-        func = _multi_tensor_radam
-    else:
-        func = _single_tensor_radam
-
-    func(
-        params,
-        grads,
-        exp_avgs,
-        exp_avg_sqs,
-        state_steps,
-        beta1=beta1,
-        beta2=beta2,
-        lr=lr,
-        weight_decay=weight_decay,
-        eps=eps,
-        decoupled_weight_decay=decoupled_weight_decay,
-        differentiable=differentiable,
-        capturable=capturable,
-        has_complex=has_complex,
-    )
-
-
 def _single_tensor_radam(
     params: List[Tensor],
     grads: List[Tensor],
@@ -373,7 +313,9 @@ def _single_tensor_radam(
             return (bias_correction2**0.5) / exp_avg_sq_sqrt
 
         # Compute the variance rectification term and update parameters accordingly
-        if capturable:
+        # data-dependent control flow is not supported by the compiler
+        # so use torch.where if compiling
+        if capturable or torch._utils.is_compiling():
             update = torch.where(
                 rho_t > 5.0, _compute_rect() * _compute_adaptive_lr(), 1.0
             )
@@ -538,7 +480,12 @@ def _multi_tensor_radam(
                 else 0
                 for rho_t in rho_t_list
             ]
-            unrectified = [0 if rect > 0 else 1.0 for rect in rect]
+
+            # data-dependent control flow is not supported by the compiler
+            if torch._utils.is_compiling():
+                unrectified = [torch.where(rect > 0, 0.0, 1.0) for rect in rect]
+            else:
+                unrectified = [0.0 if rect > 0.0 else 1.0 for rect in rect]
 
             bias_correction1 = [
                 1 - beta1 ** _get_value(step) for step in grouped_state_steps
@@ -559,3 +506,65 @@ def _multi_tensor_radam(
 
         # Here, buffer = sqrt(1 - beta2^t) * rect_step_size / (sqrt(v) + eps) + unrect_step_size
         torch._foreach_addcmul_(grouped_params, grouped_exp_avgs, buffer)
+
+
+@_disable_dynamo_if_unsupported(single_tensor_fn=_single_tensor_radam)
+def radam(
+    params: List[Tensor],
+    grads: List[Tensor],
+    exp_avgs: List[Tensor],
+    exp_avg_sqs: List[Tensor],
+    state_steps: List[Tensor],
+    # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
+    # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
+    decoupled_weight_decay: bool = False,
+    foreach: Optional[bool] = None,
+    differentiable: bool = False,
+    capturable: bool = False,
+    has_complex: bool = False,
+    *,
+    beta1: float,
+    beta2: float,
+    lr: float,
+    weight_decay: float,
+    eps: float,
+):
+    r"""Functional API that performs RAdam algorithm computation.
+
+    See :class:`~torch.optim.RAdam` for details.
+    """
+
+    if not all(isinstance(t, torch.Tensor) for t in state_steps):
+        raise RuntimeError(
+            "API has changed, `state_steps` argument must contain a list of singleton tensors"
+        )
+
+    if foreach is None:
+        _, foreach = _default_to_fused_or_foreach(
+            params, differentiable, use_fused=False
+        )
+
+    if foreach and torch.jit.is_scripting():
+        raise RuntimeError("torch.jit.script not supported with foreach optimizers")
+
+    if foreach and not torch.jit.is_scripting():
+        func = _multi_tensor_radam
+    else:
+        func = _single_tensor_radam
+
+    func(
+        params,
+        grads,
+        exp_avgs,
+        exp_avg_sqs,
+        state_steps,
+        beta1=beta1,
+        beta2=beta2,
+        lr=lr,
+        weight_decay=weight_decay,
+        eps=eps,
+        decoupled_weight_decay=decoupled_weight_decay,
+        differentiable=differentiable,
+        capturable=capturable,
+        has_complex=has_complex,
+    )
