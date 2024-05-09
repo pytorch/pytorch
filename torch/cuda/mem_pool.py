@@ -3,7 +3,7 @@ import contextlib
 from typing import Optional
 
 import torch
-from ._utils import _dummy_type
+from .._utils import _dummy_type
 
 if not hasattr(torch._C, "_CudaStreamBase"):
     # Define dummy base classes
