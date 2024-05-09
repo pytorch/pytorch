@@ -15,13 +15,17 @@ should_preserve_node_meta = False
 @contextmanager
 def preserve_node_meta():
     global should_preserve_node_meta
+    global current_meta
 
     saved_should_preserve_node_meta = should_preserve_node_meta
+    # Shallow copy is OK since fields of current_meta are not mutated
+    saved_current_meta = current_meta.copy()
     try:
         should_preserve_node_meta = True
         yield
     finally:
         should_preserve_node_meta = saved_should_preserve_node_meta
+        current_meta = saved_current_meta
 
 
 @compatibility(is_backward_compatible=False)
@@ -55,7 +59,7 @@ def reset_grad_fn_seq_nr():
             del current_meta["grad_fn_seq_nr"]
         else:
             current_meta["in_grad_fn"] = current_level - 1
-            current_meta["grad_fn_seq_nr"].pop()
+            current_meta["grad_fn_seq_nr"] = current_meta["grad_fn_seq_nr"][:-1]
 
 
 @compatibility(is_backward_compatible=False)
@@ -85,7 +89,7 @@ def set_current_meta(node):
             if "from_node" not in current_meta:
                 current_meta["from_node"] = [(node.name, node.target)]
             elif current_meta["from_node"][-1][0] != node.name:
-                current_meta["from_node"].append((node.name, node.target))
+                current_meta["from_node"] = current_meta["from_node"] + [(node.name, node.target)]
 
             yield
         finally:

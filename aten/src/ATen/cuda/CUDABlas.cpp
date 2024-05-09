@@ -236,7 +236,7 @@ namespace at::cuda::blas {
     CUDABLAS_NONNEGINT_CHECK(bgemm<Dtype>, num_batches);  \
   } while (0)
 
-#if (!defined(USE_ROCM) && !defined(_MSC_VER)) || (defined(USE_ROCM) && ROCM_VERSION >= 50700)
+#if !defined(USE_ROCM) || (defined(USE_ROCM) && ROCM_VERSION >= 50700)
 
 #if defined(USE_ROCM) && ROCM_VERSION >= 50700 && ROCM_VERSION < 60000
 // only for rocm 5.7 where we first supported hipblaslt, it was difficult
@@ -375,7 +375,7 @@ class CuBlasLtMatmulPreference : public CuBlasLtDescriptor<
 
 template <typename Dtype>
 inline void bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
-#if (!defined(USE_ROCM) && !defined(_MSC_VER)) || (defined(USE_ROCM) && ROCM_VERSION >= 60000)
+#if !defined(USE_ROCM) || (defined(USE_ROCM) && ROCM_VERSION >= 60000)
   cudaDataType_t abcType = CUDA_R_32F;
   cublasComputeType_t computeType = CUBLAS_COMPUTE_32F;
   cudaDataType_t scaleType = CUDA_R_32F;
@@ -1235,7 +1235,7 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
   }
 }
 
-#if (!defined(USE_ROCM) && !defined(_MSC_VER)) || (defined(USE_ROCM) && ROCM_VERSION >= 50700)
+#if !defined(USE_ROCM) || (defined(USE_ROCM) && ROCM_VERSION >= 50700)
 
 template <typename Dtype>
 void gemm_and_bias(
@@ -1745,7 +1745,7 @@ void int8_gemm(
   TORCH_CHECK(false, "int8_gemm is only supported for ROCm 6.0 and above");
 #endif // !defined(USE_ROCM) || (defined(USE_ROCM) && ROCM_VERSION >= 60000)
 }
-#endif // (!defined(USE_ROCM) && !defined(_MSC_VER)) || (defined(USE_ROCM) && ROCM_VERSION >= 50700)
+#endif // !defined(USE_ROCM) || (defined(USE_ROCM) && ROCM_VERSION >= 50700)
 
 // ROCm 5.6 hipblas matches the const Dtype *A API, but prior hipblas does not.
 #if defined(USE_ROCM) && ROCM_VERSION < 50600
