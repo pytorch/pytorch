@@ -20,14 +20,22 @@ from torch.testing._internal.logging_utils import logs_to_string
 # note: these tests are not run on windows due to inductor_utils.HAS_CPU
 
 
-def compiler_fn(gm):
-    """Same as torch.compile() but counts number of compiles"""
+def make_compiler_fn(fullgraph=True, dynamic=True):
+    def _compiler_fn(gm):
+        """Same as torch.compile() but counts number of compiles"""
 
-    def inner_compiler(gm_, example_inputs_):
-        counters["compiled_autograd"]["compiles"] += 1
-        return inductor.compile(gm_, example_inputs_)
+        def _inner_compiler(gm_, example_inputs_):
+            counters["compiled_autograd"]["compiles"] += 1
+            return inductor.compile(gm_, example_inputs_)
 
-    return torch.compile(gm, backend=inner_compiler, fullgraph=True, dynamic=True)
+        return torch.compile(
+            gm, backend=_inner_compiler, fullgraph=fullgraph, dynamic=dynamic
+        )
+
+    return _compiler_fn
+
+
+compiler_fn = make_compiler_fn()
 
 
 # TODO(jansel): hooks as lambdas creates recompiles in dynamo, we should fix that
@@ -47,6 +55,10 @@ class TestCompiledAutograd(TestCase):
     def check_output_and_recompiles(
         self, fn, count=1, compiler_fn=compiler_fn, compile_fn=False
     ):
+        if isinstance(count, list):
+            captures, compiles = count
+        else:
+            captures, compiles = count, count
         with torch.autograd.set_multithreading_enabled(False):
             torch._dynamo.reset()
             counters["compiled_autograd"].clear()
@@ -57,8 +69,8 @@ class TestCompiledAutograd(TestCase):
                 opt_fn = torch.compile(fn) if compile_fn else fn
                 actual = list(opt_fn())
             self.assertEqual(expected, actual)
-            self.assertEqual(counters["compiled_autograd"]["captures"], count)
-            self.assertEqual(counters["compiled_autograd"]["compiles"], count)
+            self.assertEqual(counters["compiled_autograd"]["captures"], captures)
+            self.assertEqual(counters["compiled_autograd"]["compiles"], compiles)
 
     def test_dynamo_flaky_segfault(self):
         import os
@@ -604,7 +616,7 @@ main()
                 loss.backward()
                 yield x.grad
 
-        self.check_output_and_recompiles(fn, 2)
+        self.check_output_and_recompiles(fn, count=2)
 
     def test_custom_fn_saved_multiple_tensors(self):
         def fn():
@@ -627,7 +639,7 @@ main()
                 loss.backward()
                 yield x.grad
 
-        self.check_output_and_recompiles(fn, 2)
+        self.check_output_and_recompiles(fn, count=2)
 
     def test_custom_fn_saved_multiple_tensors_dedup(self):
         def fn():
@@ -649,7 +661,7 @@ main()
                 loss.backward()
                 yield x.grad
 
-        self.check_output_and_recompiles(fn, 2)
+        self.check_output_and_recompiles(fn, count=2)
 
     def test_custom_fn_saved_shape_tensor(self):
         def fn():
@@ -671,7 +683,7 @@ main()
                 loss.backward()
                 yield x.grad
 
-        self.check_output_and_recompiles(fn, 2)
+        self.check_output_and_recompiles(fn, count=2)
 
     def test_custom_fn_saved_attr(self):
         def fn():
@@ -693,11 +705,9 @@ main()
                 loss.backward()
                 yield x.grad
 
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.InternalTorchDynamoError,
-            "is not subscriptable",
-        ):
-            self.check_output_and_recompiles(fn, 2)
+        self.check_output_and_recompiles(
+            fn, count=2, compiler_fn=make_compiler_fn(fullgraph=False)
+        )
 
     def test_custom_fn_multiple_grads(self):
         def fn():
@@ -719,7 +729,7 @@ main()
                 yield x.grad
                 yield y.grad
 
-        self.check_output_and_recompiles(fn, 2)
+        self.check_output_and_recompiles(fn, count=2)
 
     def test_custom_fn_non_variable_input(self):
         def fn():
@@ -743,7 +753,7 @@ main()
                 yield y
                 yield z
 
-        self.check_output_and_recompiles(fn, 2)
+        self.check_output_and_recompiles(fn, count=2)
 
     @unittest.skipIf(not HAS_GPU, "requires gpu")
     def test_custom_fn_output_metadata(self):
@@ -783,9 +793,9 @@ main()
             yield x.device
             yield x.grad
 
-        self.check_output_and_recompiles(fn, 1, my_compiler_fn)
+        self.check_output_and_recompiles(fn, count=1)
 
-    def test_custom_fns_with_same_graph(self):
+    def test_custom_fn_with_same_graph(self):
         def fn():
             class MyFn1(torch.autograd.Function):
                 @staticmethod
@@ -815,10 +825,10 @@ main()
                 yield x.grad
 
         self.check_output_and_recompiles(
-            fn, 2
+            fn, count=2
         )  # should compile once for MyFn1 and once for MyFn2
 
-    def test_dynamically_defined_class(self):
+    def test_custom_fn_dynamically_defined_class(self):
         def fn():
             def create_class(multiplier: int):
                 class DynamicFn(torch.autograd.Function):
@@ -839,7 +849,88 @@ main()
                 loss.backward()
                 yield x.grad
 
-        self.check_output_and_recompiles(fn, 3)
+        self.check_output_and_recompiles(fn, count=3)
+
+    def test_custom_fn_bw_graph_break(self):
+        def fn():
+            class MySin(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    ctx.save_for_backward(x)
+                    return torch.sin(x)
+
+                @staticmethod
+                def backward(ctx, gO):
+                    print("graph break")
+                    (x,) = ctx.saved_tensors
+                    print("graph break")
+                    return gO * torch.cos(x)
+
+            for i in [10, 100, 10, 15, 20, 25]:
+                x = torch.arange(0.0, i, requires_grad=True)
+                out = MySin.apply(x)
+                loss = out.sum()
+                loss.backward()
+                yield x.grad
+
+        self.check_output_and_recompiles(
+            fn, count=[2, 6], compiler_fn=make_compiler_fn(fullgraph=False)
+        )
+
+    def test_custom_fn_compiled_fw_graph_break(self):
+        def fn():
+            class MySin(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    print("graph break")
+                    ctx.save_for_backward(x)
+                    return torch.sin(x)
+
+                @staticmethod
+                def backward(ctx, gO):
+                    (x,) = ctx.saved_tensors
+                    return gO * torch.cos(x)
+
+            opt_model = torch.compile(MySin.apply)
+            for i in [10, 100, 10, 15, 20, 25]:
+                x = torch.arange(0.0, i, requires_grad=True)
+                out = opt_model(x)
+                loss = out.sum()
+                loss.backward()
+                yield x.grad
+
+        self.check_output_and_recompiles(
+            fn, count=2, compiler_fn=make_compiler_fn(fullgraph=False)
+        )
+        self.assertEqual(counters["stats"]["unique_graphs"], 5)  # 3 fw, 2 bw
+
+    def test_custom_fn_compiled_fw_bw_graph_break(self):
+        def fn():
+            class MySin(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    print("graph break")
+                    ctx.save_for_backward(x)
+                    return torch.sin(x)
+
+                @staticmethod
+                def backward(ctx, gO):
+                    print("graph break")
+                    (x,) = ctx.saved_tensors
+                    return gO * torch.cos(x)
+
+            opt_model = torch.compile(MySin.apply)
+            for i in [10, 100, 10, 15, 20, 25]:
+                x = torch.arange(0.0, i, requires_grad=True)
+                out = opt_model(x)
+                loss = out.sum()
+                loss.backward()
+                yield x.grad
+
+        self.check_output_and_recompiles(
+            fn, count=[2, 6], compiler_fn=make_compiler_fn(fullgraph=False)
+        )
+        self.assertEqual(counters["stats"]["unique_graphs"], 9)  # 3 fw, 6 bw
 
     def test_mismatch_fake_tensor_mode(self, dynamic_shape=False):
         """
@@ -1498,12 +1589,14 @@ def load_test_module(name):
         ).load_module()
 
 
-def make_wrapped(fn):
+def make_wrapped(fn, fullgraph):
     @functools.wraps(fn)
     def wrapped(self):
         torch._dynamo.reset()
-        with compiled_autograd.enable(compiler_fn):
-            return fn(self)
+        with compiled_autograd.enable(make_compiler_fn(fullgraph=fullgraph)):
+            out = fn(self)
+
+        return out
 
     return wrapped
 
@@ -1517,7 +1610,8 @@ def wrap_test_class(orig_cls):
         elif known_failures_re.match(name) or name in known_failing_tests:
             dct[name] = unittest.expectedFailure
         elif name.startswith("test_"):
-            dct[name] = make_wrapped(fn)
+            fullgraph = name not in known_graph_breaks_tests
+            dct[name] = make_wrapped(fn, fullgraph)
 
     cls = type(
         orig_cls.__name__ + "WithCompiledAutograd",
@@ -1527,6 +1621,8 @@ def wrap_test_class(orig_cls):
     cls.__file__ = __file__
     return cls
 
+
+known_graph_breaks_tests = {}
 
 # These groups of tests aren't supported yet
 known_failures_re = re.compile(
