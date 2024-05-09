@@ -1,9 +1,8 @@
+import argparse
 import os
 import re
 from pathlib import Path
 from typing import List
-
-from jsonargparse import CLI
 
 
 def remove_triton_function_declaration(source_code: str) -> str:
@@ -126,6 +125,25 @@ def get_clean_triton(input_path: Path, output_path: Path = "triton_only_repro.py
 if __name__ == "__main__":
     """Sample usage:
     # Running sweep
-    python inputcode.py out.py
+    python inputcode.py
     """
-    CLI(get_clean_triton)
+    parser = argparse.ArgumentParser(
+        description="Clean Inductor generated code to remove Inductor dependencies"
+    )
+
+    # Add the arguments
+    parser.add_argument(
+        "input_path", type=Path, help="Path to inductor generated output code"
+    )
+    parser.add_argument(
+        "--output_path",
+        type=Path,
+        default=Path("triton_only_repro.py"),
+        help="Path to write out the clean triton output",
+    )
+
+    # Parse the arguments
+    args = parser.parse_args()
+
+    # Call the function with parsed arguments
+    result = get_clean_triton(args.input_path, args.output_path)
