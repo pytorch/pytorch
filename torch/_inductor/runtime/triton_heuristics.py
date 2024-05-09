@@ -8,9 +8,9 @@ import logging
 import math
 import operator
 import os
-import sys
 import os.path
 import re
+import sys
 import threading
 import time
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
@@ -119,6 +119,7 @@ def disable_pointwise_autotuning(inductor_meta):
         return True
     return not inductor_meta.get("autotune_pointwise", True)
 
+
 def _dump_launch_params(args, kwargs, launcher, kernel_name):
     call_args = []
     call_kwargs = {}
@@ -140,10 +141,9 @@ def _dump_launch_params(args, kwargs, launcher, kernel_name):
     args_str += ", ".join(call_args)
     for k, v in call_kwargs.items():
         args_str += f", {k}={v}"
-    import os
-    import sys
+
     abs_path = os.path.abspath(sys.argv[0])
-    with open(f"{abs_path}.launch_params", 'a') as f:
+    with open(f"{abs_path}.launch_params", "a") as f:
         f.write(f"{kernel_name} | {args_str}\n")
 
 
@@ -818,9 +818,6 @@ class CachingAutotuner(KernelInterface):
         if os.environ.get("TORCHINDUCTOR_DUMP_LAUNCH_PARAMS", 0) == "1":
             _dump_launch_params(args, kwargs, launcher, self.fn.__name__)
 
-        # guard the record function and only call it if profiling is currently
-        # in progress, to reduce latency when profiler is not turned on. Note that
-        # the "if" statement (instead of, say, a contextlib.nullcontext) is intentional;
         # it is faster than entering and exiting a context manager, even if the context
         # manager is a nullcontext.
         if autograd_profiler._is_profiler_enabled:
