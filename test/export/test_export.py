@@ -1179,6 +1179,41 @@ class TestExport(TestCase):
             if node.op == "placeholder":
                 self.assertEqual(str(tuple(node.meta["val"].shape)), f"({sym},)")
 
+    def test_torch_check_eq_commutativity(self):
+        class M1(torch.nn.Module):
+            def forward(self, x1, x2, x3, y):
+                z1 = x1.item()
+                z2 = x2.item()
+                z3 = x3.item()
+                # instead of: torch._check((z2 + z3) == z1)
+                torch._check(z1 == (z2 + z3))
+                if z2 + z3 == z1:
+                    return y * 2
+                else:
+                    return y + 3
+
+        export(
+            M1(),
+            (torch.tensor(6), torch.tensor(3), torch.tensor(3), torch.randn(1)),
+        )
+
+        class M2(torch.nn.Module):
+            def forward(self, x1, x2, x3, y):
+                z1 = x1.item()
+                z2 = x2.item()
+                z3 = x3.item()
+                # instead of: torch._check((z2 + z3) != z1)
+                torch._check(z1 != (z2 + z3))
+                if z2 + z3 == z1:
+                    return y * 2
+                else:
+                    return y + 3
+
+        export(
+            M2(),
+            (torch.tensor(6), torch.tensor(6), torch.tensor(6), torch.randn(1)),
+        )
+
     def test_raise_user_error_when_guard_on_data_dependent_operation(self):
         class M(torch.nn.Module):
             def forward(self, x):
