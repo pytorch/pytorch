@@ -116,35 +116,14 @@ endif()
 
 # Skip modules that are not used by libtorch mobile yet.
 if(BUILD_CAFFE2 AND NOT INTERN_BUILD_MOBILE)
-  add_subdirectory(predictor)
-  add_subdirectory(predictor/emulator)
   add_subdirectory(core/nomnigraph)
   if(USE_NVRTC)
     add_subdirectory(cuda_rtc)
   endif()
-  add_subdirectory(ideep)
-  add_subdirectory(mobile)
-  add_subdirectory(mpi)
-  add_subdirectory(observers)
-  add_subdirectory(onnx)
   if(BUILD_CAFFE2_OPS)
-    add_subdirectory(operators)
-    add_subdirectory(operators/rnn)
-    if(USE_FBGEMM)
-      add_subdirectory(quantization/server)
-    endif()
-    if(USE_QNNPACK)
-      add_subdirectory(operators/quantized)
-    endif()
   endif()
-  add_subdirectory(opt)
   add_subdirectory(proto)
   add_subdirectory(python)
-  add_subdirectory(queue)
-  add_subdirectory(sgd)
-  add_subdirectory(share)
-  # add_subdirectory(test) # todo: use caffe2_gtest_main instead of gtest_main because we will need to call GlobalInit
-  add_subdirectory(transforms)
 endif()
 if(NOT BUILD_CAFFE2 AND NOT INTERN_BUILD_MOBILE)
   add_subdirectory(proto)
@@ -350,6 +329,7 @@ if(NOT INTERN_DISABLE_AUTOGRAD AND NOT BUILD_LITE_INTERPRETER)
     "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_4.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/ADInplaceOrViewType_0.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/ADInplaceOrViewType_1.cpp"
+    "${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/generated/c_shim_cpu.cpp"
   )
   if(BUILD_LAZY_TS_BACKEND)
     list(APPEND GENERATED_CXX_TORCH
@@ -404,12 +384,17 @@ set(GENERATED_TESTING_PYTHON
   "${TORCH_SRC_DIR}/testing/_internal/generated/annotated_fn_args.py"
   )
 
+set(GENERATED_CXX_TORCH_CUDA
+  "${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/generated/c_shim_cuda.cpp"
+  )
+
 set(TORCH_GENERATED_CODE
   ${GENERATED_CXX_TORCH}
   ${GENERATED_H_TORCH}
   ${GENERATED_CXX_PYTHON}
   ${GENERATED_H_PYTHON}
   ${GENERATED_TESTING_PYTHON}
+  ${GENERATED_CXX_TORCH_CUDA}
   )
 
 set(GEN_PER_OPERATOR_FLAG)
@@ -958,7 +943,7 @@ endif()
 # Compile exposed libraries.
 if(USE_ROCM)
   set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
-  list(APPEND Caffe2_HIP_SRCS)
+  list(APPEND Caffe2_HIP_SRCS ${GENERATED_CXX_TORCH_CUDA})
   hip_add_library(torch_hip ${Caffe2_HIP_SRCS})
   if(USE_FLASH_ATTENTION)
     target_link_libraries(torch_hip PRIVATE __caffe2_aotriton)
@@ -978,7 +963,7 @@ if(USE_ROCM)
   endif()
 elseif(USE_CUDA)
   set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
-  list(APPEND Caffe2_GPU_SRCS)
+  list(APPEND Caffe2_GPU_SRCS ${GENERATED_CXX_TORCH_CUDA})
   if(CUDA_SEPARABLE_COMPILATION)
     # Separate compilation fails when kernels using `thrust::sort_by_key`
     # are linked with the rest of CUDA code. Workaround by linking them separately.
@@ -1231,11 +1216,6 @@ endif()
 if(USE_TBB)
   list(APPEND ATen_CPU_INCLUDE ${TBB_INCLUDE_DIR})
   target_link_libraries(torch_cpu PUBLIC TBB::tbb)
-endif()
-
-if(BUILD_CAFFE2 AND BUILD_CAFFE2_OPS AND USE_FBGEMM)
-  # FIXME: quantization/server/conv_dnnlowp_op.cc depends on fbgemm/src/RefImplementations.h
-  target_include_directories(torch_cpu PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../third_party)
 endif()
 
 target_include_directories(torch_cpu PRIVATE ${ATen_CPU_INCLUDE})
