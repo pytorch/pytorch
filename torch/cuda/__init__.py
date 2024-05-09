@@ -53,18 +53,9 @@ _device_t = Union[_device, str, int, None]
 _HAS_PYNVML = False
 _PYNVML_ERR = None
 try:
-    try:
-        import pynvml  # type: ignore[import]
+    import pynvml  # type: ignore[import]
 
-        _HAS_PYNVML = True
-    except ModuleNotFoundError:
-        pass
-    try:
-        import amdsmi  # type: ignore[import]
-
-        _HAS_PYNVML = True
-    except ModuleNotFoundError:
-        pass
+    _HAS_PYNVML = True
 except ImportError as err:
     _PYNVML_ERR = err  # sometimes a lib is installed but the import fails for some other reason, so we log the error for later
 
@@ -572,9 +563,7 @@ def set_stream(stream: Stream):
 
 def _parse_visible_devices() -> Union[List[int], List[str]]:
     r"""Parse CUDA_VISIBLE_DEVICES environment variable."""
-    var = os.getenv(
-        "CUDA_VISIBLE_DEVICES" if not torch.version.hip else "HIP_VISIBLE_DEVICES"
-    )
+    var = os.getenv("CUDA_VISIBLE_DEVICES")
     if var is None:
         return list(range(64))
 
@@ -620,16 +609,6 @@ def _parse_visible_devices() -> Union[List[int], List[str]]:
     return rc
 
 
-def _raw_device_count_amdsmi() -> int:
-    try:
-        amdsmi.amdsmi_init()
-    except amdsmi.AmdSmiException as e:
-        warnings.warn(f"Can't initialize amdsmi - Error code: {e.err_code}")
-        return -1
-    socket_handles = amdsmi.amdsmi_get_processor_handles()
-    return len(socket_handles)
-
-
 def _raw_device_count_nvml() -> int:
     r"""Return number of devices as reported by NVML or negative value if NVML discovery/initialization failed."""
     from ctypes import byref, c_int, CDLL
@@ -646,36 +625,6 @@ def _raw_device_count_nvml() -> int:
         return -1
     del nvml_h
     return dev_count.value
-
-
-def _raw_device_uuid_amdsmi() -> Optional[List[str]]:
-    from ctypes import byref, c_int, c_void_p, CDLL, create_string_buffer
-
-    try:
-        amdsmi.amdsmi_init()
-    except amdsmi.AmdSmiException:
-        warnings.warn("Can't initialize amdsmi")
-        return None
-    try:
-        socket_handles = amdsmi.amdsmi_get_processor_handles()
-        dev_count = len(socket_handles)
-    except amdsmi.AmdSmiException:
-        warnings.warn("Can't get amdsmi device count")
-        return None
-    uuids: List[str] = []
-    for idx in range(dev_count):
-        try:
-            handler = amdsmi.amdsmi_get_processor_handles()[idx]
-        except amdsmi.AmdSmiException:
-            warnings.warn("Cannot get amd device handler")
-            return None
-        try:
-            uuid = amdsmi.amdsmi_get_gpu_device_uuid(handler)
-        except amdsmi.AmdSmiException:
-            warnings.warn("Cannot get uuid for amd device")
-            return None
-        uuids.append(str(uuid))
-    return uuids
 
 
 def _raw_device_uuid_nvml() -> Optional[List[str]]:
@@ -735,28 +684,6 @@ def _transform_uuid_to_ordinals(candidates: List[str], uuids: List[str]) -> List
             return cast(List[int], [])
         rc.append(idx)
     return rc
-
-
-def _device_count_amdsmi() -> int:
-    visible_devices = _parse_visible_devices()
-    if not visible_devices:
-        return 0
-    try:
-        if type(visible_devices[0]) is str:
-            return -1
-        else:
-            raw_cnt = _raw_device_count_amdsmi()
-            if raw_cnt <= 0:
-                return raw_cnt
-            # Trim the list up to a maximum available device
-            for idx, val in enumerate(visible_devices):
-                if cast(int, val) >= raw_cnt:
-                    return idx
-    except OSError:
-        return -1
-    except AttributeError:
-        return -1
-    return len(visible_devices)
 
 
 def _device_count_nvml() -> int:
@@ -823,7 +750,7 @@ def device_count() -> int:
     if _cached_device_count is not None:
         return _cached_device_count
     # bypass _device_count_nvml() if rocm (not supported)
-    nvml_count = _device_count_amdsmi() if torch.version.hip else _device_count_nvml()
+    nvml_count = -1 if torch.version.hip else _device_count_nvml()
     r = torch._C._cuda_getDeviceCount() if nvml_count < 0 else nvml_count
     # NB: Do not cache the device count prior to CUDA initialization, because
     # the number of devices can change due to changes to CUDA_VISIBLE_DEVICES
@@ -981,68 +908,6 @@ def _get_pynvml_handler(device: Optional[Union[Device, int]] = None):
     return handle
 
 
-def _get_amdsmi_handler(device: Optional[Union[Device, int]] = None):
-    if not _HAS_PYNVML:
-        raise ModuleNotFoundError(
-            "amdsmi does not seem to be installed or it can't be imported."
-        ) from _PYNVML_ERR
-    try:
-        amdsmi.amdsmi_init()
-    except amdsmi.AmdSmiException as e:
-        raise RuntimeError(
-            "amdsmi driver can't be loaded, requires >=ROCm5.6 installation"
-        ) from e
-    device = _get_amdsmi_device_index(device)
-    handle = amdsmi.amdsmi_get_processor_handles()[device]
-    return handle
-
-
-def _get_amdsmi_device_index(device: Optional[Union[int, Device]]) -> int:
-    r"""Return the amdsmi index of the device, taking HIP_VISIBLE_DEVICES into account."""
-    idx = _get_device_index(device, optional=True)
-    visible_devices = _parse_visible_devices()
-    if type(visible_devices[0]) is str:
-        raise RuntimeError("HIP_VISIBLE_DEVICES should be indices and not strings")
-    idx_map = dict(enumerate(cast(List[int], visible_devices)))
-    if idx not in idx_map:
-        raise RuntimeError(
-            f"device {idx} is not visible (HIP_VISIBLE_DEVICES={visible_devices})"
-        )
-    return idx_map[idx]
-
-
-def _get_amdsmi_memory_usage(device: Optional[Union[Device, int]] = None) -> int:
-    handle = _get_amdsmi_handler()
-    device = _get_amdsmi_device_index(device)
-    return amdsmi.amdsmi_get_gpu_vram_usage(handle)["vram_used"]
-
-
-def _get_amdsmi_utilization(device: Optional[Union[Device, int]] = None) -> int:
-    handle = _get_amdsmi_handler()
-    device = _get_amdsmi_device_index(device)
-    handle = amdsmi.amdsmi_get_processor_handles()[device]
-    return amdsmi.amdsmi_get_gpu_activity(handle)["gfx_activity"]
-
-
-def _get_amdsmi_temperature(device: Optional[Union[Device, int]] = None) -> int:
-    handle = _get_amdsmi_handler(device)
-    return amdsmi.amdsmi_get_temp_metric(
-        handle,
-        amdsmi.AmdSmiTemperatureType.JUNCTION,
-        amdsmi.AmdSmiTemperatureMetric.CURRENT,
-    )
-
-
-def _get_amdsmi_power_draw(device: Optional[Union[Device, int]] = None) -> int:
-    handle = _get_amdsmi_handler(device)
-    return amdsmi.amdsmi_get_power_info(handle)["average_socket_power"]
-
-
-def _get_amdsmi_clock_rate(device: Optional[Union[Device, int]] = None) -> int:
-    handle = _get_amdsmi_handler(device)
-    return amdsmi.amdsmi_get_clock_info(handle, amdsmi.AmdSmiClkType.GFX)["cur_clk"]
-
-
 def memory_usage(device: Optional[Union[Device, int]] = None) -> int:
     r"""Return the percent of time over the past sample period during which global (device)
     memory was being read or written as given by `nvidia-smi`.
@@ -1055,13 +920,11 @@ def memory_usage(device: Optional[Union[Device, int]] = None) -> int:
     Warning: Each sample period may be between 1 second and 1/6 second,
     depending on the product being queried.
     """
-    if not torch.version.hip:
-        handle = _get_pynvml_handler()
-        device = _get_nvml_device_index(device)
-        handle = pynvml.nvmlDeviceGetHandleByIndex(device)
-        return pynvml.nvmlDeviceGetUtilizationRates(handle).memory
-    else:
-        return _get_amdsmi_memory_usage(device)
+    handle = _get_pynvml_handler()
+
+    device = _get_nvml_device_index(device)
+    handle = pynvml.nvmlDeviceGetHandleByIndex(device)
+    return pynvml.nvmlDeviceGetUtilizationRates(handle).memory
 
 
 def utilization(device: Optional[Union[Device, int]] = None) -> int:
@@ -1076,13 +939,10 @@ def utilization(device: Optional[Union[Device, int]] = None) -> int:
     Warning: Each sample period may be between 1 second and 1/6 second,
     depending on the product being queried.
     """
-    if not torch.version.hip:
-        handle = _get_pynvml_handler(device)
-        device = _get_nvml_device_index(device)
-        handle = pynvml.nvmlDeviceGetHandleByIndex(device)
-        return pynvml.nvmlDeviceGetUtilizationRates(handle).gpu
-    else:
-        return _get_amdsmi_utilization(device)
+    handle = _get_pynvml_handler(device)
+    device = _get_nvml_device_index(device)
+    handle = pynvml.nvmlDeviceGetHandleByIndex(device)
+    return pynvml.nvmlDeviceGetUtilizationRates(handle).gpu
 
 
 def temperature(device: Optional[Union[Device, int]] = None) -> int:
@@ -1098,12 +958,9 @@ def temperature(device: Optional[Union[Device, int]] = None) -> int:
     Warning: Each sample period may be between 1 second and 1/6 second,
     depending on the product being queried.
     """
-    if not torch.version.hip:
-        handle = _get_pynvml_handler(device)
-        # 0 refers to the temperature sensor for the GPU die.
-        return pynvml.nvmlDeviceGetTemperature(handle, 0)
-    else:
-        return _get_amdsmi_temperature(device)
+    handle = _get_pynvml_handler(device)
+    # 0 refers to the temperature sensor for the GPU die.
+    return pynvml.nvmlDeviceGetTemperature(handle, 0)
 
 
 def power_draw(device: Optional[Union[Device, int]] = None) -> int:
@@ -1118,11 +975,8 @@ def power_draw(device: Optional[Union[Device, int]] = None) -> int:
     Warning: Each sample period may be between 1 second and 1/6 second,
     depending on the product being queried.
     """
-    if not torch.version.hip:
-        handle = _get_pynvml_handler(device)
-        return pynvml.nvmlDeviceGetPowerUsage(handle)
-    else:
-        return _get_amdsmi_power_draw(device)
+    handle = _get_pynvml_handler(device)
+    return pynvml.nvmlDeviceGetPowerUsage(handle)
 
 
 def clock_rate(device: Optional[Union[Device, int]] = None) -> int:
@@ -1136,11 +990,8 @@ def clock_rate(device: Optional[Union[Device, int]] = None) -> int:
     Warning: Each sample period may be between 1 second and 1/6 second,
     depending on the product being queried.
     """
-    if not torch.version.hip:
-        handle = _get_pynvml_handler(device)
-        return pynvml.nvmlDeviceGetClockInfo(handle, 1)
-    else:
-        return _get_amdsmi_clock_rate(device)
+    handle = _get_pynvml_handler(device)
+    return pynvml.nvmlDeviceGetClockInfo(handle, 1)
 
 
 def _get_device(device: Union[int, str, torch.device]) -> torch.device:

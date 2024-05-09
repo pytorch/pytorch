@@ -78,11 +78,6 @@ ENV MAGMA_HOME /opt/rocm/magma
 ENV LANG C.UTF-8
 ENV LC_ALL C.UTF-8
 
-# Install amdsmi
-COPY ./common/install_amdsmi.sh install_amdsmi.sh
-RUN bash ./install_amdsmi.sh
-RUN rm install_amdsmi.sh
-
 # (optional) Install non-default CMake version
 ARG CMAKE_VERSION
 COPY ./common/install_cmake.sh install_cmake.sh
