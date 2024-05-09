@@ -1,8 +1,6 @@
-PyYAML==6.0
-future==0.18.3
-numpy==1.24.3
+PyYAML==6.0.1
+numpy==1.26.4
 requests==2.31.0
-setuptools==67.8.0
-six==1.16.0
+setuptools==69.5.1
 sympy==1.12
-typing_extensions==4.5.0
+typing_extensions==4.11.0

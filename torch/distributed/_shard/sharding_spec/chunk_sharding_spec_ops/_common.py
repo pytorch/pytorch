@@ -117,7 +117,7 @@ def _handle_col_wise_sharding_base(
         padding_idx: If specified, the entries at padding_idx do
             not contribute to the gradient; therefore, the embedding
             vector at padding_idx is not updated during training,
-            i.e. it remains as a fixed “pad”.
+            i.e. it remains as a fixed "pad".
             Note that the embedding vector at padding_idx is
             excluded from the reduction.
 
@@ -209,10 +209,8 @@ def _result_distribute_with_col_rearrange(results, input, world_size, weight, pg
     for placement in weight._sharding_spec.placements:
         dim_size = output_split_sizes[placement.rank()]
         start = sum(
-            [
-                split_size if i < placement.rank() else 0
-                for i, split_size in enumerate(output_split_sizes)
-            ]
+            split_size if i < placement.rank() else 0
+            for i, split_size in enumerate(output_split_sizes)
         )
         indices += list(range(start, start + dim_size))
 
@@ -314,7 +312,7 @@ def _handle_row_wise_mask(gather_inp, padding_idx, weight, world_size, rank):
         padding_idx: If specified, the entries at padding_idx do
             not contribute to the gradient; therefore, the embedding
             vector at padding_idx is not updated during training,
-            i.e. it remains as a fixed “pad”.
+            i.e. it remains as a fixed "pad".
             Note that the embedding vector at padding_idx is
             excluded from the reduction.
         weight: weight tensor of Embedding look-up table.

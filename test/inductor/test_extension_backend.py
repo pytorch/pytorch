@@ -23,8 +23,8 @@ except ImportError:
     )
 
 import torch._inductor.config as config
-from torch._inductor import metrics
-from torch._inductor.codegen import cpp
+from torch._inductor import codecache, metrics
+from torch._inductor.codegen import cpp_utils
 from torch._inductor.codegen.common import (
     get_scheduling_for_device,
     get_wrapper_codegen_for_device,
@@ -105,6 +105,7 @@ class ExtensionBackendTests(TestCase):
 
     def test_open_device_registration(self):
         torch.utils.rename_privateuse1_backend("extension_device")
+        torch._register_device_module("extension_device", self.module)
 
         register_backend_for_device(
             "extension_device",
@@ -139,15 +140,19 @@ class ExtensionBackendTests(TestCase):
         def fn(a, b, c):
             return a * b + c
 
-        cpp.DEVICE_TO_ATEN["extension_device"] = "at::kPrivateUse1"
+        cpp_utils.DEVICE_TO_ATEN["extension_device"] = "at::kPrivateUse1"
         for cpp_wrapper_flag in [True, False]:
             with config.patch({"cpp_wrapper": cpp_wrapper_flag}):
                 metrics.reset()
                 opt_fn = torch.compile()(fn)
                 _, code = run_and_get_cpp_code(opt_fn, x, y, z)
-                FileCheck().check("void").check("loadu").check("extension_device").run(
-                    code
-                )
+                if codecache.valid_vec_isa_list():
+                    load_expr = "loadu"
+                else:
+                    load_expr = " = in_ptr0[static_cast<long>(i0)];"
+                FileCheck().check("void").check(load_expr).check(
+                    "extension_device"
+                ).run(code)
                 opt_fn(x, y, z)
                 res = opt_fn(x, y, z)
                 self.assertEqual(ref, res.to(device="cpu"))

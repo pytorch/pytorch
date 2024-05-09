@@ -9,6 +9,8 @@ import unittest
 
 import torch
 from torch._inductor import config, test_operators
+from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.utils._triton import has_triton
 
 try:
     try:
@@ -59,6 +61,8 @@ buf0.users = [NodeUser(node=SchedulerNode(name='buf1'), can_inplace=True, is_wea
 buf0.group.device = cpu
 buf0.group.iteration = ((256,), ())
 buf0.sizes = ([256], [])
+arg0_1_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
+buf0_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
 class buf0_loop_body:
     var_ranges = {z0: 256}
     index0 = z0
@@ -80,6 +84,8 @@ buf1.users = [NodeUser(node=ExternKernelSchedulerNode(name='buf2'), can_inplace=
 buf1.group.device = cpu
 buf1.group.iteration = ((256,), ())
 buf1.sizes = ([256], [])
+buf0_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
+buf1_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
 class buf1_loop_body:
     var_ranges = {z0: 256}
     index0 = z0
@@ -117,6 +123,8 @@ buf0_buf1.users = []
     buf0.group.device = cpu
     buf0.group.iteration = ((256,), ())
     buf0.sizes = ([256], [])
+    arg0_1_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
+    buf0_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
     class buf0_loop_body:
         var_ranges = {z0: 256}
         index0 = z0
@@ -137,6 +145,8 @@ buf0_buf1.users = []
     buf1.group.device = cpu
     buf1.group.iteration = ((256,), ())
     buf1.sizes = ([256], [])
+    buf0_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
+    buf1_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
     class buf1_loop_body:
         var_ranges = {z0: 256}
         index0 = z0
@@ -159,6 +169,29 @@ buf2.node.kernel = extern_kernels.mm""",
         )
         # intentionally only cleanup on success so debugging test is easier
         shutil.rmtree(filename)
+
+    @unittest.skipIf(not TEST_CUDA or not has_triton(), "requires cuda")
+    def test_debug_multi_tempalte(self):
+        class ToyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l = torch.nn.Linear(100, 100)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                return self.relu(self.l(x))
+
+        # no failure
+
+        from torch._inductor.utils import fresh_inductor_cache
+
+        with self.assertLogs(
+            logging.getLogger("torch._inductor.debug"), level=logging.WARNING
+        ), fresh_inductor_cache():
+            m = ToyModel().to(device="cuda:0")
+            m = torch.compile(m, mode="max-autotune")
+            input_tensor = torch.randn(100).to(device="cuda:0")
+            m(input_tensor)
 
 
 if __name__ == "__main__":

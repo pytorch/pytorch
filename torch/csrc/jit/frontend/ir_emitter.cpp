@@ -5685,7 +5685,7 @@ void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
   // successive runs of immutable constant prop does not change the graph
   ConstantPropagationImmutableTypes(to_clean);
 
-  // Constant Pooling pass must be after ConstantPropogation, which can create
+  // Constant Pooling pass must be after ConstantPropagation, which can create
   // new constants that needs to be pooled.
   ConstantPooling(to_clean);
 
