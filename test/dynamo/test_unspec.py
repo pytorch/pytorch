@@ -540,7 +540,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         fn(x)
 
         self.assertExpectedInline(cnts.frame_count, """2""")
-        self.assertExpectedInline(cnts.op_count, """3""")
+        self.assertExpectedInline(cnts.op_count, """4""")
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_split_aot_autograd(self):

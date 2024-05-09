@@ -136,9 +136,15 @@ class PyCodegen:
                 )
             )
             output.extend(create_call_function(2, True))
-        elif isinstance(value, SymNodeVariable) and value.python_type() == float:
+        elif (
+            isinstance(value, SymNodeVariable)
+            and value.python_type() == float
+            and not self.tx.export
+        ):
             # Do this a little unusual; force the output convention to be a
-            # Tensor here
+            # Tensor here.  Don't do this for export because this is
+            # apparently load bearing for export tests (but I am a bit
+            # doubtful it actually works in the real world)
             graph_outputs_key = id(value.as_proxy())
             if graph_outputs_key not in self.graph_outputs:
                 self.graph_outputs[graph_outputs_key] = GraphOutputEntry(
