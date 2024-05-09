@@ -477,18 +477,18 @@ def _cpp_prefix_path() -> str:
     return filename
 
 
-def _get_build_args_of_chosen_isa(chosen_isa: VecISA):
+def _get_build_args_of_chosen_isa(vec_isa: VecISA):
     macros = []
     build_flags = []
-    if chosen_isa != invalid_vec_isa:
+    if vec_isa != invalid_vec_isa:
         # Add Windows support later.
-        for x in chosen_isa.build_macro():
+        for x in vec_isa.build_macro():
             macros.append(copy.deepcopy(x))
 
-        build_flags = [chosen_isa.build_arch_flags()]
+        build_flags = [vec_isa.build_arch_flags()]
 
-    if config.is_fbcode() and chosen_isa != invalid_vec_isa:
-        cap = str(chosen_isa).upper()
+    if config.is_fbcode() and vec_isa != invalid_vec_isa:
+        cap = str(vec_isa).upper()
         macros = [
             f"CPU_CAPABILITY={cap}",
             f"CPU_CAPABILITY_{cap}",
@@ -626,7 +626,7 @@ def get_mmap_self_macro(use_mmap_weights: bool) -> List[str]:
 
 def get_cpp_torch_options(
     cpp_compiler,
-    chosen_isa: VecISA,
+    vec_isa: VecISA,
     include_pytorch: bool,
     aot_mode: bool,
     compile_only: bool,
@@ -645,7 +645,7 @@ def get_cpp_torch_options(
 
     sys_dir_header_cflags, sys_dir_header_include_dirs = _use_standard_sys_dir_headers()
 
-    isa_macros, isa_ps_args_build_flags = _get_build_args_of_chosen_isa(chosen_isa)
+    isa_macros, isa_ps_args_build_flags = _get_build_args_of_chosen_isa(vec_isa)
 
     (
         torch_include_dirs,
@@ -712,12 +712,13 @@ class CppTorchOptions(CppOptions):
 
     def __init__(
         self,
-        chosen_isa: VecISA,
+        vec_isa: VecISA,
         include_pytorch: bool = False,
         warning_all: bool = True,
         aot_mode: bool = False,
         compile_only: bool = False,
         use_mmap_weights: bool = False,
+        shared: bool = True,
     ) -> None:
         super().__init__(compile_only=compile_only, warning_all=warning_all)
 
@@ -733,7 +734,7 @@ class CppTorchOptions(CppOptions):
             torch_passthough_args,
         ) = get_cpp_torch_options(
             cpp_compiler=self._compiler,
-            chosen_isa=chosen_isa,
+            vec_isa=vec_isa,
             include_pytorch=include_pytorch,
             aot_mode=aot_mode,
             compile_only=compile_only,
@@ -764,7 +765,7 @@ def _get_cuda_related_args(aot_mode: bool):
     passthough_args: List[str] = []
 
     # if not use cuda, don't call this function.
-    use_cuda = True
+    cuda = True
 
     if (
         config.is_fbcode()
@@ -775,8 +776,8 @@ def _get_cuda_related_args(aot_mode: bool):
 
     from torch.utils import cpp_extension
 
-    include_dirs = cpp_extension.include_paths(use_cuda)
-    libraries_dirs = cpp_extension.library_paths(use_cuda)
+    include_dirs = cpp_extension.include_paths(cuda)
+    libraries_dirs = cpp_extension.library_paths(cuda)
 
     definations.append(" USE_ROCM" if torch.version.hip else " USE_CUDA")
 
@@ -873,17 +874,18 @@ class CppTorchCudaOptions(CppTorchOptions):
 
     def __init__(
         self,
-        chosen_isa: VecISA,
+        vec_isa: VecISA,
         include_pytorch: bool = False,
-        use_cuda: bool = True,
+        cuda: bool = True,
         aot_mode: bool = False,
         compile_only: bool = False,
         use_mmap_weights: bool = False,
+        shared: bool = True,
     ) -> None:
         # from torch._inductor.codecache import pick_vec_isa
 
         super().__init__(
-            chosen_isa=chosen_isa,
+            vec_isa=vec_isa,
             include_pytorch=include_pytorch,
             aot_mode=aot_mode,
             compile_only=compile_only,
@@ -898,7 +900,7 @@ class CppTorchCudaOptions(CppTorchOptions):
         cuda_libraries: List[str] = []
         cuda_passthough_args: List[str] = []
 
-        if use_cuda:
+        if cuda:
             (
                 cuda_definations,
                 cuda_include_dirs,

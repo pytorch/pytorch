@@ -1267,7 +1267,7 @@ cdll.LoadLibrary("__lib_path__")
         lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
         with lock:
             output_dir = os.path.dirname(input_path)
-            buid_options = CppTorchOptions(chosen_isa=self, warning_all=False)
+            buid_options = CppTorchOptions(vec_isa=self, warning_all=False)
             x86_isa_help_builder = CppBuilder(
                 key,
                 [input_path],
@@ -1277,6 +1277,7 @@ cdll.LoadLibrary("__lib_path__")
             try:
                 # Check if the output file exist, and compile when not.
                 output_path = x86_isa_help_builder.get_target_file_path()
+                print("!!! output_path: ", output_path)
                 if not os.path.isfile(output_path):
                     status, target_file = x86_isa_help_builder.build()
                     if status:
@@ -2315,17 +2316,23 @@ class CppCodeCache:
             "vec_isa": pick_vec_isa(),
         }
 
-        from torch._inductor.cpp_builder import CppBuilder, CppTorchOptions
+        print("!!!! cls.cpp_compile_command_flags: ", cls.cpp_compile_command_flags)
+        print("!!!! compile_command: ", compile_command)
 
-        picked_vec_isa = pick_vec_isa()
-        dummy_builder = CppBuilder("i", ["o"], CppTorchOptions(picked_vec_isa))
+        from torch._inductor.cpp_builder import CppBuilder, CppTorchCudaOptions
+
+        dummy_builder = CppBuilder(
+            name="o", sources="i", BuildOption=CppTorchCudaOptions(**compile_command)
+        )
         # write function will calc source_code hash, the same source code with different
         # ISA level should be generate different hash.
         # So we need get a command_line which contains isa related parameter as a part of hash key.
         # And then pass the command_line to below write function as extra parameter to
         # guarantee the source code hash contains ISA difference.
-        dummy_cmd = dummy_builder.get_command_line()
+        dummy_cmd = repr(dummy_builder.get_command_line())
         key, input_path = write(source_code, "cpp", extra=dummy_cmd)
+
+        print("!!! input_path: ", input_path)
 
         if key not in cls.cache:
             from filelock import FileLock
@@ -2633,9 +2640,9 @@ def _do_validate_cpp_commands(
     from torch._inductor.cpp_builder import CppBuilder, CppTorchCudaOptions
 
     dummy_build_option = CppTorchCudaOptions(
-        chosen_isa=picked_isa,
+        vec_isa=picked_isa,
         include_pytorch=include_pytorch,
-        use_cuda=test_cuda,
+        cuda=test_cuda,
         compile_only=compile_only,
         use_mmap_weights=mmap_weights,
     )
