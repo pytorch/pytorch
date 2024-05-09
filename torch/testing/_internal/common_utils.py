@@ -1847,15 +1847,7 @@ def skipIfNotRegistered(op_name, message):
         @skipIfNotRegistered('MyOp', 'MyOp is not linked!')
             This will check if 'MyOp' is in the caffe2.python.core
     """
-    if not BUILD_WITH_CAFFE2:
-        return unittest.skip("Pytorch is compiled without Caffe2")
-    try:
-        from caffe2.python import core
-        skipper = unittest.skipIf(op_name not in core._REGISTERED_OPERATORS,
-                                  message)
-    except ImportError:
-        skipper = unittest.skip("Cannot import `caffe2.python.core`")
-    return skipper
+    return unittest.skip("Pytorch is compiled without Caffe2")
 
 def _decide_skip_caffe2(expect_caffe2, reason):
     def skip_dec(func):
