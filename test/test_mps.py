@@ -64,6 +64,13 @@ _ref_test_ops = tuple(
 def xfailIfMacOS14_4Plus(func):
     return unittest.expectedFailure(func) if product_version > 14.3 else func  # noqa: F821
 
+def xfailIf(condition):
+    def wrapper(func):
+        if condition:
+            return unittest.expectedFailure(func)
+        else:
+            return func
+    return wrapper
 
 def mps_ops_grad_modifier(ops):
     XFAILLIST_GRAD = {
@@ -2630,6 +2637,7 @@ class TestMPS(TestCaseMPS):
         # Regression test for https://github.com/pytorch/pytorch/issues/96113
         torch.nn.LayerNorm((16,), elementwise_affine=True).to("mps")(torch.randn(1, 2, 16).to("mps", dtype=torch.float16))
 
+    @xfailIf(product_version < 14.0)
     def test_ifft(self):
         # See: https://github.com/pytorch/pytorch/issues/124096
         device = torch.device("mps")
