@@ -102,6 +102,12 @@ void test_serialize_optimizer(
   auto optim2_2 = OptimizerClass(model2->parameters(), options);
   auto optim3 = OptimizerClass(model3->parameters(), options);
   auto optim3_2 = OptimizerClass(model3->parameters(), options);
+  for (auto& param_group : optim3_2.param_groups()) {
+    const double lr = param_group.options().get_lr();
+    // change the learning rate, which will be overwritten by the loading
+    // otherwise, test cannot check if options are saved and loaded correctly
+    param_group.options().set_lr(lr + 0.01);
+  }
 
   auto x = torch::ones({10, 5});
 
