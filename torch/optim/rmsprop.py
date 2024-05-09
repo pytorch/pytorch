@@ -6,6 +6,7 @@ from .optimizer import (
     _capturable_doc,
     _default_to_fused_or_foreach,
     _differentiable_doc,
+    _disable_dynamo_if_unsupported,
     _foreach_doc,
     _get_scalar_dtype,
     _maximize_doc,
@@ -250,73 +251,6 @@ RMSprop.__doc__ = (
 )
 
 
-def rmsprop(
-    params: List[Tensor],
-    grads: List[Tensor],
-    square_avgs: List[Tensor],
-    grad_avgs: List[Tensor],
-    momentum_buffer_list: List[Tensor],
-    state_steps: List[Tensor],
-    # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
-    # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
-    foreach: Optional[bool] = None,
-    maximize: bool = False,
-    differentiable: bool = False,
-    capturable: bool = False,
-    has_complex: bool = False,
-    *,
-    lr: float,
-    alpha: float,
-    eps: float,
-    weight_decay: float,
-    momentum: float,
-    centered: bool,
-):
-    r"""Functional API that performs rmsprop algorithm computation.
-    See :class:`~torch.optim.RMSProp` for details.
-    """
-    # this check is slow during compilation, so we skip it
-    # if it's strictly needed we can add this check back in dynamo
-    if not torch._utils.is_compiling() and not all(
-        isinstance(t, torch.Tensor) for t in state_steps
-    ):
-        raise RuntimeError(
-            "API has changed, `state_steps` argument must contain a list of singleton tensors"
-        )
-
-    if foreach is None:
-        _, foreach = _default_to_fused_or_foreach(
-            params, differentiable, use_fused=False
-        )
-
-    if foreach and torch.jit.is_scripting():
-        raise RuntimeError("torch.jit.script not supported with foreach optimizers")
-
-    if foreach and not torch.jit.is_scripting():
-        func = _multi_tensor_rmsprop
-    else:
-        func = _single_tensor_rmsprop
-
-    func(
-        params,
-        grads,
-        square_avgs,
-        grad_avgs,
-        momentum_buffer_list,
-        state_steps,
-        lr=lr,
-        alpha=alpha,
-        eps=eps,
-        weight_decay=weight_decay,
-        momentum=momentum,
-        centered=centered,
-        maximize=maximize,
-        capturable=capturable,
-        differentiable=differentiable,
-        has_complex=has_complex,
-    )
-
-
 def _single_tensor_rmsprop(
     params: List[Tensor],
     grads: List[Tensor],
@@ -497,3 +431,71 @@ def _multi_tensor_rmsprop(
                 torch._foreach_addcdiv_(grouped_params, grouped_grads, avg)
             else:
                 torch._foreach_addcdiv_(grouped_params, grouped_grads, avg, value=-lr)
+
+
+@_disable_dynamo_if_unsupported(single_tensor_fn=_single_tensor_rmsprop)
+def rmsprop(
+    params: List[Tensor],
+    grads: List[Tensor],
+    square_avgs: List[Tensor],
+    grad_avgs: List[Tensor],
+    momentum_buffer_list: List[Tensor],
+    state_steps: List[Tensor],
+    # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
+    # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
+    foreach: Optional[bool] = None,
+    maximize: bool = False,
+    differentiable: bool = False,
+    capturable: bool = False,
+    has_complex: bool = False,
+    *,
+    lr: float,
+    alpha: float,
+    eps: float,
+    weight_decay: float,
+    momentum: float,
+    centered: bool,
+):
+    r"""Functional API that performs rmsprop algorithm computation.
+    See :class:`~torch.optim.RMSProp` for details.
+    """
+    # this check is slow during compilation, so we skip it
+    # if it's strictly needed we can add this check back in dynamo
+    if not torch._utils.is_compiling() and not all(
+        isinstance(t, torch.Tensor) for t in state_steps
+    ):
+        raise RuntimeError(
+            "API has changed, `state_steps` argument must contain a list of singleton tensors"
+        )
+
+    if foreach is None:
+        _, foreach = _default_to_fused_or_foreach(
+            params, differentiable, use_fused=False
+        )
+
+    if foreach and torch.jit.is_scripting():
+        raise RuntimeError("torch.jit.script not supported with foreach optimizers")
+
+    if foreach and not torch.jit.is_scripting():
+        func = _multi_tensor_rmsprop
+    else:
+        func = _single_tensor_rmsprop
+
+    func(
+        params,
+        grads,
+        square_avgs,
+        grad_avgs,
+        momentum_buffer_list,
+        state_steps,
+        lr=lr,
+        alpha=alpha,
+        eps=eps,
+        weight_decay=weight_decay,
+        momentum=momentum,
+        centered=centered,
+        maximize=maximize,
+        capturable=capturable,
+        differentiable=differentiable,
+        has_complex=has_complex,
+    )

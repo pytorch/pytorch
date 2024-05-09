@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import copy
 import itertools
 import unittest
 from typing import List
@@ -487,6 +488,19 @@ class TestFullyShardMetaDeviceInit(FSDPTestMultiThread):
                 self.assertEqual(param.device, torch.device("meta"))
             self._test_to_empty_and_reset_parameters(model, mesh, mlp_dim)
 
+        # Test that we can call `fully_shard` under meta-device context and
+        # that `init_device_mesh` call still works
+        mlp_dim = 8
+        with torch.device("meta"):
+            model = nn.Sequential(MLP(mlp_dim, with_buffer=True), MLP(mlp_dim))
+            for param in model.parameters():
+                self.assertEqual(param.device, torch.device("meta"))
+            for module in (model[0], model[1], model):
+                fully_shard(module)
+        for param in model.parameters():
+            self.assertEqual(param.device, torch.device("meta"))
+        self._test_to_empty_and_reset_parameters(model, mesh, mlp_dim)
+
     @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_meta_device_2d_init(self):
         assert self.world_size >= 4, f"{self.world_size}"
@@ -650,6 +664,132 @@ class TestFullyShardMetaDeviceInit(FSDPTestMultiThread):
         self.assertEqual(loss, ref_loss)
         for param, ref_param in zip(model.parameters(), ref_model.parameters()):
             self.assertEqual(param.grad, ref_param.grad)
+
+
+class TestFullyShardProcessGroupInit(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 4
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_process_group_init(self):
+        assert self.world_size == 4, f"{self.world_size}"
+        # For convenience, use device mesh's infra to construct the DP PG
+        # (in practice, the trainer would do it manually via `new_group()`)
+        dp_size = 2
+        global_mesh = init_device_mesh(
+            "cuda", (dp_size, self.world_size // dp_size), mesh_dim_names=("dp", "tp")
+        )
+        ref_dp_mesh, tp_mesh = global_mesh["dp"], global_mesh["tp"]
+        dp_pg = ref_dp_mesh.get_group(0)
+
+        # Check the `from_group()` API for correctness
+        dp_mesh = DeviceMesh.from_group(dp_pg, "cuda")
+        self.assertEqual(dp_mesh.mesh, ref_dp_mesh.mesh)
+        self.assertEqual(dp_mesh, ref_dp_mesh)
+        # self.assertFalse(hasattr(dp_mesh, "_coordinate_on_dim"))
+        self.assertEqual(dp_mesh._coordinate_on_dim, ref_dp_mesh._coordinate_on_dim)
+        self.assertEqual(dp_mesh._dim_group_infos, ref_dp_mesh._dim_group_infos)
+
+        # Check 1D FSDP forward/backward parity over the DP mesh
+        # NOTE: We cannot use 2D DTensor-based training here because the DP
+        # mesh from `from_group` does not respect the parent mesh.
+        torch.manual_seed(42)
+        mlp_dim = 8
+        ref_model = MLP(mlp_dim)
+        for param in ref_model.parameters():
+            dist.broadcast(param.detach(), src=0)
+        model = copy.deepcopy(ref_model)
+
+        # Parallelize the test model with the ref DP mesh
+        for module in (ref_model.in_proj, ref_model.out_proj, ref_model):
+            fully_shard(module, mesh=ref_dp_mesh)
+        # Parallelize the test model with the new DP mesh from the PG
+        for module in (model.in_proj, model.out_proj, model):
+            fully_shard(module, mesh=dp_mesh)
+
+        # Ensure that TP ranks have the same input
+        inp = torch.randn((4, mlp_dim), device="cuda")
+        if self.rank in (0, 1):
+            dist.broadcast(inp, src=0, group=tp_mesh.get_group(0))
+        elif self.rank in (2, 3):
+            dist.broadcast(inp, src=2, group=tp_mesh.get_group(0))
+
+        ref_loss = ref_model(inp).sum()
+        ref_loss.backward()
+        loss = model(inp).sum()
+        loss.backward()
+        self.assertEqual(loss, ref_loss)
+        for param, ref_param in zip(model.parameters(), ref_model.parameters()):
+            self.assertEqual(param, ref_param)
+            self.assertEqual(param.grad, ref_param.grad)
+
+
+class TestFullyShardHSDPBroadcast(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 4
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_hsdp_broadcast_across_replicas(self):
+        shard_size, replicate_size = 2, 2
+        mesh = init_device_mesh(
+            "cuda", (replicate_size, shard_size), mesh_dim_names=("replicate", "shard")
+        )
+        model_args = ModelArgs()
+        model = Transformer(model_args)
+        # Add a buffer to show that this flow works for buffers too
+        model.register_buffer("buf", torch.randn((model_args.dim,)))
+        for module in model.modules():
+            if isinstance(module, TransformerBlock):
+                fully_shard(module, mesh=mesh)
+        fully_shard(model, mesh=mesh)
+
+        # Only preserve the model states on the replicate mesh's rank 0
+        if mesh.get_local_rank("replicate") > 0:
+            for tensor in itertools.chain(model.parameters(), model.buffers()):
+                tensor.detach().fill_(1337)
+
+        # Check that replicas are different
+        for tensor in itertools.chain(model.parameters(), model.buffers()):
+            local_tensor = tensor.to_local() if isinstance(tensor, DTensor) else tensor
+            local_tensor_list = [
+                torch.empty_like(local_tensor) for _ in range(mesh["replicate"].size())
+            ]
+            dist.all_gather(
+                local_tensor_list, local_tensor, group=mesh.get_group("replicate")
+            )
+            for other_local_tensor in local_tensor_list[1:]:
+                self.assertEqual(other_local_tensor.shape, local_tensor_list[0].shape)
+                self.assertNotEqual(other_local_tensor, local_tensor_list[0])
+
+        # Broadcast from replicate mesh's rank 0
+        replicate_group = mesh.get_group("replicate")
+        for tensor in itertools.chain(model.parameters(), model.buffers()):
+            # E.g. for mesh [[0, 1, 2, 3], [4, 5, 6, 7]] sharding on dim-1 and
+            # replicating on dim-0, broadcast with sources 0, 1, 2, 3
+            src_rank = dist.get_process_group_ranks(replicate_group)[0]
+            torch.distributed.broadcast(
+                tensor.to_local() if isinstance(tensor, DTensor) else tensor,
+                src=src_rank,
+                group=replicate_group,
+            )
+
+        # Check that replicas are the same
+        for tensor in itertools.chain(model.parameters(), model.buffers()):
+            local_tensor = tensor.to_local() if isinstance(tensor, DTensor) else tensor
+            local_tensor_list = [
+                torch.empty_like(local_tensor) for _ in range(mesh["replicate"].size())
+            ]
+            dist.all_gather(
+                local_tensor_list, local_tensor, group=mesh.get_group("replicate")
+            )
+            for other_local_tensor in local_tensor_list[1:]:
+                self.assertEqual(other_local_tensor, local_tensor_list[0])
+
+        # Check that we can run an iteration without erroring
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device="cuda")
+        model(inp).sum().backward()
 
 
 if __name__ == "__main__":

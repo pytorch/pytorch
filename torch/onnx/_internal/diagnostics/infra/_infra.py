@@ -49,7 +49,7 @@ class Tag(enum.Enum):
 class PatchedPropertyBag(sarif.PropertyBag):
     """Key/value pairs that provide additional information about the object.
 
-    The definition of PropertyBag via SARIF spec is "A property bag is an object (§3.6)
+    The definition of PropertyBag via SARIF spec is "A property bag is an object (section 3.6)
     containing an unordered set of properties with arbitrary names." However it is not
     reflected in the json file, and therefore not captured by the python representation.
     This patch adds additional **kwargs to the `__init__` method to allow recording
