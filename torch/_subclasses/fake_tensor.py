@@ -394,6 +394,60 @@ class FakeTensorConfig:
     debug = os.environ.get("TORCH_FAKE_TENSOR_DEBUG", "0") == "1"
 
 
+# This memorizes the unbacked SymInt representing quantities like the number
+# of nonzero elements in this tensor.  There is one instance of the descriptor
+# per particular quantity to memoize.
+#
+# Memoization is helpful if you do something like x[mask] and y[mask];
+# mask.nonzero() gets repeatedly called and should give a consistent unbacked
+# SymInt.  It needs to be invalidated in the same way constant is.
+#
+# Making this a descriptor may seem overly fancy, but actually it's the most
+# convenient way to make sure we have access to FakeTensor during access,
+# which is required for testing version counter and epoch validity
+class UnbackedMemoDescriptor:
+    _name: str
+
+    def __set_name__(self, owner, name):
+        self._name = name
+
+    def _memo(self, obj):
+        return f"_{self._name}"
+
+    def _memo_vc(self, obj):
+        return f"_{self._name}_vc"
+
+    # When we retrace, we need to invalidate all the memos so that we can
+    # accurately identify the first time unbacked SymInts are allocated.
+    # This is only relevant for inputs; for intermediates, they will get fresh
+    # fake tensors so you won't have a memo anyway
+    def _memo_epoch(self, obj):
+        return f"_{self._name}_epoch"
+
+    def __get__(self, obj: "FakeTensor", objtype=None):
+        if (r := getattr(obj, self._memo(obj))) is None:
+            return None
+        # Version counter based tracking isn't 100% sound but it's close
+        # enough
+        if (
+            getattr(obj, self._memo_vc(obj)) != obj._version
+            or getattr(obj, self._memo_epoch(obj)) != obj.fake_mode.epoch
+        ):
+            setattr(obj, self._memo(obj), None)
+            return None
+        return r
+
+    def __set__(self, obj, value):
+        if value is None:
+            setattr(obj, self._memo(obj), None)
+            setattr(obj, self._memo_vc(obj), None)
+            setattr(obj, self._memo_epoch(obj), None)
+        elif not torch.is_inference_mode_enabled():
+            setattr(obj, self._memo(obj), value)
+            setattr(obj, self._memo_vc(obj), obj._version)
+            setattr(obj, self._memo_epoch(obj), obj.fake_mode.epoch)
+
+
 class FakeTensor(torch.Tensor):
     """
     Meta tensors give you the ability to run PyTorch code without having to
@@ -408,62 +462,16 @@ class FakeTensor(torch.Tensor):
     constant: Optional[torch.Tensor]
     real_tensor: Optional[torch.Tensor]
 
-    # This memorizes the unbacked SymInt representing the number of nonzero
-    # elements in this tensor.  This is helpful if you do something like
-    # x[mask] and y[mask]; mask.nonzero() gets repeatedly called and should
-    # give a consistent unbacked SymInt.  It needs to be invalidated in the
-    # same way constant is.
-    # TODO: Generalize this as needed, e.g., into a trie of memos
-    _nonzero_memo: Optional[torch.SymInt]
-    _nonzero_memo_vc: Optional[int]
-    # When we retrace, we need to invalidate all the memos so that we can
-    # accurately identify the first time unbacked SymInts are allocated.
-    # This is only relevant for inputs; for intermediates, they will get fresh
-    # fake tensors so you won't have a memo anyway
-    _nonzero_memo_epoch: Optional[int]
+    # TODO: Generalize this as needed, e.g., into a trie of memos, if
+    # you do something like x[0].item()  (x[0] is fresh each time, so
+    # memo mechanism here won't work)
+    nonzero_memo = UnbackedMemoDescriptor()
+    item_memo = UnbackedMemoDescriptor()
+    unique_memo = UnbackedMemoDescriptor()
 
     # Indicates to our torch_dispatch dispatching infra that
     # this is an "infra" mode with lower dispatching precedence.
     _mode_key = torch._C._TorchDispatchModeKey.FAKE
-
-    @property
-    def nonzero_memo(self):
-        if self._nonzero_memo is None:
-            return None
-        # Version counter based tracking isn't 100% sound but it's close
-        # enough
-        if (
-            self._nonzero_memo_vc != self._version
-            or self._nonzero_memo_epoch != self.fake_mode.epoch
-        ):
-            self._nonzero_memo = None
-            return None
-        return self._nonzero_memo
-
-    # This memorizes the unbacked SymInt representing the number of unique
-    # elements in this tensor.  This is helpful if you do something like
-    # calling torch.unique(x) multiple times and should
-    # give a consistent unbacked SymInt.  It needs to be invalidated in the
-    # same way constant is.
-    # TODO: Generalize this as needed, e.g., into a trie of memos
-    _unique_memo: Optional[torch.SymInt]
-    _unique_memo_vc: Optional[int]
-
-    @property
-    def unique_memo(self):
-        if self._unique_memo is None:
-            return None
-        # Version counter based tracking isn't 100% sound but it's close
-        # enough
-        if self._unique_memo_vc != self._version:
-            self._unique_memo = None
-            return None
-        return self._unique_memo
-
-    @unique_memo.setter
-    def unique_memo(self, value):
-        self._unique_memo = value
-        self._unique_memo_vc = self._version
 
     @property
     def device(self):
@@ -539,10 +547,9 @@ class FakeTensor(torch.Tensor):
         self.constant = constant  # type: ignore[attr-defined]
         assert not isinstance(real_tensor, FakeTensor)
         self.real_tensor = real_tensor  # type: ignore[attr-defined]
-        self._nonzero_memo = None  # type: ignore[attr-defined]
-        self._nonzero_memo_vc = None  # type: ignore[attr-defined]
-        self._unique_memo = None  # type: ignore[attr-defined]
-        self._unique_memo_vc = None  # type: ignore[attr-defined]
+        self.nonzero_memo = None
+        self.item_memo = None
+        self.unique_memo = None
 
         if FakeTensorConfig.debug:
             self._debug_trace = CapturedTraceback.extract()  # type: ignore[attr-defined]

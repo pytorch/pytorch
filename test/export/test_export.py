@@ -180,7 +180,7 @@ class TestDynamismExpression(TestCase):
         res = gm(*inp)
         self.assertTrue(torchdynamo.utils.same(ref, res))
 
-    def test_export_constraints_error(self):
+    def test_export_constraints_error_not_in_range(self):
         class InvalidInputConflictWithInputConstraints(torch.nn.Module):
             def forward(self, x):
                 return x + 1
@@ -194,6 +194,7 @@ class TestDynamismExpression(TestCase):
                 dynamic_shapes={"x": {0: dim_x}},
             )
 
+    def test_export_constraints_error(self):
         class ConflictingConstraints(torch.nn.Module):
             def forward(self, x):
                 b = x.item()
@@ -2431,7 +2432,7 @@ def forward(self, x):
 
         # This is because we insert sym_constrain_range in the graph now
         if is_non_strict_test(self._testMethodName):
-            error_msg = "Invalid value range"
+            error_msg = r"Invalid value range for -1 between"
         else:
             error_msg = "is outside of inline constraint"
         with self.assertRaisesRegex(RuntimeError, error_msg):
