@@ -306,14 +306,14 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
   const auto head_dim = params.query.sym_size(3);
   long cudnn_version = at::detail::getCUDAHooks().versionCuDNN();
   if (cudnn_version >= 90000) {
-    if (head_dim % 8 != 0 or head_dim > 256) {
+    if (head_dim % 8 != 0 || head_dim > 256) {
       if (debug) {
         TORCH_WARN("head_dim should be a multiple of 8 and no more than 256");
       }
       return false;
     }
   } else {
-    if (head_dim % 8 != 0 or head_dim > 128) {
+    if (head_dim % 8 != 0 || head_dim > 128) {
       if (debug) {
         TORCH_WARN("head_dim should be a multiple of 8 and no more than 128");
       }
@@ -339,7 +339,7 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
       }
       return false;
     }
-    if ((s_q % 64 != 0 or s_k % 64 != 0) and params.dropout != 0.0) {
+    if ((s_q % 64 != 0 || s_k % 64 != 0) and params.dropout != 0.0) {
       if (debug) {
         TORCH_WARN(
             "s_q not a multiple of 64 with padding/dropout is not supported with cudnn version 9.0.0");
@@ -347,7 +347,7 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
       return false;
     }
   }
-  if (s_k % 64 != 0 and cudnn_version < 8906) {
+  if (s_k % 64 != 0 && cudnn_version < 8906) {
     if (debug) {
       TORCH_WARN("not-multiple-of-64 seq_kv is not supported below 8.9.6");
     }
