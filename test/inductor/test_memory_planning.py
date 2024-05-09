@@ -74,7 +74,7 @@ class TestMemoryPlanning(TestCase):
         ).check_next(
             "auto buf0 = alloc_from_pool(pool1, 0, at::kFloat, {s0, s0}, {s0, 1L});"
         ).check(
-            "auto buf1 = alloc_from_pool(pool1, align((4*s0) + (4*s0*((-1) + s0))),"
+            "auto buf1 = alloc_from_pool(pool1, align((4L*s0) + (4L*s0*((-1L) + s0))),"
         ).run(
             code
         )

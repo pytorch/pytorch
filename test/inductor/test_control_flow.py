@@ -197,8 +197,11 @@ class CondTests(TestCase):
 
         for inputs in input_sets:
             for inputs_with_predicates in prepend_predicates(inputs, num_predicates):
+                cloned_inputs = [inp.clone() for inp in inputs_with_predicates]
                 result = model(*inputs_with_predicates)
                 result_compiled = compiled_model(*inputs_with_predicates)
+                # inputs must not be mutated
+                torch.testing.assert_close(cloned_inputs, inputs_with_predicates)
                 torch.testing.assert_close(result, result_compiled)
 
         self.assertEqual(cnt.frame_count, 1, "only one compilation expected")
@@ -488,8 +491,6 @@ class WhileLoopModels:
 
             return torch._higher_order_ops.while_loop(cond_fn, body_fn, (ci, cj, a, b))
 
-    # TODO(aakhundov): add while_loop test with parametrs
-    # once dynamo / export allows while_loop closure capture
     class Parameters(torch.nn.Module):
         class InnerModel(torch.nn.Module):
             def __init__(self, device):
@@ -526,7 +527,9 @@ class WhileLoopModels:
             return f * g / 1.41
 
     # TODO(aakhundov): add while_loop test with outer buffers
-    # once dynamo / export allows while_loop closure capture
+    # with dynamic=True once dynamo / export allows while_loop
+    # closure capture with mark_dynamic:
+    # https://github.com/pytorch/pytorch/issues/123596
     class OuterBuffers(torch.nn.Module):
         def forward(self, c, a, b):
             d = a * 2
@@ -570,8 +573,12 @@ class WhileLoopTests(TestCase):
 
         for inputs in input_sets:
             for inputs_with_counters in prepend_counters(inputs, num_counters):
+                cloned_inputs = [inp.clone() for inp in inputs_with_counters]
                 result = model(*inputs_with_counters)
-                result_compiled = compiled_model(*inputs_with_counters)
+                with torch.no_grad():
+                    result_compiled = compiled_model(*inputs_with_counters)
+                # inputs must not be mutated
+                torch.testing.assert_close(cloned_inputs, inputs_with_counters)
                 torch.testing.assert_close(
                     result, result_compiled, atol=1e-4, rtol=1e-4
                 )
@@ -597,7 +604,7 @@ class WhileLoopTests(TestCase):
     @parametrize("device", ["cpu", "cuda"])
     @parametrize("dynamic", [False, True])
     def test_while_loop_nested_control_flow(self, device, dynamic):
-        # while_loop control flow without nesting
+        # while_loop control flow with nesting
         self._run_test(
             model=WhileLoopModels.Nested(),
             inputs=(
@@ -613,9 +620,39 @@ class WhileLoopTests(TestCase):
     @parametrize("device", ["cpu", "cuda"])
     @parametrize("dynamic", [False, True])
     def test_while_loop_with_outer_code(self, device, dynamic):
-        # while_loop control flow without nesting
+        # while_loop control flow with outer code
         self._run_test(
             model=WhileLoopModels.OuterCode(),
+            inputs=(
+                torch.randn(10, 20),
+                torch.randn(10, 20),
+            ),
+            device=device,
+            dynamic=dynamic,
+        )
+
+    @skipIfRocm
+    @requires_cuda
+    @parametrize("device", ["cpu", "cuda"])
+    @parametrize("dynamic", [False, True])
+    def test_while_loop_with_parameters(self, device, dynamic):
+        # while_loop control flow with parameters
+        self._run_test(
+            model=WhileLoopModels.Parameters(device),
+            inputs=(torch.randn(10, 20),),
+            device=device,
+            dynamic=dynamic,
+        )
+
+    @requires_cuda
+    @parametrize("device", ["cpu", "cuda"])
+    # dynamic=True doesn't work now due to
+    # https://github.com/pytorch/pytorch/issues/123596
+    @parametrize("dynamic", [False])
+    def test_while_loop_with_outer_buffers(self, device, dynamic):
+        # while_loop control flow with outer code
+        self._run_test(
+            model=WhileLoopModels.OuterBuffers(),
             inputs=(
                 torch.randn(10, 20),
                 torch.randn(10, 20),

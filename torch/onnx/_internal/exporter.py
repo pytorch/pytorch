@@ -579,7 +579,7 @@ class LargeProtobufONNXProgramSerializer:
     Fallback to serializing as Protobuf with external data for models larger than 2GB.
     """
 
-    _destination_path: Final[str]
+    _destination_path: Final[str]  # type: ignore[misc]
 
     def __init__(self, destination_path: str):
         self._destination_path = destination_path
@@ -652,14 +652,14 @@ class ONNXProgram:
         model_signature: The model signature for the exported ONNX graph.
     """
 
-    _model_proto: Final[onnx.ModelProto]  # type: ignore[name-defined]
-    _input_adapter: Final[io_adapter.InputAdapter]
-    _output_adapter: Final[io_adapter.OutputAdapter]
-    _diagnostic_context: Final[diagnostics.DiagnosticContext]
-    _fake_context: Final[Optional[ONNXFakeContext]]
-    _export_exception: Final[Optional[Exception]]
-    _model_signature: Final[Optional[torch.export.ExportGraphSignature]]
-    _model_torch: Final[
+    _model_proto: Final[onnx.ModelProto]  # type: ignore[name-defined, misc]
+    _input_adapter: Final[io_adapter.InputAdapter]  # type: ignore[misc]
+    _output_adapter: Final[io_adapter.OutputAdapter]  # type: ignore[misc]
+    _diagnostic_context: Final[diagnostics.DiagnosticContext]  # type: ignore[misc]
+    _fake_context: Final[Optional[ONNXFakeContext]]  # type: ignore[misc]
+    _export_exception: Final[Optional[Exception]]  # type: ignore[misc]
+    _model_signature: Final[Optional[torch.export.ExportGraphSignature]]  # type: ignore[misc]
+    _model_torch: Final[  # type: ignore[misc]
         Optional[Union[torch.nn.Module, Callable, torch_export.ExportedProgram]]
     ]
 
@@ -1010,6 +1010,7 @@ class ONNXProgram:
         self,
         destination: Union[str, io.BufferedIOBase],
         *,
+        include_initializers: bool = True,
         model_state: Optional[Union[Dict[str, Any], str]] = None,
         serializer: Optional[ONNXProgramSerializer] = None,
     ) -> None:
@@ -1021,12 +1022,18 @@ class ONNXProgram:
                 If `destination` is a string, besides saving the ONNX model into a file, model weights are also stored
                 in separate files in the same directory as the ONNX model. E.g. for `destination="/path/model.onnx"`,
                 the initializers are saved in "/path/" folder along with "onnx.model".
+            include_initializers: Whether to include initializers in the ONNX graph as external data.
+                Cannot be combined with `model_state_dict`.
             model_state: The state_dict of the PyTorch model containing all weights on it.
                 It can be either a string with the path to a checkpoint or a dictionary with the actual model state.
                 The supported file formats are the same as those supported by `torch.load` and `safetensors.safe_open`.
                 Required when :func:`enable_fake_mode` is used but real initializers are needed on the ONNX graph.
             serializer: The serializer to use. If not specified, the model will be serialized as Protobuf.
         """
+
+        assert (
+            include_initializers is True or model_state is None
+        ), "Cannot specify both `include_initializers=False` and `model_state`."
         if serializer is None:
             if isinstance(destination, str):
                 serializer = LargeProtobufONNXProgramSerializer(destination)
@@ -1035,21 +1042,27 @@ class ONNXProgram:
 
         # Add initializers when symbolic tracing is enabled
         _model_state_files: List[Union[str, io.BytesIO, Dict[str, Any]]] = []
-        if model_state is not None:
-            assert isinstance(
-                model_state, (dict, str)
-            ), "model_state must be a path to the model's state_dict or the actual state_dict"
-            # NOTE: For dict, there can be performance penalty or high memory usage that might lead to OOM
-            #       if the dict wasn't loaded with torch.load(..., mmap=True, map_location="cpu")
-            _model_state_files.append(model_state)
-        elif self._fake_context and self._fake_context.state_dict_paths:
-            # Load state from previous model.load_state_dict() call within enable_fake_mode() context
-            for path in self._fake_context.state_dict_paths:
-                if path in _model_state_files:
-                    # ignore duplicate
-                    continue
-                if os.path.exists(path):  # type: ignore[arg-type]
-                    _model_state_files.append(path)
+        if include_initializers:
+            if model_state is not None:
+                assert isinstance(
+                    model_state, (dict, str)
+                ), "model_state must be a path to the model's state_dict or the actual state_dict"
+                # NOTE: For dict, there can be performance penalty or high memory usage that might lead to OOM
+                #       if the dict wasn't loaded with torch.load(..., mmap=True, map_location="cpu")
+                _model_state_files.append(model_state)
+            elif self._fake_context and self._fake_context.state_dict_paths:
+                # Load state from previous model.load_state_dict() call within enable_fake_mode() context
+                for path in self._fake_context.state_dict_paths:
+                    if path in _model_state_files:
+                        # ignore duplicate
+                        continue
+                    if os.path.exists(path):  # type: ignore[arg-type]
+                        _model_state_files.append(path)
+        else:
+            # self.model_proto.graph.initializer.clear() not available in older protobuf versions
+            initializer_count = len(self.model_proto.graph.initializer)
+            for _ in range(initializer_count):
+                del self.model_proto.graph.initializer[0]
 
         if _model_state_files:
             if not isinstance(destination, str):
@@ -1334,7 +1347,7 @@ class OnnxExporterError(RuntimeError):
     access to the partial export results and associated metadata.
     """
 
-    onnx_program: Final[ONNXProgram]
+    onnx_program: Final[ONNXProgram]  # type: ignore[misc]
 
     def __init__(self, onnx_program: ONNXProgram, message: str):
         """

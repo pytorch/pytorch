@@ -103,9 +103,9 @@ __global__ void conv_depthwise2d_forward_kernel(
 
 template <int kSize, int stride, typename scalar_t, typename index_t>
 __global__ void conv_depthwise2d_backward_kernel(
-    const PackedTensorAccessor32<scalar_t, 4, DefaultPtrTraits> grad_output,
+    const PackedTensorAccessor32<const scalar_t, 4, DefaultPtrTraits> grad_output,
     PackedTensorAccessor32<scalar_t, 4, DefaultPtrTraits> grad_input,
-    const PackedTensorAccessor32<scalar_t, 4, DefaultPtrTraits> weight,
+    const PackedTensorAccessor32<const scalar_t, 4, DefaultPtrTraits> weight,
     index_t totalElements,
     const int inputChannels,
     const int depthwiseMultiplier,
@@ -174,8 +174,8 @@ __global__ void conv_depthwise2d_backward_kernel(
 
 template <typename scalar_t, typename index_t=unsigned>
 __global__ void conv_depthwise2d_grad_weight_kernel(
-    const PackedTensorAccessor32<scalar_t, 4, DefaultPtrTraits> grad_output,
-    const PackedTensorAccessor32<scalar_t, 4, DefaultPtrTraits> input,
+    const PackedTensorAccessor32<const scalar_t, 4, DefaultPtrTraits> grad_output,
+    const PackedTensorAccessor32<const scalar_t, 4, DefaultPtrTraits> input,
     PackedTensorAccessor32<scalar_t, 4, DefaultPtrTraits> grad_weight,
     const int batchSize,
     const int inputChannels,
@@ -387,9 +387,9 @@ void conv_depthwise2d_backward_out(
   const auto stream = c10::cuda::getCurrentCUDAStream();
   AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, grad_output.scalar_type(),
                                   "conv_depthwise2d_backward_cuda", [&] {
-    auto grad_output_a = grad_output.packed_accessor32<scalar_t, 4>();
+    auto grad_output_a = grad_output.packed_accessor32<const scalar_t, 4>();
     auto grad_input_a = grad_input.packed_accessor32<scalar_t, 4>();
-    auto weight_a = weight.packed_accessor32<scalar_t, 4>();
+    auto weight_a = weight.packed_accessor32<const scalar_t, 4>();
 
     if (kW == 3 && kH == 3) {
       if (dW == 1 && dH == 1){
@@ -501,8 +501,8 @@ void conv_depthwise2d_grad_weight_out(
 
   AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, grad_output.scalar_type(),
                                   "conv_depthwise2d_grad_weight_cuda", [&] {
-    const auto grad_output_a = grad_output.packed_accessor32<scalar_t, 4>();
-    const auto input_a = input.packed_accessor32<scalar_t, 4>();
+    const auto grad_output_a = grad_output.packed_accessor32<const scalar_t, 4>();
+    const auto input_a = input.packed_accessor32<const scalar_t, 4>();
     const auto grad_weight_a = grad_weight.packed_accessor32<scalar_t, 4>();
     using acc_t = at::acc_type<scalar_t, true>;
     int warp_size = at::cuda::warp_size();

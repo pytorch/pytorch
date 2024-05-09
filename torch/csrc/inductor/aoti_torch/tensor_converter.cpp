@@ -27,6 +27,11 @@ std::vector<at::Tensor> alloc_tensors_by_stealing_from_handles(
   std::vector<at::Tensor> result;
   result.reserve(length);
   for (size_t i = 0; i < length; i++) {
+    if (handles[i] == nullptr) {
+      result.emplace_back();
+      continue;
+    }
+
     at::Tensor tensor = *tensor_handle_to_tensor_pointer(handles[i]);
     if (lastKnownIdx[handles[i]] != i) {
       result.emplace_back(tensor);
