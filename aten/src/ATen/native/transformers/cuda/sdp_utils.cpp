@@ -326,7 +326,7 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
     }
     return false;
   }
-  if (params.dropout != 0.0 and cudnn_version < 8906) {
+  if (params.dropout != 0.0 && cudnn_version < 8906) {
     if (debug) {
       TORCH_WARN("Dropout reference is only supported on 8.9.6 onwards.");
     }
@@ -339,7 +339,7 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
       }
       return false;
     }
-    if ((s_q % 64 != 0 || s_k % 64 != 0) and params.dropout != 0.0) {
+    if ((s_q % 64 != 0 || s_k % 64 != 0) && params.dropout != 0.0) {
       if (debug) {
         TORCH_WARN(
             "s_q not a multiple of 64 with padding/dropout is not supported with cudnn version 9.0.0");
