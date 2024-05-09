@@ -60,7 +60,7 @@ class Shard(Placement):
             self.dim <= tensor.ndim
         ), f"Sharding dim {self.dim} greater than tensor ndim {tensor.ndim}"
 
-        # chunk tensor over dimension `dim` into n slices with padding if necessary
+        # chunk tensor over dimension `dim` into n slices
         tensor_list = list(torch.chunk(tensor, num_chunks, dim=self.dim))
 
         # if no need to have padding or tensor dim size is evenly sharded already
@@ -70,7 +70,7 @@ class Shard(Placement):
                 tensor_list = [t.contiguous() for t in tensor_list]
             return tensor_list, []
 
-        # compute the chunk size inline with ``torch.chunk``
+        # compute the chunk size inline with ``torch.chunk`` to calculate padding
         full_chunk_size = (tensor.size(self.dim) + num_chunks - 1) // num_chunks
 
         # Compute chunk size for each chunk for ``self.dim``
@@ -146,13 +146,13 @@ class Shard(Placement):
             tensor, num_chunks, with_padding=True, contiguous=True
         )
 
-        output = torch.empty_like(scatter_list[my_coordinate[mesh_dim]])
+        mesh_dim_local_rank = my_coordinate[mesh_dim]
+        output = torch.empty_like(scatter_list[mesh_dim_local_rank])
         mesh_scatter(output, scatter_list, mesh, mesh_dim=mesh_dim)
 
         # Only unpad if the local_tensor was padded on the dimension.
-        pad_size = pad_sizes[my_coordinate[mesh_dim]]
-        if pad_size > 0:
-            output = unpad_tensor(output, self.dim, pad_size)
+        if pad_sizes and pad_sizes[mesh_dim_local_rank] > 0:
+            output = unpad_tensor(output, self.dim, pad_sizes[mesh_dim_local_rank])
         return output
 
     def _reduce_shard_tensor(
