@@ -300,6 +300,7 @@ def fetch_object_proxy(tracer):
 HANDLED_TYPES = (torch.Tensor, torch.nn.Parameter, FakeTensor)
 
 def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
+    from torch._dynamo.variables.inline_helper import should_decomp_for_pre_dispatch
     unrecognized_types = []
     flat_args_kwargs, spec = pytree.tree_flatten((args, kwargs))
 
@@ -326,8 +327,9 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
     if r is not NotImplemented:
         return r
 
-    # For pre-autograd tracing, we do not want to run CompositeImplicit decomps.
-    if not pre_dispatch and func not in [
+    # For pre-autograd tracing, we do not want to run CompositeImplicit decomps unless
+    # explictly specified by dynamo config.
+    if (not pre_dispatch or should_decomp_for_pre_dispatch()) and func not in [
         torch.ops.aten.size.default,
         torch.ops.aten.stride.default,
         torch.ops.aten.storage_offset.default,

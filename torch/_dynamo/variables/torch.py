@@ -751,14 +751,24 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 ):
                     fn_ = getattr(torch, torch_sym_op)
 
-            tensor_variable = wrap_fx_proxy(
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_function",
-                    fn_,
-                    *proxy_args_kwargs(args, kwargs),
-                ),
+            from .inline_helper import (
+                decompose_and_inline_function_with_makefx,
+                should_decompose_torch_op,
             )
+
+            if should_decompose_torch_op(fn_):
+                tensor_variable = decompose_and_inline_function_with_makefx(
+                    tx, fn_, args, kwargs
+                )
+            else:
+                tensor_variable = wrap_fx_proxy(
+                    tx=tx,
+                    proxy=tx.output.create_proxy(
+                        "call_function",
+                        fn_,
+                        *proxy_args_kwargs(args, kwargs),
+                    ),
+                )
 
             if (
                 isinstance(tensor_variable, TensorVariable)
