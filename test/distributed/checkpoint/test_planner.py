@@ -94,7 +94,7 @@ class TestSavePlan(TestCase):
         st = create_sharded_tensor(rank=1, world_size=4, shards_per_rank=1)
         state_dict = {"tensor": tensor, "value": val, "st": st}
         plan = create_default_local_save_plan(state_dict, False)
-        self.assertEqual(2, len(plan.items))
+        self.assertEqual(3, len(plan.items))
         wi = plan.items[0]
         self.assertEqual(wi.index, MetadataIndex("tensor", [0]))
         self.assertEqual(wi.type, WriteItemType.TENSOR)
@@ -106,7 +106,7 @@ class TestSavePlan(TestCase):
         self.assertEqual(wi.tensor_data.chunk.offsets, torch.Size([0]))
         self.assertEqual(wi.tensor_data.chunk.sizes, torch.Size([10]))
 
-        st_wi = plan.items[1]
+        st_wi = plan.items[2]
         self.assertEqual(st_wi.index, MetadataIndex("st", [8]))
         self.assertEqual(st_wi.type, WriteItemType.SHARD)
         self.assertEqual(st_wi.tensor_data.size, st.size())
