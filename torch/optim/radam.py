@@ -25,10 +25,10 @@ class RAdam(Optimizer):
     def __init__(
         self,
         params: ParamsT,
-        lr=1e-3,
+        lr: float = 1e-3,
         betas: Tuple[float, float] = (0.9, 0.999),
-        eps=1e-8,
-        weight_decay=0,
+        eps: float = 1e-8,
+        weight_decay: float = 0,
         decoupled_weight_decay: bool = False,
         *,
         foreach: Optional[bool] = None,

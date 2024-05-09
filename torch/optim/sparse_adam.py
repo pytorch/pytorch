@@ -12,9 +12,9 @@ class SparseAdam(Optimizer):
     def __init__(
         self,
         params: ParamsT,
-        lr=1e-3,
+        lr: float = 1e-3,
         betas: Tuple[float, float] = (0.9, 0.999),
-        eps=1e-8,
+        eps: float = 1e-8,
         maximize: bool = False,
     ):
         if not 0.0 < lr:

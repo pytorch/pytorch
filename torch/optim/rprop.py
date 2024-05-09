@@ -23,7 +23,7 @@ class Rprop(Optimizer):
     def __init__(
         self,
         params: ParamsT,
-        lr=1e-2,
+        lr: float = 1e-2,
         etas: Tuple[float, float] = (0.5, 1.2),
         step_sizes: Tuple[float, float] = (1e-6, 50),
         *,

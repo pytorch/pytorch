@@ -213,12 +213,12 @@ class LBFGS(Optimizer):
     def __init__(
         self,
         params: ParamsT,
-        lr=1,
-        max_iter=20,
+        lr: float = 1,
+        max_iter: int = 20,
         max_eval: Optional[int] = None,
-        tolerance_grad=1e-7,
-        tolerance_change=1e-9,
-        history_size=100,
+        tolerance_grad: float = 1e-7,
+        tolerance_change: float = 1e-9,
+        history_size: int = 100,
         line_search_fn: Optional[str] = None,
     ):
         if max_eval is None:
