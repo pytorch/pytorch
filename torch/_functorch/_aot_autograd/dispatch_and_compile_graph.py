@@ -251,7 +251,7 @@ def aot_dispatch_autograd_graph(
         torch.Tensor, lambda t: t.detach(), updated_joint_inputs
     )
     maybe_subclass_meta = subclass_tracing_info.maybe_subclass_meta
-    aot_graphs_log.debug(
+    aot_graphs_log.info(
         "aot_config id: %s, fw_metadata=%s,subclass_metadata=%s",
         str(aot_config.aot_id),
         str(fw_metadata),
