@@ -62,6 +62,14 @@ class Shard(Placement):
 
         # chunk tensor over dimension `dim` into n slices with padding if necessary
         tensor_list = list(torch.chunk(tensor, num_chunks, dim=self.dim))
+
+        # if no need to have padding or tensor dim size is evenly sharded already
+        # we can return early.
+        if not with_padding or tensor.size(self.dim) % num_chunks == 0:
+            if contiguous:
+                tensor_list = [t.contiguous() for t in tensor_list]
+            return tensor_list, []
+
         # compute the chunk size inline with ``torch.chunk``
         full_chunk_size = (tensor.size(self.dim) + num_chunks - 1) // num_chunks
 
@@ -83,17 +91,14 @@ class Shard(Placement):
         for _ in range(num_empty_tensors):
             tensor_list.append(tensor)
 
-        if with_padding or contiguous:
-            shard_list = []
-            for shard, pad_size in zip(tensor_list, pad_sizes):
-                # Fill the empty tensor with zeroes with padding.
-                if with_padding and pad_size > 0:
-                    shard = pad_tensor(shard, self.dim, pad_size)
-                shard = shard.contiguous() if contiguous else shard
-                shard_list.append(shard)
-            return shard_list, pad_sizes
-        else:
-            return tensor_list, pad_sizes
+        shard_list = []
+        for shard, pad_size in zip(tensor_list, pad_sizes):
+            # Fill the empty tensor with zeroes with padding.
+            if with_padding and pad_size > 0:
+                shard = pad_tensor(shard, self.dim, pad_size)
+            shard = shard.contiguous() if contiguous else shard
+            shard_list.append(shard)
+        return shard_list, pad_sizes
 
     @staticmethod
     def _local_shard_size_on_dim(
