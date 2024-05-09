@@ -608,7 +608,7 @@ class TestCuda(TestCase):
         self.assertGreater(start_event.elapsed_time(event), 0)
 
     def test_generic_stream_event(self):
-        stream = torch.Stream("cuda")
+        stream = torch.Stream("cuda ")
         self.assertEqual(stream.device_index, torch.cuda.current_device())
         cuda_stream = torch.cuda.Stream(
             stream_id=stream.stream_id,
