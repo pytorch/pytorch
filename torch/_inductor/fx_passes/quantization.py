@@ -993,7 +993,6 @@ def _register_quantization_maxpool2d():
             KeywordArg("ceil_mode"),
         ],
     ]
-
     for max_pool2d_args in max_pool2d_args_list:
         dequantize_maxpool2d_pattern = CallFunction(
             aten.max_pool2d_with_indices.default,
@@ -1001,13 +1000,31 @@ def _register_quantization_maxpool2d():
             KeywordArg("kernel_size"),
             *max_pool2d_args,
         )
+        dequantize_lowmem_maxpool2d_pattern = CallFunction(
+            prims._low_memory_max_pool2d_with_offsets.default,
+            dequantize_per_tensor_activation_pattern,
+            KeywordArg("kernel_size"),
+            *max_pool2d_args,
+            KeywordArg("offset_dtype"),
+        )
         dequantize_maxpool2d_get_item_pattern = CallFunction(
             operator.getitem,
             dequantize_maxpool2d_pattern,
             Arg(),
         )
+        dequantize_lowmem_maxpool2d_get_item_pattern = CallFunction(
+            operator.getitem,
+            dequantize_lowmem_maxpool2d_pattern,
+            Arg(),
+        )
         _register_quantized_maxpool2d_lowering(
             generate_pattern_with_output_quant(dequantize_maxpool2d_get_item_pattern),
+            quantized.max_pool2d.default,
+        )
+        _register_quantized_maxpool2d_lowering(
+            generate_pattern_with_output_quant(
+                dequantize_lowmem_maxpool2d_get_item_pattern
+            ),
             quantized.max_pool2d.default,
         )
 
@@ -1564,20 +1581,20 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number, dtype=torch.float3
             new_conv_node.meta.update(conv_node.meta)
 
             # Erase the original conv node
-            graph.erase_node(conv_node)  # type: ignore[arg-type]
+            graph.erase_node(conv_node)
             # Erase the dequant pattern
             if dtype == torch.bfloat16:
-                graph.erase_node(convert_to_bf16)  # type: ignore[arg-type,possibly-undefined]
+                graph.erase_node(convert_to_bf16)  # type: ignore[possibly-undefined]
             # Erase the dequant pattern
-            graph.erase_node(mul_node)  # type: ignore[arg-type]
-            graph.erase_node(sub_node)  # type: ignore[arg-type]
-            graph.erase_node(to_fp32_node)  # type: ignore[arg-type]
+            graph.erase_node(mul_node)
+            graph.erase_node(sub_node)
+            graph.erase_node(to_fp32_node)
             # Erase the dequant per channel pattern
             if clone_node is not None:
-                graph.erase_node(clone_node)  # type: ignore[arg-type]
+                graph.erase_node(clone_node)
             if dtype == torch.bfloat16:
-                graph.erase_node(weight_to_bf16_node)  # type: ignore[arg-type,possibly-undefined]
-            graph.erase_node(dequant_per_channel)  # type: ignore[arg-type]
+                graph.erase_node(weight_to_bf16_node)  # type: ignore[possibly-undefined]
+            graph.erase_node(dequant_per_channel)
             counters["inductor"]["qconv2d_weight_prepack_matcher_count"] += 1
             counters["inductor"]["qconv2d_weight_prepack_matcher_nodes"] += len(
                 match.nodes
@@ -2261,8 +2278,8 @@ def quant_lift_up(graph_module: torch.fx.GraphModule):
 
                     new_args = map_arg(new_quant_node.args, maybe_replace_node)
                     new_kwargs = map_arg(new_quant_node.kwargs, maybe_replace_node)
-                    new_quant_node.args = new_args  # type: ignore[assignment]
-                    new_quant_node.kwargs = new_kwargs  # type: ignore[assignment]
+                    new_quant_node.args = new_args
+                    new_quant_node.kwargs = new_kwargs
                     graph_module.graph.erase_node(quant_node)
 
     graph_module.graph.lint()

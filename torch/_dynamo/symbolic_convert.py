@@ -1360,8 +1360,8 @@ class InstructionTranslatorBase(
             return self.store_attr_graph_break(inst)
         val, obj = self.popn(2)
 
-        if isinstance(obj, NNModuleVariable):
-            # We don't allow side effects during export
+        if isinstance(obj, NNModuleVariable) and not isinstance(val, ConstantVariable):
+            # We don't allow side effects during export on non-constant values
             # https://github.com/pytorch/torchdynamo/issues/1475
             assert (
                 not self.export
@@ -2315,7 +2315,6 @@ class InstructionTranslator(InstructionTranslatorBase):
                 )
                 argnames_ctx_vars.append((name, target_values))
                 # Replace the local with the context class
-                cg.append_output(create_instruction("LOAD_FAST", argval=name))
                 ctx.reconstruct_type(cg)
                 cg.append_output(create_instruction("STORE_FAST", argval=name))
 
