@@ -1096,7 +1096,7 @@ class TestFullyShardNDTraining(FSDPTest):
             mesh_dim_names=("pp", "dp", "tp"),
         )
 
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_gpu(4)
     def test_2d_mlp_with_nd_mesh(self):
         global_mesh = self.init_global_mesh()
         self.run_subtests(
@@ -1108,7 +1108,6 @@ class TestFullyShardNDTraining(FSDPTest):
             functools.partial(self._test_2d_mlp_with_nd_mesh, global_mesh),
         )
 
-    @skip_if_lt_x_gpu(2)
     def _test_2d_mlp_with_nd_mesh(
         self,
         global_mesh: DeviceMesh,
