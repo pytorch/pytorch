@@ -141,7 +141,6 @@ def aot_dispatch_base(
     (
         fw_module,
         updated_flat_args,
-        aot_config,
         fw_metadata,
     ) = fakified_out_wrapper.pre_compile(
         fw_module, updated_flat_args, aot_config, fw_metadata=fw_metadata
@@ -150,7 +149,6 @@ def aot_dispatch_base(
     (
         fw_module,
         updated_flat_args,
-        aot_config,
         fw_metadata,
     ) = functionalized_rng_wrapper.pre_compile(
         fw_module, updated_flat_args, aot_config, fw_metadata=fw_metadata
@@ -433,7 +431,6 @@ def aot_dispatch_autograd(
             (
                 fw_module,
                 adjusted_flat_args,
-                aot_config,
                 fw_metadata,
             ) = fakified_out_wrapper.pre_compile(
                 fw_module, adjusted_flat_args, aot_config, fw_metadata=fw_metadata
@@ -445,7 +442,6 @@ def aot_dispatch_autograd(
             (
                 fw_module,
                 adjusted_flat_args,
-                aot_config,
                 fw_metadata,
             ) = functionalized_rng_wrapper.pre_compile(
                 fw_module, adjusted_flat_args, aot_config, fw_metadata=fw_metadata
