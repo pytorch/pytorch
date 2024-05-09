@@ -421,7 +421,6 @@ class TestKernelBenchmark(TestCase):
         f(a)
         compiled_module = self.get_compiled_module()
         cleaned_triton = self.verify_remove_inductor_deps(compiled_module)
-        self.assertTrue()
 
     @config.patch("triton.unique_kernel_names", True)
     @config.patch(benchmark_kernel=False)
