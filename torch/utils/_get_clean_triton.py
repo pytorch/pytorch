@@ -52,7 +52,7 @@ def merge_params(original_params: List[str], new_params: List[str]) -> List[str]
     return new_params
 
 
-def add_launch_params(original: str, launch_params: str) -> str:
+def add_launch_params(original: str, kernel_to_params: Dict[str, str]) -> str:
     # Regex to match the function call in the original string
     pattern = r"(\w+)\.run\(([^)]*), grid=(.*\)), [^)]*\)"
 
@@ -61,7 +61,7 @@ def add_launch_params(original: str, launch_params: str) -> str:
         func_name = match.group(1)
         params = match.group(2)
         grid = match.group(3)
-        new_params = launch_params[func_name]
+        new_params = kernel_to_params[func_name]
         new_params = merge_params(params.split(", "), new_params.split(", "))
 
         # Format the new function call
@@ -112,7 +112,9 @@ def process_file(input_filename: str, output_filename: str) -> str:
     return transformed_code
 
 
-def get_clean_triton(input_path: Path, output_path: Path = "triton_only_repro.py"):
+def get_clean_triton(
+    input_path: Path, output_path: Path = Path("triton_only_repro.py")
+):
     """Run experiments and output results to file
 
     Args:
