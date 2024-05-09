@@ -49,6 +49,7 @@ from torch.autograd.profiler_util import EventList
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.utils._sympy.functions import CeilDiv, CleanDiv, FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import make_symbol, SymT
+from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 from . import config
 from .runtime.runtime_utils import ceildiv as runtime_ceildiv
 
@@ -537,6 +538,20 @@ def sympy_str(expr: sympy.Expr) -> str:
     if isinstance(expr, (ModularIndexing, CleanDiv, FloorDiv)):
         return f"{expr.func.__name__}({', '.join(map(sympy_str, expr.args))})"
     return str(expr)
+
+
+def get_bounds_index_expr(index):
+    from .virtualized import V
+
+    # If this expression does not come from an FX node, we compute its bounds
+    if (
+        config.compute_all_bounds
+        and (fx_node := getattr(V.interpreter, "current_node", None))
+        and fx_node.target != "index_expr"
+    ):
+        return bound_sympy(index)
+    else:
+        return ValueRanges.unknown()
 
 
 def sympy_index_symbol_with_prefix(prefix: SymT, idx: int) -> sympy.Symbol:
