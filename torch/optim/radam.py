@@ -313,7 +313,9 @@ def _single_tensor_radam(
             return (bias_correction2**0.5) / exp_avg_sq_sqrt
 
         # Compute the variance rectification term and update parameters accordingly
-        if capturable:
+        # data-dependent control flow is not supported by the compiler
+        # so use torch.where if compiling
+        if capturable or torch._utils.is_compiling():
             update = torch.where(
                 rho_t > 5.0, _compute_rect() * _compute_adaptive_lr(), 1.0
             )
@@ -478,7 +480,12 @@ def _multi_tensor_radam(
                 else 0
                 for rho_t in rho_t_list
             ]
-            unrectified = [0 if rect > 0 else 1.0 for rect in rect]
+
+            # data-dependent control flow is not supported by the compiler
+            if torch._utils.is_compiling():
+                unrectified = [torch.where(rect > 0, 0.0, 1.0) for rect in rect]
+            else:
+                unrectified = [0.0 if rect > 0.0 else 1.0 for rect in rect]
 
             bias_correction1 = [
                 1 - beta1 ** _get_value(step) for step in grouped_state_steps
