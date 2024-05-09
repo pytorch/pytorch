@@ -894,6 +894,7 @@ def mps_ops_modifier(ops):
             'fft.fft2': None,
             'fft.fftn': None,
             'fft.hfft': None,
+            'fft.hfft2': None,
             'fft.ifft': None,
             'fft.ifft2': None,
             'fft.ifftn': None,
