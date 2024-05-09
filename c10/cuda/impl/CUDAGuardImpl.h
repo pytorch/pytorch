@@ -214,7 +214,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       (*interp)->trace_gpu_event_synchronization(
           c10::kCUDA, reinterpret_cast<uintptr_t>(cuda_event));
     }
-    AT_CUDA_CHECK(cudaEventSynchronize(cuda_event));
+    C10_CUDA_CHECK(cudaEventSynchronize(cuda_event));
   }
 
   void recordDataPtrOnStream(const c10::DataPtr& data_ptr, const Stream& stream)
@@ -231,7 +231,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     cudaEvent_t cuda_event2 = static_cast<cudaEvent_t>(event2);
     float time_ms = 0;
     // raise cudaErrorNotReady if either event is recorded but not yet completed
-    AT_CUDA_CHECK(cudaEventElapsedTime(&time_ms, cuda_event1, cuda_event2));
+    C10_CUDA_CHECK(cudaEventElapsedTime(&time_ms, cuda_event1, cuda_event2));
     return static_cast<double>(time_ms);
   }
 };
