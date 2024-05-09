@@ -143,10 +143,21 @@ def make_fake_inputs(nn_module, args, kwargs, dynamic_shapes):
         "co_firstlineno": code.co_firstlineno,
     }
 
-    fake_mode = FakeTensorMode(
-        shape_env=ShapeEnv(tracked_fakes=[], co_fields=co_fields),
-        allow_non_fake_inputs=True,
-    )
+    context = torch._guards.TracingContext.try_get()
+    if context is not None:
+        # This occurs when we are exporting within dynamo. There already exists
+        # a toplevel TracingContext with a fake mode, so we do not want to
+        # create another fake mode. In this scenario, we also shouldn't have any
+        # constraints since the toplevel tracing context should handle it.
+        assert (
+            len(constraints) == 0
+        ), "Found constraints when tracing with a toplevel tracing context."
+        fake_mode = context.fake_mode
+    else:
+        fake_mode = FakeTensorMode(
+            shape_env=ShapeEnv(tracked_fakes=[], co_fields=co_fields),
+            allow_non_fake_inputs=True,
+        )
     if fake_mode.shape_env is None or fake_mode.shape_env.tracked_fakes is None:
         raise ValueError(
             "Detected fake_mode does not have a shape_env with tracked fakes. "

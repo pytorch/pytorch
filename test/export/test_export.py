@@ -4214,6 +4214,22 @@ def forward(self, x, b_t, y):
         self.assertEqual(len(ep.constants), 1)
         self.assertEqual(mod(inp), m(inp))
 
+    def test_export_as_backend(self):
+        def f(x, y):
+            return x + y
+
+        def my_custom_backend(gm, example_inputs):
+            gm = (
+                torch.export.export(gm, tuple(example_inputs), strict=False)
+                .run_decompositions()
+                .module()
+            )
+            return gm
+
+        inp = (torch.randn(3, 3), torch.randn(3, 3))
+        new_res = torch.compile(f, backend=my_custom_backend)(*inp)
+        self.assertTrue(torch.allclose(f(*inp), new_res))
+
     def test_nonstrict_retrace_preserves_metadata(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
