@@ -443,6 +443,7 @@ class GraphModule(torch.nn.Module):
         # Dictionary to store metadata
         self.meta: Dict[str, Any] = {}
         self._replace_hook = None
+        self._create_node_hook = None
 
     # TorchScript breaks trying to compile the graph setter because of the
     # continued string literal. Issue here: https://github.com/pytorch/pytorch/issues/44842
@@ -799,6 +800,7 @@ class {module_name}(torch.nn.Module):
             "_load_state_dict_pre_hooks",
             "_load_state_dict_post_hooks",
             "_replace_hook",
+            "_create_node_hook",
         ]
         for attr in extra_preserved_attrs:
             if attr in self.__dict__:
@@ -866,6 +868,32 @@ class {module_name}(torch.nn.Module):
             yield
         finally:
             self._replace_hook = prev
+
+    @contextlib.contextmanager
+    def _set_create_node_hook(self, f):
+        """
+        Takes a callable which will be called after we create a new node. The
+        callable takes the newly created node as input and returns None.
+        """
+        assert callable(f), "create_node hook must be a callable."
+        prev = self._create_node_hook
+
+        # Add the hook to all submodules
+        for m in self.modules():
+            if isinstance(m, GraphModule):
+                assert m._create_node_hook is prev, (
+                    "create_node_hook is not be the same for all submodules: "
+                    f"Found: {m._create_node_hook}. Previously: {prev}"
+                )
+                m._create_node_hook = f
+
+        try:
+            yield
+        finally:
+            # Restore hook for all submodules
+            for m in self.modules():
+                if isinstance(m, GraphModule):
+                    m._create_node_hook = prev
 
 
 # workarounds for issues in __torch_function__
