@@ -676,7 +676,7 @@ or otherwise set torch._functorch.config.functionalize_rng_ops = False."""
             # Add more passes here
         ]
         for wrapper in wrappers:
-            flat_fn, fake_flat_args, aot_config, fw_metadata = wrapper.pre_compile(
+            flat_fn, fake_flat_args, fw_metadata = wrapper.pre_compile(
                 flat_fn, fake_flat_args, aot_config, fw_metadata=fw_metadata
             )
 
