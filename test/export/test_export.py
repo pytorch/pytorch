@@ -575,7 +575,6 @@ class TestExport(TestCase):
         )
 
     # Predispatch has different expected results
-    @testing.expectedFailureSerDerPreDispatch
     def test_torch_fn(self):
         class M1(torch.nn.Module):
             def __init__(self):
@@ -4896,7 +4895,9 @@ class TestOneOffModelExportResult(TestCase):
         k = torch.randn(1, 16, 16, 64, dtype=torch.bfloat16, device="cuda")
         v = torch.randn(1, 16, 16, 64, dtype=torch.bfloat16, device="cuda")
 
-        ep = torch.export.export(ScaledDotProductAttention(), (q, k, v))
+        ep = torch.export.export(
+            ScaledDotProductAttention(), (q, k, v)
+        ).run_decompositions()
         self.assertExpectedInline(
             ep.graph_module.code.strip(),
             """\
