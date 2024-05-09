@@ -1,0 +1,415 @@
+load("//third_party:glog.buck.bzl", "define_glog")
+load("//third_party:xnnpack.buck.bzl", "define_xnnpack")
+load("//third_party:kineto.buck.bzl", "define_kineto")
+load("//:buckbuild.bzl", "third_party")
+
+define_glog()
+
+define_xnnpack(third_party)
+
+define_kineto()
+
+# a placeholder for libraries that are not implemented in OSS
+cxx_library(
+    name = "no-op",
+    visibility = ['PUBLIC'],
+)
+
+cxx_library(
+    name = "rt",
+    exported_platform_linker_flags = [
+        ("^linux-.*$", ["-lrt"]),
+    ],
+    visibility = ['PUBLIC'],
+)
+
+cxx_library(
+    name = "fmt",
+    srcs = ['fmt/src/format.cc'],
+    deps = [],
+    compiler_flags = ['-w', '-Wno-error=format-zero-length', '-Wno-error=vla', '-Wno-incompatible-pointer-types-discards-qualifiers', '-Wno-unused-label', '-Wno-deprecated-declarations', '-Wno-implicit-function-declaration', '-Wno-error', '-Wno-non-pod-varargs', '-Wno-format-security', '-Wno-c++11-narrowing', '-Wno-ignored-attributes', '-Wno-return-std-move', '-Wno-shadow', '-Wno-sign-compare', '-Wno-switch', '-Wno-undef', '-Wno-uninitialized', '-Wno-unknown-pragmas', '-Wno-unknown-warning-option', '-Wno-unused-function', '-Wno-unused-local-typedef', '-Wno-unused-value', '-Wno-unused-variable', '-Wno-register', '-Wno-format', '-Wno-unused-lambda-capture', '-Wno-missing-braces', '-Wno-unused-parameter', '-Wno-unreachable-code', '-Wno-inconsistent-missing-destructor-override', '-Wno-implicit-fallthrough', '-Wno-ignored-qualifiers', '-Wno-pedantic', '-Wno-deprecated-copy', '-Wno-non-virtual-dtor', '-Wno-null-pointer-arithmetic', '-Wno-implicit-const-int-float-conversion', '-Wno-tautological-unsigned-enum-zero-compare', '-Wno-embedded-directive', '-Wno-int-conversion', '-Wno-nonnull', '-Wno-variadic-macros', '-Wno-zero-length-array', '-Wno-missing-prototypes', '-fno-exceptions', '-fno-rtti', '-Wno-braced-scalar-init', '-fvisibility-inlines-hidden'],
+    preferred_linkage = "static",
+    exported_preprocessor_flags = ['-DFMT_EXCEPTIONS=0'],
+    header_namespace = "third_party/fmt",
+    public_system_include_directories = ['fmt/include'],
+    raw_headers = glob(["fmt/include/fmt/*.h"]),
+    soname = "libthird-party_fmt_fmt.$(ext)",
+    visibility = ['PUBLIC'],
+)
+
+cxx_library(
+    name = "pthreadpool",
+    srcs = ['pthreadpool/src/legacy-api.c', 'pthreadpool/src/memory.c', 'pthreadpool/src/portable-api.c', 'pthreadpool/src/pthreads.c'],
+    deps = [
+        ":FXdiv",
+        ":pthreadpool_header",
+    ],
+    compiler_flags = [
+        "-w",
+        "-Os",
+        "-fstack-protector-strong",
+        "-fno-delete-null-pointer-checks"
+    ],
+    headers = {
+        'threadpool-atomics.h': 'pthreadpool/src/threadpool-atomics.h',
+        'threadpool-common.h': 'pthreadpool/src/threadpool-common.h',
+        'threadpool-object.h': 'pthreadpool/src/threadpool-object.h',
+        'threadpool-utils.h': 'pthreadpool/src/threadpool-utils.h',
+    },
+    header_namespace = "",
+    preferred_linkage = "static",
+    link_whole = False,
+    platform_preprocessor_flags = [['windows', ['-D_WINDOWS', '-D_WIN32', '-DWIN32', '-DNOMINMAX', '-D_CRT_SECURE_NO_WARNINGS', '-D_USE_MATH_DEFINES']], ['windows.*64$', ['-D_WIN64']]],
+    preprocessor_flags = ['-DPTHREADPOOL_USE_FUTEX=0', '-DPTHREADPOOL_USE_GCD=0'],
+    reexport_all_header_dependencies = True,
+    visibility = ['PUBLIC'],
+)
+
+cxx_library(
+    name = "pthreadpool_header",
+    header_namespace = "",
+    exported_headers = {
+        "pthreadpool.h": "pthreadpool/include/pthreadpool.h",
+    },
+    reexport_all_header_dependencies = True,
+    visibility = ["PUBLIC"],
+)
+
+cxx_library(
+    name = "pocketfft_header",
+    header_namespace = "",
+    exported_headers = {
+        "pocketfft_hdronly.h": "pocketfft/pocketfft_hdronly.h",
+    },
+    reexport_all_header_dependencies = True,
+    visibility = ["PUBLIC"],
+)
+
+cxx_library(
+    name = "FXdiv",
+    header_namespace = "",
+    exported_headers = {
+        "fxdiv.h": "FXdiv/include/fxdiv.h",
+    },
+    reexport_all_header_dependencies = True,
+    visibility = ["PUBLIC"],
+)
+
+cxx_library(
+    name = "psimd",
+    header_namespace = "",
+    exported_headers = {
+        "psimd.h": "psimd/include/psimd.h",
+    },
+    preferred_linkage = "static",
+    visibility = ["PUBLIC"],
+)
+
+cxx_library(
+    name = "cpuinfo",
+    srcs = [
+        "cpuinfo/wrappers/api.c",
+        "cpuinfo/wrappers/arm/android/properties.c",
+        "cpuinfo/wrappers/arm/cache.c",
+        "cpuinfo/wrappers/arm/linux/aarch32-isa.c",
+        "cpuinfo/wrappers/arm/linux/aarch64-isa.c",
+        "cpuinfo/wrappers/arm/linux/chipset.c",
+        "cpuinfo/wrappers/arm/linux/clusters.c",
+        "cpuinfo/wrappers/arm/linux/cpuinfo.c",
+        "cpuinfo/wrappers/arm/linux/hwcap.c",
+        "cpuinfo/wrappers/arm/linux/init.c",
+        "cpuinfo/wrappers/arm/linux/midr.c",
+        "cpuinfo/wrappers/arm/mach/init.c",
+        "cpuinfo/wrappers/arm/uarch.c",
+        "cpuinfo/wrappers/cache.c",
+        "cpuinfo/wrappers/init.c",
+        "cpuinfo/wrappers/linux/cpulist.c",
+        "cpuinfo/wrappers/linux/multiline.c",
+        "cpuinfo/wrappers/linux/processors.c",
+        "cpuinfo/wrappers/linux/smallfile.c",
+        "cpuinfo/wrappers/log.c",
+        "cpuinfo/wrappers/mach/topology.c",
+        "cpuinfo/wrappers/x86/cache/descriptor.c",
+        "cpuinfo/wrappers/x86/cache/deterministic.c",
+        "cpuinfo/wrappers/x86/cache/init.c",
+        "cpuinfo/wrappers/x86/info.c",
+        "cpuinfo/wrappers/x86/init.c",
+        "cpuinfo/wrappers/x86/isa.c",
+        "cpuinfo/wrappers/x86/linux/cpuinfo.c",
+        "cpuinfo/wrappers/x86/linux/init.c",
+        "cpuinfo/wrappers/x86/mach/init.c",
+        "cpuinfo/wrappers/x86/name.c",
+        "cpuinfo/wrappers/x86/topology.c",
+        "cpuinfo/wrappers/x86/uarch.c",
+        "cpuinfo/wrappers/x86/vendor.c",
+        "cpuinfo/wrappers/x86/windows/init.c",
+    ],
+    include_directories = ["cpuinfo/src"],
+    public_include_directories = ["cpuinfo/include"],
+    raw_headers = glob([
+        "cpuinfo/src/**/*.h",
+        "cpuinfo/src/**/*.c",
+    ]),
+    preferred_linkage = "static",
+    preprocessor_flags = [
+        "-DCPUINFO_LOG_LEVEL=2",
+        "-D_GNU_SOURCE=1",
+    ],
+    visibility = ["PUBLIC"],
+    deps = [
+        ":clog",
+    ],
+)
+
+cxx_library(
+    name = "clog",
+    srcs = [
+        "cpuinfo/deps/clog/src/clog.c",
+    ],
+    raw_headers = glob([
+        "cpuinfo/deps/clog/include/*.h",
+    ]),
+    public_include_directories = [
+        "cpuinfo/deps/clog/include/",
+    ],
+    force_static = True,
+    visibility = ["PUBLIC"],
+)
+
+cxx_library(
+    name = "FP16",
+    raw_headers = glob([
+        "FP16/include/*.h",
+    ]),
+    public_include_directories = [
+        "FP16/include/",
+    ],
+    force_static = True,
+    visibility = ["PUBLIC"],
+)
+
+
+cxx_library(
+    name = "miniz",
+    srcs = ["miniz-2.1.0/miniz.c"],
+    header_namespace = "",
+    exported_headers = {"miniz.h": "miniz-2.1.0/miniz.h"},
+    exported_preprocessor_flags = [
+        "-DMINIZ_DISABLE_ZIP_READER_CRC32_CHECKS",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+remote_file(
+  name = "typing-extensions-download",
+  url = "https://files.pythonhosted.org/packages/75/e1/932e06004039dd670c9d5e1df0cd606bf46e29a28e65d5bb28e894ea29c9/typing_extensions-4.2.0-py3-none-any.whl",
+  sha1 = "ff0849420e94f425818bff5d0f25e3cdfaba8601",
+  out = "typing_extensions-4.2.0-py3-none-any.whl",
+)
+
+prebuilt_python_library(
+  name = "typing-extensions",
+  binary_src = ":typing-extensions-download",
+  visibility = ["PUBLIC"],
+  deps = [":typing-extensions-download"],
+)
+
+remote_file(
+  name = "pyyaml-download",
+  url = "https://files.pythonhosted.org/packages/12/fc/a4d5a7554e0067677823f7265cb3ae22aed8a238560b5133b58cda252dad/PyYAML-6.0-cp39-cp39-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_12_x86_64.manylinux2010_x86_64.whl",
+  sha1 = "11aa9c5fe2d890b6a73212beadc7c8a4265ebc39",
+  out = "pyyaml.whl",
+)
+
+prebuilt_python_library(
+  name = "pyyaml",
+  binary_src = ":pyyaml-download",
+  visibility = ["PUBLIC"],
+  deps = [":pyyaml-download"],
+)
+
+cxx_library(
+    name = "ruy_lib",
+    srcs = glob(
+        ["ruy/**/*.cc"],
+        exclude = [
+            "ruy/ruy/test_*.cc",
+            "ruy/ruy/*_test.cc",
+            "ruy/example/*.cc",
+            "ruy/ruy/profiler/test.cc",
+            "ruy/ruy/benchmark.cc",
+        ],
+    ),
+    compiler_flags = ["-Os"],
+    preferred_linkage = "static",
+    public_include_directories = ["ruy"],
+    raw_headers = glob(["ruy/**/*.h"]),
+    visibility = [
+        "PUBLIC",
+    ],
+)
+
+cxx_library(
+    name = "flatbuffers-api",
+    public_include_directories = ["flatbuffers/include"],
+    raw_headers = [
+        "flatbuffers/include/flatbuffers/base.h",
+        "flatbuffers/include/flatbuffers/flatbuffers.h",
+        "flatbuffers/include/flatbuffers/stl_emulation.h",
+    ],
+    preferred_linkage = "static",
+    visibility = ["PUBLIC"],
+)
+
+cxx_library(
+    name = "flatc_library",
+    srcs = [
+        "flatbuffers/src/code_generators.cpp",
+        "flatbuffers/src/flatc.cpp",
+        "flatbuffers/src/idl_gen_fbs.cpp",
+        "flatbuffers/src/idl_gen_text.cpp",
+        "flatbuffers/src/idl_parser.cpp",
+        "flatbuffers/src/reflection.cpp",
+        "flatbuffers/src/util.cpp",
+    ],
+    public_include_directories = [
+        "flatbuffers/grpc",
+        "flatbuffers/include",
+    ],
+    raw_headers = [
+        "flatbuffers/include/flatbuffers/flatc.h",
+        "flatbuffers/include/flatbuffers/base.h",
+        "flatbuffers/include/flatbuffers/flatbuffers.h",
+        "flatbuffers/include/flatbuffers/stl_emulation.h",
+        "flatbuffers/include/flatbuffers/code_generators.h",
+        "flatbuffers/include/flatbuffers/flexbuffers.h",
+        "flatbuffers/include/flatbuffers/hash.h",
+        "flatbuffers/include/flatbuffers/idl.h",
+        "flatbuffers/include/flatbuffers/minireflect.h",
+        "flatbuffers/include/flatbuffers/reflection.h",
+        "flatbuffers/include/flatbuffers/reflection_generated.h",
+        "flatbuffers/include/flatbuffers/util.h",
+    ],
+    preferred_linkage = "static",
+    visibility = ["PUBLIC"],
+)
+
+cxx_binary(
+    name = "flatc",
+    srcs = [
+        "flatbuffers/grpc/src/compiler/cpp_generator.cc",
+        "flatbuffers/grpc/src/compiler/go_generator.cc",
+        "flatbuffers/grpc/src/compiler/java_generator.cc",
+        "flatbuffers/grpc/src/compiler/python_generator.cc",
+        "flatbuffers/grpc/src/compiler/swift_generator.cc",
+        "flatbuffers/grpc/src/compiler/ts_generator.cc",
+        "flatbuffers/src/annotated_binary_text_gen.cpp",
+        "flatbuffers/src/binary_annotator.cpp",
+        "flatbuffers/src/bfbs_gen_lua.cpp",
+        "flatbuffers/src/bfbs_gen_nim.cpp",
+        "flatbuffers/src/flatc_main.cpp",
+        "flatbuffers/src/idl_gen_binary.cpp",
+        "flatbuffers/src/idl_gen_cpp.cpp",
+        "flatbuffers/src/idl_gen_csharp.cpp",
+        "flatbuffers/src/idl_gen_dart.cpp",
+        "flatbuffers/src/idl_gen_go.cpp",
+        "flatbuffers/src/idl_gen_grpc.cpp",
+        "flatbuffers/src/idl_gen_java.cpp",
+        "flatbuffers/src/idl_gen_ts.cpp", # idl_gen_js_ts.cpp in fbsource
+        "flatbuffers/src/idl_gen_json_schema.cpp",
+        "flatbuffers/src/idl_gen_kotlin.cpp",
+        "flatbuffers/src/idl_gen_lobster.cpp",
+        "flatbuffers/src/idl_gen_lua.cpp",
+        "flatbuffers/src/idl_gen_php.cpp",
+        "flatbuffers/src/idl_gen_python.cpp",
+        "flatbuffers/src/idl_gen_rust.cpp",
+        "flatbuffers/src/idl_gen_swift.cpp",
+        "flatbuffers/src/idl_gen_text.cpp",
+        "flatbuffers/src/util.cpp",
+    ],
+    include_directories = [
+        "flatbuffers/grpc",
+        "flatbuffers/include",
+    ],
+    raw_headers = [
+        "flatbuffers/grpc/src/compiler/cpp_generator.h",
+        "flatbuffers/grpc/src/compiler/go_generator.h",
+        "flatbuffers/grpc/src/compiler/java_generator.h",
+        "flatbuffers/grpc/src/compiler/python_generator.h",
+        "flatbuffers/grpc/src/compiler/schema_interface.h",
+        "flatbuffers/grpc/src/compiler/swift_generator.h",
+        "flatbuffers/grpc/src/compiler/ts_generator.h",
+    ],
+    visibility = ["PUBLIC"],
+    deps = [":flatc_library"],
+)
+
+cxx_library(
+    name = "gtest_headers",
+    exported_preprocessor_flags = [
+        "-DGTEST_USE_OWN_TR1_TUPLE=0",
+        "-DGTEST_HAS_TR1_TUPLE=0",
+        "-D_CRT_DECLARE_NONSTDC_NAMES",
+        "-D_CRT_NONSTDC_NO_WARNINGS",
+        "-D_CRT_NONSTDC_NO_DEPRECATE",
+    ],
+    include_directories = [
+        "googletest/googletest",
+    ],
+    public_system_include_directories = [
+        "googletest/googletest/include",
+    ],
+    raw_headers = glob([
+        "googletest/googletest/src/**/*.h",
+        "googletest/googletest/include/**/*.h",
+    ]),
+    visibility = [
+        "PUBLIC",
+    ],
+)
+
+cxx_library(
+    name = "gtest",
+    srcs = [
+        "googletest/googletest/src/gtest-all.cc",
+        "googletest/googletest/src/gtest_main.cc",
+    ],
+    include_directories = [
+        "googletest/googletest",
+    ],
+    raw_headers = glob([
+        "googletest/googletest/src/**/*.cc",
+        "googletest/googletest/src/**/*.h",
+    ]),
+    visibility = [
+        "PUBLIC",
+    ],
+    xcode_public_headers_symlinks = True,
+    exported_deps = [
+        ":gtest_headers",
+    ],
+)
+
+cxx_library(
+    name = "gmock",
+    srcs = [
+        "googletest/googlemock/src/gmock-all.cc",
+    ],
+    include_directories = [
+        "googletest/googlemock",
+    ],
+    public_system_include_directories = [
+        "googletest/googlemock/include",
+    ],
+    raw_headers = glob([
+        "googletest/googlemock/include/**/*.h",
+        "googletest/googlemock/src/**/*.cc",
+    ]),
+    visibility = ["PUBLIC"],
+    deps = [
+        ":gtest",
+    ],
+    exported_deps = [
+        ":gtest_headers",
+    ],
+)
