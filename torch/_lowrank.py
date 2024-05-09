@@ -11,9 +11,14 @@ from . import _linalg_utils as _utils
 from .overrides import handle_torch_function, has_torch_function
 
 
-def get_approximate_basis(A: Tensor, q: int, niter: Optional[int] = 2) -> Tensor:
+def get_approximate_basis(
+    A: Tensor, q: int, niter: Optional[int] = 2, M: Optional[Tensor] = None
+) -> Tensor:
     """Return tensor :math:`Q` with :math:`q` orthonormal columns such
-    that :math:`Q Q^H A` approximates :math:`A`.
+    that :math:`Q Q^H A` approximates :math:`A`. If :math:`M` is
+    specified, then :math:`Q` is such that :math:`Q Q^H (A - M)`
+    approximates :math:`A - M`. without instantiating any tensors
+    of the size of :math:`A` or :math:`M`.
 
     .. note:: The implementation is based on the Algorithm 4.4 from
               Halko et al, 2009.
@@ -41,6 +46,9 @@ def get_approximate_basis(A: Tensor, q: int, niter: Optional[int] = 2) -> Tensor
                                nonnegative integer. In most cases, the
                                default value 2 is more than enough.
 
+        M (Tensor, optional): the input tensor's mean of size
+                              :math:`(*, m, n)`.
+
     References::
         - Nathan Halko, Per-Gunnar Martinsson, and Joel Tropp, Finding
           structure with randomness: probabilistic algorithms for
@@ -57,10 +65,20 @@ def get_approximate_basis(A: Tensor, q: int, niter: Optional[int] = 2) -> Tensor
 
     # The following code could be made faster using torch.geqrf + torch.ormqr
     # but geqrf is not differentiable
-    Q = torch.linalg.qr(matmul(A, R)).Q
+
+    X = matmul(A, R)
+    if M is not None:
+        X = X - matmul(M, R)
+    Q = torch.linalg.qr(X).Q
     for i in range(niter):
-        Q = torch.linalg.qr(matmul(A.mH, Q)).Q
-        Q = torch.linalg.qr(matmul(A, Q)).Q
+        X = matmul(A.mH, Q)
+        if M is not None:
+            X = X - matmul(M.mH, Q)
+        Q = torch.linalg.qr(X).Q
+        X = matmul(A, Q)
+        if M is not None:
+            X = X - matmul(M, Q)
+        Q = torch.linalg.qr(X).Q
     return Q
 
 
@@ -133,18 +151,18 @@ def _svd_lowrank(
     m, n = A.shape[-2:]
     matmul = _utils.matmul
     if M is not None:
-        # add(sparse, dense) is not implemented...
-        if A.is_sparse and not M.is_sparse:
-            A = -M + A
-        else:
-            A = A - M
+        M = M.broadcast_to(A.size())
 
     # Assume that A is tall
     if m < n:
         A = A.mH
+        if M is not None:
+            M = M.mH
 
-    Q = get_approximate_basis(A, q, niter=niter)
+    Q = get_approximate_basis(A, q, niter=niter, M=M)
     B = matmul(Q.mH, A)
+    if M is not None:
+        B = B - matmul(Q.mH, M)
     U, S, Vh = torch.linalg.svd(B, full_matrices=False)
     V = Vh.mH
     U = Q.matmul(U)
