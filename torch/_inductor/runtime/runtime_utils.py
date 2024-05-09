@@ -7,6 +7,7 @@ import operator
 import os
 import re
 import tempfile
+import time
 
 import torch
 
@@ -98,6 +99,24 @@ def do_bench(*args, **kwargs):
     if quantile_field_name not in kwargs:
         kwargs[quantile_field_name] = (0.5, 0.2, 0.8)
     return triton_do_bench(*args, **kwargs)[0]
+
+
+def do_bench_cpu(fn, warmup=5, times=20):
+    assert times > 0
+    for _ in range(warmup):
+        fn()
+    durations = []
+    for _ in range(times):
+        t0 = time.perf_counter()
+        fn()
+        t1 = time.perf_counter()
+        durations.append((t1 - t0) * 1000)
+    # return the median time
+    sorted_durations = sorted(durations)
+    if times % 2 == 0:
+        return (sorted_durations[times // 2 - 1] + sorted_durations[times // 2]) / 2
+    else:
+        return sorted_durations[times // 2]
 
 
 def cache_dir() -> str:
