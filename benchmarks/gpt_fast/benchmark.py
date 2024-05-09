@@ -37,12 +37,12 @@ all_experiments = {
     "llama-7b-int8": Experiment(
         "Llama-2-7b-chat-hf", LLaMA, "int8", LLaMAWeightOnlyInt8QuantHandler, 155
     ),
-    "mixtral-int8": Experiment(
+    "mixtral-int8": Experiment(  # We reduced the original number of layers from 32 to 16 to adapt CI memory limitation.
         "Mixtral-8x7B-v0.1",
         MixtralMoE,
         "int8",
         MixtralMoEWeightOnlyInt8QuantHandler,
-        97,
+        197,
     ),
 }
 
