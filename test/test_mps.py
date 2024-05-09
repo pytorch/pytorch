@@ -8240,7 +8240,7 @@ class TestLogical(TestCaseMPS):
                     B_mps = B.clone().detach().to('mps')
 
                     cpu_ref = torch.isin(A, B, invert=inverted)
-                    if dtype in [torch.float16, torch.bloat16]:
+                    if dtype in [torch.float16, torch.bfloat16]:
                         cpu_ref.type(dtype)
 
                     mps_out = torch.isin(A_mps, B_mps, invert=inverted)
