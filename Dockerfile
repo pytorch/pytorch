@@ -1,12 +1,10 @@
-# syntax = docker/dockerfile:experimental
+# syntax=docker/dockerfile:1
+
+# NOTE: Building this image require's docker version >= 23.0.
 #
-# NOTE: To build this you will need a docker version > 18.06 with
-#       experimental enabled and DOCKER_BUILDKIT=1
-#
-#       If you do not use buildkit you are not going to have a good time
-#
-#       For reference:
-#           https://docs.docker.com/develop/develop-images/build_enhancements/
+# For reference:
+# - https://docs.docker.com/build/dockerfile/frontend/#stable-channel
+
 ARG BASE_IMAGE=ubuntu:22.04
 ARG PYTHON_VERSION=3.11
 

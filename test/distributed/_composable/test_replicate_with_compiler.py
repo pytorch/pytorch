@@ -116,13 +116,17 @@ class ReplicateTest(MultiProcessTestCase):
         model = Net().to(device)
         input = torch.randn([1, DIM], device=device)
 
-        compiled_replicate_model = torch.compile(
-            replicate(deepcopy(model)), fullgraph=False
-        )
+        compiled_replicate_model = replicate(deepcopy(model))
+        if not no_compile_forward:
+            compiled_replicate_model = torch.compile(
+                compiled_replicate_model, fullgraph=False
+            )
         compiled_replicate_optim = torch.optim.Adam(
             compiled_replicate_model.parameters()
         )
-        compiled_ddp_model = torch.compile(DDP(deepcopy(model)), fullgraph=True)
+        compiled_ddp_model = DDP(deepcopy(model))
+        if not no_compile_forward:
+            compiled_ddp_model = torch.compile(compiled_ddp_model, fullgraph=True)
         compiled_ddp_optim = torch.optim.Adam(compiled_ddp_model.parameters())
         model = replicate(model)
         optim = torch.optim.Adam(model.parameters())

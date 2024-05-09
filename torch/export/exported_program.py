@@ -530,6 +530,7 @@ class ExportedProgram:
         For now, we do not decompose joint graphs.
         """
         from torch._decomp import core_aten_decompositions
+        from torch._export.passes._node_metadata_hook import _node_metadata_hook
         from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
             _AddRuntimeAssertionsForInlineConstraintsPass,
         )
@@ -651,8 +652,7 @@ class ExportedProgram:
 
         new_range_constraints = _get_updated_range_constraints(
             gm,
-            self._num_lifted_params_buffers(),
-            pytree.tree_leaves(self.example_inputs),
+            self.range_constraints,
             _is_executorch=False,
         )
 
@@ -664,9 +664,16 @@ class ExportedProgram:
         _replace_sym_size_ops_pass(gm)
 
         if len(new_range_constraints) > 0:
-            res = _AddRuntimeAssertionsForInlineConstraintsPass(new_range_constraints)(
-                gm
+            stack_trace = (
+                'File "torch/_export/passes/add_runtime_assertions_for_constraints_pass.py", line 46, '
+                "in _AddRuntimeAssertionsForInlineConstraintsPass"
             )
+            with gm._set_create_node_hook(
+                functools.partial(_node_metadata_hook, stack_trace=stack_trace)
+            ):
+                res = _AddRuntimeAssertionsForInlineConstraintsPass(
+                    new_range_constraints
+                )(gm)
             assert res is not None
             gm = res.graph_module
 
@@ -764,8 +771,7 @@ class ExportedProgram:
             state_dict=self.state_dict,
             range_constraints=_get_updated_range_constraints(
                 transformed_gm,
-                self._num_lifted_params_buffers(),
-                pytree.tree_leaves(self.example_inputs),
+                self.range_constraints,
                 _is_executorch=False,
             ),
             module_call_graph=copy.deepcopy(self._module_call_graph),
@@ -812,8 +818,7 @@ class ExportedProgram:
 
 def _get_updated_range_constraints(
     gm: torch.fx.GraphModule,
-    num_lifted: Optional[int] = None,
-    example_inputs: Optional[List[Any]] = None,
+    old_range_constraints: "Optional[Dict[sympy.Symbol, Any]]" = None,
     _is_executorch: bool = True,
 ) -> "Dict[sympy.Symbol, Any]":
     def get_shape_env(gm):
@@ -826,16 +831,15 @@ def _get_updated_range_constraints(
 
         fake_mode = detect_fake_mode(vals)
         if fake_mode is not None:
-            return fake_mode.shape_env, fake_mode
+            return fake_mode.shape_env
         for v in vals:
             if isinstance(v, torch.SymInt):
-                return v.node.shape_env, fake_mode
+                return v.node.shape_env
 
     # FIXME(tmanlaibaatar) Remove this whole branch once https://github.com/pytorch/pytorch/pull/123764
     if _is_executorch:
-        assert num_lifted is None
-        assert example_inputs is None
-        shape_env, _ = get_shape_env(gm)
+        assert old_range_constraints is None
+        shape_env = get_shape_env(gm)
         if shape_env is None:
             return {}
         range_constraints = {
@@ -851,17 +855,13 @@ def _get_updated_range_constraints(
                 range_constraints[k] = v
         return range_constraints
 
-    assert num_lifted is not None
-    assert example_inputs is not None
+    assert old_range_constraints is not None
 
-    shape_env, fake_mode = get_shape_env(gm)
+    shape_env = get_shape_env(gm)
     if shape_env is None:
         return {}
 
-    from torch.export.dynamic_shapes import _process_constraints
-
-    range_constraints = _process_constraints(fake_mode, gm, num_lifted, example_inputs)
-
+    range_constraints = copy.copy(old_range_constraints)
     range_constraints = {
         k: v for k, v in range_constraints.items() if k not in shape_env.replacements
     }

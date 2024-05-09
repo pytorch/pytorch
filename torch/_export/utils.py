@@ -144,6 +144,10 @@ def _check_input_constraints_for_graph(
                                 )
                 else:
                     if arg_dim != node_dim:
+                        if isinstance(
+                            node_dim, torch.SymInt
+                        ):  # this means we deferred a guard from export analysis to runtime, let this pass
+                            continue
                         raise RuntimeError(
                             f"Expected input at {get_keystr(key_path)}.shape[{j}] to be equal to "
                             f"{node_dim}, but got {arg_dim}",

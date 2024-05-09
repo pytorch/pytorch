@@ -2273,6 +2273,8 @@ if torch._C._has_mkldnn:
         )
         out = input_tensor.new_empty(shape_out)
         out_memory_format = torch.channels_last
+        if input_tensor.dim() == 5:
+            out_memory_format = torch.channels_last_3d
         out = out.to(memory_format=out_memory_format)  # type: ignore[call-overload]
         return out
 
@@ -5373,7 +5375,7 @@ def meta__scaled_dot_product_flash_attention_for_cpu_backward(
     scale: Optional[float] = None,
 ):
     # cpus's grad layout is different from cuda's,
-    # i.e. (batch_size, seq_len，num_heads, head_dim）
+    # i.e. (batch_size, seq_len,num_heads, head_dim)
     batch_size = query.size(0)
     num_heads = query.size(1)
     head_dim = query.size(3)
@@ -5504,8 +5506,8 @@ def meta__efficient_attention_backward(
     bias: Optional[Tensor],
     cu_seqlens_q: Optional[Tensor],
     cu_seqlens_k: Optional[Tensor],
-    max_seqlen_q: int,
-    max_seqlen_k: int,
+    max_seqlen_q: torch.SymInt,
+    max_seqlen_k: torch.SymInt,
     logsumexp: Tensor,
     dropout_p: float,
     philox_seed: Tensor,
