@@ -1,5 +1,7 @@
 # Owner(s): ["module: inductor"]
+import base64
 import functools
+import json
 import os
 import pickle
 import unittest
@@ -7,6 +9,7 @@ from typing import List
 from unittest import mock
 
 import torch
+from torch._dynamo import reset
 from torch._dynamo.utils import counters
 from torch._inductor import config, metrics
 from torch._inductor.codecache import (
@@ -141,6 +144,75 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
         self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
+
+    @requires_triton()
+    @parametrize("device", (GPU_TYPE, "cpu"))
+    @parametrize("dtype", (torch.float32, torch.bfloat16))
+    @parametrize("dynamic", (False, True))
+    def test_remote_cache_load_function(self, device, dtype, dynamic):
+        from unittest.mock import patch
+
+        if device == GPU_TYPE and not HAS_GPU:
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
+        if device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
+            raise unittest.SkipTest("requires SM80 or later")
+
+        def fn(x, y):
+            return (x * 2, y @ y)
+
+        a = torch.rand(25, dtype=dtype, device=device)
+        b = torch.rand(5, 5, dtype=dtype, device=device)
+
+        cache = {}
+        num_get = 0
+        num_put = 0
+
+        class MyCache:
+            def __init__(self, key, is_autotune=False):
+                pass
+
+            def get(self, filename):
+                nonlocal cache
+                nonlocal num_get
+                if filename not in cache:
+                    return None
+                ret = json.loads(cache[filename])
+                num_get += 1
+                if config.is_fbcode():
+                    return base64.b64decode(ret["data"]) if ret is not None else ret
+                else:
+                    return base64.b64decode(ret) if ret is not None else ret
+
+            def put(self, filename, data):
+                nonlocal cache
+                nonlocal num_put
+                if config.is_fbcode():
+                    data["data"] = base64.b64encode(data["data"]).decode("ascii")
+                else:
+                    data = base64.b64encode(data).decode("ascii")
+                cache[filename] = json.dumps(data)
+                num_put += 1
+
+        cache_module = (
+            "triton.runtime.fb_memcache.FbMemcacheRemoteFxGraphCacheBackend"
+            if config.is_fbcode()
+            else "triton.runtime.cache.RedisRemoteCacheBackend"
+        )
+
+        with config.patch(
+            {
+                "fx_graph_cache": False,
+                "fx_graph_remote_cache": True,
+            }
+        ), patch.dict(os.environ), patch(cache_module, MyCache, create=True):
+            os.environ.pop("TRITON_CACHE_MANAGER", None)
+            for _ in range(4):
+                with fresh_inductor_cache():
+                    compiled_fn = torch.compile(fn, dynamic=dynamic)
+                    self.assertEqual(fn(a, b), compiled_fn(a, b))
+                reset()
+            self.assertEqual(num_get, 3)
+            self.assertEqual(num_put, 1)
 
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
@@ -322,8 +394,8 @@ class TestFxGraphCache(TestCase):
 
         compiled_fn = torch.compile(fn, fullgraph=True)
 
-        x = torch.randn(4, device="cuda")
-        y = torch.randn(4, device="cuda")
+        x = torch.randn(4, device=GPU_TYPE)
+        y = torch.randn(4, device=GPU_TYPE)
         compiled_fn(x, y)
 
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
