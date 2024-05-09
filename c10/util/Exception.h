@@ -3,12 +3,10 @@
 
 #include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
-#include <c10/util/Lazy.h>
 #include <c10/util/StringUtil.h>
 
 #include <cstdint>
 #include <exception>
-#include <memory>
 #include <string>
 #include <variant>
 #include <vector>
@@ -27,12 +25,6 @@ namespace c10 {
 /// NB: c10::Error is handled specially by the default torch to suppress the
 /// backtrace, see torch/csrc/Exceptions.h
 class C10_API Error : public std::exception {
- public:
-  // Symbolizing the backtrace can be expensive; pass it around as a lazy string
-  // so it is symbolized only if actually needed.
-  using Backtrace = std::shared_ptr<const LazyValue<std::string>>;
-
- private:
   // The actual error message.
   std::string msg_;
 
@@ -44,14 +36,14 @@ class C10_API Error : public std::exception {
   // The C++ backtrace at the point when this exception was raised.  This
   // may be empty if there is no valid backtrace.  (We don't use optional
   // here to reduce the dependencies this file has.)
-  Backtrace backtrace_;
+  std::string backtrace_;
 
   // These two are derived fields from msg_stack_ and backtrace_, but we need
   // fields for the strings so that we can return a const char* (as the
   // signature of std::exception requires).  Currently, the invariant
   // is that these fields are ALWAYS populated consistently with respect
   // to msg_stack_ and backtrace_.
-  mutable OptimisticLazy<std::string> what_;
+  std::string what_;
   std::string what_without_backtrace_;
 
   // This is a little debugging trick: you can stash a relevant pointer
@@ -72,13 +64,13 @@ class C10_API Error : public std::exception {
       const uint32_t line,
       const char* condition,
       const std::string& msg,
-      Backtrace backtrace,
+      const std::string& backtrace,
       const void* caller = nullptr);
 
   // Base constructor
   Error(
       std::string msg,
-      Backtrace backtrace = nullptr,
+      std::string backtrace = "",
       const void* caller = nullptr);
 
   // Add some new context to the message stack.  The last added context
@@ -95,12 +87,16 @@ class C10_API Error : public std::exception {
     return context_;
   }
 
-  const Backtrace& backtrace() const;
+  const std::string& backtrace() const {
+    return backtrace_;
+  }
 
   /// Returns the complete error message, including the source location.
   /// The returned pointer is invalidated if you call add_context() on
   /// this object.
-  const char* what() const noexcept override;
+  const char* what() const noexcept override {
+    return what_.c_str();
+  }
 
   const void* caller() const noexcept {
     return caller_;
