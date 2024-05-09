@@ -108,21 +108,6 @@ def addmm_pattern(
     return aten.addmm(input, mat1, mat2, beta=beta, alpha=alpha)
 
 
-# addmm wrapper for testing purposes
-def call_addmm(*args, **kwargs):
-    return aten.addmm(*args, **kwargs)
-
-
-# bmm wrapper for testing purposes
-def call_bmm(*args, **kwargs):
-    return aten.bmm(*args, **kwargs)
-
-
-# mm wrapper for testing purposes
-def call_mm(*args, **kwargs):
-    return aten.mm(*args, **kwargs)
-
-
 def should_pad_addmm(match: Match) -> bool:
     mat1, mat2, input = fetch_fake_tensors(match, ("mat1", "mat2", "input"))
     return should_pad_common(mat1, mat2, input) and should_pad_bench(
@@ -144,20 +129,14 @@ def pad_addmm(
 ):
     # for paddings, dim order is reversed for some reasons
     # and for every dim, we need to specify left and right padding
-    mat1_padded = (
-        mat1
-        if mat1_pre_padded
-        else pad_mat1(
+    if not mat1_pre_padded:
+        mat1 = pad_mat1(
             mat1, m_padded_length=m_padded_length, k_padded_length=k_padded_length
         )
-    )
-    mat2_padded = (
-        mat2
-        if mat2_pre_padded
-        else pad_mat2(
+    if not mat2_pre_padded:
+        mat2 = pad_mat2(
             mat2, k_padded_length=k_padded_length, n_padded_length=n_padded_length
         )
-    )
     if input is not None:
         if len(input.shape) < 2:
             # make sure we have at least two dimensions
@@ -183,15 +162,10 @@ def pad_addmm(
         input_padded = None
 
     try:
-        res = call_addmm(input_padded, mat1_padded, mat2_padded, beta=beta, alpha=alpha)
+        res = aten.addmm(input_padded, mat1, mat2, beta=beta, alpha=alpha)
     except RuntimeError as e:
-        if input_padded is not None:
-            note1 = f"\npad_addmm was called with argument shapes: input.shape={input.shape}, mat1.shape={mat1.shape}, mat2.shape={mat2.shape}, m_padded_length={m_padded_length}, k_padded_length={k_padded_length}, n_padded_length={n_padded_length}"  # type: ignore[union-attr] # noqa: B950
-        else:
-            note1 = f"pad_addmm was called with argument shapes: input_padded=None, mat1.shape={mat1.shape}, mat2.shape={mat2.shape}, m_padded_length={m_padded_length}, k_padded_length={k_padded_length}, n_padded_length={n_padded_length}"  # noqa: B950
-
-        note2 = f"\naten.addmm was called with shapes: input_padded.shape={input_padded.shape}, mat1_padded.shape={mat1_padded.shape}, mat2_padded.shape={mat2_padded.shape}, beta={beta}, alpha={alpha}"  # noqa: B950
-        raise RuntimeError(str(e) + note1 + note2) from e
+        note = f"\naten.addmm was called with shapes: input_padded.shape={input.shape if input else None}, mat1_padded.shape={mat1.shape}, mat2_padded.shape={mat2.shape}, beta={beta}, alpha={alpha},  m_padded_length={m_padded_length}, k_padded_length={k_padded_length}, n_padded_length={n_padded_length}"  # noqa: B950
+        raise RuntimeError(str(e) + note) from e
 
     if m_padded_length != 0:
         res = res[:-m_padded_length, :]
@@ -270,7 +244,6 @@ def should_pad_bench_key(
         op,
         input if input is None else tensor_key(input),
         tf32_key,
-        torch._inductor.config.force_shape_pad,
     )
 
     return str(key)
@@ -421,7 +394,7 @@ def pad_mat1(mat1, *, m_padded_length, k_padded_length, is_bmm=False):
     return mat1
 
 
-def pad_mat2(mat2, *,  k_padded_length, n_padded_length, is_bmm=False):
+def pad_mat2(mat2, *, k_padded_length, n_padded_length, is_bmm=False):
     if k_padded_length != 0 or n_padded_length != 0:
         # dim order is reversed for constant_pad_nd, for every dim we specify right and left padding
         pad_arg = [0, n_padded_length, 0, k_padded_length]
@@ -441,21 +414,15 @@ def pad_mm(
     mat1_pre_padded: bool = False,
     mat2_pre_padded: bool = False,
 ) -> Tensor:
-    mat1_padded = (
-        mat1
-        if mat1_pre_padded
-        else pad_mat1(
+    if not mat1_pre_padded:
+        mat1 = pad_mat1(
             mat1, m_padded_length=m_padded_length, k_padded_length=k_padded_length
         )
-    )
-    mat2_padded = (
-        mat2
-        if mat2_pre_padded
-        else pad_mat2(
+    if not mat2_pre_padded:
+        mat2 = pad_mat2(
             mat2, k_padded_length=k_padded_length, n_padded_length=n_padded_length
         )
-    )
-    res = call_mm(mat1_padded, mat2_padded)
+    res = aten.mm(mat1, mat2)
     if m_padded_length != 0:
         res = res[:-m_padded_length, :]
     if n_padded_length != 0:
@@ -496,27 +463,21 @@ def pad_bmm(
     mat1_pre_padded: bool = False,
     mat2_pre_padded: bool = False,
 ) -> Tensor:
-    mat1_padded = (
-        mat1
-        if mat1_pre_padded
-        else pad_mat1(
+    if not mat1_pre_padded:
+        mat1 = pad_mat1(
             mat1,
             m_padded_length=m_padded_length,
             k_padded_length=k_padded_length,
             is_bmm=True,
         )
-    )
-    mat2_padded = (
-        mat2
-        if mat2_pre_padded
-        else pad_mat2(
+    if not mat2_pre_padded:
+        mat2 = pad_mat2(
             mat2,
             k_padded_length=k_padded_length,
             n_padded_length=n_padded_length,
             is_bmm=True,
         )
-    )
-    res = call_bmm(mat1_padded, mat2_padded)
+    res = aten.bmm(mat1, mat2)
     if m_padded_length != 0:
         res = res[:, :-m_padded_length, :]
     if n_padded_length != 0:
