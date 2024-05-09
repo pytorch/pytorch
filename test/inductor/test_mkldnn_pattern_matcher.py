@@ -1386,6 +1386,18 @@ class TestPatternMatcher(TestPatternMatcherBase):
             )
 
     @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_dynamic_qlinear_input_dim_exceeds_2(self):
+        r"""
+        This testcase will quantize a single Linear Moduel.
+        """
+        for bias in [True, False]:
+            self._qlinear_cpu_test_helper(
+                (torch.randn((2, 3, 4)),), bias=bias, is_dynamic=True
+            )
+
+    @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
     @skipIfRocm
@@ -1577,7 +1589,13 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 (torch.randn((2, 4)),), gelu, int8_mixed_bf16=True
             )
 
-    def _qlinear_dequant_promotion_cpu_test_helper(self, inputs, int8_mixed_bf16=False):
+    def _qlinear_dequant_promotion_cpu_test_helper(
+        self,
+        inputs,
+        int8_mixed_bf16=False,
+        is_dynamic=False,
+        matcher_check_fn=None,
+    ):
         class M(torch.nn.Module):
             def __init__(
                 self,
@@ -1595,7 +1613,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
         mod = M().eval()
 
-        def matcher_check_fn():
+        def default_matcher_check_fn():
             # 1. Dequant pattern matcher for dequant promotion * 1
             self.assertEqual(counters["inductor"]["dequant_promotion_matcher_count"], 1)
             # 2. dequant-linear pattern matched in quantization weight prepack * 3
@@ -1610,7 +1628,10 @@ class TestPatternMatcher(TestPatternMatcherBase):
             inputs,
             check_autocast=torch.bfloat16 if int8_mixed_bf16 else torch.float,
             check_quantization=True,
-            matcher_check_fn=matcher_check_fn,
+            matcher_check_fn=matcher_check_fn
+            if matcher_check_fn is not None
+            else default_matcher_check_fn,
+            is_dynamic=is_dynamic,
         )
 
     @skipIfNoDynamoSupport
@@ -1691,6 +1712,37 @@ class TestPatternMatcher(TestPatternMatcherBase):
         """
         self._qlinear_dequant_promotion_cpu_test_helper(
             (torch.randn((2, 3, 4)),), int8_mixed_bf16=True
+        )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_qlinear_dequant_promotion_dynamic_cpu(self):
+        r"""
+        This testcase test if dequant node before linear is promoted correctly:
+                  X
+                  |
+               Linear1(X)
+                /   \
+        Linear2(X)   Linear3(X)
+                \   /
+                 Add
+                  |
+                  Y
+        """
+
+        def matcher_check_fn():
+            # 1. Dequant pattern matcher for dequant promotion * 1
+            self.assertEqual(counters["inductor"]["dequant_promotion_matcher_count"], 1)
+            # 2. dequant-linear pattern matched in quantization weight prepack * 3
+            self.assertEqual(
+                counters["inductor"]["qlinear_weight_prepack_matcher_count"], 3
+            )
+
+        self._qlinear_dequant_promotion_cpu_test_helper(
+            (torch.randn((2, 4)),),
+            matcher_check_fn=matcher_check_fn,
+            is_dynamic=True,
         )
 
     @skipIfNoDynamoSupport
