@@ -59,6 +59,7 @@ CURRENT_DECOMPOSITION_TABLE: Dict[torch._ops.OperatorBase, Callable] = {}
 
 CONSTANT_NUMEL_LIMIT = 1
 
+null_ctx_type = type(nullcontext)
 # We currently convert all SymInt to proxies before we use them.
 # This could plausibly be handled at the Dynamo level.
 pytree.register_pytree_node(
@@ -1143,8 +1144,8 @@ class _ModuleStackTracer(PythonKeyTracer):
 
         return node
 
-null_ctx_type = type(nullcontext)
 class _MakefxTracer:
+
     def __init__(
         self,
         decomposition_table: Optional[Dict[Callable, Callable]],
@@ -1170,7 +1171,6 @@ class _MakefxTracer:
         # and configurations. After tracing, their states should be cleaned except for shape_env.
         # Rememer to specify how to intialize it from user inputs and from parent tracer whenever
         # adding new modes in _MakefxTracer.
-        null_ctx_type = type(nullcontext)
         self.fake_tensor_mode: Union[null_ctx_type, FakeTensorMode] = nullcontext()
         self.proxy_mode: Union[null_ctx_type, ProxyTorchDispatchMode] = nullcontext()
         self.proxy_function_mode: Union[null_ctx_type, PreDispatchTorchFunctionMode] = nullcontext()
