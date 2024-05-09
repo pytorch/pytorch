@@ -31,49 +31,97 @@ def tensorify_float_inputs(gm: GraphModule, shape_env: ShapeEnv) -> None:
 
     graph = gm.graph
 
-    # We proceed by a sequence of local transforms.  First, we mutate
+    return
+
+    # We proceed by a sequence of local transforms.  Intuitively, we want to
+    # mutate:
     #
-    # %a: SymFloat(s0) = placeholder[target=x]
-    #
-    # (TODO: should we give these s prefix in naming?)
+    #   %a: SymFloat(zf0) = placeholder[target=x]
     #
     # into
     #
-    # %na: f64[] = placeholder[target=x]
-    # %a: SymFloat(f0) = call_method[target=item](args = (%na,))
+    #   %na: f64[] = placeholder[target=x]
+    #   %a: SymFloat(...) = call_method[target=item](args = (%na,))
     #
-    # Notice that after this transformation, we have introduced a new unbacked
-    # float, and the original symbol s0 no longer has a 
+    # The big hazard of this transformation is that, done naively, the
+    # previously backed SymFloat become unbacked SymFloat, and then if you
+    # repropagate through them you can end up with guard on data dependent
+    # shape error.  Our plan is to have a special item() HOP, which produces
+    # the original zf0 backed SymFloat when propagated.
     #
+    # Note that our hope is that for the most part, SymFloats never appear in
+    # guards, because you propagate them along until they get used as a Scalar
+    # argument that doesn't guard on them.  However, we need to ensure
+    # compilation doesn't fail even if you do use the SymFloat in a guard-ey
+    # way, and so this tracking is necessary.
     #
-    # If we subsequently guard on it, in a way that wasn't already
-    # guarded upon in Dynamo prior to getting to this pass, this will now
-    # cause code to fail to compile whereas previously it would have compiled.
+    # Originally, I wanted to just force specialization when a float was used
+    # in a "sizey" way to avoid having to deal with the complication here.
+    # Unfortunately, it's not easy to tell if the unbacked SymFloat is going
+    # to trigger more guards.  For example, if we have:
     #
+    #   def f(y: f32[30], f0: f64[]):
+    #       zuf0: SymFloat(zuf0) = f0.item()
+    #       x: SymInt(floor(zuf0)) = floor(zuf0)
+    #       return y.select(0, x)
     #
-    # Now, this is a bit unusual wrt unbacked handling.  Ordinarily,
-    # subsequent guards on %a would fail guard on data dependent.  But these
-    # are not truly data dependent: we know what their values are.
+    # zuf0 never shows up inside of a Tensor size (it's solely being used to
+    # decide where to index into y), but it will participate in guards on
+    # subsequent meta propagation because whenever we run the meta for select
+    # we must test if floor(zuf0) <= 30.  I cannot think of a good way to say
+    # "ah yes, zuf0 should be specialized here", but conversely, to NOT
+    # specialize it if we had torch.add(y, x) instead.  So we're just going to
+    # do the complicated thing.
     #
-    # This is handled via fake tensor constant propagation.  Because f64[] is
-    # a constant 0d CPU tensor???
+    # So, what we actually end up doing, is:
+    #
+    #   %a: SymFloat(zf0) = placeholder[target=x]
+    #
+    # into
+    #
+    #   %na: f64[] = placeholder[target=x]
+    #   %a: SymFloat(zf0) = call_function[target=torch.ops.higher_order.float_item](args = (zf0, %na,))
+    #
+    # After we have performed this transformation, we want to push float_item
+    # as far down the graph as possible:
+    # For example, convert:
+    #
+    #   %a: SymFloat(zf0) = call_function[target=torch.ops.higher_order.float_item](args = (zf0, %na,))
+    #   %b: SymFloat(zf0 + 3) = call_function[target=operator.add](args = (%a, 3))
+    #
+    # into
+    #
+    #   %nb: f64[] = call_function[target=torch.add](args = (%na, 3))
+    #   %b: SymFloat(zf0 + 3) = call_function[target=torch.ops.higher_order.float_item](args = (zf0 + 3, %na,))
+    #
+    # And we can eliminate it entirely if we hit a Tensor operation for which
+    # we have a Tensor overload for the Scalar overload:
+    #
+    #   %a: SymFloat(zf0) = call_function[target=torch.ops.higher_order.float_item](args = (zf0, %na,))
+    #   %b: f32[50] = call_function[target=torch.add](args = (%tensor, %a))
+    #
+    # into
+    #
+    #   %b: f32[50] = call_function[target=torch.add](args = (%tensor, %na))
+    #
+    # (I've omitted type promotion from the translations here for clarity.)
+    #
+    # The zf0 symbols need some special handling in produce_guards, as there
+    # is no longer an input that directly generates them.  There's also a type
+    # mismatch between what Dynamo sees as the user inputs, and what the FX
+    # graph seeas as inputs.  TODO: resolve this.
+
+    for node in graph.nodes:
+        if node.op == "placeholder":
+            zf0 = node.meta["grapharg"].example
+            if isinstance(zf0, torch.SymFloat) and isinstance(zf0.node.expr, sympy.Symbol):
+                # Binding site for SymFloat, swizzle it
+                with graph.inserting_before(node):
+                    graph.placeholder(node.name)
 
 
-    # First, we find all SymFloat symbols which were used in a size-like way
-    # (e.g., they show up in a size expression), and force specialization
-    # on them.
-    #
-    # Hypothetically, we could support this in the future, but we
-    # have to work harder: we're about to /delete/ the inputs that actually
-    # bind these symbols, so you have to somehow replace them some other way.
-    #
-    # TODO: It would be marginally better to do this after DCE...
-
-    # NB: This contains both float and int symbols, just cuz it's more
-    # convenient to hoover them all up.  Distinguish them with var_to_val
     used_symbols = set()
     for node in graph.nodes:
-        if node.op 
         binds_symbol = placeholder_binds_symbol(node) is not None
         if not binds_symbol:
             # Register the free symbols as uses
