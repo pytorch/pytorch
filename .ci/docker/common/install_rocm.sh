@@ -59,8 +59,7 @@ install_ubuntu() {
                    rocm-libs \
                    rccl \
                    rocprofiler-dev \
-                   roctracer-dev \
-                   amd-smi-lib
+                   roctracer-dev
 
     if [[ $(ver $ROCM_VERSION) -ge $(ver 6.1) ]]; then
         DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated rocm-llvm-dev
@@ -144,8 +143,7 @@ install_centos() {
                    rocm-libs \
                    rccl \
                    rocprofiler-dev \
-                   roctracer-dev \
-                   amd-smi-lib
+                   roctracer-dev
 
   # precompiled miopen kernels; search for all unversioned packages
   # if search fails it will abort this script; use true to avoid case where search fails
