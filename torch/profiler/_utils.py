@@ -1,4 +1,5 @@
 import functools
+import operator
 import re
 from collections import deque
 from dataclasses import dataclass
@@ -316,7 +317,7 @@ class BasicEvaluation:
                 event
                 for _, event in sorted(
                     zip(heuristic_score_list, event_list),
-                    key=lambda x: x[0],
+                    key=operator.itemgetter(0),
                     reverse=True,
                 )
             ]

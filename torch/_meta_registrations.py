@@ -21,6 +21,7 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     IntLike,
     make_contiguous_strides_for,
+    Number,
     TensorLike,
 )
 
@@ -2272,6 +2273,8 @@ if torch._C._has_mkldnn:
         )
         out = input_tensor.new_empty(shape_out)
         out_memory_format = torch.channels_last
+        if input_tensor.dim() == 5:
+            out_memory_format = torch.channels_last_3d
         out = out.to(memory_format=out_memory_format)  # type: ignore[call-overload]
         return out
 
@@ -5372,7 +5375,7 @@ def meta__scaled_dot_product_flash_attention_for_cpu_backward(
     scale: Optional[float] = None,
 ):
     # cpus's grad layout is different from cuda's,
-    # i.e. (batch_size, seq_len，num_heads, head_dim）
+    # i.e. (batch_size, seq_len,num_heads, head_dim)
     batch_size = query.size(0)
     num_heads = query.size(1)
     head_dim = query.size(3)
@@ -6081,6 +6084,32 @@ def meta_bucketize(self, boundaries, *, out_int32=False, right=False):
     return torch.empty_like(
         self, dtype=torch.int32 if out_int32 else torch.int64
     ).contiguous()
+
+
+@register_meta([aten.histc])
+@out_wrapper()
+def meta_histc(input, bins=100, min=0, max=0):
+    fn_name = "histc()"
+    if device_hint(input) == "cpu":
+        torch._check(
+            input.is_floating_point(),
+            lambda: f"\"histogram_cpu\" not implemented for '{input.dtype}'",
+        )
+    torch._check(
+        isinstance(bins, IntLike),
+        lambda: f"{fn_name}: argument 'bins' must be int, not {type(bins)}",
+    )
+    torch._check(bins > 0, lambda: f"{fn_name}: bins must be > 0, but got {bins}")
+    torch._check(
+        isinstance(min, Number),
+        lambda: f"{fn_name}: argument 'min' must be Number, not {type(min)}",
+    )
+    torch._check(
+        isinstance(max, Number),
+        lambda: f"{fn_name}: argument 'max' must be Number, not {type(max)}",
+    )
+    torch._check(max >= min, lambda: "{fn_name}: max must be larger than min")
+    return torch.empty(bins, device=input.device, dtype=input.dtype)
 
 
 @register_meta(
