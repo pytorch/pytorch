@@ -70,7 +70,7 @@ from .dependencies import (
 )
 from .ops_handler import OpCounterCSE
 from .runtime.hints import ReductionHint
-from .runtime.runtime_utils import do_bench
+from .runtime.runtime_utils import do_bench, do_bench_cpu
 from .utils import (
     argsort,
     cache_on_self,
@@ -79,6 +79,7 @@ from .utils import (
     convert_shape_to_symint,
     developer_warning,
     get_kernel_metadata,
+    is_cpu_device,
     is_dynamic,
     is_gpu,
     pad_listlike,
@@ -3627,7 +3628,10 @@ class ChoiceCaller:
 
     def benchmark(self, *args, out) -> float:
         algo = self.to_callable()
-        return do_bench(lambda: algo(*args, out=out))
+        if is_cpu_device(args):
+            return do_bench_cpu(lambda: algo(*args, out=out))
+        else:
+            return do_bench(lambda: algo(*args, out=out))
 
     def call_name(self) -> str:
         raise NotImplementedError
