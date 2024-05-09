@@ -35,7 +35,7 @@ void fake_quantize_tensor_cachemask_kernel_cuda(
     .add_output(mask)
     .add_input(input)
     .build();
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "fake_quantize_tensor_cachemask_kernel_types", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, input.scalar_type(), "fake_quantize_tensor_cachemask_kernel_types", [&] {
     gpu_kernel_multiple_outputs(
       iter,
       [=] GPU_LAMBDA (scalar_t input_val) -> thrust::tuple<scalar_t, bool> {
@@ -69,7 +69,7 @@ void fake_quantize_tensor_cachemask_tensor_qparams_kernel_cuda(
     .add_output(mask)
     .add_input(input)
     .build();
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "fake_quantize_tensor_cachemask_kernel_types", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, input.scalar_type(), "fake_quantize_tensor_cachemask_kernel_types", [&] {
     gpu_kernel_multiple_outputs(
       iter,
       [=] GPU_LAMBDA (scalar_t input_val) -> thrust::tuple<scalar_t, bool> {
@@ -140,7 +140,7 @@ void _fake_quant_per_channel_cachemask_cuda_helper(
     // When zero_point is float, quantize mirroring affine quantizer equation
     // Xq = Round(Xf * inv_scale + zero_point)
     // where zero_point is in float.
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(zero_point_dtype, "fake_quantize_channel_cachemask_cuda_mask_type_handling", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, zero_point_dtype, "fake_quantize_channel_cachemask_cuda_mask_type_handling", [&] {
       // write mask
       gpu_kernel(iter_mask,
         [=] GPU_LAMBDA (const SelfType input_val, const float scale, const scalar_t zero_point) -> bool {
@@ -182,7 +182,7 @@ void _fake_quant_per_channel_cachemask_cuda_helper(
 
 void fake_quant_per_channel_cachemask_cuda(
     TensorIterator &iter, TensorIterator &iter_mask, int64_t quant_min, int64_t quant_max) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "fake_quantize_channel_cachemask_cpu_type_handling", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "fake_quantize_channel_cachemask_cpu_type_handling", [&] {
     _fake_quant_per_channel_cachemask_cuda_helper<scalar_t>(iter, iter_mask, quant_min, quant_max);
   });
 }

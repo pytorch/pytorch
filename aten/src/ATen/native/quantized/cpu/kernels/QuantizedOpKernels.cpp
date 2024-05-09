@@ -2556,7 +2556,7 @@ void _fake_quantize_tensor_helper(
     .add_input(input)
     .build();
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "fake_quantize_tensor_cachemask_kernel_type_handling", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, input.scalar_type(), "fake_quantize_tensor_cachemask_kernel_type_handling", [&] {
     iter_combined.for_each([&](char** data, const int64_t* strides, int64_t n) {
       for (const auto i : c10::irange(n)) {
         scalar_t* output_val = (scalar_t*)(data[0] + i * strides[0]);
@@ -2665,7 +2665,7 @@ void _fake_quant_per_channel_cachemask_cpu_helper(
     // When zero_point is float, quantize mirroring affine quantizer equation
     // Xq = Round(Xf * inv_scale + zero_point)
     // where zero_point is in float.
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(zero_point_dtype, "fake_quantize_channel_cachemask_cpu_zero_point_handling", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, zero_point_dtype, "fake_quantize_channel_cachemask_cpu_zero_point_handling", [&] {
       // write mask
       cpu_kernel(iter_mask, [=](SelfType self, float scale, scalar_t zero_point) -> bool {
         float inv_scale = 1.0f / scale;
@@ -2721,7 +2721,7 @@ void fake_quant_per_channel_cachemask_cpu(
   // TODO(future, optional): read once, write twice.  Not done at the moment
   //   for simplicity, as we do not expect this to be a bottleneck.
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "fake_quantize_channel_cachemask_cpu_type_handling", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "fake_quantize_channel_cachemask_cpu_type_handling", [&] {
     _fake_quant_per_channel_cachemask_cpu_helper<scalar_t>(iter, iter_mask, quant_min, quant_max);
   });
 }
