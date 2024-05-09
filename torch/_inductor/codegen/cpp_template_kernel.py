@@ -35,21 +35,17 @@ class CppTemplateKernel(Kernel):
 
     def def_kernel(
         self,
-        inputs: List[Tuple[str, ir.Buffer]],
-        outputs: List[Tuple[str, ir.Buffer]],
+        inputs: Dict[str, ir.Buffer],
+        outputs: Dict[str, ir.Buffer],
     ) -> str:
-        assert all(
-            len(value) == 2 and isinstance(value[0], str)
-            for value in itertools.chain(inputs, outputs)
-        ), f"inputs: {inputs}, outputs: {outputs}"
-        for name, inp in inputs:
+        for name, inp in inputs.items():
             if inp is not None:
                 self.args.input_buffers[inp.get_name()] = name
-        for name, out in outputs:
+        for name, out in outputs.items():
             self.args.output_buffers[out.get_name()] = name
         unique_sizevars = {
             s
-            for _, input in inputs
+            for input in inputs.values()
             if input is not None
             for sym in itertools.chain(input.get_size(), input.get_stride())
             if isinstance(sym, sympy.Expr)
@@ -57,7 +53,7 @@ class CppTemplateKernel(Kernel):
         }
         unique_sizevars |= {
             s
-            for _, output in outputs
+            for output in outputs.values()
             for sym in itertools.chain(output.get_size(), output.get_stride())
             if isinstance(sym, sympy.Expr)
             for s in sym.free_symbols
