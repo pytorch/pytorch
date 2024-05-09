@@ -664,6 +664,29 @@ static PyObject* THPVariable__functionalize_sync(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPVariable__functionalize_is_symbolic(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser(
+      {"_functionalize_is_symbolic(Tensor tensor)"},
+      /*traceable=*/true);
+
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto tensor = r.tensor(0);
+  TORCH_INTERNAL_ASSERT(
+      at::functionalization::impl::isFunctionalTensor(tensor));
+  auto impl = at::functionalization::impl::unsafeGetFunctionalWrapper(tensor);
+  if (impl->is_symbolic()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPVariable__functionalize_apply_view_metas(
     PyObject* self,
     PyObject* args,
@@ -673,7 +696,7 @@ static PyObject* THPVariable__functionalize_apply_view_metas(
       {"_functionalize_apply_view_metas(Tensor tensor, Tensor base)"},
       /*traceable=*/true);
 
-  ParsedArgs<4> parsed_args;
+  ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   auto tensor = r.tensor(0);
   TORCH_INTERNAL_ASSERT(
@@ -794,6 +817,10 @@ static PyMethodDef torch_functions_manual[] = {
      nullptr},
     {"_functionalize_sync",
      castPyCFunctionWithKeywords(THPVariable__functionalize_sync),
+     METH_VARARGS | METH_KEYWORDS | METH_STATIC,
+     nullptr},
+    {"_functionalize_is_symbolic",
+     castPyCFunctionWithKeywords(THPVariable__functionalize_is_symbolic),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
     {"_functionalize_apply_view_metas",

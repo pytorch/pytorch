@@ -97,6 +97,14 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
         ->are_all_mutations_under_no_grad_or_inference_mode();
   }
 
+  void maybe_mark_symbolic(const functionalization::ViewMeta& meta) {
+    is_symbolic_ = is_symbolic_ | meta.has_symbolic_inputs;
+  }
+
+  bool is_symbolic() const {
+    return is_symbolic_;
+  }
+
   // Runs the forward_fn of every ViewMeta collected in the current instance
   // to some other base.
   Tensor apply_view_metas(const Tensor& base);
@@ -237,6 +245,8 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   bool is_multi_output_view_ = false;
   // Did the tensor experience a set_() call.
   bool was_storage_changed_ = false;
+  // Did the tensor experience any view operation with symbolic int.
+  bool is_symbolic_ = false;
 
   size_t generation_ = 0;
   std::vector<at::functionalization::ViewMeta> view_metas_;

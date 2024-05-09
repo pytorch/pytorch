@@ -3261,7 +3261,6 @@ def forward(self, tangents_1):
 
         return lambda f: aot_function(f, fw_compiler=lambda g, _: partial(wrapper, g))
 
-    @patch("functorch.compile.config.view_replay_for_aliased_outputs", True)
     def test_output_aliases_input_view_meta_replay(self):
         @self._compile_and_erase_bases(0)
         def f(a):
@@ -3275,7 +3274,6 @@ def forward(self, tangents_1):
             str(out.grad_fn.__class__), """<class 'ViewBackward0'>"""
         )
 
-    @patch("functorch.compile.config.view_replay_for_aliased_outputs", True)
     def test_output_aliases_intermediate_view_meta_replay(self):
         @self._compile_and_erase_bases(0, 1)
         def f(a):
@@ -3295,7 +3293,6 @@ def forward(self, tangents_1):
             str(out2.grad_fn.__class__), """<class 'ViewBackward0'>"""
         )
 
-    @patch("functorch.compile.config.view_replay_for_aliased_outputs", True)
     def test_output_aliases_output_view_meta_replay(self):
         @self._compile_and_erase_bases(1)
         def f(a):
@@ -3306,6 +3303,32 @@ def forward(self, tangents_1):
         out1, out2 = f(inp)
 
         self.assertEqual(out1.untyped_storage(), out2.untyped_storage())
+        self.assertIsNotNone(out2.grad_fn)
+        self.assertExpectedInline(
+            str(out2.grad_fn.__class__), """<class 'ViewBackward0'>"""
+        )
+
+    @patch("torch._dynamo.config.assume_static_by_default", False)
+    def test_dynamic_output_aliases_input_view_meta_replay(self):
+        # - torch.compile: using it so we can have a SymInt in the FX graph.
+        # - Compiling with inductor, so that tensor._base isn't tracked.
+        #
+        # This should force the use of as_strided in the view reconstruction path.
+        # The first 2 view-replay paths won't be taken because:
+        #   - target_functional_tensor will be symbolic (_functionalize_is_symbolic call)
+        #   - tensor._base will be None
+        @torch.compile(backend="inductor")
+        def f(a, sz):
+            return a.view(sz), a.view(-1)
+
+        inp = torch.ones(2, 2, requires_grad=True)
+        out1, out2 = f(inp, (4,))
+
+        self.assertIsNotNone(out1.grad_fn)
+        self.assertExpectedInline(
+            str(out1.grad_fn.__class__), """<class 'AsStridedBackward0'>"""
+        )
+
         self.assertIsNotNone(out2.grad_fn)
         self.assertExpectedInline(
             str(out2.grad_fn.__class__), """<class 'ViewBackward0'>"""
