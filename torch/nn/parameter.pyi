@@ -26,11 +26,22 @@ class UninitializedParameter(Tensor):
         dtype: Optional[torch.dtype] = None,
     ): ...
 
-class UninitializedBuffer(Tensor):
+class Buffer(Tensor):
+    persistent: builtins.bool
     def __init__(
         self,
         data: Tensor = ...,
         requires_grad: builtins.bool = ...,
+        persistent: builtins.bool = ...,
+    ): ...
+
+class UninitializedBuffer(Tensor):
+    persistent: builtins.bool
+    def __init__(
+        self,
+        data: Tensor = ...,
+        requires_grad: builtins.bool = ...,
+        persistent: builtins.bool = ...,
     ): ...
     def materialize(
         self,

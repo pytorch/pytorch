@@ -18,7 +18,7 @@ class MockModule(torch.nn.Module):
     def __init__(self):
         super().__init__()
         self.l1 = torch.nn.Linear(1, 1)
-        self.register_buffer('buffer', torch.ones(1))
+        self.buffer = torch.nn.Buffer(torch.ones(1))
         self.foo = 0.0
 
     def forward(self, x):
@@ -30,8 +30,8 @@ class MockTiedModule(torch.nn.Module):
         super().__init__()
         self.l1 = torch.nn.Linear(1, 1)
         self.tied_bias = self.l1.bias
-        self.register_buffer('buffer', torch.ones(1))
-        self.register_buffer('tied_buffer', self.buffer)
+        self.buffer = torch.nn.Buffer(torch.ones(1))
+        self.tied_buffer = self.buffer
 
     def forward(self, x):
         return self.l1(x) + self.tied_bias + self.buffer + self.tied_buffer
@@ -427,7 +427,7 @@ class TestStatelessFunctionalAPI(TestCase):
     def test_tied_weights_warns(self, functional_call):
         module = MockModule()
         module.tied_bias = module.l1.bias
-        module.register_buffer("tied_buffer", module.buffer)
+        module.tied_buffer = torch.nn.Buffer(module.buffer)
 
     @parametrize("functional_call", [
         subtest(torch.func.functional_call, "torch_func"),
@@ -632,7 +632,7 @@ class TestStatelessFunctionalAPI(TestCase):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer('foo', torch.tensor([0.0]))
+                self.foo = torch.nn.Buffer(torch.tensor([0.0]))
 
             def forward(self, x):
                 self.foo = self.foo + 1
@@ -656,7 +656,7 @@ class TestStatelessFunctionalAPI(TestCase):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer('foo', torch.tensor([0.0]))
+                self.foo = torch.nn.Buffer(torch.tensor([0.0]))
 
             def forward(self, x):
                 self.foo.add_(1)
@@ -778,7 +778,7 @@ class TestStatelessFunctionalAPI(TestCase):
             def __init__(self):
                 super().__init__()
                 self.l1 = torch.nn.Linear(1, 1)
-                self.register_buffer('buffer', torch.ones(1))
+                self.buffer = torch.nn.Buffer(torch.ones(1))
 
             def forward(self, x):
                 parameters = tuple(self.parameters())
