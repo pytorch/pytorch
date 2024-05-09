@@ -255,9 +255,15 @@ struct DefaultFunctionType {
   }
 
   PyTypeObject type;
-} default_type;
+};
+
+PyTypeObject* get_default_type(){
+  static DefaultFunctionType default_type;
+  return &(default_type.type);
+}
 
 PyObject* functionToPyObject(const std::shared_ptr<Node>& cdata) {
+
   if (!cdata) {
     Py_RETURN_NONE;
   }
@@ -276,7 +282,7 @@ PyObject* functionToPyObject(const std::shared_ptr<Node>& cdata) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     PyTypeObject* type;
     if (it == cpp_function_types_map.end()) {
-      type = &default_type.type;
+      type = get_default_type();
     } else {
       type = (PyTypeObject*)it->second.get();
     }
@@ -303,7 +309,7 @@ void registerCppFunction(const std::type_info& type, PyTypeObject* pytype) {
 
 bool THPCppFunction_Check(PyObject* obj) {
   THPObjectPtr type = THPObjectPtr(PyObject_Type(obj));
-  if ((PyTypeObject*)type.get() == &default_type.type) {
+  if ((PyTypeObject*)type == get_default_type()) {
     return true;
   }
   if (cpp_function_types_set.find((PyTypeObject*)type.get()) ==
