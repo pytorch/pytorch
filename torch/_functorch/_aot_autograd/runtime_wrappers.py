@@ -82,7 +82,7 @@ class CompilerWrapper:
         aot_config: AOTConfig passed in at compile time
         fw_metadata: ViewAndMutationMeta generated from flat_fn and flat_args
         """
-        return flat_fn, flat_args, aot_config, fw_metadata
+        return flat_fn, flat_args, fw_metadata
 
     def post_compile(self, compiled_fn, aot_config, *, fw_metadata):
         """
@@ -113,15 +113,12 @@ class CompilerWrapper:
         (
             wrapped_flat_fn,
             new_flat_args,
-            new_aot_config,
             new_fw_metadata,
         ) = self.pre_compile(flat_fn, flat_args, aot_config, fw_metadata=fw_metadata)
         compiled_fn = compiler_fn(
-            wrapped_flat_fn, new_flat_args, new_aot_config, fw_metadata=new_fw_metadata
+            wrapped_flat_fn, new_flat_args, aot_config, fw_metadata=new_fw_metadata
         )
-        return self.post_compile(
-            compiled_fn, new_aot_config, fw_metadata=new_fw_metadata
-        )
+        return self.post_compile(compiled_fn, aot_config, fw_metadata=new_fw_metadata)
 
 
 # The wrapper created by this function handles all of the runtime aliasing and mutation "epilogue" logic
@@ -430,7 +427,7 @@ class FunctionalizedRngRuntimeWrapper(CompilerWrapper):
             # We are not clearing flat_args here because
             # 1) There is a check in the debug compiler at the end
             # 2) It does not matter as these are fake tensors
-        return flat_fn, flat_args, aot_config, fw_metadata
+        return flat_fn, flat_args, fw_metadata
 
     def post_compile(
         self,
@@ -501,7 +498,7 @@ class FakifiedOutWrapper(CompilerWrapper):
             ]
         else:
             self.needs_post_compile = False
-        return fw_module, flat_args, aot_config, fw_metadata
+        return fw_module, flat_args, fw_metadata
 
     def _compute_output_meta_with_inductor_strides(self):
         out = self.out_metas
@@ -575,7 +572,7 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
             fw_only=self.fw_only,  # type: ignore[arg-type]
         )
         self.maybe_subclass_meta = subclass_meta
-        return new_flat_fn, new_flat_args, aot_config, fw_metadata
+        return new_flat_fn, new_flat_args, fw_metadata
 
     def post_compile(
         self,
@@ -740,7 +737,7 @@ class AOTDedupeWrapper(CompilerWrapper):
 
         if ok:
             self.needs_post_compile = False
-            return flat_fn, leaf_flat_args, aot_config, fw_metadata
+            return flat_fn, leaf_flat_args, fw_metadata
 
         if requires_subclass_dispatch(leaf_flat_args, fw_metadata):
             raise RuntimeError(
