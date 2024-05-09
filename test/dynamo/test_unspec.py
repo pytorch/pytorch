@@ -485,6 +485,35 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         compl_fn = torch.compile(fn, dynamic=True, backend="eager")
         self.assertEqual(compl_fn(inputs), fn(inputs))
 
+    @torch._dynamo.config.patch(specialize_float=False, assume_static_by_default=True)
+    def test_unspec_float_input(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def f(x, y):
+            if y == 5.0:
+                return x + 2
+            else:
+                return x + y
+
+        f(torch.randn(3), 3.0)
+        f(torch.randn(3), 4.0)
+        self.assertExpectedInline(cnts.frame_count, """1""")  # no recompile
+        f(torch.randn(3), 5.0)
+        self.assertExpectedInline(cnts.frame_count, """2""")  # guard worked
+
+    @torch._dynamo.config.patch(specialize_float=False, assume_static_by_default=True)
+    def test_unspec_float_output(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def f(x, y):
+            return x + 1, y * 2
+
+        f(torch.randn(3), 3.0)
+        f(torch.randn(3), 4.0)
+        f(torch.randn(3), 5.0)
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_data_dependent_evaluate_expr_graph_break(self):
         cnts = torch._dynamo.testing.CompileCounter()
@@ -521,6 +550,17 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             return torch.split(x, [y, z])
 
         print(f(torch.randn(10, requires_grad=True), torch.tensor([7, 3])))
+
+    def test_bool_tensor_ctor(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, dynamic=True, fullgraph=True)
+        def f(x):
+            y = torch.empty((x.size(0) // 13) * 13)
+            return torch.tensor(y.numel() == 0)
+
+        self.assertTrue(f(torch.empty(8)).item())
+        self.assertFalse(f(torch.empty(13)).item())
 
 
 if __name__ == "__main__":

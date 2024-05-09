@@ -986,6 +986,7 @@ class SymNodeVariable(VariableTracker):
         self.proxy = proxy
         # TODO: Should we allow non SymTypes here?  Today it is allowed
         self.sym_num = sym_num
+        self._tensor_var = None
 
     def python_type(self):
         if isinstance(self.sym_num, SymTypes):
@@ -995,6 +996,15 @@ class SymNodeVariable(VariableTracker):
 
     def as_proxy(self):
         return self.proxy
+
+    def as_tensor(self, tx):
+        if self._tensor_var is None:
+            from .builder import SourcelessBuilder
+
+            self._tensor_var = SourcelessBuilder.create(
+                tx, torch.scalar_tensor
+            ).call_function(tx, [self], {})
+        return self._tensor_var
 
     def evaluate_expr(self, output_graph=None):
         try:

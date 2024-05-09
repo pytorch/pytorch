@@ -1960,7 +1960,7 @@ class DimConstraints:
                 if "eq" in c:
                     other = c["eq"]
                     if isinstance(other, int):
-                        others.append(f"{k} = None  # {other}")
+                        others.append(f"{k} = {other}")
                     elif self._is_supported_equivalence(other):
                         s = next(iter(other.free_symbols))
                         if s not in results:
@@ -3255,6 +3255,9 @@ class ShapeEnv:
                     raise ConstraintViolationError(f"{val} not in range [{vr.lower}, {vr.upper}]")
 
                 range_str = f"[{vr.lower}, {vr.upper}]"
+            elif isinstance(val, float):
+                self.var_to_range[sympy_expr] = vr = ValueRanges(-sympy.oo, sympy.oo)
+                range_str = f"[{vr.lower}, {vr.upper}]"
             else:
                 # Skip var_range logic for SingletonInt
                 # Only used for jagged layout nested tensors
@@ -3608,7 +3611,7 @@ class ShapeEnv:
                     record_constraint_violation(constraint.warn_only, self._debug_name(source), msg)
 
         def track_symfloat(source, val):
-            log.debug("track_symfloat %s %s %s", LazyString(source.name), val)
+            log.debug("track_symfloat %s %s", LazyString(source.name), val)
             assert not isinstance(val, SymFloat) or is_symbolic(val)
 
             if isinstance(val, SymFloat) and val.node.maybe_as_float() is not None:
@@ -3821,7 +3824,6 @@ class ShapeEnv:
                 r = self.var_to_range[symbol]
 
             assert sources
-            assert symbol.is_integer
             bounds = []
             if r.lower != -sympy.oo:
                 if any(is_dim(source) for source in sources):

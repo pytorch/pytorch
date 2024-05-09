@@ -136,6 +136,18 @@ class PyCodegen:
                 )
             )
             output.extend(create_call_function(2, True))
+        elif isinstance(value, SymNodeVariable) and value.python_type() == float:
+            # Do this a little unusual; force the output convention to be a
+            # Tensor here
+            graph_outputs_key = id(value.as_proxy())
+            if graph_outputs_key not in self.graph_outputs:
+                self.graph_outputs[graph_outputs_key] = GraphOutputEntry(
+                    len(self.graph_outputs), value.as_tensor(self.tx)
+                )
+            self.load_graph_output(graph_outputs[graph_outputs_key].index)
+            output.extend(
+                [self.create_load_attr("item")] + create_call_function(0, True)
+            )
         elif isinstance(
             value,
             (
@@ -380,7 +392,7 @@ class PyCodegen:
 
         graphargs = self.tx.output.graphargs
         for arg in graphargs:
-            if arg.is_unspecialized:
+            if arg.pass_arg_as_tensor:
                 self.extend_output(
                     [
                         self.create_load_python_module(torch, True),
