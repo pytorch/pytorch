@@ -1290,7 +1290,7 @@ class _MakefxTracer:
                 return sub_tracer
 
             self.fx_tracer = _create_sub_fx_tracer(parent_tracer.fx_tracer)
-            self._init_modes_from_fx_tracer(self.fx_tracer)
+            self._construct_modes_with_fx_tracer(self.fx_tracer)
             yield
         finally:
             self._restore_modes(*prev_modes)
