@@ -9,9 +9,6 @@ def is_fbcode():
     return not hasattr(torch.version, "git_version")
 
 
-if is_fbcode():
-    from triton.fb import build_paths
-
 # add some debug printouts
 debug = False
 
@@ -357,6 +354,9 @@ always_keep_tensor_constants = False
 
 # assert that indirect indexing does not read / write out of bounds
 assert_indirect_indexing = True
+
+# compute CSE bounds on variables that do not appear in the FX graph
+compute_all_bounds = False
 
 # constant folding on the joint graph
 joint_graph_constant_folding = True
@@ -762,9 +762,7 @@ class cuda:
     # The default path only works under PyTorch local development environment.
     cutlass_dir = os.environ.get(
         "TORCHINDUCTOR_CUTLASS_DIR",
-        build_paths.cutlass()
-        if is_fbcode() and not torch.version.hip
-        else os.path.abspath(
+        os.path.abspath(
             os.path.join(os.path.dirname(torch.__file__), "../third_party/cutlass/")
         ),
     )
