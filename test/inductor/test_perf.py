@@ -266,6 +266,13 @@ class NumBytesMetricTests(TestCase):
         inp = (T(10, 10), T(10, 10))
         self.assertExpectedInline(count_numel(f, *inp), """400""")
 
+        def f(a, b):
+            b = b.cos()
+            return torch.cat([a, b])
+
+        inp = (T(10, 10), T(10, 10))
+        self.assertExpectedInline(count_numel(f, *inp), """400""")
+
     @patch.object(config, "split_cat_fx_passes", False)
     @patch.object(
         config,
