@@ -6221,6 +6221,49 @@ def _check_for_unsupported_isin_dtype(dtype):
     )
 
 
+@register_meta(aten._embedding_bag_dense_backward)
+def meta_embedding_bag_dense_backward(
+    grad,
+    indices,
+    offset2bag,
+    bag_size,
+    maximum_indices,
+    num_weights,
+    scale_grad_by_freq,
+    mode,
+    per_sample_weights,
+    padding_idx=-1,
+):
+    torch._check(
+        grad.dtype in [torch.float16, torch.bfloat16, torch.float32, torch.float64],
+        lambda: f"Unsupported input type encountered: {grad.dtype}",
+    )
+    MODE_SUM, MODE_MEAN, MODE_MAX = range(3)
+    if mode == MODE_MAX:
+        torch._check(maximum_indices is not None)
+    index_grad_weight = grad.new_empty((num_weights, grad.size(1)))
+    return index_grad_weight
+
+
+@register_meta(aten._embedding_bag_per_sample_weights_backward)
+def meta_embedding_bag_per_sample_weights_backward(
+    grad, weight, indices, offsets, offset2bag, mode, padding_idx=-1
+):
+    MODE_SUM, MODE_MEAN, MODE_MAX = range(3)
+    embedding_features = grad.size(1)
+    torch._check(
+        mode == MODE_SUM,
+        "embedding_bag_backward: per_sample_weights only supported for mode='sum'",
+    )
+    torch._check(grad.dim() == 2)
+    torch._check(indices.dim() == 1)
+    num_samples = indices.size(0)
+    torch._check(weight.dim() == 2)
+    torch._check(weight.size(1) == embedding_features)
+    output = grad.new_empty((num_samples,))
+    return output
+
+
 @register_meta(aten.isin)
 @out_wrapper()
 def meta_isin(elements, test_elements, *, assume_unique=False, invert=False):
