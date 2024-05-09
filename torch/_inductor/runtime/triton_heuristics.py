@@ -8,6 +8,7 @@ import logging
 import math
 import operator
 import os
+import sys
 import os.path
 import re
 import threading
@@ -117,6 +118,33 @@ def disable_pointwise_autotuning(inductor_meta):
     if inductor_meta.get("are_deterministic_algorithms_enabled"):
         return True
     return not inductor_meta.get("autotune_pointwise", True)
+
+def _dump_launch_params(args, kwargs, launcher, kernel_name):
+    call_args = []
+    call_kwargs = {}
+    for arg in args:
+        if isinstance(arg, (int, bool)):
+            call_args.append(str(arg))
+        else:
+            call_args.append("T")
+    for k, v in kwargs.items():
+        if isinstance(arg, (int, bool)):
+            call_kwargs[k] = v
+        else:
+            call_kwargs[k] = v
+    for k, v in launcher.config.kwargs.items():
+        call_kwargs[k] = v
+    call_kwargs["num_warps"] = launcher.config.num_warps
+    call_kwargs["num_stages"] = launcher.config.num_stages
+    args_str = ""
+    args_str += ", ".join(call_args)
+    for k, v in call_kwargs.items():
+        args_str += f", {k}={v}"
+    import os
+    import sys
+    abs_path = os.path.abspath(sys.argv[0])
+    with open(f"{abs_path}.launch_params", 'a') as f:
+        f.write(f"{kernel_name} | {args_str}\n")
 
 
 class CachingAutotuner(KernelInterface):
@@ -786,6 +814,9 @@ class CachingAutotuner(KernelInterface):
             launcher.config.pre_hook(
                 {**dict(zip(self.arg_names, args)), **launcher.config.kwargs, **kwargs}
             )
+
+        if os.environ.get("TORCHINDUCTOR_DUMP_LAUNCH_PARAMS", 0) == "1":
+            _dump_launch_params(args, kwargs, launcher, self.fn.__name__)
 
         # guard the record function and only call it if profiling is currently
         # in progress, to reduce latency when profiler is not turned on. Note that
