@@ -599,27 +599,26 @@ class TestTemplatedSDPA(InductorTestCase):
             norm_graph,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_args_0_ : torch.Tensor, L_args_1_ : torch.Tensor, L_args_2_ : torch.Tensor):
+    def forward(self, L_args_0_: "f64[2, 2, 8, 4]", L_args_1_: "f64[2, 2, 8, 4]", L_args_2_: "f64[2, 2, 8, 4]"):
         l_args_0_ = L_args_0_
         l_args_1_ = L_args_1_
         l_args_2_ = L_args_2_
 
-        new_empty = l_args_0_.new_empty([], requires_grad = True)
-        new_empty_1 = l_args_0_.new_empty([], dtype = torch.int32)
-        new_empty_2 = l_args_0_.new_empty([], dtype = torch.int32)
-        new_empty_3 = l_args_0_.new_empty([], dtype = torch.int32)
-        new_empty_4 = l_args_0_.new_empty([], dtype = torch.int32)
+        new_empty: "f64[]" = l_args_0_.new_empty([], requires_grad = True)
+        new_empty_1: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
+        new_empty_2: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
+        new_empty_3: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
+        new_empty_4: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
         flex_attention_0 = self.flex_attention_0
-        flex_attention = torch.ops.higher_order.flex_attention(l_args_0_, """
-            + """l_args_1_, l_args_2_, flex_attention_0);  l_args_0_ = l_args_1_ = l_args_2_ = flex_attention_0 = None
-        out = flex_attention[0];  flex_attention = None
+        flex_attention = torch.ops.higher_order.flex_attention(l_args_0_, l_args_1_, l_args_2_, flex_attention_0);  l_args_0_ = l_args_1_ = l_args_2_ = flex_attention_0 = None
+        out: "f64[2, 2, 8, 4]" = flex_attention[0];  flex_attention = None
         return (out,)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, new_empty, new_empty_1, new_empty_2, new_empty_3, new_empty_4):
-            mul = new_empty * new_empty;  new_empty = None
+        def forward(self, new_empty: "f64[]", new_empty_1: "i32[]", new_empty_2: "i32[]", new_empty_3: "i32[]", new_empty_4: "i32[]"):
+            mul: "f64[]" = new_empty * new_empty;  new_empty = None
             return mul
-""",
+""",  # noqa: B950
         )
         # Save the AOT graphs
         aot_graphs = []
