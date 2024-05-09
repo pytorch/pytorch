@@ -2086,31 +2086,30 @@ class BenchmarkRunner:
 
         devices = [current_device] if current_device else self.args.devices
         if self.args.amp:
-            if devices == ["cuda"]:
-                # AMP training can lead to small loss values which can undeflow
-                # gradient values returning in zero gradients. To solve this
-                # problem, PyTorch introduces GradScaler. GradScaler is a stateful
-                # structure, that scales the loss values to prevent underflow. Loss
-                # values are big at the beginning of training (therefore not
-                # requiring scaling), while loss value tends to be small as network
-                # starts getting better (requiring scaling). GradScaler manages all
-                # of this fine tuning, checking the gradients are turning to inf,
-                # discarding such batches.
+            # AMP training can lead to small loss values which can undeflow
+            # gradient values returning in zero gradients. To solve this
+            # problem, PyTorch introduces GradScaler. GradScaler is a stateful
+            # structure, that scales the loss values to prevent underflow. Loss
+            # values are big at the beginning of training (therefore not
+            # requiring scaling), while loss value tends to be small as network
+            # starts getting better (requiring scaling). GradScaler manages all
+            # of this fine tuning, checking the gradients are turning to inf,
+            # discarding such batches.
 
-                # Since we are not running a long iteration, default value of
-                # init_scale 65536 is going to turn all gradients to inf. Therefore,
-                # we just use a init_scale of 2.0 for benchmarking purpose.
+            # Since we are not running a long iteration, default value of
+            # init_scale 65536 is going to turn all gradients to inf. Therefore,
+            # we just use a init_scale of 2.0 for benchmarking purpose.
 
-                # Disabling Gradscaler because
-                #  1) Benchmark setup runs 2 iterations of fwd-bwd. So, not useful.
-                #  2) Current setup shares grad_scaler for eager and dynamo model,
-                #  which is bad as Gradscaler has state and can adjust the scaling
-                #  factor between eager and dynamo run, making accuracy check
-                #  harder.
-                # self.grad_scaler = torch.cuda.amp.GradScaler(init_scale=2.0)
-                self.autocast = torch.cuda.amp.autocast
-            if devices == ["cpu"]:
-                self.autocast = torch.cpu.amp.autocast
+            # Disabling Gradscaler because
+            #  1) Benchmark setup runs 2 iterations of fwd-bwd. So, not useful.
+            #  2) Current setup shares grad_scaler for eager and dynamo model,
+            #  which is bad as Gradscaler has state and can adjust the scaling
+            #  factor between eager and dynamo run, making accuracy check
+            #  harder.
+            # self.grad_scaler = torch.cuda.amp.GradScaler(init_scale=2.0)
+            self.autocast = functools.partial(
+                torch.amp.autocast, device_type=devices[0]
+            )
             if self.args.amp_dtype:
                 amp_dtype = (
                     torch.float16
