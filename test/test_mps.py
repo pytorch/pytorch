@@ -69,6 +69,9 @@ def xfailIf(condition):
             return func
     return wrapper
 
+def xfailIfMacOS14_4Plus(func):
+    return unittest.expectedFailure(func) if product_version > 14.3 else func  # noqa: F821
+
 def mps_ops_grad_modifier(ops):
     XFAILLIST_GRAD = {
 
@@ -9237,7 +9240,7 @@ class TestViewOpsMPS(TestCaseMPS):
         # Note: only validates storage on native device types
         # because some accelerators, like XLA, do not expose storage
         if base.device.type == 'mps':
-            if base.storage().data_ptr() != other.storage().data_ptr():
+            if base.untyped_storage().data_ptr() != other.untyped_storage().data_ptr():
                 return False
 
         return True
@@ -11425,6 +11428,8 @@ class TestRNNMPS(TestCaseMPS):
             for test_options in self.LSTM_TEST_CASES:
                 self._lstm_helper(num_layers=num_layers, dtype=dtype, device=device, **test_options)
 
+    # Broke on MacOS-14.4 (but works on 14.2), see https://github.com/pytorch/pytorch/issues/125803
+    @xfailIfMacOS14_4Plus
     def test_lstm_backward(self, device="mps", dtype=torch.float32):
         for num_layers in [1, 2, 5]:
             for test_options in self.LSTM_TEST_CASES:
