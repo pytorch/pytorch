@@ -293,6 +293,36 @@ check whether the process group has already been initialized use :func:`torch.di
 
 .. autofunction:: get_world_size
 
+Shutdown
+--------
+
+It is important to clean up resources on exit by calling :func:`destroy_process_group`.
+
+The simplest pattern to follow is to destroy every process group and backend by calling
+:func:`destroy_process_group()` with the default value of None for the `group` argument, at a
+point in the training script where communications are no longer needed, usually near the
+end of main().  The call should be made once per trainer-process, not at the outer
+process-launcher level.
+
+if :func:`destroy_process_group` is not called by all ranks in a pg within the timeout duration,
+especially when there are multiple process-groups in the application e.g. for N-D parallelism,
+hangs on exit are possible.  This is because the destructor for ProcessGroupNCCL calls ncclCommAbort,
+which must be called collectively, but the order of calling ProcessGroupNCCL's destructor if called
+by python's GC is not deterministic. Calling :func:`destroy_process_group` helps by ensuring
+ncclCommAbort is called in a consistent order across ranks, and avoids calling ncclCommAbort
+during ProcessGroupNCCL's destructor.
+
+Reinitialization
+^^^^^^^^^^^^^^^^
+
+`destroy_process_group` can also be used to destroy individual process groups.  One use
+case could be fault tolerant training, where a process group may be destroyed and then
+a new one initialized during runtime.  In this case, it's critical to synchronize the trainer
+processes using some means other than torch.distributed primitives _after_ calling destroy and
+before subsequently initializing.  This behavior is currently unsupported/untested, due to
+the difficulty of achieving this synchronization, and is considered a known issue.  Please file
+a github issue or RFC if this is a use case that's blocking you.
+
 --------------------------------------------------------------------------------
 
 Distributed Key-Value Store
