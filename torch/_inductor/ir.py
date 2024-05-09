@@ -70,7 +70,7 @@ from .dependencies import (
 )
 from .ops_handler import OpCounterCSE
 from .runtime.hints import ReductionHint
-from .runtime.runtime_utils import do_bench
+from .runtime.runtime_utils import do_bench, do_bench_cpu
 from .utils import (
     argsort,
     cache_on_self,
@@ -79,6 +79,7 @@ from .utils import (
     convert_shape_to_symint,
     developer_warning,
     get_kernel_metadata,
+    is_cpu_device,
     is_dynamic,
     is_gpu,
     pad_listlike,
@@ -3595,8 +3596,8 @@ class TritonTemplateBuffer(TemplateBuffer):
         self.mutated_inputs = mutated_inputs
         if mutated_inputs is not None:
             # Ensure that the mutated inputs are only allowed for certain nodes
-            allowed_set = {"flex_attention"}
-            current_node = str(V.graph.current_node)
+            allowed_set = {torch.ops.higher_order.flex_attention}
+            current_node = V.graph.current_node.target
             assert (
                 current_node in allowed_set
             ), f"Mutated inputs are only allowed for {allowed_set} but got {current_node}"
@@ -3627,7 +3628,10 @@ class ChoiceCaller:
 
     def benchmark(self, *args, out) -> float:
         algo = self.to_callable()
-        return do_bench(lambda: algo(*args, out=out))
+        if is_cpu_device(args):
+            return do_bench_cpu(lambda: algo(*args, out=out))
+        else:
+            return do_bench(lambda: algo(*args, out=out))
 
     def call_name(self) -> str:
         raise NotImplementedError
@@ -6653,7 +6657,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
                 torch::List<int64_t> padding,
                 torch::List<int64_t> dilation,
                 int64_t groups,
-                double inv_output_scale,
+                double output_scale,
                 int64_t output_zero_point,
                 c10::optional<c10::ScalarType> output_dtype,
                 c10::string_view attr,
@@ -6829,7 +6833,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
                 torch::List<int64_t> padding,
                 torch::List<int64_t> dilation,
                 int64_t groups,
-                double inv_output_scale,
+                double output_scale,
                 int64_t output_zero_point,
                 c10::optional<c10::ScalarType> output_dtype,
                 c10::string_view binary_attr,
@@ -7045,7 +7049,7 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
                 at::Tensor weight_scales,
                 at::Tensor weight_zero_points,
                 c10::optional<at::Tensor> bias,
-                double inv_output_scale,
+                double output_scale,
                 int64_t output_zero_point,
                 c10::optional<c10::ScalarType> output_dtype,
                 c10::string_view post_op_name,
@@ -7674,7 +7678,7 @@ class InterpreterShim(torch.fx.Interpreter):
         self.graph = graph
         self.submodules = submodules
         self.extra_traceback = False
-        self.fetch_attr = submodules.__getitem__  # type: ignore[method-assign]
+        self.fetch_attr = submodules.__getitem__
         self.current_node = None
 
     def run_node(self, n: torch.fx.Node) -> Any:
