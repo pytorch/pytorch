@@ -439,8 +439,8 @@ struct NCCLTraceBuffer {
     // op_id refers to logical operations (e.g. one per op inside coalesced
     // group)
     size_t collective_seq_id_;
-    size_t op_id_;
     size_t p2p_seq_id_;
+    size_t op_id_;
     std::string profiling_name_;
 
     std::shared_ptr<torch::CapturedTraceback> traceback_;
