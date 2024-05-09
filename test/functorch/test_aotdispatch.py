@@ -5405,9 +5405,6 @@ symbolic_aot_autograd_failures = {
         "nn.functional.ctc_loss", ""
     ),  # aten._ctc_loss.Tensor - couldn't find symbolic meta function/deco...
     xfail(
-        "nn.functional.embedding_bag", ""
-    ),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail(
         "nn.functional.fractional_max_pool3d", ""
     ),  # rand() received an invalid combination of arguments - g...
     xfail(

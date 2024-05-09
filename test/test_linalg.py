@@ -18,7 +18,7 @@ from torch.testing._internal.common_utils import \
      TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU, iter_indices,
      make_fullrank_matrices_with_distinct_singular_values,
      freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, parametrize, skipIfTorchDynamo,
-     setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally)
+     setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, has_hipsolver,
      onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
@@ -2485,6 +2485,7 @@ class TestLinalg(TestCase):
     @precisionOverride({torch.float: 1e-4, torch.cfloat: 2e-4})
     @setLinalgBackendsToDefaultFinally
     @dtypes(*floating_and_complex_types())
+    @serialTest()
     def test_svd(self, device, dtype):
         # tests linalg.svd, svd, linalg.svdvals
         make_arg = partial(make_tensor, dtype=dtype, device=device)
