@@ -65,7 +65,7 @@ class SubprocPool:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             env={
-                **os.environ,
+                **os.environ, "PYTHONPATH": os.pathsep.join(sys.path)
             },
         )
         self.write_pipe: Pipe = typing.cast(Pipe, self.process.stdin)
