@@ -1446,13 +1446,6 @@ if(USE_SNPE AND ANDROID)
   endif()
 endif()
 
-if(USE_METAL)
-  if(NOT IOS)
-    message(WARNING "Metal is only used in ios builds.")
-    caffe2_update_option(USE_METAL OFF)
-  endif()
-endif()
-
 if(USE_NNAPI AND NOT ANDROID)
   message(WARNING "NNApi is only used in android builds.")
   caffe2_update_option(USE_NNAPI OFF)
