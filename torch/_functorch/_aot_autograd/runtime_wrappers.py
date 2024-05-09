@@ -15,7 +15,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import torch
 import torch.utils.dlpack
 from torch import Tensor
-from torch._guards import DuplicateInputs, TracingContext
+from torch._guards import detect_fake_mode, DuplicateInputs, TracingContext
 from torch._prims_common import CUDARngStateHelper
 from torch.multiprocessing.reductions import StorageWeakRef
 from .. import config
@@ -414,6 +414,24 @@ class FunctionalizedRngRuntimeWrapper(CompilerWrapper):
     # of those two indices incorrect.
     return_new_outs: bool = True
 
+    def pre_compile(
+        self,
+        flat_fn,
+        flat_args,
+        aot_config,
+        *,
+        fw_metadata,
+    ):
+        if config.functionalize_rng_ops:
+            # Update example inputs for the fw_compiler
+            fake_mode = detect_fake_mode()
+            seed, offset = CUDARngStateHelper.get_torch_state_as_tuple(fake_mode)
+            flat_args.extend([seed, offset])
+            # We are not clearing flat_args here because
+            # 1) There is a check in the debug compiler at the end
+            # 2) It does not matter as these are fake tensors
+        return flat_fn, flat_args, aot_config, fw_metadata
+
     def post_compile(
         self,
         compiled_fn,
@@ -462,7 +480,48 @@ class FunctionalizedRngRuntimeWrapper(CompilerWrapper):
 
 @dataclass
 class FakifiedOutWrapper(CompilerWrapper):
-    fakified_out: Optional[Any] = None
+    out_metas: List[torch.Tensor] = field(default_factory=list)
+    # TracingContext.fwd_output_strides
+    # Generated from actually doing compile
+    fwd_output_strides: Optional[List[List[int]]] = None
+    needs_post_compile: bool = True
+
+    def pre_compile(
+        self,
+        fw_module,  # Must be fw_module from aot_dispatch_*_graph
+        flat_args,
+        aot_config,
+        *,
+        fw_metadata,
+    ):
+        tracing_context = torch._guards.TracingContext.try_get()
+        if tracing_context and tracing_context.fakify_first_call:
+            self.out_metas = [
+                n.meta["val"] for n in (list(fw_module.graph.nodes)[-1].args[0])
+            ]
+        else:
+            self.needs_post_compile = False
+        return fw_module, flat_args, aot_config, fw_metadata
+
+    def _compute_output_meta_with_inductor_strides(self):
+        out = self.out_metas
+        fwd_output_strides = self.fwd_output_strides
+        if not fwd_output_strides:
+            return out
+        with TracingContext.get().fake_mode.shape_env.suppress_guards():
+            for i in range(len(out)):
+                if not isinstance(out[i], Tensor):
+                    continue
+                if all(
+                    s1 == s2 for s1, s2 in zip(out[i].stride(), fwd_output_strides[i])
+                ):
+                    continue
+                out[i] = out[i].as_strided(out[i].shape, fwd_output_strides[i])
+        return out
+
+    # To be called post compile
+    def set_fwd_output_strides(self, fwd_output_strides):
+        self.fwd_output_strides = fwd_output_strides
 
     def post_compile(
         self,
@@ -471,18 +530,22 @@ class FakifiedOutWrapper(CompilerWrapper):
         *,
         fw_metadata: ViewAndMutationMeta,
     ):
-        fakified_out = self.fakified_out
+        if self.needs_post_compile:
+            assert self.fwd_output_strides is not None
+            fakified_out = self._compute_output_meta_with_inductor_strides()
 
-        @wraps(compiled_fn)
-        def wrapper(runtime_args):
-            nonlocal fakified_out
-            if fakified_out is not None:
-                out = fakified_out
-                fakified_out = None
-                return out
-            return compiled_fn(runtime_args)
+            @wraps(compiled_fn)
+            def wrapper(runtime_args):
+                nonlocal fakified_out
+                if fakified_out is not None:
+                    out = fakified_out
+                    fakified_out = None
+                    return out
+                return compiled_fn(runtime_args)
 
-        return wrapper
+            return wrapper
+        # If we don't need to fakify, we can just return the original compiled function
+        return compiled_fn
 
 
 # This wrapper handles the AOTDispatch runtime logic for tensor subclasses.
