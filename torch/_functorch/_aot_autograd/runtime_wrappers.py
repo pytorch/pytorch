@@ -73,7 +73,7 @@ class CompilerWrapper:
         aot_config: AOTConfig,
         *,
         fw_metadata: ViewAndMutationMeta,
-    ):
+    ) -> Tuple[Callable, List[Tensor], ViewAndMutationMeta]:
         """
         Process the inputs to the compiler_fn. You can pass in extra metadata via kwargs.
         Args:
@@ -418,7 +418,7 @@ class FunctionalizedRngRuntimeWrapper(CompilerWrapper):
         aot_config,
         *,
         fw_metadata,
-    ):
+    ) -> Tuple[Callable, List[Tensor], ViewAndMutationMeta]:
         if config.functionalize_rng_ops:
             # Update example inputs for the fw_compiler
             fake_mode = detect_fake_mode()
@@ -490,7 +490,7 @@ class FakifiedOutWrapper(CompilerWrapper):
         aot_config,
         *,
         fw_metadata,
-    ):
+    ) -> Tuple[Callable, List[Tensor], ViewAndMutationMeta]:
         tracing_context = torch._guards.TracingContext.try_get()
         if tracing_context and tracing_context.fakify_first_call:
             self.out_metas = [
@@ -710,7 +710,7 @@ class AOTDedupeWrapper(CompilerWrapper):
         aot_config: AOTConfig,
         *,
         fw_metadata: ViewAndMutationMeta,
-    ):
+    ) -> Tuple[Callable, List[Tensor], ViewAndMutationMeta]:
         # Use information about whether or not flat_fn mutates its arguments
         # or not to handle dupe args
 
@@ -862,7 +862,7 @@ class AOTDedupeWrapper(CompilerWrapper):
                 ref_fw_metadata == updated_fw_metadata
             ), f"ref_metadata={str(ref_fw_metadata)}, actual_metadata={str(updated_fw_metadata)}"
 
-        return wrapped_flat_fn, deduped_flat_args, aot_config, updated_fw_metadata
+        return wrapped_flat_fn, deduped_flat_args, updated_fw_metadata
 
     def post_compile(
         self,
@@ -940,7 +940,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         aot_config: AOTConfig,
         *,
         fw_metadata: ViewAndMutationMeta,
-    ):
+    ) -> Tuple[Callable, List[Tensor], ViewAndMutationMeta]:
         is_inference = not self.trace_joint
         flat_args_with_synthetic_bases, synthetic_base_info = merge_view_inputs(
             flat_args,
@@ -951,7 +951,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         # Happy path: we don't need synthetic bases
         if synthetic_base_info is None:
             self.needs_post_compile = False
-            return flat_fn, flat_args, aot_config, fw_metadata
+            return flat_fn, flat_args, fw_metadata
 
         # export path: ban synthetic bases for now, add later if requested.
         if requires_subclass_dispatch(flat_args, fw_metadata):
@@ -1047,7 +1047,6 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         return (
             wrapped_flat_fn,
             flat_args_with_synthetic_bases,
-            aot_config,
             fw_metadata_updated,
         )
 
