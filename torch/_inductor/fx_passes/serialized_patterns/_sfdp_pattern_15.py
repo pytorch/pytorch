@@ -1,8 +1,9 @@
+# mypy: ignore-errors
+
 # noqa: F401, E501
 # This is an auto-generated file. Please do not modify it by hand.
 # To re-generate, run:
-# cd ~/pytorch && python
-# torchgen/fuse_attention_patterns/gen_attention_patterns.py
+# cd ~/pytorch && python torchgen/fuse/gen_patterns.py
 
 import torch
 import torch._inductor
@@ -125,7 +126,7 @@ expand_default_4 = CallFunction(aten.expand.default, permute_default_3, Ignored(
 clone_default_2 = CallFunction(aten.clone.default, expand_default_4, memory_format=torch.contiguous_format)
 view_default_5 = CallFunction(aten.view.default, clone_default_2, Ignored())
 bmm_default_1 = CallFunction(aten.bmm.default, view_default_4, view_default_5)
-_sfdp_pattern_15_inference = CallFunction(aten.view.default, bmm_default_1, Ignored())
+_sfdp_pattern_15_inference = CallFunction(aten.view.default, bmm_default_1, Ignored(), _users=0)
 
 
 eq_Scalar = CallFunction(aten.eq.Scalar, KeywordArg('attn_mask'), Ignored())
@@ -231,4 +232,4 @@ expand_default_4 = CallFunction(aten.expand.default, permute_default_3, Ignored(
 clone_default_2 = CallFunction(aten.clone.default, expand_default_4, memory_format=torch.contiguous_format)
 view_default_5 = CallFunction(aten.view.default, clone_default_2, Ignored())
 bmm_default_1 = CallFunction(aten.bmm.default, view_default_4, view_default_5)
-_sfdp_pattern_15_half_inference = CallFunction(aten.view.default, bmm_default_1, Ignored())
+_sfdp_pattern_15_half_inference = CallFunction(aten.view.default, bmm_default_1, Ignored(), _users=0)

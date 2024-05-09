@@ -142,7 +142,8 @@ def _draw_single_box(
     if display_str:
         text_bottom = bottom
         # Reverse list and print from bottom to top.
-        text_width, text_height = font.getsize(display_str)
+        _left, _top, _right, _bottom = font.getbbox(display_str)
+        text_width, text_height = _right - _left, _bottom - _top
         margin = np.ceil(0.05 * text_height)
         draw.rectangle(
             [
@@ -620,10 +621,7 @@ def make_image(tensor, rescale=1, rois=None, labels=None):
     image = Image.fromarray(tensor)
     if rois is not None:
         image = draw_boxes(image, rois, labels=labels)
-    try:
-        ANTIALIAS = Image.Resampling.LANCZOS
-    except AttributeError:
-        ANTIALIAS = Image.ANTIALIAS
+    ANTIALIAS = Image.Resampling.LANCZOS
     image = image.resize((scaled_width, scaled_height), ANTIALIAS)
     import io
 

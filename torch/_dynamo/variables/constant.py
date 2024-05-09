@@ -122,7 +122,7 @@ class ConstantVariable(VariableTracker):
             )
         member = getattr(self.value, name)
         if callable(member):
-            raise NotImplementedError()
+            raise NotImplementedError
         return member
 
     def call_method(
@@ -212,5 +212,5 @@ class EnumVariable(VariableTracker):
     def const_getattr(self, tx, name):
         member = getattr(self.value, name)
         if callable(member):
-            raise NotImplementedError()
+            raise NotImplementedError
         return member

@@ -2,7 +2,7 @@
 
 import torch
 import torch.distributed as dist
-from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, init_device_mesh
+from torch.distributed._tensor import DeviceMesh, DTensor, init_device_mesh, Replicate
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
@@ -39,7 +39,11 @@ def init_model(device_type, model_parallel_size=TP_DEGREE):
         device_type=device_type,
         mesh=torch.arange(0, world_size).view(-1, model_parallel_size),
     )
-    mesh_2d = init_device_mesh(device_type, (world_size // model_parallel_size, model_parallel_size), mesh_dim_names=("dp", "tp"))
+    mesh_2d = init_device_mesh(
+        device_type,
+        (world_size // model_parallel_size, model_parallel_size),
+        mesh_dim_names=("dp", "tp"),
+    )
 
     dp_pg = mesh_2d.get_group(mesh_dim=0)
 

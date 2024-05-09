@@ -20,6 +20,7 @@ from torch._decomp.decompositions import (
 )
 from torch._decomp.decompositions_for_rng import extra_random_decomps
 from torch._higher_order_ops.out_dtype import out_dtype
+from torch._inductor.utils import pad_listlike
 from torch._prims_common import (
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
@@ -27,6 +28,7 @@ from torch._prims_common import (
 )
 
 from . import config, inductor_prims
+from .utils import needs_fallback_due_to_atomic_add_limitations, use_scatter_fallback
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -85,6 +87,7 @@ decomps_to_exclude = [
     aten.clamp_max,
     aten.clamp_min,
     aten.glu,  # inductor lowers this directly
+    aten.select_scatter,  # need to be in the ATen graph in order for it to work with the re-inplacing pass
     aten.split.Tensor,  # inductor lowers this directly
     aten.squeeze,  # inductor lowers this directly
     aten.sum,  # inductor lowers this directly
@@ -102,7 +105,7 @@ def register_decomposition(ops):
 
 
 # TODO: for now, inductor doesn't handle asserts
-# because the condition is symbool -> tensor in the graph.
+# because the condition is symbol -> tensor in the graph.
 @register_decomposition([aten._assert_async.msg])
 def assert_async_msg_decomp(tensor, msg):
     return
@@ -134,7 +137,7 @@ def full(size, fill_value, **kwargs):
     dtype = kwargs.get("dtype")
     if dtype is None:
         kwargs["dtype"] = type_to_dtype(type(fill_value))
-        return aten.full(size, fill_value, **kwargs)
+        return torch.full(size, fill_value, **kwargs)
     return NotImplemented
 
 
@@ -705,3 +708,96 @@ def _softmax_backward_data(grad_output, output, dim, input_dtype):
     if grad_output.dtype != input_dtype:
         grad_input = grad_input.to(input_dtype)
     return grad_input.contiguous()
+
+
+@register_decomposition(aten.index_reduce)
+def index_reduce(
+    self, dim: int, index, src, reduction_type: str, *, include_self: bool = True
+):
+    if reduction_type == "mean" and not needs_fallback_due_to_atomic_add_limitations(
+        self.dtype
+    ):
+        true_division = self.dtype.is_floating_point or self.dtype.is_complex
+        ones = torch.ones_like(src)
+        if include_self:
+            out = self
+            counts = torch.ones_like(self).index_add(dim, index, ones)
+        else:
+            out = self.index_fill(dim, index, 0)
+            counts = torch.zeros_like(self).index_add(dim, index, ones)
+            counts = counts.masked_fill(counts < 1, 1)
+        out = out.index_add(dim, index, src)
+        return out / counts if true_division else out // counts
+
+    if use_scatter_fallback(
+        aten.scatter_reduce_.two,
+        reduction_type,
+        self.dtype,
+        src.dtype,
+        src.device.type,
+        True,
+    ):
+        return NotImplemented
+
+    repeats = self.shape[dim + 1 :].numel() * self.shape[:dim].numel()
+    index_shape = (index.numel(), *self.shape[dim + 1 :], *self.shape[:dim])
+    perm = (*range(self.ndim - dim, self.ndim), 0, *range(1, self.ndim - dim))
+    scatter_index = (
+        index.to(torch.int64)
+        .repeat_interleave(repeats)
+        .reshape(index_shape)
+        .permute(perm)
+    )
+    return self.scatter_reduce(
+        dim,
+        scatter_index,
+        src,
+        reduction_type,
+        include_self=include_self,
+    )
+
+
+@register_decomposition(aten.max_pool2d_with_indices)
+def max_pool2d_with_indices(
+    x, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False
+):
+    if dilation == 1:
+        dilation = [1, 1]
+
+    if padding == 0:
+        padding = [0, 0]
+
+    if stride is None:
+        stride = kernel_size
+
+    kernel_size = pad_listlike(kernel_size, 2)
+    dilation = pad_listlike(dilation, 2)
+    padding = pad_listlike(padding, 2)
+    stride = pad_listlike(stride, 2)
+
+    window_size = kernel_size[0] * kernel_size[1]
+    # We fallback when using non-default dilation or when the window size is too large
+    if (
+        torch._inductor.lowering.should_fallback_max_pool2d_with_indices(
+            kernel_size, dilation
+        )
+        or window_size > torch.iinfo(torch.int8).max
+    ):
+        return NotImplemented
+
+    vals, offsets = prims._low_memory_max_pool2d_with_offsets(
+        x,
+        kernel_size,
+        stride,
+        padding,
+        dilation,
+        ceil_mode,
+    )
+    indices = prims._low_memory_max_pool2d_offsets_to_indices(
+        offsets,
+        kernel_size[1],
+        x.size(-1),
+        stride,
+        padding,
+    )
+    return vals, indices
