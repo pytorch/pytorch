@@ -11,14 +11,13 @@ from collections import defaultdict, deque
 from contextlib import contextmanager
 from dataclasses import dataclass, fields, is_dataclass
 from enum import auto, Enum
-from typing import Any, Callable, List, Optional, Tuple, Type
+from typing import Any, Callable, List, Optional, Tuple, Type, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
 from torch.autograd import Function, Variable
 from torch.distributed.algorithms.join import Join, Joinable, JoinHook
 from torch.utils._pytree import tree_flatten, tree_unflatten
-from torch.utils.hooks import RemovableHandle
 
 RPC_AVAILABLE = False
 if dist.is_available():
@@ -43,6 +42,9 @@ from torch._utils import _get_device_index
 
 from ..modules import Module
 from .scatter_gather import gather, scatter_kwargs  # noqa: F401
+
+if TYPE_CHECKING:
+    from torch.utils.hooks import RemovableHandle
 
 __all__ = ["DistributedDataParallel"]
 
@@ -242,9 +244,11 @@ class _DDPSink(Function):
         # None and are not filled with zeros.
         ctx.set_materialize_grads(False)
         ctx.ddp_weakref = ddp_weakref
-        ret = tuple(
-            inp.clone() if isinstance(inp, torch.Tensor) else inp for inp in inputs
-        )
+        ret = inputs
+        if ddp_weakref()._ddp_sink_clone:
+            ret = tuple(
+                inp.clone() if isinstance(inp, torch.Tensor) else inp for inp in inputs
+            )
         return ret
 
     @staticmethod
@@ -734,11 +738,8 @@ class DistributedDataParallel(Module, Joinable):
                     ValueError,
                     "DistributedDataParallel device_ids and output_device arguments "
                     "only work with single-device/multiple-device GPU modules or CPU modules, "
-                    "but got device_ids {}, output_device {}, and module parameters {}.".format(
-                        device_ids,
-                        output_device,
-                        {p.device for p in self._module_parameters},
-                    ),
+                    f"but got device_ids {device_ids}, output_device {output_device}, "
+                    f"and module parameters {({p.device for p in self._module_parameters})}.",
                 )
 
             self.device_ids = None
@@ -890,11 +891,20 @@ class DistributedDataParallel(Module, Joinable):
         if self._use_python_reducer:
             torch._inductor.config._fuse_ddp_communication = True
             torch._inductor.config._fuse_ddp_bucket_size = bucket_cap_mb
+            # Directly adding this to the trace rule will disturb the users
+            # who are using DDPOptimizer.
+            torch._dynamo.trace_rules.LEGACY_MOD_INLINELIST.add(
+                "torch.nn.parallel.distributed"
+            )
+            torch._dynamo.trace_rules.get_legacy_mod_inlinelist.cache_clear()
         self._force_to_disable_cpp_reducer = (
             optimize_ddp == "python_reducer_without_compiled_forward"
         )
         if self._use_python_reducer:
             self._register_accum_grad_hook()
+
+        # Whether or not DDPSink performs a clone.
+        self._ddp_sink_clone = True
 
     def _register_accum_grad_hook(self):
         import torch.distributed._functional_collectives as fcol
@@ -919,6 +929,8 @@ class DistributedDataParallel(Module, Joinable):
                 param.grad.copy_(gradient)
 
         for index, param in enumerate(self._module_parameters):
+            if not param.requires_grad:
+                continue
             self._accum_grad_hooks.append(
                 param.register_post_accumulate_grad_hook(
                     functools.partial(
@@ -946,7 +958,7 @@ class DistributedDataParallel(Module, Joinable):
         # 1. Create gradient buffer
         device = torch.device("cpu") if device_ids is None else device_ids[0]
         self._delay_grad_buffer = torch.zeros(
-            sum([p.numel() for p in self._delay_all_reduce_params]),
+            sum(p.numel() for p in self._delay_all_reduce_params),
             device=device,
         )
 
@@ -1968,13 +1980,6 @@ class DistributedDataParallel(Module, Joinable):
             >>> ddp.register_comm_hook(state=None, hook=encode_and_decode)
         """
         self._check_comm_hook(hook)
-        if hook.__name__ in ["bf16_compress_hook", "fp16_compress_hook"]:
-            # If we pass None, then the hook will try to get the world size
-            # by calling `dist.group.WORLD.size()`, which causes compilation
-            # errors. So we pre-decode the process group and pass it to the
-            # hook.
-            if state is None:
-                state = dist.group.WORLD
         assert self.logger is not None
         self.logger._set_comm_hook_name(hook.__qualname__)
         self._comm_hooks.append((hook, state))
@@ -2363,3 +2368,16 @@ class DistributedDataParallel(Module, Joinable):
         if not _rank_not_in_group(new_process_group):
             self.process_group = new_process_group
             self.reducer._update_process_group(new_process_group)
+
+    def _set_ddp_sink_clone(self, val: bool):
+        """
+        Sets whether or not DDPSink should clone the output tensors or not.
+        The default is True since if the loss is modified in place we run
+        into the view is modified in-place error.
+
+        Although, cloning the tensors can add significant memory and
+        performance hit if the number and size of tensors are large. As
+        a result, this can be set to False if you are not modifying the
+        loss in place.
+        """
+        self._ddp_sink_clone = val

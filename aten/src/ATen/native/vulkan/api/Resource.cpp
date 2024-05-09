@@ -1,20 +1,6 @@
 #include <ATen/native/vulkan/api/Adapter.h>
 #include <ATen/native/vulkan/api/Resource.h>
 
-#define PRINT_FIELD(struct, field) #field << ": " << struct.field << std::endl
-
-std::ostream& operator<<(std::ostream& out, VmaTotalStatistics stats) {
-  VmaDetailedStatistics total_stats = stats.total;
-  out << "VmaTotalStatistics: " << std::endl;
-  out << "  " << PRINT_FIELD(total_stats.statistics, blockCount);
-  out << "  " << PRINT_FIELD(total_stats.statistics, allocationCount);
-  out << "  " << PRINT_FIELD(total_stats.statistics, blockBytes);
-  out << "  " << PRINT_FIELD(total_stats.statistics, allocationBytes);
-  return out;
-}
-
-#undef PRINT_FIELD
-
 namespace at {
 namespace native {
 namespace vulkan {

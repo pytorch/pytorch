@@ -40,7 +40,8 @@ class CustomObjArgument:
 
 @dataclasses.dataclass
 class ConstantArgument:
-    value: Union[int, float, bool, None]
+    name: str
+    value: Union[int, float, bool, str, None]
 
 
 ArgumentSpec = Union[

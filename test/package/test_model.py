@@ -23,7 +23,10 @@ except ImportError:
     from common import PackageTestCase
 
 
-@skipIf(True, "Does not work with recent torchvision, see https://github.com/pytorch/pytorch/issues/81115")
+@skipIf(
+    True,
+    "Does not work with recent torchvision, see https://github.com/pytorch/pytorch/issues/81115",
+)
 @skipIfNoTorchVision
 class ModelTest(PackageTestCase):
     """End-to-end tests packaging an entire model."""
@@ -88,7 +91,6 @@ class ModelTest(PackageTestCase):
 
     @skipIfNoTorchVision
     def test_model_save(self):
-
         # This example shows how you might package a model
         # so that the creator of the model has flexibility about
         # how they want to save it but the 'server' can always

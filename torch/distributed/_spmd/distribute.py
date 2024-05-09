@@ -350,7 +350,7 @@ FACTORY_SYM_INT_CONSUMERS: Dict[torch._ops.OpOverload, Callable] = {
 }
 
 
-# Dispatch override for factory ops, as DTensor cannot propogate sharding spec
+# Dispatch override for factory ops, as DTensor cannot propagate sharding spec
 # without DTensor inputs.
 FACTORY_OPS: Dict[torch._ops.OpOverload, Callable] = {
     aten.scalar_tensor.default: default_factory_op_rule,

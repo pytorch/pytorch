@@ -216,7 +216,7 @@ inline std::vector<c10::Scalar> convert_tensor_to_scalar_list(
       scalarList_.scalar_type(),
       "convert_tensor_to_scalar_list",
       [&]() {
-        const scalar_t* scalar_data = scalarList_.data_ptr<scalar_t>();
+        const scalar_t* scalar_data = scalarList_.const_data_ptr<scalar_t>();
         TORCH_CHECK(
             (expect_length == scalarList_.size(0)),
             "Expected length of scalars to match input of length ",

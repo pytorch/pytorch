@@ -1489,7 +1489,7 @@ torch::utils::maybe_initialize_device(options);
             # we're an output-arg variant, check these args against output tensor
             if not f.func.is_out_fn():
                 raise RuntimeError(
-                    f"{f.func}: dtype in tensor_options_args without output arg"
+                    f"{f.func}: dtype in tensor_options_args without output arg, {ps} {ps.arguments}"
                 )
             if not all(a in tensor_options_args_names for a in ("layout", "device")):
                 raise RuntimeError(

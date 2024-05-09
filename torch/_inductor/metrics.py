@@ -43,6 +43,8 @@ cpp_to_dtype_count = 0
 # Each element counts the number of inner kernels in each outer loop fusion.
 cpp_outer_loop_fused_inner_counts: List[int] = []
 
+num_comprehensive_padding = 0
+
 
 # reset all counters
 def reset():
@@ -52,6 +54,7 @@ def reset():
     global ir_nodes_pre_fusion
     global cpp_to_dtype_count
     global cpp_outer_loop_fused_inner_counts
+    global num_comprehensive_padding
 
     generated_kernel_count = 0
     generated_cpp_vec_kernel_count = 0
@@ -61,6 +64,7 @@ def reset():
     ir_nodes_pre_fusion = 0
     cpp_to_dtype_count = 0
     cpp_outer_loop_fused_inner_counts.clear()
+    num_comprehensive_padding = 0
 
 
 @dataclass
@@ -218,6 +222,21 @@ MetricTable.register_table(
         "size_hints",
         "reduction_hint",
         "speedup",
+    ],
+)
+
+# Log the fusion failures due to indexing mismatch
+MetricTable.register_table(
+    "fusion_failure_due_to_indexing_mismatch",
+    [
+        "pre_grad_graph_id",
+        "post_grad_graph_id",
+        "node1_name",
+        "node2_name",
+        "node1_debug_str",
+        "node2_debug_str",
+        "common_buffer_names",
+        "failure_reason",
     ],
 )
 
