@@ -2,6 +2,7 @@
 import contextlib
 import functools
 import operator
+import warnings
 from typing import cast, Dict, List, Optional, Sequence, Tuple, TYPE_CHECKING
 
 import torch
@@ -308,7 +309,20 @@ class OpDispatcher:
                 else:
                     mesh = arg.device_mesh
             elif isinstance(arg, torch.Tensor):
-                if arg.ndim == 0 or self._allow_implicit_replication:
+                if arg.numel() == 1 and arg.ndim == 1:
+                    warnings.warn(
+                        "Found a non-scalar tensor with numel=1 and ndim!=0, "
+                        "we are implicitly creating a replicated DTensor for it. "
+                        "However, please consider changing it to a scalar tensor "
+                        "or explicitly create a DTensor under distributed enviroment."
+                    )
+
+                # if the arg.numel() == 1, arg.ndim could be 0 or 1.
+                if (
+                    arg.ndim <= 1
+                    and arg.numel() == 1
+                    or self._allow_implicit_replication
+                ):
                     mesh = mesh or try_find_mesh_from_args(op_call, args_list)
                     # scalar tensor can be safely treated as replicated
                     args_schema.append(
