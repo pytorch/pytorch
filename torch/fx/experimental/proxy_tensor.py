@@ -1168,7 +1168,7 @@ class _MakefxTracer:
 
         # All context managers and their states should be initialized before tracing based on the inputs
         # and configurations.
-        # After tracing, thier states should be cleaned except for shape_env.
+        # After tracing, their states should be cleaned except for shape_env.
         null_ctx_type = type(nullcontext)
         self.fake_tensor_mode: Union[null_ctx_type, FakeTensorMode] = nullcontext()
         self.proxy_mode: Union[null_ctx_type, ProxyTorchDispatchMode] = nullcontext()
@@ -1286,11 +1286,6 @@ class _MakefxTracer:
                     sub_tracer = PythonKeyTracer()
                 elif type(parent_tracer) == _ModuleStackTracer:
                     sub_tracer = _ModuleStackTracer(parent_tracer.scope_root)
-                    # We want sub_tracer to share the same states as parent tracer
-                    # for below states to correctly compute some metadata
-                    sub_tracer.scope_root = parent_tracer.scope_root
-                    sub_tracer.proxy_paths = parent_tracer.proxy_paths
-                    sub_tracer.proxy_modules = parent_tracer.proxy_modules
                 else:
                     raise RuntimeError(f"Unexpected tracer type: {type(parent_tracer)}.")
 

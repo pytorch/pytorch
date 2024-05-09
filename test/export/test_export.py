@@ -617,8 +617,9 @@ class TestExport(TestCase):
     # TODO(yidi)
     # Expected failure for test cases that calls run_decomposition().
     # The top-level cond node has pre-existing metadata,
-    # which overrides the metadata for operators in subgraph due to interpreter.run()
-    # and the way we preserve metadata.
+    # which overrides the metadata for operators in subgraph due to interpreter.run(),
+    # where cond is a single node in the interpreter.run(). And we preserve metadata
+    # by copying current node's metadata for all nodes created during interpreting.
     @testing.expectedFailurePreDispatchRunDecomp
     @testing.expectedFailureRetraceability
     def test_export_cond_preserve_torch_fn_for_subgraphs(self):
