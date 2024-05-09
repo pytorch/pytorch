@@ -188,13 +188,15 @@ class TestFSSpecWithDist(ShardedTensorTestBase):
 
         sd = {"random": torch.zeros(10)}
         dcp.load(sd, checkpoint_id=self.temp_dir)
-
         self.assertTrue(torch.allclose(sd["random"], t2))
 
-        dcp.save(
-            {"random": t2}, storage_writer=FsspecWriter(self.temp_dir, overwrite=True)
-        )
-        self.assertRaisesRegex(CheckpointException, ".*Checkpoint already exists.*")
+        with self.assertRaisesRegex(
+            CheckpointException, ".*Checkpoint already exists.*"
+        ):
+            dcp.save(
+                {"random": t2},
+                storage_writer=FsspecWriter(self.temp_dir, overwrite=False),
+            )
 
 
 if __name__ == "__main__":

@@ -391,11 +391,13 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
 
         self.assertTrue(torch.allclose(sd["random"], t2))
 
-        DCP.save(
-            {"random": t2},
-            storage_writer=DCP.FileSystemWriter(self.temp_dir, overwrite=True),
-        )
-        self.assertRaisesRegex(CheckpointException, ".*Checkpoint already exists.*")
+        with self.assertRaisesRegex(
+            CheckpointException, ".*Checkpoint already exists.*"
+        ):
+            DCP.save(
+                {"random": t2},
+                storage_writer=DCP.FileSystemWriter(self.temp_dir, overwrite=False),
+            )
 
 
 class TestNoCPU(DTensorTestBase):

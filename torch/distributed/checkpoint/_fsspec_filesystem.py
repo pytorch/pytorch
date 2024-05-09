@@ -114,7 +114,7 @@ class FsspecWriter(FileSystemWriter):
             sync_files,
             thread_count,
             per_thread_copy_ahead,
-            overwrite,
+            overwrite=overwrite,
         )
         self.fs = FileSystem()
         self.path = self.fs.init_path(path)
