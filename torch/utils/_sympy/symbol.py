@@ -19,13 +19,14 @@ import sympy
 
 class SymT(Enum):
     SIZE = auto()
+    FLOAT = auto()
     UNBACKED_INT = auto()
     UNBACKED_FLOAT = auto()
     # Inductor: The intermediates in inner_fn tmp0, one generated per ops call.
     # If one of these shows up in an indexing expression, that means an
     # indirect load is happening.
     TMP = auto()
-    # Inductor: what's this?
+    # Inductor: Placeholder variable that is later replaced with TMP
     INDIRECT = auto()
     # Inductor: Some size expressions are replaced with a precomputed size ps0
     # which is computed host side, and then directly reused in the kernel, so
@@ -54,7 +55,11 @@ class SymT(Enum):
 prefix_str = {
     SymT.SIZE: "s",  # integer
     SymT.UNBACKED_INT: "u",  # integer
-    SymT.UNBACKED_FLOAT: "f",
+    # Prefix z here is chosen to avoid false aliasing in symbol_is_type test
+    # DO NOT add a "z" type.  You also need to avoid conflicts on these
+    # prefixes but this is somewhat easier to manage
+    SymT.FLOAT: "zf",
+    SymT.UNBACKED_FLOAT: "zuf",
     SymT.TMP: "tmp",
     SymT.PRECOMPUTED_SIZE: "ps",
     SymT.INDEX: "i",
@@ -69,7 +74,7 @@ prefix_str = {
 
 def make_symbol(prefix: SymT, idx: int, **kwargs) -> sympy.Symbol:
     # TODO: maybe put the assumptions here directly
-    return sympy.Symbol(f"{prefix}{idx}", **kwargs)
+    return sympy.Symbol(f"{prefix_str[prefix]}{idx}", **kwargs)
 
 
 # This type is a little wider than it should be, because free_symbols says

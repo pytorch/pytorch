@@ -49,6 +49,7 @@ from torch.autograd.profiler_util import EventList
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.utils._sympy.functions import CeilDiv, CleanDiv, FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import make_symbol, SymT
+from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 from . import config
 from .runtime.runtime_utils import ceildiv as runtime_ceildiv
 
@@ -539,6 +540,20 @@ def sympy_str(expr: sympy.Expr) -> str:
     return str(expr)
 
 
+def get_bounds_index_expr(index):
+    from .virtualized import V
+
+    # If this expression does not come from an FX node, we compute its bounds
+    if (
+        config.compute_all_bounds
+        and (fx_node := getattr(V.interpreter, "current_node", None))
+        and fx_node.target != "index_expr"
+    ):
+        return bound_sympy(index)
+    else:
+        return ValueRanges.unknown()
+
+
 def sympy_index_symbol_with_prefix(prefix: SymT, idx: int) -> sympy.Symbol:
     """
     Used to generate an integer-nonnegative symbol.
@@ -665,6 +680,14 @@ def clear_on_fresh_inductor_cache(obj: Any):
     return obj
 
 
+def clear_inductor_caches():
+    """
+    Clear all registered caches.
+    """
+    for obj in _registered_caches:
+        obj.cache_clear()
+
+
 @contextlib.contextmanager
 def fresh_inductor_cache(cache_entries=None):
     """
@@ -673,8 +696,7 @@ def fresh_inductor_cache(cache_entries=None):
     Optionally, pass a dict as 'cache_entries' to get a list of filenames and sizes
     generated with this cache instance.
     """
-    for obj in _registered_caches:
-        obj.cache_clear()
+    clear_inductor_caches()
 
     inductor_cache_dir = tempfile.mkdtemp()
     try:
@@ -844,6 +866,15 @@ class IndentedBuffer:
         res.writelines(self._lines)
         res.writelines(other._lines)
         return res
+
+
+@contextlib.contextmanager
+def restore_stdout_stderr(initial_stdout, initial_stderr):
+    try:
+        yield
+    finally:
+        sys.stdout = initial_stdout
+        sys.stderr = initial_stderr
 
 
 class DeferredLineBase:
@@ -1292,13 +1323,13 @@ def pass_execution_and_save(func, gm, inp, msg):
 def is_collective(node):
     from . import ir
 
-    return isinstance(node, ir.CollectiveKernel) or type(node) == ir._CollectiveKernel
+    return type(node) == ir._CollectiveKernel
 
 
 def is_wait(node):
     from . import ir
 
-    return isinstance(node, ir.Wait) or type(node) == ir._WaitKernel
+    return type(node) == ir._WaitKernel
 
 
 def num_fw_fixed_arguments(dynamo_gm_num_inputs: int, aot_fw_gm_num_inputs: int):

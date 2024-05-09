@@ -49,6 +49,11 @@ accumulated_cache_size_limit = 256
 # to be dynamic, but accesses to ints should NOT get promoted into inputs.
 specialize_int = False
 
+# Whether or not to specialize on float inputs.  Dynamo will always promote
+# float inputs into Tensor inputs, but at the moment, backends inconsistently
+# support codegen on float (this is to be fixed).
+specialize_float = True
+
 # legacy config, does nothing now!
 dynamic_shapes = True
 
@@ -130,7 +135,7 @@ suppress_errors = bool(os.environ.get("TORCHDYNAMO_SUPPRESS_ERRORS", False))
 # Record and write an execution record of the current frame to a file
 # if an exception is encountered
 # @compile_ignored[debug]
-replay_record_enabled = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
+replay_record_enabled = os.environ.get("TORCH_COMPILE_REPLAY_RECORD", "0") == "1"
 
 # Rewrite assert statement in python with torch._assert
 rewrite_assert_with_torch_assert = True
