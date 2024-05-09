@@ -158,8 +158,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
       (*interp)->trace_gpu_event_synchronization(
-          c10::kXPU,
-          reinterpret_cast<uintptr_t>(xpu_event));
+          c10::kXPU, reinterpret_cast<uintptr_t>(xpu_event));
     }
     xpu_event->wait_and_throw();
   }

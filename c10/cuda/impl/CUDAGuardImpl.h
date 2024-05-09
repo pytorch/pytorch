@@ -212,8 +212,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
       (*interp)->trace_gpu_event_synchronization(
-          c10::kCUDA,
-          reinterpret_cast<uintptr_t>(cuda_event));
+          c10::kCUDA, reinterpret_cast<uintptr_t>(cuda_event));
     }
     AT_CUDA_CHECK(cudaEventSynchronize(cuda_event));
   }
@@ -225,8 +224,9 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   }
 
   double elapsedTime(void* event1, void* event2) const override {
-    TORCH_CHECK(event1 && event2,
-      "Both events must be recorded before calculating elapsed time.");
+    TORCH_CHECK(
+        event1 && event2,
+        "Both events must be recorded before calculating elapsed time.");
     cudaEvent_t cuda_event1 = static_cast<cudaEvent_t>(event1);
     cudaEvent_t cuda_event2 = static_cast<cudaEvent_t>(event2);
     float time_ms = 0;
