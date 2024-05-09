@@ -816,6 +816,21 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         },
         aliasAnalysisConservative()),
     OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::get_autocast_dtype(str device_type) -> ScalarType"),
+        [](Stack& stack) {
+#if defined BUILD_LITE_INTERPRETER || defined C10_MOBILE
+          // autocast is not supported.
+          at::ScalarType dtype = at::ScalarType::Undefined;
+#else
+          at::DeviceType device_type =
+              at::Device(pop(stack).toStringRef()).type();
+          at::ScalarType dtype = at::autocast::get_autocast_dtype(device_type);
+#endif
+          push(stack, dtype);
+        },
+        aliasAnalysisConservative()),
+    OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::Uninitialized() -> Any"),
         unInitialized,
         aliasAnalysisSpecialCase()),
