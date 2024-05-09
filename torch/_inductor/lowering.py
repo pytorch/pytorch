@@ -3511,15 +3511,14 @@ def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
     return x_out, ceil_mode
 
 
-fallback_max_pool2d_with_indices = fallback_handler(
-    aten.max_pool2d_with_indices.default,
-    add_to_fallback_set=False,
-)
+def should_fallback_max_pool2d_with_indices(kernel_size, dilation):
+    kernel_size = pad_listlike(kernel_size, 2)
+    window_size = kernel_size[0] * kernel_size[1]
+    return (window_size > 25) or any(d > 1 for d in dilation)
 
 
-@register_lowering(aten.max_pool2d_with_indices, type_promotion_kind=None)
-def max_pool2d_with_indices(
-    x, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False
+def max_pool2d_checks(
+    x, kernel_size, stride, padding, dilation, *, assert_fallback=None
 ):
     if padding == 0:
         padding = [0, 0]
@@ -3527,6 +3526,7 @@ def max_pool2d_with_indices(
         dilation = [1, 1]
     if not stride:
         stride = kernel_size
+
     kernel_size = pad_listlike(kernel_size, 2)
     stride = pad_listlike(stride, 2)
     padding = pad_listlike(padding, 2)
@@ -3539,36 +3539,51 @@ def max_pool2d_with_indices(
     assert len(dilation) == 2
     assert len(x.get_size()) in (3, 4)
 
+    use_fallback = should_fallback_max_pool2d_with_indices(kernel_size, dilation)
+    if assert_fallback is not None:
+        assert use_fallback == assert_fallback
+
+    return kernel_size, stride, padding, dilation, use_fallback
+
+
+@register_lowering(prims._low_memory_max_pool2d_with_offsets, type_promotion_kind=None)
+def _low_memory_max_pool2d_with_offsets(
+    x,
+    kernel_size,
+    stride,
+    padding,
+    dilation,
+    ceil_mode=False,
+):
+    # assert we are not on a fallback path, the inductor decomp should have guaranteed this
+    kernel_size, stride, padding, dilation, _ = max_pool2d_checks(
+        x, kernel_size, stride, padding, dilation, assert_fallback=False
+    )
+
     x.realize_hint()
     *batch, h, w = x.get_size()
 
     h_out, ceil_mode1 = pooling_size(h, 0, kernel_size, stride, padding, ceil_mode)
     w_out, ceil_mode2 = pooling_size(w, 1, kernel_size, stride, padding, ceil_mode)
 
+    new_size = list(batch) + [h_out, w_out]
     if padding[0] or padding[1] or ceil_mode1 or ceil_mode2:
         x_loader = constant_boundary_condition(x, float("-inf"), dim=2)
     else:
         x_loader = x.make_loader()
 
-    new_size = list(batch) + [h_out, w_out]
-    window_size = kernel_size[0] * kernel_size[1]
-
-    if window_size > 25 or any(d != 1 for d in dilation):
-        # Kernel size too big. Results in hard-to-optimize Triton code. Use fallback.
-        return fallback_max_pool2d_with_indices(
-            x, kernel_size, stride, padding, dilation, ceil_mode
-        )
-
     def fn(idx, return_index):
         *prefix, bh, bw = idx
         maxval = None
         maxindex = None
-        for ih, iw in itertools.product(range(kernel_size[0]), range(kernel_size[1])):
-            ih = bh * stride[0] + ih - padding[0]
-            iw = bw * stride[1] + iw - padding[1]
+        for h_inc, w_inc in itertools.product(
+            range(kernel_size[0]), range(kernel_size[1])
+        ):
+            ih = bh * stride[0] + h_inc - padding[0]
+            iw = bw * stride[1] + w_inc - padding[1]
             val = x_loader([*prefix, ih, iw])
             if return_index:
-                index = ops.index_expr(ih * w + iw, torch.int64)
+                index = ops.index_expr(h_inc * kernel_size[1] + w_inc, torch.int8)
                 if maxindex is None:
                     maxindex = index
                 else:
@@ -3582,20 +3597,58 @@ def max_pool2d_with_indices(
         else:
             return maxval
 
-    r1 = Pointwise.create(
+    out = Pointwise.create(
         device=x.get_device(),
         dtype=x.get_dtype(),
         inner_fn=functools.partial(fn, return_index=False),
         ranges=new_size,
     )
-    r2 = Pointwise.create(
+    offsets = Pointwise.create(
         device=x.get_device(),
-        dtype=torch.int64,
+        dtype=torch.int8,
         inner_fn=functools.partial(fn, return_index=True),
         ranges=new_size,
     )
-    # TODO(jansel): should we force these to be realized?
-    return r1, r2
+    return out, offsets
+
+
+@register_lowering(
+    prims._low_memory_max_pool2d_offsets_to_indices, type_promotion_kind=None
+)
+def _low_memory_max_pool2d_offsets_to_indices(
+    offsets, kernel_width, input_width, stride, padding
+):
+    # TODO: Generalize to other max pooling flavors, and arbitrary dim
+
+    offsets_loader = offsets.make_loader()
+
+    def increments_to_index(h_inc, w_inc, bh, bw):
+        w_in = ops.index_expr(input_width, torch.int64)
+        hbase = ops.index_expr(bh * stride[0] - padding[0], torch.int64)
+        wbase = ops.index_expr(bw * stride[1] - padding[1], torch.int64)
+        ih = hbase + h_inc
+        iw = wbase + w_inc
+        return ih * w_in + iw
+
+    def offsets_to_indices(idx):
+        *prefix, bh, bw = idx
+        offset = offsets_loader([*prefix, bh, bw])
+        kw_const = ops.constant(kernel_width, torch.int32)
+        h_inc = offset // kw_const
+        w_inc = offset - (h_inc * kw_const)
+        return increments_to_index(h_inc, w_inc, bh, bw)
+
+    indices = Pointwise.create(
+        device=offsets.get_device(),
+        dtype=torch.int64,
+        inner_fn=offsets_to_indices,
+        ranges=offsets.get_size(),
+    )
+    return indices
+
+
+# Fallback selected when we do not decompose to the low-memory path.
+make_fallback(aten.max_pool2d_with_indices)
 
 
 fallback_max_pool2d_with_indices_backward = fallback_handler(
@@ -3657,8 +3710,6 @@ def max_pool2d_with_indices_backward(
         return fallback_max_pool2d_with_indices_backward(
             grad_output, x, kernel_size, stride, padding, dilation, ceil_mode, indices
         )
-
-    indices.realize_hint()
 
     *batch, height, width = x.get_size()
     *_, pooled_height, pooled_width = grad_output.get_size()
@@ -3970,7 +4021,21 @@ def adaptive_max_pool2d(x, output_size):
         )
     if h_in % h_out == 0 and w_in % w_out == 0:
         kernel_size = [h_in // h_out, w_in // w_out]
-        return max_pool2d_with_indices(x, kernel_size)
+        if should_fallback_max_pool2d_with_indices(kernel_size, dilation=[1, 1]):
+            return max_pool2d_with_indices(x, kernel_size)  # type: ignore[name-defined]   # noqa: F821
+        else:
+            v, offsets = _low_memory_max_pool2d_with_offsets(
+                x,
+                kernel_size,
+                stride=kernel_size,
+                padding=[0, 0],
+                dilation=[1, 1],
+                ceil_mode=False,
+            )
+            indices = _low_memory_max_pool2d_offsets_to_indices(
+                offsets, kernel_size[1], w_in, kernel_size, padding=[0, 0]
+            )
+            return v, indices
 
     h_kernel_max = ceildiv((h_in + h_out - 1), h_out)
     w_kernel_max = ceildiv((w_in + w_out - 1), w_out)
@@ -5456,11 +5521,7 @@ register_inplace(aten.__ixor__, aten.__xor__)
 
 @register_lowering(aten.sym_constrain_range)
 def sym_constrain_range(a, min=None, max=None):
-    tracing_context = torch._guards.TracingContext.try_get()
-    assert (
-        tracing_context is None or a in tracing_context.fake_mode.shape_env.var_to_range
-    )
-    return a
+    return None
 
 
 @register_lowering(aten.sym_size.int)
@@ -5666,23 +5727,24 @@ def associative_scan(combine_fn: ir.Subgraph, input, dim: int):
     from .subgraph_lowering import InputDescriptor, lower_pointwise_subgraph
 
     subgraph_inputs = [
-        InputDescriptor(dtype=input.get_dtype(), device=input.get_device())
-        for _ in range(2)
+        InputDescriptor(dtype=x.get_dtype(), device=x.get_device())
+        for x in itertools.chain(input, input)
     ]
     lowered_combine_fn = lower_pointwise_subgraph(combine_fn, subgraph_inputs)
 
     def wrapped_combine_fn(lhs, rhs):
-        res = lowered_combine_fn(
+        return lowered_combine_fn(
             *pytree.tree_leaves(lhs),
             *pytree.tree_leaves(rhs),
         )
-        return (res,)
 
-    kwargs = _make_scan_inner(input, axis=dim, dtype=None)
+    kwargs = _make_scan_inner(input[0], axis=dim, dtype=None)
+    kwargs["dtypes"] = tuple(x.get_dtype() for x in input)
+    kwargs["inner_fns"] = tuple(x.make_loader() for x in input)
     result = ir.Scan.create(**kwargs, combine_fn=wrapped_combine_fn)
     if result is None:
         raise RuntimeError("Unable to generate code for associative_scan op")
-    return result[0]
+    return result
 
 
 @register_lowering(torch.ops.prims._sink_tokens.default)
@@ -5712,60 +5774,6 @@ def with_effects(token, op, *args, **kwargs):
 
 try:
     import torch.distributed._functional_collectives
-
-    c10d_functional = torch.ops.c10d_functional
-
-    @register_lowering(c10d_functional.wait_tensor)
-    def wait(input):
-        return TensorBox.create(ir.Wait.create(input))
-
-    @register_lowering(c10d_functional.broadcast)
-    def broadcast(input, src, tag, ranks, group_size):
-        return ir.Broadcast.create(input, src, tag, ranks, group_size)
-
-    @register_lowering(c10d_functional.all_reduce)
-    def allreduce(input, reduce_op, tag, ranks, group_size):
-        return ir.AllReduce.create(input, reduce_op, tag, ranks, group_size)
-
-    @register_lowering(c10d_functional.all_gather_into_tensor)
-    def all_gather_into_tensor(shard, tag, ranks, group_size):
-        return TensorBox.create(
-            ir.AllGatherIntoTensor.create(
-                ir.ExternKernel.require_contiguous(shard), tag, ranks, group_size
-            )
-        )
-
-    @register_lowering(c10d_functional.reduce_scatter_tensor)
-    def reduce_scatter_tensor(input, reduce_op, tag, ranks, group_size):
-        return TensorBox.create(
-            ir.ReduceScatterTensor.create(input, reduce_op, tag, ranks, group_size)
-        )
-
-    @register_lowering(c10d_functional.all_reduce_coalesced)
-    def all_reduce_coalesced(input, reduce_op, tag, ranks, group_size):
-        return ir.AllReduceCoalesced.create(input, reduce_op, tag, ranks, group_size)
-
-    @register_lowering(c10d_functional.all_gather_into_tensor_coalesced)
-    def all_gather_into_tensor_coalesced(self, tag, ranks, group_size):
-        result = ir.AllGatherIntoTensorCoalesced.create(self, tag, ranks, group_size)
-        return list(map(TensorBox.create, result))
-
-    @register_lowering(c10d_functional.reduce_scatter_tensor_coalesced)
-    def reduce_scatter_tensor_coalesced(self, reduceOp, tag, ranks, group_size):
-        result = ir.ReduceScatterTensorCoalesced.create(
-            self, reduceOp, tag, ranks, group_size
-        )
-        return list(map(TensorBox.create, result))
-
-    @register_lowering(c10d_functional.all_to_all_single)
-    def all_to_all_single(
-        self, output_split_sizes, input_split_sizes, tag, ranks, group_size
-    ):
-        return TensorBox.create(
-            ir.AllToAllSingle.create(
-                self, output_split_sizes, input_split_sizes, tag, ranks, group_size
-            )
-        )
 
     _c10d_functional = torch.ops._c10d_functional
 
@@ -5897,7 +5905,7 @@ try:
             )
         )
 
-except ImportError:
+except (AttributeError, ImportError):
     log.info(
         "Inductor support for distributed collectives depends on building torch.distributed"
     )

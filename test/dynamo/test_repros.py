@@ -4415,8 +4415,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         try:
             from megablocks.layers import moe
             from megablocks.layers.arguments import Arguments
-        except ImportError:
-            raise unittest.SkipTest("requires megablocks")
+        except ImportError as e:
+            raise unittest.SkipTest("requires megablocks") from e
         bs, sl, hs, num_experts, top_k = (16, 1024, 512, 1, 1)
         args = Arguments(
             hidden_size=hs,
@@ -4744,6 +4744,56 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(v.foo, 200)
         self.assertEqual(v.data.shape, (10, 20))
         self.assertEqual(type(v), Matrix)
+
+    def test_nn_parametrize(self):
+        class Module(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.randn(10, 10))
+
+            def forward(self, x):
+                return self.param @ x
+
+        class Parametrization(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        def parametrize(model: nn.Module):
+            mods = list(model.modules())
+            for mod in mods:
+                params = list(mod._parameters.items())
+                for name, p in params:
+                    if p is not None:
+                        torch.nn.utils.parametrize.register_parametrization(
+                            mod, name, Parametrization(), unsafe=True
+                        )
+
+        m = Module()
+        parametrize(m)
+        opt_m = torch.compile(m, backend="eager")
+        inp = torch.randn(10, 10)
+        self.assertEqual(m(inp), opt_m(inp))
+
+    def test_nn_module_property_closure(self):
+        x = torch.randn(10, 10)
+
+        class Mod(torch.nn.Module):
+            @property
+            def y(self):
+                return torch.ones(10, 10) + x
+
+            def forward(self, x):
+                return x @ self.y
+
+        mod = Mod()
+
+        def fn(x):
+            return mod(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        inp = torch.randn(10, 10)
+        self.assertEqual(fn(inp), opt_fn(inp))
 
     def test_global_fn_mutation(self):
         def foo(x, y):

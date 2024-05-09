@@ -60,6 +60,7 @@ from typing import (
     Optional,
     Set,
     Tuple,
+    TYPE_CHECKING,
     Union,
 )
 
@@ -84,9 +85,11 @@ from torch._inductor.cudagraph_utils import (
 )
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.storage import UntypedStorage
-from torch.types import _bool
 from torch.utils import _pytree as pytree
 from torch.utils.weak import TensorWeakRef
+
+if TYPE_CHECKING:
+    from torch.types import _bool
 
 StorageWeakRefPointer = int
 StorageDataPtr = int

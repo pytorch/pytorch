@@ -2266,6 +2266,21 @@ int THPVariableMetaType_init(PyObject* cls, PyObject* args, PyObject* kwargs) {
     return 0;
   }
 
+  // Forbid subclassing _TensorBase directly
+  py::tuple mro =
+      py::reinterpret_borrow<py::tuple>(((PyTypeObject*)cls)->tp_mro);
+  bool is_subclass_of_thpvariable = false;
+  for (py::handle h : mro) {
+    if (h.ptr() == THPVariableClass) {
+      is_subclass_of_thpvariable = true;
+      break;
+    }
+  }
+  if (!is_subclass_of_thpvariable) {
+    PyErr_SetString(PyExc_RuntimeError, "Cannot subclass _TensorBase directly");
+    return -1;
+  }
+
   // If the user provided a torch_dispatch implementation, disable
   // torch_function.
   py::object torch_dispatch_impl = py::reinterpret_steal<py::object>(
@@ -2275,13 +2290,6 @@ int THPVariableMetaType_init(PyObject* cls, PyObject* args, PyObject* kwargs) {
   if (torch_dispatch_impl.ptr() != torch_dispatch_default.ptr()) {
     py::object torch_function_impl = py::reinterpret_steal<py::object>(
         PyObject_GetAttrString(cls, "__torch_function__"));
-    // This will only fail if the user subclasses _TensorBase directly.
-    // Ignore the error here to let the class __init__ code fail with a nice
-    // error message.
-    if (!torch_function_impl) {
-      PyErr_Clear();
-      return 0;
-    }
     py::object torch_function_default_bound = py::reinterpret_steal<py::object>(
         PyObject_GetAttrString(THPVariableClass, "__torch_function__"));
 

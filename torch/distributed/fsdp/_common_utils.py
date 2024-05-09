@@ -31,8 +31,6 @@ from torch.distributed._composable_state import _get_module_state, _State
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
 )
-from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.fsdp._fsdp_extensions import FSDPExtensions
 from torch.distributed.utils import _apply_to_tensors
 from torch.utils._mode_utils import no_dispatch
 
@@ -46,6 +44,8 @@ from .api import (
 )
 
 if TYPE_CHECKING:
+    from torch.distributed.device_mesh import DeviceMesh
+    from torch.distributed.fsdp._fsdp_extensions import FSDPExtensions
     from ._flat_param import FlatParamHandle
 
 FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"
