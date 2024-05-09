@@ -1345,8 +1345,6 @@ class Scheduler:
         self.compute_dependencies()
         self.topological_sort_schedule()
         self.dead_node_elimination()
-        if config.reorder_for_compute_comm_overlap:
-            comms.decide_global_ordering_of_comms(self.nodes)
         self.compute_ancestors()
 
         metrics.ir_nodes_pre_fusion += len(self.nodes)
@@ -1359,6 +1357,8 @@ class Scheduler:
         self.fuse_nodes()
         self.finalize_multi_template_buffers()
         self.nodes = comms.enforce_comm_node_ordering_for_fsdp(self.name_to_fused_node, self.nodes)
+        if config.reorder_for_compute_comm_overlap:
+            comms.decide_global_ordering_of_comms(self.nodes)
         # Refresh node_users and inverse_users to reflect fused nodes and grouped nodes
         self.compute_node_users()
         if config.raise_last_usage:

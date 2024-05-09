@@ -101,6 +101,18 @@ def split_contiguous_view_as_strided(all_gather_output, all_gather_input_numels,
     return out
 
 
+lib.define("chunk_cat(Tensor[] tensors, int dim, int num_chunks) -> Tensor")
+
+@torch.library.impl(lib, "chunk_cat", "Meta")
+def chunk_cat(tensors, dim, num_chunks):
+    return torch._chunk_cat(tensors, dim, num_chunks)
+
+@torch.library.impl(lib, "chunk_cat", "CUDA")
+def chunk_cat(tensors, dim, num_chunks):
+    return torch._chunk_cat(tensors, dim, num_chunks)
+
+
+
 @torch.no_grad()
 def foreach_all_gather(
     fsdp_params: List[FSDPParam],
@@ -349,9 +361,14 @@ def foreach_reduce_scatter_copy_in(
     world_size: int,
 ) -> None:
     reduce_scatter_input = reduce_scatter_input.view(world_size, -1)
-    torch._chunk_cat(
-        unsharded_grads, dim=0, num_chunks=world_size, out=reduce_scatter_input
-    )
+    if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        torch._chunk_cat(
+            unsharded_grads, dim=0, num_chunks=world_size, out=reduce_scatter_input
+        )
+    else:
+        out = torch.ops.fsdp.chunk_cat(unsharded_grads, dim=0, num_chunks=world_size)
+        with torch.no_grad():
+            reduce_scatter_input.copy_(out)
 
 
 def _get_all_gather_input_metadatas(

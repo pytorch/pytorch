@@ -22,6 +22,20 @@ def get_users_from_unfused_nodes(snode):
         return snode.users
 
 
+def _collect_reads(snode):
+    if isinstance(snode, scheduler._BaseGroupedSchedulerNode):
+        return [dep for snode in snode.snodes for dep in snode.read_writes.reads]
+    else:
+        return snode.read_writes.reads
+
+
+def _collect_writes(snode):
+    if isinstance(snode, scheduler._BaseGroupedSchedulerNode):
+        return [dep for snode in snode.snodes for dep in snode.read_writes.writes]
+    else:
+        return snode.read_writes.writes
+
+
 def raise_last_usage(
     name_to_fused_node: Dict[str, "scheduler.BaseSchedulerNode"], graph_inputs: Dict[str, "Buffer"], snodes: List["scheduler.BaseSchedulerNode"]
 ) -> List["scheduler.BaseSchedulerNode"]:
@@ -35,16 +49,21 @@ def raise_last_usage(
     If we found a consumer node of current node that satisfies the above conditions, we can schedule it right after the current node.
     After moving these consumer nodes up, we are able to immediately release the memory of their last-usage input args.
     """
+
     write_map = defaultdict(set)  # bufX -> set of nodes that write to bufX (including itself)
     node_to_input_prev_writes = defaultdict(set)  # nodeY -> set of writes nodes to nodeY's input args before nodeY
     for snode in snodes:
-        for dep in snode.read_writes.writes:
+        for dep in _collect_writes(snode):
             write_map[dep.name].add(snode.get_name())
         if isinstance(snode.node, ir.ResizeStorageBytes):
             write_map[snode.node.resized_buf_name].add(snode.get_name())
-        for dep in snode.read_writes.reads:
+        for dep in _collect_reads(snode):
             node_to_input_prev_writes[snode].update(write_map[dep.name])
             node_to_input_prev_writes[snode].discard(snode.get_name())
+            if isinstance(snode, scheduler._BaseGroupedSchedulerNode):
+                for sub_snode in snode.snodes:
+                    node_to_input_prev_writes[sub_snode].update(write_map[dep.name])
+                    node_to_input_prev_writes[sub_snode].discard(sub_snode.get_name())
 
     def get_numel_by_name(buf_name):
         def _compute_elems(buf):
@@ -60,15 +79,10 @@ def raise_last_usage(
         else:
             snode = name_to_fused_node[buf_name]
             if isinstance(snode, scheduler.FusedSchedulerNode):
-                buf = None
-                for sub_snode in snode.snodes:
-                    if sub_snode.get_name() == buf_name:
-                        buf = sub_snode.node
-                        break
-                assert buf is not None
-            elif isinstance(snode, scheduler.BaseSchedulerNode):
+                return sum(_compute_elems(sub_snode.node) for sub_snode in snode.snodes)
+            else:
                 buf = snode.node
-            return _compute_elems(buf)
+                return _compute_elems(buf)
 
     new_order = []
     scheduled = set()
@@ -91,8 +105,8 @@ def raise_last_usage(
             # For now, we don't move users that are MultiOutput
             if isinstance(user.node.node, ir.MultiOutput):
                 continue
-            # For now, we don't move users that are FusedSchedulerNode or GroupedSchedulerNode
-            if isinstance(name_to_fused_node[user.node.get_name()], scheduler._BaseGroupedSchedulerNode):
+            # For now, we don't move users that are GroupedSchedulerNode
+            if isinstance(name_to_fused_node[user.node.get_name()], scheduler.GroupedSchedulerNode):
                 continue
             # For now, we don't move users that have GroupedSchedulerNode as input
             if any((not x.name in graph_inputs and isinstance(name_to_fused_node[x.name], scheduler.GroupedSchedulerNode)) for x in user.node.read_writes.reads):
@@ -102,7 +116,7 @@ def raise_last_usage(
                 continue
             if (
                 all(prev_write in scheduled for prev_write in node_to_input_prev_writes[user.node])
-                and len(user.node.read_writes.writes) == 1 and list(user.node.read_writes.writes)[0].name == user.node.get_name()
+                # and len(user.node.read_writes.writes) == 1 and list(user.node.read_writes.writes)[0].name == user.node.get_name()
                 and (
                     # if raising the user node saves memory
                     get_numel_by_name(user.node.get_name()) < sum(get_numel_by_name(x_name) for x_name in user.node.last_usage)
@@ -127,7 +141,7 @@ def raise_primal_resize_zero_if_primal_is_unused(
     primal_to_reads = defaultdict(set)  # argX -> set of nodes that reads argX
     primal_resize_zero_nodes = []
     for snode in snodes:
-        for dep in snode.read_writes.reads:
+        for dep in _collect_reads(snode):
             if dep.name.startswith("arg"):
                 primal_to_reads[dep.name].add(snode.get_name())
     for snode in snodes:
