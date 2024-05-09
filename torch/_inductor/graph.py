@@ -1659,7 +1659,10 @@ class GraphLowering(torch.fx.Interpreter):
         linemap = [(line_no, node.stack_trace) for line_no, node in linemap]
         key, path = PyCodeCache.write(code)
         mod = PyCodeCache.load_by_key_path(
-            key, path, linemap=linemap, attrs=self.constants
+            key,
+            path,
+            linemap=linemap,
+            attrs={**self.constants, **self.torchbind_constants},
         )
         self.cache_key = key
         self.cache_path = path

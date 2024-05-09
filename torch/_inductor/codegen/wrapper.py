@@ -523,52 +523,6 @@ class WrapperCodeGen(CodeGen):
             """
         )
 
-    def write_load_constants(self, result: IndentedBuffer) -> None:
-        """
-        Loads constants into the global scope so that the constants will be
-        loaded when the wrapper module is loaded
-        """
-        if len(V.graph.constants) == 0 and len(V.graph.torchbind_constants) == 0:
-            return
-
-        def add_torchbind_input(name, value):
-            import pickle
-
-            result.writeline(f"{name} = pickle.loads({pickle.dumps(value)!r})")
-
-        result.writelines(["", "", "def load_constants():"])
-        with result.indent():
-            if len(V.graph.constants) > 0:
-                result.splice(
-                    """
-                    from torch._dynamo.testing import rand_strided
-                    """,
-                    strip=True,
-                )
-
-                for name, value in V.graph.constants.items():
-                    # all the constants are global variables, that's why we need
-                    # these 'global var_name' lines
-                    result.writeline(f"global {name}")
-                    self.add_fake_input(
-                        result,
-                        name,
-                        value.size(),
-                        value.stride(),
-                        value.device,
-                        value.dtype,
-                    )
-
-            if len(V.graph.torchbind_constants) > 0:
-                result.writeline("import pickle")
-                for name, torchbind_obj in V.graph.torchbind_constants.items():
-                    # all the constants are global variables, that's why we need
-                    # these 'global var_name' lines
-                    result.writeline(f"global {name}")
-                    add_torchbind_input(name, torchbind_obj)
-
-        result.writelines(["", "load_constants()"])
-
     @cache_on_self
     def write_triton_header_once(self) -> None:
         self.header.splice(
@@ -840,8 +794,6 @@ class WrapperCodeGen(CodeGen):
 
         self.generate_end(result)
 
-        self.write_load_constants(result)
-
         self.add_benchmark_harness(result)
 
         return result.getvaluewithlinemap()
@@ -1037,17 +989,22 @@ class WrapperCodeGen(CodeGen):
         # define the variable and assign it None
         self.writeline(f"{node.get_name()} = None")
 
-    def add_fake_input(self, output, name, shape, stride, device, dtype):
-        output.writeline(
-            f"{name} = rand_strided("
-            f"{self.codegen_python_shape_tuple(shape)}, "
-            f"{self.codegen_python_shape_tuple(stride)}, "
-            f"device='{device}', dtype={dtype})"
-        )
-
     def benchmark_compiled_module(self, output):
+        def add_fake_input(name, shape, stride, device, dtype):
+            output.writeline(
+                f"{name} = rand_strided("
+                f"{self.codegen_python_shape_tuple(shape)}, "
+                f"{self.codegen_python_shape_tuple(stride)}, "
+                f"device='{device}', dtype={dtype})"
+            )
+
         def add_expr_input(name, val):
             output.writeline(f"{name} = {val}")
+
+        def add_torchbind_input(name, value):
+            import pickle
+
+            output.writeline(f"{name} = pickle.loads({pickle.dumps(value)!r})")
 
         output.writelines(
             ["", "", "def benchmark_compiled_module(times=10, repeat=10):"]
@@ -1060,6 +1017,22 @@ class WrapperCodeGen(CodeGen):
                 """,
                 strip=True,
             )
+
+            for name, value in V.graph.constants.items():
+                # all the constants are global variables, that's why we need
+                # these 'global var_name' lines
+                output.writeline(f"global {name}")
+                add_fake_input(
+                    name, value.size(), value.stride(), value.device, value.dtype
+                )
+
+            if len(V.graph.torchbind_constants) > 0:
+                output.writeline("import pickle")
+                for name, torchbind_obj in V.graph.torchbind_constants.items():
+                    # all the constants are global variables, that's why we need
+                    # these 'global var_name' lines
+                    output.writeline(f"global {name}")
+                    add_torchbind_input(name, torchbind_obj)
 
             for name, value in V.graph.graph_inputs.items():
                 if isinstance(value, sympy.Symbol) and isinstance(
@@ -1084,8 +1057,7 @@ class WrapperCodeGen(CodeGen):
                         V.graph.sizevars.size_hint(x, fallback=42)
                         for x in value.get_stride()
                     ]
-                    self.add_fake_input(
-                        output,
+                    add_fake_input(
                         name,
                         shape,
                         stride,

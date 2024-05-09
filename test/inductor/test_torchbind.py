@@ -33,7 +33,12 @@ class TestTorchbind(TestCase):
             lib_file_path = find_library_location("libtorchbind_test.so")
             torch.ops.load_library(str(lib_file_path))
 
-    def test_torchbind_inductor(self):
+    def get_exported_model(self):
+        """
+        Returns the ExportedProgram, example inputs, and result from calling the
+        eager model with those inputs
+        """
+
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -48,14 +53,20 @@ class TestTorchbind(TestCase):
                 return x + b
 
         m = M()
-        orig_res = m(torch.ones(2, 3))
+        inputs = (torch.ones(2, 3),)
+        orig_res = m(*inputs)
 
         # We can't directly torch.compile because dynamo doesn't trace ScriptObjects yet
         with enable_torchbind_tracing():
-            ep = torch.export.export(m, (torch.ones(2, 3),), strict=False)
-        compiled = torch._inductor.compile(ep.module(), (torch.ones(2, 3),))
+            ep = torch.export.export(m, inputs, strict=False)
 
-        new_res = compiled(torch.ones(2, 3))
+        return ep, inputs, orig_res
+
+    def test_torchbind_inductor(self):
+        ep, inputs, orig_res = self.get_exported_model()
+        compiled = torch._inductor.compile(ep.module(), inputs)
+
+        new_res = compiled(*inputs)
         self.assertTrue(torch.allclose(orig_res, new_res))
 
 
