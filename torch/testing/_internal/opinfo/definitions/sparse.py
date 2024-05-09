@@ -798,7 +798,7 @@ def _validate_sample_input_sparse_like_fns(op_info, sample, check_validate=False
         torch.sparse_csc,
         torch.sparse_bsr,
         torch.sparse_bsc,
-    }:
+    } and op_info.name not in {"zeros_like"}:
         if sample.kwargs.get("layout", sample.input.layout) != sample.input.layout:
             return ErrorInput(
                 sample,

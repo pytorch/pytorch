@@ -87,9 +87,7 @@ class BaseUserFunctionVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        return tx.inline_user_function_return(
-            self, list(self.self_args()) + list(args), kwargs
-        )
+        return tx.inline_user_function_return(self, [*self.self_args(), *args], kwargs)
 
     def call_hasattr(self, tx, name: str) -> VariableTracker:
         result = False
@@ -330,9 +328,11 @@ class UserMethodVariable(UserFunctionVariable):
             self.obj, variables.NNModuleVariable
         ):
             module_attr = getattr(self.fn, "__module__", "")
+            # inline torch.nn.utils.parametrize
             if (
                 module_attr is not None
                 and module_attr.startswith("torch.nn.")
+                and module_attr != "torch.nn.utils.parametrize"
                 or self.is_constant
             ):
                 return self.obj.call_method(
@@ -441,7 +441,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
     def get_function(self):
         if self.closure:
-            raise NotImplementedError()
+            raise NotImplementedError
         func = types.FunctionType(
             self.code.as_python_constant(),
             self.f_globals,

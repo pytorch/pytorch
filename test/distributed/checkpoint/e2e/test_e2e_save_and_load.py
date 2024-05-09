@@ -211,10 +211,18 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
     @with_comms
     @skip_if_lt_x_gpu(4)
     @with_temp_dir
-    def test_e2e_async(self):
-        self._run_e2e_test(compile=False, model_type=ModelType.FSDP, async_op=True)
+    @parametrize("cache_staged_state_dict", [False, True])
+    def test_e2e_async_cached(self, cache_staged_state_dict):
+        self._run_e2e_test(
+            compile=False,
+            model_type=ModelType.FSDP,
+            async_op=True,
+            cache_staged_state_dict=cache_staged_state_dict,
+        )
 
-    def _run_e2e_test(self, compile, model_type, async_op=False):
+    def _run_e2e_test(
+        self, compile, model_type, async_op=False, cache_staged_state_dict=False
+    ):
         model, optim = self._create_model(compile, ModelType.NONE)
         _train(model, optim, train_steps=2)
 
@@ -230,7 +238,10 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
         }
 
         if async_op:
-            f = saver.async_save(sd, checkpoint_id=self.temp_dir)
+            writer = DCP.FileSystemWriter(
+                self.temp_dir, cache_staged_state_dict=cache_staged_state_dict
+            )
+            f = saver.async_save(sd, storage_writer=writer)
             t = time.monotonic()
             while not f.done():
                 time.sleep(1)
@@ -351,8 +362,20 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
         self._verify_msd(model_sd, dist_msd)
 
         # another way
-        loaded_model_sd = _load_state_dict_from_keys("model", model_sd)
-        self._verify_msd(model_sd, loaded_model_sd)
+        loaded_model_sd = _load_state_dict_from_keys(
+            "model", checkpoint_id=self.temp_dir
+        )["model"]
+        self._verify_msd(model_sd, loaded_model_sd, offload_to_cpu=True)
+
+        loaded_optim_state = _load_state_dict_from_keys(
+            "optimizer.state", checkpoint_id=self.temp_dir
+        )["optimizer"]["state"]
+        self.assertNotIn("param_groups", loaded_optim_state)
+        for k, v in dist_optim.state_dict()["state"].items():
+            for optim_key in ["exp_avg", "exp_avg_sq", "step"]:
+                self._compare_tensor(
+                    loaded_optim_state[k][optim_key], v[optim_key], offload_to_cpu=True
+                )
 
 
 class TestNoCPU(DTensorTestBase):
