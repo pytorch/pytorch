@@ -1906,6 +1906,8 @@ def compile(model: Optional[Callable] = None, *,
         backend = _TorchCompileInductorWrapper(mode, options, dynamic)
     else:
         backend = _TorchCompileWrapper(backend, mode, options, dynamic)
+    backend.fullgraph = fullgraph
+    backend.disable = disable
 
     return torch._dynamo.optimize(backend=backend, nopython=fullgraph, dynamic=dynamic, disable=disable)(model)
 

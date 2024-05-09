@@ -437,6 +437,11 @@ fake_tensor_cache_crosscheck_enabled = (
 # WARNING: this is an experimental flag and is subject to change.
 _experimental_support_context_fn_in_torch_utils_checkpoint = False
 
+# This flag is used during forward compilation to prepare compile modified autograd nodes
+# for compiled autograd. To disable compiled autograd after the forward compilation, use the
+# torch._dynamo.compiled_autograd.disable() context manager instead
+compiled_autograd_enabled = False
+
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 

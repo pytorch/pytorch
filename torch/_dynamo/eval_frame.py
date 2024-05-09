@@ -321,6 +321,8 @@ class _TorchDynamoContext:
         self.cleanup_fns.clear()
 
     def __call__(self, fn):
+        # if isinstance(self, OptimizeContext):
+        #     breakpoint()
         # public api for compiler config/options
         def get_compiler_config():
             return self.compiler_config

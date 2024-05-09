@@ -1,5 +1,4 @@
 import contextlib
-import functools
 from typing import List, Optional, TYPE_CHECKING
 
 import torch
@@ -44,8 +43,8 @@ def maybe_clone(x):
 
 
 class AutogradCompilerInstance:
-    def __init__(self, compiler_fn) -> None:
-        self.compiler_fn = compiler_fn
+    def __init__(self) -> None:
+        self.compiler_fn = None
         self.stack = contextlib.ExitStack()
         self.close = self.stack.close
         self.shape_env = ShapeEnv()
@@ -199,6 +198,16 @@ class AutogradCompilerInstance:
             self.bind_tensors_to_proxies(input, proxies)
         return input
 
+    def accumulate_compiler_fns(self, backward_c_function):
+        compiler_fn = backward_c_function._compiled_autograd_compiler_fn
+        if self.compiler_fn is None:
+            self.compiler_fn = compiler_fn
+
+        if self.compiler_fn is not compiler_fn:
+            raise RuntimeError(
+                "Multiple compiled autograd backends detected. This is not supported."
+            )
+
     def end_capture(self, outputs):
         self.stack.close()
         self.fx_tracer.create_node(
@@ -222,7 +231,14 @@ class AutogradCompilerInstance:
             "compiled_autograd_graph",
             payload_fn=lambda: graph.print_readable(print_output=False),
         )
-        return self.compiler_fn(graph)
+        assert self.compiler_fn
+        return torch.compile(
+            graph,
+            backend=self.compiler_fn,
+            fullgraph=self.compiler_fn.fullgraph,
+            dynamic=self.compiler_fn.dynamic,
+            options=self.compiler_fn.kwargs,
+        )
 
     def reorder_accumulate_grad_nodes(self):
         """
@@ -269,53 +285,25 @@ class AutogradCompilerInstance:
         set_stack_trace(new_stack_trace)
 
 
-compiled_autograd_enabled = False
-
-# We may have code like:
-# with enable(compiler_fn):
-#   ...
-#   with disable():
-#     ...
-#   ...
-# The disable() call just want to disable compiled autograd temporarily.
-# But overall the feature is enabled.
-#
-# The code covered by the disable context manager has no way to know if
-# compiled autograd is overall eanbled. Use another variable
-# compiled_autograd_enabled_count to indicate how many times compiled
-# autograd has been enabled in the call stack for this purpose.
-compiled_autograd_enabled_count = 0
-
-
-@contextlib.contextmanager
-def enable(compiler_fn):
+def initialize():
+    assert torch._dynamo.config.compiled_autograd_enabled
+    torch._C._dynamo.compiled_autograd.clear_autograd_compiler()
     prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
-        functools.partial(AutogradCompilerInstance, compiler_fn)
+        AutogradCompilerInstance
     )
+    assert not prior
     torch._C._dynamo.compiled_autograd.set_verbose_logging(
         snapshot_verbose_logging_enabled()
     )
-    global compiled_autograd_enabled, compiled_autograd_enabled_count
-    compiled_autograd_enabled = True
-    compiled_autograd_enabled_count += 1
-    try:
-        with torch.autograd.set_multithreading_enabled(False):
-            yield
-    finally:
-        compiled_autograd_enabled_count -= 1
-        if not prior:
-            compiled_autograd_enabled = False
-        torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
 
 
 @contextlib.contextmanager
 def disable():
+    # Note: this does not disable compiler_fn installation on torch.compile created autograd nodes during forward compilation
+    # controlled by `torch._dynamo.config.compiled_autograd_enabled`
     prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(None)
-    global compiled_autograd_enabled
-    compiled_autograd_enabled = False
     try:
         yield
     finally:
         if prior:
-            compiled_autograd_enabled = True
-        torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
+            torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)

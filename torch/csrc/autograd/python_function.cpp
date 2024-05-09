@@ -286,6 +286,11 @@ auto PyNode::name() const -> std::string {
   return name;
 }
 
+auto PyNode::has_compiler_fn() const -> bool {
+  auto f = (THPFunction*)obj;
+  return f->_compiled_autograd_compiler_fn != nullptr;
+}
+
 auto PyNode::compiled_autograd_should_lift() const -> bool {
   pybind11::gil_scoped_acquire gil;
   static PyObject* attr_name =
@@ -367,6 +372,13 @@ variable_list PyNode::apply_with_saved(
   saved.before(f->input_info);
   f->compiled_autograd_tracing = true;
   variable_list result;
+  if (has_compiler_fn()) {
+    // forward was torch.compile'd with compiled autograd
+    PyObject* r = PyObject_CallMethod(
+        saved.get_py_compiler(), "accumulate_compiler_fns", "O", obj);
+    if (r == nullptr)
+      throw python_error();
+  }
   if (!compiled_autograd_should_lift()) {
     if (_backward_state_idx.has_value()) {
       PyObject* r = PyObject_CallMethod(
@@ -1555,6 +1567,33 @@ int THPFunction_set_compiled_autograd_backward_state(
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
+PyObject* THPFunction_get_compiled_autograd_compiler_fn(
+    PyObject* _self,
+    void* _unused) {
+  HANDLE_TH_ERRORS
+  auto self = (THPFunction*)_self;
+  PyObject* compiler_fn = self->_compiled_autograd_compiler_fn;
+  if (compiler_fn == nullptr) {
+    compiler_fn = Py_None;
+  }
+  Py_INCREF(compiler_fn);
+  return compiler_fn;
+  END_HANDLE_TH_ERRORS
+}
+
+int THPFunction_set_compiled_autograd_compiler_fn(
+    PyObject* _self,
+    PyObject* compiler_fn,
+    void* _unused) {
+  HANDLE_TH_ERRORS
+  auto self = (THPFunction*)_self;
+  TORCH_INTERNAL_ASSERT(self->_compiled_autograd_compiler_fn == nullptr);
+  Py_INCREF(compiler_fn);
+  self->_compiled_autograd_compiler_fn = compiler_fn;
+  return 0;
+  END_HANDLE_TH_ERRORS_RET(-1)
+}
+
 PyObject* THPFunction_raw_saved_tensors(THPFunction* self, void* _unused) {
   HANDLE_TH_ERRORS
   // User tries to access saved variables after they have been freed
@@ -1738,6 +1777,11 @@ static struct PyGetSetDef THPFunction_properties[] = {
     {"_compiled_autograd_backward_state",
      (getter)THPFunction_get_compiled_autograd_backward_state,
      (setter)THPFunction_set_compiled_autograd_backward_state,
+     nullptr,
+     nullptr},
+    {"_compiled_autograd_compiler_fn",
+     (getter)THPFunction_get_compiled_autograd_compiler_fn,
+     (setter)THPFunction_set_compiled_autograd_compiler_fn,
      nullptr,
      nullptr},
     {nullptr}};

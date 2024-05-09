@@ -48,6 +48,8 @@ struct PyNode : public Node {
       const variable_list& inputs,
       SwapSavedVariables& saved) override;
 
+  bool has_compiler_fn() const override;
+
   bool compiled_autograd_should_lift() const;
 
   // THPFunction this Function is wrapping.  Owning!
@@ -126,6 +128,7 @@ struct THPFunction {
   // should call the original FX graph rather than compiling.
   bool compiled_autograd_tracing;
   PyObject* compiled_autograd_backward_state;
+  PyObject* _compiled_autograd_compiler_fn;
   std::vector<c10::SymInt> compiled_autograd_symints;
 
   std::vector<torch::autograd::VariableInfo> output_info;

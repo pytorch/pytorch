@@ -1152,7 +1152,7 @@ inline static uint64_t compute_min_topological_nr(const edge_list& outputs) {
 auto Engine::compute_dependencies(
     Node* root,
     GraphTask& task,
-    uint64_t min_topo_nr) -> void {
+    uint64_t min_topo_nr) -> bool {
   // Computes the number of dependencies for each function which requires grad
   std::vector<Node*> queue{root};
   bool will_use_accelerator = false;
@@ -1160,6 +1160,7 @@ auto Engine::compute_dependencies(
   // Queue contains all nodes that will start propagating gradients.
   // We no longer have to expand functions that don't require grad.
   auto& dependencies = task.dependencies_;
+  bool use_compiled_autograd = false;
   while (!queue.empty()) {
     auto fn = queue.back();
     queue.pop_back();
@@ -1169,6 +1170,11 @@ auto Engine::compute_dependencies(
     if (!will_use_accelerator) {
       will_use_accelerator = fn->stream().has_value();
     }
+    if (fn->has_compiler_fn()) {
+      // fn's forward was torch.compile'd with compiled autograd enabled
+      use_compiled_autograd = true;
+    }
+
     for (const auto& edge : fn->next_edges()) {
       if (auto next_ptr = edge.function.get()) {
         dependencies[next_ptr] += 1;
@@ -1185,6 +1191,8 @@ auto Engine::compute_dependencies(
     // leaf_streams.
     task.stash_current_streams();
   }
+
+  return use_compiled_autograd;
 }
 
 auto Engine::execute(
@@ -1248,14 +1256,18 @@ auto Engine::execute(
 
   auto min_topo_nr = compute_min_topological_nr(outputs);
   // Now compute the dependencies for all executable functions
-  compute_dependencies(graph_root.get(), *graph_task, min_topo_nr);
+  bool use_compiled_autograd =
+      compute_dependencies(graph_root.get(), *graph_task, min_topo_nr);
 
   if (!outputs.empty()) {
     graph_task->init_to_execute(
         *graph_root, outputs, accumulate_grad, min_topo_nr);
   }
 
-  if (compiled_autograd != nullptr) {
+  std::cout << "c++ autograd engine, compiled_autograd=" << compiled_autograd
+            << ", use_compiled_autograd=" << use_compiled_autograd
+            << ", compiled_autograd=" << compiled_autograd << std::endl;
+  if (compiled_autograd != nullptr && use_compiled_autograd) {
     // see [Note: Compiled Autograd]
     TORCH_CHECK(
         !create_graph, "compiled_autograd does not support create_graph");

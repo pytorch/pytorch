@@ -610,7 +610,7 @@ class TracingContext:
             "TracingContext.get() must be called within an ongoing trace."
         )
 
-    def __init__(self, fake_mode):
+    def __init__(self, fake_mode, **kwargs):
         self.guards_context = GuardsContext()
         self.module_context = ModuleContext()
         self.global_context = GlobalContext()
@@ -651,6 +651,10 @@ class TracingContext:
         # meta on the first invocation
         # see note: [Returning Fake Tensors on First AOT Autograd Call]
         self.fakify_first_call = False
+
+        # Contains the wrapper used for this Dynamo instance.
+        # _TorchCompileInductorWrapper or _TorchCompileWrapper
+        self.torch_compile_wrapper = kwargs.get("torch_compile_wrapper", None)
 
     def clear(self):
         # Look at the note in output_graph.py in function `save_global_state`

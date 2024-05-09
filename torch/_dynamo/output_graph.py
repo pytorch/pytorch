@@ -304,7 +304,9 @@ class OutputGraph:
                 # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
                 allow_non_fake_inputs=True if self.export else False,
             )
-        self.tracing_context: TracingContext = TracingContext(fake_mode)
+        self.tracing_context: TracingContext = TracingContext(
+            fake_mode, torch_compile_wrapper=compiler_fn
+        )
         self.init_ambient_guards()
 
         # Map each tensor id to a list of sources. This is necessary because
