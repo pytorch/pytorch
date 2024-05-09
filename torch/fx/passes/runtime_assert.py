@@ -11,7 +11,8 @@ else:
 import torch
 import torch.utils._pytree as pytree
 from torch import fx
-from torch.fx._utils import get_node_context, lazy_format_graph_code
+from torch.fx._compatibility import compatibility
+from torch.fx._utils import lazy_format_graph_code
 from torch.fx.experimental.sym_node import SymNode
 from torch.fx.graph_module import GraphModule
 
@@ -19,7 +20,7 @@ log = logging.getLogger(__name__)
 graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
 
 
-def get_example_value(node: fx.Node) -> Optional[str]:
+def _get_example_value(node: fx.Node) -> Optional[str]:
     """
     Get the example value key for a node, since dynamo uses "example_value"
     while non-strict export uses "val.
@@ -32,6 +33,7 @@ def get_example_value(node: fx.Node) -> Optional[str]:
         return None
 
 
+@compatibility(is_backward_compatible=True)
 def insert_deferred_runtime_asserts(
     gm: GraphModule,
     shape_env: ShapeEnv,
@@ -114,7 +116,7 @@ def insert_deferred_runtime_asserts(
                     # useless right now
                     (
                         res,
-                        f"Runtime assertion failed for expression {ra.expr} on node '{res}'\nMore context: {get_node_context(res)}",
+                        f"Runtime assertion failed for expression {ra.expr} on node '{res}'",
                     ),
                 )
 
@@ -131,7 +133,7 @@ def insert_deferred_runtime_asserts(
             # arguments
             if (
                 node in placeholders
-                and (example_value := get_example_value(node)) is not None
+                and (example_value := _get_example_value(node)) is not None
             ):
 
                 def match_symbol(symint, cb):
@@ -261,7 +263,7 @@ def insert_deferred_runtime_asserts(
                 if i0 in shape_env.size_like:
                     if export:
                         graph.call_function(
-                            torch.ops.aten.sym_constrain_range_for_size,
+                            torch.ops.aten.sym_constrain_range_for_size.default,
                             (symbol_to_proxy[i0].node,),
                         )
                     else:
@@ -281,33 +283,23 @@ def insert_deferred_runtime_asserts(
                         except TypeError:
                             return None
 
-                    ge_check = graph.call_function(
-                        operator.ge,
-                        (
-                            symbol_to_proxy[i0].node,
-                            convert(vr.lower),
-                        ),
-                    )
-                    le_check = graph.call_function(
-                        operator.le,
-                        (
-                            symbol_to_proxy[i0].node,
-                            convert(vr.upper),
-                        ),
-                    )
-                    graph.call_function(
-                        torch.ops.aten._assert_scalar.default,
-                        (
-                            ge_check,
-                            f"Runtime assertion failed for {symbol_to_proxy[i0].node} >= {vr.lower}",
-                        ),
-                    )
-                    graph.call_function(
-                        torch.ops.aten._assert_scalar.default,
-                        (
-                            le_check,
-                            f"Runtime assertion failed for {symbol_to_proxy[i0].node} <= {vr.upper}",
-                        ),
-                    )
+                    if export:
+                        graph.call_function(
+                            torch.ops.aten.sym_constrain_range.default,
+                            (symbol_to_proxy[i0].node,),
+                            {
+                                "min": convert(vr.lower),
+                                "max": convert(vr.upper),
+                            },
+                        )
+                    else:
+                        graph.call_function(
+                            torch._constrain_as_value,
+                            (
+                                symbol_to_proxy[i0].node,
+                                convert(vr.lower),
+                                convert(vr.upper),
+                            ),
+                        )
 
                 add_runtime_asserts(ras)

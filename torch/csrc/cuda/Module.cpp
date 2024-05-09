@@ -913,8 +913,11 @@ static void registerCudaDeviceProperties(PyObject* module) {
   // hipified to hipUUID which is defined in hip_runtime_api.h
   py::class_<CUuuid>(m, "_CUuuid")
       .def_property_readonly(
-          "bytes", [](const CUuuid& uuid) { return py::bytes(uuid.bytes); })
-      .def("__repr__", [](const CUuuid& uuid) {
+          "bytes",
+          [](const CUuuid& uuid) {
+            return std::vector<uint8_t>(uuid.bytes, uuid.bytes + 16);
+          })
+      .def("__str__", [](const CUuuid& uuid) {
         // UUIDs are a 128-bit label. CUDA and HIP store this as char[16].
         // For string representation, the code here expands this to
         // 8-4-4-4-12 hex format, so each byte becomes 2 hex characters.
