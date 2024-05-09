@@ -318,6 +318,13 @@ _efficient_attention_backward(
     grad_bias = at::empty(sz, bias->options())
                     .slice(/*dim=*/-1, /*start=*/0, /*end=*/lastDim);
   }
+  else {
+    // This function requires returnning a valid tensor for grad_bias
+    // even though bias_requires_grad is false, so create a fake tensor
+    // to make the framework happy.
+    grad_bias = at::empty({1});
+  }
+
   at::Tensor workspace;
 
   const bool use_dropout = std::fpclassify(dropout_p) != FP_ZERO;
@@ -645,7 +652,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
     const at::Tensor& query,
     const at::Tensor& key,
     const at::Tensor& value,
-    const at::Tensor& attn_bias,
+    const c10::optional<Tensor>& attn_bias,
     const at::Tensor& out,
     const at::Tensor& logsumexp,
     const at::Tensor& philox_seed,
@@ -669,7 +676,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
   // This is needed because SaveVariable automatically converts
   // c10::optional to undefined tensor
   c10::optional<Tensor> kernel_bias;
-  if (attn_bias.defined()) {
+  if (attn_bias.has_value() && attn_bias->defined()) {
     kernel_bias = attn_bias;
   }
   // Will add with signauter changes for dropout and bias
