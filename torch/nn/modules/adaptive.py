@@ -20,7 +20,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
 
     As described in
     `Efficient softmax approximation for GPUs by Edouard Grave, Armand Joulin,
-    Moustapha Cissé, David Grangier, and Hervé Jégou
+    Moustapha Ciss\u00e9, David Grangier, and Herv\u00e9 J\u00e9gou
     <https://arxiv.org/abs/1609.04309>`__.
 
     Adaptive softmax is an approximate strategy for training models with large

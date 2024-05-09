@@ -68,6 +68,27 @@ to ``torchrun`` follow these steps:
     |                                                       |                                                    |
     +-------------------------------------------------------+----------------------------------------------------+
 
+.. versionchanged:: 2.0.0
+
+    The launcher will pass the ``--local-rank=<rank>`` argument to your script.
+    From PyTorch 2.0.0 onwards, the dashed ``--local-rank`` is preferred over the
+    previously used underscored ``--local_rank``.
+
+    For backward compatibility, it may be necessary for users to handle both
+    cases in their argument parsing code. This means including both ``"--local-rank"``
+    and ``"--local_rank"`` in the argument parser. If only ``"--local_rank"`` is
+    provided, the launcher will trigger an error: "error: unrecognized arguments:
+    --local-rank=<rank>". For training code that only supports PyTorch 2.0.0+,
+    including ``"--local-rank"`` should be sufficient.
+
+    ::
+
+        >>> # xdoctest: +SKIP
+        >>> import argparse
+        >>> parser = argparse.ArgumentParser()
+        >>> parser.add_argument("--local-rank", "--local_rank", type=int)
+        >>> args = parser.parse_args()
+
 The aformentioned changes suffice to migrate from ``torch.distributed.launch`` to ``torchrun``.
 To take advantage of new features such as elasticity, fault-tolerance, and error reporting of ``torchrun``
 please refer to:
@@ -478,7 +499,7 @@ def get_args_parser() -> ArgumentParser:
         "--monitor_interval",
         action=env,
         type=float,
-        default=5,
+        default=0.1,
         help="Interval, in seconds, to monitor the state of workers.",
     )
     parser.add_argument(
@@ -781,7 +802,7 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
             ranks = set(map(int, args.local_ranks_filter.split(",")))
             assert ranks
         except Exception as e:
-            raise Exception(
+            raise ValueError(
                 "--local_ranks_filter must be a comma-separated list of integers e.g. --local_ranks_filter=0,1,2"
             ) from e
 
