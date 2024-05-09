@@ -2315,7 +2315,6 @@ class InstructionTranslator(InstructionTranslatorBase):
                 )
                 argnames_ctx_vars.append((name, target_values))
                 # Replace the local with the context class
-                cg.append_output(create_instruction("LOAD_FAST", argval=name))
                 ctx.reconstruct_type(cg)
                 cg.append_output(create_instruction("STORE_FAST", argval=name))
 
@@ -2575,19 +2574,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if tracer.f_globals is parent.f_globals:
             # Merge symbolic_globals back if parent and child are in the same namespace
             parent.symbolic_globals.update(tracer.symbolic_globals)
-
-        # Guard on the ID of the inlined function. If user patches the function,
-        # this will force a recompile.
-        # To prevent overguarding, do not guard on functions from "torch.nn."
-        # namespace like _call_impl from nn.Module. Users mostly patch `forward`
-        # method.
-        if (
-            isinstance(func, UserFunctionVariable)
-            and func.source
-            and func.fn.__module__
-            and not func.fn.__module__.startswith(("torch.nn", "torch.ao"))
-        ):
-            install_guard(func.source.make_guard(GuardBuilder.CLOSURE_MATCH))
 
         parent.inconsistent_side_effects |= tracer.inconsistent_side_effects
 

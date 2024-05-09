@@ -1435,15 +1435,13 @@ class GuardBuilder(GuardBuilderBase):
 
     def FUNCTION_MATCH(self, guard: Guard):
         """things like torch.add and user defined functions"""
-        self.ID_MATCH(guard)
+        return self.ID_MATCH(guard)
 
     def CLOSURE_MATCH(self, guard: Guard):
         """matches a closure by __code__ id."""
         val = self.get(guard.name)
         # Strictly only want user-defined functions
-        if type(val) in (types.FunctionType, types.MethodType) and hasattr(
-            val, "__code__"
-        ):
+        if type(val) == types.FunctionType and hasattr(val, "__code__"):
             self._guard_on_attribute(guard, "__code__", GuardBuilder.HASATTR)
             self._guard_on_attribute(guard, "__code__", GuardBuilder.FUNCTION_MATCH)
         else:
@@ -1717,7 +1715,12 @@ class GuardBuilder(GuardBuilderBase):
         # For tensors that are part of the Dynamo extracted Fx graph module, an
         # ID_MATCH suffices. Once we turn on inline_inbuilt_nn_modules, these
         # will be lifted as inputs and have a TENSOR_MATCH guard.
-        if guard.is_nn_module() or match_on_id_for_tensor(guard):
+        # For FSDP modules, we must use TENSOR_MATCH because FSDP module is
+        # traced using UnspecializedNNModuleVariable and therefore lifts the
+        # params as inputs.
+        if (
+            guard.is_nn_module() and not guard.is_fsdp_module()
+        ) or match_on_id_for_tensor(guard):
             self.ID_MATCH(guard)
         else:
             if isinstance(value, TensorWeakRef):
