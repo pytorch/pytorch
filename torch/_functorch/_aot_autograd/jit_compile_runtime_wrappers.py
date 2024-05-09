@@ -17,13 +17,7 @@ import torch
 import torch.utils.dlpack
 from torch import Tensor
 from torch._dynamo.utils import lazy_format_graph_code
-from torch._guards import (
-    compile_context,
-    CompileContext,
-    detect_fake_mode,
-    tracing,
-    TracingContext,
-)
+from torch._guards import compile_context, CompileContext, tracing, TracingContext
 from torch._logging import getArtifactLogger, trace_structured
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses import FakeTensor
@@ -143,9 +137,27 @@ def aot_dispatch_base(
         flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
     )
 
+    fakified_out_wrapper = FakifiedOutWrapper()
+    (
+        fw_module,
+        updated_flat_args,
+        aot_config,
+        fw_metadata,
+    ) = fakified_out_wrapper.pre_compile(
+        fw_module, updated_flat_args, aot_config, fw_metadata=fw_metadata
+    )
+    functionalized_rng_wrapper = FunctionalizedRngRuntimeWrapper()
+    (
+        fw_module,
+        updated_flat_args,
+        aot_config,
+        fw_metadata,
+    ) = functionalized_rng_wrapper.pre_compile(
+        fw_module, updated_flat_args, aot_config, fw_metadata=fw_metadata
+    )
+
     disable_amp = torch._C._is_any_autocast_enabled()
     context = torch._C._DisableAutocast if disable_amp else nullcontext
-    fakified_out = None
 
     with context(), track_graph_compiling(aot_config, "inference"):
         compiler = (
@@ -153,11 +165,6 @@ def aot_dispatch_base(
             if aot_config.inference_compiler is not None
             else aot_config.fw_compiler
         )
-        if config.functionalize_rng_ops:
-            # Add the seed and offset as example inputs to pass to the compiler
-            fake_mode = detect_fake_mode()
-            seed, offset = CUDARngStateHelper.get_torch_state_as_tuple(fake_mode)
-            updated_flat_args.extend([seed, offset])
 
         if tracing_context := torch._guards.TracingContext.try_get():
             tracing_context.fw_metadata = (
@@ -169,11 +176,8 @@ def aot_dispatch_base(
         with TracingContext.report_output_strides() as fwd_output_strides:
             compiled_fw = compiler(fw_module, updated_flat_args)
 
-        # see note: [Returning Fake Tensors on First AOT Autograd Call]
-        if tracing_context and tracing_context.fakify_first_call:
-            fakified_out = _compute_output_meta_with_inductor_strides(
-                fw_module, fwd_output_strides
-            )
+        if fakified_out_wrapper.needs_post_compile:
+            fakified_out_wrapper.set_fwd_output_strides(fwd_output_strides)
 
     # However, RuntimeWrapper does not expect the rng offsets in the
     # output. So, we have to create another wrapper and take out the offset. As
@@ -182,10 +186,10 @@ def aot_dispatch_base(
         compiled_fw = make_boxed_func(compiled_fw)
 
     # Create a wrapper to set up the rng functionalize and fakified out bits
-    compiled_fw = FunctionalizedRngRuntimeWrapper().post_compile(
+    compiled_fw = functionalized_rng_wrapper.post_compile(
         compiled_fw, aot_config, fw_metadata=fw_metadata
     )
-    compiled_fw = FakifiedOutWrapper(fakified_out=fakified_out).post_compile(
+    compiled_fw = fakified_out_wrapper.post_compile(
         compiled_fw,
         aot_config,
         fw_metadata=fw_metadata,
@@ -427,15 +431,28 @@ def aot_dispatch_autograd(
             # flat_args at this point might still be subclasses-
             # make sure to pass the unwrapped fake tensors into the compiler!
             adjusted_flat_args = joint_inputs[0]
-            if config.functionalize_rng_ops:
-                # Update example inputs for the fw_compiler
-                fake_mode = detect_fake_mode()
-                seed, offset = CUDARngStateHelper.get_torch_state_as_tuple(fake_mode)
-                adjusted_flat_args.extend([seed, offset])
-                # We are not clearing flat_args here because
-                # 1) There is a check in the debug compiler at the end
-                # 2) It does not matter as these are fake tensors
 
+            fakified_out_wrapper = FakifiedOutWrapper()
+            (
+                fw_module,
+                adjusted_flat_args,
+                aot_config,
+                fw_metadata,
+            ) = fakified_out_wrapper.pre_compile(
+                fw_module, adjusted_flat_args, aot_config, fw_metadata=fw_metadata
+            )
+
+            functionalized_rng_wrapper = FunctionalizedRngRuntimeWrapper(
+                return_new_outs=False
+            )
+            (
+                fw_module,
+                adjusted_flat_args,
+                aot_config,
+                fw_metadata,
+            ) = functionalized_rng_wrapper.pre_compile(
+                fw_module, adjusted_flat_args, aot_config, fw_metadata=fw_metadata
+            )
             if tracing_context := torch._guards.TracingContext.try_get():
                 tracing_context.fw_metadata = inner_meta
 
@@ -445,11 +462,8 @@ def aot_dispatch_autograd(
             if not hasattr(compiled_fw_func, "_boxed_call"):
                 compiled_fw_func = make_boxed_func(compiled_fw_func)
 
-            # see note: [Returning Fake Tensors on First AOT Autograd Call]
-            if tracing_context and tracing_context.fakify_first_call:
-                fakified_out = _compute_output_meta_with_inductor_strides(
-                    fw_module, fwd_output_strides
-                )
+            if fakified_out_wrapper.needs_post_compile:
+                fakified_out_wrapper.set_fwd_output_strides(fwd_output_strides)
 
             compiled_fw_func = AOTDispatchSubclassWrapper(
                 fw_only=None,
@@ -462,13 +476,10 @@ def aot_dispatch_autograd(
                 fw_metadata=fw_metadata,
             )
 
-            compiled_fw_func = FunctionalizedRngRuntimeWrapper(
-                return_new_outs=False
-            ).post_compile(compiled_fw_func, aot_config, fw_metadata=fw_metadata)
-
-            compiled_fw_func = FakifiedOutWrapper(
-                fakified_out=fakified_out,
-            ).post_compile(
+            compiled_fw_func = functionalized_rng_wrapper.post_compile(
+                compiled_fw_func, aot_config, fw_metadata=fw_metadata
+            )
+            compiled_fw_func = fakified_out_wrapper.post_compile(
                 compiled_fw_func,
                 aot_config,
                 fw_metadata=fw_metadata,
