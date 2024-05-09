@@ -1548,6 +1548,9 @@ bool IsListConstructIntType(const Value* v) {
   return false;
 }
 
+// Check if all graph inputs are static and allow a cached value to return.
+// This is called for each node in an export, and the return does not change
+// since the inputs to the graph do not change.
 bool AllGraphInputsStaticWithCaching(const Graph* g) {
   auto maybe_is_static = ConstantValueMap::GetAllGraphInputsStatic();
   if (maybe_is_static.has_value()) {
