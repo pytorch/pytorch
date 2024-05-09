@@ -114,8 +114,14 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out) {
     cub::DeviceReduce::Sum(temp_storage.get(), temp_storage_bytes, itr, static_cast<int64_t*>(num_nonzeros.get()), N, stream);
     int64_t num_nonzeros_h;
     at::cuda::memcpy_and_sync(&num_nonzeros_h, num_nonzeros.get(), sizeof(int64_t), cudaMemcpyDeviceToHost, stream);
+    //expected output size is num_nonzeros x ndim
+    //we are producing output with size {num_nonzeros, ndim} and strides {1, num_nonzeros} (that is, transposed ndim x num_nonzeros output)
+    //we are able to directly use passed output with this size and strides, and we can also (per contract)
+    //resize passed output with incorrect sizes anyway we want.
+    //However, out with correct sizes and incorrect strides will have to be copied to from the intermediate we've produced.
     bool need_to_copy = out.dim() == 2 && out.sizes()[0] == num_nonzeros_h && out.sizes()[1] == self.dim() && !out.t().is_contiguous();
     at::Tensor out_temp = need_to_copy ? Tensor(at::detail::empty_cuda({self.dim(), num_nonzeros_h}, out.options())) : out.resize_({self.dim(), num_nonzeros_h});
+    //Scalars are expected to produce output of size (1,0), so we can't write to it
     if (self.dim() > 0) {
         cub::CountingInputIterator<int64_t> counting_itr(0);
         temp_storage_bytes = 0;
