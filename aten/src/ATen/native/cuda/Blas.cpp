@@ -989,7 +989,8 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   else
 #endif
   {
-#if defined(USE_ROCM)
+#if defined(USE_ROCM) && ROCM_VERSION >= 60200
+  // hipBlasLT requires scaleD to be set to something in order to use AMAX
     auto dummy_options = TensorOptions().dtype(kFloat).device(kCUDA);
     auto dummy_scale = at::ones(1, dummy_options);
 #endif
@@ -1012,7 +1013,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
         args.result->data_ptr(),
 #if !defined(USE_ROCM)
         scale_result ? scale_result->data_ptr() : nullptr,
-#else
+#elif defined(USE_ROCM) && ROCM_VERSION >= 60200
         scale_result ? scale_result->data_ptr() : dummy_scale.data_ptr(),
 #endif
         args.result_ld,
@@ -1021,8 +1022,8 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
         use_fast_accum);
   }
 
-#if defined(USE_ROCM)
-  // rocm's hipblaslt does not yet support amax, so calculate separately
+#if defined(USE_ROCM) && ROCM_VERSION >= 60000 && ROCM_VERSION < 60200
+  // ROCm's hipBLASLt does not support amax before 6.2, so calculate separately
   amax = at::max(at::abs(out.to(kFloat)));
 #endif
 
