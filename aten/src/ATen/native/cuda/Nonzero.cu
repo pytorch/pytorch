@@ -94,8 +94,6 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE static cudaError_t dispatch_select_if_wra
                          stream);
 }
 
-DECLARE_LAUNCH_WRAPPER(cub::DeviceSelect::If, select_if);
-DECLARE_LAUNCH_WRAPPER(dispatch_select_if_wrapper, dispatch_select_if);
 
 } // anonymous namespace
 
