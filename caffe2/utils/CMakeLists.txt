@@ -1,4 +1,4 @@
-if(NOT BUILD_CAFFE2 OR INTERN_BUILD_MOBILE)
+if(INTERN_BUILD_MOBILE)
   list(APPEND Caffe2_CPU_SRCS
     utils/string_utils.cc
     utils/threadpool/ThreadPool.cc
@@ -11,7 +11,7 @@ if(NOT BUILD_CAFFE2 OR INTERN_BUILD_MOBILE)
     )
   endif()
 
-  if(NOT BUILD_CAFFE2 AND NOT INTERN_BUILD_MOBILE)
+  if(NOT INTERN_BUILD_MOBILE)
     list(APPEND Caffe2_CPU_SRCS
       utils/proto_wrap.cc
     )
