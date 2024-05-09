@@ -84,7 +84,7 @@ class CompilerWrapper:
         """
         return flat_fn, flat_args, fw_metadata
 
-    def post_compile(self, compiled_fn, aot_config, *, fw_metadata):
+    def post_compile(self, compiled_fn, aot_config, *, fw_metadata) -> Callable:
         """
         Given an output of the compiler, wrap it with information received from prologue.
         Args:
