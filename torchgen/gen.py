@@ -2397,8 +2397,8 @@ def gen_source_files(
                 extra_cuda_headers if is_cuda_dispatch_key(dispatch_key) else ""
             )
 
+            # header files were checked in for ABI-compatiblilty checking
             header_file_name = f"c_shim_{dispatch_key.lower()}.h"
-            cpp_file_name = f"c_shim_{dispatch_key.lower()}.cpp"
             new_header = gen_aoti_c_shim(
                 fallback_native_functions,
                 dispatch_key,
@@ -2406,22 +2406,10 @@ def gen_source_files(
                 header=True,
                 includes="",
             )
-            new_cpp = gen_aoti_c_shim(
-                fallback_native_functions,
-                dispatch_key,
-                backend_indices,
-                header=False,
-                includes=headers_for_aoti() + "\n" + extra_headers,
-            )
-
             if update_aoti_c_shim:
                 aoti_fm.write(
                     header_file_name,
                     lambda: new_header,
-                )
-                aoti_fm.write(
-                    cpp_file_name,
-                    lambda: new_cpp,
                 )
             else:
                 try:
@@ -2439,11 +2427,11 @@ Only in a limited number of situations, this is allowed:
 
 1. You added a fallback op to the inductor_fallback_ops list in torchgen/aoti/fallback_ops.py.
 If that's the case, run `python torchgen/gen.py --update-aoti-c-shim` to update the existing
-C shim files.
+C shim header files.
 
 2. You added a new default argument to an existing fallback op. This is clearly a BC breaking
 change in the AOTInductor land. In this case, you need to keep a manual copy of that existing
-fallback op in a file, e.g. torch/csrc/inductor/aoti_torch/shim_common.cpp, bump up the version
+fallback op in a file, e.g. torch/csrc/inductor/aoti_torch/c/shim.h, bump up the version
 number of that fallback op in the newly generated C shim files, and update the cpp wrapper
 codegen to generate the correct cpp call for this op. Contact AOTInductor team for assistance.
 
@@ -2452,6 +2440,18 @@ codegen to generate the correct cpp call for this op. Contact AOTInductor team f
                     print(
                         f"{os.path.join(aoti_fm.install_dir, header_file_name)} not found"
                     )
+
+            # cpp files are always generated on-the-fly
+            aoti_fm.write(
+                f"c_shim_{dispatch_key.lower()}.cpp",
+                lambda: gen_aoti_c_shim(
+                    fallback_native_functions,
+                    dispatch_key,
+                    backend_indices,
+                    header=False,
+                    includes=headers_for_aoti() + "\n" + extra_headers,
+                ),
+            )
 
         del fm
 
