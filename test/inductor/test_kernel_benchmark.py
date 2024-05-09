@@ -68,7 +68,6 @@ class TestKernelBenchmark(TestCase):
                 stderr=subprocess.STDOUT,
             )
         except subprocess.CalledProcessError as e:
-            breakpoint()
             print(
                 "Failed when runinng triton code with TORCHINDUCTOR_DUMP_LAUNCH_PARAMS=1",
                 e,
