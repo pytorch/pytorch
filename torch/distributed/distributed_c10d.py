@@ -51,8 +51,8 @@ __all__ = [
     'Backend', 'BackendConfig', 'GroupMember', 'P2POp', 'all_gather', 'all_gather_coalesced',
     'all_gather_object', 'all_reduce',
     'all_reduce_coalesced', 'all_to_all',
-    'all_to_all_single', 'barrier', 'batch_isend_irecv', 'broadcast',
-    'broadcast_object_list', 'destroy_process_group',
+    'all_to_all_single', 'barrier', 'batch_isend_irecv', 'broadcast', 'send_object_list',
+    'recv_object_list', 'broadcast_object_list', 'destroy_process_group',
     'gather', 'gather_object', 'get_backend_config', 'get_backend', 'get_rank',
     'get_world_size', 'get_pg_count', 'group', 'init_process_group', 'irecv',
     'is_gloo_available', 'is_initialized', 'is_mpi_available', 'is_backend_available',
@@ -1284,7 +1284,8 @@ def init_process_group(
     #
     # Since this API must be called before all distributed code being compiled,
     # clearing the cache here should be safe.
-    torch._dynamo.trace_rules.clear_lru_cache()
+    if "torch._dynamo" in sys.modules:
+        torch._dynamo.trace_rules.clear_lru_cache()
 
     assert (store is None) or (
         init_method is None
@@ -2604,6 +2605,188 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
 
 
 @_exception_logger
+def send_object_list(object_list, dst, group=None, device=None):
+    """
+    Sends picklable objects in ``object_list`` synchronously.
+
+    Similar to :func:`send`, but Python objects can be passed in.
+    Note that all objects in ``object_list`` must be picklable in order to be
+    sent.
+
+    Args:
+        object_list (List[Any]): List of input objects to sent.
+            Each object must be picklable. Receiver must provide lists of equal sizes.
+        dst (int): Destination rank to send ``object_list`` to.
+            Destination rank is based on global process group (regardless of ``group`` argument)
+        group: (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used. Default is ``None``.
+        device (``torch.device``, optional): If not None, the objects are
+            serialized and converted to tensors which are moved to the
+            ``device`` before sending. Default is ``None``.
+
+    Returns:
+        ``None``.
+
+    .. note:: For NCCL-based process groups, internal tensor representations
+        of objects must be moved to the GPU device before communication takes
+        place. In this case, the device used is given by
+        ``torch.cuda.current_device()`` and it is the user's responsibility to
+        ensure that this is set so that each rank has an individual GPU, via
+        ``torch.cuda.set_device()``.
+
+    .. warning::
+        :func:`send_object_list` uses ``pickle`` module implicitly, which
+        is known to be insecure. It is possible to construct malicious pickle
+        data which will execute arbitrary code during unpickling. Only call this
+        function with data you trust.
+
+    .. warning::
+        Calling :func:`send_object_list` with GPU tensors is not well supported
+        and inefficient as it incurs GPU -> CPU transfer since tensors would be
+        pickled. Please consider using :func:`send` instead.
+
+    Example::
+        >>> # xdoctest: +SKIP("need process group init")
+        >>> # Note: Process group initialization omitted on each rank.
+        >>> import torch.distributed as dist
+        >>> # Assumes backend is not NCCL
+        >>> device = torch.device("cpu")
+        >>> if dist.get_rank() == 0:
+        >>>     # Assumes world_size of 2.
+        >>>     objects = ["foo", 12, {1: 2}] # any picklable object
+        >>>     dist.send_object_list(objects, dst=1, device=device)
+        >>> else:
+        >>>     objects = [None, None, None]
+        >>>     dist.recv_object_list(objects, src=0, device=device)
+        >>> objects
+        ['foo', 12, {1: 2}]
+    """
+    if get_rank() == dst:
+        raise ValueError(
+            "Invalid destination rank: destination rank should not be the same as "
+            "the rank of the current process."
+        )
+
+    if _rank_not_in_group(group):
+        _warn_not_in_group("send_object_list")
+        return
+
+    # Current device selection.
+    # To preserve backwards compatibility, ``device`` is default to ``None``
+    # in which case we run current logic of device selection, i.e.
+    # ``current_device`` is CUDA if backend is NCCL otherwise CPU device. In the
+    # case it is not ``None`` we move the size and object tensors to be
+    # sent to this device.
+    current_device = device or _get_pg_default_device(group)
+    # Serialize object_list elements to tensors on src rank.
+    tensor_list, size_list = zip(*[_object_to_tensor(obj, current_device, group) for obj in object_list])
+    object_sizes_tensor = torch.cat(size_list)
+
+    # Send object sizes
+    send(object_sizes_tensor, dst=dst, group=group)
+
+    # Concatenate and send serialized object tensors
+    # Note: torch.cat will do an extra memory copy to the current device, if the tensor_list
+    # has only one element, we can skip the copy.
+    if len(tensor_list) == 1:  # type: ignore[possibly-undefined]
+        object_tensor = tensor_list[0]
+    else:
+        object_tensor = torch.cat(tensor_list)
+
+    send(object_tensor, dst=dst, group=group)
+
+
+@_exception_logger
+def recv_object_list(object_list, src=None, group=None, device=None):
+    """
+    Receives picklable objects in ``object_list`` synchronously.
+
+    Similar to :func:`recv`, but can receive Python objects.
+
+    Args:
+        object_list (List[Any]): List of objects to receive into.
+            Must provide a list of sizes equal to the size of the list being sent.
+        src (int, optional): Source rank from which to recv ``object_list``.
+            Source rank is based on global process group (regardless of ``group`` argument)
+            Will receive from any rank if set to None. Default is ``None``.
+        group: (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used. Default is ``None``.
+        device (``torch.device``, optional): If not None, receives on this device.
+            Default is ``None``.
+
+    Returns:
+        Sender rank. -1 if rank is not part of the group. If rank is part of the group,
+        ``object_list`` will contain the sent objects from ``src`` rank.
+
+    .. note:: For NCCL-based process groups, internal tensor representations
+        of objects must be moved to the GPU device before communication takes
+        place. In this case, the device used is given by
+        ``torch.cuda.current_device()`` and it is the user's responsibility to
+        ensure that this is set so that each rank has an individual GPU, via
+        ``torch.cuda.set_device()``.
+
+    .. warning::
+        :func:`recv_object_list` uses ``pickle`` module implicitly, which
+        is known to be insecure. It is possible to construct malicious pickle
+        data which will execute arbitrary code during unpickling. Only call this
+        function with data you trust.
+
+    .. warning::
+        Calling :func:`recv_object_list` with GPU tensors is not well supported
+        and inefficient as it incurs GPU -> CPU transfer since tensors would be
+        pickled. Please consider using :func:`recv` instead.
+
+    Example::
+        >>> # xdoctest: +SKIP("need process group init")
+        >>> # Note: Process group initialization omitted on each rank.
+        >>> import torch.distributed as dist
+        >>> # Assumes backend is not NCCL
+        >>> device = torch.device("cpu")
+        >>> if dist.get_rank() == 0:
+        >>>     # Assumes world_size of 2.
+        >>>     objects = ["foo", 12, {1: 2}] # any picklable object
+        >>>     dist.send_object_list(objects, dst=1, device=device)
+        >>> else:
+        >>>     objects = [None, None, None]
+        >>>     dist.recv_object_list(objects, src=0, device=device)
+        >>> objects
+        ['foo', 12, {1: 2}]
+    """
+    if _rank_not_in_group(group):
+        _warn_not_in_group("recv_object_list")
+        return -1
+
+    # Current device selection.
+    # To preserve backwards compatibility, ``device`` is default to ``None``
+    # in which case we run current logic of device selection, i.e.
+    # ``current_device`` is CUDA if backend is NCCL otherwise CPU device. In the
+    # case it is not ``None`` we move the size and object tensors to be
+    # received to this device.
+    current_device = device or _get_pg_default_device(group)
+    object_sizes_tensor = torch.empty(len(object_list), dtype=torch.long, device=current_device)
+
+    # Receive object sizes
+    rank_sizes = recv(object_sizes_tensor, src=src, group=group)
+
+    # Tensor to receive serialized objects into.
+    object_tensor = torch.empty(  # type: ignore[call-overload]
+        torch.sum(object_sizes_tensor).item(),  # type: ignore[arg-type]
+        dtype=torch.uint8,
+        device=current_device
+    )
+
+    rank_objects = recv(object_tensor, src=src, group=group)
+    assert rank_sizes == rank_objects, "Mismatch in return ranks for object sizes and objects."
+    # Deserialize objects using their stored sizes.
+    offset = 0
+    for i, obj_size in enumerate(object_sizes_tensor):
+        obj_view = object_tensor[offset : offset + obj_size]
+        obj_view = obj_view.type(torch.uint8)
+        offset += obj_size
+        object_list[i] = _tensor_to_object(obj_view, obj_size, group)
+    return rank_objects
+
+@_exception_logger
 def broadcast_object_list(object_list, src=0, group=None, device=None):
     """
     Broadcasts picklable objects in ``object_list`` to the whole group.
@@ -2635,7 +2818,7 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
         ensure that this is set so that each rank has an individual GPU, via
         ``torch.cuda.set_device()``.
 
-    .. note:: Note that this API differs slightly from the :func:`all_gather`
+    .. note:: Note that this API differs slightly from the :func:`broadcast`
         collective since it does not provide an ``async_op`` handle and thus
         will be a blocking call.
 
@@ -4310,6 +4493,8 @@ dynamo_unsupported_distributed_c10d_ops = [
     all_to_all,
     all_reduce_coalesced,
     gather,
+    send_object_list,
+    recv_object_list,
     broadcast_object_list,
     barrier,
     scatter,
