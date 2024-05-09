@@ -1,7 +1,7 @@
 import contextlib
 import inspect
 from collections import defaultdict
-from typing import Any, Callable, Dict, List, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -36,6 +36,9 @@ from torch.utils._pytree import (
     SequenceKey,
     tree_map_with_path,
 )
+
+if TYPE_CHECKING:
+    from sympy import Symbol
 
 
 def key_path_to_source(kp: KeyPath) -> Source:
@@ -159,8 +162,6 @@ def make_fake_inputs(nn_module, args, kwargs, dynamic_shapes):
             (args, kwargs),
         )
 
-        from sympy import Symbol
-
         source_pairs: List[Tuple[Source, Source]] = []
         derived_equalities: List[Tuple[Source, Union[Source, Symbol], Callable]] = []
         phantom_symbols: Dict[str, Symbol] = {}
@@ -202,6 +203,7 @@ def produce_guards_and_solve_constraints(
     gm: torch.fx.GraphModule,
     equalities_inputs: EqualityConstraint,
     original_signature: inspect.Signature,
+    _disable_forced_specializations: Optional[bool] = False,
 ):
     """
     Given a fake mode, sources pairs corresponding to equal dynamic shape dimensions,
@@ -212,6 +214,7 @@ def produce_guards_and_solve_constraints(
     Additional inputs:
         equalities_inputs: the equality constraints to use for guards
         original_signature: the signature of the forward method
+        _disable_forced_specializations: if True, avoids forced specializations
     """
     shape_env = fake_mode.shape_env
     assert shape_env.tracked_fakes is not None
@@ -227,6 +230,7 @@ def produce_guards_and_solve_constraints(
             input_contexts=input_contexts,
             equalities_inputs=equalities_inputs,
             ignore_static=False,
+            _disable_forced_specializations=_disable_forced_specializations,
         )
     except ConstraintViolationError as e:
         constraint_violation_error = e
@@ -239,7 +243,9 @@ def produce_guards_and_solve_constraints(
         # TODO(avik): Maybe record the constraint violation error instead and replay later?
         assert constraint_violation_error
         raise constraint_violation_error
-    dim_constraints.solve()
+    dim_constraints.solve(
+        _disable_forced_specializations=_disable_forced_specializations
+    )
     dim_constraints.remove_redundant_dynamic_results()
     forced_specializations = dim_constraints.forced_specializations()
     msg = dim_constraints.prettify_results(

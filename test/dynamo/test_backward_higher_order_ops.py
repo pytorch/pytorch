@@ -129,13 +129,13 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_inputs_ : list):
         l_inputs_ = L_inputs_
 
-        getitem = l_inputs_[0];  l_inputs_ = None
+        getitem: "f32[s0]" = l_inputs_[0];  l_inputs_ = None
 
-        new_grad = torch.clone(getitem)
+        new_grad: "f32[s0]" = torch.clone(getitem)
 
-        result = getitem * getitem;  getitem = None
+        result: "f32[s0]" = getitem * getitem;  getitem = None
 
-        new_grad_1 = torch.clone(result);  result = None
+        new_grad_1: "f32[s0]" = torch.clone(result);  result = None
         return (new_grad, new_grad_1)
 """,
             )
@@ -195,13 +195,13 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_inputs_ : list):
         l_inputs_ = L_inputs_
 
-        getitem = l_inputs_[0];  l_inputs_ = None
+        getitem: "f32[s0]" = l_inputs_[0];  l_inputs_ = None
 
-        new_grad = torch.clone(getitem)
+        new_grad: "f32[s0]" = torch.clone(getitem)
 
-        result = getitem * getitem;  getitem = None
+        result: "f32[s0]" = getitem * getitem;  getitem = None
 
-        new_grad_1 = torch.clone(result);  result = None
+        new_grad_1: "f32[s0]" = torch.clone(result);  result = None
         return (new_grad, new_grad_1)
 """,
             )

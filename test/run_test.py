@@ -37,6 +37,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
+    TEST_WITH_SLOW,
     TEST_WITH_SLOW_GRADCHECK,
 )
 
@@ -74,7 +75,7 @@ HAVE_TEST_SELECTION_TOOLS = True
 # Make sure to remove REPO_ROOT after import is done
 sys.path.remove(str(REPO_ROOT))
 
-
+TEST_CONFIG = os.getenv("TEST_CONFIG", "")
 RERUN_DISABLED_TESTS = os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1"
 DISTRIBUTED_TEST_PREFIX = "distributed"
 INDUCTOR_TEST_PREFIX = "inductor"
@@ -228,9 +229,7 @@ CI_SERIAL_LIST = [
     "nn/test_pooling",
     "nn/test_convolution",  # Doesn't respect set_per_process_memory_fraction, results in OOM for other tests in slow gradcheck
     "distributions/test_distributions",
-    "functorch/test_vmap",  # OOM
     "test_fx",  # gets SIGKILL
-    "test_dataloader",  # frequently hangs for ROCm
     "functorch/test_memory_efficient_fusion",  # Cause CUDA OOM on ROCm
     "test_utils",  # OOM
     "test_sort_and_select",  # OOM
@@ -491,18 +490,17 @@ def run_test(
         and not is_cpp_test
         and "-n" not in command
     )
-    is_slow = "slow" in os.environ.get("TEST_CONFIG", "") or "slow" in os.environ.get(
-        "BUILD_ENVRIONMENT", ""
-    )
     timeout = (
         None
         if not options.enable_timeout
         else THRESHOLD * 6
-        if is_slow
+        if TEST_WITH_SLOW
         else THRESHOLD * 3
         if should_retry
         and isinstance(test_module, ShardedTest)
         and test_module.time is not None
+        else THRESHOLD * 3
+        if is_cpp_test
         else None
     )
     print_to_stderr(f"Executing {command} ... [{datetime.now()}]")
@@ -531,6 +529,7 @@ def run_test(
                 stderr=output,
                 env=env,
                 timeout=timeout,
+                retries=0,
             )
 
             # Pytest return code 5 means no test is collected. Exit code 4 is
@@ -1183,15 +1182,16 @@ def parse_args():
             or TEST_WITH_ASAN
             or (
                 strtobool(os.environ.get("TD_DISTRIBUTED", "False"))
-                and os.getenv("TEST_CONFIG") == "distributed"
+                and TEST_CONFIG == "distributed"
                 and TEST_CUDA
             )
             or (IS_WINDOWS and not TEST_CUDA)
+            or TEST_CONFIG == "nogpu_AVX512"
+            or TEST_CONFIG == "nogpu_NO_AVX2"
         )
         and get_pr_number() is not None
         and not strtobool(os.environ.get("NO_TD", "False"))
-        and "slow" not in os.getenv("TEST_CONFIG", "")
-        and "slow" not in os.getenv("BUILD_ENVIRONMENT", ""),
+        and not TEST_WITH_SLOW,
     )
     parser.add_argument(
         "additional_unittest_args",

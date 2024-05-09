@@ -993,7 +993,6 @@ def _register_quantization_maxpool2d():
             KeywordArg("ceil_mode"),
         ],
     ]
-
     for max_pool2d_args in max_pool2d_args_list:
         dequantize_maxpool2d_pattern = CallFunction(
             aten.max_pool2d_with_indices.default,
@@ -1001,13 +1000,31 @@ def _register_quantization_maxpool2d():
             KeywordArg("kernel_size"),
             *max_pool2d_args,
         )
+        dequantize_lowmem_maxpool2d_pattern = CallFunction(
+            prims._low_memory_max_pool2d_with_offsets.default,
+            dequantize_per_tensor_activation_pattern,
+            KeywordArg("kernel_size"),
+            *max_pool2d_args,
+            KeywordArg("offset_dtype"),
+        )
         dequantize_maxpool2d_get_item_pattern = CallFunction(
             operator.getitem,
             dequantize_maxpool2d_pattern,
             Arg(),
         )
+        dequantize_lowmem_maxpool2d_get_item_pattern = CallFunction(
+            operator.getitem,
+            dequantize_lowmem_maxpool2d_pattern,
+            Arg(),
+        )
         _register_quantized_maxpool2d_lowering(
             generate_pattern_with_output_quant(dequantize_maxpool2d_get_item_pattern),
+            quantized.max_pool2d.default,
+        )
+        _register_quantized_maxpool2d_lowering(
+            generate_pattern_with_output_quant(
+                dequantize_lowmem_maxpool2d_get_item_pattern
+            ),
             quantized.max_pool2d.default,
         )
 
