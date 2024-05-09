@@ -87,6 +87,10 @@ namespace onnx_torch = ::torch::onnx;
 namespace onnx = ::ONNX_NAMESPACE;
 namespace diagnostics = ::torch::onnx::diagnostics;
 
+// SymbolDimMap is a Torch-to-ONNX shape look-up. This is built so it can be
+// returned by the export function. During the export however, when we come
+// across new ONNX shapes, the reverse look-up is needed. To avoid incurring
+// a linear-time look-up, we maintain DimSymbolMap in parallel.
 c10::ShapeSymbol ONNXDimToShapeSymbol(
     const onnx::TensorShapeProto_Dimension& dim,
     SymbolDimMap& symbol_dim_map,
