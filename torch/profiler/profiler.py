@@ -146,19 +146,20 @@ class _KinetoProfile:
         self.stop_trace()
 
     def prepare_trace(self):
-        self.profiler = prof.profile(
-            use_cuda=(ProfilerActivity.CUDA in self.activities),
-            use_cpu=(ProfilerActivity.CPU in self.activities),
-            use_mtia=(ProfilerActivity.MTIA in self.activities),
-            use_device=self.use_device,
-            record_shapes=self.record_shapes,
-            with_flops=self.with_flops,
-            profile_memory=self.profile_memory,
-            with_stack=self.with_stack,
-            with_modules=self.with_modules,
-            use_kineto=True,
-            experimental_config=self.experimental_config,
-        )
+        if self.profiler is None:
+            self.profiler = prof.profile(
+                use_cuda=(ProfilerActivity.CUDA in self.activities),
+                use_cpu=(ProfilerActivity.CPU in self.activities),
+                use_mtia=(ProfilerActivity.MTIA in self.activities),
+                use_device=self.use_device,
+                record_shapes=self.record_shapes,
+                with_flops=self.with_flops,
+                profile_memory=self.profile_memory,
+                with_stack=self.with_stack,
+                with_modules=self.with_modules,
+                use_kineto=True,
+                experimental_config=self.experimental_config,
+            )
         self.profiler._prepare_trace()
 
     def start_trace(self):
@@ -207,7 +208,8 @@ class _KinetoProfile:
 
     def export_chrome_trace(self, path: str):
         """
-        Exports the collected trace in Chrome JSON format.
+        Exports the collected trace in Chrome JSON format. If kineto is enabled, only
+        last cycle in schedule is exported.
         """
         assert self.profiler
         if path.endswith(".gz"):
