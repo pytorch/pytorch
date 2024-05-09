@@ -1,10 +1,10 @@
 # Owner(s): ["module: functorch"]
 
 import torch
-from functorch.compile import minifier
-from torch._functorch.compile_utils import get_placeholders, get_outputs
 from functorch import make_fx
-from torch.testing._internal.common_utils import TestCase, run_tests
+from functorch.compile import minifier
+from torch._functorch.compile_utils import get_outputs, get_placeholders
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class TestMinifier(TestCase):
@@ -14,11 +14,12 @@ class TestMinifier(TestCase):
             x = x + 3
             x = x * y
             return x + y
+
         inps = [torch.randn(3), torch.randn(3)]
         failing_f = make_fx(failing_f)(*inps)
 
         def has_mul(fx_g, inps):
-            return (torch.ops.aten.mul.Tensor in (i.target for i in fx_g.graph.nodes))
+            return torch.ops.aten.mul.Tensor in (i.target for i in fx_g.graph.nodes)
 
         min_f, inps = minifier(failing_f, inps, has_mul)
         self.assertEqual(len(min_f.graph.nodes), 4)
@@ -54,6 +55,7 @@ class TestMinifier(TestCase):
             c = c.cos()
             d = a * c
             return (a, b, c, d)
+
         inps = [torch.randn(3) for _ in range(3)]
 
         def inputs_returned(fx_g, inps):
@@ -74,7 +76,7 @@ class TestMinifier(TestCase):
         inps = [torch.randn(3), torch.randn(3)]
 
         def has_add(fx_g, inps):
-            return (torch.ops.aten.add.Tensor in (i.target for i in fx_g.graph.nodes))
+            return torch.ops.aten.add.Tensor in (i.target for i in fx_g.graph.nodes)
 
         failing_f = make_fx(f)(*inps)
         min_f, inps = minifier(failing_f, inps, has_add)

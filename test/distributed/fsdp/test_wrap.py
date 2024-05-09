@@ -945,8 +945,7 @@ class TestWrapUtils(TestCase):
         ignored_params = set()
         for module_name, module in model.named_modules():
             if "lora_A" in module_name:
-                for param in module.parameters():
-                    ignored_params.add(param)
+                ignored_params.update(module.parameters())
         _validate_frozen_params(model, modules_to_wrap, ignored_params, use_orig_params)
 
 

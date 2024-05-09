@@ -1,3 +1,3 @@
 from .cond import cond
 from .while_loop import while_loop
-from .templated_attention import templated_attention
+from .flex_attention import flex_attention, flex_attention_backward

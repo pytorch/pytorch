@@ -222,15 +222,15 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
 
   MIOPEN_CHECK(miopenBatchNormalizationBackward(
     handle, mode, &one, &zero, &one, &zero,
-    idesc.desc(), input->data_ptr(),
-    idesc.desc(), grad_output->data_ptr(),
+    idesc.desc(), input->const_data_ptr(),
+    idesc.desc(), grad_output->const_data_ptr(),
     idesc.desc(), grad_input_t.data_ptr(),
-    wdesc.desc(), weight->data_ptr(),
+    wdesc.desc(), weight->const_data_ptr(),
     grad_weight_t.data_ptr(),
     grad_bias_t.data_ptr(),
     epsilon,
-    save_mean->data_ptr(),
-    save_var->data_ptr()));
+    save_mean->const_data_ptr(),
+    save_var->const_data_ptr()));
 
   return std::tuple<Tensor,Tensor,Tensor>{grad_input_t, grad_weight_t, grad_bias_t};
 }
