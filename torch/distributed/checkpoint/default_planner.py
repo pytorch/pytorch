@@ -25,6 +25,7 @@ from torch.distributed.checkpoint.metadata import (
     MetadataIndex,
     STATE_DICT_TYPE,
     STORAGE_TYPES,
+    StorageMeta,
     TensorStorageMetadata,
 )
 from torch.distributed.checkpoint.planner import (
@@ -78,7 +79,12 @@ class DefaultSavePlanner(SavePlanner):
                 "from your call."
             )
 
-    def set_up_planner(self, state_dict: STATE_DICT_TYPE, is_coordinator: bool) -> None:
+    def set_up_planner(
+        self,
+        state_dict: STATE_DICT_TYPE,
+        storage_meta: Optional[StorageMeta] = None,
+        is_coordinator: bool = False,
+    ) -> None:
         if self.flatten_state_dict:
             state_dict, self.mappings = flatten_state_dict(state_dict)
         if self.flatten_sharded_tensors:
@@ -168,8 +174,8 @@ class DefaultLoadPlanner(LoadPlanner):
     def set_up_planner(
         self,
         state_dict: STATE_DICT_TYPE,
-        metadata: Metadata,
-        is_coordinator: bool,
+        metadata: Optional[Metadata] = None,
+        is_coordinator: bool = False,
     ) -> None:
         _init_state_dict(state_dict)
         self.original_state_dict = state_dict
@@ -185,6 +191,7 @@ class DefaultLoadPlanner(LoadPlanner):
         self.is_coordinator = is_coordinator
 
     def create_local_plan(self) -> LoadPlan:
+        assert self.metadata is not None
         return create_default_local_load_plan(
             self.state_dict, self.metadata, not self.allow_partial_load
         )
@@ -265,10 +272,11 @@ class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
     def set_up_planner(
         self,
         state_dict: STATE_DICT_TYPE,
-        metadata: Metadata,
-        is_coordinator: bool,
+        metadata: Optional[Metadata] = None,
+        is_coordinator: bool = False,
     ) -> None:
         assert not state_dict
+        assert metadata is not None
 
         # rebuild the state dict from the metadata
         for k, v in metadata.state_dict_metadata.items():
@@ -349,7 +357,10 @@ def create_default_local_save_plan(
         if isinstance(obj, DTensor):
             if obj.device_mesh.get_coordinate() is not None:
                 requests += _create_write_items(fqn, obj)
-        elif isinstance(obj, (torch.Tensor)) or is_coordinator:
+        else:
+            # For the plain tensor and non-tensor values, add the request for all
+            # the ranks. Coordinator will decides whether to deduplicate the
+            # values based on the keys.
             requests += _create_write_items(fqn, obj)
 
     return SavePlan(requests)

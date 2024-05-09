@@ -2,6 +2,7 @@
 import contextlib
 import functools
 import operator
+import warnings
 from typing import cast, Dict, List, Optional, Sequence, Tuple, TYPE_CHECKING
 
 import torch
@@ -187,10 +188,18 @@ class OpDispatcher:
                     # Default to `OffsetBasedRNGTracker` if the parallelism API
                     # did not already construct one
                     random._rng_tracker = random.OffsetBasedRNGTracker(mesh.device_type)
+
+                first_arg, first_local_arg = cast(dtensor.DTensor, args[0]), cast(
+                    torch.Tensor, local_tensor_args[0]
+                )
+                rng_context = (
+                    random._rng_tracker._distribute_region(first_arg._spec)
+                    if random._rng_tracker and not first_local_arg.is_meta
+                    else contextlib.nullcontext()
+                )
+
                 # For DTensor random operator, run it within a distribute region
-                with random._rng_tracker._distribute_region(
-                    cast(dtensor.DTensor, args[0])._spec
-                ) if random._rng_tracker else contextlib.nullcontext():
+                with rng_context:
                     local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
             else:
                 local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
@@ -300,7 +309,20 @@ class OpDispatcher:
                 else:
                     mesh = arg.device_mesh
             elif isinstance(arg, torch.Tensor):
-                if arg.ndim == 0 or self._allow_implicit_replication:
+                if arg.numel() == 1 and arg.ndim == 1:
+                    warnings.warn(
+                        "Found a non-scalar tensor with numel=1 and ndim!=0, "
+                        "we are implicitly creating a replicated DTensor for it. "
+                        "However, please consider changing it to a scalar tensor "
+                        "or explicitly create a DTensor under distributed enviroment."
+                    )
+
+                # if the arg.numel() == 1, arg.ndim could be 0 or 1.
+                if (
+                    arg.ndim <= 1
+                    and arg.numel() == 1
+                    or self._allow_implicit_replication
+                ):
                     mesh = mesh or try_find_mesh_from_args(op_call, args_list)
                     # scalar tensor can be safely treated as replicated
                     args_schema.append(
