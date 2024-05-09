@@ -227,6 +227,7 @@ PyTypeObject* _initFunctionPyTypeObject(
     const char* name,
     PyGetSetDef* function_properties,
     PyMethodDef* function_methods) {
+  type.ob_base = { PyObject_HEAD_INIT(nullptr) 0 };
   // NOLINTNEXTLINE(misc-redundant-expression)
   type.tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC;
   type.tp_name = name;
@@ -251,7 +252,6 @@ static std::unordered_set<PyTypeObject*> cpp_function_types_set;
 struct DefaultFunctionType {
   DefaultFunctionType() : type() {
     _initFunctionPyTypeObject(type, "CppFunction", nullptr, nullptr);
-    Py_INCREF(&type);
   }
 
   PyTypeObject type;
