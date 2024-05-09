@@ -61,6 +61,10 @@ _ref_test_ops = tuple(
     )
 )
 
+def xfailIfMacOS14_4Plus(func):
+    return unittest.expectedFailure(func) if product_version > 14.3 else func  # noqa: F821
+
+
 def mps_ops_grad_modifier(ops):
     XFAILLIST_GRAD = {
 
@@ -227,6 +231,7 @@ def mps_ops_modifier(ops):
         '__radd__',
         '__rmul__',
         '__getitem__',
+        'abs',
         'add',
         'argwhere',
         'atleast_1d',
@@ -286,8 +291,8 @@ def mps_ops_modifier(ops):
         'narrow_copy',
         'nn.functional.conv1d',
         'nn.functional.conv_transpose1d',
-        'nn.functional.padcircular',
         'nn.functional.feature_alpha_dropoutwithout_train',
+        'nn.functional.padcircular',
         'nn.functional.unfold',
         'nonzero',
         'ones',
@@ -383,6 +388,7 @@ def mps_ops_modifier(ops):
         'half',
         'hstack',
         'int',
+        'isclose',
         'isnan',
         'ldexp',
         'log10',
@@ -403,12 +409,13 @@ def mps_ops_modifier(ops):
         'mean',
         'ne',
         'neg',
-        'nn.functional.rms_norm',
         'nn.functional.padconstant',
         'nn.functional.padreflect',
         'nn.functional.padreplicate',
         'nn.functional.pixel_shuffle',
         'nn.functional.pixel_unshuffle',
+        'nn.functional.rms_norm',
+        'nn.functional.softsign',
         'nn.functional.tanhshrink',
         'prod',
         'reciprocal',
@@ -4600,6 +4607,33 @@ class TestMPS(TestCaseMPS):
         helper([7, 5, 2, 4, 6], 'sum')
         helper([8, 4, 5, 7, 6], 'mean')
 
+    def test_mse_loss_strided_output(self):
+        # https://github.com/pytorch/pytorch/issues/124621
+        lf = nn.MSELoss(reduction='none')
+        model_cpu = nn.Sequential(
+            nn.Conv1d(3, 3, 1),
+        )
+        model_mps = copy.deepcopy(model_cpu).to("mps")
+
+        x = torch.randn(128, 10, 3)
+        x = x.permute(0, 2, 1)
+
+        x_mps = x.detach().clone().to("mps").permute(0, 2, 1)
+        x_mps = x_mps.permute(0, 2, 1)
+
+        y = model_cpu(x)
+        y_mps = model_mps(x_mps)
+
+        y = y.permute(0, 2, 1)[:, :5, :]
+        y_mps = y_mps.permute(0, 2, 1)[:, :5, :]
+
+        y_hat = torch.randn(128, 5, 3)
+        y_hat_mps = y_hat.detach().clone().to("mps")
+
+        loss = lf(y, y_hat)
+        loss_mps = lf(y_mps, y_hat_mps)
+        self.assertEqual(loss, loss_mps)
+
     # Binary Cross Enropy
     def test_bce_loss_simple(self):
         def helper(shape, reduction):
@@ -6469,6 +6503,18 @@ class TestMPS(TestCaseMPS):
             for shape in [(2, 8, 4, 5)]:
                 for alpha in [0.000001, 1.0, 2.3, 0.34, 23]:
                     helper(shape, alpha, memory_fromat)
+
+    def test_elu_strided_output(self):
+        # https://github.com/pytorch/pytorch/issues/124834
+        elu_input = torch.randn(1, 1024, 500)
+        alpha = float(1)
+        inplace = False
+
+        elu_input_noncontiguous = elu_input.transpose(1, 2)
+        self.assertEqual(
+            F.elu(elu_input_noncontiguous.to('cpu'), alpha, inplace),
+            F.elu(elu_input_noncontiguous.to('mps'), alpha, inplace)
+        )
 
     # Test glu
     def test_glu(self):
@@ -9184,7 +9230,7 @@ class TestViewOpsMPS(TestCaseMPS):
         # Note: only validates storage on native device types
         # because some accelerators, like XLA, do not expose storage
         if base.device.type == 'mps':
-            if base.storage().data_ptr() != other.storage().data_ptr():
+            if base.untyped_storage().data_ptr() != other.untyped_storage().data_ptr():
                 return False
 
         return True
@@ -9306,6 +9352,14 @@ class TestViewOpsMPS(TestCaseMPS):
 
         v[0, 1] = 0
         self.assertEqual(t[1, 0], v[0, 1])
+
+    def test_inplace_view_add(self):
+        # https://github.com/pytorch/pytorch/issues/96153
+        t_mps = torch.ones((2, 6,), device='mps')[1].reshape(2, 3)
+        t_cpu = torch.ones((2, 6,), device='cpu')[1].reshape(2, 3)
+        t_mps = t_mps + 1
+        t_cpu = t_cpu + 1
+        self.assertEqual(t_mps, t_cpu)
 
     def test_t_inplace_view(self, device="mps"):
         t = torch.ones(5, 5, device=device)
@@ -11364,6 +11418,8 @@ class TestRNNMPS(TestCaseMPS):
             for test_options in self.LSTM_TEST_CASES:
                 self._lstm_helper(num_layers=num_layers, dtype=dtype, device=device, **test_options)
 
+    # Broke on MacOS-14.4 (but works on 14.2), see https://github.com/pytorch/pytorch/issues/125803
+    @xfailIfMacOS14_4Plus
     def test_lstm_backward(self, device="mps", dtype=torch.float32):
         for num_layers in [1, 2, 5]:
             for test_options in self.LSTM_TEST_CASES:
